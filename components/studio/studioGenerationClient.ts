@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ImageSize } from "@/lib/imageGenerationPricing";
+import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 
 export type StudioImageQuote = {
   modelId: string;
@@ -164,6 +165,7 @@ export function createStudioImageRunner() {
       }>(groupResponse, await groupResponse.json().catch(() => null));
       const generation = group.generations.find(item => item.generationId === group.targets[0]?.currentGenerationId);
       if (generation?.status === "succeeded") {
+        notifyUserUsageChanged();
         const response = await fetch("/api/images/generations/" + encodeURIComponent(generation.generationId) + "/download", { signal });
         if (!response.ok) {
           await discardResponseBody(response);
@@ -202,6 +204,7 @@ export async function generateStudioText(prompt: string, signal: AbortSignal, re
       liveness: { noteKeepalive() {}, noteVisibleChunk() {} },
       onProgress() {},
     });
+    notifyUserUsageChanged();
     if (result.serverStallCode || !result.displayText.trim()) throw new StudioGenerationError(502);
     return result.displayText.trim();
   } finally {

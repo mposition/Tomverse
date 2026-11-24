@@ -1,11 +1,31 @@
 import {
-  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, type StickerRect,
+  studioStickerArt, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, type StickerRect,
 } from "@/lib/studioStickerGeometry";
 import { studioStickerLayout } from "@/lib/studioTools";
+import type { Language } from "@/lib/language";
+import { loadStudioStickerFont } from "./studioStickerFonts";
 
 export const studioImageTypes = ["image/png", "image/jpeg", "image/webp"];
 export const studioImageAccept = studioImageTypes.join(",");
 export const studioImageLimit = 12 * 1024 * 1024;
+const studioBlobs = new Map<string, Blob>();
+
+export function rememberStudioBlob(url: string, blob: Blob) {
+  studioBlobs.set(url, blob);
+}
+
+export function revokeStudioObjectUrl(url: string) {
+  studioBlobs.delete(url);
+  URL.revokeObjectURL(url);
+}
+
+export async function readStudioBlob(url: string): Promise<Blob> {
+  const blob = studioBlobs.get(url);
+  if (blob) return blob;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Studio image is unavailable");
+  return response.blob();
+}
 
 export function validStudioImage(file: File) {
   return studioImageTypes.includes(file.type) && file.size > 0 && file.size <= studioImageLimit;
@@ -105,7 +125,6 @@ export const STUDIO_STICKER_BACKGROUND = "#fff6e9";
 
 export type StickerComposition = true | "opaque";
 
-const stickerFont = "system-ui, sans-serif";
 const stickerLineHeight = 1.16;
 const stickerCaptionColors = [
   { hue: 292, ink: "#89519f", edge: "#e9ccfa" },
@@ -143,10 +162,11 @@ function stickerCaptionPalette(pixels: Uint8ClampedArray, stride: number, art: S
 
 function stickerCaption(
   context: CanvasRenderingContext2D, pixels: Uint8ClampedArray, stride: number, art: StickerRect, text: string,
+  font: (size: number) => string,
 ) {
   const shortSide = Math.min(art.width, art.height);
   const maxSize = shortSide * .18;
-  context.font = `750 100px ${stickerFont}`;
+  context.font = font(100);
   context.textAlign = "center";
   context.textBaseline = "middle";
   const measure = (lines: string[], maxWidth: number, maxHeight: number) => {
@@ -192,37 +212,40 @@ function stickerCaption(
   return { ...label, ...placement, ink, edge };
 }
 
-async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, caption: string): Promise<Blob | null> {
+async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, caption: string, language: Language): Promise<Blob | null> {
   const sourceScale = Math.min(1, 512 / Math.max(cell.width, cell.height));
   const sourceWidth = Math.max(1, Math.round(cell.width * sourceScale));
   const sourceHeight = Math.max(1, Math.round(cell.height * sourceScale));
   const original = canvas(sourceWidth, sourceHeight);
   original.context.drawImage(image, cell.left, cell.top, cell.width, cell.height, 0, 0, sourceWidth, sourceHeight);
   const pixels = original.context.getImageData(0, 0, sourceWidth, sourceHeight).data;
-  const art = studioStickerBounds(pixels, sourceWidth, sourceHeight);
-  if (!art || art.width < sourceWidth * .19 || art.height < sourceHeight * .19) return null;
+  const art = studioStickerArt(pixels, sourceWidth, { left: 0, top: 0, width: sourceWidth, height: sourceHeight });
+  if (!art) return null;
   const { left, top, width, height } = art;
   const padding = Math.max(1, Math.round(Math.max(width, height) * .025));
   const text = caption.trim();
-  const label = text ? stickerCaption(original.context, pixels, sourceWidth, art, text) : null;
+  const font = await loadStudioStickerFont(language, text);
+  original.element.lang = language;
+  const label = text ? stickerCaption(original.context, pixels, sourceWidth, art, text, font) : null;
   const minX = Math.min(left, label?.left ?? left) - padding;
   const minY = Math.min(top, label?.top ?? top) - padding;
   const outputWidth = Math.max(left + width, label ? label.left + label.width : 0) + padding - minX;
   const outputHeight = Math.max(top + height, label ? label.top + label.height : 0) + padding - minY;
   const outputScale = 512 / Math.max(outputWidth, outputHeight);
   const output = canvas(Math.round(outputWidth * outputScale), Math.round(outputHeight * outputScale));
+  output.element.lang = language;
   const { context } = output;
   fillStickerBackground(context);
   context.scale(outputScale, outputScale);
   context.drawImage(original.element, left, top, width, height, left - minX, top - minY, width, height);
   if (label) {
     const { lines, size, ink, edge } = label;
-    context.font = `750 ${size}px ${stickerFont}`;
+    context.font = font(size);
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillStyle = ink;
     context.strokeStyle = edge;
-    context.lineWidth = size * .105;
+    context.lineWidth = size * .065;
     context.lineJoin = "round";
     const x = label.left - minX + label.width / 2;
     const centerY = label.top - minY + label.height / 2;
@@ -240,11 +263,11 @@ function fillStickerBackground(context: CanvasRenderingContext2D) {
   context.fillRect(0, 0, context.canvas.width, context.canvas.height);
 }
 
-export async function renderStudioSticker(source: string, caption: string, composed?: StickerComposition): Promise<Blob | null> {
+export async function renderStudioSticker(
+  source: string, caption: string, language: Language, composed?: StickerComposition,
+): Promise<Blob | null> {
   if (composed === "opaque") {
-    const response = await fetch(source);
-    if (!response.ok) throw new Error("Could not read the sticker image");
-    return response.blob();
+    return readStudioBlob(source);
   }
   const image = await readImage(source);
   if (composed) {
@@ -254,26 +277,39 @@ export async function renderStudioSticker(source: string, caption: string, compo
     context.drawImage(image, 0, 0);
     return encode(element);
   }
-  return renderStickerCell(image, { left: 0, top: 0, width: image.naturalWidth, height: image.naturalHeight }, caption);
+  return renderStickerCell(image, { left: 0, top: 0, width: image.naturalWidth, height: image.naturalHeight }, caption, language);
 }
 
-export async function makeStudioImageReference(source: string, secondSource?: string) {
+export async function makeStudioImageReference(source: string) {
   const image = await readImage(source);
-  if (!secondSource) {
-    const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
-    const width = Math.max(1, Math.round(image.naturalWidth * scale));
-    const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const { element, context } = canvas(width, height);
-    drawImage(context, image, width, height, "contain");
-    return encode(element);
-  }
-  const second = await readImage(secondSource);
-  const { element, context } = canvas(1024, 512);
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, 1024, 512);
-  drawImage(context, image, 512, 512, "contain");
-  context.translate(512, 0);
-  drawImage(context, second, 512, 512, "contain");
+  const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const { element, context } = canvas(width, height);
+  drawImage(context, image, width, height, "contain");
+  return encode(element);
+}
+
+export const studioStyleReferenceDirection =
+  "The wide left panel is the subject reference. The narrow right panel contains material, color and lighting samples. Use the left panel for the person's identity and the right panel only for the chosen look. Output one complete image with no panel layout.";
+
+export async function makeStudioStyleReference(source: string, styleSource: string) {
+  const [subject, style] = await Promise.all([readImage(source), readImage(styleSource)]);
+  const { element, context } = canvas(1024, 1024);
+  const subjectWidth = 730;
+  const stripLeft = 746;
+  const stripWidth = element.width - stripLeft;
+  const cropWidth = Math.round(style.naturalWidth * .16);
+  const lower = Math.round(style.naturalHeight * .76);
+  context.fillStyle = "#f4f0eb";
+  context.fillRect(0, 0, element.width, element.height);
+  drawImage(context, subject, subjectWidth, element.height, "contain");
+  // Use the outer and lower edges of the preset portrait for color and wardrobe.
+  context.drawImage(style, 0, 0, cropWidth, style.naturalHeight, stripLeft, 0, stripWidth / 2, 632);
+  context.drawImage(style, style.naturalWidth - cropWidth, 0, cropWidth, style.naturalHeight,
+    stripLeft + stripWidth / 2, 0, stripWidth / 2, 632);
+  context.drawImage(style, 0, lower, style.naturalWidth, style.naturalHeight - lower,
+    stripLeft, 640, stripWidth, element.height - 640);
   return encode(element);
 }
 
@@ -320,7 +356,7 @@ export async function applyStudioSubjectMask(source: string, mask: Blob) {
   }
 }
 
-export async function splitStudioSheet(source: string, captions: readonly string[]) {
+export async function splitStudioSheet(source: string, captions: readonly string[], language: Language) {
   const image = await readImage(source);
   if (image.naturalWidth < 250 || image.naturalHeight < 200) throw new Error("Sticker sheet too small");
   const { columns, rows } = studioStickerLayout(captions.length);
@@ -328,10 +364,10 @@ export async function splitStudioSheet(source: string, captions: readonly string
   const { context } = canvas(width, height);
   context.drawImage(image, 0, 0);
   const pixels = context.getImageData(0, 0, width, height).data;
-  const cells = studioStickerCells(pixels, width, height, columns, rows);
+  const cells = studioStickerCells(pixels, width, height, columns, rows, captions.length);
   return Promise.all(captions.map((caption, index) => {
     const cell = cells[index];
-    return studioStickerCrossesSeam(pixels, width, height, cell) ? null : renderStickerCell(image, cell, caption);
+    return studioStickerCrossesSeam(pixels, width, height, cell) ? null : renderStickerCell(image, cell, caption, language);
   }));
 }
 
@@ -342,17 +378,4 @@ export function saveStudioFile(blob: Blob, filename: string) {
   link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-export async function shareStudioPng(blob: Blob, filename: string) {
-  const files = [new File([blob], filename, { type: "image/png" })];
-  if (navigator.canShare?.({ files }) && navigator.share) {
-    try {
-      await navigator.share({ files });
-      return;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-    }
-  }
-  saveStudioFile(blob, filename);
 }

@@ -23,9 +23,9 @@ const faceReport = z.object({
   status: z.literal("ok"),
   score,
   summary,
-  metrics: z.array(scoreItem).length(11),
-  observations: z.array(scoreItem.extend({ note, region: region.nullable().catch(null) })).length(6),
-  tips: z.array(z.object({ label: z.string().trim().min(1).max(28), note })).length(8),
+  metrics: z.array(scoreItem).min(6).max(11),
+  observations: z.array(scoreItem.extend({ note, region: region.nullable().catch(null) })).min(4).max(6),
+  tips: z.array(z.object({ label: z.string().trim().min(1).max(28), note })).min(4).max(8),
   guides: faceGuides.nullable().catch(null),
 });
 const colorReport = z.object({
@@ -52,15 +52,18 @@ export type StudioAnalysisReport = StudioFaceReport | StudioColorReport;
 export function studioAnalysisPrompt(kind: StudioAnalysisKind, language: string) {
   const schema = kind === "face-analysis"
     ? [
-      'Return status "ok", a numeric overall score and a short summary of the visual impression in this specific photo.',
+      'Evaluate only features visible in the photo, keeping lighting, lens angle and expression separate from facial structure. Use the same score anchors per metric: 5 = mixed in this photo, 7 = clear or balanced, 9 = unusually clear or balanced. Use steps of 0.5 for individual scores. Overall is the arithmetic mean of all 11 metrics rounded to one decimal.',
+      'Return status "ok", the numeric overall score and a short summary citing two visible observations. Keep the score about this photograph.',
       'Return metrics, exactly 11 {"label":"...","score":8.1} items in this order: symmetry, proportions, eyes, nose, lips, jawline, cheekbones, visible skin texture, hair, grooming, and photo presentation.',
       'Return observations, exactly six {"label":"...","score":8.1,"note":"...","region":[0.3,0.2,0.25,0.18]} items for eyes, nose, lips, jawline, cheekbones and hair in that order. Scores must match their metrics. Each region is a precise crop in normalized [x,y,width,height] from the top left, or null.',
       'Return exactly eight concise tips {"label":"...","note":"..."} in order: grooming, hairstyle, styling around the mouth, brows, photo texture, posture, clothing and lighting. Keep them practical and non-medical. Scores are 0 through 10.',
       'When clearly visible, return guides {"axis":0.5,"thirds":[0.2,0.35,0.53,0.73],"markers":[{"label":"...","point":[0.6,0.3]}]}. Axis is the normalized horizontal midpoint of the face. Thirds are strictly increasing normalized y values for hairline, brows, base of nose and chin. Markers locate up to three observable visual features on the portrait in normalized [x,y]. Use short descriptions, and return guides:null when the positions are uncertain.',
     ].join("\n")
     : [
-      'Suggest a seasonal color profile based on visible skin undertone, hair and eye colors. Return status "ok", season and a short summary line of descriptive words.',
-      'Return features.hair, features.eyes and features.skin, each with a localized name, a hex color and a region. A region is [x,y,width,height] normalized to the photo, or null.',
+      'Use this decision order: (1) Check exposure, white balance, color cast, shadow and obvious retouching. If no usable skin area remains, return status "retry". (2) Judge warm, cool or neutral from consistently lit areas of the cheeks and jaw, excluding blush, lip color, highlights and shadow. Treat hair and eyes as evidence of depth and contrast, not proof of skin undertone. (3) Judge depth and contrast from the skin, hair and iris together, then judge muted versus clear chroma. (4) Choose the closest seasonal family using all three axes.',
+      'Use the same anchors every time: Spring = warm and clear, usually light to medium depth; Autumn = warm and muted, often medium to deep; Summer = cool and muted, usually light to medium; Winter = cool and clear, usually high contrast or deep. If undertone is neutral, rank muted versus clear and light versus deep before choosing the closest family. Use a broad family when there is no clear subtype. Use a deep subtype only when depth is the strongest visible signal.',
+      'Return status "ok", season and a short summary that cites the visible undertone and the most decisive other axis. Derive both palettes from that same family. Check that the undertone, contrast, overall tone and palettes agree with the final season.',
+      'Return features.hair, features.eyes and features.skin, each with a localized name, a hex color and a region. A region is [x,y,width,height] normalized to the photo, or null. Frame actual hair, at least one visible iris for eyes, and an evenly lit cheek for skin. Check each region lies over the named feature.',
       'Return profile.undertone as {"name":"Warm","color":"#dba981"}. Return profile.contrast and profile.tone as objects with a localized name and a colors array of exactly two and four hex colors, respectively.',
       'Return recommended and comparison arrays of exactly six distinct {"color":"#778866","name":"..."} items each. In recommendedPalette and comparisonPalette, give ten distinct hex colors each that include the six named shades and four related shades.',
       'Trace the visible clothing in garment as one polygon of 3–20 normalized [x,y] points from the photo top-left. Trace the neckline and shoulders and exclude background, hair and skin. Return garment:null when the boundary is uncertain.',
@@ -77,7 +80,9 @@ export function studioAnalysisPrompt(kind: StudioAnalysisKind, language: string)
 }
 
 export function parseStudioAnalysis(kind: StudioAnalysisKind, text: string): StudioAnalysisReport | null {
-  const parsed: unknown = JSON.parse(text.trim().replace(/^\s*```(?:json)?\s*|\s*```\s*$/gi, ""));
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const json = fenced?.[1] ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  const parsed: unknown = JSON.parse(json);
   if (z.object({ status: z.literal("retry") }).strict().safeParse(parsed).success) return null;
   return (kind === "face-analysis" ? faceReport : colorReport).parse(parsed);
 }

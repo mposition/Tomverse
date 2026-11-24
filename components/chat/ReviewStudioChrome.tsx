@@ -92,7 +92,7 @@ export function ReviewCommandBar({ review, locked = false, view, setView, showMo
   </header>;
 }
 
-function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
+export function WorkspaceUsageButton() {
   const { lang, t } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   const { data: session } = useSession();
@@ -108,6 +108,14 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
   return <>
     <span id={usageDescriptionId} className="sr-only">{usageDescription}</span>
     <button type="button" className="review-credit-button" data-testid="workspace-usage" onClick={() => openAccountSettings("plan")} aria-label={`${usageLabel} · ${c.settings}`} aria-describedby={usageDescriptionId} title={usageDescription}><BarChart3 size={17} aria-hidden="true" /><span>{usageLabel}</span></button>
+  </>;
+}
+
+function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
+  const { lang } = useLanguage();
+  const c = reviewWorkspaceCopy[lang];
+  return <>
+    <WorkspaceUsageButton />
     <WorkspaceThemeButton />
     <select disabled={disabled} data-testid={testId} aria-label={c.appearance} value={workspace.appearance} onChange={event => workspace.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
   </>;

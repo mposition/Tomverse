@@ -45,6 +45,7 @@
 .commandBar :global(.review-brand strong a) { color: inherit; text-decoration: none; }
 .commandBar :global(.review-brand > .review-conversation-title) { display: block; min-width: 0; }
 .commandBar :global(.review-icon-button) { color: var(--studio-text); background: var(--studio-surface); border-color: var(--studio-line); }
+.commandBar :global(.review-credit-button) { color: var(--studio-text); background: var(--studio-surface); }
 .toolIntro { margin: 10px 0 24px; color: var(--studio-muted); }
 .studioHero {
   --hero-ink: #fff5ed;
@@ -194,6 +195,10 @@
 .primary { background: var(--studio-accent); color: var(--studio-primary-text); border-color: var(--studio-accent); }
 .choiceActive { border-color: var(--studio-accent); background: var(--studio-selection); }
 .fileButton { position: relative; margin: 7px 0; }
+.fileButton[data-capture] { display: none; }
+@media (pointer: coarse) {
+  .fileButton[data-capture] { display: inline-flex; }
+}
 .fileButton input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: inherit; }
 .primary:disabled, .secondary:disabled, .fileButton[data-disabled] { cursor: default; opacity: .5; }
 .choices { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -209,17 +214,18 @@
   color: #453124; text-align: center; font-size: .74rem; overflow-wrap: anywhere;
 }
 .stickerImage img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
-.stickerActions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(34px, .62fr); border-top: 1px solid var(--studio-line); }
-.stickerActions button {
+.stickerActions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(30px, .53fr) 30px; border-top: 1px solid var(--studio-line); }
+.stickerActions > button {
   min-height: 40px; padding: 4px; border: 0; border-radius: 0; background: var(--studio-surface);
   color: var(--studio-accent); font: inherit; font-size: .72rem; font-weight: 700;
   overflow-wrap: anywhere; cursor: pointer;
 }
-.panel .stickerActions button + button {
+.panel .stickerActions > button + button {
   margin-inline-start: 0; border-inline-start: 1px solid var(--studio-line); white-space: nowrap;
 }
-.stickerActions button:focus-visible { outline-offset: -3px; }
-.stickerActions button:disabled { color: var(--studio-muted); opacity: .55; cursor: default; }
+.stickerActions > button:focus-visible { outline-offset: -3px; }
+.stickerActions > button:disabled { color: var(--studio-muted); opacity: .55; cursor: default; }
+.stickerActions > button:last-of-type { display: grid; place-items: center; }
 .posterOptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .posterOptions .field { min-width: 0; }
 .photoInput { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-height: 82px;
@@ -232,6 +238,7 @@
 .creativeGenerate { margin-top: 14px; }
 .creativeActions { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .creativeActions .field { margin: 0; }
+.artisticOptions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .characterPresets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 3px; }
 .characterPreset { position: relative; min-width: 0; display: grid; grid-template-rows: auto 1fr; border: 1px solid var(--studio-line);
   border-radius: 9px; overflow: hidden; background: var(--studio-field); cursor: pointer; }
@@ -252,6 +259,11 @@
 }
 .characterArt { display: block; width: 100%; max-height: 480px; object-fit: contain; border-radius: 10px; background: var(--studio-field); }
 .reportPreview { display: block; width: min(100%, 646px); margin-inline: auto; border-radius: 9px; background: #f8f3ea; overflow: hidden; }
+.reportHeader { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 9px; margin-bottom: 14px; }
+.reportHeader h2, .reportHeader .creativeActions { margin: 0; }
+.sampleReport { margin: 0; }
+.sampleReport figcaption { margin: 0 0 10px; color: var(--studio-muted); font-size: .8rem; }
+.sampleReport .reportPreview { width: min(100%, 520px, max(320px, calc((100svh - 280px) * .6667))); }
 .reportPreview img { display: block; width: 100%; height: auto; object-fit: contain; }
 .packCaptions { margin: 0 0 14px; }
 .captionLabel, .captionEntry, .regenerationRow { display: flex; gap: 8px; align-items: end; }
@@ -281,6 +293,9 @@
 .creditActions > :is(button, a) { width: 100%; }
 .dialog::backdrop { background: #12251c88; }
 .dialogActions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.shareDialog { width: min(430px, calc(100vw - 28px)); }
+.shareActions { display: grid; gap: 8px; }
+.panel .shareActions button + button { margin-inline-start: 0; }
 .compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .compare figure { margin: 0; min-width: 0; border-radius: 10px; overflow: hidden; }
 .compare figure { padding: 10px; background-color: var(--studio-field); }
@@ -294,15 +309,10 @@
 .publishingPreview { display: block; width: 100%; height: auto; max-width: 690px; }
 .publishingFigure[data-vertical] .publishingPreview { width: auto; max-width: 100%; max-height: 610px; aspect-ratio: auto; object-fit: contain; }
 .memeArt {
-  position: relative; overflow: hidden; container-type: inline-size; isolation: isolate;
+  overflow: hidden;
   width: min(100%, 540px); margin: 0 auto 14px; aspect-ratio: 1; border-radius: 10px;
 }
 .memeArt img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.memeArt strong {
-  position: absolute; bottom: 9%; inset-inline: 6%; color: #fff4d8;
-  font-size: 9cqi; font-weight: 850; line-height: 1.1; text-align: center; text-wrap: balance;
-  overflow-wrap: anywhere; -webkit-text-stroke: .075em #241812; paint-order: stroke fill;
-}
 @media (max-width: 1050px) {
   .workbench { grid-template-columns: minmax(214px, .44fr) minmax(0, 1fr); gap: 13px; }
   .panel { padding: 15px; }
