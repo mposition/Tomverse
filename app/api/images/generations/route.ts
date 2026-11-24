@@ -27,6 +27,8 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
+import { conversationLockedResponse } from "@/lib/conversationLock";
 import {
   processImageGenerationGroup,
   requestImageGeneration,
@@ -68,6 +70,9 @@ export async function GET(req: Request) {
     const key = new URL(req.url).searchParams.get("requestKey") ?? "";
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(key)) return Response.json({ code: "INVALID_REQUEST_KEY" }, { status: 400 });
     const group = await prisma.imageGenerationGroup.findUnique({ where: { userId_groupIdempotencyKey: { userId, groupIdempotencyKey: key } }, select: { id: true, conversationId: true } });
+    if (group && req.headers.get("origin") === DESKTOP_APP_ORIGIN && !(await prisma.conversation.findFirst({
+      where: { id: group.conversationId, userId, password: null }, select: { id: true },
+    }))) return conversationLockedResponse();
     return Response.json(group ? { groupId: group.id, conversationId: group.conversationId } : { code: "IMAGE_REQUEST_NOT_FOUND" }, { status: group ? 200 : 404, headers: { "Cache-Control": "no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "IMAGE_REQUEST_READ_FAILED" }, { status: 503 }); }
 }
@@ -89,6 +94,9 @@ export async function POST(req: Request) {
       day: 500,
     });
     const body = await readLimitedJson(req, 32 * 1024, createGenerationSchema);
+    if (body.conversationId && req.headers.get("origin") === DESKTOP_APP_ORIGIN && !(await prisma.conversation.findFirst({
+      where: { id: body.conversationId, userId, kind: "image", password: null }, select: { id: true },
+    }))) return conversationLockedResponse();
 
     const result = await requestImageGeneration({
       userId,

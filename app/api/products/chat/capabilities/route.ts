@@ -4,6 +4,20 @@ import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled } from "@/lib/desktopReadApiContract";
+import {
+  getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached,
+} from "@/lib/appSettings";
+import { CHAT_STARTER_MAX_VISIBLE, selectVisibleStarterCards } from "@/lib/chatStarterAvailability";
+import { chatStarterCatalogFor } from "@/lib/chatStarterCatalog";
+import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
+import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
+import { workspaceWelcomeCopy } from "@/locales/workspaceWelcome";
+import { effectivePlanModelLimit, getUserBillingPlan, planAllowsFeature } from "@/lib/billingEntitlements";
+import { reviewEasyEnabled } from "@/lib/reviewRouting";
+import { refreshImageModelCatalog } from "@/lib/modelCatalog";
+import { imageModelOwner } from "@/lib/imageModelRegistry";
+import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { autoSelectionCapability } from "@/lib/autoRoutingUi";
@@ -21,6 +35,44 @@ import { promptRefinerChatExecutionRelease } from
   "@/lib/promptRefinerChatExecutionRelease";
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
+
+async function desktopChatCapabilities(userId: string) {
+  const desktopWrite = desktopChatWriteEnabled();
+  const desktopReview = desktopReviewWriteEnabled();
+  const attachmentAccess = desktopAttachmentEnabled();
+  const [startersEnabled, importEnabled, continuationEnabled, plan, attachments] = await Promise.all([
+    desktopWrite ? isChatStarterEnabled().catch(() => false) : false,
+    isExternalImportEnabled().catch(() => false),
+    isExternalContinuationEnabledCached().catch(() => false),
+    desktopWrite || desktopReview || attachmentAccess ? getUserBillingPlan(userId).catch(() => null) : null,
+    attachmentAccess ? getOperationalFeatureFlags().then((flags) => flags.attachmentsEnabled).catch(() => false) : false,
+  ]);
+  const reviewPlan = desktopReview ? plan : null;
+  const desktopAttachments = attachments && plan?.allowAttachments === true;
+  const modelCapabilities = new Set(resolveChatStarterCapabilities({
+    webSearchBackendReadiness: resolveWebSearchBackendReadiness(),
+  }).filter((capability) => capability === "generated-artifact" ||
+    (desktopAttachments && (capability === "document-attachment" || capability === "image-input"))));
+  const starters = startersEnabled ? selectVisibleStarterCards({
+    signedIn: true, plan: plan?.tier ?? null, enabledFlags: new Set(), knownFlags: new Set(), modelCapabilities,
+  }, chatStarterCatalogFor("chat"), CHAT_STARTER_MAX_VISIBLE).flatMap(({ entry, availability }) => {
+    const cards = workspaceWelcomeCopy.en.starter.cards;
+    const copy = cards[entry.labelKey.split(".")[2] as keyof typeof cards];
+    return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];
+  }) : [];
+  const imageEnabled = reviewPlan && planAllowsFeature(reviewPlan, "imageGeneration") &&
+    await isImageGenerationEnabledCached().catch(() => false);
+  const catalog = imageEnabled ? await refreshImageModelCatalog().catch(() => []) : [];
+  const images = catalog.filter((model) => !model.disabledReason).map((model) => ({
+    id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
+    prices: model.prices.map(({ quality, size, credits }) => ({ quality, size, credits })),
+  }));
+  return { desktopWrite, desktopImport: importEnabled && continuationEnabled, desktopStarters: starters,
+    desktopAttachments,
+    ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
+    ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
+  };
+}
 
 /**
  * Read the server-owned Auto capability for a not-yet-created Tomverse Chat.
@@ -95,12 +147,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const availability = await autoAvailabilityFor(session.user.id);
+    const [availability, desktop] = await Promise.all([
+      autoAvailabilityFor(session.user.id),
+      request.headers.get("origin") === DESKTOP_APP_ORIGIN ? desktopChatCapabilities(session.user.id) : null,
+    ]);
     const voice = voiceConversationConfig(process.env);
     return NextResponse.json(
       // Older APKs use this field for their 300-second client timer and reserve
       // estimate. Updated clients opt into continuous funding explicitly.
-      { autoSelection: autoSelectionCapability(availability), voiceConversation: { enabled: Boolean(voice), maxSeconds: 300, continuous: Boolean(voice), reservationSeconds: voice?.reservationSeconds ?? 60 } },
+      { autoSelection: autoSelectionCapability(availability), voiceConversation: { enabled: Boolean(voice), maxSeconds: 300, continuous: Boolean(voice), reservationSeconds: voice?.reservationSeconds ?? 60 },
+        ...desktop },
       { headers: NO_STORE_HEADERS }
     );
   } catch (error) {

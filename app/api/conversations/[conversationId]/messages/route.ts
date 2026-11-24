@@ -2,6 +2,7 @@ import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/
 import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { applyNativeMessageDeletion } from "@/lib/projectWorkspaceService";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { reviewHandoffDescriptorSchema } from "@/lib/reviewContinuationHandoffCore";
@@ -170,6 +171,10 @@ export async function POST(
       if (!existingConv || existingConv.userId !== userId) {
           return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
       }
+      const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
+      if (desktop && !desktopConversationWriteProduct(existingConv)) {
+        return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
+      }
       if (
         !hasConversationUnlockGrant(
           req,
@@ -182,6 +187,11 @@ export async function POST(
       }
 
     const body = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, saveMessagesSchema);
+    if (desktop && (body.messages.length !== 1 || body.draftConsume ||
+        body.messages.some((message) => message.modelId || message.attachmentReferences ||
+          (!desktopAttachmentEnabled() && message.attachmentUploadIds)))) {
+      return NextResponse.json({ error: "Desktop Chat saves one question with its prepared attachments at a time." }, { status: 400 });
+    }
     const messageMappings = body.messages.map((message) => ({
       requestId: message.clientRequestId,
       messageId: scopedMessageId(conversationId, message.clientRequestId),

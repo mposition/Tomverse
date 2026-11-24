@@ -84,10 +84,15 @@ import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
 import { DeveloperSettingsTab } from "@/components/settings/DeveloperSettingsTab";
 import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
+    accountSettingsPageHref,
     isSettingsSectionId,
     parseSettingsDeepLink,
+    settingsExitHref,
+    SETTINGS_SECTION_QUERY_PARAM,
+    SETTINGS_TAB_QUERY_PARAM,
     settingsSectionElementId,
     stripSettingsDeepLink,
+    type SettingsDeepLink,
     type SettingsSectionId,
 } from "@/lib/settingsNavigation";
 import { listImportableGuestConversations } from "@/lib/guestImport";
@@ -103,6 +108,7 @@ type LoginMethod =
 export function AuthButton({
     showAnalyticsCookieButton = false,
     currentProduct = "review",
+    settingsPage,
 }: {
     // Guests have no account menu to reach analytics preferences from, so
     // the mobile shell (which drops the floating settings button to
@@ -113,19 +119,24 @@ export function AuthButton({
     // current product explicitly so sign-in and account actions return to the
     // surface the user was actually using.
     currentProduct?: ConversationProductKey;
+    settingsPage?: SettingsDeepLink & { product: ConversationProductKey; embedded?: boolean };
 } = {}) {
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();
-    const [isModalOpen, setIsModalOpen] = useState(false);
+    const pageMode = settingsPage !== undefined;
+    const embedded = settingsPage?.embedded === true;
+    const returnProduct = settingsPage?.product ?? currentProduct;
+    const SettingsHeading = pageMode ? "h1" : "h2";
+    const [isModalOpen, setIsModalOpen] = useState(pageMode);
     // A settings detail page returns to the product it was entered from. Every
     // way in -- this panel, the account menu, a deep link -- starts on a
     // product surface that renders this component, so recording here covers
     // them all.
     useEffect(() => {
-        rememberSettingsReturnProduct(currentProduct);
-    }, [currentProduct]);
+        rememberSettingsReturnProduct(returnProduct, embedded ? "desktop" : pageMode ? "page" : "workspace");
+    }, [returnProduct, embedded, pageMode]);
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
-    const [activeSettingsTab, setActiveSettingsTab] = useState<AccountSettingsTab>("account");
+    const [activeSettingsTab, setActiveSettingsTab] = useState<AccountSettingsTab>(settingsPage?.tab ?? "account");
     // Data-tab entry point for external conversation import. Hidden until the
     // capacity endpoint answers 200: that endpoint is the authoritative
     // session + rollout-flag probe, so a disabled flag closes this entry
@@ -145,7 +156,7 @@ export function AuthButton({
     // it names has actually rendered: the import row only appears once the
     // capacity probe answers, which is several frames after the tab paints.
     const [pendingSettingsSection, setPendingSettingsSection] =
-        useState<SettingsSectionId | null>(null);
+        useState<SettingsSectionId | null>(settingsPage?.section ?? null);
     const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
     const settingsDialogRef = useRef<HTMLDivElement | null>(null);
     const deleteAccountButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -158,7 +169,7 @@ export function AuthButton({
     const { t, lang: globalLang, setLang: setGlobalLang } = useLanguage();
     const pwaInstall = usePwaInstall();
     const accountCallbackUrl = withChatLanguage(
-        PRODUCT_SURFACE_PATH[currentProduct],
+        pageMode ? accountSettingsPageHref(activeSettingsTab, returnProduct, null, embedded) : PRODUCT_SURFACE_PATH[currentProduct],
         globalLang
     );
     const formatCopy = (key: string, values: Record<string, string>) =>
@@ -286,9 +297,13 @@ export function AuthButton({
     }, [accountUsage?.subscription?.cancelAtPeriodEnd]);
 
     const closeSettingsModal = useCallback(() => {
+        if (pageMode) {
+            window.location.assign(settingsExitHref(returnProduct));
+            return;
+        }
         setIsModalOpen(false);
         requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
-    }, []);
+    }, [returnProduct, pageMode]);
 
     const closeDeleteAccountModal = useCallback(() => {
         setIsDeleteAccountModalOpen(false);
@@ -302,14 +317,20 @@ export function AuthButton({
             tab: AccountSettingsTab,
             section: string | null = null
         ) => {
+            const row = isSettingsSectionId(section) ? section : null;
             setIsAccountMenuOpen(false);
             setActiveSettingsTab(tab);
-            setPendingSettingsSection(
-                isSettingsSectionId(section) ? section : null
-            );
+            setPendingSettingsSection(row);
             setIsModalOpen(true);
+            if (pageMode) {
+                const url = new URL(window.location.href);
+                url.searchParams.set(SETTINGS_TAB_QUERY_PARAM, tab);
+                if (row) url.searchParams.set(SETTINGS_SECTION_QUERY_PARAM, row);
+                else url.searchParams.delete(SETTINGS_SECTION_QUERY_PARAM);
+                window.history.replaceState(null, "", url);
+            }
         },
-        []
+        [pageMode]
     );
 
     // Lets the collapsed sidebar rail's compact account button (which has no
@@ -344,7 +365,7 @@ export function AuthButton({
     // the request has been served, and rewriting the current entry (rather
     // than pushing one) leaves the visitor's own Back button where it was.
     useEffect(() => {
-        if (typeof window === "undefined") return;
+        if (pageMode || typeof window === "undefined") return;
         const pending = consumePendingAccountSettingsRequest();
         if (pending) {
             queueMicrotask(() => openSettingsTab(pending.tab, pending.section));
@@ -358,7 +379,7 @@ export function AuthButton({
             `${window.location.pathname}${stripSettingsDeepLink(window.location.search)}${window.location.hash}`
         );
         queueMicrotask(() => openSettingsTab(deepLink.tab, deepLink.section));
-    }, [openSettingsTab]);
+    }, [openSettingsTab, pageMode]);
 
     // Scroll and focus restoration for the row the visitor came from. The
     // dialog moves focus to its first control on the frame after it opens, so
@@ -621,7 +642,7 @@ export function AuthButton({
     }, []);
 
     useModalDialog({
-        open: isModalOpen,
+        open: isModalOpen && !pageMode,
         onClose: closeSettingsModal,
         dialogRef: settingsDialogRef,
         panelRef: settingsDialogRef,
@@ -878,7 +899,7 @@ export function AuthButton({
         if (modelFinderOpeningRef.current) return;
         modelFinderOpeningRef.current = true;
         setModelFinderConfirmOpen(false);
-        closeSettingsModal();
+        if (!pageMode) closeSettingsModal();
         requestAnimationFrame(() => {
             openModelFinder();
             modelFinderOpeningRef.current = false;
@@ -1170,7 +1191,8 @@ export function AuthButton({
 
   if (session && session.user) {
     return (
-      <div className="relative w-full" data-testid="account-card-compact">
+      <div className="relative w-full" data-testid={pageMode ? undefined : "account-card-compact"}>
+        {!pageMode && <>
         <div className="flex min-h-12 items-center gap-1.5 rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <button
             ref={accountMenuButtonRef}
@@ -1372,14 +1394,17 @@ export function AuthButton({
             </div>
           </>
         ) : null}
+        </>}
 
             {isModalOpen && (
-                <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <div className={pageMode ? "mx-auto w-full max-w-5xl px-4 py-6 sm:px-6" : "fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"}>
                     <div
                         ref={settingsDialogRef}
-                        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-                        role="dialog"
-                        aria-modal="true"
+                        className={pageMode
+                            ? "flex w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                            : "flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"}
+                        role={pageMode ? "region" : "dialog"}
+                        aria-modal={pageMode ? undefined : true}
                         aria-labelledby="user-settings-title"
                     >
                         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
@@ -1388,23 +1413,23 @@ export function AuthButton({
                                     <Settings className="h-5 w-5" />
                                 </span>
                                 <div>
-                                    <h2 id="user-settings-title" className="text-base font-bold">{t("auth.userSettings")}</h2>
+                                    <SettingsHeading id="user-settings-title" className="text-base font-bold">{t("auth.userSettings")}</SettingsHeading>
                                     <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                                         {session.user.email}
                                     </p>
                                 </div>
                             </div>
-                            <button
+                            {!pageMode && <button
                                 type="button"
                                 onClick={closeSettingsModal}
                                 className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white"
                                 aria-label={t("auth.cancel")}
                             >
                                 <X className="h-4 w-4" />
-                            </button>
+                            </button>}
                         </div>
 
-                        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
+                        <div className={embedded ? "min-h-0 flex-1" : "grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]"}>
                             {/*
                               Seven tabs wrap rather than shrink. `grid-cols-4`
                               held four across at `sm`; a fifth, sixth and
@@ -1415,7 +1440,7 @@ export function AuthButton({
                               it), so no label is ever cut and the touch
                               targets keep their height.
                             */}
-                            <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-3 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
+                            {!embedded && <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-3 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
                                 {[
                                     { id: "account", label: t("auth.accountTab"), icon: UserRound },
                                     { id: "preferences", label: t("auth.preferencesTab"), icon: Palette },
@@ -1455,7 +1480,7 @@ export function AuthButton({
                                             // separate contract, asserted by
                                             // the settings IA spec.
                                             data-testid={`settings-tab-${item.id}`}
-                                            onClick={() => setActiveSettingsTab(item.id as typeof activeSettingsTab)}
+                                            onClick={() => openSettingsTab(item.id as AccountSettingsTab)}
                                             aria-pressed={isActive}
                                             className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-center text-sm font-semibold transition-colors md:justify-start md:text-left ${
                                                 isActive
@@ -1468,7 +1493,7 @@ export function AuthButton({
                                         </button>
                                     );
                                 })}
-                            </nav>
+                            </nav>}
 
                             <div className="min-h-0 overflow-y-auto px-5 py-5">
                                 {activeSettingsTab === "account" && (
@@ -1506,7 +1531,7 @@ export function AuthButton({
                                                 description={t("emailNotifications.dataTabDescription")}
                                                 status={t("emailNotifications.marketingOptional")}
                                                 actionLabel={t("emailNotifications.dataTabOpen")}
-                                                onNavigate={closeSettingsModal}
+                                                onNavigate={pageMode ? undefined : closeSettingsModal}
                                                 testId="email-notifications-entry"
                                                 linkTestId="email-notifications-entry-link"
                                             />
@@ -1604,6 +1629,7 @@ export function AuthButton({
                                                 ref={deleteAccountButtonRef}
                                                 type="button"
                                                 onClick={() => setIsDeleteAccountModalOpen(true)}
+                                                data-testid="settings-account-delete-action"
                                                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                             >
                                                 <Trash2 className="h-4 w-4" />
@@ -1962,7 +1988,7 @@ export function AuthButton({
                                                     description={t("memoryReview.dataTabDescription")}
                                                     status={memoryEntryStatusText}
                                                     actionLabel={t("memoryReview.dataTabOpen")}
-                                                    onNavigate={closeSettingsModal}
+                                                    onNavigate={pageMode ? undefined : closeSettingsModal}
                                                     testId="memory-entry"
                                                     linkTestId="memory-entry-link"
                                                 />
@@ -2007,7 +2033,7 @@ export function AuthButton({
                                                                 : t("externalImport.dataTabUsageEmpty")
                                                         }
                                                         actionLabel={t("externalImport.dataTabOpen")}
-                                                        onNavigate={closeSettingsModal}
+                                                        onNavigate={pageMode ? undefined : closeSettingsModal}
                                                         testId="external-import-entry"
                                                         linkTestId="external-import-entry-link"
                                                     />
@@ -2026,7 +2052,7 @@ export function AuthButton({
                                                     title={t("accountDataExport.dataTabTitle")}
                                                     description={t("accountDataExport.dataTabDescription")}
                                                     actionLabel={t("accountDataExport.dataTabOpen")}
-                                                    onNavigate={closeSettingsModal}
+                                                    onNavigate={pageMode ? undefined : closeSettingsModal}
                                                     testId="account-data-entry"
                                                     linkTestId="account-data-entry-link"
                                                 />
@@ -2096,8 +2122,8 @@ export function AuthButton({
 
                                 {activeSettingsTab === "developer" && (
                                     <DeveloperSettingsTab
-                                        onUpgrade={() => setActiveSettingsTab("plan")}
-                                        onNavigate={closeSettingsModal}
+                                        onUpgrade={() => openSettingsTab("plan")}
+                                        onNavigate={pageMode ? undefined : closeSettingsModal}
                                     />
                                 )}
 
@@ -2497,6 +2523,15 @@ export function AuthButton({
             )}
       </div>
     );
+  }
+
+  if (pageMode) {
+    return <div className="mx-auto max-w-3xl px-4 py-8">
+      <h1 className="mb-4 text-xl font-semibold">{t("auth.userSettings")}</h1>
+      <Link href={`/auth/signin?${new URLSearchParams({ callbackUrl: accountCallbackUrl })}`} className="inline-flex min-h-11 items-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white">
+        {t("auth.login")}
+      </Link>
+    </div>;
   }
 
   return (

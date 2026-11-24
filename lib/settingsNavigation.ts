@@ -11,10 +11,9 @@ import { PRODUCT_SURFACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfac
 /**
  * Where a settings *detail page* goes when the user navigates back up.
  *
- * Settings is not a route: it is a closable panel (the modal inside
- * components/auth/AuthButton.tsx) on each product surface — Chat, Review,
- * Studio. Its detail screens — everything under /settings — are full pages, so
- * their upward navigation has to name a destination rather than lean on
+ * Account settings mount as a workspace modal or on the dedicated /settings
+ * page. Settings detail screens are full pages, so their upward navigation
+ * has to name a destination rather than lean on
  * `router.back()`, which points at whatever the visitor happened to see last
  * and at nothing at all when the URL was opened directly.
  *
@@ -35,6 +34,10 @@ import { PRODUCT_SURFACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfac
  * see docs/ui-contracts/settings-navigation.md §1.
  */
 export const SETTINGS_HOME_PATH = REVIEW_WORKSPACE_PATH;
+export const ACCOUNT_SETTINGS_PATH = "/settings";
+export const SETTINGS_PRODUCT_QUERY_PARAM = "from";
+export const SETTINGS_DESKTOP_QUERY_PARAM = "desktop";
+export type SettingsEntry = "workspace" | "page" | "desktop";
 
 /**
  * The product route with nothing appended, Review by default. Kept
@@ -50,6 +53,7 @@ export const settingsExitHref = (product: ConversationProductKey = "review") =>
  * Chat, not to Review. Anything unreadable falls back to Review.
  */
 export const SETTINGS_RETURN_PRODUCT_STORAGE_KEY = "tomverse.settings.returnProduct";
+export const SETTINGS_RETURN_ENTRY_STORAGE_KEY = "tomverse.settings.returnEntry";
 
 export const settingsReturnProductFrom = (
     value: string | null | undefined
@@ -62,10 +66,16 @@ export const settingsReturnProductFrom = (
  */
 export const settingsHrefForProduct = (
     href: string,
-    product: ConversationProductKey
+    product: ConversationProductKey,
+    entry: SettingsEntry = "workspace"
 ) => {
     if (href !== SETTINGS_HOME_PATH && !href.startsWith(`${SETTINGS_HOME_PATH}?`)) return href;
-    return `${PRODUCT_SURFACE_PATH[product]}${href.slice(SETTINGS_HOME_PATH.length)}`;
+    const search = href.slice(SETTINGS_HOME_PATH.length);
+    if (entry === "workspace") return `${PRODUCT_SURFACE_PATH[product]}${search}`;
+    const params = new URLSearchParams(search);
+    params.set(SETTINGS_PRODUCT_QUERY_PARAM, product);
+    if (entry === "desktop") params.set(SETTINGS_DESKTOP_QUERY_PARAM, "1");
+    return `${ACCOUNT_SETTINGS_PATH}?${params}`;
 };
 
 /**
@@ -157,6 +167,18 @@ export const isSettingsSectionId = (
 /** DOM id of the settings list row, i.e. the scroll and focus target. */
 export const settingsSectionElementId = (section: SettingsSectionId) =>
     `settings-entry-${section}`;
+
+export const settingsTabHref = (
+    tab: AccountSettingsTab,
+    product: ConversationProductKey = "review"
+) => `${PRODUCT_SURFACE_PATH[product]}?${new URLSearchParams({ [SETTINGS_TAB_QUERY_PARAM]: tab })}`;
+
+export const accountSettingsPageHref = (
+    tab: AccountSettingsTab,
+    product: ConversationProductKey,
+    section?: SettingsSectionId | null,
+    embedded?: boolean,
+) => settingsHrefForProduct(section ? settingsSectionHref(section) : settingsTabHref(tab), product, embedded ? "desktop" : "page");
 
 export const settingsSectionHref = (
     section: SettingsSectionId,

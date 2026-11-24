@@ -8,6 +8,7 @@ import {
     readLimitedJson,
 } from "@/lib/apiSecurity";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
 import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
@@ -24,6 +25,7 @@ import {
     databaseErrorMetadata,
     isRetryableDatabaseError,
 } from "@/lib/databaseError";
+import { clampSelectedModelsAgainstRuntime, getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { resolveProjectScopeById } from "@/lib/projectWorkspaceService";
 
@@ -63,6 +65,27 @@ const contextSchema = z
     })
     .strict();
 
+const savedChatId = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
+const desktopContextSchema = z.object({
+    conversationId: savedChatId,
+    sourceUserMessageId: savedChatId,
+    modelId: z.string().min(1).max(100),
+    previousContextBundle: contextSchema.shape.previousContextBundle,
+}).strict();
+
+const storedModelIds = z.array(z.string());
+function parseStoredModelIds(value: string | null | undefined) {
+    let parsed: unknown = value ?? [];
+    try {
+        for (let depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
+            parsed = JSON.parse(parsed);
+        }
+    } catch {
+        return null;
+    }
+    return storedModelIds.safeParse(parsed).data ?? null;
+}
+
 const traceIdFor = (request: Request) => {
     const supplied = request.headers.get("X-Client-Request-ID")?.trim();
     const parsed = z.string().uuid().safeParse(supplied);
@@ -76,7 +99,9 @@ export async function POST(request: Request) {
         // a bearer is never read as a guest, and never falls back to a cookie.
         const authentication = await resolveChatRouteSession(request);
         if (authentication.response) return authentication.response;
-        const userId = authentication.session?.user?.id ?? null;
+        const { session } = authentication;
+        const userId = session?.user?.id ?? null;
+        const desktop = request.headers.get("origin") === DESKTOP_APP_ORIGIN;
 
         await consumeApiRateLimit(
             request,
@@ -84,7 +109,12 @@ export async function POST(request: Request) {
             "chat-context-preparation",
             { minute: 60, day: 2_000 }
         );
-        const payload = await readLimitedJson(request, CHAT_MAX_MESSAGE_BODY_BYTES, contextSchema);
+        const desktopPayload = desktop
+            ? await readLimitedJson(request, CHAT_MAX_MESSAGE_BODY_BYTES, desktopContextSchema)
+            : null;
+        const payload = desktopPayload
+            ? { ...desktopPayload, modelIds: [desktopPayload.modelId], prompt: "" }
+            : await readLimitedJson(request, CHAT_MAX_MESSAGE_BODY_BYTES, contextSchema);
         if (payload.previousContextBundle !== undefined && !userId) {
             throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");
         }
@@ -108,7 +138,7 @@ export async function POST(request: Request) {
         // unlock — but the bundle still binds `null`, and the chat request
         // must present the same.
         const conversationId =
-            payload.conversationId && payload.conversationId !== "private-chat"
+            payload.conversationId && (desktopPayload || payload.conversationId !== "private-chat")
                 ? payload.conversationId
                 : null;
 
@@ -119,9 +149,10 @@ export async function POST(request: Request) {
         let conversationMemoryMode: string | null = null;
         let profileVersionId: string | null = null;
         let conversationProjectId: string | null = null;
+        let query = payload.prompt;
         if (conversationId) {
             const conversation = await prisma.conversation.findUnique({
-                where: { id: conversationId },
+                where: { id: conversationId, userId, ...(desktopPayload ? { productKey: "chat", kind: "chat" } : {}) },
                 select: {
                     userId: true,
                     password: true, passwordVersion: true,
@@ -129,6 +160,7 @@ export async function POST(request: Request) {
                     memoryMode: true,
                     assistantProfileVersionId: true,
                     projectId: true,
+                    ...(desktopPayload ? { selectedModels: true, disabledPanels: true } : {}),
                 },
             });
             if (!conversation || conversation.userId !== userId) {
@@ -154,6 +186,29 @@ export async function POST(request: Request) {
             if (!isChatConversationKind(conversation.kind)) {
                 return conversationKindNotSupportedResponse();
             }
+            if (desktopPayload) {
+                if (conversation.password !== null) return conversationLockedResponse();
+                const saved = await prisma.message.findFirst({
+                    where: { conversationId, role: "user", conversation: { userId, productKey: "chat", kind: "chat", password: null } },
+                    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                    select: { id: true, content: true },
+                });
+                if (saved?.id !== desktopPayload.sourceUserMessageId) {
+                    throw new ChatAccessError(409, "DESKTOP_CHAT_DRAFT_CHANGED", "The saved Chat question or model changed.");
+                }
+                const selected = parseStoredModelIds(conversation.selectedModels);
+                const disabled = parseStoredModelIds(conversation.disabledPanels);
+                if (!selected?.length || !disabled) {
+                    return Response.json({ ok: true, contextBundle: null, memoryUsedCount: 0 }, { headers });
+                }
+                const models = await getRuntimeModels();
+                const visible = clampSelectedModelsAgainstRuntime(selected, models);
+                const disabledModels = clampSelectedModelsAgainstRuntime(disabled, models, disabled.length);
+                if (!visible.includes(desktopPayload.modelId) || disabledModels.includes(desktopPayload.modelId)) {
+                    throw new ChatAccessError(409, "DESKTOP_CHAT_DRAFT_CHANGED", "The saved Chat question or model changed.");
+                }
+                query = saved.content;
+            }
             conversationMemoryMode = conversation.memoryMode;
             profileVersionId = conversation.assistantProfileVersionId;
             conversationProjectId = conversation.projectId ?? null;
@@ -169,10 +224,11 @@ export async function POST(request: Request) {
         }
         const context = await buildChatTurnContext({
             userId,
-            query: payload.prompt,
+            query,
             memorySemanticContext: prepareMemoryHistoryContext({
-                request, userId, conversationId, query: payload.prompt, modelIds: payload.modelIds,
+                request, userId, conversationId, query, modelIds: payload.modelIds,
                 previousContextBundle: payload.previousContextBundle,
+                currentQuestionId: desktopPayload?.sourceUserMessageId,
             }),
             conversationMode: conversationMemoryMode,
             profileVersionId,

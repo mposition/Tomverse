@@ -8,6 +8,8 @@ import {
   serializeImageGroup,
 } from "@/lib/imageGenerationRead";
 import { prisma } from "@/lib/prisma";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
+import { conversationLockedResponse } from "@/lib/conversationLock";
 
 // GET /api/images/groups/[groupId] -- the polling endpoint policy §11 asks
 // for: "one group-level endpoint returns group, target and attempt state
@@ -54,6 +56,9 @@ export async function GET(req: Request, { params }: Params) {
         { status: 404, headers: { "Cache-Control": "no-store" } }
       );
     }
+    if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && !(await prisma.conversation.findFirst({
+      where: { id: group.conversationId, userId, password: null }, select: { id: true },
+    }))) return conversationLockedResponse();
 
     const generationIds = group.targets.flatMap((target) =>
       target.generations.map((generation) => generation.id)

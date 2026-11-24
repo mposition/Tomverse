@@ -9,6 +9,8 @@ import {
   settingsExitHref,
   settingsSectionElementId,
   settingsSectionHref,
+  settingsTabHref,
+  accountSettingsPageHref,
   stripSettingsDeepLink,
   settingsSectionGroupLabelKey,
   SETTINGS_TAB_LABEL_KEY,
@@ -22,6 +24,7 @@ import {
   settingsReturnProductFrom,
 } from "../lib/settingsNavigation.ts";
 import {
+  ACCOUNT_SETTINGS_TABS,
   consumePendingAccountSettingsRequest,
   isAccountSettingsTab,
   readAccountSettingsOpenRequest,
@@ -39,6 +42,27 @@ const LOCALES = { en, ko };
 // checked in every language rather than in the two the rest of this file
 // happens to assert on.
 const ALL_LOCALES = { de, en, es, fr, ko, pt, zh };
+
+test("settings detail links can return to the dedicated page with their workspace and focused row", () => {
+  const section = "email-notifications";
+  const href = "/settings?settings=account&settingsSection=email-notifications&from=chat";
+  assert.equal(accountSettingsPageHref("account", "chat", section), href);
+  assert.equal(settingsHrefForProduct(settingsSectionHref(section), "chat", "page"), href);
+  assert.equal(settingsHrefForProduct(settingsSectionHref(section), "chat"), "/chat?settings=account&settingsSection=email-notifications");
+  assert.equal(settingsHrefForProduct("/settings/notifications", "chat", "page"), "/settings/notifications");
+  assert.equal(settingsExitHref("chat"), "/chat");
+  assert.deepEqual(parseSettingsDeepLink(new URL(href, "https://tomverse.app").search), { tab: "account", section });
+});
+
+test("product settings links round-trip every tab through the web deep-link parser", () => {
+  for (const product of ["chat", "review", "studio"]) {
+    for (const tab of ACCOUNT_SETTINGS_TABS) {
+      const url = new URL(settingsTabHref(tab, product), "https://tomverse.app");
+      assert.equal(url.pathname, `/${product}`);
+      assert.deepEqual(parseSettingsDeepLink(url.search), { tab, section: null });
+    }
+  }
+});
 
 test("every entry with a detail page addresses the settings list on Review", () => {
   for (const section of SETTINGS_SECTION_IDS) {
