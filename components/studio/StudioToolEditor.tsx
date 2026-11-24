@@ -93,7 +93,7 @@ export function StudioToolEditor({ tool, preset }: {
       ...illustrationPresets.map(item => [item.style, studioPresetName(item, lang)]),
     ]
     : [["subtle", copy.subtle], ["playful", copy.playful], ["bold", copy.bold]];
-  const [photo, setPhoto] = useState(() => publishing ? "" : photoTool ? asset(preset?.id.startsWith("pet-") ? "cat" : "selfie") : asset(tool.artwork));
+  const [photo, setPhoto] = useState(() => publishing ? "" : id === "meme" ? asset("selfie") : photoTool ? asset(preset?.id.startsWith("pet-") ? "cat" : "selfie") : asset(tool.artwork));
   const [customPhoto, setCustomPhoto] = useState(false);
   const [logo, setLogo] = useState("");
   const [result, setResult] = useState(() => publishing ? asset(publicationChoices[0].artwork)
@@ -195,8 +195,12 @@ export function StudioToolEditor({ tool, preset }: {
   const imagePrompt = () => {
     switch (id) {
       case "meme":
-        return (hasReference ? "Transform the supplied reference into " : "Create ") +
-          "one funny, shareable image depicting this situation: " + details + ". Leave room at the top for a caption. Do not draw text. Caption context: " + caption;
+        return [
+          hasReference ? "Use the photo as the main character and preserve recognisable identity." : "Create one original, shareable reaction image.",
+          "Turn the situation into one exaggerated comic beat. Show the joke through a big readable facial reaction, physical gesture, and one memorable prop or camera angle. Stay close to the setting and punchline; make them instantly legible.",
+          "Keep the face and crucial prop clear above the lower caption area. No lettering, watermarks or caption boxes.",
+          JSON.stringify({ situation: details, captionContext: caption }),
+        ].join(" ");
       case "illustration":
         return "Transform the attached photo using this visual style: " + artisticOptions[format]?.[0] + ". Preserve the subject's identity and recognisable details. Direction: " + details;
       case "caricature":
@@ -261,7 +265,7 @@ export function StudioToolEditor({ tool, preset }: {
       : pngTool && !resultIsExample ? await fetch(result).then(response => response.blob())
         : await renderStudioImage(result, {
           width: 1080, height: 1080, fit: template ? "cover" : "contain",
-          title: id === "meme" ? caption : undefined,
+          memeCaption: id === "meme" ? caption : undefined,
         });
     const filename = "tomverse-" + (publishing ? dim.id : id) + ".png";
     if (share) await shareStudioPng(blob, filename);
@@ -336,7 +340,7 @@ export function StudioToolEditor({ tool, preset }: {
           <textarea rows={4} maxLength={500} value={posterBrief} disabled={busy} onChange={event => setPosterBrief(event.target.value)} />
         </label>
       </>}
-      {poster && <>
+      {poster && <div className={styles.posterOptions}>
         <label className={styles.field}>{copy.posterCategory}
           <select aria-label={copy.posterCategory} value={posterCategory} disabled={busy} onChange={event => setPosterCategory(event.target.value)}>
             {posterCategories.map(([label, value]) => <option key={value} value={value}>{copy[label]}</option>)}
@@ -347,7 +351,7 @@ export function StudioToolEditor({ tool, preset }: {
             {posterStyles.map(([label, value]) => <option key={value} value={value}>{copy[label]}</option>)}
           </select>
         </label>
-      </>}
+      </div>}
       {publishing && (
         <label className={styles.field}>{copy.publishingHeadline}
           <input value={title} maxLength={65} disabled={busy} onChange={event => setTitle(event.target.value)} />

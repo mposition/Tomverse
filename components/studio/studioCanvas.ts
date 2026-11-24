@@ -47,9 +47,9 @@ function drawImage(
 
 export async function renderStudioImage(
   source: string,
-  options: { width: number; height: number; fit?: "contain" | "cover"; title?: string; subtitle?: string; bleed?: boolean },
+  options: { width: number; height: number; fit?: "contain" | "cover"; memeCaption?: string; bleed?: boolean },
 ): Promise<Blob> {
-  const { width, height, fit = "cover", title, subtitle } = options;
+  const { width, height, fit = "cover", memeCaption } = options;
   const image = await readImage(source);
   const { element, context } = canvas(width, height);
   if (options.bleed) {
@@ -62,29 +62,28 @@ export async function renderStudioImage(
     context.restore();
   }
   drawImage(context, image, width, height, fit);
-  if (title) {
-    const size = Math.round(width * .054);
-    context.font = `800 ${size}px system-ui, sans-serif`;
+  if (memeCaption?.trim()) {
+    const caption = memeCaption.trim();
+    const family = getComputedStyle(document.documentElement).getPropertyValue("--font-ui").trim() || "system-ui, sans-serif";
+    await document.fonts.load(`850 24px ${family}`, caption).catch(() => []);
+    const maxWidth = width * .88;
+    const targetSize = width * .09;
+    context.font = `850 ${targetSize}px ${family}`;
+    const lines = context.measureText(caption).width > maxWidth ? splitCaption(caption) : [caption];
+    const size = Math.min(targetSize, targetSize * maxWidth / Math.max(...lines.map(line => context.measureText(line).width)));
+    const step = size * 1.1;
+    context.font = `850 ${size}px ${family}`;
+    context.textAlign = "center";
     context.textBaseline = "middle";
-    const maxWidth = width * .83;
-    const titleWidth = context.measureText(title).width;
-    if (subtitle) context.font = `500 ${Math.round(size * .48)}px system-ui, sans-serif`;
-    const measured = Math.min(Math.max(titleWidth, subtitle ? context.measureText(subtitle).width : 0), maxWidth);
-    context.font = `800 ${size}px system-ui, sans-serif`;
-    const padding = size * .6;
-    const x = width * .055;
-    const y = height * .06;
-    const labelHeight = size * (subtitle ? 2.2 : 1.37);
-    context.fillStyle = "#142820ed";
-    context.beginPath();
-    context.roundRect(x, y, measured + padding * 2, labelHeight, size * .38);
-    context.fill();
-    context.fillStyle = "#ffffff";
-    context.fillText(title, x + padding, y + size * .69, maxWidth);
-    if (subtitle) {
-      context.font = `500 ${Math.round(size * .48)}px system-ui, sans-serif`;
-      context.fillText(subtitle, x + padding, y + size * 1.65, maxWidth);
-    }
+    context.fillStyle = "#fff4d8";
+    context.strokeStyle = "#241812";
+    context.lineWidth = size * .075;
+    context.lineJoin = "round";
+    lines.forEach((line, index) => {
+      const y = height * .91 - step * (lines.length - index - .5);
+      context.strokeText(line, width / 2, y);
+      context.fillText(line, width / 2, y);
+    });
   }
   return encode(element);
 }
@@ -101,6 +100,10 @@ function splitCaption(text: string): string[] {
   }
   return [graphemes.slice(0, split).join("").trimEnd(), graphemes.slice(split).join("").trimStart()];
 }
+
+export const STUDIO_STICKER_BACKGROUND = "#fff6e9";
+
+export type StickerComposition = true | "opaque";
 
 const stickerFont = "system-ui, sans-serif";
 const stickerLineHeight = 1.16;
@@ -209,6 +212,7 @@ async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, cap
   const outputScale = 512 / Math.max(outputWidth, outputHeight);
   const output = canvas(Math.round(outputWidth * outputScale), Math.round(outputHeight * outputScale));
   const { context } = output;
+  fillStickerBackground(context);
   context.scale(outputScale, outputScale);
   context.drawImage(original.element, left, top, width, height, left - minX, top - minY, width, height);
   if (label) {
@@ -231,8 +235,25 @@ async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, cap
   return encode(output.element);
 }
 
-export async function renderStudioSticker(source: string, caption: string): Promise<Blob | null> {
+function fillStickerBackground(context: CanvasRenderingContext2D) {
+  context.fillStyle = STUDIO_STICKER_BACKGROUND;
+  context.fillRect(0, 0, context.canvas.width, context.canvas.height);
+}
+
+export async function renderStudioSticker(source: string, caption: string, composed?: StickerComposition): Promise<Blob | null> {
+  if (composed === "opaque") {
+    const response = await fetch(source);
+    if (!response.ok) throw new Error("Could not read the sticker image");
+    return response.blob();
+  }
   const image = await readImage(source);
+  if (composed) {
+    // Existing checkout drafts have captions composed over alpha.
+    const { element, context } = canvas(image.naturalWidth, image.naturalHeight);
+    fillStickerBackground(context);
+    context.drawImage(image, 0, 0);
+    return encode(element);
+  }
   return renderStickerCell(image, { left: 0, top: 0, width: image.naturalWidth, height: image.naturalHeight }, caption);
 }
 

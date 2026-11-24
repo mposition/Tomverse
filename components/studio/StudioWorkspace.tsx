@@ -27,8 +27,6 @@ const StudioAccount = dynamic(() => import("@/components/auth/AuthButton").then(
 
 type StudioBillingOutcome = "success" | "cancelled" | "credits-success" | "credits-cancelled" | "tester-pass";
 
-const mobileArtwork = new Set(["meme"]);
-
 function ToolArtwork({ tool }: { tool: StudioTool }) {
   if (tool.id === "stickers") {
     return <div className={styles.stickerMosaic}>
@@ -40,8 +38,6 @@ function ToolArtwork({ tool }: { tool: StudioTool }) {
   }
   const analysis = tool.id === "face-analysis" || tool.id === "color-analysis" ? tool.id : undefined;
   return <picture className={styles.cardPhoto} data-analysis={analysis}>
-    {mobileArtwork.has(tool.artwork) && <source media="(max-width: 768px)" srcSet={`/studio/${tool.artwork}-mobile.png`} />}
-    {/* Art direction differs between desktop and mobile. */}
     <img src={studioArtworkPath(tool.artwork)} alt="" width={294} height={172} data-character={tool.id === "character-maker" || undefined} />
   </picture>;
 }

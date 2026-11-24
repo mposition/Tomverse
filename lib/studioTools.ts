@@ -2,7 +2,7 @@ export { STUDIO_PHOTO_PRESETS, type StudioPhotoPreset } from "./studioPresetLibr
 
 export const STUDIO_TOOLS = [
   { id: "stickers", mobileDescription: "stickersMobile", group: "play", artwork: "stickers", title: "stickersTitle", description: "stickersDescription" },
-  { id: "meme", mobileDescription: "memeMobile", group: "play", artwork: "meme", title: "memeTitle", description: "memeDescription" },
+  { id: "meme", mobileDescription: "memeMobile", group: "play", artwork: "meme-cafe.webp", title: "memeTitle", description: "memeDescription" },
   { id: "face-analysis", mobileDescription: "faceAnalysisDescription", group: "play", artwork: "face-analysis-cover.webp", title: "faceAnalysisTitle", description: "faceAnalysisDescription" },
   { id: "character-maker", mobileDescription: "characterMakerDescription", group: "play", artwork: "character-fantasy.webp", title: "characterMakerTitle", description: "characterMakerDescription" },
   { id: "color-analysis", mobileDescription: "colorAnalysisDescription", group: "play", artwork: "color-analysis-cover.webp", title: "colorAnalysisTitle", description: "colorAnalysisDescription" },
