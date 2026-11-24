@@ -705,7 +705,7 @@ export async function runScheduledOptimizerCycle(options: { waitForCompletion?: 
 
 /** Refusals that belong to the diagnostic alone: the day goes back to the rotation. */
 const COST_DIAGNOSTIC_SKIP_REFUSALS: ReadonlySet<string> = new Set([
-    ...OPTIMIZER_TARGET_SKIP_REFUSALS, "diagnostic_off", "diagnostic_needs_person", "optimizer_off",
+    ...OPTIMIZER_TARGET_SKIP_REFUSALS, "diagnostic_off", "diagnostic_needs_person", "diagnostic_recent", "optimizer_off",
 ]);
 
 /**

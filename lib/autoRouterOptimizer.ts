@@ -255,7 +255,12 @@ export const COST_DIAGNOSTIC_INTERVAL_DAYS = 7;
 export async function scheduledCostDiagnosticDue(at: Date = new Date()): Promise<boolean> {
     if (!costEfficiencyDiagnosticOn()) return false;
     if (!(await readOptimizerAutomation()).costDiagnosticWeekly) return false;
-    const recent = await prisma.autoRouterOptimizerCycle.findFirst({
+    return !(await costDiagnosticStartedWithin(prisma, at));
+}
+
+/** Any diagnostic, person- or system-started, in the last COST_DIAGNOSTIC_INTERVAL_DAYS. */
+async function costDiagnosticStartedWithin(db: Pick<Prisma.TransactionClient, "autoRouterOptimizerCycle">, at: Date): Promise<boolean> {
+    const recent = await db.autoRouterOptimizerCycle.findFirst({
         where: {
             target: "routing",
             createdAt: { gte: new Date(at.getTime() - COST_DIAGNOSTIC_INTERVAL_DAYS * 86_400_000) },
@@ -266,7 +271,7 @@ export async function scheduledCostDiagnosticDue(at: Date = new Date()): Promise
         },
         select: { id: true },
     });
-    return recent === null;
+    return recent !== null;
 }
 
 export async function runScheduledAutoRouterOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
@@ -475,7 +480,7 @@ async function addProviderSpend(
 }
 
 type Reserved =
-    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" }
+    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" | "diagnostic_recent" }
     | { cycle: { id: string; budgetMicroUsd: number } };
 
 /**
@@ -514,6 +519,11 @@ export async function reserveOptimizerCycle(input: {
                 where: { startedBy: "system", createdAt: { gte: dayStart } },
             });
             if (startedToday > 0) return { refused: "daily_done" };
+            // The weekly check again, under the lock: a diagnostic a person
+            // started after the schedule looked still holds the week.
+            if (input.objective === "chat_cost_efficiency" && await costDiagnosticStartedWithin(tx, now)) {
+                return { refused: "diagnostic_recent" };
+            }
         }
         const recent = await tx.autoRouterOptimizerCycle.findMany({
             where: { createdAt: { gte: monthStart } },
@@ -608,8 +618,10 @@ export type OptimizerStartRefusal =
     | "month_cap"
     /** The cost-efficiency diagnostic's default-off switch is off. */
     | "diagnostic_off"
-    /** Only a person starts a diagnostic; no schedule does. */
-    | "diagnostic_needs_person";
+    /** The system starts a diagnostic only while the weekly switch is on. */
+    | "diagnostic_needs_person"
+    /** The system's weekly diagnostic: one already started in the last 7 days. */
+    | "diagnostic_recent";
 
 const AUTO_PLANS_WIDEST_FIRST: readonly ModelTier[] = ["Max", "Pro", "Free"];
 
