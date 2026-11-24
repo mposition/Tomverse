@@ -7,6 +7,7 @@ import {
   generateImageForMeasurement,
   generateImageWithProvider,
   ImageProviderError,
+  imageProviderRejectionDetail,
 } from "../lib/imageProviderAdapter.ts";
 
 // Required, not imported: the adapter reaches the registry through tsx's
@@ -47,6 +48,31 @@ test("plain 4xx is a user error; auth failures are Tomverse's fault", () => {
   assert.equal(classifyImageProviderFailure(422, null), "provider_user_error");
   assert.equal(classifyImageProviderFailure(401, null), "provider_failed");
   assert.equal(classifyImageProviderFailure(403, null), "provider_failed");
+});
+
+test("a rejection detail names the provider's code and offending parameter, never free text", () => {
+  assert.equal(
+    imageProviderRejectionDetail(400, {
+      error: { code: "invalid_value", type: "invalid_request_error", param: "size", message: "a red apple is bad" },
+    }),
+    "Image provider rejected the request (HTTP 400; code=invalid_value; type=invalid_request_error; param=size)."
+  );
+  // Google: numeric code plus a status string.
+  assert.equal(
+    imageProviderRejectionDetail(400, { error: { code: 400, status: "INVALID_ARGUMENT", message: "x" } }),
+    "Image provider rejected the request (HTTP 400; code=400; status=INVALID_ARGUMENT)."
+  );
+  // fal's validation list.
+  assert.equal(
+    imageProviderRejectionDetail(422, { detail: [{ loc: ["body", "prompt"], type: "string_too_long", msg: "x" }] }),
+    "Image provider rejected the request (HTTP 422; type=string_too_long; param=body.prompt)."
+  );
+  // A code that is not an identifier (could quote the prompt) is dropped.
+  assert.equal(
+    imageProviderRejectionDetail(400, { error: { code: "the prompt a red apple" } }),
+    "Image provider rejected the request (HTTP 400)."
+  );
+  assert.equal(imageProviderRejectionDetail(400, null), "Image provider rejected the request (HTTP 400).");
 });
 
 test("ImageProviderError carries phase, status and provider request id", () => {
