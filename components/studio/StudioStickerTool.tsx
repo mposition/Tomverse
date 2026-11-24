@@ -37,10 +37,10 @@ const samplePhoto = "/studio/selfie.png";
 const sheetSize = "1536x1024";
 const singleSize = "1024x1024";
 const stickerBackground = "Use a perfectly flat pure green (#00ff00) background so the artwork can be cut out. Never use that background color in the character or props. Do not draw any lettering.";
-const captionSpace = "Keep the expression and face clear. Leave a wide, flat, solid unlettered surface within a natural prop or the front of the clothing in the lower half of the sticker. Use a restrained palette, fine linework, and an expressive pose. Keep the details and surrounding space simple, with no white halo, thick outlines, detached labels or excess decoration.";
+const stickerDirection = "Make the expression and gesture instantly readable at chat sticker size. Use a lively, cohesive palette, clean linework and a crisp sticker silhouette. Let the pose tell the story. Add a small expression accent or prop when it helps the joke or emotion.";
 const drawFace = (style: FaceStyle) => style === "real"
   ? "Preserve the recognisable, photoreal face and draw the body and props."
-  : "Make a recognisable illustrated character from the portrait.";
+  : "Make a recognisable chibi character from the portrait, with expressive eyes, rounded proportions and soft shading.";
 
 function StudioStickerPreview({ source, caption, composed }: Sticker & { caption: string }) {
   const [rendered, setRendered] = useState<{ source: string; caption: string; url: string }>();
@@ -192,7 +192,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
       const blob = await runPack({
         inputKey: photo.source,
         prompt: "Create exactly " + words.length + " separate chat sticker drawings from this portrait. Arrange them in " + columns + " equal columns and " + rows + " equal rows. Put one centered drawing in each cell with a clear green gutter on every side. All drawings must have the same apparent scale. Nothing touches or crosses a cell edge, including any prop. Leave unused cells plain green. Keep the same face, style, palette and proportions. " +
-          drawFace(style) + " " + stickerBackground + " " + captionSpace +
+          drawFace(style) + " " + stickerBackground + " " + stickerDirection +
           " In left-to-right, top-to-bottom order, each pose and expression should match its caption: " + JSON.stringify(words),
         size: sheetQuote.quote.size,
         quote: sheetQuote.quote,
@@ -273,7 +273,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
         inputKey: current.source || reference.source,
         prompt: (current.source ? "The left half is the reference portrait. The right half is an existing sticker. Ignore any lettering in the references. " : "Use the supplied reference portrait. ") +
           "Draw one new sticker with the same identity, keeping the figure centered with clear space around it. " +
-          drawFace(reference.style) + " " + stickerBackground + " " + captionSpace +
+          drawFace(reference.style) + " " + stickerBackground + " " + stickerDirection +
           " Change the pose, expression and props so the drawing depicts this new caption: " + JSON.stringify(replacement.caption.trim()),
         size: singleQuote.quote.size,
         quote: singleQuote.quote,
