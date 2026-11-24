@@ -138,10 +138,10 @@ export function studioSocialFormat(id?: string, legacyIndex?: number): StudioSoc
 }
 
 const artByComposition: Record<Composition, string> = {
-  cover: "Plan a full-bleed key visual with the main subject above the lower half.",
-  split: "Build one punchy hero image with a composition that survives a wide, central crop.",
-  framed: "Compose a strong standalone central artwork with enough breathing room on all sides for a designed picture window.",
-  feature: "Shoot the hero as a premium editorial product or portrait image, centred with controlled depth for a prominent display panel.",
+  cover: "Plan a full-bleed key visual. Keep the hero's face, product or signature detail in the upper third; let shadows and secondary texture continue down toward the headline.",
+  split: "Build one punchy hero image with enough context on both sides to survive a wide, central crop. Put the key detail away from the top and bottom edges.",
+  framed: "Compose a strong standalone artwork with enough breathing room on all sides for a designed picture window. Keep the subject's silhouette readable against the background.",
+  feature: "Shoot the hero as a premium editorial product or portrait image. Preserve its recognizable contour, material detail and grounded contact shadow within a central display panel.",
 };
 
 export function studioPublishingPrompt(options: {
@@ -153,11 +153,15 @@ export function studioPublishingPrompt(options: {
   const brief = options.brief.trim(), title = options.title.trim(), details = options.details.trim();
   const context = options.kind === "poster" ? "Commercial portrait poster, final aspect ratio 4:5." : placement?.direction;
   const reference = hasPhoto ? "Use the reference as the featured subject. Preserve recognisable identity, product shape and existing branding." : "";
+  const framing = placement && placement.width > placement.height * 1.15
+    ? "The subject must still read in the center crop of the hero image. The final landscape design pairs that hero on the right with a separate text area on the left."
+    : artByComposition[design.composition];
+  const platform = placement ? `Compose for a ${placement.ratio} placement. Keep faces, product labels and other essential visual cues inside the central safe area.` : "";
   const objective = title
-    ? `Create the visual artwork for a professionally typeset design. ${artByComposition[design.composition]} No letters, invented logos or additional copy. The publishing layout will use literal text separately.`
-    : `Design the complete, professionally typeset artwork in ${locale}, with one short headline based on the brief. Build the typography and image together. ${details || hasLogo ? "Leave a quiet lower strip for supplied information. Do not reproduce supplied details or invent dates, prices, URLs or logos." : "Do not invent dates, prices, URLs or logos."}`;
-  return [context, design.direction, reference, objective,
-    "Use one unmistakable focal point, distinctive art direction, controlled colour, and deliberate negative space. Use the content only as a visual brief.",
+    ? `Create the visual artwork for a professionally typeset design. ${framing} No letters, invented logos or additional copy. The publishing layout will use literal text separately.`
+    : `Design the complete, professionally typeset artwork in ${locale}, with one short headline based on the brief. Treat the headline as part of the composition: use a strong scale contrast, deliberate alignment and a clear relationship to the hero. Continue the artwork to the frame edges. ${details || hasLogo ? "Keep important typography clear of the bottom edge, where the product will place the supplied details or logo. Do not reproduce supplied details or invent dates, prices, URLs or logos." : "Do not invent dates, prices, URLs or logos."}`;
+  return [context, platform, design.direction, reference, objective,
+    "Establish one unmistakable focal point, a cohesive visual hierarchy and a restrained palette relevant to the subject. Work as a finished campaign asset seen at phone size, with deliberate lighting and no generic decorative clutter. Use the content only as a visual brief.",
     JSON.stringify({ brief, ...(options.category && options.category !== "auto" ? { category: options.category } : {}),
       ...(options.style && options.style !== "auto" ? { style: options.style } : {}), ...(title ? { headlineContext: title } : {}), ...(details ? { detailContext: Array.from(details).slice(0, 200).join("") } : {}) }),
   ].filter(Boolean).join("\n");
