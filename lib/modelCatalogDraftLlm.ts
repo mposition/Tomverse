@@ -666,7 +666,6 @@ export const officialHostsFor = (provider: string): readonly string[] => OFFICIA
  * token counts logged and never content. Agent spending, not user credits.
  */
 export const MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ENV = "MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ID";
-const BENCHMARK_SEARCH_TIMEOUT_MS = 30_000;
 const BENCHMARK_SEARCH_MAX_OUTPUT_TOKENS = 600;
 /** How many proposed pages a fill keeps; it reads the first that loads. */
 export const BENCHMARK_SEARCH_MAX_URLS = 3;
@@ -697,7 +696,8 @@ export const benchmarkUrlsFromAnswer = (answer: unknown, provider: string): stri
 };
 
 export type BenchmarkPageSearch = {
-  findPages: (input: { provider: string; apiModelId: string; name?: string }) => Promise<string[]>;
+  /** `timeoutMs` bounds the call: the fill gives the search and its page one shared budget. */
+  findPages: (input: { provider: string; apiModelId: string; name?: string; timeoutMs: number }) => Promise<string[]>;
 };
 
 /** The configured search model, or null when the benchmark search is off. */
@@ -717,7 +717,7 @@ export const benchmarkPageSearchFromEnv = async (
         prompt: benchmarkSearchPrompt(input),
         maxOutputTokens: BENCHMARK_SEARCH_MAX_OUTPUT_TOKENS,
         maxRetries: 0,
-        abortSignal: AbortSignal.timeout(BENCHMARK_SEARCH_TIMEOUT_MS),
+        abortSignal: AbortSignal.timeout(Math.max(1, input.timeoutMs)),
         output: Output.object({
           schema: jsonSchema(BENCHMARK_SEARCH_SCHEMA as unknown as JSONSchema7),
           name: "benchmark_pages",

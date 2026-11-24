@@ -83,7 +83,7 @@ mock.module(mod("lib/modelCatalogAdmin.ts"), {
   },
 });
 
-const { fillLinkCapabilities, capabilitiesNeedFilling } = await import(mod("lib/codingCatalogAdmin.ts"));
+const { BENCHMARK_STEP_MS, fillLinkCapabilities, capabilitiesNeedFilling } = await import(mod("lib/codingCatalogAdmin.ts"));
 const { codingModelPage, defaultCodingCapabilitySources } = await import(mod("lib/modelCatalogCore.ts"));
 
 const session = { user: { id: "admin-1", email: "owner@example.com" } };
@@ -359,6 +359,7 @@ test("with the benchmark search on, the first of the provider's own pages it nam
       return urls;
     },
   });
+  const budgets = [];
   const announcement = "https://openai.com/index/gpt-a";
   const card = "https://openai.com/index/gpt-a-system-card";
   reset();
@@ -366,13 +367,17 @@ test("with the benchmark search on, the first of the provider's own pages it nam
   await fill({
     // A page off the provider's hosts is never read; one that does not load is skipped; only the first that loads is kept.
     benchmarkSearch: search(["https://blog.example.com/gpt-a-benchmarks", "https://openai.com/index/missing", announcement, card]),
-    fetchPage: async (_provider, url) => {
+    fetchPage: async (_provider, url, maxMs) => {
       calls.pages.push(url);
+      if (url.startsWith("https://openai.com/")) budgets.push(maxMs);
       if (url.endsWith("/missing")) throw new DraftRefusal("fetch_failed", `${url} http_404`);
       return { url, text: "page" };
     },
   });
-  assert.deepEqual(searched, [{ provider: "openai", apiModelId: "gpt-a", name: "GPT A" }]);
+  // The search and its pages share one budget, inside the Admin client's wait.
+  assert.deepEqual(searched, [{ provider: "openai", apiModelId: "gpt-a", name: "GPT A", timeoutMs: 20_000 }]);
+  assert.equal(budgets.length, 2);
+  for (const ms of budgets) assert.ok(ms > 0 && ms <= BENCHMARK_STEP_MS, String(ms));
   assert.deepEqual(calls.pages, [...pagesOf("openai"), "https://openai.com/index/missing", announcement]);
   assert.equal(calls.llm, 1);
   // The notes may stand on it; the evidence keeps its three capability pages.

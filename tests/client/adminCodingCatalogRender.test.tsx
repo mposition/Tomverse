@@ -33,7 +33,7 @@ const c = adminMessagesFor(adminCodingCatalogMessages, "ko");
 const cEn = adminMessagesFor(adminCodingCatalogMessages, "en");
 const m = adminMessagesFor(adminModelCatalogMessages, "ko");
 const noop = () => {};
-const fillReady = { configured: true, env: "MODEL_CATALOG_DRAFT_LLM_MODEL_ID", supported: true, running: false, busy: false, onFill: noop };
+const fillReady = { configured: true, env: "MODEL_CATALOG_DRAFT_LLM_MODEL_ID", supported: true, search: false, running: false, busy: false, onFill: noop };
 const reason = (code: string) => reasonText(m, reasonMessage(code));
 
 const chat = {
@@ -618,6 +618,9 @@ test("a link's detail has one fill button, off with the reason while the draft m
   assert.match(ready, />LLM으로 기능 정보 채우기</);
   assert.doesNotMatch(button(ready), / disabled=""/);
   assert.match(ready, /LLM 호출 1회/);
+  // With the benchmark search on, the detail says each fill is two paid calls.
+  assert.doesNotMatch(ready, /coding-link-fill-search-note/);
+  assert.match(render({ ...fillReady, search: true }), /data-testid="coding-link-fill-search-note"[^>]*>[^<]*행마다 유료 호출이 2회/);
   assert.match(button(render({ ...fillReady, running: true, busy: true })), / disabled=""/);
   assert.match(render({ ...fillReady, running: true, busy: true }), />공식 문서를 읽는 중…</);
   const off = render({ ...fillReady, configured: false });
@@ -626,6 +629,17 @@ test("a link's detail has one fill button, off with the reason while the draft m
   const noSource = render({ ...fillReady, supported: false });
   assert.match(button(noSource), / disabled=""/);
   assert.match(noSource, /이 공급자는 공식 문서 주소가 없습니다/);
+});
+
+test("the fill-all dialog counts the search calls when the benchmark search is on, and says Code waits for the publish", () => {
+  for (const messages of [c, cEn]) {
+    const off = messages.fill.allEffects(4, 1, false);
+    const on = messages.fill.allEffects(4, 1, true);
+    assert.equal(on.length, off.length + 1);
+    assert.ok(on.some((line) => line.includes("8")), on.join(" | "));
+    assert.ok(!off.some((line) => line.includes("8")), off.join(" | "));
+  }
+  assert.ok(c.fill.allEffects(4, 1, false).some((line) => line.includes("Code에서 거절")));
 });
 
 test("the fill bar counts the rows to fill, shows N/M while it runs, and lists what failed and why", () => {

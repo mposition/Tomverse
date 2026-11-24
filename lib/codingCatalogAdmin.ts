@@ -409,16 +409,27 @@ export const unlinkCodingModel = async (input: { modelId: string; session: Sessi
 /** What fillLinkCapabilities calls out to; tests inject these (the real ones are loaded on first use). */
 export type CapabilityFillDeps = {
   draftLlm: () => Promise<CatalogDraftLlm | null>;
-  fetchPage: (provider: string, url: string) => Promise<DraftPage>;
+  /** `maxMs` caps one read inside what a step has left. */
+  fetchPage: (provider: string, url: string, maxMs?: number) => Promise<DraftPage>;
   /** The provider's own benchmark and model card pages, found by a search model; null when that search is off. */
   benchmarkSearch: () => Promise<BenchmarkPageSearch | null>;
 };
 
 const defaultFillDeps: CapabilityFillDeps = {
   draftLlm: async () => (await import("@/lib/modelCatalogDraftLlm")).catalogDraftLlmFromEnv(),
-  fetchPage: async (provider, url) => (await import("@/lib/modelCatalogDraftLlm")).fetchOfficialPage(provider, url),
+  fetchPage: async (provider, url, maxMs) => (await import("@/lib/modelCatalogDraftLlm")).fetchOfficialPage(provider, url, maxMs),
   benchmarkSearch: async () => (await import("@/lib/modelCatalogDraftLlm")).benchmarkPageSearchFromEnv(),
 };
+
+/**
+ * The benchmark step of a fill: the search gets BENCHMARK_SEARCH_MS, and it and
+ * the pages it names together BENCHMARK_STEP_MS; a page is not started with less
+ * than BENCHMARK_MIN_PAGE_MS left. With the three documentation pages (10 s
+ * each) and the draft call (90 s) a fill stays within 150 s.
+ */
+export const BENCHMARK_STEP_MS = 30_000;
+const BENCHMARK_SEARCH_MS = 20_000;
+const BENCHMARK_MIN_PAGE_MS = 2_000;
 
 /**
  * Whether a row is a fill target: a link still on the registry's conservative
@@ -506,12 +517,19 @@ export const fillLinkCapabilities = async (input: {
     }
     // A benchmark page the search names stands beside them for the notes; the
     // search only proposes URLs, and each is read here, on the provider's own hosts.
+    // The search and its page share one budget, so the request stays inside the
+    // Admin client's wait (components/admin/AdminCodingCatalogPanel.tsx).
     const search = await deps.benchmarkSearch();
     if (search) {
-      const found = await search.findPages({ provider, apiModelId: facts.apiModelId, name: facts.name }).catch(() => []);
+      const deadline = Date.now() + BENCHMARK_STEP_MS;
+      const found = await search
+        .findPages({ provider, apiModelId: facts.apiModelId, name: facts.name, timeoutMs: BENCHMARK_SEARCH_MS })
+        .catch(() => []);
       for (const url of found) {
+        const left = deadline - Date.now();
+        if (left < BENCHMARK_MIN_PAGE_MS) break;
         if (!isOfficialSourceUrl(provider, url) || read.some((page) => page.url === url)) continue;
-        const page = await deps.fetchPage(provider, url).catch(() => null);
+        const page = await deps.fetchPage(provider, url, left).catch(() => null);
         if (page) {
           read.push(page);
           break;
