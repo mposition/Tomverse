@@ -11,7 +11,7 @@ import { canUseModelWithPlan, type AiModel } from "@/lib/models";
 import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
 import { RESEARCH_PREVIEW_P0_MODEL_SHORTLIST } from "@/lib/researchPreviewAdmission";
 import {
-  RESEARCH_ENGINE_VERSION, RESEARCH_MODEL_ROLES, RESEARCH_PROFILES, RESEARCH_RESOURCE_LIMITS, RESEARCH_RUN_TERMINAL_STATUSES,
+  RESEARCH_ENGINE_VERSION, RESEARCH_MODEL_ROLES, RESEARCH_OUTPUT_TOKEN_CAPS, RESEARCH_PROFILES, RESEARCH_RESOURCE_LIMITS, RESEARCH_RUN_TERMINAL_STATUSES,
   researchBriefSchema, researchInputManifestSchema, researchPlanSchema, researchReportDocumentSchema, researchSectionKeySchema,
   researchSourceKeySchema, researchSourceSelectionSchema, type ResearchExecutionProfile, type ResearchInputManifest, type ResearchModelRole,
   type ResearchRunV2Dto,
@@ -92,7 +92,7 @@ async function pinExecutionProfile(userId: string, profile: "standard" | "deep")
     if (!model || !model.enabled || model.catalogDeleted || !researchEngineModelIsShortlisted(model)) {
       throw refuse(409, "RESEARCH_ENGINE_UNAVAILABLE", "Deep Research is unavailable.");
     }
-    const estimate = await funding.estimate({ userId, model, outputTokenCap: 6_000, searchEnabled: role === "researcher",
+    const estimate = await funding.estimate({ userId, model, outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.investigate, searchEnabled: role === "researcher",
       inputEstimate: createTokenEstimateAccumulator().addText("x".repeat(24_000)).breakdown() }).catch((error: unknown) => {
       // Research without a fundable web search cannot run; say so before anything starts.
       if ((error as { code?: string })?.code === "RESEARCH_SEARCH_UNAVAILABLE") {

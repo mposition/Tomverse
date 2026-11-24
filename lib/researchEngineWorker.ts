@@ -2,7 +2,7 @@ import "server-only";
 
 import { Prisma, type ResearchWorkItem } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import {
+import { RESEARCH_OUTPUT_TOKEN_CAPS,
   RESEARCH_PROFILES, RESEARCH_RESOURCE_LIMITS, researchCoordinatorSchema, researchInputManifestSchema,
   researchInvestigateTurnSchema, researchPlanSchema, researchPrivateAnalysisSchema, researchReportDocumentSchema,
   researchSectionDraftSchema, researchSynthesisSchema, researchVerificationSchema, researchWorkPayloadSchema,
@@ -177,7 +177,7 @@ async function handlePlan(run: RunRow, item: ResearchWorkItem, fence: ResearchIt
   const prompt = plannerPrompt(publicContextOf(manifest), payload.feedback);
   const result = await callResearchModel({ run, fence, role: "planner", purpose: "plan", dispatchKey: dispatchKeyFor(item),
     ...prompt, toolName: "submit_research_plan", toolDescription: "Submit the structured research plan.",
-    schema: researchPlanSchema, outputTokenCap: 6_000, signal });
+    schema: researchPlanSchema, outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.plan, signal });
   if (!result.ok) return settleModelRefusal(item, fence, result);
   const profile = RESEARCH_PROFILES[manifest.profile];
   const plan = { ...result.value, subquestions: result.value.subquestions.slice(0, profile.maxSubquestions),
@@ -326,7 +326,7 @@ async function handleInvestigate(run: RunRow, item: ResearchWorkItem, fence: Res
   });
   const result = await callResearchModel({ run, fence, role: "researcher", purpose: "work", dispatchKey: dispatchKeyFor(item), ...prompt,
     toolName: "submit_research_turn", toolDescription: "Request searches/reads and record quoted findings for this sub-question.",
-    schema: researchInvestigateTurnSchema, outputTokenCap: 6_000, fundsSearch: true, signal });
+    schema: researchInvestigateTurnSchema, outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.investigate, fundsSearch: true, signal });
   if (!result.ok) return settleModelRefusal(item, fence, result);
   const turn = result.value;
   const resolved = await resolveFindings(run.id, turn.findings, payload.questionKey, { allowPrivateKeys: new Set(), excluded });
@@ -533,7 +533,7 @@ async function handleAnalyzePrivate(run: RunRow, item: ResearchWorkItem, fence: 
   const prompt = analystPrompt({ question: manifest.brief.question, sourceKey: entry.key, label: entry.label, evidence });
   const result = await callResearchModel({ run, fence, role: "analyst", purpose: "work", dispatchKey: dispatchKeyFor(item), ...prompt,
     toolName: "submit_research_private_analysis", toolDescription: "Record quoted findings from this private source.",
-    schema: researchPrivateAnalysisSchema, outputTokenCap: 5_000, signal,
+    schema: researchPrivateAnalysisSchema, outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.privateAnalysis, signal,
     revalidate: () => revalidateResearchPrivateEntry(run.userId, entry) });
   if (!result.ok) {
     if (result.kind === "scope_revoked") await revokePrivateSource(run, source.id);
@@ -701,7 +701,7 @@ async function handleCoordinate(run: RunRow, item: ResearchWorkItem, fence: Rese
     questionSummaries: summaries, remainingSubquestions: Math.max(0, profile.maxSubquestions * 2 - distinctQuestions) });
   const result = await callResearchModel({ run, fence, role: "coordinator", purpose: "work", dispatchKey: dispatchKeyFor(item), ...prompt,
     toolName: "submit_research_coverage", toolDescription: "Decide whether to continue and which gaps to research.",
-    schema: researchCoordinatorSchema, outputTokenCap: 3_000, signal });
+    schema: researchCoordinatorSchema, outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.coordinate, signal });
   if (!result.ok) return settleModelRefusal(item, fence, result);
   const decision = result.value;
   const room = Math.max(0, profile.maxSubquestions * 2 - distinctQuestions);
@@ -753,7 +753,7 @@ async function handleVerify(run: RunRow, item: ResearchWorkItem, fence: Research
   });
   const result = await callResearchModel({ run, fence, role: "verifier", purpose: "finalization", dispatchKey: dispatchKeyFor(item), ...verifierPrompt({ claims: verifierClaims }),
     toolName: "submit_research_verification", toolDescription: "Return a verdict for each claim.", schema: researchVerificationSchema,
-    outputTokenCap: 6_000, signal, ...(entries.length ? { revalidate } : {}) });
+    outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.verify, signal, ...(entries.length ? { revalidate } : {}) });
   if (!result.ok) {
     if (result.kind === "scope_revoked") await revokeFailedPrivateEntries(run, entries);
     return settleModelRefusal(item, fence, result);
@@ -808,7 +808,7 @@ async function handleWriteSection(run: RunRow, item: ResearchWorkItem, fence: Re
     feedback: payload.feedback, instruction: payload.instruction });
   const result = await callResearchModel({ run, fence, role: "writer", purpose: "finalization", dispatchKey: dispatchKeyFor(item), ...prompt,
     toolName: "submit_research_section", toolDescription: "Submit this report section.", schema: researchSectionDraftSchema,
-    outputTokenCap: 8_000, signal, ...(privateEntries.length ? { revalidate: async () =>
+    outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.writeSection, signal, ...(privateEntries.length ? { revalidate: async () =>
       (await Promise.all(privateEntries.map((entry) => revalidateResearchPrivateEntry(run.userId, entry)))).every(Boolean) } : {}) });
   if (!result.ok) {
     if (result.kind === "scope_revoked") await revokeFailedPrivateEntries(run, privateEntries);
@@ -883,7 +883,7 @@ async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: Rese
         .slice(0, 80).map((claim) => ({ claimKey: claim.claimKey, text: claim.text, verification: claim.verification })),
       limitations, instruction: payload.instruction }),
     toolName: "submit_research_synthesis", toolDescription: "Submit the report summary and closing sections.", schema: researchSynthesisSchema,
-    outputTokenCap: 6_000, signal });
+    outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.synthesize, signal });
   if (!result.ok) {
     if (result.kind === "scope_revoked") await revokeFailedPrivateEntries(run, privateEntries);
     if (result.kind === "budget" || result.kind === "unknown" || result.kind === "refused" || result.kind === "profile_changed" || result.kind === "scope_revoked" ||
