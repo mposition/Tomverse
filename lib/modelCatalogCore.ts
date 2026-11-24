@@ -61,7 +61,10 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   // Google moved the Gemini API docs to AI Studio in 2026-11 and ai.google.dev
   // now answers 301. AI Studio also serves user-built apps and shared prompts,
   // so only its /docs/ path counts as documentation.
-  google: ["ai.google.dev", "cloud.google.com", "aistudio.google.com/docs/"],
+  // Google publishes model cards and benchmark tables on DeepMind's model pages
+  // and launch posts on its blog (owner decision 2026-11-24). deepmind.google
+  // also serves careers and other pages, so only those two paths count there.
+  google: ["ai.google.dev", "cloud.google.com", "aistudio.google.com/docs/", "blog.google", "deepmind.google/models/", "deepmind.google/blog/"],
   xai: ["docs.x.ai", "x.ai"],
   fal: ["fal.ai"],
   // bfl.ai also serves the playground and account pages, so only /pricing there.
@@ -72,7 +75,10 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   moonshot: ["platform.moonshot.ai", "platform.kimi.ai"],
   // QwenCloud is Alibaba's Qwen API site. Its www host also serves sign-in and
   // a playground, so only /pricing/ there counts; docs.qwencloud.com is docs.
-  qwen: ["www.alibabacloud.com", "help.aliyun.com", "docs.qwencloud.com", "www.qwencloud.com/pricing/"],
+  // The Qwen team's launch posts and benchmark tables are on qwen.ai's blog and
+  // research pages and on its GitHub Pages blog (owner decision 2026-11-24);
+  // only those paths of qwen.ai count, and only that one github.io host.
+  qwen: ["www.alibabacloud.com", "help.aliyun.com", "docs.qwencloud.com", "www.qwencloud.com/pricing/", "qwen.ai/blog", "qwen.ai/research", "qwenlm.github.io"],
   zhipu: ["docs.z.ai"],
   minimax: ["platform.minimax.io"],
   groq: ["console.groq.com"],
@@ -192,8 +198,10 @@ export const codingModelPage = (sources: CodingCapabilitySources, apiModelId: st
 /**
  * Exact hosts only: a subdomain wildcard would admit user-written pages
  * (community.openai.com) as "official", and this list is also the fetch
- * allowlist for LLM drafts. No port, https only. An entry with a path
- * ("host/path/") admits only URLs under that path on that host.
+ * allowlist for LLM drafts. No port, https only. An entry with a path admits
+ * only that path on that host: "host/path/" any URL under it, "host/path" that
+ * path itself or any under "host/path/" (so qwen.ai/blog?id=x, never
+ * qwen.ai/blogger).
  */
 export const isOfficialSourceUrl = (provider: string, url: string): boolean => {
   let parsed: URL;
@@ -207,7 +215,9 @@ export const isOfficialSourceUrl = (provider: string, url: string): boolean => {
   return OFFICIAL_SOURCE_HOSTS[provider].some((entry) => {
     const slash = entry.indexOf("/");
     if (slash === -1) return parsed.hostname === entry;
-    return parsed.hostname === entry.slice(0, slash) && parsed.pathname.startsWith(entry.slice(slash));
+    const path = entry.slice(slash);
+    if (parsed.hostname !== entry.slice(0, slash)) return false;
+    return path.endsWith("/") ? parsed.pathname.startsWith(path) : parsed.pathname === path || parsed.pathname.startsWith(`${path}/`);
   });
 };
 

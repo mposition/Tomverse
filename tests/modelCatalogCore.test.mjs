@@ -472,6 +472,28 @@ test("sources must be the provider's own https documentation", () => {
   assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/models"), false);
   assert.equal(isOfficialSourceUrl("qwen", "https://qwencloud.com/pricing/api"), false);
   assert.equal(isOfficialSourceUrl("openai", "https://www.qwencloud.com/pricing/api"), false);
+  // Launch posts and model cards (owner decision 2026-11-24): Google's blog and
+  // DeepMind's model and blog pages; the Qwen team's blog and research pages and
+  // its GitHub Pages blog. Only those paths, and only that one github.io host.
+  assert.equal(isOfficialSourceUrl("google", "https://blog.google/innovation-and-ai/models-and-research/google-deepmind/gemini-4/"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/models/gemini/"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/blog/gemini-4-model-card/"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/careers/"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://www.blog.google/x"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/blog?id=qwen4-max"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/blog/qwen4"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/research"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/blogger"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://chat.qwen.ai/blog"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwenlm.github.io/blog/qwen3/"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://someone.github.io/qwen"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://qwen.ai/blog?id=x"), false);
+  // A path entry with no trailing slash is that path or below it, never a longer name.
+  assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/pricing"), true);
+  assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/pricing/api"), true);
+  assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/pricing-old"), false);
 });
 
 test("default price sources are official for their provider and fit the draft limit", () => {
