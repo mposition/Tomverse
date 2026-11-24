@@ -152,6 +152,7 @@ export const N1B_BEARER_ROUTES: readonly string[] = [];
  * ANDROID_ID are all deliberately absent.
  */
 export const MOBILE_DEVICE_PLATFORMS = ["ios", "android"] as const;
+export const NATIVE_DEVICE_PLATFORMS = ["ios", "android", "desktop"] as const;
 
 export type MobileDevicePlatform = (typeof MOBILE_DEVICE_PLATFORMS)[number];
 

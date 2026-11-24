@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID, generateKeyPairSync } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, generateKeyPairSync } from "node:crypto";
 import { after, before, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
@@ -58,7 +58,7 @@ const reset = async () => {
   // test throttled -- which is how a 429 gets mistaken for the behaviour under
   // test.
   await prisma.chatUsageBucket.deleteMany({
-    where: { period: { startsWith: "api-mobile-" } },
+    where: { OR: [{ period: { startsWith: "api-mobile-" } }, { period: { startsWith: "api-desktop-" } }] },
   });
   const { resetMobileSessionSnapshotsForTesting } = await authorization();
   resetMobileSessionSnapshotsForTesting();
@@ -81,6 +81,144 @@ const issue = async (userId: string) => {
   });
   return result.tokens;
 };
+
+test("Desktop settings credentials only authorize the same active Desktop session", async (t) => {
+  const desktopAuth = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  const settingsEnabled = process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+  const previousSecret = process.env.NEXTAUTH_SECRET;
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  process.env.NEXTAUTH_SECRET = "desktop-settings-local-fixture-secret";
+  t.after(() => {
+    for (const [name, value] of Object.entries({
+      TOMVERSE_DESKTOP_AUTH_ENABLED: desktopAuth,
+      TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED: settingsEnabled,
+      NEXTAUTH_SECRET: previousSecret,
+    })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  const { POST } = await import("@/app/api/auth/desktop/settings-session/route");
+  const requestSettings = (accessToken?: string) => POST(new Request("https://tomverse.test/api/auth/desktop/settings-session", {
+    method: "POST", headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  }));
+  delete process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+  assert.equal((await requestSettings()).status, 503);
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+  assert.equal((await requestSettings()).status, 401);
+  const user = await createUser();
+  const mobile = await issue(user.id);
+  assert.equal((await requestSettings(mobile.accessToken)).status, 401);
+  const { issueMobileSession, logoutMobileSession } = await service();
+  const desktop = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const accepted = await requestSettings(desktop.tokens.accessToken);
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.headers.get("Cache-Control"), "no-store");
+  const { token, expiresAt } = await accepted.json();
+  const { decode } = await import("next-auth/jwt");
+  const decoded = await decode({ token, secret: process.env.NEXTAUTH_SECRET });
+  assert.equal(decoded?.id, user.id);
+  assert.equal(decoded?.authenticatedAt, undefined);
+  assert.equal(decoded?.absoluteExpiresAt, expiresAt);
+  assert.ok(decoded?.desktopSettings);
+  assert.ok(expiresAt > Date.now() && expiresAt <= Date.now() + 300_000);
+  const { authOptions } = await import("@/lib/auth");
+  const session = authOptions.callbacks?.session;
+  assert.ok(session);
+  const current = (claims = decoded) => session({
+    session: { user: { name: user.name, email: user.email, id: user.id }, expires: new Date(expiresAt).toISOString() },
+    token: claims, user: { id: user.id, email: user.email!, emailVerified: null },
+    trigger: "update", newSession: undefined,
+  });
+  const currentId = async (claims = decoded) => {
+    const { user: sessionUser } = await current(claims);
+    return sessionUser && "id" in sessionUser ? sessionUser.id : undefined;
+  };
+  assert.equal(await currentId(), user.id);
+  assert.equal(await currentId({ ...decoded, absoluteExpiresAt: Date.now() - 1 }), undefined);
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "false";
+  assert.equal(await currentId(), undefined);
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+  await logoutMobileSession({ request: request(), refreshToken: desktop.tokens.refreshToken, client: "desktop" });
+  assert.equal((await requestSettings(desktop.tokens.accessToken)).status, 401);
+  assert.equal(await currentId(), undefined);
+  const second = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const secondResponse = await requestSettings(second.tokens.accessToken);
+  const secondClaims = await decode({ token: (await secondResponse.json()).token, secret: process.env.NEXTAUTH_SECRET });
+  assert.ok(secondClaims?.desktopSettings);
+  assert.equal(await currentId(secondClaims), user.id);
+  await prisma.user.update({ where: { id: user.id }, data: { sessionsRevokedAt: new Date() } });
+  const { invalidateMobileSessionSnapshots } = await authorization();
+  const { invalidateSessionSecuritySnapshot } = await import("@/lib/sessionSecurity");
+  invalidateMobileSessionSnapshots(user.id);
+  invalidateSessionSecuritySnapshot(user.id);
+  assert.equal((await requestSettings(second.tokens.accessToken)).status, 401);
+  assert.equal(await currentId(secondClaims), undefined);
+  const limitedUser = await createUser();
+  const limited = await issueMobileSession({ request: request(), userId: limitedUser.id, platform: "desktop", deviceLabel: "Desktop" });
+  for (let request = 0; request < 15; request += 1) {
+    assert.equal((await requestSettings(limited.tokens.accessToken)).status, 200);
+  }
+  assert.equal((await requestSettings(limited.tokens.accessToken)).status, 429);
+});
+
+test("Desktop email verifies an existing single-use code without accepting browser requests", async (t) => {
+  const settings = {
+    TOMVERSE_DESKTOP_AUTH_ENABLED: process.env.TOMVERSE_DESKTOP_AUTH_ENABLED,
+    TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED: process.env.TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED,
+    EMAIL_AUDIT_HASH_KEY: process.env.EMAIL_AUDIT_HASH_KEY,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+  };
+  t.after(() => {
+    for (const [key, value] of Object.entries(settings)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  delete process.env.TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED;
+  const { POST } = await import("@/app/api/auth/desktop/email/route");
+  const user = await createUser();
+  const code = "482917";
+  assert.ok(user.email);
+  const submit = (proof: string, headers: Record<string, string> = {}) => POST(new Request("https://tomverse.test/api/auth/desktop/email", {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ action: "verify", email: user.email, code: proof, appVersion: "0.1.118" }),
+  }));
+  assert.equal((await submit(code)).status, 503);
+  process.env.TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED = "true";
+  assert.equal((await submit(code, { Origin: "https://tomverse.test" })).status, 403);
+  assert.equal((await submit(code, { Cookie: "next-auth.session-token=ignored" })).status, 403);
+  const digest = (input: string) => createHmac("sha256", process.env.NEXTAUTH_SECRET!).update(input).digest("hex");
+  await prisma.emailLoginAttempt.create({ data: {
+    email: user.email, codeHash: digest(`email-login:code:${user.email}:${code}`),
+    linkTokenHash: digest(`email-login:link:${randomUUID()}`), expiresAt: new Date(Date.now() + 60_000),
+  } });
+  assert.equal((await submit("111111")).status, 401);
+  const accepted = await submit(code);
+  assert.equal(accepted.status, 200);
+  const { verifyMobileAccessTokenString } = await accessToken();
+  const access = (await accepted.json()).accessToken;
+  const verified = verifyMobileAccessTokenString(access, { client: "desktop" });
+  assert.ok(verified.ok);
+  assert.equal(verified.identity.subject, user.id);
+  assert.equal(verifyMobileAccessTokenString(access).ok, false);
+  assert.equal((await submit(code)).status, 401);
+  process.env.EMAIL_AUDIT_HASH_KEY = "local-desktop-email-audit";
+  process.env.RESEND_API_KEY = "local-desktop-email-fixture";
+  const delivery = t.mock.method(globalThis, "fetch", async (url: URL | string | Request) => {
+    const target = new URL(url instanceof Request ? url.url : url);
+    assert.equal(target.origin, "https://api.resend.com");
+    return Response.json({ id: "desktop-email-delivery-fixture" });
+  });
+  const receiver = `desktop-request-${randomUUID()}@example.test`;
+  const delivered = await POST(new Request("https://tomverse.test/api/auth/desktop/email", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request", email: receiver }),
+  }));
+  assert.equal(delivered.status, 200);
+  assert.equal(delivery.mock.callCount(), 1);
+  assert.equal(await prisma.emailLoginAttempt.count({ where: { email: receiver } }), 1);
+});
 
 beforeEach(reset);
 after(async () => {
@@ -109,6 +247,170 @@ test("an exchange creates a device, a family and exactly one live rotation", asy
   const { verifyMobileAccessTokenString } = await accessToken();
   const verdict = verifyMobileAccessTokenString(tokens.accessToken);
   assert.equal(verdict.ok, true);
+});
+
+test("Desktop exchanges only the bound browser grant and keeps its credentials out of mobile routes", async () => {
+  const { issueMobileLoginGrant, pkceChallengeFor, consumeMobileLoginGrant } = await import("@/lib/mobileLoginGrant");
+  const exchange = await import("@/app/api/auth/desktop/exchange/route");
+  const desktopSession = await import("@/app/api/auth/desktop/session/route");
+  const { revokeMobileDevice, rotateMobileSession, logoutMobileSession } = await service();
+  const { verifyMobileAccessTokenString } = await accessToken();
+  const user = await createUser();
+  const codeVerifier = randomBytes(32).toString("base64url");
+  const codeChallenge = pkceChallengeFor(codeVerifier);
+  const state = randomBytes(32).toString("base64url");
+  const redirectUri = "http://127.0.0.1:52134/desktop-login/callback";
+  const desktop = { state, redirectUri };
+  const { grant } = await issueMobileLoginGrant({ userId: user.id, codeChallenge, desktop });
+  const expired = await issueMobileLoginGrant({ userId: user.id, codeChallenge, desktop, now: new Date(Date.now() - 61_000) });
+  const phone = await issueMobileLoginGrant({ userId: user.id, codeChallenge });
+  const body = { clientId: "tomverse-desktop", state, redirectUri, codeVerifier, grant };
+  const send = (overrides: Record<string, string> = {}, origin?: string) => exchange.POST(new Request(
+    "https://tomverse.test/api/auth/desktop/exchange", {
+      method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { origin } : {}) },
+      body: JSON.stringify({ ...body, ...overrides }),
+    },
+  ));
+  const session = (token: string) => desktopSession.GET(new Request("https://tomverse.test/api/auth/desktop/session", {
+    headers: { Authorization: `Bearer ${token}` },
+  }));
+  const previous = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  try {
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal((await send()).status, 503);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal((await send({}, "https://tomverse.test")).status, 403);
+    assert.equal((await send({ clientId: "other-client" })).status, 400);
+    assert.equal((await send({ redirectUri: "https://example.test" })).status, 400);
+    assert.equal((await send({ redirectUri: redirectUri.replace("52134", "52135") })).status, 401);
+    assert.equal((await send({ state: randomBytes(32).toString("base64url") })).status, 401);
+    assert.equal((await send({ codeVerifier: randomBytes(32).toString("base64url") })).status, 401);
+    assert.equal((await send({ grant: expired.grant })).status, 401);
+    assert.equal((await send({ grant: phone.grant })).status, 401);
+    assert.equal((await consumeMobileLoginGrant({ grant, codeVerifier })).ok, false);
+    const exchanges = await Promise.all([send(), send()]);
+    assert.deepEqual(exchanges.map((response) => response.status).sort(), [200, 401]);
+    const success = await exchanges.find((response) => response.ok)!.json();
+    const { accessToken: access, refreshToken, deviceId } = success;
+    assert.equal(success.expiresIn, 600);
+    assert.equal(typeof refreshToken, "string");
+    assert.equal(exchanges.find((response) => !response.ok)!.headers.get("cache-control"), "no-store");
+    assert.equal((await send()).status, 401);
+    assert.equal(verifyMobileAccessTokenString(access).ok, false);
+    assert.equal(verifyMobileAccessTokenString(access, { client: "desktop" }).ok, true);
+    const phoneSession = await issue(user.id);
+    assert.equal((await session(phoneSession.accessToken)).status, 401);
+    assert.equal((await rotateMobileSession({ request: request(), refreshToken: phoneSession.refreshToken, client: "desktop" })).ok, false);
+    assert.equal((await rotateMobileSession({ request: request(), refreshToken })).ok, false);
+    await logoutMobileSession({ request: request(), refreshToken });
+    assert.equal((await session(access)).status, 200);
+    const account = await session(access);
+    assert.equal(account.status, 200);
+    assert.deepEqual((await account.json()).account, { id: user.id, name: user.name, email: user.email });
+    assert.equal((await prisma.mobileDevice.findUniqueOrThrow({ where: { id: deviceId } })).platform, "desktop");
+    const family = await prisma.mobileTokenFamily.findFirstOrThrow({ where: { deviceId } });
+    assert.equal(await prisma.mobileRefreshRotation.count({ where: { familyId: family.id } }), 1);
+    assert.equal(await prisma.mobileAuthEvent.count({ where: { deviceId, event: "mobile_auth.exchanged" } }), 1);
+    assert.ok(await prisma.chatUsageBucket.count({ where: { period: { startsWith: "api-desktop-exchange" } } }));
+    await revokeMobileDevice({ userId: user.id, deviceId });
+    assert.equal((await session(access)).status, 401);
+    const inactive = await createUser();
+    await prisma.user.update({ where: { id: inactive.id }, data: { accountStatus: "suspended" } });
+    const inactiveGrant = await issueMobileLoginGrant({ userId: inactive.id, codeChallenge, desktop });
+    assert.equal((await send({ grant: inactiveGrant.grant })).status, 401);
+    assert.equal(await prisma.mobileDevice.count({ where: { userId: inactive.id } }), 0);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    else process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = previous;
+  }
+});
+
+test("Desktop refresh and logout keep server replay detection and device revocation", async () => {
+  const { issueMobileSession } = await service();
+  const refresh = await import("@/app/api/auth/desktop/refresh/route");
+  const logout = await import("@/app/api/auth/desktop/logout/route");
+  const account = await import("@/app/api/auth/desktop/session/route");
+  const user = await createUser();
+  const issueDesktop = () => issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const post = (endpoint: "refresh" | "logout", refreshToken: string, origin?: string) => new Request(
+    `https://tomverse.test/api/auth/desktop/${endpoint}`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { origin } : {}) },
+      body: JSON.stringify({ refreshToken }),
+    });
+  const session = (accessToken: string) => account.GET(new Request("https://tomverse.test/api/auth/desktop/session", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }));
+  const prior = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  try {
+    const issued = (await issueDesktop()).tokens;
+    assert.equal((await refresh.POST(post("refresh", issued.refreshToken, "null"))).status, 403);
+    const replies = await Promise.all([
+      refresh.POST(post("refresh", issued.refreshToken)), refresh.POST(post("refresh", issued.refreshToken)),
+    ]);
+    assert.deepEqual(replies.map((reply) => reply.status).sort(), [200, 401]);
+    const winner = await replies.find((reply) => reply.ok)!.json();
+    assert.equal((await session(winner.accessToken)).status, 401);
+    assert.equal(await prisma.mobileAuthEvent.count({ where: { deviceId: issued.deviceId, event: "mobile_auth.reuse_detected" } }), 1);
+    const active = (await issueDesktop()).tokens;
+    const refreshed = await refresh.POST(post("refresh", active.refreshToken));
+    assert.equal(refreshed.status, 200);
+    const next = await refreshed.json();
+    assert.equal((await session(next.accessToken)).status, 200);
+    assert.equal((await logout.POST(post("logout", next.refreshToken))).status, 204);
+    assert.equal((await session(next.accessToken)).status, 401);
+  } finally {
+    if (prior === undefined) delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    else process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = prior;
+  }
+});
+
+test("Desktop binds only an active Code key belonging to the current eligible account", async () => {
+  const { issueMobileSession } = await service();
+  const { generateExternalApiKey } = await import("@/lib/externalApiKeyCore");
+  const { POST } = await import("@/app/api/auth/desktop/code-key/route");
+  const user = await createUser();
+  const other = await createUser();
+  await prisma.user.updateMany({ where: { id: { in: [user.id, other.id] } }, data: { plan: "Pro" } });
+  const seedKey = async (userId: string, options: { expiresAt?: Date; revokedAt?: Date } = {}) => {
+    const generated = generateExternalApiKey();
+    await prisma.externalApiKey.create({ data: { userId, name: "Desktop fixture", keyPrefix: generated.keyPrefix,
+      secretDigest: generated.secretDigest, ...options } });
+    return generated;
+  };
+  const own = await seedKey(user.id);
+  const foreign = await seedKey(other.id);
+  const expired = await seedKey(user.id, { expiresAt: new Date(Date.now() - 10_000) });
+  const revoked = await seedKey(user.id, { revokedAt: new Date() });
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const validate = (key: string, headers: Record<string, string> = {}) => POST(new Request("https://tomverse.test/api/auth/desktop/code-key", {
+    method: "POST", headers: { Authorization: `Bearer ${tokens.accessToken}`, "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ key }),
+  }));
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "EXTERNAL_API_ENABLED", "EXTERNAL_API_ALLOWED_USER_IDS"] as const;
+  const previous = Object.fromEntries(switches.map((name) => [name, process.env[name]]));
+  try {
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.EXTERNAL_API_ALLOWED_USER_IDS = "*";
+    delete process.env.EXTERNAL_API_ENABLED;
+    assert.equal((await validate(own.key)).status, 503);
+    process.env.EXTERNAL_API_ENABLED = "true";
+    for (const key of [foreign.key, expired.key, revoked.key, own.keyPrefix, "arbitrary-clipboard-text"]) {
+      assert.equal((await validate(key)).status, 403);
+    }
+    assert.equal((await validate(own.key, { Origin: "tomverse://desktop" })).status, 403);
+    assert.equal((await validate(own.key, { Cookie: "next-auth.session-token=ambient" })).status, 403);
+    const accepted = await validate(own.key);
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(await accepted.json(), { ok: true, keyPrefix: own.keyPrefix });
+    await prisma.user.update({ where: { id: user.id }, data: { plan: "Free" } });
+    assert.equal((await validate(own.key)).status, 403);
+  } finally {
+    for (const name of switches) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
 });
 
 test("a refresh consumes its token, mints a successor, and links the chain", async () => {

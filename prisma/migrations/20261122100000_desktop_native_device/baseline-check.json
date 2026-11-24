@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "52335bc62128b1461410ae2888d15869a28d41959d9644cf11311d3346baada8",
+  "replacedChecks": [
+    {
+      "table": "MobileDevice",
+      "constraint": "MobileDevice_platform_check",
+      "previousDefinitionSha256": "835aebd2c40ebd30447d2df13e661b48ef79a92373125bff6b34f59ceb8bd6a5"
+    }
+  ]
+}

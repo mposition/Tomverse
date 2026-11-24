@@ -10,10 +10,8 @@ export const studioImageAccept = studioImageTypes.join(",");
 export const studioImageLimit = 12 * 1024 * 1024;
 const studioBlobs = new Map<string, Blob>();
 
-export function createStudioObjectUrl(blob: Blob) {
-  const url = URL.createObjectURL(blob);
+export function rememberStudioBlob(url: string, blob: Blob) {
   studioBlobs.set(url, blob);
-  return url;
 }
 
 export function revokeStudioObjectUrl(url: string) {

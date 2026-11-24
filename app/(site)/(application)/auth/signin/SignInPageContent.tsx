@@ -125,6 +125,8 @@ function SignInButtons({
         searchParams.get("callbackUrl") ?? rememberedCallbackUrl,
         lang
     );
+    const desktopProvider = !isSignup && callbackUrl.startsWith("/auth/desktop?")
+        ? searchParams.get("desktopProvider") : null;
     // Sent here from the sign-in screen after the provider proved an account
     // that has none here (section 5.2a).
     const noAccountProvider =
@@ -537,7 +539,7 @@ function SignInButtons({
             ) : null}
 
             {appleAvailable && (
-                <button type="button" onClick={() => void startOAuth("apple")} className={providerButtonClass}>
+                <button type="button" autoFocus={desktopProvider === "apple"} onClick={() => void startOAuth("apple")} className={providerButtonClass}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src="/auth/apple.svg" className="h-5 w-5" alt="Apple" />
                     {t("auth.apple")}
@@ -547,6 +549,7 @@ function SignInButtons({
             {/* Google */}
             <button
                 type="button"
+                autoFocus={desktopProvider === "google"}
                 onClick={() => void startOAuth("google")}
                 className={providerButtonClass}
             >
@@ -558,6 +561,7 @@ function SignInButtons({
             {/* Microsoft */}
             <button
                 type="button"
+                autoFocus={desktopProvider === "azure-ad"}
                 onClick={() => void startOAuth("azure-ad")}
                 className={providerButtonClass}
             >
