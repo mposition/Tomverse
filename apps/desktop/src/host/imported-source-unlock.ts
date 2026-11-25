@@ -22,6 +22,20 @@ const EXTERNAL_ID = /^[A-Za-z0-9_-]{1,100}$/;
 
 type Grant = { cookie: string; expiresAt: number };
 
+// The verify route's answer for a snapshot that has no password (app/api/external-conversations/
+// [conversationId]/lock/verify/route.ts): 400 with exactly this body and no `code`. Its other 400s
+// (INVALID_JSON, INVALID_REQUEST and lock errors) carry a code, and a proxy's 400 is not this JSON.
+const NOT_LOCKED_ERROR = "This conversation is not locked.";
+
+async function saysNotLocked(res: Response): Promise<boolean> {
+  if (!(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) return false;
+  const body: unknown = await res.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const keys = Object.keys(body).sort();
+  const { success, error } = body as { success?: unknown; error?: unknown };
+  return keys.length === 2 && keys[0] === "error" && keys[1] === "success" && success === false && error === NOT_LOCKED_ERROR;
+}
+
 const sourcePath = (id: string, offset: number | undefined) =>
   `/api/conversations/${encodeURIComponent(id)}/continuation?offset=${offset ?? "end"}&limit=50`;
 
@@ -96,6 +110,9 @@ export function createImportedSourceUnlock(options: { settings: Session; signal:
       signal.throwIfAborted();
       const headers = res.headers;
       const setCookies = headers.getSetCookie?.() ?? [];
+      // A 400 body is read only to recognise the route's own "not locked" answer; other bodies are discarded unread.
+      const notLocked = res.status === 400 && await saysNotLocked(res);
+      signal.throwIfAborted();
       await res.body?.cancel().catch(() => {});
       if (res.status === 401) settings.forget();
       if (res.status === 403) return { status: "wrong" };
@@ -104,8 +121,9 @@ export function createImportedSourceUnlock(options: { settings: Session; signal:
         return Number.isInteger(wait) && wait > 0 ? { status: "limited", retryAfterSeconds: Math.min(wait, 86_400) } : { status: "limited" };
       }
       if (res.status === 503 || res.status === 501) return { status: "unavailable" };
-      // A lock that was removed meanwhile needs no grant: the next read simply succeeds.
-      if (res.status === 400) return { status: "unlocked" };
+      // A lock that was removed meanwhile needs no grant: the next read simply succeeds. Any other 400
+      // (a malformed request, a proxy's error page) decided nothing about the lock.
+      if (notLocked) return { status: "unlocked" };
       if (!res.ok) return { status: "failed" };
       const name = COOKIE_PREFIX + target;
       const pair = setCookies.map((line) => line.split(";", 1)[0].trim()).find((part) => part.startsWith(name + "="));
