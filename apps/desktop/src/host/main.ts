@@ -10,6 +10,10 @@ import { createCodeBrowserView } from "./code-browser-view";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
+import { createConnectorApi } from "./connector-api";
+import { openConnectorOAuthWindow } from "./connector-oauth-window";
+import { connectorInput } from "../connector-contract";
+import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { solveEmailLoginChallenge } from "./login-challenge";
@@ -95,7 +99,7 @@ const unsafeSwitches = [
   "remote-debugging-address",
   "no-sandbox", "disable-setuid-sandbox", "disable-web-security", "allow-running-insecure-content", "ignore-certificate-errors",
 ];
-const webPaths = { review: "/review", plugins: "/plugins", image: "/studio" } as const;
+const webPaths = { review: "/review", image: "/studio" } as const;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 declare const DESKTOP_PACKAGED_TASK_QA: boolean;
 declare const DESKTOP_LOCAL_DEV_PACKAGE: boolean;
@@ -2343,6 +2347,24 @@ async function accountSettings(value: unknown) {
   return request(input);
 }
 
+let connectorApi: { settings: ReturnType<typeof connectedSettingsApi>; api: ReturnType<typeof createConnectorApi> } | undefined;
+
+// Connector management shares the account settings session; the renderer only names typed actions.
+function connectors() {
+  if (!state.capabilities?.plugins) throw new Error("Plugins are unavailable.");
+  const settings = connectedSettingsApi();
+  if (connectorApi?.settings !== settings) {
+    const origin = accountOrigin ?? DESKTOP_LIVE_ORIGIN;
+    const signal = chatSession.signal;
+    connectorApi = { settings, api: createConnectorApi({
+      send: settings.send, signal,
+      authorize: (url) => openConnectorOAuthWindow({ owner: mainWindow, url, accountOrigin: new URL(origin).origin, signal,
+        language: state.language ?? "en", title: (host) => desktopConnectorCopy[state.language ?? "en"].windowTitle.replace("{host}", () => host) }),
+    }) };
+  }
+  return connectorApi.api;
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -2353,6 +2375,9 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   }
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
   if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
+  if (draft.mcpConnectionId && (!state.capabilities?.plugins || draft.deepResearchDepth || handoffId)) {
+    throw new Error("Plugins are unavailable for this draft.");
+  }
   const attachments = resolveStagedAttachments(draft.attachmentUploadIds);
   return withChatAccount(async (api) => {
     const input = { ...draft, prompt: withHandoffExcerpt("chat", draft.prompt, handoffId),
@@ -2373,6 +2398,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let contextChanged = false;
     let researchSubmitted = false;
     let lastProgressAt = 0;
+    let lastMcpProgress: ChatTurnProgress["mcpProgress"];
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
       if (!id || !window || window.isDestroyed() || window.webContents.isDestroyed() || window !== mainWindow ||
           accountSignal.aborted || signal.aborted || signingOut || closing) return;
@@ -2395,7 +2421,11 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         publish({ savedPrompt: input.prompt });
         const saved = await api.conversation({ id }, true, signal);
         streamStarted = true;
-        const result = await api.stream(saved, input, sourceId, assistantId, signal, (text) => {
+        const result = await api.stream(saved, input, sourceId, assistantId, signal, (text, mcpState) => {
+          if (mcpState && mcpState !== lastMcpProgress) {
+            lastMcpProgress = mcpState;
+            publish({ mcpProgress: mcpState });
+          }
           if (text === partial) return;
           partial = text;
           const now = Date.now();
@@ -3125,6 +3155,8 @@ function registerIpc() {
     if (!state.capabilities?.plugins) return { enabled: false, servers: [], connections: [] };
     return withChatAccount((api) => api.pluginInventory());
   });
+  main("desktop:connector-inventory", () => connectors().inventory());
+  main("desktop:connector-action", (value) => connectors().run(connectorInput.parse(value)));
   main("chat:history", (value) => {
     const product = desktopTextProduct.default("chat").parse(value);
     return withChatAccount((api) => api.history(product));

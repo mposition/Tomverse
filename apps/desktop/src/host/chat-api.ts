@@ -30,6 +30,7 @@ import { VOICE_TRANSCRIPT_MAX_CHARACTERS } from "../../../../lib/voiceInputForma
 import type { DictationClip, DictationReply } from "../dictation-contract";
 import { desktopMcpReply, type DesktopMcpAction } from "../../../../lib/desktopCodeMcpContract";
 import { desktopPluginInventory } from "../plugin-contract";
+import type { McpProgressState } from "../../../../lib/mcpConnectorProgress";
 import { DesktopSessionRefused } from "./browser-login";
 
 const DESKTOP_PLUGIN_INVENTORY = "/api/mcp/connections";
@@ -66,7 +67,7 @@ const uploadPreparation = z.object({
   uploadHeaders: z.object({ "Content-Type": z.string() }).strict(),
 });
 const matchesProduct = (product: DesktopTextProduct) => product === "review" ? isDesktopReview : isDesktopChat;
-type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort" | "deepResearchDepth"> & {
+type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort" | "deepResearchDepth" | "mcpConnectionId"> & {
   review?: true;
   currentLocation?: ChatTurnInput["currentLocation"];
   admission?: { admissionToken: string; contextBundle?: string | null };
@@ -356,7 +357,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       return sourceId;
     },
     async stream(current: ChatConversation, input: StreamSelection, sourceId: string, assistantId: string,
-      turn: AbortSignal, progress: (text: string) => void, reportModel?: (id: string) => void) {
+      turn: AbortSignal, progress: (text: string, mcp?: McpProgressState) => void, reportModel?: (id: string) => void) {
       const at = current.messages.findIndex((message) => message.id === sourceId && message.role === "user");
       if (at < 0 || !current.selectedModels[0]) throw new Error("Tomverse could not confirm the source question and model.");
       const modelId = input.review ? input.modelId : current.selectedModels[0];
@@ -385,7 +386,9 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           return null;
         }
       };
-      const contextBundle = input.review ? input.admission?.contextBundle : await prepare();
+      // A chosen plugin turn is never a signed-context (location fusion) turn, as on the web.
+      const mcpConnectionId = input.review ? undefined : input.mcpConnectionId;
+      const contextBundle = input.review ? input.admission?.contextBundle : mcpConnectionId ? null : await prepare();
       const timeout = new AbortController();
       const watchdog = createChatLivenessWatchdog({ onExpire: () => timeout.abort() });
       try {
@@ -397,6 +400,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
             messages, modelId, webSearchMode: current.webSearchMode,
             ...(input.admission ? { admissionToken: input.admission.admissionToken } : {}),
             ...(bundle ? { contextBundle: bundle } : {}),
+            ...(mcpConnectionId ? { mcpConnectionId } : {}),
             ...(input.deepResearchDepth ? { deepResearchDepth: input.deepResearchDepth }
               : input.effort === "default" ? {} : { reasoningEffort: input.effort }),
           }, { signal: AbortSignal.any([turnSignal(turn), timeout.signal]) });
@@ -426,7 +430,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
         if (routedModel && /^[a-zA-Z0-9._:-]{1,120}$/.test(routedModel)) reportModel?.(routedModel);
         const reader = response.body.getReader();
         try {
-          const result = await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText }) => progress(displayText) });
+          const result = await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText, mcpProgress }) => progress(displayText, mcpProgress) });
           if (result.serverStallCode) throw new Error("Tomverse stopped waiting for the model.");
           return parseChatStreamTrailer(result.searchMetadataJson);
         } finally {

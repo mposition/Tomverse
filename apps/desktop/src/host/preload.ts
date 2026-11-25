@@ -100,6 +100,8 @@ if (trustedWindow) {
     connectCopiedCodeKey: () => ipcRenderer.invoke("desktop:connect-copied-code-key"),
     cancelSignIn: () => ipcRenderer.invoke("desktop:cancel-sign-in"),
     pluginInventory: () => ipcRenderer.invoke("desktop:plugin-inventory"),
+    connectorInventory: () => ipcRenderer.invoke("desktop:connector-inventory"),
+    connectorAction: (input: Parameters<DesktopApi["connectorAction"]>[0]) => ipcRenderer.invoke("desktop:connector-action", input),
     chatHistory: (product?: DesktopTextProduct) => ipcRenderer.invoke("chat:history", product),
     chatSearch: (query: string, product?: DesktopTextProduct) => ipcRenderer.invoke("chat:search", { query, product }),
     chatConversation: (input: Parameters<DesktopApi["chatConversation"]>[0]) => ipcRenderer.invoke("chat:conversation", input),
