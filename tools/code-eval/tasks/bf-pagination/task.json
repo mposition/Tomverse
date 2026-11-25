@@ -1,0 +1,12 @@
+{
+  "id": "bf-pagination",
+  "title": "List pagination reports the wrong page count",
+  "category": "bugfix",
+  "prompt": "The product list helper in this project (`listPage`) paginates arrays for an API. Users report three problems: with 25 items and a page size of 10 the last page (items 21-25) cannot be reached because `pageCount` says 2; a client that asks for `size=1000` receives a huge page although the maximum page size is 100; and asking for a page past the end returns an empty page instead of the last page. Find the causes and fix them without changing the shape of the returned object. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 600
+}

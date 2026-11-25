@@ -1,0 +1,12 @@
+{
+  "id": "ft-template-blocks",
+  "title": "Add each and if blocks to the template engine",
+  "category": "feature",
+  "prompt": "The small template engine in this project only substitutes `{{name}}` and `{{{raw}}}`. Add block support as described in README.md: `{{#each list}}...{{/each}}` and `{{#if value}}...{{else}}...{{/if}}`, including nesting, `{{this}}` and `{{@index}}` inside each. Existing behaviour (HTML escaping, dotted paths, raw output) must keep working. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

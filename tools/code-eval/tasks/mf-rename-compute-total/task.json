@@ -1,0 +1,12 @@
+{
+  "id": "mf-rename-compute-total",
+  "title": "Rename calcTotal to computeTotal everywhere",
+  "category": "multi-file",
+  "prompt": "Rename the function `calcTotal` to `computeTotal` throughout this project: its definition, every import and call (including aliased imports, namespace imports and the registry), error messages, comments and README. Behaviour stays the same, except that the error message now names the new function. Only `src/index.js` may still mention the old name: it keeps exporting `calcTotal` as a deprecated wrapper around `computeTotal` that calls `console.warn(\"calcTotal is deprecated; use computeTotal\")` the first time it is used (once per process) and then behaves exactly like `computeTotal`. `src/index.js` must also export `computeTotal`. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1500
+}

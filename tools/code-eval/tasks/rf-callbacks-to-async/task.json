@@ -1,0 +1,12 @@
+{
+  "id": "rf-callbacks-to-async",
+  "title": "Convert a callback-style record store to async functions",
+  "category": "refactor",
+  "prompt": "The record store (`src/store.js`), the sync helper (`src/sync.js`) and the command runner (`src/cli.js`) are written in Node callback style. Convert them to promises (async/await) without changing what they do: every function that took a trailing `callback` parameter now takes no callback and returns a Promise that resolves with what the callback received as its result, and rejects with the error the callback received. Names, arguments, error classes and results stay the same. Update the existing tests to the new style. `RecordStore#read`, `#write`, `#list`, `#remove`, `syncRecords` and `runCommand` must no longer declare a callback parameter. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1500
+}

@@ -1,0 +1,8 @@
+{
+  "name": "ft-sliding-window",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

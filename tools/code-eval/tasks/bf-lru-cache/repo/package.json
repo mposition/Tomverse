@@ -1,0 +1,8 @@
+{
+  "name": "bf-lru-cache",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
