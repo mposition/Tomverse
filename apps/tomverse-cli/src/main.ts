@@ -439,6 +439,7 @@ const engineExtras = (ctx: Context, root: string) => ({
     web: {},
     backgroundCommands: true,
     images: true,
+    subagents: true,
     nestedInstructions: true,
     ...(ctx.config.memory === false ? {} : { memory: projectMemory(ctx, root) }),
 });

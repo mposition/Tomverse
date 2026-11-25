@@ -225,6 +225,22 @@ per task".
   ended the way a timed-out command is (a hard kill of the CLI itself cannot
   run that cleanup). The session records them; a resumed session tells the
   model that its earlier background commands are no longer running.
+- **Subagents (`delegate`):** the model can hand self-contained work to subagents that
+  each start with a fresh context of their own and give back only a written report,
+  so a wide search does not fill the main conversation. `explore` subagents can only
+  list, search and read (the same path rules as the model's own reads, `view_image`
+  when the model takes images); up to three run in parallel and need no approval.
+  A `worker` subagent can also change files and run commands, one at a time, and
+  every change and command is asked the same way, through the same prompt and the same
+  "always" answers, as the main agent's own; a worker is not offered in
+  `--read-only`, plan mode or `exec`. A subagent uses the model and reasoning effort of
+  the task (the CLI never picks a cheaper model on its own), cannot start subagents of
+  its own, and is stopped when the task is. Its requests are recorded in the session and
+  in `tomverse usage` like any other and count against the task's request limit: a
+  call that cannot fit what is left starts nothing, and a task starts at most 12. The
+  report is handed to the main agent as unverified information. The session keeps a
+  short record of each run (the task, kind, requests and how it ended, not its
+  conversation); a resumed session tells the model about a run that never reported back.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a
@@ -360,7 +376,7 @@ are not used by this CLI.
 - Terminal text is English; Korean and other Unicode input, file names and
   output work.
 - Not in this version: MCP, plugins or skills, a code index or
-  LSP, parallel agents or worktrees, IDE or desktop apps, background agents.
+  LSP, worktrees, IDE or desktop apps, background agents.
 
 ## Update and roll back
 

@@ -3,7 +3,7 @@ import { readProcess } from "./readprocess.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
-import { tool, type ToolSet } from "ai";
+import { tool, type ModelMessage, type ToolSet } from "ai";
 import { z } from "zod";
 import { commandEnv, planCommand, runCommand, CommandError, type CommandLaunch, type CommandPlan } from "./commands.js";
 import { BACKGROUND_READ_BYTES, type BackgroundCommands, type BackgroundInfo } from "./background.js";
@@ -174,6 +174,33 @@ const endTool = (ctx: ToolContext, toolCallId: string, state: "completed" | "fai
 };
 
 export type ImageAttachment = { path: string; mediaType: string; base64: string; bytes: number };
+
+/** What the CLI writes in front of an image it attached on the model's behalf; hosts that list the conversation leave such a message out. */
+export const VIEW_IMAGE_MARK = "Image from view_image:";
+/** Images a history keeps as image data; an older one is replaced by a note, so the saved session and each request stay bounded. */
+const KEEP_IMAGES = 3;
+
+/** One message of the user's role that carries the images view_image read (a tool result cannot carry an image). */
+export const imageMessage = (images: ImageAttachment[]): ModelMessage => {
+    const content: Array<{ type: "text"; text: string } | { type: "image"; image: string; mediaType: string }> = [];
+    for (const image of images) content.push({ type: "text", text: `${VIEW_IMAGE_MARK} ${image.path}` }, { type: "image", image: image.base64, mediaType: image.mediaType });
+    return { role: "user", content } as ModelMessage;
+};
+
+/** Keeps the newest few images of a history as image data. */
+export const trimOldImages = (messages: ModelMessage[]) => {
+    let kept = 0;
+    for (let m = messages.length - 1; m >= 0; m -= 1) {
+        const message = messages[m]!;
+        if (message.role !== "user" || !Array.isArray(message.content)) continue;
+        for (let p = message.content.length - 1; p >= 0; p -= 1) {
+            const part = message.content[p] as { type?: string };
+            if (part.type !== "image") continue;
+            kept += 1;
+            if (kept > KEEP_IMAGES) message.content[p] = { type: "text", text: "[This image is no longer attached; call view_image again to see it.]" };
+        }
+    }
+};
 
 /** The kind of an image file by its first bytes (not its name), among the types the API accepts. */
 export const imageTypeOf = (head: Buffer) => {

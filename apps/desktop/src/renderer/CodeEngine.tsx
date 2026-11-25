@@ -119,6 +119,29 @@ export function BackgroundPanel({ task, language, live }: { task: Task; language
   </section>;
 }
 
+/** The subagents the model started: what each was asked, whether it still runs, how many requests it used and how it ended. */
+export function SubagentPanel({ task, language }: { task: Task; language: Language }) {
+  const copy = desktopCodeEngineCopy[language];
+  const runs = task.subagents ?? [];
+  if (!runs.length) return null;
+  const state = (run: NonNullable<Task["subagents"]>[number]) => run.state === "running" ? copy.subagentRunning : run.state === "completed" ? copy.subagentCompleted
+    : run.state === "failed" ? copy.subagentFailed : run.state === "cancelled" ? copy.subagentCancelled : run.state === "limit" ? copy.subagentLimit : copy.subagentUnknown;
+  const heading = copy.subagentsHeading.replace("{count}", String(runs.length));
+  return <section className="code-subagents" aria-label={heading}>
+    <strong>{heading}</strong>
+    <small>{copy.subagentsHint}</small>
+    <ul>{runs.map((run) => <li key={run.id}>
+      <div>
+        <span>{run.kind === "worker" ? copy.subagentWorker : copy.subagentExplore}</span>
+        <span role="status">{state(run)}</span>
+        <small>{copy.subagentRequests.replace("{count}", String(run.requests))}</small>
+      </div>
+      <small>{run.task}</small>
+      {run.summary && <details><summary>{copy.subagentReport}</summary><pre>{run.summary}</pre></details>}
+    </li>)}</ul>
+  </section>;
+}
+
 /** Messages held for after the current turn: edit, reorder or remove them while the task runs. */
 export function QueuePanel({ task, language, live }: { task: Task; language: Language; live: boolean }) {
   const copy = desktopCodeEngineCopy[language];

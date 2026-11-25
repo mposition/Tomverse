@@ -829,7 +829,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           return;
         }
-        if ((event.type === "goal_check" || event.type === "queued_follow_up_started") && journal) publish();
+        if ((event.type === "goal_check" || event.type === "queued_follow_up_started" || event.type === "subagent_started" || event.type === "subagent_finished") && journal) publish();
         if (event.type === "response" && journal) {
           Object.assign(task, journalApiUsage(journal.state, command.connection.key));
           task.context = journalContext(journal.state);
@@ -865,6 +865,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       web: {},
       backgroundCommands: true,
       images: true,
+      subagents: true,
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
       nestedInstructions: !continuation && savedCap === undefined,
       memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin

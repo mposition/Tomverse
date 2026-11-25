@@ -70,6 +70,18 @@ type Copy = {
   memoryClear: string;
   memoryFailed: string;
   memorySent: string;
+  subagentsHeading: string;
+  subagentsHint: string;
+  subagentExplore: string;
+  subagentWorker: string;
+  subagentRunning: string;
+  subagentCompleted: string;
+  subagentFailed: string;
+  subagentCancelled: string;
+  subagentLimit: string;
+  subagentUnknown: string;
+  subagentRequests: string;
+  subagentReport: string;
 };
 
 export const desktopCodeEngineCopy = {
@@ -143,6 +155,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "Delete all notes",
     memoryFailed: "The notes could not be read or changed.",
     memorySent: "Project memory included",
+    subagentsHeading: "Subagents · {count}",
+    subagentsHint: "Separate runs the model started to investigate or do independent work. Their requests count toward this task's limit and credits.",
+    subagentExplore: "Explore",
+    subagentWorker: "Worker",
+    subagentRunning: "Running",
+    subagentCompleted: "Done",
+    subagentFailed: "Failed",
+    subagentCancelled: "Stopped",
+    subagentLimit: "Request limit reached",
+    subagentUnknown: "Result unknown",
+    subagentRequests: "{count} request(s)",
+    subagentReport: "Report (not verified)",
   },
   ko: {
     limits: "작업 한도",
@@ -214,6 +238,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "모든 메모 삭제",
     memoryFailed: "메모를 읽거나 바꾸지 못했습니다.",
     memorySent: "프로젝트 메모리 포함",
+    subagentsHeading: "하위 에이전트 · {count}",
+    subagentsHint: "모델이 조사하거나 독립된 작업을 맡기려고 따로 시작한 실행입니다. 이 실행의 요청도 이 작업의 한도와 크레딧에 포함됩니다.",
+    subagentExplore: "탐색",
+    subagentWorker: "작업",
+    subagentRunning: "실행 중",
+    subagentCompleted: "완료",
+    subagentFailed: "실패",
+    subagentCancelled: "중지됨",
+    subagentLimit: "요청 한도 도달",
+    subagentUnknown: "결과를 알 수 없음",
+    subagentRequests: "요청 {count}회",
+    subagentReport: "보고 (검증되지 않음)",
   },
   zh: {
     limits: "任务上限",
@@ -285,6 +321,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "删除全部",
     memoryFailed: "无法读取或更改记忆条目。",
     memorySent: "包含项目记忆",
+    subagentsHeading: "子代理 · {count}",
+    subagentsHint: "模型为调查或处理独立工作而单独启动的运行。它们的请求同样计入此任务的上限和积分。",
+    subagentExplore: "探索",
+    subagentWorker: "执行",
+    subagentRunning: "运行中",
+    subagentCompleted: "已完成",
+    subagentFailed: "失败",
+    subagentCancelled: "已停止",
+    subagentLimit: "已达请求上限",
+    subagentUnknown: "结果未知",
+    subagentRequests: "{count} 次请求",
+    subagentReport: "报告（未经验证）",
   },
   "zh-Hant": {
     limits: "任務上限",
@@ -356,6 +404,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "刪除全部",
     memoryFailed: "無法讀取或變更記憶條目。",
     memorySent: "包含專案記憶",
+    subagentsHeading: "子代理 · {count}",
+    subagentsHint: "模型為調查或處理獨立工作而另外啟動的執行。它們的請求同樣計入此任務的上限與點數。",
+    subagentExplore: "探索",
+    subagentWorker: "執行",
+    subagentRunning: "執行中",
+    subagentCompleted: "已完成",
+    subagentFailed: "失敗",
+    subagentCancelled: "已停止",
+    subagentLimit: "已達請求上限",
+    subagentUnknown: "結果未知",
+    subagentRequests: "{count} 次請求",
+    subagentReport: "報告（未經驗證）",
   },
   fr: {
     limits: "Limites de la tâche",
@@ -427,6 +487,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "Supprimer toutes les notes",
     memoryFailed: "Impossible de lire ou de modifier les notes.",
     memorySent: "Mémoire du projet incluse",
+    subagentsHeading: "Sous-agents · {count}",
+    subagentsHint: "Exécutions séparées lancées par le modèle pour enquêter ou faire un travail indépendant. Leurs requêtes comptent dans la limite et les crédits de cette tâche.",
+    subagentExplore: "Exploration",
+    subagentWorker: "Exécution",
+    subagentRunning: "En cours",
+    subagentCompleted: "Terminé",
+    subagentFailed: "Échec",
+    subagentCancelled: "Arrêté",
+    subagentLimit: "Limite de requêtes atteinte",
+    subagentUnknown: "Résultat inconnu",
+    subagentRequests: "{count} requête(s)",
+    subagentReport: "Rapport (non vérifié)",
   },
   de: {
     limits: "Aufgabenlimits",
@@ -498,6 +570,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "Alle Notizen löschen",
     memoryFailed: "Die Notizen konnten nicht gelesen oder geändert werden.",
     memorySent: "Projektgedächtnis enthalten",
+    subagentsHeading: "Unteragenten · {count}",
+    subagentsHint: "Getrennte Läufe, die das Modell für Recherchen oder eigenständige Arbeit gestartet hat. Ihre Anfragen zählen zum Limit und zu den Credits dieser Aufgabe.",
+    subagentExplore: "Erkunden",
+    subagentWorker: "Ausführen",
+    subagentRunning: "Läuft",
+    subagentCompleted: "Fertig",
+    subagentFailed: "Fehlgeschlagen",
+    subagentCancelled: "Gestoppt",
+    subagentLimit: "Anfragelimit erreicht",
+    subagentUnknown: "Ergebnis unbekannt",
+    subagentRequests: "{count} Anfrage(n)",
+    subagentReport: "Bericht (nicht geprüft)",
   },
   es: {
     limits: "Límites de la tarea",
@@ -569,6 +653,18 @@ export const desktopCodeEngineCopy = {
     memoryClear: "Eliminar todas las notas",
     memoryFailed: "No se pudieron leer ni cambiar las notas.",
     memorySent: "Memoria del proyecto incluida",
+    subagentsHeading: "Subagentes · {count}",
+    subagentsHint: "Ejecuciones separadas que el modelo inició para investigar o hacer un trabajo independiente. Sus solicitudes cuentan para el límite y los créditos de esta tarea.",
+    subagentExplore: "Explorar",
+    subagentWorker: "Ejecutar",
+    subagentRunning: "En curso",
+    subagentCompleted: "Terminado",
+    subagentFailed: "Falló",
+    subagentCancelled: "Detenido",
+    subagentLimit: "Límite de solicitudes alcanzado",
+    subagentUnknown: "Resultado desconocido",
+    subagentRequests: "{count} solicitud(es)",
+    subagentReport: "Informe (sin verificar)",
   },
   pt: {
     limits: "Limites da tarefa",
@@ -640,5 +736,17 @@ export const desktopCodeEngineCopy = {
     memoryClear: "Excluir todas as notas",
     memoryFailed: "Não foi possível ler ou alterar as notas.",
     memorySent: "Memória do projeto incluída",
+    subagentsHeading: "Subagentes · {count}",
+    subagentsHint: "Execuções separadas que o modelo iniciou para investigar ou fazer um trabalho independente. As solicitações delas contam para o limite e os créditos desta tarefa.",
+    subagentExplore: "Explorar",
+    subagentWorker: "Executar",
+    subagentRunning: "Em andamento",
+    subagentCompleted: "Concluído",
+    subagentFailed: "Falhou",
+    subagentCancelled: "Interrompido",
+    subagentLimit: "Limite de solicitações atingido",
+    subagentUnknown: "Resultado desconhecido",
+    subagentRequests: "{count} solicitação(ões)",
+    subagentReport: "Relatório (não verificado)",
   },
 } as const satisfies Record<Language, Copy>;

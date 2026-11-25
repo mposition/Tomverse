@@ -65,7 +65,7 @@ export function journalPendingFollowUp(state: SessionState, key?: string): strin
 }
 
 /** Limits, goal mode and held messages of a saved task: cheap, so it is read on every publish. */
-export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued"> {
+export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued" | "subagents"> {
   const task = state.tasks.at(-1);
   const profile = state.limits.profile;
   const last = task?.goalChecks?.at(-1);
@@ -76,7 +76,20 @@ export function journalEngine(state: SessionState, key?: string): Pick<Task, "li
       ...(last ? { last: { met: last.met, summary: cleanText(last.summary, key), ...(last.next ? { next: cleanText(last.next, key) } : {}) } } : {}),
     } : undefined,
     queued: task?.queued?.length ? task.queued.map(({ id, text }) => ({ id, text: cleanText(text.slice(0, 24_000), key) })) : undefined,
+    subagents: journalSubagents(state, key),
   };
+}
+
+/** The subagents of a session for the Code screen. A run still marked running in a session that is not running is one whose result is not known. */
+export function journalSubagents(state: SessionState, key?: string): Task["subagents"] {
+  const list = state.subagents;
+  if (!list?.length) return undefined;
+  const live = state.status === "running";
+  return list.slice(-12).map((record) => ({
+    id: record.id, kind: record.kind, task: cleanText(record.task, key).slice(0, 300), requests: record.requests,
+    state: record.state === "running" && !live ? "unknown" as const : record.state,
+    ...(record.summary ? { summary: cleanText(record.summary, key).slice(0, 400) } : {}),
+  }));
 }
 
 /** A rough size of the saved conversation: it walks every message, so it is read when a request ends, not on every publish. */

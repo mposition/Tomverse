@@ -71,7 +71,8 @@ test("exec --json: read-only task, JSON lines only on stdout, exit 0, receipts s
         assert.equal(final.cost.requests, 2);
         assert.equal(final.cost.charged, 6, "two requests at 3 credits each, from the server's receipts");
         assert.ok(!result.stdout.includes(TEST_KEY) && !result.stderr.includes(TEST_KEY.slice(13)));
-        assert.deepEqual(gateway.completions.map((c) => c.body.tools.length), [3, 3]);
+        // The three read tools and delegate (explore subagents only: a read-only session has nothing a worker could change).
+        assert.deepEqual(gateway.completions.map((c) => c.body.tools.map((t: any) => t.function.name).sort()), [["delegate", "list_files", "read_file", "search_text"], ["delegate", "list_files", "read_file", "search_text"]]);
         assert.deepEqual(gateway.completions.map((c) => c.body.tomverse_effort), ["high", "high"]);
     } finally {
         await gateway.stop();

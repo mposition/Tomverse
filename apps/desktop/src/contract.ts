@@ -232,6 +232,11 @@ export type Transmission = {
 export type CodeBackgroundCommand = {
   handle: string; command: string; state: "running" | "exited" | "stopped"; exitCode?: number | null; startedAt: string; output: string;
 };
+/** A run the model handed to a subagent (explore or worker): what it was asked, and how it is going or ended. */
+export type CodeSubagent = {
+  id: string; kind: "explore" | "worker"; task: string; requests: number;
+  state: "running" | "completed" | "failed" | "cancelled" | "limit" | "unknown"; summary?: string;
+};
 export type CodeGoalState = {
   maxContinuations: number; continuations: number;
   last?: { met: boolean; summary: string; next?: string };
@@ -269,6 +274,8 @@ export type Task = {
   queued?: Array<{ id: string; text: string }>;
   /** Commands this task keeps running in the background; they end with the task. */
   background?: CodeBackgroundCommand[];
+  /** Subagents the model started in this task, newest last. */
+  subagents?: CodeSubagent[];
   /** The saved limit profile when it is not the standard one. */
   limits?: Exclude<CodeLimitProfile, "standard">;
   goal?: CodeGoalState;

@@ -42,7 +42,9 @@ export const SESSION_SCHEMA_VERSION = 1;
 
 export type GenerationRecord = {
     seq: number;
-    purpose: "agent" | "compact" | "goal";
+    purpose: "agent" | "compact" | "goal" | "subagent";
+    /** The subagent run this request was made for (purpose "subagent"). */
+    subagentId?: string;
     idempotencyKey: string;
     /**
      * intent: recorded, maybe sent, no answer seen (unknown until looked up).
@@ -112,6 +114,61 @@ export type BackgroundRecord = {
     epoch: string;
     /** The model has been told how it ended. */
     acknowledged?: boolean;
+};
+
+/**
+ * One run of a subagent (the delegate tool): what it was asked, how far it got, and what became of it. Its requests are in
+ * `generations` (purpose "subagent") and count against the task's limits like any other request; its conversation is not kept.
+ */
+export type SubagentRecord = {
+    id: string;
+    toolCallId: string;
+    kind: "explore" | "worker";
+    /** The assignment the main agent gave, shortened. */
+    task: string;
+    /** unknown: the process ended while it ran, so what it did is not known (files it changed are still in `changes`). */
+    state: "running" | "completed" | "failed" | "cancelled" | "limit" | "unknown";
+    requests: number;
+    startedAt: string;
+    endedAt?: string;
+    /** Which run of the CLI started it; a record from another run is one a resume tells the model about. */
+    epoch: string;
+    /** The first part of its report, or why it failed. */
+    summary?: string;
+    filesRead?: string[];
+    filesChanged?: string[];
+    /** The model has been told how it ended after a resume. */
+    acknowledged?: boolean;
+};
+
+/**
+ * The start of one user message (a task's prompt, or a follow-up sent while it ran): where the conversation and the list of
+ * file changes stood just before it. Rewinding to it cuts the conversation back to `messageIndex` and undoes the changes from
+ * `changeStart` on; forking copies the conversation before the message that came after it.
+ */
+export type CheckpointRecord = {
+    kind: "prompt" | "follow_up";
+    /** Index into `tasks` of the task the message belongs to. */
+    task: number;
+    /** Position of the message in the saved messages; null once a compaction folded it into a summary. */
+    messageIndex: number | null;
+    changeStart: number;
+    toolStart: number;
+    at: string;
+    /** The first part of the message, to tell the turns apart in a list. */
+    text: string;
+};
+
+/** A rewind that was carried out, kept so the session says what happened to its history. */
+export type RewindRecord = {
+    at: string;
+    /** The turn rewound to (its message and everything after it were taken out). */
+    turn: number;
+    conversation: boolean;
+    undone: string[];
+    conflicts: Array<{ changeId: string; path: string; reason: string }>;
+    /** Commands that ran in the part that was taken out: their effects cannot be undone. */
+    commands: string[];
 };
 
 export type ToolRecord = {
@@ -193,6 +250,12 @@ export type SessionState = {
     tools: ToolRecord[];
     changes: ChangeRecord[];
     background?: BackgroundRecord[];
+    subagents?: SubagentRecord[];
+    /** One entry per user message, in order. Absent on sessions saved before checkpoints existed (they cannot be rewound or forked). */
+    checkpoints?: CheckpointRecord[];
+    rewinds?: RewindRecord[];
+    /** Where this session was forked from: the session and how many of its turns were copied. */
+    forkedFrom?: { sessionId: string; turns: number; at: string };
     pendingApprovals: PendingApproval[];
     /**
      * One entry per user prompt. Limits apply per task and are never reset by
@@ -207,7 +270,7 @@ export type SessionState = {
         /** Model routing at accepted plan activations, kept outside the plan for older journal readers. */
         planAssignments?: import("./task-plan.js").TaskPlanAssignments;
         /** A missing index is queued. A null index was included before compaction. */
-        followUps?: Array<{ text: string; messageIndex?: number | null }>;
+        followUps?: Array<{ text: string; messageIndex?: number | null; /** Written by goal mode, not by the person. */ auto?: boolean }>;
         /** Messages held for after the model finishes: the first one becomes a follow-up when it does. */
         queued?: Array<{ id: string; text: string }>;
         /** Automatic continuations goal mode has made in this task, and what each check said. */
