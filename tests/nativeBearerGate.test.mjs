@@ -5,6 +5,7 @@ import {
   INTERNAL_AUTH_HEADER_PREFIX,
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
+  desktopBillingEnabled,
   desktopComposerToolsEnabled,
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
@@ -51,6 +52,36 @@ test("Desktop analysis and composer tools require their own enrollment", () => {
     delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
     assert.equal(desktopWriteApiRoute(analysis, "GET"), false);
     assert.equal(desktopComposerToolsEnabled(), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop billing screens are off unless their own switch and the account settings session are both on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED", "TOMVERSE_DESKTOP_BILLING_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopBillingEnabled(), false);
+    for (const key of switches.slice(0, 2)) process.env[key] = "true";
+    assert.equal(desktopBillingEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_BILLING_ENABLED = "1";
+    assert.equal(desktopBillingEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_BILLING_ENABLED = "true";
+    assert.equal(desktopBillingEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+    assert.equal(desktopBillingEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopBillingEnabled(), false);
+    // A display switch: it enrols no bearer route.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    for (const path of ["/api/billing/checkout", "/api/billing/credit-packs", "/api/billing/plan-change/confirm"]) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    }
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];

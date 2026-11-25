@@ -24,6 +24,8 @@ rollout 승인이 덮는 범위는 **§4의 편집 행렬을 Admin API·UI에서
 - `app/api/billing/checkout/route.ts`
 - `app/api/admin/billing/route.ts`
 - `components/marketing/UpgradeInterestButton.tsx`
+- `components/billing/checkoutCopy.ts` — 주문 요약의 청구 가능 할인 판정(`promotionAppliesToCurrency`,
+  `calculateDiscountedDisplayMinor`)과 결제 고지 문구. 웹 결제 화면과 Desktop 플랜 화면이 같이 씁니다.
 
 ## 1. 이 문서가 생긴 이유
 

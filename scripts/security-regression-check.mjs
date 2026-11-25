@@ -2437,13 +2437,21 @@ const checks = [
   {
     name: "Checkout discloses renewal and links paid users to legal policies",
     file: "components/marketing/UpgradeInterestButton.tsx",
-    test: (source) =>
-      source.includes('href="/terms"') &&
-      source.includes('href="/refund"') &&
-      source.includes("automatic renewal") &&
-      source.includes("자동 갱신") &&
-      source.includes("discount period") &&
-      !source.includes("Discounts apply to the first month of Pro and Max"),
+    test: (source) => {
+      // The notice text lives in the shared copy module, which Desktop's plan
+      // screen renders too; the links stay in the dialog.
+      const copy = read("components/billing/checkoutCopy.ts");
+      return (
+        source.includes('href="/terms"') &&
+        source.includes('href="/refund"') &&
+        source.includes('from "@/components/billing/checkoutCopy"') &&
+        copy.includes("automatic renewal") &&
+        copy.includes("자동 갱신") &&
+        copy.includes("discount period") &&
+        !copy.includes("Discounts apply to the first month of Pro and Max") &&
+        !source.includes("Discounts apply to the first month of Pro and Max")
+      );
+    },
   },
   {
     name: "Chat model picker retains catalogue pricing while the composer omits credit estimates",

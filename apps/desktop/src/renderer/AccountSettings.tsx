@@ -18,6 +18,7 @@ import { DeveloperOverview, KeyUsage } from "./DeveloperExtras";
 import { ModelFinderPanel, ReviewProviderDefaults } from "./AiSettingsExtras";
 import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
 import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
+import { BillingSettings } from "./BillingSettings";
 
 export { AccountSettingRow };
 
@@ -760,6 +761,6 @@ export function AccountSettings({ tab, language, onApply, onContinue, onOpenImpo
       <ImportedConversations language={language} onContinue={onContinue} />
     </>;
     case "developer": return <Keys language={language} />;
-    case "plan": return <Plan language={language} />;
+    case "plan": return <BillingSettings language={language} fallback={<Plan language={language} />} />;
   }
 }
