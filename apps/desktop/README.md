@@ -66,6 +66,14 @@ New Tomverse API Agent tasks in a Git project start in their own worktree when G
 
 A worktree keeps the path relative to the repository of the folder you opened. Attachments for an isolated task must exist in the selected commit. After restarting Desktop, open the source folder and select the saved task from history to resume in its worktree. If the worktree is missing or on a different branch, Desktop blocks resumption and undo until the original checkout is available. Saved diffs and command details can still be inspected. Worktree files stay on disk when you delete Desktop task history.
 
+## Code terminal
+
+The terminal button in the Code header opens a terminal panel for the open task. It is off until you press **Turn on terminal**. Each task keeps up to four terminals, and their shells and scrollback stay alive while another task is on screen. They end when the task is deleted, when the project or account changes, and when Desktop quits, together with everything they started.
+
+The app host owns the shells (the renderer only sends typed actions) and starts each in the task's folder, which is its worktree for an isolated task. A shell gets the basic command environment from `apps/tomverse-cli/src/env.ts` plus terminal settings, never a Tomverse session, an API key or a token. Terminals use the `node-pty` native module; the Windows and macOS packages unpack it next to `app.asar`. Without it (Linux, or a module that cannot load) the terminal falls back to a limited pipe shell and says so.
+
+Code's own agent gets a read-only `read_terminal` tool for the terminals you leave shared with it (the **Code can read** toggle, on by default). It cannot type into a terminal, the output is returned as untrusted data, and commands still go through `run_command` and its approval. Select text in a terminal and press **Add to prompt** to attach it to your next request.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

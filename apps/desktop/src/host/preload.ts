@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserState } from "../browser-contract";
 import type { WebViewState } from "../web-view-contract";
+import type { TerminalEvent } from "../terminal-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
 import type { BillingState } from "../billing-contract";
 import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
@@ -59,6 +60,12 @@ if (trustedWindow) {
       const onState = (_event: Electron.IpcRendererEvent, state: BrowserState) => listener(state);
       ipcRenderer.on("desktop:code-browser-state", onState);
       return () => ipcRenderer.removeListener("desktop:code-browser-state", onState);
+    },
+    codeTerminal: (command: Parameters<DesktopApi["codeTerminal"]>[0]) => ipcRenderer.invoke("desktop:code-terminal", command),
+    subscribeCodeTerminal(listener: (event: TerminalEvent) => void) {
+      const onEvent = (_event: Electron.IpcRendererEvent, event: TerminalEvent) => listener(event);
+      ipcRenderer.on("desktop:code-terminal-event", onEvent);
+      return () => ipcRenderer.removeListener("desktop:code-terminal-event", onEvent);
     },
     webView: (command: Parameters<DesktopApi["webView"]>[0]) => ipcRenderer.invoke("desktop:web-view", command),
     subscribeWebView(listener: (state: WebViewState | null) => void) {

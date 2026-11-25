@@ -65,6 +65,12 @@ import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeH
 import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-scope";
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
+import { same } from "../../../tomverse-cli/src/runtime.js";
+import { createRequire } from "node:module";
+import { TerminalHost } from "./terminal-host";
+import { createTerminalApi } from "./terminal-api";
+import { createTerminalLaunch } from "./terminal-session";
+import { terminalEnv } from "./terminal-env";
 import { codeMemoryView } from "./code-memory";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
@@ -440,6 +446,9 @@ function broadcast() {
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   state.codeBrowserAvailable = scope !== null;
   state.codeBrowserInspection = scope !== null && fixture?.browserInspection === true;
+  state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
+  // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
+  void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.deviceFixtureAvailable = accountPermissionsFixture();
   if (!state.deviceFixtureAvailable) stopDictation(true);
   refreshCodeFallbackSettings();
@@ -991,6 +1000,7 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
+  if (event.type === "terminal-read") { replyToTerminalRead(event); return; }
   if (event.type === "queue-result") {
     if (pendingQueue?.requestId === event.requestId) {
       pendingQueue.resolve(event.ok && event.runId === runId && event.runId !== discardedRunId);
@@ -2461,6 +2471,70 @@ async function runCodeBrowser(value: unknown) {
   existing?.apply(command);
 }
 
+// Terminals are off until the person turns them on. The host owns the shells and decides the folder from the open task.
+const codeTerminalPath = () => join(app.getPath("userData"), "code-terminal.txt");
+let codeTerminalEnabled = false;
+const terminalHost = new TerminalHost({
+  launch: createTerminalLaunch(() => { try { return createRequire(__filename)("node-pty"); } catch { return null; } }),
+  env: () => terminalEnv(),
+  emit: (event) => {
+    const window = mainWindow;
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send("desktop:code-terminal-event", event);
+  },
+});
+
+function terminalProjectOpen() {
+  return Boolean(projectRoot && currentHistoryScope() && codeConnection() && !signingOut && !invalidatingSession && !closing);
+}
+
+function terminalAvailable() {
+  return Boolean(state.task?.id && terminalProjectOpen());
+}
+
+function terminalWorkspace() {
+  const task = state.task;
+  const scope = currentHistoryScope();
+  const root = projectRoot;
+  if (!task?.id || !scope || !root || !terminalAvailable()) return null;
+  let project: ProjectRoot | null = null;
+  if (same(task.root, root.path)) project = root;
+  else {
+    const worktree = readManagedWorktree(managedWorktreeHome(scope), task.root);
+    if (worktree && !worktree.info.unavailable) project = worktree.project;
+  }
+  if (!project) return null;
+  try { assertProjectRoot(project); } catch { return null; }
+  return { task: task.id, cwd: project.path };
+}
+
+const terminalApi = createTerminalApi({
+  host: terminalHost, workspace: terminalWorkspace, enabled: () => codeTerminalEnabled,
+  setEnabled: (enabled) => {
+    writeFileAtomic(codeTerminalPath(), enabled ? "enabled" : "disabled");
+    codeTerminalEnabled = enabled;
+    broadcast();
+  },
+});
+
+function loadCodeTerminal() {
+  try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
+  catch { codeTerminalEnabled = false; }
+}
+
+// The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
+function replyToTerminalRead(event: Extract<WorkerEvent, { type: "terminal-read" }>) {
+  const child = worker;
+  const live = Boolean(child && runId === event.runId && event.runId !== discardedRunId && state.busy &&
+    state.task?.status === "running" && !suspended);
+  let reply = live ? terminalApi.read({ lines: event.lines, ...(event.terminal === undefined ? {} : { terminal: event.terminal }) }) : null;
+  const key = codeConnection()?.key;
+  if (reply && key) reply = { ...reply, text: cleanText(reply.text, key) };
+  if (child && child === worker) {
+    try { send({ type: "terminal-read-result", runId: event.runId, requestId: event.requestId, reply }); }
+    catch { /* The task or runtime ended before the reply. */ }
+  }
+}
+
 let accountSettingsApi: { signal: AbortSignal; request: ReturnType<typeof createAccountSettingsApi> } | undefined;
 
 function connectedSettingsApi() {
@@ -3064,6 +3138,7 @@ function registerIpc() {
     return { ...state, handoff: currentHandoff() };
   });
   main("desktop:code-browser", runCodeBrowser);
+  main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
     if (!accountPermissionsFixture()) return false;
     geolocationGrant = { session: chatSession.signal, expiry: Date.now() + 12_000 };
@@ -3230,7 +3305,8 @@ function registerIpc() {
       approval?.settings.automaticFrom === "tomverse_api"
       ? { mode: input.mode, project, approval } : undefined;
     send({ type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
-      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserInspection ? { browserSnapshot: true } : {}) });
+      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserInspection ? { browserSnapshot: true } : {}),
+      ...(codeTerminalEnabled ? { terminalRead: true } : {}) });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     codeWorktreeDraft = undefined;
@@ -3671,6 +3747,7 @@ else {
     loginAttempt?.abort();
     linkAttempt?.abort();
     renewal?.controller.abort();
+    terminalHost.closeAllSync();
     browserSession = null;
     linkedCode = null;
     clearTimeout(sessionExpiry);
@@ -3722,6 +3799,7 @@ else {
     loadCodeExecutionPreference();
     loadCliPaths();
     loadCodeNotifications();
+    loadCodeTerminal();
     powerMonitor.on("suspend", () => {
       cliInspection?.controller.abort();
       suspended = true;

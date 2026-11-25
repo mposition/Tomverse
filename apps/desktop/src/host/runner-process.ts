@@ -8,6 +8,7 @@ import {
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
+import type { TerminalReadReply, TerminalReadRequest } from "../../../tomverse-cli/src/terminal-read.js";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
@@ -34,6 +35,7 @@ type ActiveRun = {
   abort: AbortController;
   runner?: Runner;
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
+  terminalRead?: { requestId: string; settle: (reply: TerminalReadReply | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
   queueOperation?: (operation: QueueOperation) => boolean;
@@ -587,6 +589,24 @@ function requestBrowserSnapshot(control: ActiveRun, signal: AbortSignal) {
   });
 }
 
+function requestTerminalRead(control: ActiveRun, request: TerminalReadRequest, signal: AbortSignal) {
+  return new Promise<TerminalReadReply | null>((resolve) => {
+    const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(6_000)]);
+    if (control.terminalRead || stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const settle = (reply: TerminalReadReply | null) => {
+      stop.removeEventListener("abort", aborted);
+      control.terminalRead = undefined;
+      resolve(reply);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    control.terminalRead = { requestId, settle };
+    send({ type: "terminal-read", runId: control.runId, requestId, lines: request.lines,
+      ...(request.terminal === undefined ? {} : { terminal: request.terminal }) });
+  });
+}
+
 function requestCodePlugin(control: ActiveRun, action: PluginRequest["action"], signal: AbortSignal) {
   return new Promise<PluginResponse["result"]>((resolve) => {
     const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(16_000)]);
@@ -876,6 +896,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
         /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
         ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
+      terminalRead: command.type === "start" && command.terminalRead
+        ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
       prompter: {
         confirm: async () => false,
         approve: async (view) => {
@@ -1521,6 +1543,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     if (active.pluginRequest?.requestId === data.requestId) active.pluginRequest.settle(data.result);
   } else if (data.type === "browser-snapshot-result" && active?.runId === data.runId) {
     if (active.browserSnapshot?.requestId === data.requestId) active.browserSnapshot.settle(data.text);
+  } else if (data.type === "terminal-read-result" && active?.runId === data.runId) {
+    if (active.terminalRead?.requestId === data.requestId) active.terminalRead.settle(data.reply);
   } else if (data.type === "answer" && active?.runId === data.runId) {
     const approval = active.approval;
     if (!approval || approval.id !== data.decision.id || (data.decision.action === "run" && !approval.canRemember)) return;

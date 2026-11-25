@@ -20,6 +20,7 @@ import type { RememberedRule } from "./approvals.js";
 import type { CommandLaunch, CommandPlan } from "./commands.js";
 import type { PlannedEdit } from "./patch.js";
 import { withWorkspaceReferences, type Workspace } from "./workspace.js";
+import { terminalReadTool, type TerminalReadReply, type TerminalReadRequest } from "./terminal-read.js";
 
 /**
  * The coding loop. The model plans, picks tools and summarises; this file
@@ -86,6 +87,8 @@ export type RunnerOptions = {
     captureTransmission?: boolean;
     taskPlan?: "agent" | "plan";
     browserSnapshot?: (signal: AbortSignal) => Promise<string | null>;
+    /** Gives the model read_terminal: the newest output of the terminals the person shared for this task. Read-only. */
+    terminalRead?: (request: TerminalReadRequest, signal: AbortSignal) => Promise<TerminalReadReply | null>;
     codePlugin?: (action: CodePluginAction, signal: AbortSignal) => Promise<CodePluginReply | null>;
     beforeWrite?: ToolContext["beforeWrite"];
     beforeCommand?: ToolContext["beforeCommand"];
@@ -419,6 +422,10 @@ export class Runner {
                         : { status: "error", message: "No local browser tab is shared with this task." };
                 },
             });
+        }
+        if (options.terminalRead) {
+            this.tools.read_terminal = terminalReadTool({ read: options.terminalRead, signal: () => this.controller.signal,
+                assertAllowed: options.assertAllowed, redactText: options.redactText });
         }
         if (options.taskPlan) {
             this.tools.update_task_plan = tool({
@@ -1146,6 +1153,7 @@ export class Runner {
         let savedToolMessages = 0;
         let analysisOnly = false;
         const analysisTools = [...READ_TOOLS, "view_image", "delegate", "update_task_plan", ...(options.browserSnapshot ? ["snapshot_browser"] : []),
+            ...(options.terminalRead ? ["read_terminal"] : []),
             ...(options.codePlugin ? ["list_plugin_tools", "read_plugin"] : [])];
         const result = streamText({
             model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf), model.reasoningEfforts === undefined ? undefined : this.currentTask().effort),
