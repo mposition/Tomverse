@@ -28,6 +28,8 @@ export type RequestTransmission = {
     /** Public web pages whose text was part of the request, by address. */
     webReads?: Array<{ url: string; truncated: boolean }>;
     moreWebReads?: number;
+    /** Images attached to the request (each is sent as image data). */
+    imageCount?: number;
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -60,6 +62,10 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
         if (!message) continue;
         if (message.role === "system" && typeof message.content === "string" && message.content.includes("\n<project-instructions>\n")) {
             evidence.projectInstructions = true;
+        }
+        if (message.role === "user" && Array.isArray(message.content)) {
+            const images = message.content.filter((part) => record(part)?.type === "image_url").length;
+            if (images) evidence.imageCount = (evidence.imageCount ?? 0) + images;
         }
         if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
             for (const value of message.tool_calls) {

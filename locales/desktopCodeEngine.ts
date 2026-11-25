@@ -57,6 +57,7 @@ type Copy = {
   approvalWebNote: string;
   webRead: string;
   webReadMore: string;
+  imagesSent: string;
 };
 
 export const desktopCodeEngineCopy = {
@@ -117,6 +118,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "Only this address is requested from the site, with no cookies, login or files from your project. The page text is sent to the model as untrusted reference material. \"Allow for this run\" allows this site until the task ends.",
     webRead: "Web page read: {url}",
     webReadMore: "{count} more web pages read",
+    imagesSent: "{count} image(s) sent as image data",
   },
   ko: {
     limits: "작업 한도",
@@ -175,6 +177,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "이 사이트에는 이 주소만 요청하며, 쿠키·로그인·프로젝트 파일은 보내지 않습니다. 페이지 본문은 신뢰할 수 없는 참고 자료로 모델에 전달됩니다. \"이번 실행에서 허용\"을 고르면 작업이 끝날 때까지 이 사이트를 허용합니다.",
     webRead: "읽은 웹 페이지: {url}",
     webReadMore: "읽은 웹 페이지 {count}개 더",
+    imagesSent: "이미지 {count}개를 이미지 데이터로 전송",
   },
   zh: {
     limits: "任务上限",
@@ -233,6 +236,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "只会向该网站请求这个地址，不会发送 Cookie、登录信息或项目文件。网页文本会作为不可信的参考资料发送给模型。选择“允许本次运行”后，在任务结束前都会允许该网站。",
     webRead: "已读取网页：{url}",
     webReadMore: "另有 {count} 个网页已读取",
+    imagesSent: "已将 {count} 张图片作为图像数据发送",
   },
   "zh-Hant": {
     limits: "任務上限",
@@ -291,6 +295,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "只會向該網站請求這個位址，不會傳送 Cookie、登入資訊或專案檔案。網頁文字會作為不可信的參考資料傳送給模型。選擇「允許本次執行」後，在工作結束前都會允許該網站。",
     webRead: "已讀取網頁：{url}",
     webReadMore: "另有 {count} 個網頁已讀取",
+    imagesSent: "已將 {count} 張圖片作為影像資料傳送",
   },
   fr: {
     limits: "Limites de la tâche",
@@ -349,6 +354,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "Seule cette adresse est demandée au site, sans cookies, connexion ni fichiers de votre projet. Le texte de la page est envoyé au modèle comme source de référence non fiable. « Autoriser pour cette exécution » autorise ce site jusqu'à la fin de la tâche.",
     webRead: "Page web lue : {url}",
     webReadMore: "{count} autres pages web lues",
+    imagesSent: "{count} image(s) envoyée(s) comme données d'image",
   },
   de: {
     limits: "Aufgabenlimits",
@@ -407,6 +413,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "Von der Website wird nur diese Adresse angefragt, ohne Cookies, Anmeldung oder Dateien Ihres Projekts. Der Seitentext geht als nicht vertrauenswürdiges Referenzmaterial an das Modell. „Für diesen Lauf zulassen“ erlaubt diese Website bis zum Ende der Aufgabe.",
     webRead: "Gelesene Webseite: {url}",
     webReadMore: "{count} weitere Webseiten gelesen",
+    imagesSent: "{count} Bild(er) als Bilddaten gesendet",
   },
   es: {
     limits: "Límites de la tarea",
@@ -465,6 +472,7 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "Solo se solicita esta dirección al sitio, sin cookies, inicio de sesión ni archivos de tu proyecto. El texto de la página se envía al modelo como material de referencia no fiable. «Permitir durante esta ejecución» permite este sitio hasta que termine la tarea.",
     webRead: "Página web leída: {url}",
     webReadMore: "{count} páginas web más leídas",
+    imagesSent: "{count} imagen(es) enviada(s) como datos de imagen",
   },
   pt: {
     limits: "Limites da tarefa",
@@ -523,5 +531,6 @@ export const desktopCodeEngineCopy = {
     approvalWebNote: "Apenas este endereço é solicitado ao site, sem cookies, login ou arquivos do seu projeto. O texto da página é enviado ao modelo como material de referência não confiável. \"Permitir para esta execução\" permite este site até o fim da tarefa.",
     webRead: "Página da web lida: {url}",
     webReadMore: "Mais {count} páginas da web lidas",
+    imagesSent: "{count} imagem(ns) enviada(s) como dados de imagem",
   },
 } as const satisfies Record<Language, Copy>;

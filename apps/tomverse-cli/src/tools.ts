@@ -25,6 +25,8 @@ export const READ_TOOLS = ["list_files", "search_text", "read_file"] as const;
 export const WRITE_TOOLS = ["apply_patch", "run_command"] as const;
 
 const READ_LINE_LIMIT = 2000;
+/** One image file the model may look at: the API takes 8 MB, and the session keeps it as text, so the CLI takes less. */
+export const IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 const SEARCH_FILE_BYTES = 1024 * 1024;
 
 export type ToolContext = {
@@ -35,6 +37,8 @@ export type ToolContext = {
     commandTimeoutMs: number;
     commandEnv: string[];
     launchCommand?: CommandLaunch;
+    /** Hands an image file to the next model request (the Runner puts it in a message of the user's role); without it view_image does not exist. */
+    attachImage?: (image: ImageAttachment) => void;
     /** The commands this task keeps running in the background; without it the background tools do not exist. */
     background?: BackgroundCommands;
     /** Reading public web pages; without it the web_fetch tool does not exist. Each host is approved by the person first. */
@@ -148,6 +152,35 @@ const endTool = (ctx: ToolContext, toolCallId: string, state: "completed" | "fai
     }
     ctx.journal.commit();
     return output;
+};
+
+export type ImageAttachment = { path: string; mediaType: string; base64: string; bytes: number };
+
+/** The kind of an image file by its first bytes (not its name), among the types the API accepts. */
+export const imageTypeOf = (head: Buffer) => {
+    if (head.length >= 8 && head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+    if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "image/jpeg";
+    if (head.length >= 6 && (head.subarray(0, 6).toString("latin1") === "GIF87a" || head.subarray(0, 6).toString("latin1") === "GIF89a")) return "image/gif";
+    if (head.length >= 12 && head.subarray(0, 4).toString("latin1") === "RIFF" && head.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+    return null;
+};
+
+/** Reads one workspace image for the model, under the same path rules as every read (workspace only, no credential files). */
+export const viewImageTool = (ctx: Pick<ToolContext, "workspace">, input: { path: string }) => {
+    const resolved = ctx.workspace.resolve(input.path, "read");
+    if (!resolved.exists) return { result: { status: "error", error: `${resolved.relative} does not exist.` } };
+    const stat = statSync(resolved.absolute);
+    if (!stat.isFile()) return { result: { status: "error", error: `${resolved.relative} is not a file.` } };
+    if (stat.size > IMAGE_MAX_BYTES) {
+        return { result: { status: "error", error: `${resolved.relative} is ${stat.size} bytes; images up to ${IMAGE_MAX_BYTES} bytes can be viewed.` } };
+    }
+    const bytes = readFileSync(resolved.absolute);
+    const mediaType = imageTypeOf(bytes);
+    if (!mediaType) return { result: { status: "error", error: `${resolved.relative} is not a PNG, JPEG, WebP or GIF image.` } };
+    return {
+        result: { status: "ok", path: resolved.relative, mediaType, bytes: bytes.length, note: "The image is attached to the next message from the user; look at it there." },
+        attachment: { path: resolved.relative, mediaType, base64: bytes.toString("base64"), bytes: bytes.length } satisfies ImageAttachment,
+    };
 };
 
 export const readFileTool = (ctx: Pick<ToolContext, "workspace" | "readByteLimit" | "redactText">,
@@ -404,6 +437,25 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             },
         }),
     };
+    if (ctx.attachImage) {
+        const attach = ctx.attachImage;
+        tools.view_image = tool({
+            description: "Look at an image file of the workspace (PNG, JPEG, WebP or GIF, up to 3 MB): a screenshot, a diagram, a design. Only for models that can see images. Needs no approval; the same files as read_file.",
+            inputSchema: z.object({ path: z.string() }),
+            execute: async (input) => {
+                try {
+                    ctx.assertAllowed?.();
+                    ctx.signal().throwIfAborted();
+                    ctx.onActivity(`view_image ${input.path}`);
+                    const viewed = viewImageTool(ctx, input);
+                    if (viewed.attachment) attach(viewed.attachment);
+                    return viewed.result;
+                } catch (error) {
+                    return toolError(error);
+                }
+            },
+        });
+    }
     if (readOnly) return tools;
     tools.apply_patch = tool({
         description:

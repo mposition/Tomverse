@@ -1,6 +1,6 @@
 import { codeReferenceKind, codeReferencePath, MAX_CODE_REFERENCES, type Change, type CodeQuotaEvidence, type CommandInspection, type Entry, type RunStatus,
   type CodeTaskPlan, type Task, type Transmission, type Verification } from "../contract";
-import { estimateTokens, hasUnconfirmedToolOutcome, safeText, type SessionState } from "../../../tomverse-cli/src/runtime.js";
+import { VIEW_IMAGE_MARK, estimateTokens, hasUnconfirmedToolOutcome, safeText, type SessionState } from "../../../tomverse-cli/src/runtime.js";
 import { isEffort } from "../../../tomverse-cli/src/effort.js";
 import { confirmedApiQuota } from "../../../tomverse-cli/src/quota-refusal.js";
 import { reportedGenerationModel } from "../../../tomverse-cli/src/transmission.js";
@@ -45,6 +45,8 @@ export function journalEntries(state: SessionState, key?: string): Entry[] {
       ? original.prompt : typeof message.content === "string"
       ? message.content
       : message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
+    // An image the agent looked at is attached on its behalf as a message of the user's role; it is not something the person wrote.
+    if (message.role === "user" && text.startsWith(VIEW_IMAGE_MARK)) return [];
     const visible: Entry[] = text ? [{ role: message.role, text: cleanText(text.slice(0, 24_000), key) }] : [];
     if (plan.success && message.role === "assistant" && Array.isArray(message.content) && message.content.some((part) =>
       part.type === "tool-call" && part.toolName === "update_task_plan" && part.toolCallId === plan.data.firstCallId)) visible.push({ role: "plan" });

@@ -213,7 +213,7 @@ export type Transmission = {
     commandOutput?: { results: number; truncated: number };
     listedPathCount?: number; truncatedListingCount?: number;
     fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number;
-    webReads?: Array<{ url: string; truncated: boolean }>; moreWebReads?: number };
+    webReads?: Array<{ url: string; truncated: boolean }>; moreWebReads?: number; imageCount?: number };
 };
 /** A command the task keeps running in the background: what it is, whether it still runs, and the newest of what it printed. */
 export type CodeBackgroundCommand = {

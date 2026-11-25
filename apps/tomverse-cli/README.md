@@ -165,6 +165,15 @@ per task".
   of the folder, `..`, Windows UNC/device paths and alternate data streams are
   refused. Nothing is uploaded in bulk; only what the model asks to read, in
   bounded pieces.
+- **Images (`view_image`):** for a model whose catalogue entry says it takes
+  images, the model can look at a PNG, JPEG, WebP or GIF file of the folder (up
+  to 3 MB; the type is checked on the file's first bytes). It needs no approval
+  and follows the same rules as `read_file`: only inside the folder, never a
+  credential file. The image reaches the model as image data in the next request,
+  so it is part of what the transmission record counts; the newest three
+  images stay attached and older ones are replaced by a note. A model that does
+  not take images is not offered the tool, and an image you select as a
+  reference in Desktop is looked at the same way.
 - **Every change asks:** `apply_patch` shows the full diff of every file in the
   batch. Edits are exact text replacements; an edit whose text is not found
   exactly once is refused, not guessed. BOM and CRLF line endings are kept.
@@ -330,7 +339,7 @@ are not used by this CLI.
   tested on every one of these systems before it is published.
 - Terminal text is English; Korean and other Unicode input, file names and
   output work.
-- Not in this version: MCP, plugins or skills, image input, a code index or
+- Not in this version: MCP, plugins or skills, a code index or
   LSP, parallel agents or worktrees, IDE or desktop apps, background agents.
 
 ## Update and roll back

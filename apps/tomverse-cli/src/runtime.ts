@@ -6,7 +6,7 @@ import { Gateway, type Receipt, type CatalogModel } from "./gateway.js";
 import { Workspace, normalizeRoot, same } from "./workspace.js";
 import { catalogProviderFor } from "./transmission.js";
 import type { Endpoint } from "./config.js";
-export { Runner, SMART_ADAPTIVE, EXIT_CODES } from "./agent.js";
+export { Runner, SMART_ADAPTIVE, EXIT_CODES, VIEW_IMAGE_MARK } from "./agent.js";
 export type { ApprovalView, ApprovalDecision, Prompter, RunnerOptions, Outcome } from "./agent.js";
 export { Gateway, GatewayError } from "./gateway.js";
 export type { CatalogModel, Receipt } from "./gateway.js";
