@@ -58,7 +58,9 @@ const compactableStatuses: Task["status"][] = ["completed", "stopped", "blocked"
 
 export function CodeEngineBar({ task, language, idle }: { task: Task; language: Language; idle: boolean }) {
   const copy = desktopCodeEngineCopy[language];
-  const [compaction, setCompaction] = useState<"working" | CompactHistoryResult | null>(null);
+  const [attempt, setAttempt] = useState<{ taskId: string | null; result: "working" | CompactHistoryResult } | null>(null);
+  const compaction = attempt?.taskId === task.id ? attempt.result : null;
+  const setCompaction = (result: "working" | CompactHistoryResult) => setAttempt({ taskId: task.id, result });
   const canCompact = idle && !!task.id && !!task.context && task.savedLocally !== false && task.execution?.executionMode === "tomverse_api" &&
     !task.continuation && !task.cliContinuation && compactableStatuses.includes(task.status);
   async function compact() {

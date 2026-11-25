@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
@@ -123,7 +123,7 @@ function CodePlanAnalysis({ analysis, language }: {
   </li>;
 }
 
-function TaskConversation({ task, models, language, openSettings }: { task: Task; models: Model[]; language: Language; openSettings: () => void }) {
+function TaskConversation({ task, models, language, openSettings, engine }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode }) {
   const copy = desktopShellCopy[language];
   const native = desktopNativeCopy[language];
   const continuation = task.continuation;
@@ -191,6 +191,7 @@ function TaskConversation({ task, models, language, openSettings }: { task: Task
       {!continued && apiUsage}
       {hasDiagnostics && task.id && ["completed", "blocked", "failed", "unknown", "stopped"].includes(task.status) && <EventLogExport language={language} />}
     </div>}
+    {engine}
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
@@ -962,9 +963,9 @@ function Desktop() {
           nearBottom.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 48;
         }}>
           <div className="content">
-            {task ? <><TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} />
-              <CodeEngineBar key={task.id ?? "new"} task={task} language={language} idle={!busy && online} /></> : <section className="welcome">
+            {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
+              language={language} openSettings={() => openSettings("execution")}
+              engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
                 onClick={(event) => void openCodeProject(event.currentTarget)}>
@@ -976,7 +977,7 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
-          {task && surface === "code" && <QueuePanel key={`queue-${task.id ?? "new"}`} task={task} language={language} live={!!queueTarget} />}
+          {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>

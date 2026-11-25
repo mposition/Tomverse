@@ -113,6 +113,7 @@ test("Code runs goal mode with no task limit and compacts a finished task on req
     await page.evaluate(() => window.desktop.start({ prompt: "Check first.txt", model: "fake-coder", mode: "agent", effort: "default",
       saveHistory: true, workspace: { kind: "local" }, limits: "unlimited", goal: true }));
     const bar = page.locator(".code-engine");
+    await expect(bar).toHaveCount(1, { timeout: 30_000 });
     await expect(bar).toContainText("Goal verified", { timeout: 30_000 });
     await expect(bar).toContainText("Goal mode · 1 of 10 automatic continuations");
     await expect(bar).toContainText("Limits · No limit");

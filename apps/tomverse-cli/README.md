@@ -108,8 +108,8 @@ tomverse exec --json "explain src/index.ts" --read-only
 | `tomverse trust [folder]` | Allow the CLI to work in a folder (asked once in interactive mode). |
 | `tomverse config show/set/unset` | `endpoint`, `model`, `allow-insecure-localhost`, `command-env`. |
 
-Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-requests <n>`,
-`--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
+Options: `--cwd`, `--model`, `--effort default|<level>`, `--read-only`, `--limits <profile>`, `--goal`,
+`--max-requests <n>`, `--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
 
 ### Limits
 
@@ -119,9 +119,30 @@ Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-
 | Active time per task | 15 min (`--timeout`) | Time spent waiting for your approval does not count. |
 | Per command | 120 s (`--command-timeout`) | The model can ask for another value; the approval shows it. Maximum 30 min. |
 
+`--limits <profile>` picks the request and time limits of a task as a set; it is saved with the
+session and kept when you resume it. `--max-requests` and `--timeout` are more specific and win
+over the profile.
+
+| Profile | Requests per task | Active time per task |
+|---|---|---|
+| `standard` (default) | 20 | 15 min |
+| `extended` | 200 | 120 min |
+| `unlimited` | none | none |
+
+`unlimited` has no limit of its own: the task ends when you stop it, when the API refuses a request
+(a key credit limit or quota), or when the model is done. Approvals, the per-command time limit and
+the key's credit limit work as before.
+
+`--goal` turns on goal mode for the session. When the model says it is done, one more request of
+the same model answers whether the goal is verified (for code: a relevant check was run and its
+result shown). If not, its next action is sent to the model as your instruction and the task
+continues, at most 10 automatic continuations in a row; it then stops as "limit reached" and says
+the goal is not verified. Goal mode needs a session that can change files, counts every check as a
+request, and never answers an approval for you.
+
 Use `--effort high` for one task or `/effort low` to set the next interactive task.
 `default` uses the model's existing setting. The coding API advertises the
-available levels for each model. A task keeps its requested level across steps
+available levels for each model; `--effort` takes `default` or any level `tomverse models` lists. A task keeps its requested level across steps
 and resume. Each response records the applied level. A model that does not
 support the request uses its own default.
 
