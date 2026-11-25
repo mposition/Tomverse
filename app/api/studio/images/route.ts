@@ -78,6 +78,11 @@ async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useC
   });
   const quotes = quotesAt(size);
   const squareQuotes = squareFallback && size !== "1024x1024" ? quotesAt("1024x1024") : [];
+  if (useCase === "real-sticker-pack" || useCase === "real-sticker") {
+    // Use the exact photo-edit configuration evaluated for both packs and replacements.
+    const square = size === "1024x1024" ? quotes : squareQuotes;
+    return edit ? square.find(quote => quote.modelId === "gpt-image-2.6-sunburst" && quote.quality === "medium") ?? null : null;
+  }
   for (const id of studioModelPreference(useCase)) {
     const preferred = quotes.find(quote => quote.modelId === id) ?? squareQuotes.find(quote => quote.modelId === id);
     if (preferred) return preferred;
