@@ -114,13 +114,21 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
             ] });
             return Response.json({ messageMappings: [{ requestId: question.clientRequestId, messageId: sourceId }] });
           }
+          case "/api/chat/context": {
+            const body = JSON.parse(String(init?.body));
+            if (body.conversationId !== research.id || body.sourceUserMessageId !== sourceId || body.modelId !== researchModel) {
+              return Response.json({}, { status: 409 });
+            }
+            return Response.json({ ok: true, contextBundle: "fixture-project-context" });
+          }
           case "/api/chat": {
             const body = JSON.parse(String(init?.body));
             if (method === "PUT" && body.action === "google-drive-import" && body.fileId === "fake-drive-doc" && body.accessToken === "synthetic-google-token") {
               return Response.json({ uploadId: "synthetic-drive-upload", name: "Notebook.txt", mediaType: "text/plain", size: 64, kind: "text" });
             }
             if (method !== "POST" || body.deepResearchDepth !== "deep" || body.modelId !== researchModel ||
-                body.sourceUserMessageId !== sourceId || body.reasoningEffort || body.messages[0]?.attachments?.[0]?.attachmentId !== "drive-file" || submitted++) {
+                body.sourceUserMessageId !== sourceId || body.reasoningEffort || body.contextBundle !== "fixture-project-context" ||
+                body.messages[0]?.attachments?.[0]?.attachmentId !== "drive-file" || submitted++) {
               return Response.json({}, { status: 400 });
             }
             reportId = body.assistantMessageId;

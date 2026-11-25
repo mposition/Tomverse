@@ -265,7 +265,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     async checkDeepResearch(assistantMessageId: string) {
       return request(DESKTOP_DEEP_RESEARCH_STATUS, z.object({
         status: z.enum(["submitted", "in_progress", "completed", "failed"]),
-        content: z.string().max(100_128).optional(),
+        content: z.string().optional(),
       }), "POST", { assistantMessageId });
     },
     async discardAttachment(uploadId: string) {
@@ -385,8 +385,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           return null;
         }
       };
-      // The existing research endpoint is asynchronous and processes the saved transcript itself.
-      const contextBundle = input.review ? input.admission?.contextBundle : input.deepResearchDepth ? null : await prepare();
+      const contextBundle = input.review ? input.admission?.contextBundle : await prepare();
       const timeout = new AbortController();
       const watchdog = createChatLivenessWatchdog({ onExpire: () => timeout.abort() });
       try {

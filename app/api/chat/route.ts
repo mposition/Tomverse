@@ -248,6 +248,7 @@ import type { PerplexityResponseCapture } from "@/lib/perplexityResponseCore";
 import {
     DEEP_RESEARCH_DEPTH_PARAMS,
     describeDeepResearchMessages,
+    PerplexityDeepResearchError,
     PerplexityDeepResearchMessageError,
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
@@ -5586,28 +5587,42 @@ async function handleChatPost(
                 );
             }
 
-            // Set once Perplexity has accepted the job. If persisting the
-            // local rows then fails, this is the id an operator needs to
-            // reconcile a provider job that has no Message or job row here.
-            let submittedPerplexityJobId: string | null = null;
-            let desktopClaimed = false;
-            try {
-                if (desktop) {
-                    const claimed = await prisma.$transaction(async (tx) => {
-                        await assertMessageCapacity(tx, session.user!.id, conversationId, 1, 0);
-                        // The answer ID is bound to this saved question. Concurrent replays can only claim it once.
-                        return tx.message.createMany({ skipDuplicates: true, data: {
-                            id: assistantMessageId, conversationId, role: "assistant", content: "",
-                            modelId: requestedModelId, status: "incomplete",
-                        } });
+            if (desktop) {
+                const claimed = await prisma.$transaction(async (tx) => {
+                    const previous = await tx.message.findUnique({
+                        where: { id: assistantMessageId, conversationId },
+                        select: { status: true },
                     });
-                    if (!claimed.count) {
-                        await settleChatUsage(usageReservation, { inputTokens: 0, outputTokens: 0, outcome: "failed" });
-                        usageReservation = null;
-                        return tracedJsonError("This research question was already submitted.", "DEEP_RESEARCH_ALREADY_SUBMITTED", 409, traceId);
+                    if (previous) {
+                        // A known submit refusal may be retried. An accepted job or an
+                        // unconfirmed dispatch keeps its claim, even after a restart.
+                        if (previous.status !== "error" || await tx.perplexityAsyncJob.findUnique({
+                            where: { assistantMessageId }, select: { id: true },
+                        })) return false;
+                        return (await tx.message.updateMany({
+                            where: { id: assistantMessageId, conversationId, status: "error", modelId: requestedModelId,
+                                role: "assistant", pendingJobId: null },
+                            data: { status: "incomplete", content: "" },
+                        })).count === 1;
                     }
-                    desktopClaimed = true;
+                    // Capacity failures are local and use the route's ordinary storage refusal.
+                    await assertMessageCapacity(tx, session.user!.id, conversationId, 1, 0);
+                    // The answer ID is bound to this saved question. Concurrent replays can only claim it once.
+                    return (await tx.message.createMany({ skipDuplicates: true, data: {
+                        id: assistantMessageId, conversationId, role: "assistant", content: "",
+                        modelId: requestedModelId, status: "incomplete",
+                    } })).count === 1;
+                });
+                if (!claimed) {
+                    await settleChatUsage(usageReservation, { inputTokens: 0, outputTokens: 0, outcome: "failed" });
+                    usageReservation = null;
+                    return tracedJsonError("This research question was already submitted.", "DEEP_RESEARCH_ALREADY_SUBMITTED", 409, traceId);
                 }
+            }
+
+            // Preserve the provider job id in diagnostics when persistence fails after acceptance.
+            let submittedPerplexityJobId: string | null = null;
+            try {
                 const depthParams =
                     DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
                 const { perplexityJobId } = await submitDeepResearchJob({
@@ -5626,7 +5641,7 @@ async function handleChatPost(
 
                 await prisma.$transaction(async (tx) => {
                     const researchState = { status: "pending", pendingJobId: perplexityJobId, ...contextAttribution };
-                    if (desktopClaimed) {
+                    if (desktop) {
                         await tx.message.update({ where: { id: assistantMessageId, conversationId }, data: researchState });
                     } else {
                         await assertMessageCapacity(tx, session.user!.id, conversationId, 1, 0);
@@ -5663,7 +5678,9 @@ async function handleChatPost(
                 // The credit refund below is unconditional either way.
                 const isMessageContractError =
                     error instanceof PerplexityDeepResearchMessageError;
-                if (desktopClaimed && isMessageContractError) {
+                const definiteSubmitRefusal = error instanceof PerplexityDeepResearchError &&
+                    error.status !== undefined && error.status >= 400 && error.status < 500;
+                if (desktop && (isMessageContractError || definiteSubmitRefusal)) {
                     await prisma.message.updateMany({
                         where: { id: assistantMessageId, conversationId, status: "incomplete" },
                         data: { status: "error" },
