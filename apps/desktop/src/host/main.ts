@@ -12,6 +12,10 @@ import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../br
 import { createAccountSettingsApi } from "./account-settings-api";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
+import { createBillingApi } from "./billing-api";
+import { createBillingWindowHost } from "./billing-window";
+import { desktopBillingInput } from "../billing-contract";
+import { desktopBillingCopy } from "../../../../locales/desktopBilling";
 import { solveEmailLoginChallenge } from "./login-challenge";
 import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, type DesktopLoginEmail } from "../login-contract";
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
@@ -641,6 +645,17 @@ const webViewHost = createWebViewHost({
   publish: (next) => {
     const owner = mainWindow;
     if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:web-view-state", next);
+  },
+});
+
+const billingWindowHost = createBillingWindowHost({
+  parent: () => mainWindow,
+  returnOrigins: () => [...new Set([accountOrigin ?? DESKTOP_LIVE_ORIGIN, webOrigin].map((value) => new URL(value).origin))],
+  language: () => state.language ?? "en",
+  title: () => desktopBillingCopy(state.language ?? "en").windowTitle,
+  publish: (next) => {
+    const owner = mainWindow;
+    if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:billing-window", next);
   },
 });
 
@@ -2307,6 +2322,25 @@ async function accountSettings(value: unknown) {
   return request(input);
 }
 
+let billingApi: { request: ReturnType<typeof createAccountSettingsApi>; billing: ReturnType<typeof createBillingApi> } | undefined;
+
+async function billing(value: unknown) {
+  const input = desktopBillingInput.parse(value);
+  if (input.action === "closeCheckout") return { ok: true, value: { closed: billingWindowHost.close() } };
+  if (!state.capabilities?.billing) throw new Error("Billing is unavailable.");
+  const request = connectedSettingsApi();
+  if (billingApi?.request !== request) {
+    const signal = chatSession.signal;
+    billingApi = { request, billing: createBillingApi(request, {
+      accountSignal: signal,
+      timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+      checkoutOpen: billingWindowHost.isOpen,
+      openCheckout: (url, purpose) => billingWindowHost.open(url, purpose, signal),
+    }) };
+  }
+  return billingApi.billing(input);
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -3054,6 +3088,7 @@ function registerIpc() {
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));
   main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
+  main("desktop:billing", billing);
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

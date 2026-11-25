@@ -20,6 +20,7 @@ import { desktopChatCopy } from "../../../../locales/desktopChat";
 import type { AccountPreferences, AccountSettingsResult, DesktopAccountSettingsInput } from "../account-settings-contract";
 import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
+import { BillingSettings } from "./BillingSettings";
 
 const dictionaries = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };
 const languageLabel = (language: Language) => new Intl.DisplayNames(language, { type: "language" }).of(language) ?? language;
@@ -797,6 +798,6 @@ export function AccountSettings({ tab, language, onApply, onContinue, onOpenImpo
       <ImportedConversations language={language} onContinue={onContinue} />
     </>;
     case "developer": return <Keys language={language} />;
-    case "plan": return <Plan language={language} />;
+    case "plan": return <BillingSettings language={language} fallback={<Plan language={language} />} />;
   }
 }

@@ -19,6 +19,8 @@ export function createWebView(owner: BrowserWindow, input: {
   decide: (url: string) => WebViewVerdict;
   changed: (state: WebViewRaw) => void;
   linkRequested: (url: string) => void;
+  /** "deny" refuses every window.open instead of loading an allowed target in this view. */
+  newWindows?: "deny";
 }) {
   const isolated = session.fromPartition("tomverse-web-view-" + randomUUID(), { cache: false });
   isolated.setPermissionCheckHandler(() => false);
@@ -64,6 +66,7 @@ export function createWebView(owner: BrowserWindow, input: {
     if (verdict === "link") input.linkRequested(event.url);
   };
   webContents.setWindowOpenHandler(({ url: target }) => {
+    if (input.newWindows === "deny") return { action: "deny" };
     const verdict = input.decide(target);
     if (verdict === "allow") queueMicrotask(() => void load(target));
     else if (verdict === "link") input.linkRequested(target);

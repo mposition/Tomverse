@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserState } from "../browser-contract";
 import type { WebViewState } from "../web-view-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
+import type { BillingWindowState } from "../billing-contract";
 import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
 import type { DesktopLoginState, LoginApi } from "../login-contract";
 
@@ -88,6 +89,12 @@ if (trustedWindow) {
     openWeb: (destination: Parameters<DesktopApi["openWeb"]>[0]) => ipcRenderer.invoke("desktop:web", destination),
     accountSettings: (input: Parameters<DesktopApi["accountSettings"]>[0]) =>
       ipcRenderer.invoke("desktop:account-settings", input),
+    billing: (input: Parameters<DesktopApi["billing"]>[0]) => ipcRenderer.invoke("desktop:billing", input),
+    subscribeBillingWindow(listener: (state: BillingWindowState) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: BillingWindowState) => listener(state);
+      ipcRenderer.on("desktop:billing-window", onState);
+      return () => ipcRenderer.removeListener("desktop:billing-window", onState);
+    },
     checkUpdate: () => ipcRenderer.invoke("desktop:check-update"),
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>
