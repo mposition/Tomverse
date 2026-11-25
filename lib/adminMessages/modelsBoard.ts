@@ -9,6 +9,14 @@ import { defineAdminMessages } from "@/lib/adminLocale";
  */
 export const adminModelsBoardMessages = defineAdminMessages({
   en: {
+    voice: {
+      title: "Chat voice conversation",
+      description: "Choose a GPT-Live model for new calls. Available models use the current OpenAI active-minute rate.",
+      current: "Current model", check: "Check for new models", model: "Voice model", save: "Save model",
+      saved: "Saved. New calls use this model.", failed: "Could not confirm the voice model setting. Check again.",
+      unavailable: "OpenAI pricing is unavailable. Check again to see eligible models.",
+      noAlternative: "There are no other models at the current rate.",
+    },
     registry: {
       tableCaption: "Model registry",
       columns: {
@@ -86,6 +94,14 @@ export const adminModelsBoardMessages = defineAdminMessages({
     },
   },
   ko: {
+    voice: {
+      title: "Chat 음성 대화",
+      description: "새 통화에 쓸 GPT-Live 모델을 선택하세요. OpenAI의 활성 통화 분당 요금이 현재와 같은 모델이 표시됩니다.",
+      current: "현재 모델", check: "새 모델 확인", model: "음성 모델", save: "모델 저장",
+      saved: "저장했습니다. 새 통화부터 적용됩니다.", failed: "음성 모델 설정을 확인하지 못했습니다. 다시 확인해 주세요.",
+      unavailable: "OpenAI 가격표를 읽지 못했습니다. 새 모델 확인을 다시 눌러 주세요.",
+      noAlternative: "현재 요금으로 선택할 수 있는 다른 모델이 없습니다.",
+    },
     registry: {
       tableCaption: "모델 레지스트리",
       columns: {

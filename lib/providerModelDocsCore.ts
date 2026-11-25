@@ -451,6 +451,19 @@ const tableAfter = (markdown: string, start: number) => {
   return { header: rows[0], body: rows.slice(2) };
 };
 
+/** These models use the same active-session tariff as the voice reservation. */
+export function liveModelsAtMinuteRate(markdown: string, microUsdPerMinute: number): string[] | null {
+  const header = /^\|\s*Model\s*\|\s*Active rate\s*\|\s*Standby rate\s*\|[ \t]*\r?$/im.exec(markdown);
+  if (!header) return null;
+  const table = tableAfter(markdown, header.index);
+  if (!table?.body.length) return null;
+  return table.body.flatMap(([id, active]) => {
+    const rate = /^\$(\d+(?:\.\d+)?)\s*\/\s*minute$/i.exec(active ?? "");
+    return /^gpt-live-[a-z0-9][a-z0-9.-]{0,100}$/.test(id) && rate && Number(rate[1]) * 1_000_000 === microUsdPerMinute
+      ? [id] : [];
+  });
+}
+
 /** The text of one `##`/`###` section, up to the next heading of the same or higher level. */
 const section = (markdown: string, heading: RegExp) => {
   const match = markdown.match(heading);

@@ -18,6 +18,7 @@ import {
   parseAnthropicPricingPage,
   parseOpenAiModelPage,
   parseOpenAiStandardPricingTable,
+  liveModelsAtMinuteRate,
   type AnthropicPricingPage,
   promotionNotices,
   type DocEvidenceSource,
@@ -160,6 +161,12 @@ const fetchDocument = async (url: string): Promise<FetchedDocument> => {
     return { ok: false, url, status: "fetch_failed", problem: timedOut ? "timeout" : "network_error" };
   }
 };
+
+/** On-demand lookup for an operator choosing a Live model. No provider credentials required. */
+export async function getOpenAiLiveModelsAtRate(microUsdPerMinute: number) {
+  const pricing = await fetchDocument(OPENAI_PRICING_MARKDOWN_URL);
+  return pricing.ok ? liveModelsAtMinuteRate(pricing.body, microUsdPerMinute) : null;
+}
 
 type EvidenceWrite = {
   provider: ProviderModelDocProvider;

@@ -14,7 +14,7 @@ import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { reserveVoiceBudgets, settleVoiceBudgets } from "@/lib/voiceBudgetReservation";
 import { snapshotVoiceBudgets, restoreVoiceBudgets, type VoiceBudgetSnapshot } from "@/lib/voiceConversationBudget";
-import { VOICE_CONVERSATION_INITIAL_SECONDS, VOICE_CONVERSATION_CLOSING_SECONDS, VOICE_CONVERSATION_RESERVATION_SECONDS, VOICE_CONVERSATION_MODEL, VOICE_CONVERSATION_PRICING_VERSION, VOICE_CONVERSATION_SOURCE, voiceDurationCharge } from "@tomverse/chat-core";
+import { VOICE_CONVERSATION_INITIAL_SECONDS, VOICE_CONVERSATION_CLOSING_SECONDS, VOICE_CONVERSATION_RESERVATION_SECONDS, VOICE_CONVERSATION_PRICING_VERSION, VOICE_CONVERSATION_SOURCE, voiceDurationCharge } from "@tomverse/chat-core";
 
 type VoiceFunding = {
   startSeconds: number; endSeconds: number; planCredits: number; createdAt: string;
@@ -110,7 +110,7 @@ async function reserveFunding(tx: Prisma.TransactionClient, input: { userId: str
 /** Holds only the next funded window before a paid call. Legacy rows remain readable. */
 export async function reserveVoiceConversationCredits(input: {
   userId: string; requestId: string; conversationId: string | null;
-  creditsPerMinute: number; maxSeconds: number;
+  creditsPerMinute: number; maxSeconds: number; modelId: string;
   sessionSeconds?: number;
   continuous?: boolean;
 }) {
@@ -141,7 +141,7 @@ export async function reserveVoiceConversationCredits(input: {
     };
     return tx.chatCreditReservation.create({ data: {
       id: reservationId, userId: input.userId, subjectKey, traceId: input.requestId,
-      source: VOICE_CONVERSATION_SOURCE, provider: "openai", modelId: VOICE_CONVERSATION_MODEL,
+      source: VOICE_CONVERSATION_SOURCE, provider: "openai", modelId: input.modelId,
       idempotencyKey, status: "reserved", reservationPayload: payload as unknown as Prisma.InputJsonValue,
       createdAt: fundedAt,
       reservedCredits: price.credits, reservedCostMicroUsd: BigInt(price.costMicroUsd),
@@ -154,7 +154,7 @@ export async function reserveVoiceConversationCredits(input: {
 
 export const isVoiceCapacityRefusal = (error: unknown): error is { code: string } => ["CREDIT_BALANCE_INSUFFICIENT", "PLAN_DAILY_CREDIT_LIMIT_REACHED", "PROVIDER_BUDGET_EXHAUSTED", "VOICE_OPERATIONAL_LIMIT_REACHED", "ADDON_CREDITS_INSUFFICIENT", "ADDON_COST_ALLOWANCE_INSUFFICIENT"].includes((error as { code?: string })?.code ?? "");
 
-export async function reserveContinuousVoiceCredits(input: { userId: string; requestId: string; conversationId: string | null; creditsPerMinute: number }) {
+export async function reserveContinuousVoiceCredits(input: { modelId: string; userId: string; requestId: string; conversationId: string | null; creditsPerMinute: number }) {
   // Include setup plus a commit margin: a 50-second hold has no margin above
   // the required five-second dispatch budget. Shorter windows would be refunded
   // before dispatch after even a small DB delay, rather than starting usefully.
@@ -217,7 +217,7 @@ export async function extendVoiceConversationCredits(id: string, userId: string)
   }
 }
 
-async function settleFunding(tx: Prisma.TransactionClient, row: { id: string; userId: string | null; subjectKey: string }, payload: VoiceCreditPayload, seconds: number, initialized: boolean, evidence: "final" | "observed_minimum") {
+async function settleFunding(tx: Prisma.TransactionClient, row: { id: string; userId: string | null; subjectKey: string; modelId: string }, payload: VoiceCreditPayload, seconds: number, initialized: boolean, evidence: "final" | "observed_minimum") {
   const billedSeconds = initialized ? Math.max(VOICE_CONVERSATION_INITIAL_SECONDS, seconds) : seconds;
   for (const part of payload.funding!) {
     const usedEnd = Math.max(part.startSeconds, Math.min(part.endSeconds, seconds));
@@ -237,7 +237,7 @@ async function settleFunding(tx: Prisma.TransactionClient, row: { id: string; us
       userId: row.userId, reservationId: row.id, entries: part.addOnEntries, settledCredits: price.credits - planCharged,
       settledFundedCostMicroUsd: addOnReserved ? Math.ceil(part.addOnEntries.reduce((sum, entry) => sum + entry.fundedCostMicroUsd, 0) * (price.credits - planCharged) / addOnReserved) : 0, outcome: seconds > 0 ? "completed" : "empty",
     });
-    if (actualCost > 0) await recordInternalProviderUsage({ client: tx, provider: "openai", modelId: VOICE_CONVERSATION_MODEL, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostMicroUsd: actualCost, uncachedInputCostMicroUsd: 0, cachedInputCostMicroUsd: 0, outputCostMicroUsd: actualCost, date: new Date(part.createdAt) });
+    if (actualCost > 0) await recordInternalProviderUsage({ client: tx, provider: "openai", modelId: row.modelId, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostMicroUsd: actualCost, uncachedInputCostMicroUsd: 0, cachedInputCostMicroUsd: 0, outputCostMicroUsd: actualCost, date: new Date(part.createdAt) });
     await settleVoiceBudgets({ reservation: restoreVoiceBudgets(part.budgets), client: tx, basis: evidence === "observed_minimum" ? { kind: "reservation" } : initialized ? { kind: "provider_seconds", seconds: providerEnd - part.startSeconds } : { kind: "not_billed" } });
   }
 }
@@ -299,7 +299,7 @@ export async function settleVoiceConversationCredits(id: string, seconds: number
         });
       }
       if (price.costMicroUsd > 0) await recordInternalProviderUsage({
-        client: tx, provider: "openai", modelId: VOICE_CONVERSATION_MODEL,
+        client: tx, provider: "openai", modelId: row.modelId,
         inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
         estimatedCostMicroUsd: price.costMicroUsd, uncachedInputCostMicroUsd: 0,
         cachedInputCostMicroUsd: 0, outputCostMicroUsd: price.costMicroUsd, date: row.createdAt,

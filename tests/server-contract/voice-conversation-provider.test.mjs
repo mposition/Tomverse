@@ -15,9 +15,9 @@ test("provider creation obeys the remaining funding deadline and refuses invalid
     });
     assert.fail("A slow provider must be aborted at the funded startup deadline");
   };
-  for (const value of [0, -1, 15_001, NaN]) await assert.rejects(createVoiceProviderSession("fixture", [], value), /Invalid voice startup deadline/);
+  for (const value of [0, -1, 15_001, NaN]) await assert.rejects(createVoiceProviderSession("gpt-live-1.1", "fixture", [], value), /Invalid voice startup deadline/);
   assert.equal(calls, 0);
-  await assert.rejects(createVoiceProviderSession("fixture", [], 20), error => error.name === "TimeoutError");
+  await assert.rejects(createVoiceProviderSession("gpt-live-1.1", "fixture", [], 20), error => error.name === "TimeoutError");
   assert.equal(calls, 1);
 });
 
@@ -35,11 +35,12 @@ test("WebRTC creation uses the documented session-scoped frontend permissions an
     });
     return Response.json({ session: { id: "live_created" }, transport: { type: "webrtc", sdp: "fixture-answer" } }, { status: 201 });
   };
-  assert.deepEqual(await createVoiceProviderSession("fixture-offer", [
+  assert.deepEqual(await createVoiceProviderSession("gpt-live-1.1", "fixture-offer", [
     { role: "user", content: "Our code name is Cedar." },
     { role: "assistant", content: "Cedar." },
   ]), { ok: true, sessionId: "live_created", sdp: "fixture-answer" });
   assert.equal(submitted.session.store, false);
+  assert.equal(submitted.session.model, "gpt-live-1.1");
   assert.deepEqual(submitted.session.delegation, { type: "client" });
   assert.deepEqual(submitted.transport, { type: "webrtc", sdp: "fixture-offer" });
   assert.deepEqual(submitted.session.input.map(message => [message.role, message.content[0].type]), [["user", "input_text"], ["assistant", "output_text"]]);
@@ -47,7 +48,7 @@ test("WebRTC creation uses the documented session-scoped frontend permissions an
 test("a malformed SDP returns its session identity for durable closing before any further provider command", async () => {
   const calls = [];
   globalThis.fetch = async url => { calls.push(String(url)); return Response.json(calls.length === 1 ? { session: { id: "live_known" }, transport: {} } : {}); };
-  const result = await createVoiceProviderSession("fixture-offer", []);
+  const result = await createVoiceProviderSession("gpt-live-1.1", "fixture-offer", []);
   assert.deepEqual(result, { ok: false, rejected: false, sessionId: "live_known" });
   assert.equal(calls.length, 1);
 });

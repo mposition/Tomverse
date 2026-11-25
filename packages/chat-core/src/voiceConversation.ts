@@ -1,5 +1,5 @@
 /** Shared voice semantics; platform audio and credentials are injected by each host. */
-export const VOICE_CONVERSATION_MODEL = "gpt-live-1";
+export const DEFAULT_VOICE_CONVERSATION_MODEL = "gpt-live-1.1";
 export const VOICE_CONVERSATION_SOURCE = "voice_conversation";
 export const VOICE_CONVERSATION_PRICING_VERSION = "2026-10-23";
 // https://developers.openai.com/api/docs/pricing — USD 0.05/min, billed per second.
