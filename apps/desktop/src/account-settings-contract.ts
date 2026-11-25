@@ -117,6 +117,9 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
     description: z.string().trim().max(ASSISTANT_PROFILE_LIMITS.maxDescriptionCharacters).optional(),
     instructions: z.string().trim().min(1).max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters) }).strict(),
   z.object({ action: z.literal("imports"), offset: z.number().int().min(0).max(100_000) }).strict(),
+  z.object({ action: z.literal("importRuns") }).strict(),
+  z.object({ action: z.literal("importConversation"), id: accountId,
+    offset: z.number().int().min(0).max(1_000_000) }).strict(),
   z.object({ action: z.literal("importCapacity") }).strict(),
   z.object({ action: z.literal("startImport"), provider: z.enum(EXTERNAL_IMPORT_PROVIDERS) }).strict(),
   z.object({ action: z.literal("importStatus"), id: accountId }).strict(),
@@ -134,6 +137,12 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("renameProject"), id: accountId, name: projectName }).strict(),
   z.object({ action: z.literal("removeProject"), id: accountId }).strict(),
   z.object({ action: z.literal("moveToProject"), id: accountId, projectId: accountId.nullable() }).strict(),
+  z.object({ action: z.literal("changeConversationLock"), id: accountId, values: z.union([
+    z.object({ password: z.string().min(8).max(128) }).strict(),
+    z.object({ password: z.null(), currentPassword: z.string().min(1).max(128) }).strict(),
+  ]) }).strict(),
+  z.object({ action: z.literal("shareConversation"), id: accountId }).strict(),
+  z.object({ action: z.literal("revokeConversationShare"), id: accountId }).strict(),
   z.object({ action: z.literal("keys") }).strict(),
   z.object({ action: z.literal("createKey"), name: z.string().trim().min(1).max(80),
     creditCap: z.number().int().positive().nullable(), expiresInDays: z.number().int().positive().max(365).nullable() }).strict(),
@@ -192,7 +201,21 @@ export const desktopAccountSettingsOutput = {
       id: accountId, title: z.string(), provider: z.string(), titleWithheld: z.boolean(), messageCount: z.number(),
     })),
   }),
-  importCapacity: z.object({ remaining: z.object({ normalizedTextBytes: importCount, externalConversations: importCount, externalMessages: importCount }) }),
+  importRuns: z.object({ imports: z.array(z.object({
+    id: accountId, provider: z.string(), status: z.string(), conversationCount: importCount, createdAt: importTimestamp,
+  })).max(50) }),
+  importConversation: z.object({
+    title: z.string(), messageTotal: importCount, limit: importCount.positive(), offset: importCount,
+    messages: z.array(z.object({
+      id: accountId, role: z.enum(["user", "assistant"]), content: z.string(),
+      sourceModelLabel: z.string().nullable(), truncated: z.boolean(),
+    })).max(100),
+  }),
+  importCapacity: z.object({
+    remaining: z.object({ normalizedTextBytes: importCount, externalConversations: importCount, externalMessages: importCount }),
+    usage: z.object({ normalizedTextBytes: importCount, externalConversations: importCount }).optional(),
+    limits: z.object({ maxNormalizedTextBytes: importCount, maxExternalConversations: importCount }).optional(),
+  }),
   startImport: z.object({ importId: accountId }),
   appendImport: z.object({ results: z.array(z.discriminatedUnion("outcome", [
     z.object({ outcome: z.literal("staged"), stagedConversationId: accountId, conversationDigest: importDigest }),
@@ -212,6 +235,15 @@ export const desktopAccountSettingsOutput = {
   renameProject: project,
   removeProject: z.object({ success: z.literal(true) }),
   moveToProject: z.object({ projectId: accountId.nullable() }),
+  changeConversationLock: z.object({ isLocked: z.boolean(), shareEnabled: z.boolean().optional() }),
+  shareConversation: z.object({
+    url: z.url().refine(value => {
+      const url = new URL(value);
+      return url.protocol === "https:" && !url.username && !url.password && /^\/share\/[A-Za-z0-9_-]+$/.test(url.pathname);
+    }),
+    expiresAt: importTimestamp,
+  }),
+  revokeConversationShare: z.object({ success: z.literal(true) }),
   keys: z.object({
     enabled: z.boolean(), keys: z.array(keySummary),
     limits: z.object({ maxKeys: z.number().int().positive(), maxCreditCap: z.number().int().positive(),

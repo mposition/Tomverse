@@ -10,7 +10,7 @@ const settingsCredential = z.object({
   expiresAt: z.number().int().refine((value) => value > Date.now() && value <= Date.now() + 360_000),
 }).strict();
 
-type SettingsRequest = { path: string; method?: "POST" | "PUT" | "PATCH" | "DELETE"; body?: object };
+type SettingsRequest = { path: string; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: object };
 
 function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
   switch (input.action) {
@@ -52,6 +52,10 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
       return { path: "/api/assistant-profiles", method: "POST", body: { name: input.name, description: input.description, instructions: input.instructions } };
     case "imports":
       return { path: "/api/external-conversations?limit=50&offset=" + input.offset };
+    case "importRuns":
+      return { path: "/api/imports/external" };
+    case "importConversation":
+      return { path: `/api/external-conversations/${encodeURIComponent(input.id)}?limit=100&offset=${input.offset}` };
     case "importCapacity":
       return { path: "/api/imports/external/capacity" };
     case "startImport":
@@ -92,6 +96,12 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
       return { path: `/api/projects/${encodeURIComponent(input.id)}`, method: "DELETE" };
     case "moveToProject":
       return { path: `/api/conversations/${encodeURIComponent(input.id)}`, method: "PATCH", body: { projectId: input.projectId } };
+    case "changeConversationLock":
+      return { path: `/api/conversations/${encodeURIComponent(input.id)}`, method: "PATCH", body: input.values };
+    case "shareConversation":
+      return { path: `/api/conversations/${encodeURIComponent(input.id)}/share`, method: "POST" };
+    case "revokeConversationShare":
+      return { path: `/api/conversations/${encodeURIComponent(input.id)}/share`, method: "DELETE" };
     case "keys":
       return { path: "/api/user/api-keys" };
     case "createKey":
@@ -139,18 +149,21 @@ export function createAccountSettingsApi(
     return renewal;
   }
 
-  async function request(input: DesktopAccountSettingsInput) {
-    const { path, method = "GET", body } = settingsRequest(input);
+  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json") {
     const session = await credential();
     const cookie = origin.startsWith("https:") ? "__Secure-next-auth.session-token" : "next-auth.session-token";
-    const res = await transport(new URL(path, origin), {
+    return transport(new URL(path, origin), {
       method, body: body ? JSON.stringify(body) : undefined,
       headers: {
-        Cookie: cookie + "=" + session.token, Origin: origin, Accept: "application/json",
+        Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       redirect: "error", cache: "no-store", signal: signal(),
     });
+  }
+
+  async function request(input: DesktopAccountSettingsInput) {
+    const res = await send(settingsRequest(input));
     if (input.action === "pinConversation") {
       accountSignal.throwIfAborted();
       if (res.status === 401) saved = undefined;
@@ -176,5 +189,33 @@ export function createAccountSettingsApi(
     accountSignal.throwIfAborted();
     return value;
   }
-  return request;
+  async function exportConversation(id: string, includeSource: boolean) {
+    const path = `/api/conversations/${encodeURIComponent(id)}/export${includeSource ? "?include=source" : ""}`;
+    const res = await send({ path }, "text/plain");
+    if (!res.ok || !res.body || res.headers.get("content-type")?.split(";")[0] !== "text/plain") {
+      if (res.status === 401) saved = undefined;
+      await res.body?.cancel().catch(() => {});
+      throw new Error("Tomverse could not download the conversation.");
+    }
+    const chunks: Uint8Array[] = [];
+    const reader = res.body.getReader();
+    let length = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > 128 * 1024 * 1024) {
+          await reader.cancel().catch(() => {});
+          throw new Error("The conversation export is too large.");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    accountSignal.throwIfAborted();
+    return Buffer.concat(chunks, length);
+  }
+  return Object.assign(request, { exportConversation });
 }

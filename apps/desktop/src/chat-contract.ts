@@ -51,6 +51,7 @@ export const chatHistoryRow = z.object({
   projectId: chatId.nullish(),
   selectedModels: z.array(z.string()).optional(),
   sourceTitle: z.string().nullish(),
+  sourceState: z.string().nullish(),
 });
 export const chatHistoryHit = z.object({
   id: z.string(),

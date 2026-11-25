@@ -107,13 +107,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     application = await electron.launch({
       executablePath, args: [desktopDir, `--user-data-dir=${profile}`, "--use-fake-device-for-media-stream"], timeout: 20_000,
     });
-    await application.evaluate(async ({ shell, clipboard }, { origin, chat }) => {
+    const exportPath = join(profile, "chat-export.txt");
+    await application.evaluate(async ({ shell, clipboard, dialog }, { origin, chat, exportPath }) => {
       const host = globalThis as typeof globalThis & {
         clips?: number; sent?: number; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
       };
       host.importRequests = [];
       host.pinWrites = [];
       clipboard.writeText = async (value) => { host.copied = value; };
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
       const newChatId = "sent-chat-fixture";
       let question = "";
       let assistantId: string | undefined;
@@ -130,6 +132,8 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       let pinState = { pinned: false, pinSeq: 0 };
       let projectName = "";
       let projectId: string | null = null;
+      let shareEnabled = false;
+      let isLocked = false;
       const keySummary = { id: "test-key", name: "Fixture key", keyPrefix: "tv_test", state: "active",
         creditCap: 400, committedCredits: 0, expiresAt: null };
       const preferences = { theme: "dark", language: "en", timeZone: "Australia/Brisbane",
@@ -165,12 +169,28 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           "/api/user/email-preferences", "/api/assistant-profiles", "/api/external-conversations", "/api/user/api-keys",
           "/api/memories", "/api/memories/memory-1", `/api/conversations/${chat.id}/pin`].includes(target.pathname)
           || target.pathname.startsWith("/api/assistant-profiles/")
+          || target.pathname === "/api/external-conversations/fixture-import"
+          || target.pathname === `/api/conversations/${chat.id}/export`
+          || target.pathname === `/api/conversations/${chat.id}/share`
           || target.pathname.startsWith("/api/projects")
           || (target.pathname === `/api/conversations/${chat.id}` && options?.method === "PATCH")
           || target.pathname.startsWith("/api/imports/external")) {
           const headers = new Headers(options?.headers);
           if (headers.get("cookie") !== "next-auth.session-token=fixture..settings.web.session" ||
               headers.get("origin") !== origin || headers.has("authorization")) throw new Error("Invalid settings credential transport");
+          if (target.pathname === `/api/conversations/${chat.id}/export`) {
+            return new Response("Exported Desktop conversation.\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+          }
+          if (target.pathname === `/api/conversations/${chat.id}/share`) {
+            if (options?.method === "POST") {
+              shareEnabled = true;
+              return Response.json({ url: "https://example.invalid/share/fixture", expiresAt: new Date().toISOString() });
+            }
+            if (options?.method === "DELETE") {
+              shareEnabled = false;
+              return Response.json({ success: true });
+            }
+          }
           if (target.pathname === "/api/projects") {
             if (options?.method === "POST") {
               projectName = JSON.parse(String(options.body)).name;
@@ -191,7 +211,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
             }
           }
           if (target.pathname === `/api/conversations/${chat.id}`) {
-            projectId = JSON.parse(String(options?.body)).projectId;
+            const body = JSON.parse(String(options?.body));
+            if (Object.hasOwn(body, "password")) {
+              if (body.password !== "FixturePass!" && (body.password !== null || body.currentPassword !== "FixturePass!")) {
+                return Response.json({ success: false }, { status: 403 });
+              }
+              isLocked = body.password !== null;
+              return Response.json({ isLocked, shareEnabled });
+            }
+            projectId = body.projectId;
             return Response.json({ projectId });
           }
           if (target.pathname === `/api/conversations/${chat.id}/pin`) {
@@ -204,12 +232,16 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
             return Response.json(pinState);
           }
           if (target.pathname.startsWith("/api/imports/external")) {
-            host.importRequests.push(target.pathname);
+            if (options?.method === "POST" || target.pathname.endsWith("/capacity")) host.importRequests.push(target.pathname);
             const body = options?.body ? JSON.parse(String(options.body)) : undefined;
             switch (target.pathname) {
               case "/api/imports/external/capacity":
-                return Response.json({ remaining: { normalizedTextBytes: 1_000_000, externalConversations: 20, externalMessages: 500 } });
+                return Response.json({ remaining: { normalizedTextBytes: 1_000_000, externalConversations: 20, externalMessages: 500 },
+                  usage: { normalizedTextBytes: 24, externalConversations: 1 },
+                  limits: { maxNormalizedTextBytes: 52_428_800, maxExternalConversations: 2000 } });
               case "/api/imports/external":
+                if (!body) return Response.json({ imports: [{ id: "fixture-run", provider: "ChatGPT", status: "completed",
+                  conversationCount: 1, createdAt: new Date().toISOString() }] });
                 if (body.provider !== "claude" || typeof body.parserVersion !== "string") throw new Error("Invalid native import");
                 return Response.json({ importId: "fixture-import-id" }, { status: 201 });
               case "/api/imports/external/fixture-import-id/batches":
@@ -279,6 +311,11 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           if (target.pathname === "/api/external-conversations") return Response.json({ total: 1, offset: 0, limit: 50,
             continuationEnabled: true, conversations: [{ id: "fixture-import", title: "Saved external conversation",
               provider: "ChatGPT", titleWithheld: false, messageCount: 3 }] });
+          if (target.pathname === "/api/external-conversations/fixture-import") return Response.json({
+            title: "Saved external conversation", offset: 0, limit: 100, messageTotal: 1,
+            messages: [{ id: "imported-fixture-message", role: "user", sourceModelLabel: null, truncated: false,
+              content: "<script>Private imported text</script>" }],
+          });
           if (target.pathname === "/api/user/api-keys") {
             if (options?.method === "POST") return Response.json({ key: "synthetic-test-key", summary: keySummary }, { status: 201 });
             return Response.json({ enabled: true, keys: [keySummary], limits: { maxKeys: 10, maxCreditCap: 10000, expiryDays: [7, 30, 90, 365] } });
@@ -364,13 +401,14 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           servers: [{ id: "github", name: "GitHub", custom: false }, { id: "custom-1", name: "Custom GitHub", custom: true }],
           connections: [{ id: "test-connection", serverId: "github", name: "GitHub", status: "connected", tools: 3, granted: 1 }],
         });
-        if (target.pathname === "/api/conversations") return Response.json([{ ...chat, ...pinState, projectId }, {
+        if (target.pathname === "/api/conversations") return Response.json([{ ...chat, ...pinState, projectId, shareEnabled, isLocked }, {
           ...chat, id: "older-shared-chat", title: "An older shared chat", updatedAt: "2025-01-01T09:00:00Z",
           shareEnabled: true, selectedModels: ["gpt-5-4-mini"],
         }]);
         if (target.pathname === `/api/conversations/${chat.id}`) return Response.json({ ...chat, messages: Array.from({ length: 48 }, (_, index) => ({
           id: `message-${index + 1}`, role: index % 2 === 0 ? "user" : "assistant", status: "normal",
-          content: `Saved transcript message ${index + 1}.` + (index === 47 ? "\n\n```python\nfor i in range(3):\n    print(i)\n```" : ""),
+          content: `Saved transcript message ${index + 1}.` + (index === 47 ? "\n\n```python\nfor i in range(3):\n    print(i)\n```"
+            : index === 46 ? "\n\nfor i in range(5):\n    print(i)" : ""),
           modelId: index === 47 ? "gpt-6-luna" : undefined, artifacts: [],
         })),
           responseAttempts: [{ assistantMessageId: "message-48", actualModelId: "gpt-5-4-mini", provider: "openai" }],
@@ -378,7 +416,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         });
         return Response.json({}, { status: 404 });
       };
-    }, { origin: authOrigin, chat: conversation });
+    }, { origin: authOrigin, chat: conversation, exportPath });
     const page = await application.firstWindow();
     const rail = page.getByRole("navigation", { name: "Workspaces" });
     const settings = rail.getByRole("button", { name: "Settings", exact: true });
@@ -426,6 +464,25 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await olderActions.click();
     const actions = page.getByLabel("Conversation actions", { exact: true });
     await actions.click();
+    await page.getByRole("button", { name: "Download (.txt)", exact: true }).click();
+    await expect.poll(() => readFile(exportPath, "utf8").catch(() => null)).toBe("Exported Desktop conversation.\n");
+    const chatMenu = page.locator(".header .chat-action-menu");
+    await chatMenu.getByRole("button", { name: "Share", exact: true }).click();
+    await expect(chatMenu.getByText("Create a read-only share page?")).toBeVisible();
+    await chatMenu.getByRole("button", { name: "Create share link", exact: true }).click();
+    await expect(chatMenu.getByRole("textbox", { name: "Share", exact: true })).toHaveValue("https://example.invalid/share/fixture");
+    await chatMenu.getByRole("button", { name: "Stop sharing", exact: true }).click();
+    await chatMenu.getByRole("button", { name: "Stop sharing", exact: true }).click();
+    await expect(chatMenu.getByRole("button", { name: "Share", exact: true })).toBeVisible();
+    const lockLabel = "Enter a password to set the lock:";
+    await chatMenu.getByRole("button", { name: "Lock Chat", exact: true }).click();
+    await chatMenu.getByLabel(lockLabel).fill("FixturePass!");
+    await chatMenu.getByRole("button", { name: "Lock Chat", exact: true }).click();
+    await expect(page.locator(".long-thread")).toHaveCount(0);
+    await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
+    await chatMenu.getByLabel(/This chat is locked/).fill("FixturePass!");
+    await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
+    await expect(page.locator(".long-thread").getByRole("listitem")).toHaveCount(48);
     await page.getByRole("button", { name: "Pin chat", exact: true }).click();
     const pinWrites = () => application!.evaluate(() => (globalThis as typeof globalThis & { pinWrites: boolean[] }).pinWrites);
     await expect.poll(pinWrites).toEqual([true]);
@@ -466,6 +523,11 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     const lastAnswer = transcript.getByRole("listitem").last();
     await expect(lastAnswer.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
     await expect(lastAnswer.locator(".hljs-keyword").first()).toHaveText("for");
+    const lastQuestion = transcript.getByRole("listitem").nth(46);
+    await expect(lastQuestion.locator(".hljs-keyword").first()).toHaveText("for");
+    await lastQuestion.getByRole("button", { name: "Copy code", exact: true }).click();
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { copied?: string }).copied),
+      "for i in range(5):\n    print(i)");
     await lastAnswer.getByRole("button", { name: "Copy code", exact: true }).click();
     assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { copied?: string }).copied),
       "for i in range(3):\n    print(i)");
@@ -582,7 +644,17 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await expect(assistants).toContainText("Renamed fixture assistant");
     await page.getByTestId("desktop-settings-data").click();
+    await page.getByRole("button", { name: "Manage imports", exact: true }).click();
     await expect(page.getByTestId("native-account-imports")).toContainText("Saved external conversation");
+    await expect(page.getByRole("region", { name: "Import storage" })).toContainText("1 of 2,000 imported conversations");
+    await expect(page.getByRole("region", { name: "Imported exports" })).toContainText("Completed");
+    await page.getByRole("button", { name: "View · Saved external conversation" }).click();
+    const nativeSource = page.getByTestId("native-import-conversation");
+    await expect(nativeSource).toContainText("<script>Private imported text</script>");
+    await expect(nativeSource.locator("script")).toHaveCount(0);
+    await nativeSource.getByRole("button", { name: "Back to imports", exact: true }).click();
+    const priorCapacityReads = await application.evaluate(() =>
+      (globalThis as typeof globalThis & { importRequests: string[] }).importRequests.length);
     await page.getByRole("button", { name: "Start a new import" }).click();
     const importDialog = page.getByRole("region", { name: "Import conversations from another AI service" });
     const rawExport = [
@@ -593,8 +665,9 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       name: "conversations.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(rawExport)),
     });
     await expect(importDialog.getByRole("heading", { name: "Choose conversations to import" })).toBeVisible();
-    assert.deepEqual(await application.evaluate(() =>
-      (globalThis as typeof globalThis & { importRequests: string[] }).importRequests), ["/api/imports/external/capacity"]);
+    const requestsBeforeSelection = await application.evaluate((_electron, from) =>
+      (globalThis as typeof globalThis & { importRequests: string[] }).importRequests.slice(from), priorCapacityReads);
+    assert.ok(requestsBeforeSelection.length > 0 && requestsBeforeSelection.every(path => path === "/api/imports/external/capacity"));
     await importDialog.getByRole("checkbox", { name: /Selected conversation/ }).check();
     await importDialog.getByRole("button", { name: "Review the selection" }).click();
     await expect(importDialog.getByRole("heading", { name: "Check what will be imported" })).toBeVisible();

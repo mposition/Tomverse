@@ -6,6 +6,7 @@ import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
+import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { solveEmailLoginChallenge } from "./login-challenge";
 import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, type DesktopLoginEmail } from "../login-contract";
@@ -2207,13 +2208,9 @@ async function runCodeBrowser(value: unknown) {
 
 let accountSettingsApi: { signal: AbortSignal; request: ReturnType<typeof createAccountSettingsApi> } | undefined;
 
-async function accountSettings(value: unknown) {
-  const input = desktopAccountSettingsInput.parse(value);
+function connectedSettingsApi() {
   const active = browserSession;
   if (!active || state.account.stage !== "connected" || signingOut || closing) throw new Error("Connect your Tomverse account first.");
-  if (input.action === "pinConversation" && input.accountScope !== state.account.draftNamespace) {
-    return { kind: "refused" } as const;
-  }
   const signal = chatSession.signal;
   if (accountSettingsApi?.signal !== signal) {
     const accountId = active.accountId;
@@ -2229,7 +2226,16 @@ async function accountSettings(value: unknown) {
       }, signal),
     };
   }
-  return accountSettingsApi.request(input);
+  return accountSettingsApi.request;
+}
+
+async function accountSettings(value: unknown) {
+  const input = desktopAccountSettingsInput.parse(value);
+  const request = connectedSettingsApi();
+  if (input.action === "pinConversation" && (state.account.stage !== "connected" || input.accountScope !== state.account.draftNamespace)) {
+    return { kind: "refused" } as const;
+  }
+  return request(input);
 }
 
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
@@ -2995,6 +3001,15 @@ function registerIpc() {
   main("chat:remove", (value) => removeChat(chatId.parse(value)));
   main("chat:models", () => withChatAccount((api) => api.models()));
   main("chat:copy-text", (value) => clipboard.writeText(z.string().min(1).max(1_000_000).parse(value)));
+  main("chat:export", (value) => {
+    const input = z.object({ id: chatId, title: z.string().max(500), includeSource: z.boolean() }).strict().parse(value);
+    const request = connectedSettingsApi();
+    return saveGeneratedFile(async () => ({
+      bytes: await request.exportConversation(input.id, input.includeSource),
+      suggestedName: sanitizeFileName(input.title) + ".txt",
+      extension: "txt",
+    }), nativeCopy().saveGenerated, "TXT");
+  });
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));

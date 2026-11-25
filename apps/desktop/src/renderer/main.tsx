@@ -797,7 +797,7 @@ function Desktop() {
         <nav aria-label="Tomverse">
           <span aria-hidden="true">Tomverse</span>
           {ACCOUNT_SETTINGS_TABS.map((tab) => <button key={tab} type="button" data-testid={`desktop-settings-${tab}`}
-            aria-current={tab === settingsView ? "page" : undefined}
+            aria-current={tab === settingsView || (importsOpen && tab === "data") ? "page" : undefined}
             onClick={() => openSettings(tab)}>{settingsCopy[tab]}</button>)}
         </nav>
         <nav aria-label="Tomverse Code">
@@ -1095,7 +1095,8 @@ function Desktop() {
             </>}
           </section>}
           {accountPanel && account?.stage === "connected" && <AccountSettings key={settingsAccount}
-            tab={accountPanel} language={language} onApply={applyAccountPreferences} onContinue={openImportedConversation} />}
+            tab={accountPanel} language={language} onApply={applyAccountPreferences} onContinue={openImportedConversation}
+            onOpenImports={() => openSettings("imports")} onBackToData={() => openSettings("data")} />}
           {account?.stage !== "connected" && settingsView === "preferences" &&
             <LocalPreferences language={language} theme={theme} setLanguage={next => void act(() => window.desktop.setLanguage(next))} setTheme={setTheme} />}
           {account?.stage !== "connected" && settingsView === "ai" && <LocalMemoryPrivacy language={language} openHistory={openCodeHistory} />}

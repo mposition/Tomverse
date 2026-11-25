@@ -325,6 +325,12 @@ pre, code { font-family: var(--font-code); }
   .desktop-review-perspectives { display: none; }
 }
 .desktop-chat-workspace { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.chat-scroll-frame { min-height: 0; flex: 1; display: flex; flex-direction: column; position: relative; }
+.chat-auto-banner { display: flex; gap: 9px; align-items: center; padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.chat-auto-banner > svg { box-sizing: content-box; padding: 6px; border-radius: 50%; background: #087d61; color: white; }
+.chat-auto-banner small { display: block; margin-top: 2px; color: var(--muted); }
+.chat-jump-latest { display: flex; align-items: center; gap: 6px; position: absolute; bottom: 14px; left: 50%; translate: -50% 0; z-index: 2;
+  width: max-content; padding: 7px 14px; border-radius: 30px; border: 1px solid var(--chat-answer-border, var(--line)); background: var(--chat-answer, var(--surface)); color: var(--text); }
 .desktop-chat-workspace[data-thread="true"] { background: var(--chat-transcript, #f8fafc); }
 :root.dark { --chat-transcript: #0b0b0d; --chat-answer: #18181b; --chat-answer-border: #2c2c31; }
 .desktop-chat-workspace[data-thread="true"] .chat-content { padding-top: 14px; }
@@ -377,12 +383,17 @@ pre, code { font-family: var(--font-code); }
 .chat-conversation-actions summary { list-style: none; }
 .chat-new-launcher { display: flex; align-items: start; gap: 3px; }
 .chat-new-image { display: grid; place-items: center; min-height: 36px; padding-inline: 12px; }
-.chat-action-menu { position: absolute; right: 0; top: calc(100% + 5px); z-index: 3; min-width: 190px; padding: 8px;
+.chat-action-menu { position: absolute; right: 0; top: calc(100% + 5px); z-index: 3; min-width: 190px; max-width: min(360px, 70vw); padding: 8px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
-.chat-action-menu > button { display: block; width: 100%; padding: 8px; text-align: left; border-radius: 6px; }
+.chat-action-menu > button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; text-align: left; border-radius: 6px; }
+.chat-action-menu > .chat-menu-delete { color: light-dark(#a81c35, #ff8a9c); }
 .chat-action-menu > button:hover { background: var(--raised); }
 .chat-action-menu form { display: grid; grid-template-columns: auto auto; gap: 6px; }
 .chat-action-menu input { grid-column: 1 / -1; min-width: 200px; }
+.chat-menu-confirmation { grid-column: 1 / -1; white-space: normal; }
+.chat-menu-confirmation p { margin: 6px 0; }
+.chat-menu-share-url { position: relative; }
+.chat-menu-share-url input { padding-inline-end: 35px; }
 .history--chat { gap: 0; padding: 0; background: var(--chat-transcript, #fafafa); }
 .history--chat .history-header { min-height: 64px; padding: 0 14px; border-bottom: 1px solid var(--chat-answer-border, var(--line)); }
 .history--chat .history-header h1 { display: flex; align-items: center; gap: 8px; }

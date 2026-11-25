@@ -100,6 +100,7 @@ if (trustedWindow) {
     removeChat: (id: string) => ipcRenderer.invoke("chat:remove", id),
     chatModels: () => ipcRenderer.invoke("chat:models"),
     copyChatText: (text: string) => ipcRenderer.invoke("chat:copy-text", text),
+    exportChat: (input) => ipcRenderer.invoke("chat:export", input),
     sendChat: (input: Parameters<DesktopApi["sendChat"]>[0]) => ipcRenderer.invoke("chat:send", input),
     stopChat: () => ipcRenderer.invoke("chat:stop"),
     subscribeChat(listener: (progress: ChatTurnProgress) => void) {

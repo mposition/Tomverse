@@ -358,6 +358,7 @@ export type DesktopApi = {
   removeChat(id: string): Promise<boolean>;
   chatModels(): Promise<ChatModel[]>;
   copyChatText(text: string): Promise<void>;
+  exportChat(input: { id: string; title: string; includeSource: boolean }): Promise<boolean>;
   sendChat(input: ChatTurnInput): Promise<ChatTurnResult>;
   stopChat(): Promise<void>;
   subscribeChat(listener: (progress: ChatTurnProgress) => void): () => void;

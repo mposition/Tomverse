@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ArrowRight, ArrowUp, ChevronDown, CodeXml, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Lock, Paperclip, Plus, Search, SlidersHorizontal, Sparkles, Square } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, CodeXml, Download, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Link2Off, Lock, Paperclip, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Square, Trash2, Unlock } from "lucide-react";
+import { autoRoutingCopy } from "../../../../lib/autoRoutingCopy";
 import { chatHelpCopy } from "../../../../components/chat/chatHelpCopy";
 import { continuationDisplayTitle } from "../../../../lib/continuationDisplayTitle";
 import { millisecondsUntilNextDay, partitionConversationRows } from "../../../../lib/conversationListGrouping";
@@ -53,6 +54,7 @@ export const sidebarCopy = { de: de.sidebar, en: en.sidebar, es: es.sidebar, fr:
   pt: pt.sidebar, zh: zh.sidebar, "zh-Hant": zhHant.sidebar };
 const importedLabel = { de: de.journey.imported, en: en.journey.imported, es: es.journey.imported, fr: fr.journey.imported,
   ko: ko.journey.imported, pt: pt.journey.imported, zh: zh.journey.imported, "zh-Hant": zhHant.journey.imported };
+const chatCopy = { de: de.chat, en: en.chat, es: es.chat, fr: fr.chat, ko: ko.chat, pt: pt.chat, zh: zh.chat, "zh-Hant": zhHant.chat };
 
 function mergeChatMessages(previous: ChatConversation["messages"], incoming: ChatConversation["messages"]) {
   const messages = new Map(previous.map((message) => [message.id, message]));
@@ -291,6 +293,17 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     }
   }
 
+  function updateConversationActions(id: string, changes: Pick<ChatHistoryRow, "isLocked" | "shareEnabled">, selection?: number) {
+    setRows(items => items.map(row => row.id === id ? { ...row, ...changes } : row));
+    setSelected(row => row?.id === id ? { ...row, ...changes } : row);
+    if (changes.isLocked) setConversation(current => current?.id === id ? null : current);
+    if (selectedRow?.id === id && selection === openVersion.current &&
+      changes.isLocked !== undefined && changes.isLocked !== selectedRow.isLocked) {
+      void open({ ...selectedRow, ...changes });
+    }
+    setRefresh(value => value + 1);
+  }
+
   function applyConversation(saved: ChatConversation) {
     if (draftScope.current === "new") {
       const unsent = readDesktopDraft(draftAccount.current, `${product}:new`);
@@ -342,7 +355,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     selected: selectedRow && { ...selectedRow, pinned: selectedPinned ?? undefined },
     conversation, language,
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
-    opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject,
+    opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject, updateConversationActions,
+    selectionVersion: () => openVersion.current,
     draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
     sending, send, live, reload: () => setRefresh((value) => value + 1) };
 }
@@ -530,27 +544,106 @@ export function chatTitle(row: ChatHistoryRow, language: Language) {
 export function ChatConversationActions({ chat, row, canModify = true }: { chat: History; row?: ChatHistoryRow; canModify?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [projectError, setProjectError] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(false);
+  const [confirming, setConfirming] = useState<"share" | "revoke" | "lock">();
+  const [password, setPassword] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
   const menu = useRef<HTMLDetailsElement>(null);
   const { language } = chat;
   const copy = desktopChatCopy[language];
+  const sidebar = sidebarCopy[language];
+  const help = chatHelpCopy[language];
   const handoff = reviewHandoffCopy[language === "zh-Hant" ? "zhHant" : language];
   const selected = row ?? chat.selected;
   if (!selected) return null;
-  return <details ref={menu} className={row ? "chat-conversation-actions chat-row-actions" : "chat-conversation-actions"}>
+  const target = selected;
+  function download(includeSource: boolean) {
+    setExporting(true);
+    setExportError(false);
+    void window.desktop.exportChat({ id: target.id, title: chatTitle(target, language), includeSource })
+      .catch(() => setExportError(true)).finally(() => setExporting(false));
+  }
+  async function runConversationAction() {
+    if (!confirming || actionBusy) return;
+    setActionBusy(true);
+    setActionError(false);
+    const selection = chat.selectionVersion();
+    try {
+      if (confirming === "lock") {
+        const result = await window.desktop.accountSettings<"changeConversationLock">({ action: "changeConversationLock", id: target.id,
+          values: target.isLocked ? { password: null, currentPassword: password } : { password } });
+        chat.updateConversationActions(target.id, result, selection);
+      } else if (confirming === "share") {
+        const { url } = await window.desktop.accountSettings<"shareConversation">({ action: "shareConversation", id: target.id });
+        chat.updateConversationActions(target.id, { shareEnabled: true });
+        setShareUrl(url);
+        await window.desktop.copyChatText(url).catch(() => {});
+      } else {
+        await window.desktop.accountSettings<"revokeConversationShare">({ action: "revokeConversationShare", id: target.id });
+        chat.updateConversationActions(target.id, { shareEnabled: false });
+        setShareUrl("");
+      }
+      setConfirming(undefined);
+    } catch {
+      setActionError(true);
+      chat.reload();
+    } finally {
+      setActionBusy(false);
+      setPassword("");
+    }
+  }
+  function prepareAction(action: NonNullable<typeof confirming>) {
+    setConfirming(action);
+    setPassword("");
+    setActionError(false);
+    setShareUrl("");
+  }
+  return <details ref={menu} className={row ? "chat-conversation-actions chat-row-actions" : "chat-conversation-actions"}
+    onToggle={event => {
+      if (!event.currentTarget.open) {
+        setConfirming(undefined);
+        setPassword("");
+        setDraft(null);
+      }
+    }}
+    onBlur={event => {
+      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+    }}
+    onKeyDown={event => {
+      if (event.key !== "Escape" || !event.currentTarget.open) return;
+      event.preventDefault();
+      event.currentTarget.open = false;
+      event.currentTarget.querySelector("summary")?.focus();
+    }}>
     <summary className="icon" aria-label={row ? `${copy.conversationActions} · ${chatTitle(row, language)}` : copy.conversationActions}>
       <Ellipsis size={row ? 15 : 18} aria-hidden="true" />
     </summary>
     <div className="chat-action-menu">
-      {draft === null ? <>
-        <button type="button" disabled={chat.writing || chat.sending} onClick={() => { void chat.togglePin(selected); }}>
-          {selected.pinned ? sidebarCopy[language].unpinChat : sidebarCopy[language].pinChat}
+      {confirming ? <form onSubmit={event => { event.preventDefault(); void runConversationAction(); }}>
+        {confirming === "share" && <div className="chat-menu-confirmation">
+          <strong>{help.shareDialogTitle}</strong><p>{help.shareDialogBody}</p><p>{help.shareDialogSnapshot}</p><p>{help.shareDialogVisibility}</p>
+        </div>}
+        {confirming === "revoke" && <p className="chat-menu-confirmation">{sidebar.revokeShareConfirm}</p>}
+        {confirming === "lock" && <label className="chat-menu-confirmation">
+          {selected.isLocked ? sidebar.askPassword : sidebar.enterPassword}
+          <input className="history-search" type="password" autoFocus value={password} autoComplete="off"
+            minLength={selected.isLocked ? 1 : 8} maxLength={128} required disabled={actionBusy}
+            onChange={event => setPassword(event.currentTarget.value)} />
+        </label>}
+        {actionError && <p role="alert" className="chat-menu-confirmation">{desktopShellCopy[language].actionFailed}</p>}
+        <button className="soft" type="button" disabled={actionBusy} onClick={() => setConfirming(undefined)}>{handoff.cancel}</button>
+        <button className="primary" type="submit" disabled={actionBusy}>
+          {confirming === "share" ? help.shareDialogConfirm : confirming === "revoke" ? sidebar.revokeShare : selected.isLocked ? sidebar.unlock : sidebar.lock}
         </button>
-        {canModify && !selected.isLocked && <><button type="button" disabled={chat.writing || chat.sending}
-          onClick={() => setDraft(chatTitle(selected, language))}>{copy.rename}</button>
-        <button type="button" disabled={chat.writing || chat.sending} onClick={() => {
-          if (menu.current) menu.current.open = false;
-          void chat.remove(selected).finally(() => menu.current?.querySelector("summary")?.focus());
-        }}>{copy.deleteConversation}</button></>}
+      </form> : draft === null ? <>
+        {canModify && !selected.isLocked && <button type="button" disabled={chat.writing || chat.sending}
+          onClick={() => setDraft(chatTitle(selected, language))}><Pencil size={15} aria-hidden="true" />{copy.rename}</button>}
+        <button type="button" disabled={chat.writing || chat.sending} onClick={() => { void chat.togglePin(selected); }}>
+          <Pin size={15} aria-hidden="true" />{selected.pinned ? sidebar.unpinChat : sidebar.pinChat}
+        </button>
         {canModify && !selected.isLocked && !!chat.projects?.length && <label className="chat-project-move">
           {sidebarCopy[language].moveToProject}
           <select aria-label={sidebarCopy[language].moveToProject} value={selected.projectId ?? ""} disabled={chat.writing || chat.sending} onChange={event => {
@@ -562,6 +655,36 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
           </select>
         </label>}
         {projectError && <p role="alert">{desktopShellCopy[language].actionFailed}</p>}
+        {selected.kind === "chat" && <>
+          <button type="button" disabled={selected.isLocked || selected.surface === "continuation" || chat.sending || actionBusy}
+            title={selected.surface === "continuation" ? sidebar.shareContinuationUnavailable : selected.isLocked ? sidebar.shareLocked : undefined}
+            onClick={() => prepareAction("share")}>
+            <Share2 size={15} aria-hidden="true" />{selected.shareEnabled ? sidebar.refreshShare : sidebar.share}
+          </button>
+          {selected.shareEnabled && <button type="button" disabled={actionBusy} onClick={() => prepareAction("revoke")}>
+            <Link2Off size={15} aria-hidden="true" />{sidebar.revokeShare}
+          </button>}
+          {shareUrl && <div className="chat-menu-share-url">
+            <input className="history-search" value={shareUrl} readOnly aria-label={sidebar.share} />
+            <CopyAnswer content={shareUrl} language={language} />
+          </div>}
+          {selected.surface === "continuation" && <button type="button"
+            disabled={exporting || selected.isLocked || selected.sourceState === "deleted"} onClick={() => download(true)}>
+            <Download size={15} aria-hidden="true" />{sidebar.downloadWithSourceTxt}
+          </button>}
+          <button type="button" disabled={exporting || selected.isLocked} onClick={() => download(false)}>
+            <Download size={15} aria-hidden="true" />{selected.surface === "continuation" ? sidebar.downloadContinuationOnlyTxt : sidebar.downloadTxt}
+          </button>
+        </>}
+        {exportError && <p role="alert">{desktopShellCopy[language].actionFailed}</p>}
+        {canModify && !selected.isLocked && <button type="button" className="chat-menu-delete" disabled={chat.writing || chat.sending} onClick={() => {
+          if (menu.current) menu.current.open = false;
+          void chat.remove(selected).finally(() => menu.current?.querySelector("summary")?.focus());
+        }}><Trash2 size={15} aria-hidden="true" />{copy.deleteConversation}</button>}
+        {canModify && <button type="button" disabled={chat.writing || chat.sending || actionBusy} onClick={() => prepareAction("lock")}>
+          {selected.isLocked ? <Unlock size={15} aria-hidden="true" /> : <Lock size={15} aria-hidden="true" />}
+          {selected.isLocked ? sidebar.unlock : sidebar.lock}
+        </button>}
       </> : <form onSubmit={(event) => {
         event.preventDefault();
         void chat.rename(draft, selected).then((saved) => {
@@ -644,6 +767,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const location = useChatDraftLocation((chat.account ?? "") + ":" + (activeId ?? "new"));
   const draftExcerpt = activeId ? undefined : handoff;
   const availableAuto = chat.conversation?.autoSelection.offered ?? (!activeId && autoOffered);
+  const autoCopy = autoRoutingCopy[language];
   const currentPicker = picker?.conversation === activeId ? picker : undefined;
   const selectedModel = models.find(({ id }) => id === (currentPicker?.id ?? chat.conversation?.selectedModels[0] ?? (!activeId ? preferredModelId : undefined)))
     ?? models.find(({ id }) => id === "gpt-6-luna") ?? models[0];
@@ -653,6 +777,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const composer = useRef<HTMLTextAreaElement>(null);
   const lastSeed = useRef<StarterSeedMemory | null>(null);
   const nearBottom = useRef(true);
+  const [showLatest, setShowLatest] = useState(false);
 
   useEffect(() => {
     if (!chatWrite) return;
@@ -693,9 +818,14 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const actualModels = new Map(chat.conversation?.responseAttempts?.flatMap(({ assistantMessageId, actualModelId, provider }) =>
     assistantMessageId && actualModelId ? [[assistantMessageId, { id: actualModelId, provider }] as const] : []));
   return <div className="desktop-chat-workspace" data-thread={Boolean(chat.conversation || chat.sending)}>
+    {chat.conversation?.selectionMode === "auto" && <div className="chat-auto-banner">
+      <Sparkles size={17} aria-hidden="true" /><div><strong>{autoCopy.label}</strong><small>{autoCopy.description}</small></div>
+    </div>}
+    <div className="chat-scroll-frame">
     <div className="scroll" ref={scroll} onScroll={(event) => {
       const pane = event.currentTarget;
       nearBottom.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 64;
+      setShowLatest(!nearBottom.current);
     }}>
     <div className="content chat-content">
       {!chat.selected && !chat.sending && <section className="welcome chat-welcome">
@@ -775,6 +905,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
       </>}
     </div>
     </div>
+    {chat.conversation && showLatest && <button type="button" className="chat-jump-latest" onClick={() => {
+      if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+    }}><ArrowDown size={14} aria-hidden="true" /> {chatCopy[language].scrollToLatest}</button>}
+    </div>
     {showComposer && <div className="composer-slot chat-composer-slot">
       {!chatWrite && <p className="chat-compose-notice" role="status">{copy.sendUnavailable}</p>}
       {modelError && <p className="notice" role="alert">{copy.modelsUnavailable}</p>}
@@ -801,7 +935,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           <details className="model-menu">
             <summary aria-label={copy.modelEffort}>
               {mode === "auto" && <Sparkles size={15} />}
-              {mode === "auto" ? "Smart Adaptive" : selectedModel?.name ?? shellCopy.model}
+              {mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
               {effortEnabled && effort !== "default" && ` · ${effortLabels[effort]}`} <ChevronDown size={15} />
             </summary>
             <div className="model-popover">
@@ -810,7 +944,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
                   id: event.currentTarget.value || selectedModel!.id,
                   mode: event.currentTarget.value ? "manual" : "auto", conversation: activeId,
                 })}>
-                {availableAuto && <option value="">Smart Adaptive</option>}
+                {availableAuto && <option value="">{autoCopy.label}</option>}
                 {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
               </select></label>
               {effortEnabled && <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={effort} disabled={chat.sending}
