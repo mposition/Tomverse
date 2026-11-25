@@ -51,7 +51,11 @@ function CodeMemorySettings({ language }: { language: Language }) {
     try { setView(await window.desktop.codeMemory(input)); setFailed(false); }
     catch { setFailed(true); }
   }
-  useEffect(() => { void run({ action: "read" }); }, []);
+  useEffect(() => {
+    let current = true;
+    window.desktop.codeMemory({ action: "read" }).then((loaded) => { if (current) setView(loaded); }, () => { if (current) setFailed(true); });
+    return () => { current = false; };
+  }, []);
   const entries = view?.entries ?? [];
   return <>
     <SettingRow field="code-memory" label={copy.memory} detail={copy.memoryDetail} control={

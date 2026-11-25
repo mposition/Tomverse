@@ -2,7 +2,7 @@
 import { viewChanges } from "./changes.js";
 import { Journal, type JournalIo, type SessionState } from "./session.js";
 import { Gateway, type Receipt, type CatalogModel } from "./gateway.js";
-import { Workspace, normalizeRoot, same } from "./workspace.js";
+import { normalizeRoot, same } from "./workspace.js";
 import { catalogProviderFor } from "./transmission.js";
 import type { Endpoint } from "./config.js";
 export { Runner, SMART_ADAPTIVE, EXIT_CODES, VIEW_IMAGE_MARK } from "./agent.js";

@@ -266,7 +266,3 @@ export class BackgroundCommands {
         this.exitHook = null;
     }
 }
-
-/** One line for a task's history and the model: what a background command is doing. */
-export const describeBackground = (info: BackgroundInfo) =>
-    `${info.handle} ${info.state}${info.state !== "running" ? ` (exit ${info.exitCode ?? "?"}${info.signal ? `, ${info.signal}` : ""})` : ""}: ${info.display}`;

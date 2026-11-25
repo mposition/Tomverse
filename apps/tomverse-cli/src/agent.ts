@@ -505,7 +505,8 @@ export class Runner {
     /** The tools this model is offered: view_image only for a model whose catalogue entry says it takes images. */
     private toolsFor(model: CatalogModel): ToolSet {
         if (model.vision || !this.tools.view_image) return this.tools;
-        const { view_image: _withheld, ...rest } = this.tools;
+        const rest = { ...this.tools };
+        delete rest.view_image;
         return rest;
     }
 

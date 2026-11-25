@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- wire-format fixtures: request bodies are arbitrary JSON */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import test from "node:test";
 import { MEMORY_ENTRY_CHARS, MEMORY_MAX_ENTRIES, MEMORY_TOTAL_CHARS, ProjectMemory, looksLikeCredential, memoryFileFor } from "../src/memory.js";
 import { requestTransmission } from "../src/transmission.js";
