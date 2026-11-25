@@ -90,7 +90,6 @@ if (trustedWindow) {
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),
-    openWeb: (destination: Parameters<DesktopApi["openWeb"]>[0]) => ipcRenderer.invoke("desktop:web", destination),
     accountSettings: (input: Parameters<DesktopApi["accountSettings"]>[0]) =>
       ipcRenderer.invoke("desktop:account-settings", input),
     accountData: (input: Parameters<DesktopApi["accountData"]>[0]) => ipcRenderer.invoke("desktop:account-data", input),

@@ -40,7 +40,7 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
@@ -114,7 +114,6 @@ const unsafeSwitches = [
   "remote-debugging-address",
   "no-sandbox", "disable-setuid-sandbox", "disable-web-security", "allow-running-insecure-content", "ignore-certificate-errors",
 ];
-const webPaths = { review: "/review", image: "/studio" } as const;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 declare const DESKTOP_PACKAGED_TASK_QA: boolean;
 declare const DESKTOP_LOCAL_DEV_PACKAGE: boolean;
@@ -3271,7 +3270,6 @@ function registerIpc() {
   main("desktop:export-diagnostics", exportDiagnostics);
   main("desktop:copy-diagnostics", copyDiagnostics);
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));
-  main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
   main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
   main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));

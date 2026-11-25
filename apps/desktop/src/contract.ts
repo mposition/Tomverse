@@ -117,12 +117,10 @@ export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
 }).strict();
-export const webDestination = z.enum(["review", "image"]);
 export type StartInput = z.infer<typeof startInput>;
 export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
 export type Decision = z.infer<typeof decisions>;
-export type WebDestination = z.infer<typeof webDestination>;
 export type Model = { id: string; name: string; provider: string; efforts: string[] };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
@@ -405,7 +403,6 @@ export type DesktopApi = {
   checkRecovery(id: string): Promise<RecoveryResult>;
   exportDiagnostics(): Promise<boolean>;
   copyDiagnostics(): Promise<boolean>;
-  openWeb(destination: WebDestination): Promise<void>;
   accountSettings<Action extends AccountSettingsAction>(
     input: Extract<DesktopAccountSettingsInput, { action: Action }>,
   ): Promise<AccountSettingsResult<Action>>;

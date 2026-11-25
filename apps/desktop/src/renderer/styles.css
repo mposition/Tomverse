@@ -491,7 +491,6 @@ dialog.desktop-review-analysis::backdrop { background: transparent; }
 .chat-project-form input { width: 100%; margin-block: 6px; }
 .chat-project-move { display: grid; gap: 4px; padding: 8px; }
 .chat-project-move select { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
-.web-launcher { display: flex; align-items: start; gap: 4px; }
 .project-picker { margin-top: 16px; display: flex; align-items: center; gap: 16px; color: var(--muted); }
 .thread { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .long-thread > li:not(:focus-within) { content-visibility: auto; contain-intrinsic-block-size: auto 84px; }
@@ -602,7 +601,7 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
   .history .resize { display: none; }
   .header { padding-inline: 8px; }
   .header-tools { gap: 2px; min-width: 0; }
-  .project-picker, .web-launcher { flex-wrap: wrap; }
+  .project-picker { flex-wrap: wrap; }
   .code-retention { white-space: normal; }
 }
 @container code-column (max-width: 760px) {

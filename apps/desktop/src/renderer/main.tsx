@@ -1190,16 +1190,12 @@ function Desktop() {
             </button>
           </section>}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
-          ? <ConnectorWorkspace key={account.label} language={language} /> : <section className="welcome">
+          ? <ConnectorWorkspace key={account.label} language={language} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
           <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>
-            : surface !== "chat" && <p>{copy.webFallback}</p>}
+            : surface !== "chat" && <p>{copy.unavailable}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}
-          <div className="web-launcher">
-            {surface === "plugins" ? account?.stage !== "connected" && <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
-              : surface === "chat" || surface === "settings" ? <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
-              : <button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb(surface))}>
-                <ExternalLink size={16} /> {copy.openSurface.replace("{surface}", () => names[surface])}</button>}
-          </div>
+          {(surface === "chat" || surface === "settings" || account?.stage !== "connected") &&
+            <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>}
         </section>}
         {alertText && <p className="notice" role="alert">{alertText}</p>}
       </div></div>}

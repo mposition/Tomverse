@@ -973,7 +973,8 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
       };
     });
     assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.approvalHost]), ["undefined", "undefined"]);
-    await assert.rejects(page.evaluate(() => window.desktop.openWeb("https://example.invalid" as "review")));
+    // Desktop no longer offers a way to send a workspace to the web: the bridge has no such call.
+    assert.equal(await page.evaluate(() => typeof (window.desktop as unknown as { openWeb?: unknown }).openWeb), "undefined");
     assert.equal(await page.evaluate(() => typeof window.open("https://example.invalid")?.document), "undefined");
 
     const frame = "desktop-frame-probe";
@@ -1001,7 +1002,10 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await tools.getByRole("button", { name: "Chat", exact: true }).click();
     await expect(page.getByRole("button", { name: "Open Chat", exact: true })).toHaveCount(0);
     await tools.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "Open Review", exact: true }).click();
+    const unavailable = page.getByTestId("desktop-surface-unavailable");
+    await expect(unavailable.getByText("This feature isn’t available right now.", { exact: true })).toBeVisible();
+    await expect(unavailable.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open Review", exact: true })).toHaveCount(0);
     await tools.getByRole("button", { name: "Plugins", exact: true }).click();
     // Plugins stay inside Desktop: there is no web launcher for them.
     await expect(page.getByRole("button", { name: "Open Plugins", exact: true })).toHaveCount(0);
@@ -1017,9 +1021,7 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await page.getByRole("button", { name: "Manage history", exact: true }).click();
     await expect(page.getByRole("heading", { name: "What shall we build?" })).toBeVisible();
     assert.deepEqual(await application.evaluate(() =>
-      (globalThis as typeof globalThis & { desktopDestinations: string[] }).desktopDestinations), [
-      "https://tomverse.app/review",
-    ]);
+      (globalThis as typeof globalThis & { desktopDestinations: string[] }).desktopDestinations), []);
     assert.equal(await tools.getByRole("button", { name: "Image", exact: true }).count(), 0);
     await application.evaluate(({ BrowserWindow }) => {
       const state = globalThis as typeof globalThis & { desktopBlockedNavigation?: boolean };
