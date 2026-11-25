@@ -217,8 +217,9 @@ export type CheckoutOutcome = CheckoutReturn | "closed";
 export type CheckoutPurpose = "subscription" | "credits";
 
 /**
- * What the return URL says happened. A hint for the wording only: whether a payment
- * went through is decided from the account the server reports afterwards.
+ * What the return URL says happened. A hint for the wording only, in either direction:
+ * a cancel page does not shorten or end the account check, and whether a payment went
+ * through is decided from the account the server reports afterwards.
  */
 export function checkoutReturnOutcome(value: string): CheckoutReturn {
   let target: URL;
@@ -249,4 +250,50 @@ export function purchaseConfirmed(
     return after.plan === tier && before.plan !== tier;
   }
   return after.balances.purchasedRemainingCredits > before.balances.purchasedRemainingCredits;
+}
+
+/** The account reads after a checkout window ends, however it ended. */
+export const PURCHASE_CHECK_ATTEMPTS = 5;
+export const PURCHASE_CHECK_INTERVAL_MS = 2_500;
+
+export type PurchaseCheck = "confirmed" | "unconfirmed" | "superseded";
+
+/**
+ * Reads the account until it shows the purchase or the attempts run out. A success page,
+ * a cancel page and a window the customer closed all get the same reads: the window's
+ * address is not evidence either way, so a payment the server records late still ends
+ * here as confirmed. A failed read counts as "not shown yet". "unconfirmed" means only
+ * that these reads did not show the purchase, never that nothing was paid.
+ */
+export async function readUntilConfirmed(input: {
+  intent: PurchaseIntent;
+  before: Pick<BillingUsage, "plan" | "balances">;
+  read: () => Promise<BillingUsage | null>;
+  attempts: number;
+  /** False once a newer check or purchase has taken over; the result is then dropped. */
+  current: () => boolean;
+  onRead?: (usage: BillingUsage) => void;
+  wait?: (ms: number) => Promise<void>;
+}): Promise<PurchaseCheck> {
+  const wait = input.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < input.attempts; attempt++) {
+    if (attempt) await wait(PURCHASE_CHECK_INTERVAL_MS);
+    if (!input.current()) return "superseded";
+    const after = await input.read().catch(() => null);
+    if (!input.current()) return "superseded";
+    if (!after) continue;
+    input.onRead?.(after);
+    if (purchaseConfirmed(input.intent, input.before, after)) return "confirmed";
+  }
+  return "unconfirmed";
+}
+
+/**
+ * Whether a new checkout would buy again what an unconfirmed payment may already have
+ * bought. An account holds one subscription, so any subscription checkout repeats an
+ * unconfirmed subscription; a credit pack repeats the same pack.
+ */
+export function repeatsPurchase(unconfirmed: PurchaseIntent, next: PurchaseIntent): boolean {
+  return unconfirmed.kind === "subscription" ? next.kind === "subscription"
+    : next.kind === "credits" && next.packId === unconfirmed.packId;
 }

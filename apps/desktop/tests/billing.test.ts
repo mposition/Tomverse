@@ -5,7 +5,8 @@ import { billingRequest, createBillingApi } from "../src/host/billing-api";
 import { readDesktopCapabilities } from "../src/host/desktop-capabilities";
 import {
   checkoutReturnOutcome, classifyCheckoutNavigation, desktopBillingInput, desktopBillingResponse, isTomverseUrl, purchaseConfirmed,
-  stripeCheckoutUrl, type CheckoutPurpose,
+  PURCHASE_CHECK_ATTEMPTS, PURCHASE_CHECK_INTERVAL_MS, readUntilConfirmed, repeatsPurchase, stripeCheckoutUrl, type BillingUsage,
+  type CheckoutPurpose,
 } from "../src/billing-contract";
 
 const origin = "https://tomverse.example";
@@ -144,6 +145,63 @@ test("a purchase counts as done only when the account the server reports shows i
   assert.equal(purchaseConfirmed({ kind: "subscription", planId: "max" }, usage("Max", 0), usage("Max", 0)), false);
   assert.equal(purchaseConfirmed({ kind: "credits", packId: "starter_500" }, usage("Pro", 100), usage("Pro", 100)), false);
   assert.equal(purchaseConfirmed({ kind: "credits", packId: "starter_500" }, usage("Pro", 100), usage("Pro", 600)), true);
+});
+
+test("a cancel page does not end the account check: a payment recorded late still ends confirmed", async () => {
+  const account = (plan: "Free" | "Pro" | "Max", purchased: number): BillingUsage => desktopBillingResponse.usage.parse(usage(plan, purchased));
+  const waits: number[] = [];
+  const wait = async (ms: number) => { waits.push(ms); };
+  const credits = { kind: "credits", packId: "starter_500" } as const;
+  // The window came back on the cancel page; the server records the payment by the third read.
+  const answers = [account("Pro", 100), null, account("Pro", 600), account("Pro", 600)];
+  let reads = 0;
+  const seen: number[] = [];
+  assert.equal(await readUntilConfirmed({ intent: credits, before: account("Pro", 100), attempts: PURCHASE_CHECK_ATTEMPTS,
+    current: () => true, wait, read: async () => answers[reads++] ?? null,
+    onRead: (after) => seen.push(after.balances.purchasedRemainingCredits) }), "confirmed");
+  assert.equal(reads, 3);
+  assert.deepEqual(seen, [100, 600]);
+  assert.deepEqual(waits, [PURCHASE_CHECK_INTERVAL_MS, PURCHASE_CHECK_INTERVAL_MS]);
+  assert.equal(PURCHASE_CHECK_ATTEMPTS, 5);
+  assert.equal(PURCHASE_CHECK_INTERVAL_MS, 2_500);
+
+  // A subscription paid late reads the same way.
+  reads = 0;
+  const plans = [account("Free", 0), account("Free", 0), account("Free", 0), account("Pro", 0)];
+  assert.equal(await readUntilConfirmed({ intent: { kind: "subscription", planId: "pro" }, before: account("Free", 0),
+    attempts: PURCHASE_CHECK_ATTEMPTS, current: () => true, wait, read: async () => plans[reads++] ?? null }), "confirmed");
+  assert.equal(reads, 4);
+});
+
+test("an account that never shows the purchase is unconfirmed only after every read, and failed reads count as not shown", async () => {
+  const account = (purchased: number): BillingUsage => desktopBillingResponse.usage.parse(usage("Pro", purchased));
+  const credits = { kind: "credits", packId: "starter_500" } as const;
+  let reads = 0;
+  assert.equal(await readUntilConfirmed({ intent: credits, before: account(100), attempts: PURCHASE_CHECK_ATTEMPTS, current: () => true,
+    wait: async () => {}, read: async () => { reads++; if (reads % 2) throw new TypeError("fetch failed"); return account(100); } }),
+  "unconfirmed");
+  assert.equal(reads, PURCHASE_CHECK_ATTEMPTS);
+
+  // A newer check or purchase takes over: the older one reports nothing.
+  let live = true;
+  reads = 0;
+  assert.equal(await readUntilConfirmed({ intent: credits, before: account(100), attempts: PURCHASE_CHECK_ATTEMPTS, current: () => live,
+    wait: async () => {}, read: async () => { reads++; live = false; return account(600); } }), "superseded");
+  assert.equal(reads, 1);
+});
+
+test("a new checkout repeats an unconfirmed one for any subscription and for the same credit pack", () => {
+  const pro = { kind: "subscription", planId: "pro" } as const;
+  const max = { kind: "subscription", planId: "max" } as const;
+  const starter = { kind: "credits", packId: "starter_500" } as const;
+  const project = { kind: "credits", packId: "project_1500" } as const;
+  assert.equal(repeatsPurchase(pro, pro), true);
+  // One account holds one subscription: a different plan would still be a second subscription.
+  assert.equal(repeatsPurchase(pro, max), true);
+  assert.equal(repeatsPurchase(pro, starter), false);
+  assert.equal(repeatsPurchase(starter, starter), true);
+  assert.equal(repeatsPurchase(starter, project), false);
+  assert.equal(repeatsPurchase(starter, pro), false);
 });
 
 test("server responses are parsed to the fields the screen uses", () => {

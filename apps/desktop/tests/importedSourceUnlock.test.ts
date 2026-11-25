@@ -140,6 +140,13 @@ test("a lock that was removed meanwhile reads normally, and a stale grant falls 
   assert.deepEqual(await removed.unlock.unlock("c1", "pw-123456"), { status: "unlocked" });
   assert.equal(removed.unlock.held(), 0);
 
+  const removedRead = harness((call) => call.url.pathname === verifyPath("ext1")
+    ? Response.json({ success: false, error: "This conversation is not locked." }, { status: 400 }) : Response.json(availableBody));
+  await removedRead.unlock.read({ id: "c1" }, async () => lockedWire("ext1"));
+  assert.deepEqual(await removedRead.unlock.unlock("c1", "pw-123456"), { status: "unlocked" });
+  assert.deepEqual(await removedRead.unlock.read({ id: "c1" }, async () => chatImportedSourceWire.parse(availableBody)),
+    chatImportedSource.parse(availableBody));
+
   const stale = harness((call) => call.url.pathname === verifyPath("ext1") ? unlockedResponse("ext1")
     : Response.json(lockedWire("ext1")));
   await stale.unlock.read({ id: "c1" }, async () => lockedWire("ext1"));
@@ -150,6 +157,44 @@ test("a lock that was removed meanwhile reads normally, and a stale grant falls 
   assert.equal(bearerReads, 1);
   assert.equal(page.source.status, "locked");
   assert.equal(stale.unlock.held(), 0, "a grant the server no longer honours is dropped");
+});
+
+test("a 400 that is not the server's own \"not locked\" answer is a failure, not an unlock", async () => {
+  const notLocked = "This conversation is not locked.";
+  const bad: Array<[string, () => Response]> = [
+    // The route's own other 400s carry a code.
+    ["a malformed request body", () => Response.json({ error: "Invalid request payload.", code: "INVALID_REQUEST" }, { status: 400 })],
+    ["unreadable JSON", () => Response.json({ error: "Invalid JSON request.", code: "INVALID_JSON" }, { status: 400 })],
+    ["a lock error", () => Response.json({ success: false, error: "Password must be between 4 and 128 characters.",
+      code: "INVALID_LOCK_PASSWORD" }, { status: 400 })],
+    // A differently shaped answer, even with the same words, is not the route's.
+    ["the words with a code added", () => Response.json({ success: false, error: notLocked, code: "INVALID_REQUEST" }, { status: 400 })],
+    ["the words without success: false", () => Response.json({ error: notLocked }, { status: 400 })],
+    ["success: true", () => Response.json({ success: true, error: notLocked }, { status: 400 })],
+    ["another message", () => Response.json({ success: false, error: "Bad request" }, { status: 400 })],
+    ["an empty object", () => Response.json({}, { status: 400 })],
+    ["a JSON array", () => Response.json([notLocked], { status: 400 })],
+    ["a JSON string", () => Response.json(notLocked, { status: 400 })],
+    // A proxy or gateway in front of the server answers in its own format.
+    ["a proxy's HTML page", () => new Response("<html><body><h1>400 Bad Request</h1></body></html>",
+      { status: 400, headers: { "Content-Type": "text/html" } })],
+    ["plain text with the same words", () => new Response(notLocked, { status: 400, headers: { "Content-Type": "text/plain" } })],
+    ["the JSON body labelled as text", () => new Response(JSON.stringify({ success: false, error: notLocked }),
+      { status: 400, headers: { "Content-Type": "text/plain" } })],
+    ["broken JSON", () => new Response("{\"success\": false, \"error\": ", { status: 400, headers: { "Content-Type": "application/json" } })],
+    ["no body", () => new Response(null, { status: 400 })],
+  ];
+  for (const [label, response] of bad) {
+    const { unlock } = harness(() => response());
+    await unlock.read({ id: "c1" }, async () => lockedWire("ext1"));
+    assert.deepEqual(await unlock.unlock("c1", "pw-123456"), { status: "failed" }, label);
+    assert.equal(unlock.held(), 0, label);
+  }
+  // The server's own answer, exactly as the route sends it, is the one 400 that means the lock is gone.
+  const { unlock } = harness(() => Response.json({ success: false, error: notLocked }, { status: 400 }));
+  await unlock.read({ id: "c1" }, async () => lockedWire("ext1"));
+  assert.deepEqual(await unlock.unlock("c1", "pw-123456"), { status: "unlocked" });
+  assert.equal(unlock.held(), 0);
 });
 
 test("signing out or switching account discards every grant", async () => {

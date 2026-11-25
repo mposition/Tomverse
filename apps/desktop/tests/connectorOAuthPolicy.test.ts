@@ -19,7 +19,7 @@ test("Google sign-in is reported as unavailable instead of being opened or redir
   assert.deepEqual(oauthStartTarget("https://accounts.google.com/o/oauth2/v2/auth?client_id=1"), { ok: false, kind: "unsupported", host: "accounts.google.com" });
 });
 
-test("only a public https provider page opens in the sign-in window", () => {
+test("only an https provider page on a public-looking name opens in the sign-in window", () => {
   const ok = oauthStartTarget("https://github.com/login/oauth/authorize?client_id=1&state=" + state);
   assert.equal(ok.ok && ok.url.host, "github.com");
   for (const value of ["http://github.com/login", "https://user:pass@github.com/login", "https://127.0.0.1/login", "https://localhost/login",
@@ -42,7 +42,7 @@ test("the Tomverse callback is recognised by origin, path and parameter shape", 
   assert.deepEqual(classifyOAuthNavigation(`${account}/api/mcp/oauth/callback?state=${state}&code=${"c".repeat(4_097)}`, account), { kind: "denied" });
 });
 
-test("the window never loads a Tomverse page, an insecure page or a local address", () => {
+test("the window's navigation rule refuses a Tomverse page, an insecure page and a local name or address literal", () => {
   for (const value of [`${account}/plugins?oauth=connected`, `${account}/api/auth/session`, `${account}/api/mcp/connections`,
     `${account}/api/mcp/oauth/callback/../session?state=${state}&code=x`, `${account}/`, "http://github.com/login", "https://127.0.0.1:3000/x",
     "https://localhost/x", "https://user:pw@github.com/x", "data:text/html,hi", "about:blank", "not a url"]) {

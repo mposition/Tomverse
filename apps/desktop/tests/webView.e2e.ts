@@ -47,6 +47,48 @@ test("An external link opens in the isolated link view with its host, a copy but
   }
 });
 
+test("A public-looking name that resolves to loopback, or does not resolve, is cancelled before it is loaded", { timeout: 60_000 }, async () => {
+  const profile = await mkdtemp(join(tmpdir(), "tomverse-web-view-dns-"));
+  let application: ElectronApplication | undefined;
+  type Host = typeof globalThis & { lookups: string[]; failures: Array<{ code: number; url: string }> };
+  try {
+    await writeFile(join(profile, "language.txt"), "en");
+    application = await electron.launch({ executablePath, args: [desktopDir, `--user-data-dir=${profile}`], timeout: 20_000 });
+    const page = await application.firstWindow();
+    await application.evaluate(({ app }) => {
+      const host = globalThis as Host;
+      host.lookups = [];
+      host.failures = [];
+      // A stand-in for DNS in the link view's own session; no lookup or connection leaves the machine.
+      app.on("session-created", (created) => {
+        created.resolveHost = async (name) => {
+          host.lookups.push(name);
+          if (name === "rebind.example.com") return { endpoints: [{ address: "127.0.0.1", family: "ipv4" }] };
+          throw new Error("ERR_NAME_NOT_RESOLVED");
+        };
+      });
+      app.on("web-contents-created", (_event, contents) => {
+        contents.on("did-fail-load", (_failure, code, _description, url, mainFrame) => { if (mainFrame) host.failures.push({ code, url }); });
+      });
+    });
+    const viewer = page.getByTestId("desktop-web-view");
+    const seen = () => application!.evaluate(() => ({ lookups: (globalThis as Host).lookups, failures: (globalThis as Host).failures }));
+    for (const url of ["https://rebind.example.com/start", "https://unresolved.example.com/start"]) {
+      await page.evaluate((target) => window.desktop.webView({ type: "open-link", url: target }), url);
+      await expect(viewer).toHaveAttribute("data-kind", "link");
+      await expect(viewer.getByRole("alert")).toContainText("This page could not be loaded.");
+      // -20 is ERR_BLOCKED_BY_CLIENT: the session's request filter cancelled the navigation after the lookup.
+      await expect.poll(async () => (await seen()).failures.filter((failure) => failure.url === url)).toEqual([{ code: -20, url }]);
+    }
+    assert.deepEqual((await seen()).lookups, ["rebind.example.com", "unresolved.example.com"]);
+    await viewer.getByTestId("desktop-web-view-close").click();
+    await expect(viewer).toHaveCount(0);
+  } finally {
+    await application?.close();
+    await rm(profile, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 test("A link in a Code answer opens in the link view instead of doing nothing", { timeout: 60_000 }, async (context) => {
   const tmp = await mkdtemp(join(tmpdir(), "tomverse-web-view-code-"));
   context.after(() => rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
