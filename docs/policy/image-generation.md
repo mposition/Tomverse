@@ -582,10 +582,19 @@ High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
 판매가는 20크레딧이다: (10,000 + 프롬프트 예산 5,000) / 20 = 750µUSD/크레딧, 하한 17크레딧.
 반환된 PNG가 1024×1024이고 알파 채널이 있을 때만 결과로 받는다.
 이 도구는 `IMAGE_MODEL_REGISTRY`에 넣지 않는다(`IMAGE_PHOTO_TOOLS`). 그래서 Chat의 모델 선택,
-자동 라우팅, 비교, Admin 카탈로그에 나오지 않고, 사진이 없는 요청은 예약 전에 거절한다.
-가격 검사(`check:image-pricing`)는 사진 도구도 함께 본다. 기본값은 꺼짐이며, 켜기 전에 dev에서
-한 번 호출해 응답의 `image.b64_json` 필드, 출력 크기, 보고 단위(10)를 확인한다. 이 세 가지는
-문서로만 확인했고 실측하지 않았다.
+자동 라우팅, 비교, Admin 카탈로그에 나오지 않는다. 목록에서 빠진 것은 입장 검사가 아니므로,
+생성 서비스는 이 도구를 소유한 기능(Studio 투명 PNG)이 서버에서 지정한 요청만 받고, 클라이언트가
+보낸 모델 ID로는 사진이 있어도 거절한다. 가격 검사(`check:image-pricing`)는 사진 도구도 함께 본다.
+기본값은 꺼짐이다.
+2026-11-26 dev 토큰으로 합성 사진 9장을 실측했다(운영자 요청, 합계 US$0.09). 모든 응답이
+`image.b64_json`에 1024×1024 알파 채널 PNG를 담았고 10단위를 보고했으며, 불투명 영역의 픽셀은
+입력과 같았다. 응답 시간은 장당 2~5초였다.
+같은 사진으로 Bria RMBG 3.0(fal `bria/rmbg-3`, 장당 US$0.018)과 비교했다. 일반 피사체는 차이가
+없었고, 역광 곱슬머리에서는 Bria가 배경의 밝은 색을 머리카락 가장자리에 남겼다. Bria는 주 피사체
+하나만 남기고(머그잔 옆 운동화, 유리잔 받침 제거) Recraft는 앞쪽 물건을 함께 남겼다. 가격과 응답
+시간, 가장자리 품질을 근거로 Recraft를 유지한다.
+공급자가 보고한 비용이 판매 시점의 원가보다 크면 초과분을 공급자 예산에 더 청구한다
+(`reportedEditOverageMicroUsd`). 보고 비용이 있는 다른 편집 경로에도 같은 규칙이 적용된다.
 [Recraft 배경 제거 API](https://www.recraft.ai/docs/api-reference/tools/remove-background) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이

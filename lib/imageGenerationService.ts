@@ -173,6 +173,23 @@ const promptCostMicroUsd = (inputTokens: number) =>
   );
 
 /**
+ * What a provider-reported request cost adds past what an edit was priced at
+ * (output plus photo). 0 when nothing is reported, the report is within the
+ * price, or the job is not an edit. The provider budget is charged this, so a
+ * provider price that moved under a fixed option still drains the budget the
+ * money leaves from.
+ */
+export const reportedEditOverageMicroUsd = (
+  snapshotOutputCost: number | null,
+  editBudget: unknown,
+  reportedCostMicroUsd: number | null | undefined
+): number =>
+  snapshotOutputCost !== null && typeof editBudget === "number" &&
+  typeof reportedCostMicroUsd === "number" && Number.isFinite(reportedCostMicroUsd)
+    ? Math.max(0, reportedCostMicroUsd - (snapshotOutputCost + editBudget))
+    : 0;
+
+/**
  * What an edit's photo settles at, from the rate and budget its reservation
  * recorded -- never the live constants, which a deploy may have moved since.
  * 0 for a generation; the budget for a photo billed per edit (no rate); the
@@ -1793,19 +1810,15 @@ export const processImageGeneration = async (
       // edit reserved for output and photo together.
       const editBudget = (reservation.pricingSnapshot as { edit?: { inputBudgetMicroUsd?: unknown } } | null)
         ?.edit?.inputBudgetMicroUsd;
-      if (
-        typeof editBudget === "number" &&
-        snapshotOutputCost !== null &&
-        typeof result.reportedCostMicroUsd === "number" &&
-        result.reportedCostMicroUsd > snapshotOutputCost + editBudget
-      ) {
+      const reportedOverage = reportedEditOverageMicroUsd(snapshotOutputCost, editBudget, result.reportedCostMicroUsd);
+      if (reportedOverage > 0) {
         console.error(
           JSON.stringify({
             event: "image_edit_input_over_budget",
             generationId,
             modelId: generation.modelId,
             reportedCostMicroUsd: result.reportedCostMicroUsd,
-            reservedMicroUsd: snapshotOutputCost + editBudget,
+            reservedMicroUsd: (result.reportedCostMicroUsd as number) - reportedOverage,
             timestamp: new Date().toISOString(),
           })
         );
@@ -1826,6 +1839,8 @@ export const processImageGeneration = async (
           ? Number(reservation.reservedCostMicroUsd)
           : snapshotOutputCost +
             extraImageCost +
+            // Reported past the price: the provider budget sees what was actually billed.
+            reportedOverage +
             promptCostMicroUsd(result.inputTokens) +
             editInputCost +
             thinkingCost;
