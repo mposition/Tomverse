@@ -78,6 +78,7 @@ test("the transport refuses routes outside the workspace and forgets a rejected 
   await assert.rejects(transport("/api/admin/users"), /not a project workspace route/);
   await assert.rejects(transport("/api/conversations/c_1/export"), /not a project workspace route/);
   await assert.rejects(transport("/api/conversations"), /not a project workspace route/);
+  await assert.rejects(transport("/api/projects/p_1/../../admin/users"), /not a project workspace route/);
   assert.equal((await transport("/api/projects")).status, 401);
   assert.equal(settings.forgotten, 1);
 });

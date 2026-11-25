@@ -11,6 +11,7 @@ import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createProjectActions } from "./project-host";
+import { createResearchActions } from "./research-host";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { solveEmailLoginChallenge } from "./login-challenge";
@@ -3118,6 +3119,8 @@ function registerIpc() {
   main("desktop:account-settings", accountSettings);
   main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,
     window: () => mainWindow, language: () => state.language ?? "en", saveFile: saveGeneratedFile, saveTitle: () => nativeCopy().saveGenerated }));
+  main("desktop:research", createResearchActions({ settings: connectedSettingsApi, withChat: (action) => withChatAccount(action, "chat"),
+    saveFile: saveGeneratedFile, saveTitle: () => nativeCopy().saveGenerated }));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

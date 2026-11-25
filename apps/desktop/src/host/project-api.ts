@@ -33,7 +33,7 @@ export type ProjectIo = {
 /** Account-session transport for the shared client. Anything outside the workspace routes is refused. */
 export function projectTransport(settings: Pick<AccountSettingsApi, "send" | "forget">): ApiFetch {
   return async (path, init) => {
-    if (!WORKSPACE_PATH.test(path)) throw new Error("This path is not a project workspace route.");
+    if (!WORKSPACE_PATH.test(path) || path.includes("..")) throw new Error("This path is not a project workspace route.");
     const method = (init?.method ?? "GET") as "GET" | "POST" | "PATCH" | "DELETE";
     const body = typeof init?.body === "string" ? JSON.parse(init.body) as object : undefined;
     const response = await settings.send({ path, method, body });

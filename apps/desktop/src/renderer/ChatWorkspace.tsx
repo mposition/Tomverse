@@ -39,6 +39,7 @@ import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type Desktop
 import { GeneratedFiles } from "./GeneratedFiles";
 import { ProjectComposerBar, ProjectWorkspace } from "./ProjectWorkspace";
 import { MessageProjectSaves } from "./ProjectSaveToProject";
+import { useChatResearch } from "./ResearchEngine";
 import type { ProjectWorkspaceRoute } from "../../../../lib/projectWorkspaceRoute";
 import type { ProjectConversationRow } from "../../../../packages/api-client/src/projectWorkspace";
 import { projectWorkspaceCopy } from "../../../../locales/projectWorkspace";
@@ -337,6 +338,17 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setRefresh(value => value + 1);
   }
 
+  /** Reads a conversation again and shows it; with onlyIfOpen, only when it is still the open one. */
+  async function showConversation(id: string, onlyIfOpen = false) {
+    if (onlyIfOpen && draftScope.current !== id) return;
+    try {
+      const item = await window.desktop.chatConversation({ id, product });
+      if (!onlyIfOpen || draftScope.current === id) applyConversation(item);
+    } catch {
+      setRefresh(value => value + 1);
+    }
+  }
+
   /** A new chat whose first turn creates the conversation inside the project. */
   async function openProjectChat(project: { id: string; name: string }) {
     setProjectRoute(null);
@@ -448,7 +460,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     conversation: selectedRow?.isLocked ? null : conversation, language,
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
     opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject, updateConversationActions,
-    projectRoute, setProjectRoute, newChatProject, openProjectChat, openConversationRow,
+    projectRoute, setProjectRoute, newChatProject, openProjectChat, openConversationRow, showConversation,
     withConversationWrite, draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
     sending, send, live: selectedRow?.isLocked ? null : live, reload: () => setRefresh((value) => value + 1) };
 }
@@ -891,6 +903,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     ?? eligible.find(({ id }) => id === "gpt-6-luna") ?? eligible[0];
   const mode = availableAuto ? currentPicker?.mode ?? chat.conversation?.selectionMode ?? "auto" : "manual";
   const effortEnabled = models.some((model) => model.reasoningEfforts !== undefined);
+  const research = useChatResearch({ account: chat.account, language, ready: chatWrite && online && !chat.selected?.isLocked,
+    busy: chat.sending || chat.writing || attachments.uploading, conversationId: activeId, modelId: selectedModel?.id, draft: chat.draft,
+    projectId: activeId ? chat.selected?.projectId : chat.newChatProject?.id, plain: !attachments.files.length && !draftExcerpt,
+    onStarted: (id) => void chat.showConversation(id), onSaved: () => chat.setDraft(""), onSettled: (id) => void chat.showConversation(id, true) });
   const scroll = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const lastSeed = useRef<StarterSeedMemory | null>(null);
@@ -994,6 +1010,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             return <li className={`entry entry--${message.role}`} key={message.id}>
               {message.role === "assistant" && !message.imageTurn && <AnswerModel {...(actualModels.get(message.id) ?? { id: message.modelId })} />}
               <div className="chat-message-bubble">
+                {message.role === "assistant" && research.card(message.id, Boolean(chat.projects))}
                 {message.role === "assistant" && message.content && !message.imageTurn && <CopyAnswer content={message.content} language={language} />}
                 <div data-handoff-content="chat">{message.role === "user"
                   ? <UserMessageContent content={message.content} language={language} /> : message.imageTurn
@@ -1071,6 +1088,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             <ChatDraftLocation location={location} language={language} draft={chat.draft} setDraft={chat.setDraft}
               tool deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
             <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" tool />
+            {research.tools}
           </ComposerTools>
           <span className="spacer" />
           <DesktopModelPicker key={activeId ?? "new"} account={chat.account} language={language} label={copy.modelEffort}
@@ -1096,6 +1114,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
         </div>
       </form>
     </div>}
+    {research.dialogs}
     {showComposer && researchModel && researchSetup === toolsScope && <DesktopResearchSetup language={language}
       model={researchModel.name} credits={getWeightedUsageCredits(researchModel, estimateDeepResearchInputTokens(chat.draft))}
       locked={!canUseModelWithPlan(plan, researchModel)}

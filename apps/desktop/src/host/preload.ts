@@ -91,6 +91,7 @@ if (trustedWindow) {
     accountSettings: (input: Parameters<DesktopApi["accountSettings"]>[0]) =>
       ipcRenderer.invoke("desktop:account-settings", input),
     projects: (input) => ipcRenderer.invoke("desktop:projects", input),
+    research: (input) => ipcRenderer.invoke("desktop:research", input),
     checkUpdate: () => ipcRenderer.invoke("desktop:check-update"),
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>
