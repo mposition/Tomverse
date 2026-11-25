@@ -9,6 +9,7 @@ import {
   desktopComposerToolsEnabled,
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
+  desktopPluginsEnabled,
   desktopWriteApiRoute,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
@@ -80,6 +81,36 @@ test("Desktop billing screens are off unless their own switch and the account se
     // A display switch: it enrols no bearer route.
     process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
     for (const path of ["/api/billing/checkout", "/api/billing/credit-packs", "/api/billing/plan-change/confirm"]) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    }
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop connector screens are off unless their own switch and the account settings session are both on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED", "TOMVERSE_DESKTOP_PLUGINS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopPluginsEnabled(), false);
+    for (const key of switches.slice(0, 2)) process.env[key] = "true";
+    assert.equal(desktopPluginsEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED = "1";
+    assert.equal(desktopPluginsEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED = "true";
+    assert.equal(desktopPluginsEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+    assert.equal(desktopPluginsEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopPluginsEnabled(), false);
+    // A display switch: it enrols no bearer route.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    for (const path of ["/api/mcp/connections", "/api/mcp/oauth/start", "/api/mcp/invocations/abc"]) {
       assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
     }
   } finally {

@@ -365,6 +365,18 @@ export function desktopBillingEnabled() {
     process.env.TOMVERSE_DESKTOP_BILLING_ENABLED === "true";
 }
 
+/**
+ * Desktop's in-app connector management and Chat connector use. A display
+ * switch only: Desktop calls the same /api/mcp routes as the web through the
+ * account settings session, and the connector preview switch still decides
+ * whether those routes offer anything.
+ */
+export function desktopPluginsEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED === "true";
+}
+
 export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && desktopChatWriteEnabled();
