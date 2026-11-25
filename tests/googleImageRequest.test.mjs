@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildGoogleImageRequest,
   googleBillableOutputTokens,
+  googleBilledPhotoInputTokens,
   googleNonImageBillableTokens,
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
@@ -443,4 +444,26 @@ test("the image tokens a response billed are read whether or not it is accepted"
   assert.equal(googleBilledImageTokens({ usage: { total_output_tokens: 553 } }), null);
   assert.equal(googleBilledImageTokens({ usage: { output_tokens_by_modality: [{ modality: "text", tokens: 5 }] } }), null);
   assert.equal(googleBilledImageTokens(null), null);
+});
+
+test("Google photo edits send one stateless image input and read its billed tokens separately", () => {
+  const edited = request({ referencePngBase64: "cGhvdG8=" });
+  assert.deepEqual(edited, {
+    ...request(),
+    input: [
+      { type: "text", text: "a single red apple" },
+      { type: "image", mime_type: "image/png", data: "cGhvdG8=" },
+    ],
+    store: false,
+  });
+  assert.equal(googleBilledPhotoInputTokens({ usage: { input_tokens_by_modality: [
+    { modality: "text", tokens: 80 },
+    { modality: "image", tokens: 1100 },
+    { modality: "image", tokens: 20 },
+  ] } }), 1120);
+  assert.equal(googleBilledPhotoInputTokens({ usage: { input_tokens_by_modality: [
+    { modality: "image", tokens: 0 },
+    { modality: "image", tokens: -1 },
+  ] } }), 0);
+  assert.equal(googleBilledPhotoInputTokens({ usage: { total_input_tokens: 339 } }), null);
 });

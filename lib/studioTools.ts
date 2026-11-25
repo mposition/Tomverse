@@ -13,6 +13,13 @@ export const STUDIO_TOOLS = [
   { id: "social-post", mobileDescription: "socialPostDescription", group: "publishing", artwork: "effects/social-post-travel-story.webp", title: "socialPostTitle", description: "socialPostDescription" },
 ] as const;
 
+export const STUDIO_IMAGE_USE_CASES = [
+  "real-sticker-pack", "character-sticker-pack", "real-sticker", "character-sticker",
+  "live-action-character", "stylized-character", "meme", "illustration", "caricature",
+  "transparent-png", "poster", "social-post",
+] as const;
+export type StudioImageUseCase = (typeof STUDIO_IMAGE_USE_CASES)[number];
+
 export type StudioTool = (typeof STUDIO_TOOLS)[number];
 export type StudioCreativeTool = Extract<StudioTool, { id: "character-maker" | "face-analysis" | "color-analysis" }>;
 export const findStudioTool = (id: string) => STUDIO_TOOLS.find(tool => tool.id === id);

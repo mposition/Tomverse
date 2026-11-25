@@ -87,6 +87,13 @@ const body = {
   modelId: "gpt-image-2", pricingVersion: "outdated-quote",
 };
 
+function quotedSubmission(quote: { modelId: string; pricingVersion: string; quality: string; credits: number; size: string; useCase?: string; requestedSize?: string; squareFallback?: boolean }) {
+  return {
+    ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion, quality: quote.quality,
+    credits: quote.credits, size: quote.size, useCase: quote.useCase, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
+  };
+}
+
 beforeEach(() => {
   delete process.env.STUDIO_IMAGE_GENERATION_ENABLED;
   process.env.STUDIO_ENABLED = "true";
@@ -139,7 +146,7 @@ test("a fresh quoted edit binds the authenticated upload through the transaction
   assert.equal(quoted.status, 200);
   const quote = await quoted.json();
   assert.ok(quote.credits > 0);
-  const accepted = await post({ ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion });
+  const accepted = await post(quotedSubmission(quote));
   assert.equal(accepted.status, 202);
   assert.deepEqual(await accepted.json(), { groupId: "studio-group" });
   assert.equal(reservations.length, 1);
@@ -154,4 +161,142 @@ test("a fresh quoted edit binds the authenticated upload through the transaction
   assert.deepEqual(dispatched, [["studio-image"]]);
   assert.equal((await post({ ...body, attachmentId: "must-not-be-trusted" })).status, 400);
   assert.equal(reservations.length, 1);
+});
+
+test("an open tab can still submit its versioned Medium quote", async () => {
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const quote = await (await GET(quoteRequest())).json();
+  const result = await post({ ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion });
+  assert.equal(result.status, 202);
+  assert.equal(reservations[0].quality, "medium");
+  assert.equal((await post({ ...quotedSubmission(quote), quality: undefined })).status, 409);
+});
+
+test("Studio automatically routes a feature to a quoted catalogue model and rejects an outdated route", async (context) => {
+  const routingEnv = "STUDIO_IMAGE_ROUTE_PREFERENCES";
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
+  context.after(() => {
+    delete process.env[routingEnv];
+    registry.resetActiveImageModelCatalog();
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const originalModels = registry.listEnabledImageModels();
+  const squareEditModels = originalModels.filter((model: typeof originalModels[number]) => {
+    const price = registry.getImageModelPrice(model.id, "medium", "1024x1024");
+    return price && registry.imageEditCredits(model, price) !== null;
+  });
+  const primary = squareEditModels.find((model: { id: string }) => model.id === registry.DEFAULT_IMAGE_MODEL_ID);
+  const alternate = squareEditModels.find((model: { id: string }) => model.id !== primary?.id);
+  assert.ok(primary && alternate);
+  process.env[routingEnv] = JSON.stringify({
+    "character-sticker-pack": ["missing-model", alternate.id],
+    "live-action-character": "invalid configuration for a different feature",
+  });
+
+  const requested = new Request(base + "?size=1024x1024&edit=true&useCase=character-sticker-pack");
+  const quote = await (await GET(requested)).json();
+  assert.equal(quote.useCase, "character-sticker-pack");
+  assert.equal(quote.modelId, alternate.id);
+  assert.equal((await (await GET(quoteRequest())).json()).modelId, primary.id);
+  assert.equal((await GET(new Request(requested.url.replace("character-sticker-pack", "invalid")))).status, 400);
+  assert.equal((await post(quotedSubmission(quote))).status, 202);
+  assert.deepEqual(reservations[0].modelIds, [alternate.id]);
+
+  registry.setActiveImageModelCatalog(originalModels.map((model: typeof originalModels[number]) =>
+    model.id === alternate.id ? { ...model, disabledReason: "price_unverified" } : model
+  ));
+  assert.equal((await (await GET(requested)).json()).modelId, primary.id);
+  assert.equal((await post(quotedSubmission(quote))).status, 409);
+  assert.equal(reservations.length, 1);
+});
+
+test("a verified pack route can choose a square-only model before a landscape fallback", async context => {
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
+  context.after(() => { delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES; });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const grok = registry.getImageModel("grok-imagine-image-quality-20260403");
+  assert.ok(grok);
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "character-sticker-pack": [grok.id] });
+  const preferred = new Request(base + "?size=1536x1024&edit=true&useCase=character-sticker-pack&squareFallback=true");
+  const quote = await (await GET(preferred)).json();
+  assert.equal(quote.modelId, grok.id);
+  assert.equal(quote.size, "1024x1024");
+  const response = await post(quotedSubmission(quote));
+  assert.equal(response.status, 202);
+  assert.equal(reservations[0].size, quote.size);
+  assert.equal(reservations[0].quality, quote.quality);
+});
+
+test("real sticker packs and individual edits require the verified square Sunburst edit", async context => {
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
+  const id = "gpt-image-2.6-sunburst";
+  const other = registry.getImageModel("gpt-image-2");
+  const models = registry.listEnabledImageModels();
+  context.after(() => {
+    delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES;
+    delete process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED;
+    registry.resetActiveImageModelCatalog();
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED = "true";
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({
+    "real-sticker-pack": [other.id], "real-sticker": [other.id],
+  });
+  const price = { ...registry.getImageModelPrice(other.id, "medium", "1024x1024"), credits: 65, outputCostMicroUsd: 43_470 };
+  registry.setActiveImageModelCatalog([...models.filter((m: { id: string }) => m.id !== id), {
+    ...other, id, apiModelId: id, prices: [price],
+  }]);
+  const square = base + "?size=1024x1024&edit=true&useCase=";
+  for (const url of [square + "real-sticker-pack", square + "real-sticker",
+    base + "?size=1536x1024&edit=true&useCase=real-sticker-pack&squareFallback=true"]) {
+    const response = await GET(new Request(url));
+    assert.equal(response.status, 200);
+    const quote = await response.json();
+    assert.deepEqual([quote.modelId, quote.size, quote.quality, quote.credits], [id, "1024x1024", "medium", 65]);
+    assert.equal((await post(quotedSubmission(quote))).status, 202);
+    assert.deepEqual(reservations.at(-1)?.modelIds, [id]);
+  }
+  const request = new Request(square + "real-sticker-pack");
+  const submission = quotedSubmission(await (await GET(request)).json());
+  assert.equal((await post({ ...submission, modelId: other.id })).status, 409);
+  assert.equal((await GET(new Request(request.url.replace("edit=true", "edit=false")))).status, 503);
+  process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED = "false";
+  assert.equal((await GET(request)).status, 503);
+  assert.equal((await post(submission)).status, 409);
+  assert.equal(reservations.length, 3);
+});
+
+test("Studio reserves exactly the quoted model, quality, size and credit amount", async context => {
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
+  context.after(() => {
+    registry.resetActiveImageModelCatalog();
+    delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES;
+    delete process.env.IMAGE_RECRAFT_EDIT_ENABLED;
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "live-action-character": ["recraftv4_pro"] });
+  const requested = new Request(base + "?size=1024x1024&edit=true&useCase=live-action-character");
+  assert.notEqual((await (await GET(requested)).json()).modelId, "recraftv4_pro");
+  process.env.IMAGE_RECRAFT_EDIT_ENABLED = "true";
+  const quote = await (await GET(requested)).json();
+  assert.equal(quote.modelId, "recraftv4_pro");
+  assert.equal(quote.size, "2048x2048");
+  assert.equal(quote.requestedSize, "1024x1024");
+  assert.equal(quote.credits, 350);
+  const submit = quotedSubmission(quote);
+  for (const mismatch of [{ credits: 349 }, { quality: "high" }, { size: "1024x1024" }]) {
+    assert.equal((await post({ ...submit, ...mismatch })).status, 409);
+  }
+  assert.equal(reservations.length, 0);
+  // Another preferred model can serve the output size but not the requested shape.
+  const models = registry.listEnabledImageModels();
+  const first = models.find((model: { id: string }) => model.id === "gpt-image-2");
+  registry.setActiveImageModelCatalog(models.map((model: typeof first) => model.id === first.id ? {
+    ...model, prices: [{ ...model.prices[0], size: "2048x2048", quality: "medium" }],
+  } : model));
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "live-action-character": [first.id, "recraftv4_pro"] });
+  assert.equal((await (await GET(new Request(base + "?size=2048x2048&edit=true&useCase=live-action-character"))).json()).modelId, first.id);
+  assert.equal((await post(submit)).status, 202);
+  assert.equal(reservations[0].size, "2048x2048");
+  assert.equal(reservations[0].quality, "medium");
 });

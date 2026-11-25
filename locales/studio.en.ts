@@ -16,7 +16,7 @@ export const studioLocale = {
   "apply": "Apply",
   "generationUnavailable": "Generation is currently unavailable.",
   "signInToGenerate": "Sign in to generate.",
-  "generationCredits": "{model} · {credits} credits",
+  "generationCredits": "{credits} credits",
   "packCaptions": "Sticker captions",
   "firstScene": "Generate first scene",
   "nextScene": "Generate next scene",

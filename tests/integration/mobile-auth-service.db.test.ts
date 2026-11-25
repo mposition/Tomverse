@@ -617,6 +617,33 @@ test("Desktop reads its own resources through the exact origin and route allowli
     }
     assert.equal((await rename(createdId, { title: "Renamed in Desktop" })).status, 200);
     assert.equal((await (await conversation(createdId)).json()).title, "Renamed in Desktop");
+    const composerFlag = "TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED";
+    const reviewFlag = "TOMVERSE_DESKTOP_REVIEW_ENABLED";
+    const previousComposer = process.env[composerFlag];
+    const previousReview = process.env[reviewFlag];
+    try {
+      const options = { webSearchMode: "always", memoryMode: "off", assistantProfileId: null };
+      delete process.env[composerFlag];
+      assert.equal((await rename(createdId, options)).status, 400);
+      assert.equal((await (await capabilities.GET(read("/api/products/chat/capabilities"))).json()).desktopComposerTools, false);
+      process.env[composerFlag] = "true";
+      process.env[reviewFlag] = "true";
+      assert.equal((await (await capabilities.GET(read("/api/products/chat/capabilities"))).json()).desktopComposerTools, true);
+      assert.equal((await rename(foreign.id, options)).status, 403);
+      assert.equal((await rename(review.id, options)).status, 403);
+      assert.equal((await rename(locked.id, options)).status, 423);
+      assert.equal((await rename(createdId, options, { Cookie: "session=ambient" })).status, 401);
+      assert.equal((await rename(createdId, { ...options, password: "will-not-change" })).status, 400);
+      const updated = await rename(createdId, options);
+      assert.equal(updated.status, 200, await updated.clone().text());
+      const savedOptions = await (await conversation(createdId)).json();
+      assert.equal(savedOptions.webSearchMode, "always");
+      assert.equal(savedOptions.memoryMode, "off");
+      assert.equal(savedOptions.assistantProfile, null);
+    } finally {
+      if (previousComposer === undefined) delete process.env[composerFlag]; else process.env[composerFlag] = previousComposer;
+      if (previousReview === undefined) delete process.env[reviewFlag]; else process.env[reviewFlag] = previousReview;
+    }
     assert.equal((await rename(createdId, { password: "will-not-change" })).status, 400);
     assert.equal((await rename(createdId, { title: "Ambient cookie" }, { Cookie: "session=ambient" })).status, 401);
     assert.equal((await rename(foreign.id, { title: "Wrong owner" })).status, 403);

@@ -6,9 +6,10 @@ import { zipSync } from "fflate";
 import { Download, Plus, Shuffle, X } from "lucide-react";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
 import { fillStudioStickerCaptions, STUDIO_STICKER_KEYS, STUDIO_STICKER_LIMIT } from "@/lib/studioTools";
-import { studioStickerPrompt, type StudioStickerFaceStyle as FaceStyle } from "@/lib/studioStickerPrompt";
+import { studioStickerBrief, type StudioStickerFaceStyle as FaceStyle } from "@/lib/studioStickerPrompt";
 import { studioCopy, studioStickerSuggestions } from "@/locales/studio";
-import { makeStudioImageReference, removeStudioGreenScreen, renderStudioSticker, saveStudioFile, splitStudioSheet, STUDIO_STICKER_BACKGROUND, type StickerComposition } from "./studioCanvas";
+import { photoSampleCaptions } from "@/locales/studio.ko";
+import { makeStudioStickerReference, renderStudioSticker, saveStudioFile, splitStudioSheet, STUDIO_STICKER_BACKGROUND, type StickerComposition } from "./studioCanvas";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
 import { StudioImageShare } from "./StudioImageShare";
@@ -34,6 +35,10 @@ type StickerCheckoutDraft = {
 };
 
 const samplePhoto = "/studio/selfie.png";
+const koreanPhotoSample: Sticker[] = photoSampleCaptions.map((caption, index) => ({
+  source: "/studio/stickers-real-ko/" + String(index + 1).padStart(2, "0") + ".png", caption, language: "ko", composed: "opaque",
+}));
+const characterSample: Sticker[] = STUDIO_STICKER_KEYS.map((_, i) => ({ source: "/studio/sticker-" + (i + 1) + ".png" }));
 const sheetSize = "1536x1024";
 const singleSize = "1024x1024";
 function StudioStickerPreview({ source, caption, composed, language }: Sticker & { caption: string; language: Language }) {
@@ -72,26 +77,31 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   const [runPack] = useState(createStudioImageRunner);
   const [runCut] = useState(createStudioImageRunner);
   const committed = useRef<string | null>(null);
-  const [style, setStyle] = useState<FaceStyle>("character");
+  const [style, setStyle] = useState<FaceStyle>(lang === "ko" ? "real" : "character");
   const [photo, setPhoto] = useState<{ source: string; name?: string }>({ source: samplePhoto });
   const [reference, setReference] = useState({ source: samplePhoto, style: "character" as FaceStyle });
-  const [stickers, setStickers] = useState<Sticker[]>(() => STUDIO_STICKER_KEYS.map((_, i) => ({
-    source: "/studio/sticker-" + (i + 1) + ".png",
-  })));
+  const [savedPack, setStickers] = useState<Sticker[] | null>(null);
   const [captions, setCaptions] = useState<PackCaption[]>([]);
   const [captionDraft, setCaptionDraft] = useState("");
   const [captionLanguage, setCaptionLanguage] = useState<Language>();
   const outputLanguage = captionLanguage ?? lang;
+  const sampleStyle = style === "real" && outputLanguage === "ko" ? "real" : "character";
+  const stickers = savedPack ?? (sampleStyle === "real" ? koreanPhotoSample : characterSample);
+  const sourceStyle = savedPack ? reference.style : sampleStyle;
   const pendingCaption = captions.length < STUDIO_STICKER_LIMIT ? captionDraft.trim() : "";
   const captionEntries = [...captions, ...(pendingCaption ? [{ text: pendingCaption }] : [])];
   const words = captionEntries.map(({ text }) => text);
-  const outputSize = words.length <= 1 ? singleSize : sheetSize;
-  const sheetQuote = useStudioImageQuote(outputSize, true, true, outputSize === sheetSize ? singleSize : undefined);
+  const outputSize = style === "real" || words.length <= 1 ? singleSize : sheetSize;
+  const packUseCase = style === "real" ? "real-sticker-pack" : "character-sticker-pack";
+  const stickerUseCase = style === "real" ? "real-sticker" : "character-sticker";
+  const sheetQuote = useStudioImageQuote(outputSize, true, words.length > 0,
+    outputSize === sheetSize ? singleSize : undefined, words.length > 1 ? packUseCase : stickerUseCase);
   const [sample, setSample] = useState(true);
   const [replacement, setReplacement] = useState<Replacement | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [replacementError, setReplacementError] = useState<string | null>(null);
-  const singleQuote = useStudioImageQuote(singleSize, true, Boolean(replacement));
+  const singleQuote = useStudioImageQuote(singleSize, true, Boolean(replacement), undefined,
+    sourceStyle === "real" ? "real-sticker" : "character-sticker");
   const checkoutDraft = useStudioCheckoutDraft<StickerCheckoutDraft>("stickers", saved => {
     const restoreSource = (source: StudioDraftImage) => typeof source === "string" ? source : urls.make(source);
     urls.release(photo.source);
@@ -100,7 +110,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     setStyle(saved.style);
     setPhoto({ ...saved.photo, source: restoreSource(saved.photo.source) });
     setReference({ ...saved.reference, source: restoreSource(saved.reference.source) });
-    setStickers(saved.stickers.map(sticker => ({ ...sticker, source: restoreSource(sticker.source) })));
+    setStickers(saved.stickers.length ? saved.stickers.map(sticker => ({ ...sticker, source: restoreSource(sticker.source) })) : null);
     setCaptions(saved.captions.map((text, index) => ({ text, suggested: saved.suggestedCaptionIndexes?.includes(index) })));
     setCaptionDraft(saved.captionDraft);
     setCaptionLanguage(saved.captionLanguage);
@@ -116,7 +126,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
       const [photoSource, referenceSource, savedStickers, replacementSource] = await Promise.all([
         captureStudioDraftImage(photo.source),
         captureStudioDraftImage(reference.source),
-        Promise.all(stickers.map(async sticker => ({ ...sticker, source: await captureStudioDraftImage(sticker.source) }))),
+        Promise.all((savedPack ?? []).map(async sticker => ({ ...sticker, source: await captureStudioDraftImage(sticker.source) }))),
         replacement?.source ? captureStudioDraftImage(replacement.source) : null,
       ]);
       await checkoutDraft.save({
@@ -184,17 +194,18 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     const controller = new AbortController();
     packController.current = controller;
     try {
+      const { prompt, spellingKey } = studioStickerBrief(style, words);
       const blob = await runPack({
-        inputKey: photo.source,
-        prompt: studioStickerPrompt(style, words),
+        inputKey: JSON.stringify([photo.source, spellingKey]),
+        prompt,
         size: sheetQuote.quote.size,
         quote: sheetQuote.quote,
-        reference: () => makeStudioImageReference(photo.source),
+        reference: () => makeStudioStickerReference(photo.source, spellingKey),
         signal: controller.signal,
       });
-      const sheet = URL.createObjectURL(await removeStudioGreenScreen(blob));
+      const sheet = URL.createObjectURL(blob);
       try {
-        const pieces = await splitStudioSheet(sheet, words, outputLanguage);
+        const pieces = await splitStudioSheet(sheet, words.length);
         controller.signal.throwIfAborted();
         const next: Sticker[] = pieces.map((piece, index) => ({
           source: piece ? urls.make(piece) : "", caption: words[index], language: outputLanguage, composed: piece ? "opaque" : undefined,
@@ -258,18 +269,19 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     setReplacementError(null);
     try {
       const language = replacement.language ?? languageFor(stickers[replacement.index]);
+      const { prompt, spellingKey } = studioStickerBrief(sourceStyle, [replacement.caption]);
       const blob = await runCut({
-        inputKey: reference.source,
-        prompt: studioStickerPrompt(reference.style, [replacement.caption.trim()]),
+        inputKey: JSON.stringify([reference.source, spellingKey]),
+        prompt,
         size: singleQuote.quote.size,
         quote: singleQuote.quote,
-        reference: () => makeStudioImageReference(reference.source),
+        reference: () => makeStudioStickerReference(reference.source, spellingKey),
         signal: controller.signal,
       });
-      const source = URL.createObjectURL(await removeStudioGreenScreen(blob));
+      const source = URL.createObjectURL(blob);
       let art: Blob | null;
       try {
-        art = await renderStudioSticker(source, replacement.caption, language);
+        [art] = await splitStudioSheet(source, 1);
       } finally {
         URL.revokeObjectURL(source);
       }
@@ -296,6 +308,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     if (!replacement?.source || !replacement.caption.trim()) return;
     const { index, source } = replacement;
     const caption = replacement.caption.trim();
+    if (!savedPack) setReference({ source: samplePhoto, style: sourceStyle });
     urls.release(stickers[index].source);
     setStickers(stickers.map((sticker, i) => i === index ? { ...sticker, source, caption, language: replacement.language, composed: replacement.composed } : sticker));
     committed.current = source;
@@ -368,7 +381,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
           </div>
         </div>
         <StudioGenerateButton label={words.length ? copy.generatePack.replace("{count}", String(words.length)) : copy.generate} busy={busy} disabled={!sheetQuote.quote || !words.length} onClick={createPack} />
-        <StudioQuoteHint {...sheetQuote} />
+        <StudioQuoteHint {...sheetQuote} showModel={false} />
         <StudioStatus status={status} />
       </section>
       <section className={styles.panel}>
@@ -419,7 +432,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
           <StudioGenerateButton label={copy.regenerate} busy={regenerating}
             disabled={!singleQuote.quote || !replacement.caption.trim()} onClick={() => void createSticker()} />
         </div>
-        <StudioQuoteHint {...singleQuote} />
+        <StudioQuoteHint {...singleQuote} showModel={false} />
         {replacementError && <StudioStatus status={{ error: true, text: replacementError }} />}
         <div className={styles.compare}>
           <figure><figcaption>{copy.currentImage}</figcaption>{stickers[replacement.index].source

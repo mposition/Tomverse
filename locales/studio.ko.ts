@@ -1,3 +1,10 @@
+export const photoSampleCaptions = [
+  "굿굿!", "사랑해", "고마워", "잘 자", "축하해",
+  "미안해", "배고파", "가는중", "잠깐!", "대박!",
+  "힘내!", "괜찮아", "피곤해", "좋아!", "최고야",
+  "안녕!", "헉!", "알겠어", "기대돼", "내일봐",
+] as const;
+
 export const studioLocale = {
   "captionLanguage": "문구 언어",
   "randomCaptions": "랜덤 문구 20개",
@@ -16,7 +23,7 @@ export const studioLocale = {
   "apply": "적용",
   "generationUnavailable": "현재 생성 기능을 사용할 수 없습니다.",
   "signInToGenerate": "로그인하면 생성할 수 있습니다.",
-  "generationCredits": "{model} · {credits} 크레딧",
+  "generationCredits": "{credits} 크레딧",
   "packCaptions": "팩에 넣을 문구",
   "firstScene": "첫 장면 생성",
   "nextScene": "다음 장면 생성",

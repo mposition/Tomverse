@@ -8,6 +8,7 @@ import { isChatConversationKind } from "@/lib/conversationKindGuard";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
     IMAGE_QUALITY_BY_PRESET,
+    imageEditPricing,
     type ImagePreset,
     type ImageSize,
 } from "@/lib/imageGenerationPricing";
@@ -160,12 +161,14 @@ export async function startChatImageTurn(
             throw new ChatAccessError(400, "IMAGE_EDIT_SOURCE_MISSING", "Attach the photo to edit.");
         }
         editSource = { attachmentId: source.attachmentId };
-        // The edit keeps the photo's shape, at that size's own price, when
-        // every model sells that size; one that sells only a square edits into it.
+        // Keep the photo's shape when all targets sell it. A single target
+        // with a fixed edit size uses that native option.
         const editModelIds = input.imageModelIds.length > 0 ? input.imageModelIds : [DEFAULT_IMAGE_MODEL_ID];
-        size = editModelIds.every((modelId) => getImageModel(modelId)?.sizes.includes(source.size))
-            ? source.size
-            : "1024x1024";
+        const onlyEditSize = editModelIds.length === 1 ? imageEditPricing(editModelIds[0])?.option?.size : undefined;
+        size = editModelIds.every((modelId) => {
+            const editSize = imageEditPricing(modelId)?.option?.size;
+            return (!editSize || editSize === source.size) && getImageModel(modelId)?.sizes.includes(source.size);
+        }) ? source.size : onlyEditSize ?? "1024x1024";
     }
     const result = await requestImageGeneration({
         userId: input.userId,

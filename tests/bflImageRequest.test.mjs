@@ -25,6 +25,7 @@ import {
 // catalogue the adapter never sees (tests/imageProviderAdapter.test.mjs).
 const {
   IMAGE_MODEL_REGISTRY,
+  imageEditCredits,
   imageThinkingBilling,
   imageThinkingCapMinimumMicroUsd,
   resetActiveImageModelCatalog,
@@ -374,4 +375,52 @@ test("a BFL price source is the price page or the docs, not the playground", () 
   assert.equal(isOfficialSourceUrl("bfl", "https://docs.bfl.ai/quick_start/pricing"), true);
   assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/play"), false);
   assert.equal(isOfficialSourceUrl("bfl", "https://playground.bfl.ai/pricing"), false);
+});
+
+test("both FLUX 3 photo edits hold the priced output and omit their bytes from the audit", async context => {
+  const previous = process.env.IMAGE_BFL_EDIT_ENABLED;
+  context.after(() => {
+    if (previous === undefined) delete process.env.IMAGE_BFL_EDIT_ENABLED;
+    else process.env.IMAGE_BFL_EDIT_ENABLED = previous;
+  });
+  const bytes = pngHeader(1024, 768);
+  const editImage = { bytes, mimeType: "image/png", width: 1024, height: 768, sha256: "a".repeat(64) };
+  const reference = bytes.toString("base64");
+  for (const [id, quality, credits, outputCostMicroUsd] of [
+    ["flux-3-image", "medium", 75, 48_000],
+    ["flux-3-image-klein", "low", 20, 9_000],
+  ]) {
+    const price = { quality, size: "1024x1024", credits, outputCostMicroUsd };
+    const model = { ...FLUX3_MODEL, id, apiModelId: id, prices: [price] };
+    const calls = [];
+    const execute = (override = {}) => withBfl(fakeFetch(calls), () =>
+      generate({ modelId: id, quality, editImage, ...override }), { model });
+
+    delete process.env.IMAGE_BFL_EDIT_ENABLED;
+    assert.equal(imageEditCredits(model, price), null);
+    await assert.rejects(execute(), /cannot edit/);
+    assert.equal(calls.length, 0);
+
+    process.env.IMAGE_BFL_EDIT_ENABLED = "true";
+    assert.equal(imageEditCredits(model, price), credits);
+    assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: outputCostMicroUsd - 1 }), null);
+    assert.equal(imageEditCredits(model, { ...price, credits: 1 }), null);
+    await assert.rejects(execute({ size: "1536x1024" }), /cannot edit/);
+    assert.equal(calls.length, 0);
+
+    const result = await execute();
+    assert.equal(calls.length, 3);
+    assert.deepEqual(JSON.parse(calls[0].init.body), {
+      ...buildBflImageRequest({ apiModelId: id, size: "1024x1024", prompt: "a single red apple" }),
+      images: [reference],
+    });
+    assert.equal(calls[2].init.headers, undefined);
+    assert.equal(Object.hasOwn(result.requestParams, "images"), false);
+    assert.equal(Object.hasOwn(result.requestParams, "prompt"), false);
+    const audit = JSON.stringify(result.requestParams);
+    assert.equal(audit.includes(reference), false);
+    assert.equal(audit.includes("a single red apple"), false);
+    assert.equal(result.requestParams.resolution, "1k");
+    assert.equal(result.requestParams.image.sha256, editImage.sha256);
+  }
 });
