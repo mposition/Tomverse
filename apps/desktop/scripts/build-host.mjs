@@ -27,7 +27,7 @@ const host = await build({
   platform: "node",
   target: "node22",
   format: "cjs",
-  external: ["electron"],
+  external: ["electron", "node-pty"],
   outExtension: { ".js": ".cjs" },
   outdir,
   define: {

@@ -37,6 +37,8 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { ApprovalBrowser } from "./ApprovalBrowser";
 import { appendElementComments } from "../element-comment";
 import { useAgentBrowserReveal } from "./useAgentBrowserReveal";
+import { CodeTerminal } from "./CodeTerminal";
+import { desktopTerminalCopy } from "../../../../locales/desktopTerminal";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
@@ -220,6 +222,7 @@ function Desktop() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [workspace, setWorkspace] = useState<Workspace>("code");
   const [openBrowserScope, setOpenBrowserScope] = useState<string | null>(null);
+  const [terminalPanel, setTerminalPanel] = useState(false);
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
   const webView = useWebViewState();
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
@@ -228,6 +231,9 @@ function Desktop() {
   const browserScope = JSON.stringify([snapshot?.draftNamespace, snapshot?.task?.id]);
   const browserOpen = canShowBrowser && openBrowserScope === browserScope;
   useAgentBrowserReveal(canShowBrowser, () => setOpenBrowserScope(browserScope));
+  const terminalTask = snapshot?.task?.id ?? null;
+  const canShowTerminal = surface === "code" && snapshot?.codeTerminal?.available === true;
+  const terminalOpen = canShowTerminal && terminalPanel;
   const accountSettingsTab = isAccountSettingsTab(settingsView) ? settingsView : null;
   const importsOpen = settingsView === "imports";
   const accountPanel = importsOpen ? "imports" : accountSettingsTab;
@@ -943,6 +949,9 @@ function Desktop() {
           {surface === "code" && task?.id && task.savedLocally && !task.unreadable && !busy &&
             snapshot?.history.some((row) => row.id === task.id) &&
             <TaskGithubPulls key={snapshot.draftNamespace + task.id} language={language} onVisibilityChange={setGithubDialogOpen} />}
+          {canShowTerminal && <button className="icon" type="button" aria-label={desktopTerminalCopy[language].title}
+            aria-expanded={terminalOpen} aria-controls={terminalOpen ? "code-terminal-panel" : undefined}
+            onClick={() => setTerminalPanel(!terminalOpen)}><SquareTerminal size={18} /></button>}
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
             aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
             onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
@@ -989,6 +998,9 @@ function Desktop() {
             </section>}
           </div>
         </div>
+        {terminalOpen && <CodeTerminal key={terminalTask ?? "new"} language={language} task={terminalTask}
+          enabled={snapshot?.codeTerminal?.enabled === true} onClose={() => setTerminalPanel(false)}
+          onAddToPrompt={(text) => changeDraft(prompt.trimEnd() ? prompt.trimEnd() + "\n\n" + text : text)} />}
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
           {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}

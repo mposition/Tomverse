@@ -7,6 +7,7 @@ import type { CodeExecutionMode, NativeFixtureProvider } from "../code-execution
 import type { CodeCliContinuation, CodeContinuation } from "../code-fallback";
 import type { DesktopMcpAction, DesktopMcpReply } from "../../../../lib/desktopCodeMcpContract";
 import type { CliFixtureInput } from "./cli-fixture-input";
+import type { TerminalReadReply } from "../../../tomverse-cli/src/terminal-read";
 
 export type Connection = { endpoint: string; key: string };
 export type RecordedSession = { requestId: string; storage: string | null; sessionId: string; project: ProjectRoot;
@@ -22,7 +23,7 @@ export type WorkerCommand =
   | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
   | { type: "catalog"; requestId: string; connection: Connection }
   | { type: "start"; runId: string; project: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
-    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean;
+    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; terminalRead?: boolean;
     continuation?: CodeContinuation & { taskId: string; sourceHome: string; sourceProvider: "openai" | "anthropic" } }
   | (NativeFixtureTask & { type: "start-codex-fixture"; clientVersion: string;
     apiSource?: CodeCliContinuation & { scope: HistoryScope; connection: Connection } })
@@ -35,6 +36,7 @@ export type WorkerCommand =
   | { type: "code-plugin-result"; runId: string; requestId: string; result: DesktopMcpReply | null }
   | { type: "browser-snapshot-result"; runId: string; requestId: string; text: string | null }
   | { type: "browser-agent-result"; runId: string; requestId: string; reply: BrowserAgentReply }
+  | { type: "terminal-read-result"; runId: string; requestId: string; reply: TerminalReadReply | null }
   | { type: "answer"; runId: string; decision: Decision }
   | { type: "follow-up"; runId: string; requestId: string; text: string }
   | { type: "queue"; runId: string; requestId: string; operation: QueueOperation }
@@ -67,6 +69,7 @@ export type WorkerEvent =
   | { type: "code-plugin-cancel"; runId: string; requestId: string }
   | { type: "browser-snapshot"; runId: string; requestId: string }
   | { type: "browser-agent"; runId: string; requestId: string; request: BrowserAgentRequest }
+  | { type: "terminal-read"; runId: string; requestId: string; terminal?: number; lines: number }
   | { type: "approval"; runId: string; request: ApprovalRequest }
   | { type: "follow-up-queued"; runId: string; requestId: string; queued: boolean }
   | { type: "queue-result"; runId: string; requestId: string; ok: boolean }

@@ -11,6 +11,7 @@ import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, Im
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState, ElementPick } from "./browser-contract";
+import type { TerminalCommand, TerminalEvent, TerminalInfo, TerminalListing, TerminalReplayResult } from "./terminal-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
@@ -314,6 +315,8 @@ export type CodeKeyState = ({ stage: "missing" | "checking" } | { stage: "connec
 export type Snapshot = {
   codeGitWorkspace?: CodeGitWorkspace;
   codeBrowserAvailable?: boolean;
+  /** Terminals: available when a project is open, enabled when the person turned them on. They belong to the open task. */
+  codeTerminal?: { available: boolean; enabled: boolean };
   codeBrowserInspection?: boolean;
   deviceFixtureAvailable?: boolean;
   root: string | null;
@@ -389,6 +392,8 @@ export type DesktopApi = {
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
   subscribeCodeBrowserPick: (listener: (pick: ElementPick) => void) => () => void;
+  codeTerminal: (command: TerminalCommand) => Promise<TerminalListing | TerminalInfo | TerminalReplayResult | void>;
+  subscribeCodeTerminal: (listener: (event: TerminalEvent) => void) => () => void;
   webView: (command: WebViewCommand) => Promise<void>;
   subscribeWebView: (listener: (state: WebViewState | null) => void) => () => void;
   state(): Promise<Snapshot>;

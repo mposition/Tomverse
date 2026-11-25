@@ -77,6 +77,14 @@ The Code browser panel (loopback pages only, available in fixture builds today) 
 - The Tomverse API agent gets `browser_navigate`, `browser_read`, `browser_screenshot`, `browser_console`, `browser_click` and `browser_type`. It drives one tab that its own task opened, shown in the panel with a **Take over** button that ends its control at once. Addresses are limited to `http` on `localhost`, `127.0.0.1` or `[::1]` with a port, the same rule as the panel. Reading, screenshots and console reads need no approval; each click or typing is approved, and "Allow for this run" is remembered per site. Passwords, one-time codes and card fields are never typed. Page text is returned as untrusted data. The main process does the work: scripts run in an isolated world one call at a time, and input, pictures, the accessibility tree and the element picker use the tab's own DevTools session. Nothing is injected ahead of time.
 - **Select element** lets the person click an element of the page, write a comment, and add several comments to the next message together. The message carries the selector, a short text, the position and a `pick-xxxxxxxx` id; the cropped picture stays in memory in the main process and reaches the model only when it calls `browser_screenshot` with that id.
 
+## Code terminal
+
+The terminal button in the Code header opens a terminal panel for the open task. It is off until you press **Turn on terminal**. Each task keeps up to four terminals, and their shells and scrollback stay alive while another task is on screen. They end when the task is deleted, when the project or account changes, and when Desktop quits, together with everything they started.
+
+The app host owns the shells (the renderer only sends typed actions) and starts each in the task's folder, which is its worktree for an isolated task. A shell gets the basic command environment from `apps/tomverse-cli/src/env.ts` plus terminal settings, never a Tomverse session, an API key or a token. Terminals use the `node-pty` native module; the Windows and macOS packages unpack it next to `app.asar`. Without it (Linux, or a module that cannot load) the terminal falls back to a limited pipe shell and says so.
+
+Code's own agent gets a read-only `read_terminal` tool for the terminals you leave shared with it (the **Code can read** toggle, on by default). It cannot type into a terminal, the output is returned as untrusted data, and commands still go through `run_command` and its approval. Select text in a terminal and press **Add to prompt** to attach it to your next request.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

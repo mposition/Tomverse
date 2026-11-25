@@ -13,6 +13,8 @@ const appEntries = new Set([
   "dist/host/runner-process.cjs", "dist/host/tomverse-icon.ico", "dist/host/tomverse-icon.png",
   "dist/renderer", "dist/renderer/index.html", "dist/renderer/assets",
 ]);
+// The terminal's native module is unpacked next to the archive; nothing else is.
+export const unpackedRuntime = /^node_modules\/node-pty\/(?:package\.json|LICENSE|lib\/[\w./-]+\.js|prebuilds\/[a-z0-9]+-[a-z0-9]+\/[\w.()/-]+)$/;
 const commonRuntime = [
   "chrome_100_percent.pak", "chrome_200_percent.pak", "icudtl.dat", "LICENSE", "LICENSES.chromium.html",
   "resources.pak", "snapshot_blob.bin", "v8_context_snapshot.bin", "version", "vk_swiftshader_icd.json",
@@ -59,7 +61,8 @@ export function inspectAppArchive(archive, { cliProtocolCheck = false, localDev 
   const actual = new Set(entries);
   for (const entry of appEntries) assert.ok(actual.has(entry), `Missing packaged entry ${entry}.`);
   for (const entry of actual) {
-    assert.ok(appEntries.has(entry) ||
+    assert.ok(appEntries.has(entry) || unpackedRuntime.test(entry) ||
+      /^node_modules(?:\/node-pty(?:\/(?:lib(?:\/[\w-]+)*|prebuilds(?:\/[a-z0-9-]+(?:\/conpty)?)?))?)?$/.test(entry) ||
       /^dist\/renderer\/assets\/[\w-]+-[\w-]+\.(js|css|png|svg|woff2)$/.test(entry), `Unexpected packaged entry ${entry}.`);
   }
   const manifest = JSON.parse(extractFile(archive, "package.json").toString("utf8"));
@@ -95,6 +98,15 @@ export async function inspectPortablePayload(bundle, platform, { localDev = fals
   const resources = new Set(["app.asar", "THIRD_PARTY_NOTICES.txt"]);
   if (platform === "win32") resources.add("tomverse-icon.ico");
   for (const entry of await readdir(join(bundle, "resources"), { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name === "app.asar.unpacked") {
+      for (const file of await readdir(join(bundle, "resources", entry.name), { recursive: true, withFileTypes: true })) {
+        if (!file.isFile()) continue;
+        const relativePath = posix.join(...join(file.parentPath, file.name).slice(join(bundle, "resources", entry.name).length + 1).split(/[\\/]/));
+        assert.ok(unpackedRuntime.test(relativePath), `Unexpected unpacked runtime file ${relativePath}.`);
+        files.push(join("resources", entry.name, relativePath));
+      }
+      continue;
+    }
     assert.ok(entry.isFile() && resources.delete(entry.name), `Unexpected portable bundle entry resources/${entry.name}.`);
     files.push(join("resources", entry.name));
   }
@@ -172,12 +184,14 @@ export async function inspectMacPayload(application, name, arch) {
         links.delete(relative);
       } else if (entry.isDirectory()) {
         const isLocale = macLocale.test(entry.name);
-        assert.ok(directories.has(relative) || (isLocale && [resources, "Contents/Resources"].includes(directory)),
+        assert.ok(directories.has(relative) || relative.startsWith("Contents/Resources/app.asar.unpacked") ||
+          (isLocale && [resources, "Contents/Resources"].includes(directory)),
           `Unexpected macOS bundle directory: ${relative}.`);
         if (isLocale && directory === resources) files.add(`${relative}/locale.pak`);
         await visit(relative);
       } else {
-        assert.ok(entry.isFile() && (files.delete(relative) || signatures.has(relative)),
+        assert.ok(entry.isFile() && (files.delete(relative) || signatures.has(relative) ||
+          unpackedRuntime.test(relative.replace(/^Contents\/Resources\/app\.asar\.unpacked\//, ""))),
           `Unexpected macOS bundle entry: ${relative}.`);
         fileCount++;
       }
