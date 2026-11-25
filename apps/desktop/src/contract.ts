@@ -12,6 +12,7 @@ import type { BrowserCommand, BrowserState } from "./browser-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
+import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
 import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
@@ -379,6 +380,7 @@ export type DesktopApi = {
   accountSettings<Action extends AccountSettingsAction>(
     input: Extract<DesktopAccountSettingsInput, { action: Action }>,
   ): Promise<AccountSettingsResult<Action>>;
+  projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;
   checkUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   setCodeNotifications(enabled: boolean): Promise<void>;

@@ -304,7 +304,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       await request(pathFor(id), z.object({ success: z.literal(true) }), "DELETE");
     },
     async create(input: ChatTurnInput, turn: AbortSignal) {
-      const { id } = await request(DESKTOP_CHAT_CREATE, z.object({ id: chatId }), "POST", { selectedModels: [input.modelId] },
+      const { id } = await request(DESKTOP_CHAT_CREATE, z.object({ id: chatId }), "POST", { selectedModels: [input.modelId], ...(input.projectId ? { projectId: input.projectId } : {}) },
         { turn, headers: { [CHAT_INITIAL_SELECTION_MODE_HEADER]: input.selectionMode } });
       return id;
     },
