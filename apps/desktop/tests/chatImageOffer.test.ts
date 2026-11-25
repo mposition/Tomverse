@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ChatConversation, } from "../src/chat-contract";
+import type { ChatConversation } from "../src/chat-contract";
 import { desktopChatApi } from "../src/host/chat-api";
 import { startImageTurn } from "../src/host/chat-extras";
 import { imageOfferQuote } from "../src/image-offer";
@@ -55,9 +55,9 @@ test("the offer is priced from the catalogue at the preset quality, or not at al
 });
 
 const turn = {
-  action: "imageTurn", conversationId: "auto-chat", sourceUserMessageId: "saved-question", assistantMessageId: "answer-id-0001",
+  action: "imageTurn" as const, conversationId: "auto-chat", sourceUserMessageId: "saved-question", assistantMessageId: "answer-id-0001",
   modelId, imageModelIds: ["gpt-image-2"], preset: "draft" as const,
-} as const;
+} satisfies Parameters<typeof startImageTurn>[1];
 
 test("an unreadable image outcome is asked again under the same answer id, and a readable refusal is final", async () => {
   const calls: { path: string; body?: Record<string, unknown> }[] = [];
