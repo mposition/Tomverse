@@ -31,7 +31,7 @@ export const itemFeedbackInput = z.object({
   verdict: z.enum(COMPARISON_REVIEW_ITEM_VERDICTS).nullable(),
 }).strict();
 
-/** Answers a saved question with an image in the same conversation. Charged at once, so Desktop asks first. */
+/** Answers a saved question with an image in the same conversation, started at once as on the web. */
 export const imageTurnInput = z.object({
   action: z.literal("imageTurn"), conversationId: chatId, sourceUserMessageId: chatId,
   assistantMessageId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
@@ -39,6 +39,8 @@ export const imageTurnInput = z.object({
   imageModelIds: z.array(z.string().min(1).max(120)).max(8),
   preset: z.enum(["draft", "standard", "final"]).nullable(),
   prompt: z.string().trim().min(1).max(4_000).optional(),
+  /** Change the photo saved with the question; the server finds it, the request never names a file. */
+  edit: z.literal(true).optional(),
   routingDecisionId: z.string().regex(/^[a-z0-9]{20,40}$/).optional(),
 }).strict();
 
@@ -95,7 +97,7 @@ export type VerifyItemOutcome =
 export type ItemFeedbackOutcome = { ok: boolean };
 export type ImageTurnOutcome = { ok: true; groupId: string } | { ok: false; code: string | null };
 
-/** What the server's own image judgement decided for a saved Auto question. Nothing is generated or charged yet. */
+/** What the server's own image judgement decided for a saved Auto question. */
 export type ChatImageOffer = {
   conversationId: string; sourceUserMessageId: string; assistantMessageId: string; modelId: string;
   request: { modelIds: string[]; preset: "draft" | "standard" | "final" | null; prompt?: string; edit?: true; routingDecisionId?: string };

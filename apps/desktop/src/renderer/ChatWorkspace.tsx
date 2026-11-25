@@ -39,7 +39,7 @@ export { ChatMarkdown } from "./ChatTranscript";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
 import { AnswerExtras } from "./AnswerExtras";
-import { ChatImageOffer } from "./ChatImageOffer";
+import { ChatImageRetry } from "./ChatImageRetry";
 import { showImageOffer } from "./image-offer-store";
 import { HandoffDraft } from "./WorkspaceHandoff";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
@@ -1009,7 +1009,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             </div>
           </li>}
         </ol>
-        <ChatImageOffer conversationId={chat.conversation?.id} capability={imageCapability} language={language} onStarted={() => void chat.open(chat.selected ?? null)} />
+        <ChatImageRetry conversationId={chat.conversation?.id} language={language} onStarted={() => void chat.open(chat.selected ?? null)} />
         {chat.sending && !live?.text && <p className="chat-effort" role="status">{copy.waiting}</p>}
         {connectors && <ChatConnectorStatus language={language} progress={connectorProgress} waiting={connectorApproval} sending={chat.sending}
           onManage={onManageConnectors ?? (() => {})} onResolved={() => setConnectorApproval(false)} />}

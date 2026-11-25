@@ -17,7 +17,8 @@ import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
 import { AccountDataRefusal } from "./account-data-refusal";
 import { desktopAccountDataInput } from "../account-data-contract";
-import { reviewExportFile, runChatExtras } from "./chat-extras";
+import { reviewExportFile, runChatExtras, startImageTurn } from "./chat-extras";
+import { imageTurnFromOffer } from "../image-turn-request";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { createBillingApi } from "./billing-api";
@@ -2511,7 +2512,10 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         });
         researchSubmitted = Boolean(result && "deepResearch" in result);
         if (result && "imageTurn" in result && result.imageTurn && sourceId) {
-          imageOffer = { conversationId: id, sourceUserMessageId: sourceId, assistantMessageId: assistantId, modelId: input.modelId, request: result.imageTurn };
+          // As on the web, the server's judgement starts the image at once; only a failed start is kept for a retry.
+          const offer = { conversationId: id, sourceUserMessageId: sourceId, assistantMessageId: assistantId, modelId: input.modelId, request: result.imageTurn };
+          const started = signal.aborted ? { ok: true as const } : await startImageTurn(connectedSettingsApi(), imageTurnFromOffer(offer)).catch(() => ({ ok: false as const }));
+          if (!started.ok) imageOffer = offer;
         }
         applied = result?.appliedReasoningEffort;
         if (applied) publish({ applied });

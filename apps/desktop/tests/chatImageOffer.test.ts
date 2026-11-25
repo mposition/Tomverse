@@ -3,10 +3,8 @@ import test from "node:test";
 import type { ChatConversation } from "../src/chat-contract";
 import { desktopChatApi } from "../src/host/chat-api";
 import { startImageTurn } from "../src/host/chat-extras";
-import { imageOfferQuote } from "../src/image-offer";
-import type { ImageCapability } from "../src/images-contract";
-import { desktopImageOfferCopy } from "../../../locales/desktopImageOffer";
-import { SUPPORTED_LANGUAGES } from "../../../lib/language";
+import { imageTurnFromOffer } from "../src/image-turn-request";
+import { chatExtrasInput } from "../src/chat-extras-contract";
 
 const origin = "http://127.0.0.1:44183";
 const modelId = "gpt-6-luna";
@@ -16,17 +14,7 @@ const current: ChatConversation = {
   messagePage: { nextCursor: null }, selectionMode: "auto", selectedModels: [modelId],
   autoSelection: { offered: true }, webSearchMode: "off",
 };
-const capability: ImageCapability = {
-  maxModels: 3,
-  models: [
-    { id: "gpt-image-2", name: "GPT Image 2", provider: "openai", pricingVersion: "v1", prices: [
-      { size: "1024x1024", quality: "low", credits: 6 }, { size: "1024x1024", quality: "medium", credits: 20 },
-      { size: "1024x1024", quality: "high", credits: 80 }, { size: "1024x1536", quality: "medium", credits: 30 }] },
-    { id: "other", name: "Other", provider: "fal", pricingVersion: "v2", prices: [{ size: "1024x1024", quality: "medium", credits: 12 }] },
-  ],
-};
-
-test("an Auto turn the server judges an image request returns the decision and charges nothing", async (t) => {
+test("an Auto turn the server judges an image request returns the decision before anything is charged", async (t) => {
   const paths: string[] = [];
   t.mock.method(globalThis, "fetch", async (url: URL) => {
     paths.push(url.pathname);
@@ -40,18 +28,6 @@ test("an Auto turn the server judges an image request returns the decision and c
   assert.deepEqual(result && "imageTurn" in result ? result.imageTurn : null,
     { modelIds: ["gpt-image-2"], preset: "draft", prompt: "Dusk, lighthouse", routingDecisionId: "abcdefghij0123456789" });
   assert.deepEqual(paths, ["/api/chat/context", "/api/chat"]);
-});
-
-test("the offer is priced from the catalogue at the preset quality, or not at all", () => {
-  assert.deepEqual(imageOfferQuote(capability, { modelIds: ["gpt-image-2"], preset: "draft" }),
-    { quality: "low", models: [{ id: "gpt-image-2", name: "GPT Image 2", credits: 6 }], credits: 6 });
-  assert.equal(imageOfferQuote(capability, { modelIds: ["gpt-image-2"], preset: null })?.credits, 20);
-  assert.equal(imageOfferQuote(capability, { modelIds: [], preset: "final" })?.credits, 80);
-  assert.equal(imageOfferQuote(capability, { modelIds: ["gpt-image-2", "other"], preset: "standard" })?.credits, 32);
-  assert.equal(imageOfferQuote(capability, { modelIds: ["other"], preset: "final" }), null);
-  assert.equal(imageOfferQuote(capability, { modelIds: ["missing"], preset: "standard" }), null);
-  assert.equal(imageOfferQuote(capability, { modelIds: ["gpt-image-2"], preset: "standard", edit: true }), null);
-  assert.equal(imageOfferQuote(null, { modelIds: [], preset: "standard" }), null);
 });
 
 const turn = {
@@ -81,10 +57,24 @@ test("an unreadable image outcome is asked again under the same answer id, and a
   assert.equal(tries, 3);
 });
 
-test("every language words the price, the confirmation and the refusals", () => {
-  for (const language of SUPPORTED_LANGUAGES) {
-    const copy = desktopImageOfferCopy[language];
-    assert.ok(copy.create.includes("{credits}") && copy.price.includes("{credits}"), language);
-    for (const value of Object.values(copy)) assert.ok(value.length > 0);
-  }
+test("the decision becomes the same request body the web sends, edit flag and routing id included", () => {
+  const offer = { conversationId: "auto-chat", sourceUserMessageId: "saved-question", assistantMessageId: "answer-id-0001", modelId,
+    request: { modelIds: ["gpt-image-2"], preset: null, prompt: "Bluer", edit: true as const, routingDecisionId: "abcdefghij0123456789" } };
+  const input = imageTurnFromOffer(offer);
+  assert.deepEqual(input, { action: "imageTurn", conversationId: "auto-chat", sourceUserMessageId: "saved-question", assistantMessageId: "answer-id-0001",
+    modelId, imageModelIds: ["gpt-image-2"], preset: null, prompt: "Bluer", edit: true, routingDecisionId: "abcdefghij0123456789" });
+  assert.equal(chatExtrasInput.safeParse(input).success, true);
+  assert.equal(chatExtrasInput.safeParse({ ...input, edit: false }).success, false);
+  assert.equal("edit" in imageTurnFromOffer({ ...offer, request: { modelIds: [], preset: "standard" } }), false);
+});
+
+test("an edit decision reaches the server as a flag only, and the retry body is identical", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const replies = [new Response("", { status: 503 }), Response.json({ imageTurn: { groupId: "group_2", modelIds: [] } }, { status: 202 })];
+  const api = { send: async (call: { body?: object }) => { bodies.push(call.body as Record<string, unknown>); return replies[bodies.length - 1]!; } };
+  const input = imageTurnFromOffer({ conversationId: "auto-chat", sourceUserMessageId: "saved-question", assistantMessageId: "answer-id-0001", modelId,
+    request: { modelIds: ["gpt-image-2"], preset: "standard", edit: true } });
+  assert.deepEqual(await startImageTurn(api, input, async () => {}), { ok: true, groupId: "group_2" });
+  assert.equal(bodies[0].edit, true);
+  assert.deepEqual(bodies[1], bodies[0]);
 });

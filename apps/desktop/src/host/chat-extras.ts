@@ -89,6 +89,7 @@ export async function startImageTurn(api: Transport, input: Extract<ChatExtrasIn
     sourceUserMessageId: input.sourceUserMessageId, assistantMessageId: input.assistantMessageId, modelId: input.modelId,
     imageModelIds: input.imageModelIds, preset: input.preset,
     ...(input.prompt ? { prompt: input.prompt } : {}),
+    ...(input.edit ? { edit: true } : {}),
     ...(input.routingDecisionId ? { routingDecisionId: input.routingDecisionId } : {}),
   };
   let last: ImageTurnOutcome = { ok: false, code: null };
