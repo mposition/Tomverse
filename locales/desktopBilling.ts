@@ -19,6 +19,8 @@ export type DesktopBillingCopy = {
   /** The window came back on the cancel page; the account still decides, so this is never a definite "unpaid". */
   notConfirmedCancelled: string;
   checkAgain: string;
+  /** When an unconfirmed checkout attempt began. */
+  attemptStarted: string;
   repeatTitle: string;
   repeatBody: string;
   startAnyway: string;
@@ -47,6 +49,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "Tomverse has not recorded this payment yet. If you finished paying, check again in a moment.",
     notConfirmedCancelled: "It looks like you did not finish paying. Tomverse has not recorded a payment. If you did pay, check again in a moment.",
     checkAgain: "Check again",
+    attemptStarted: "Checkout started {time}",
     repeatTitle: "A payment you just made may still be processing.",
     repeatBody: "Tomverse has not recorded it yet. Paying again now could charge you twice. Check again first, or start a new payment only if you are sure the last one did not go through.",
     startAnyway: "Start a new payment anyway",
@@ -73,6 +76,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "아직 Tomverse에 결제가 기록되지 않았습니다. 결제를 마쳤다면 잠시 후 다시 확인해 주세요.",
     notConfirmedCancelled: "결제를 마치지 않은 것으로 보입니다. 아직 Tomverse에 결제가 기록되지 않았습니다. 결제를 했다면 잠시 후 다시 확인해 주세요.",
     checkAgain: "다시 확인",
+    attemptStarted: "{time}에 시작한 결제",
     repeatTitle: "방금 한 결제가 아직 처리 중일 수 있습니다.",
     repeatBody: "아직 Tomverse에 기록되지 않았습니다. 지금 다시 결제하면 두 번 청구될 수 있습니다. 먼저 다시 확인하고, 이전 결제가 되지 않은 것이 확실할 때만 새로 결제해 주세요.",
     startAnyway: "그래도 새로 결제하기",
@@ -99,6 +103,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "Tomverse 尚未记录这笔付款。如果你已完成付款，请稍后再核对。",
     notConfirmedCancelled: "你似乎没有完成付款。Tomverse 尚未记录付款。如果你已付款，请稍后再核对。",
     checkAgain: "再次核对",
+    attemptStarted: "结账开始于 {time}",
     repeatTitle: "你刚才的付款可能仍在处理中。",
     repeatBody: "Tomverse 尚未记录这笔付款。现在再次付款可能会被重复扣款。请先再次核对；只有在确定上一笔付款没有成功时，才发起新的付款。",
     startAnyway: "仍然发起新的付款",
@@ -125,6 +130,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "Tomverse 尚未記錄這筆付款。如果你已完成付款，請稍後再確認。",
     notConfirmedCancelled: "你似乎沒有完成付款。Tomverse 尚未記錄付款。如果你已付款，請稍後再確認。",
     checkAgain: "再次確認",
+    attemptStarted: "結帳開始於 {time}",
     repeatTitle: "你剛才的付款可能仍在處理中。",
     repeatBody: "Tomverse 尚未記錄這筆付款。現在再次付款可能會被重複扣款。請先再次確認；只有在確定上一筆付款沒有成功時，才開始新的付款。",
     startAnyway: "仍要開始新的付款",
@@ -151,6 +157,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "Tomverse n’a pas encore enregistré ce paiement. Si vous l’avez terminé, vérifiez de nouveau dans un instant.",
     notConfirmedCancelled: "Il semble que vous n’ayez pas terminé le paiement. Tomverse n’a enregistré aucun paiement. Si vous avez payé, vérifiez de nouveau dans un instant.",
     checkAgain: "Vérifier de nouveau",
+    attemptStarted: "Paiement commencé le {time}",
     repeatTitle: "Un paiement que vous venez d’effectuer est peut-être encore en cours de traitement.",
     repeatBody: "Tomverse ne l’a pas encore enregistré. Payer de nouveau maintenant pourrait entraîner un double débit. Vérifiez d’abord de nouveau, et ne lancez un nouveau paiement que si vous êtes sûr que le précédent n’a pas abouti.",
     startAnyway: "Lancer quand même un nouveau paiement",
@@ -177,6 +184,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "Tomverse hat diese Zahlung noch nicht erfasst. Wenn Sie bezahlt haben, prüfen Sie es gleich noch einmal.",
     notConfirmedCancelled: "Es sieht so aus, als hätten Sie die Bezahlung nicht abgeschlossen. Tomverse hat keine Zahlung erfasst. Wenn Sie bezahlt haben, prüfen Sie es gleich noch einmal.",
     checkAgain: "Erneut prüfen",
+    attemptStarted: "Bezahlung begonnen am {time}",
     repeatTitle: "Eine gerade getätigte Zahlung wird möglicherweise noch verarbeitet.",
     repeatBody: "Tomverse hat sie noch nicht erfasst. Wenn Sie jetzt erneut bezahlen, könnte Ihnen der Betrag doppelt berechnet werden. Prüfen Sie zuerst erneut und starten Sie eine neue Zahlung nur, wenn Sie sicher sind, dass die letzte nicht durchgegangen ist.",
     startAnyway: "Trotzdem neue Zahlung starten",
@@ -203,6 +211,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "Tomverse aún no ha registrado este pago. Si ya pagaste, vuelve a comprobarlo en un momento.",
     notConfirmedCancelled: "Parece que no terminaste el pago. Tomverse no ha registrado ningún pago. Si pagaste, vuelve a comprobarlo en un momento.",
     checkAgain: "Comprobar de nuevo",
+    attemptStarted: "Pago iniciado el {time}",
     repeatTitle: "Es posible que un pago que acabas de hacer todavía se esté procesando.",
     repeatBody: "Tomverse aún no lo ha registrado. Si vuelves a pagar ahora, podrían cobrarte dos veces. Comprueba de nuevo primero e inicia un pago nuevo solo si estás seguro de que el anterior no se completó.",
     startAnyway: "Iniciar un pago nuevo de todos modos",
@@ -229,6 +238,7 @@ const copy: Record<Language, DesktopBillingCopy> = {
     notConfirmed: "A Tomverse ainda não registou este pagamento. Se já pagou, verifique novamente dentro de momentos.",
     notConfirmedCancelled: "Parece que não concluiu o pagamento. A Tomverse não registou nenhum pagamento. Se pagou, verifique novamente dentro de momentos.",
     checkAgain: "Verificar novamente",
+    attemptStarted: "Pagamento iniciado em {time}",
     repeatTitle: "Um pagamento que acabou de fazer pode ainda estar a ser processado.",
     repeatBody: "A Tomverse ainda não o registou. Se pagar novamente agora, pode ser cobrado duas vezes. Verifique novamente primeiro e inicie um novo pagamento apenas se tiver a certeza de que o anterior não foi concluído.",
     startAnyway: "Iniciar um novo pagamento mesmo assim",

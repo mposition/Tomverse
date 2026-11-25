@@ -299,8 +299,23 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
     await expect.poll(usageReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(reads + 5);
     await openPlan();
-    await expect(notice("credits:starter_500")).toHaveAttribute("data-stage", "unconfirmed");
-    await expect(notice("credits:starter_500")).toContainText("It looks like you did not finish paying.");
+    await expect(notice("credits:starter_500").last()).toHaveAttribute("data-stage", "unconfirmed");
+    await expect(notice("credits:starter_500").last()).toContainText("It looks like you did not finish paying.");
+
+    // The repeat added an attempt and kept the first. Two Starter attempts, and the account shows one pack: one
+    // attempt is confirmed, the other stays unconfirmed with its start time, and a third purchase still warns.
+    const starterAttempts = (stage: string) =>
+      page.locator(`[data-testid="native-billing-verification"][data-item="credits:starter_500"][data-stage="${stage}"]`);
+    await land(1, 500);
+    await notice("credits:starter_500").last().getByRole("button", { name: "Check again" }).click();
+    await expect(starterAttempts("confirmed")).toHaveCount(1, { timeout: 30_000 });
+    await expect(starterAttempts("unconfirmed")).toHaveCount(1, { timeout: 30_000 });
+    await expect(starterAttempts("unconfirmed")).toContainText("Checkout started");
+    const thirdPosts = await posts("/api/billing/credit-packs");
+    await buy(0).click();
+    await expect(repeatNotice).toHaveAttribute("data-item", "credits:starter_500", { timeout: 30_000 });
+    assert.equal(await posts("/api/billing/credit-packs"), thirdPosts, "the third attempt waits for the customer's choice");
+    assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 
     // Another account never sees these records, and its own first purchase of the same pack is not held back.
     await page.evaluate(() => window.desktop.signOut());

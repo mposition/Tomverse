@@ -348,6 +348,8 @@ function CheckoutStatus({ language, windowState, pass, purchases, repeat, labelO
 }) {
   const desk = desktopBillingCopy(language);
   const billingCopy = dictionaries[language].billing;
+  // The warning goes on the item's newest unconfirmed attempt; the older ones stay listed with their own times.
+  const repeatOn = repeat ? purchases.filter(record => record.item === repeat.item && record.stage === "unconfirmed").at(-1)?.id : undefined;
   return <>
     {windowState && <div className="billing-notice" role="status" data-testid="native-billing-window">
       <p><strong>{desk.windowOpen}</strong></p>
@@ -360,7 +362,7 @@ function CheckoutStatus({ language, windowState, pass, purchases, repeat, labelO
     </div>}
     {purchases.filter(record => record.stage !== "open").map(record => <PurchaseNotice key={record.id} language={language}
       record={record} label={labelOf(record.intent)} onCheckAgain={onCheckAgain} onRepeat={onRepeat}
-      repeat={repeat?.item === record.item && record.stage === "unconfirmed" ? repeat : undefined} />)}
+      repeat={record.id === repeatOn ? repeat : undefined} />)}
   </>;
 }
 
@@ -372,13 +374,14 @@ function PurchaseNotice({ language, record, label, repeat, onCheckAgain, onRepea
   const desk = desktopBillingCopy(language);
   const purchase = purchaseCtaCopy[language];
   const credits = record.intent.kind === "credits";
+  const started = new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.startedAt));
   return <div className="billing-notice" role="status" data-testid="native-billing-verification" data-item={record.item}
-    data-stage={repeat ? "repeat" : record.stage}>
+    data-attempt={record.id} data-stage={repeat ? "repeat" : record.stage}>
     {record.stage === "confirmed" ? credits
       ? <><p><strong>{purchase.purchaseSuccessTitle}</strong></p><p>{purchase.purchaseSuccessBody(label)}</p></>
       : <p><strong>{fillBillingCopy(desk.planConfirmed, { plan: label })}</strong></p>
       : <>
-        <p><strong>{label}</strong></p>
+        <p><strong>{label}</strong> <span className="billing-muted">{fillBillingCopy(desk.attemptStarted, { time: started })}</span></p>
         {record.stage === "checking" ? <p>{desk.verifying}</p> : <>
           {repeat ? <><p><strong>{desk.repeatTitle}</strong></p><p>{desk.repeatBody}</p></>
             : <p>{record.cancelled ? desk.notConfirmedCancelled : desk.notConfirmed}</p>}

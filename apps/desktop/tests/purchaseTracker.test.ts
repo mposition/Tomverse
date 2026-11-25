@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { desktopBillingResponse, type BillingUsage } from "../src/billing-contract";
 import {
-  CHECK_AGAIN_ATTEMPTS, createPurchaseTracker, PURCHASE_CHECK_ATTEMPTS, PURCHASE_CHECK_INTERVAL_MS, PURCHASE_RECORD_TTL_MS,
-  REPEAT_HOLD_TTL_MS,
+  CHECK_AGAIN_ATTEMPTS, createPurchaseTracker, landedPacks, landedSubscription, PURCHASE_CHECK_ATTEMPTS, PURCHASE_CHECK_INTERVAL_MS,
+  PURCHASE_RECORD_TTL_MS, REPEAT_HOLD_TTL_MS,
 } from "../src/host/purchase-tracker";
 
 const account = (plan: "Free" | "Pro" | "Max", purchased: number): BillingUsage => desktopBillingResponse.usage.parse({
@@ -165,7 +165,7 @@ test("a hold is one-time, bound to its item and short-lived", () => {
   assert.equal(tracker.admit(starter, usage(), late).kind, "held", "an answer to an old warning needs a fresh one");
 });
 
-test("a new checkout clears the confirmations shown, never another item's unconfirmed record, and replaces its own item", async () => {
+test("a new checkout clears the confirmations shown and keeps every unconfirmed attempt, its own item's included", async () => {
   const { tracker, server, usage, stages } = harness();
   tracker.begin(starter, usage(), 500);
   server.purchased = 500;
@@ -175,14 +175,177 @@ test("a new checkout clears the confirmations shown, never another item's unconf
   tracker.windowClosed("cancelled");
   await flush();
   assert.deepEqual(stages(), ["subscription:unconfirmed"]);
-  const before = tracker.records()[0].id;
+  const first = tracker.records()[0].id;
   tracker.begin(project, usage(), 1_500);
   assert.deepEqual(stages(), ["subscription:unconfirmed", "credits:project_1500:open"]);
-  // The customer chose to repeat the subscription: its record starts again from now.
+  // The customer chose to repeat the subscription: a second attempt is added beside the first.
   tracker.begin({ kind: "subscription", planId: "max" }, usage(), 0);
-  const replaced = tracker.records().find(({ item }) => item === "subscription")!;
-  assert.notEqual(replaced.id, before);
-  assert.deepEqual(replaced.intent, { kind: "subscription", planId: "max" });
+  const attempts = tracker.records().filter(({ item }) => item === "subscription");
+  assert.deepEqual(attempts.map(({ id, intent, stage }) => [id === first, intent, stage]), [
+    [true, { kind: "subscription", planId: "pro" }, "unconfirmed"], [false, { kind: "subscription", planId: "max" }, "open"],
+  ]);
+});
+
+/** Runs the warning and then the customer's choice for `intent`, and records a second attempt of it. */
+function repeatAfterWarning(h: ReturnType<typeof harness>, intent: Parameters<ReturnType<typeof harness>["tracker"]["admit"]>[0],
+  credits: number) {
+  const held = h.tracker.admit(intent, h.usage());
+  assert.equal(held.kind, "held");
+  assert.deepEqual(h.tracker.admit(intent, h.usage(), (held as { hold: string }).hold), { kind: "proceed" });
+  h.tracker.begin(intent, h.usage(), credits);
+}
+
+test("the same pack paid twice through the warning: one pack's increase confirms one attempt and the warning stays", async () => {
+  const h = harness();
+  h.server.purchased = 100;
+  h.tracker.begin(starter, h.usage(), 500);
+  h.tracker.windowClosed("cancelled");
+  await flush();
+  repeatAfterWarning(h, starter, 500);
+  h.tracker.windowClosed("closed");
+  await flush();
+  assert.deepEqual(h.stages(), ["credits:starter_500:unconfirmed", "credits:starter_500:unconfirmed"]);
+  // The first payment lands late: one pack's worth. Which attempt it was cannot be told, so the oldest is
+  // confirmed and the other stays unconfirmed; a third purchase of the pack is still held back.
+  h.server.purchased = 600;
+  assert.equal(h.tracker.admit(starter, h.usage()).kind, "held");
+  assert.deepEqual(h.stages(), ["credits:starter_500:confirmed", "credits:starter_500:unconfirmed"]);
+  // The same balance read again proves nothing more.
+  assert.equal(h.tracker.admit(starter, h.usage()).kind, "held");
+  // The second lands too: both are confirmed and the pack is free to buy again.
+  h.server.purchased = 1_100;
+  assert.deepEqual(h.tracker.admit(starter, h.usage()), { kind: "settled" });
+  assert.deepEqual(h.stages(), ["credits:starter_500:confirmed", "credits:starter_500:confirmed"]);
+  assert.deepEqual(h.tracker.admit(starter, h.usage()), { kind: "proceed" });
+});
+
+test("the same pack paid twice and both land at once: both attempts are confirmed by one read", async () => {
+  const h = harness();
+  h.tracker.begin(starter, h.usage(), 500);
+  h.tracker.windowClosed("closed");
+  await flush();
+  repeatAfterWarning(h, starter, 500);
+  h.server.purchased = 1_000;
+  h.tracker.windowClosed("closed");
+  await flush();
+  assert.deepEqual(h.stages(), ["credits:starter_500:confirmed", "credits:starter_500:confirmed"]);
+  assert.deepEqual(h.tracker.admit(starter, h.usage()), { kind: "proceed" });
+});
+
+test("the subscription tried twice through the warning: the plan change confirms one attempt and the warning stays", async () => {
+  const h = harness();
+  h.tracker.begin(pro, h.usage(), 0);
+  h.tracker.windowClosed("success");
+  await flush();
+  repeatAfterWarning(h, pro, 0);
+  h.tracker.windowClosed("success");
+  await flush();
+  assert.deepEqual(h.stages(), ["subscription:unconfirmed", "subscription:unconfirmed"]);
+  h.server.plan = "Pro";
+  assert.equal(h.tracker.admit(pro, h.usage()).kind, "held");
+  assert.deepEqual(h.stages(), ["subscription:confirmed", "subscription:unconfirmed"]);
+  // A second Session paid on top of an active plan would be a second subscription: the warning stays, for
+  // another plan too, and reads of the same plan never confirm the remaining attempt.
+  assert.equal(h.tracker.admit({ kind: "subscription", planId: "max" }, h.usage()).kind, "held");
+  assert.equal(h.tracker.checkAgain("subscription"), true);
+  await flush();
+  assert.deepEqual(h.stages(), ["subscription:confirmed", "subscription:unconfirmed"]);
+  // It ends when its own day is over.
+  h.clock.now += PURCHASE_RECORD_TTL_MS;
+  assert.equal(h.tracker.admit(pro, h.usage()).kind, "proceed");
+});
+
+test("each attempt expires a day after its own start", async () => {
+  const h = harness();
+  h.tracker.begin(starter, h.usage(), 500);
+  h.tracker.windowClosed("closed");
+  await flush();
+  h.clock.now += PURCHASE_RECORD_TTL_MS / 2;
+  repeatAfterWarning(h, starter, 500);
+  h.tracker.windowClosed("closed");
+  await flush();
+  assert.equal(h.tracker.records().length, 2);
+  h.clock.now += PURCHASE_RECORD_TTL_MS / 2;
+  // The first is a day old and gone; the second is half a day old and still warns.
+  assert.deepEqual(h.stages(), ["credits:starter_500:unconfirmed"]);
+  assert.equal(h.tracker.admit(starter, h.usage()).kind, "held");
+  h.clock.now += PURCHASE_RECORD_TTL_MS / 2;
+  assert.deepEqual(h.stages(), []);
+  assert.equal(h.tracker.admit(starter, h.usage()).kind, "proceed");
+});
+
+type PackCase = { name: string; balance: number; pending: Array<[id: string, item: string, before: number, credits: number]>;
+  landed: string[]; before?: Record<string, number> };
+
+test("credit-pack attribution: an increase confirms only the attempts it proves, oldest first per pack", () => {
+  const cases: PackCase[] = [
+    { name: "one attempt, any increase", balance: 600, pending: [["a1", "starter", 500, 500]], landed: ["a1"] },
+    { name: "one attempt, a smaller increase (credits spent meanwhile)", balance: 550, pending: [["a1", "starter", 500, 500]],
+      landed: ["a1"] },
+    { name: "one attempt, no increase", balance: 500, pending: [["a1", "starter", 500, 500]], landed: [], before: { a1: 500 } },
+    { name: "one attempt, the balance fell", balance: 300, pending: [["a1", "starter", 500, 500]], landed: [] },
+    { name: "same pack twice, one pack's worth", balance: 500,
+      pending: [["a1", "starter", 0, 500], ["a2", "starter", 0, 500]], landed: ["a1"], before: { a2: 500 } },
+    { name: "same pack twice, two packs' worth", balance: 1_000,
+      pending: [["a1", "starter", 0, 500], ["a2", "starter", 0, 500]], landed: ["a1", "a2"] },
+    { name: "same pack twice, more than one pack can add", balance: 600,
+      pending: [["a1", "starter", 0, 500], ["a2", "starter", 0, 500]], landed: ["a1", "a2"] },
+    { name: "same pack three times, two packs' worth", balance: 1_000,
+      pending: [["a1", "starter", 0, 500], ["a2", "starter", 0, 500], ["a3", "starter", 0, 500]], landed: ["a1", "a2"],
+      before: { a3: 1_000 } },
+    { name: "same pack twice, the second started after the first's baseline grew", balance: 2_500,
+      pending: [["a1", "starter", 2_000, 500], ["a2", "starter", 2_000, 500]], landed: ["a1"], before: { a2: 2_500 } },
+    { name: "two packs, the larger landed", balance: 1_500,
+      pending: [["s", "starter", 0, 500], ["p", "project", 0, 1_500]], landed: ["p"], before: { s: 1_500 } },
+    { name: "two packs, an increase either could explain", balance: 500,
+      pending: [["s", "starter", 0, 500], ["p", "project", 0, 1_500]], landed: [] },
+    { name: "two packs of one size, one pack's worth", balance: 500,
+      pending: [["s", "starter", 0, 500], ["t", "starter_plus", 0, 500]], landed: [] },
+    { name: "two packs, both landed", balance: 2_000,
+      pending: [["s", "starter", 0, 500], ["p", "project", 0, 1_500]], landed: ["s", "p"] },
+    { name: "two packs, more than the larger can add alone", balance: 1_600,
+      pending: [["s", "starter", 0, 500], ["p", "project", 0, 1_500]], landed: ["s", "p"] },
+    { name: "same pack twice beside another pack, only the other could add this much", balance: 1_500,
+      pending: [["a1", "starter", 0, 500], ["a2", "starter", 0, 500], ["p", "project", 0, 1_500]], landed: ["p"],
+      before: { a1: 1_500, a2: 1_500 } },
+    { name: "same pack twice beside another pack, ambiguous", balance: 1_000,
+      pending: [["a1", "starter", 0, 500], ["a2", "starter", 0, 500], ["p", "project", 0, 1_500]], landed: [] },
+    { name: "an unknown size alone, any increase", balance: 100, pending: [["u", "team", 0, Infinity]], landed: ["u"] },
+    { name: "an unknown size beside a known pack", balance: 500,
+      pending: [["s", "starter", 0, 500], ["u", "team", 0, Infinity]], landed: [] },
+    { name: "an unknown size twice, one proven at most", balance: 10_000,
+      pending: [["u1", "team", 0, Infinity], ["u2", "team", 0, Infinity]], landed: ["u1"] },
+    { name: "a known and an unknown attempt of one pack: counted with the larger size", balance: 600,
+      pending: [["k", "starter", 0, 500], ["u", "starter", 0, Infinity]], landed: ["k"] },
+  ];
+  for (const { name, balance, pending, landed, before } of cases) {
+    const result = landedPacks(balance, pending.map(([id, item, base, credits]) =>
+      ({ id, item: `credits:${item}` as const, before: base, credits })));
+    assert.deepEqual(result.landed, landed, name);
+    assert.deepEqual(result.pending.map(({ id }) => id), pending.map(([id]) => id).filter((id) => !landed.includes(id)), name);
+    for (const [id, value] of Object.entries(before ?? {})) {
+      assert.equal(result.pending.find((attempt) => attempt.id === id)?.before, value, `${name}: ${id}`);
+    }
+  }
+});
+
+test("subscription attribution: a plan change confirms the oldest attempt for that plan, and no other", () => {
+  const cases: Array<{ name: string; plan: "Free" | "Pro" | "Max"; pending: Array<[string, "Pro" | "Max", "Free" | "Pro" | "Max"]>;
+    landed: string | null; before: Array<"Free" | "Pro" | "Max"> }> = [
+    { name: "no change", plan: "Free", pending: [["s1", "Pro", "Free"]], landed: null, before: ["Free"] },
+    { name: "the plan bought", plan: "Pro", pending: [["s1", "Pro", "Free"]], landed: "s1", before: [] },
+    { name: "another plan", plan: "Max", pending: [["s1", "Pro", "Free"]], landed: null, before: ["Free"] },
+    { name: "already on the plan when it began", plan: "Pro", pending: [["s1", "Pro", "Pro"]], landed: null, before: ["Pro"] },
+    { name: "two attempts for one plan", plan: "Pro", pending: [["s1", "Pro", "Free"], ["s2", "Pro", "Free"]], landed: "s1",
+      before: ["Pro"] },
+    { name: "two attempts, the newer one's plan", plan: "Max", pending: [["s1", "Pro", "Free"], ["s2", "Max", "Free"]], landed: "s2",
+      before: ["Max"] },
+  ];
+  for (const { name, plan, pending, landed, before } of cases) {
+    const result = landedSubscription(plan, pending.map(([id, tier, base]) => ({ id, tier, before: base })));
+    assert.equal(result.landed, landed, name);
+    assert.deepEqual(result.pending.map((attempt) => attempt.before), before, name);
+  }
 });
 
 test("records older than a day are dropped, and none outlives the account session", async () => {
