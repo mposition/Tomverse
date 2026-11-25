@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Check, Copy, KeyRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
-import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
+import { useSettingsReturnTarget } from "@/components/settings/useSettingsReturnProduct";
 import { SETTINGS_HOME_PATH, SETTINGS_TAB_QUERY_PARAM, settingsHrefForProduct } from "@/lib/settingsNavigation";
 import {
     asideProviderConfig,
@@ -1116,7 +1116,7 @@ export function AllowedModels({
 
 export function ExternalApiSettings() {
     const { t } = useLanguage();
-    const product = useSettingsReturnProduct();
+    const { product, entry } = useSettingsReturnTarget();
     const [overview, setOverview] = useState<Overview | null>(null);
     const [failed, setFailed] = useState(false);
     const [signedOut, setSignedOut] = useState(false);
@@ -1240,7 +1240,7 @@ export function ExternalApiSettings() {
                     {overview.reason === "plan_not_eligible" ? (
                         <section className={card} data-testid="external-api-paid-plan">
                             <p className="text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.paidPlanRequired")}</p>
-                            <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product)} data-testid="external-api-upgrade" className={`mt-3 inline-flex ${primary}`}>
+                            <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product, entry)} data-testid="external-api-upgrade" className={`mt-3 inline-flex ${primary}`}>
                                 {t("externalApi.paidPlanUpgrade")}
                             </Link>
                         </section>
@@ -1273,7 +1273,7 @@ export function ExternalApiSettings() {
                         ) : (
                             <KeyList keys={overview.keys} onChanged={load} maxCreditCap={overview.limits.maxCreditCap} />
                         )}
-                        <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product)} className="mt-3 inline-block text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">
+                        <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product, entry)} className="mt-3 inline-block text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">
                             {t("externalApi.accountUsageLink")}
                         </Link>
                     </section>

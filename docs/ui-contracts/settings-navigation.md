@@ -23,17 +23,20 @@ projects, same assertions).
 
 ## 1. Two movements, two controls
 
-The settings surface is the modal that lives in the sidebar's account card. It
-has no URL of its own, but its detail screens are real pages and they nest —
-`/settings/imports/conversations/<id>` is three levels below the list. So a
-visitor inside settings can want to move in two different directions, and each
-one gets its own control. They coexist; neither replaces the other, and
-neither may be merged into the other.
+Workspace settings open as the modal in the sidebar's account card. The
+dedicated `/settings` page renders the same account controls and accepts the
+same tab and row parameters. Both entries lead to the same detail screens.
+For example, `/settings/imports/conversations/<id>` is three levels below
+the list. The upward and exit controls remain distinct at every depth.
 
 **Hierarchical back — one level up, inside settings.** Rendered at the start of
 the page by `SettingsDetailNav` (to the settings list) or by the page's own
 link (to the import list, to the memory settings). It names its destination:
 `settingsSectionHref(section)` from `lib/settingsNavigation.ts`.
+When the list was entered through the dedicated page, the upward link
+returns to that page and includes its selected tab, row and originating
+product. The Desktop presentation keeps its native tabs and displays the
+same settings contents.
 `router.back()` is never used — it points at whatever the visitor saw last,
 and at nothing at all on a directly-opened URL.
 
@@ -77,9 +80,10 @@ Consequences:
   claim to discard or cancel something the control does not touch. It uses a
   `MessageSquare`-family icon and states the destination in words.
 
-The browser's own Back button is not part of this and is never overridden. The
-deep link is removed from the address bar with `history.replaceState` — the
-current entry is rewritten, no entry is pushed.
+The browser's own Back button is independent of these controls.
+The workspace modal consumes its deep link with `history.replaceState`.
+The dedicated page updates the current entry when the selected tab changes,
+so reloading it keeps that tab.
 
 ## 2. Grouping
 

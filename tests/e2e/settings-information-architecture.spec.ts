@@ -191,6 +191,55 @@ async function gotoReviewWithSettings(page: Page) {
 }
 
 test.describe("settings information architecture", () => {
+  test("the dedicated settings page reuses detail views and saves through the account settings API", async ({ page }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockSettingsEntryApis(page);
+    let theme = "light";
+    await page.route((url) => url.pathname === "/api/user/settings", async (route) => {
+      const saving = route.request().method() === "POST";
+      if (saving) theme = route.request().postDataJSON().theme ?? theme;
+      const settings = { theme, language: "ko", timeZone: "UTC" };
+      await route.fulfill(json(saving ? { settings } : settings));
+    });
+
+    await page.goto("/settings?settings=ai&from=chat");
+    const panel = page.getByRole("region", { name: "사용자 설정" });
+    await expect(panel).toBeVisible();
+    await expect(panel.locator("[data-testid^=settings-tab-]")).toHaveCount(7);
+    await expect(panel.getByTestId("settings-tab-ai")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId(RETURN_TO_CHAT)).toHaveAttribute("href", "/chat");
+    await panel.getByTestId("memory-entry-link").click();
+    await expect(page).toHaveURL(/\/settings\/memory$/);
+    const back = page.getByTestId("memory-back");
+    await expect(back).toHaveAttribute("href", "/settings?settings=ai&settingsSection=memory&from=chat");
+    await back.click();
+    await expect(panel.getByTestId("memory-entry-link")).toBeFocused();
+
+    await panel.getByTestId("settings-tab-preferences").click();
+    await expect(page).toHaveURL(/settings=preferences/);
+    const themeSelect = panel.getByRole("combobox").first();
+    await expect(themeSelect).toHaveValue("light");
+    await themeSelect.selectOption("dark");
+    const saved = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/user/settings");
+    await panel.getByRole("button", { name: "확인", exact: true }).click();
+    expect((await saved).postDataJSON()).toEqual({ theme: "dark" });
+    await expect(page).toHaveURL(/\/chat$/, { timeout: 20_000 });
+  });
+
+  test("a signed-out visitor can sign in and return to the same dedicated settings tab", async ({ page }) => {
+    await prepareGuestPage(page, "ko");
+    await page.goto("/settings?settings=data&from=studio");
+    const href = await page.getByRole("main").getByRole("link", { name: "로그인 / 회원가입", exact: true }).getAttribute("href");
+    const login = new URL(href!, "https://tomverse.app");
+    expect(login.pathname).toBe("/auth/signin");
+    const callback = new URL(login.searchParams.get("callbackUrl")!, login.origin);
+    expect(callback.pathname).toBe("/settings");
+    expect(callback.searchParams.get("settings")).toBe("data");
+    expect(callback.searchParams.get("from")).toBe("studio");
+    await expect(page.getByTestId("settings-tab-data")).toHaveCount(0);
+  });
+
   test("the tab strip ends data, developer, plan, and the account tab has no API row @ui-risk", async ({
     page,
   }) => {

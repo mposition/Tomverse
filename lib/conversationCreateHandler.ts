@@ -55,6 +55,7 @@ import {
 import { clampRuntimeSelectedModels } from "@/lib/modelRegistry";
 import { resolveNewConversationSelectedModels } from "@/lib/newConversationSelectedModels";
 import { prisma } from "@/lib/prisma";
+import { DESKTOP_APP_ORIGIN, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
 
 const modelSchema = z.string().min(1).max(120);
 
@@ -76,6 +77,7 @@ const createConversationSchema = z
     assistantProfileId: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
+const desktopConversationCreateSchema = createConversationSchema.pick({ title: true, selectedModels: true }).strict();
 
 const safeParse = (data: unknown, fallback: string[]) => {
   if (!data) return fallback;
@@ -106,6 +108,10 @@ export const createConversationForProduct = async (
     }
 
     const userId = session.user.id;
+    const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
+    if (desktop && !desktopTextWriteEnabled(productKey)) {
+      return NextResponse.json({ error: "Desktop writing is unavailable in this workspace." }, { status: 403 });
+    }
     // Only the Chat entry route can supply its server-admitted principal.
     if (initialAutoOwnerId !== undefined && (productKey !== "chat" || initialAutoOwnerId !== userId)) {
       return NextResponse.json({ error: "Conversation access denied." }, { status: 403 });
@@ -114,7 +120,8 @@ export const createConversationForProduct = async (
       minute: 10,
       day: 100,
     });
-    const body = await readLimitedJson(req, 8 * 1024, createConversationSchema);
+    const body = await readLimitedJson<z.infer<typeof createConversationSchema>>(req, 8 * 1024,
+      desktop ? desktopConversationCreateSchema : createConversationSchema);
     const title = body.title || "New chat";
 
       const userSettings = await prisma.userSettings.findUnique({
