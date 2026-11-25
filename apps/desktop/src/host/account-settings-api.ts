@@ -124,6 +124,15 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
         body: { expectedRevision: input.expectedRevision, targetProjectId: input.projectId } };
     case "extractionRuns":
       return { path: "/api/memories/extraction-runs" };
+    case "reviewProviders":
+      return { path: "/api/user/settings" };
+    case "saveReviewProviders":
+      return { path: "/api/user/settings", method: "POST", body: { reviewEasyDefaultProviders: input.providers } };
+    case "modelFinder":
+      return { path: "/api/user/model-finder" };
+    case "saveModelFinder":
+      return { path: "/api/user/model-finder", method: "POST", body: input.values.mode === "default" ? { action: "accept_default" }
+        : { action: "complete", answers: { tasks: input.values.tasks, priority: input.values.priority }, modelIds: input.values.modelIds } };
     case "knowledge":
       return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}/knowledge` };
     case "deleteKnowledgeFile":

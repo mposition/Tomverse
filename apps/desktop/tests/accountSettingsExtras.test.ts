@@ -154,3 +154,52 @@ test("an assistant package is saved only when it is a zip", async () => {
   assert.deepEqual(await api.handle({ action: "saveAssistant", id: "prof_1", name: "My / helper" }), { status: "saved" });
   assert.equal(saved[0].readUInt32LE(0), 0x04034b50);
 });
+
+test("Review provider defaults and Model Finder map to their routes and validate the answers", async () => {
+  const { settings, calls } = settingsWith((url, init) => {
+    if (url.pathname === "/api/user/model-finder") return init?.method === "POST"
+      ? Response.json({ defaultModelId: "m1", newConversationModelIds: ["m1", "m2"] })
+      : Response.json({ settings: { preferredTasks: ["coding"], preferredPriority: "fast", defaultModelId: "m1", modelFinderCompletedAt: null } });
+    return init?.method === "POST" ? Response.json({ success: true }) : Response.json({
+      reviewEasyProviderOptions: ["openai", "anthropic", "google"], reviewEasyDefaultProviders: ["openai", "anthropic"],
+      reviewEasyPlatformProviders: ["openai"], reviewEasyMaxProviders: "2", reviewEasyEffectiveProviders: ["openai", "anthropic"],
+    });
+  });
+  const defaults = (await settings({ action: "reviewProviders" })) as AccountSettingsResult<"reviewProviders">;
+  assert.deepEqual(defaults.reviewEasyDefaultProviders, ["openai", "anthropic"]);
+  assert.equal(defaults.reviewEasyMaxProviders, 2);
+  await settings({ action: "saveReviewProviders", providers: null });
+  await settings({ action: "saveReviewProviders", providers: ["google"] });
+  await settings({ action: "modelFinder" });
+  const saved = (await settings({ action: "saveModelFinder", values: { mode: "default" } })) as AccountSettingsResult<"saveModelFinder">;
+  assert.equal(saved.defaultModelId, "m1");
+  await settings({ action: "saveModelFinder", values: { mode: "complete", tasks: ["coding", "writing"], priority: "deep", modelIds: ["m1", "m2"] } });
+  assert.deepEqual(calls.map(call => [call.method, call.path, call.body]), [
+    ["GET", "/api/user/settings", undefined],
+    ["POST", "/api/user/settings", { reviewEasyDefaultProviders: null }],
+    ["POST", "/api/user/settings", { reviewEasyDefaultProviders: ["google"] }],
+    ["GET", "/api/user/model-finder", undefined],
+    ["POST", "/api/user/model-finder", { action: "accept_default" }],
+    ["POST", "/api/user/model-finder", { action: "complete", answers: { tasks: ["coding", "writing"], priority: "deep" }, modelIds: ["m1", "m2"] }],
+  ]);
+  for (const bad of [
+    { action: "saveReviewProviders", providers: [] }, { action: "saveReviewProviders", providers: ["a", "b", "c", "d"] },
+    { action: "saveReviewProviders", providers: ["Bad Name"] },
+    { action: "saveModelFinder", values: { mode: "complete", tasks: [], priority: "fast", modelIds: ["m1"] } },
+    { action: "saveModelFinder", values: { mode: "complete", tasks: ["coding"], priority: "slow", modelIds: ["m1"] } },
+  ]) assert.equal(desktopAccountSettingsInput.safeParse(bad).success, false, JSON.stringify(bad));
+});
+
+test("a server that cannot answer with Review options or a coherent Model Finder save is not trusted", async () => {
+  const { settings: noOptions } = settingsWith(() => Response.json({ theme: "dark" }));
+  await assert.rejects(noOptions({ action: "reviewProviders" }));
+  const { settings: incoherent } = settingsWith(() => Response.json({ defaultModelId: "m1", newConversationModelIds: ["m2"] }));
+  await assert.rejects(incoherent({ action: "saveModelFinder", values: { mode: "default" } }));
+});
+
+test("the Model Finder choices stay equal to the web catalogue", async () => {
+  const { MODEL_FINDER_TASKS, MODEL_FINDER_PRIORITIES } = await import("../../../lib/modelFinder");
+  const { MODEL_FINDER_TASK_IDS, MODEL_FINDER_PRIORITY_IDS } = await import("../src/account-settings-contract");
+  assert.deepEqual([...MODEL_FINDER_TASK_IDS], [...MODEL_FINDER_TASKS]);
+  assert.deepEqual([...MODEL_FINDER_PRIORITY_IDS], [...MODEL_FINDER_PRIORITIES]);
+});

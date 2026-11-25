@@ -13,6 +13,7 @@ import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
 import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
 import { AssistantExtras } from "./AssistantExtras";
+import { ModelFinderPanel, ReviewProviderDefaults } from "./AiSettingsExtras";
 import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
 import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
 
@@ -751,7 +752,11 @@ export function AccountSettings({ tab, language, onApply, onContinue, onOpenImpo
     case "account": return <Account language={language} />;
     case "preferences": return <Preferences language={language} onApply={onApply} />;
     case "assistants": return <Assistants language={language} />;
-    case "ai": return <Memory language={language} />;
+    case "ai": return <>
+      <ModelFinderPanel language={language} />
+      <ReviewProviderDefaults language={language} />
+      <Memory language={language} />
+    </>;
     case "data": {
       const copy = dictionaries[language].externalImport;
       return <>

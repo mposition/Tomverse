@@ -55,6 +55,11 @@ const assistantPolicies = {
 const assistantInstructions = z.string().max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters);
 const assistantModels = z.array(z.string().trim().min(1).max(120)).max(ASSISTANT_PROFILE_LIMITS.maxModels);
 const assistantStarters = z.array(z.string().trim().max(ASSISTANT_PROFILE_LIMITS.maxStarterCharacters)).max(ASSISTANT_PROFILE_LIMITS.maxStarters);
+// The literals of lib/modelFinder.ts (a test keeps them equal) and the Review provider id shape.
+export const MODEL_FINDER_TASK_IDS = ["documents", "writing", "coding", "research", "multilingual", "general"] as const;
+export const MODEL_FINDER_PRIORITY_IDS = ["fast", "balanced", "deep", "sources"] as const;
+const reviewProvider = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
+const reviewProviderList = z.array(reviewProvider).min(1).max(3);
 const versionEntry = z.object({ id: accountId, revision: z.number().int().positive(), createdAt: z.string() });
 
 export const accountPreferences = z.object({
@@ -159,6 +164,14 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("knowledge"), id: accountId }).strict(),
   z.object({ action: z.literal("deleteKnowledgeFile"), id: accountId, fileId: accountId }).strict(),
   z.object({ action: z.literal("deleteAssistant"), id: accountId }).strict(),
+  z.object({ action: z.literal("reviewProviders") }).strict(),
+  z.object({ action: z.literal("saveReviewProviders"), providers: reviewProviderList.nullable() }).strict(),
+  z.object({ action: z.literal("modelFinder") }).strict(),
+  z.object({ action: z.literal("saveModelFinder"), values: z.union([
+    z.object({ mode: z.literal("default") }).strict(),
+    z.object({ mode: z.literal("complete"), tasks: z.array(z.enum(MODEL_FINDER_TASK_IDS)).min(1).max(MODEL_FINDER_TASK_IDS.length),
+      priority: z.enum(MODEL_FINDER_PRIORITY_IDS), modelIds: z.array(z.string().trim().min(1).max(100)).min(1).max(3) }).strict(),
+  ]) }).strict(),
 ]);
 
 const keySummary = z.object({
@@ -285,6 +298,21 @@ export const desktopAccountSettingsOutput = {
   }),
   deleteKnowledgeFile: z.looseObject({}),
   deleteAssistant: z.looseObject({}),
+  reviewProviders: z.object({
+    // An older server that does not send the options simply has no Review defaults to show.
+    reviewEasyProviderOptions: z.array(z.string()),
+    reviewEasyDefaultProviders: reviewProviderList.nullable().catch(null),
+    reviewEasyPlatformProviders: reviewProviderList.nullable().catch(null),
+    reviewEasyMaxProviders: z.coerce.number().int().min(1).max(3).catch(3),
+    reviewEasyEffectiveProviders: z.array(z.string()).catch([]),
+  }),
+  saveReviewProviders: z.object({ success: z.literal(true) }),
+  modelFinder: z.object({ settings: z.object({
+    preferredTasks: z.array(z.string()), preferredPriority: z.string().nullable(),
+    defaultModelId: z.string(), modelFinderCompletedAt: z.string().nullable(),
+  }) }),
+  saveModelFinder: z.object({ defaultModelId: z.string().min(1), newConversationModelIds: z.array(z.string()).min(1).max(3) })
+    .refine(value => value.newConversationModelIds[0] === value.defaultModelId),
   exportHistory: z.object({ requests: z.array(exportHistoryEntry).max(200) }),
   usage: z.object({
     plan: label,
