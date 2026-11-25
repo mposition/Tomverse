@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import test from "node:test";
@@ -7,7 +8,7 @@ import type { ImageRequest } from "../src/images-contract";
 
 const imageRequest: ImageRequest = {
   prompt: "Draw a blue circle",
-  idempotencyKey: "b103addb-73ec-41e7-a1ea-c32f623966ff",
+  idempotencyKey: randomUUID(),
   size: "1024x1024",
   quality: "medium",
   models: ["fixture-image"],
