@@ -115,14 +115,14 @@ test("deleting every conversation needs the typed phrase and reports locked chat
   assert.equal(calls[0].init?.method, "DELETE");
   assert.equal(calls[0].url.pathname, "/api/conversations");
   const locked = setup(() => Response.json({ code: "CONVERSATION_LOCKED" }, { status: 423 }));
-  assert.deepEqual(await locked.api.handle({ action: "deleteAllConversations", confirmation: "DELETE ALL CHATS" }), { status: "locked" });
+  assert.deepEqual(await locked.api.handle({ action: "deleteAllConversations", confirmation: "DELETE ALL CHATS" }), { status: "locked", code: "CONVERSATION_LOCKED" });
 });
 
 test("account deletion signs Desktop out only after the server accepts it", async () => {
   assert.equal(desktopAccountDataInput.safeParse({ action: "deleteAccount", confirmation: "delete my account" }).success, false);
   assert.equal(desktopAccountDataInput.safeParse({ action: "deleteAccount", confirmation: "DELETE MY ACCOUNT", path: "/api/x" }).success, false);
   const refused = setup(() => Response.json({ code: "ACCOUNT_REAUTHENTICATION_REQUIRED" }, { status: 428 }));
-  assert.deepEqual(await refused.api.handle({ action: "deleteAccount", confirmation: "DELETE MY ACCOUNT" }), { status: "reauth" });
+  assert.deepEqual(await refused.api.handle({ action: "deleteAccount", confirmation: "DELETE MY ACCOUNT" }), { status: "reauth", code: "ACCOUNT_REAUTHENTICATION_REQUIRED" });
   assert.equal(refused.signedOut(), 0);
   const accepted = setup(() => Response.json({ success: true, scheduledFor: new Date().toISOString() }));
   assert.deepEqual(await accepted.api.handle({ action: "deleteAccount", confirmation: "DELETE MY ACCOUNT" }), { status: "deleted" });
