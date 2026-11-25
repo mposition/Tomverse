@@ -14,7 +14,9 @@
  * call again. A fourth call (2026-11-14, off unless
  * MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED=true) asks for image models
  * of providers Tomverse is already connected to, which their model-list APIs
- * never return. Three calls a week, four with that switch on, `maxRetries: 0`, bounded output, token
+ * never return; since 2026-11-24 that is one call per connected provider with no
+ * image model yet (about ten). Three calls a week, about thirteen with that
+ * switch on, `maxRetries: 0`, bounded output, token
  * counts logged and never content. Agent spending, not user credits: nothing
  * here touches a credit or a Chat budget.
  */
@@ -37,6 +39,7 @@ import {
   acceptNewProviderCandidates,
   connectedImageResearchPrompt,
   connectedImageResearchProviders,
+  researchConnectedImageProviders,
   brisbaneIsoWeek,
   newProviderResearchPrompt,
   newProviderResearchRunRecord,
@@ -52,9 +55,9 @@ import { RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
 export const MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ENV = "MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID";
 /**
- * The fourth weekly call (connected providers' image models) has its own
- * default-off switch: turning the research on once approved three calls, and a
- * deploy must not raise that to four by itself.
+ * The connected providers' image-model calls have their own default-off switch:
+ * turning the research on once approved three calls, and a deploy must not
+ * raise that by itself.
  */
 export const MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV = "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED";
 export const NEW_PROVIDER_RESEARCH_WEEK_SETTING_KEY = "modelDiscovery.newProviderResearchWeek";
@@ -280,29 +283,32 @@ export async function runNewProviderModelResearch(
     accepted: AcceptedNewProviderCandidate[];
     rejected: NewProviderResearchRejection[];
   } = { ok: true, proposed: 0, accepted: [], rejected: [] };
-  if (connectedImageEnabled && inputs.imageResearchProviders.length > 0) {
-    try {
-      const answer = await ask(
-        "connected_image",
-        CONNECTED_IMAGE_RESEARCH_SYSTEM,
-        connectedImageResearchPrompt({
-          providers: inputs.imageResearchProviders,
-          currentImageModels: inputs.currentModels.image,
+  // One call per provider, in this week's rotated order; a provider's call
+  // accepts only that provider's models.
+  if (connectedImageEnabled) {
+    connectedImage = await researchConnectedImageProviders({
+      providers: inputs.imageResearchProviders,
+      week,
+      ask: (provider) =>
+        ask(
+          `connected_image:${provider}`,
+          CONNECTED_IMAGE_RESEARCH_SYSTEM,
+          connectedImageResearchPrompt({
+            providers: [provider],
+            currentImageModels: inputs.currentModels.image,
+            knownApiModels: inputs.knownApiModels,
+            today,
+          })
+        ),
+      check: (provider, answer) =>
+        acceptConnectedImageCandidates({
+          answer,
+          connectedProviders: [provider],
           knownApiModels: inputs.knownApiModels,
-          today,
-        })
-      );
-      const checked = acceptConnectedImageCandidates({
-        answer,
-        connectedProviders: inputs.imageResearchProviders,
-        knownApiModels: inputs.knownApiModels,
-        isOfficial: isOfficialSourceUrl,
-      });
-      connectedImage = { ok: true, proposed: answer?.candidates?.length ?? 0, ...checked };
-    } catch (error) {
-      failed("connected_image", error);
-      connectedImage = { ok: false, proposed: 0, accepted: [], rejected: [] };
-    }
+          isOfficial: isOfficialSourceUrl,
+        }),
+      onFailure: (provider, error) => failed(`connected_image:${provider}`, error),
+    });
   }
 
   // Products are researched separately, so two answers can name one model.

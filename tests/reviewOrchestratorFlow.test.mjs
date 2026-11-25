@@ -475,6 +475,38 @@ test("a reviewer that exits with an error is retried on another vendor", async (
   }
 });
 
+test("a reviewer that reports its usage limit holds that provider until the reset, whatever its probe reads", async () => {
+  const f = fixture({ claude: "limit", cursor: "accept" });
+  try {
+    f.commit("a.txt", "spent plan\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const store = new Store(f.config.stateDir);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    const queued = store.readSlot(jobId, 0);
+    assert.deepEqual([queued.status, queued.retriedAfter, queued.excludeVendors], ["queued", "reviewer_usage_limit", ["anthropic"]]);
+    // The probe still says available (as on 2026-11-23); the reported limit wins.
+    const held = orchestrator.withUsageLimits(allAvailable(f.config)).claude;
+    assert.equal(held.state, "exhausted");
+    assert.equal(held.reason, "usage_limit_reported");
+    assert.ok(Date.parse(held.until) > Date.now());
+    assert.match(held.message, /weekly limit/);
+    // A new job with only Claude probing available gets no Claude reviewer.
+    f.commit("b.txt", "next job\n");
+    const second = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const started = orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    assert.equal(started.length, 0);
+    assert.equal(store.readSlot(second.jobId, 0).status, "queued");
+    // Once the hold ends, the probe decides again.
+    orchestrator.usageLimits.get("claude").until = Date.now() - 1;
+    assert.equal(orchestrator.withUsageLimits(allAvailable(f.config)).claude.state, "available");
+    assert.equal(orchestrator.usageLimits.has("claude"), false);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test("a worktree failure blames no vendor and only waits before the next try", async () => {
   const f = fixture({ claude: "accept" });
   try {

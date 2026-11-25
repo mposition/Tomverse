@@ -83,7 +83,7 @@ mock.module(mod("lib/modelCatalogAdmin.ts"), {
   },
 });
 
-const { fillLinkCapabilities, capabilitiesNeedFilling } = await import(mod("lib/codingCatalogAdmin.ts"));
+const { BENCHMARK_STEP_MS, fillLinkCapabilities, capabilitiesNeedFilling } = await import(mod("lib/codingCatalogAdmin.ts"));
 const { codingModelPage, defaultCodingCapabilitySources } = await import(mod("lib/modelCatalogCore.ts"));
 
 const session = { user: { id: "admin-1", email: "owner@example.com" } };
@@ -144,6 +144,7 @@ const deps = (overrides = {}) => ({
     calls.pages.push(url);
     return { url, text: "page" };
   },
+  benchmarkSearch: async () => null,
   ...overrides,
 });
 const reset = (profile = registryLink(), enabled = null) => {
@@ -348,6 +349,61 @@ test("the notes read the model's own page; a models page that does not load is l
   assert.deepEqual(calls.pages, [toolPage, structuredPage, modelPage]);
   assert.deepEqual(state.row.profile.evidence.sources, [toolPage, structuredPage]);
   assert.deepEqual(state.row.profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
+});
+
+test("with the benchmark search on, the first of the provider's own pages it names that loads is read for the notes", async () => {
+  const searched = [];
+  const search = (urls) => async () => ({
+    findPages: async (input) => {
+      searched.push(input);
+      return urls;
+    },
+  });
+  const budgets = [];
+  const announcement = "https://openai.com/index/gpt-a";
+  const card = "https://openai.com/index/gpt-a-system-card";
+  reset();
+  notesAnswer = { strengths: ["SWE-bench Verified 80%"], weaknesses: [], sourceUrls: [announcement] };
+  await fill({
+    // A page off the provider's hosts is never read; one that does not load is skipped; only the first that loads is kept.
+    benchmarkSearch: search(["https://blog.example.com/gpt-a-benchmarks", "https://openai.com/index/missing", announcement, card]),
+    fetchPage: async (_provider, url, maxMs) => {
+      calls.pages.push(url);
+      if (url.startsWith("https://openai.com/")) budgets.push(maxMs);
+      if (url.endsWith("/missing")) throw new DraftRefusal("fetch_failed", `${url} http_404`);
+      return { url, text: "page" };
+    },
+  });
+  // The search and its pages share one budget, inside the Admin client's wait.
+  assert.deepEqual(searched, [{ provider: "openai", apiModelId: "gpt-a", name: "GPT A", timeoutMs: 20_000 }]);
+  assert.equal(budgets.length, 2);
+  for (const ms of budgets) assert.ok(ms > 0 && ms <= BENCHMARK_STEP_MS, String(ms));
+  assert.deepEqual(calls.pages, [...pagesOf("openai"), "https://openai.com/index/missing", announcement]);
+  assert.equal(calls.llm, 1);
+  // The notes may stand on it; the evidence keeps its three capability pages.
+  assert.ok(new Set(state.row.profile.codingNotes.sources).has(announcement));
+  assert.deepEqual(state.row.profile.evidence.sources, pagesOf("openai"));
+
+  // A search that times out may have been charged: the fill stops there, before the draft call, with the row unchanged.
+  reset();
+  const before = structuredClone(state.row);
+  const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  await assert.rejects(
+    fill({ benchmarkSearch: async () => ({ findPages: async () => { throw timeout; } }) }),
+    (error) => error instanceof CatalogRefusal && error.code === "timeout_outcome_unknown" && error.status === 504
+  );
+  assert.equal(calls.llm, 0);
+  assert.deepEqual(state.row, before);
+  assert.deepEqual(state.audits, []);
+
+  // A search that fails or finds nothing leaves the fill as it was.
+  for (const benchmarkSearch of [search([]), async () => ({ findPages: async () => { throw new Error("search 500"); } })]) {
+    reset();
+    await fill({ benchmarkSearch });
+    assert.deepEqual(calls.pages, pagesOf("openai"));
+    assert.equal(calls.llm, 1);
+    assert.equal(state.audits.length, 1);
+  }
 });
 
 test("every page the answer stands on must be the provider's own, or nothing is written", async () => {

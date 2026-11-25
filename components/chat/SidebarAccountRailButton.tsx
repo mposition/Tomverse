@@ -19,10 +19,8 @@ import type { UserUsageResponse } from "@/components/chat/useUserUsage";
 import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
-import {
-    localizedProductHref,
-    type ChatWorkspaceProduct,
-} from "@/lib/chatProductUiCopy";
+import { localizedProductHref } from "@/lib/chatProductUiCopy";
+import type { ConversationProductKey } from "@/lib/conversationProduct";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { PwaInstallMenuItem } from "./PwaInstallMenuItem";
@@ -40,7 +38,7 @@ export function SidebarAccountRailButton({
     placement = "right",
 }: {
     accountUsage?: UserUsageResponse | null;
-    currentProduct?: ChatWorkspaceProduct;
+    currentProduct?: ConversationProductKey;
     placement?: "right" | "above";
 }) {
     const { data: session } = useSession();

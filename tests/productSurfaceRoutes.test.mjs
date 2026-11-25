@@ -86,7 +86,7 @@ test("a public share follows its stored product and defaults unknown rows to Rev
     assert.equal(productSurfacePathOrReview("future-product"), "/review");
 });
 
-test("the generic account menu defaults to Review and accepts an explicit Chat product", () => {
+test("the shared account menu defaults to Review and accepts the Studio product", () => {
     const authButton = readFileSync(
         new URL("../components/auth/AuthButton.tsx", import.meta.url),
         "utf8"
@@ -99,7 +99,12 @@ test("the generic account menu defaults to Review and accepts an explicit Chat p
         authButton,
         /PRODUCT_SURFACE_PATH\[currentProduct\]/
     );
-    assert.match(authButton, /currentProduct\?: ChatWorkspaceProduct/);
+    assert.match(authButton, /currentProduct\?: ConversationProductKey/);
+    const studio = readFileSync(
+        new URL("../components/studio/StudioWorkspace.tsx", import.meta.url),
+        "utf8"
+    );
+    assert.match(studio, /<StudioAccount currentProduct="studio"/);
     assert.match(authButton, /returnTo=\{accountCallbackUrl\}/);
 });
 

@@ -6,6 +6,7 @@ import { signIn } from "next-auth/react";
 import { Check, Menu, Plus, Puzzle, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { ReviewNavigation } from "@/components/chat/ReviewStudioChrome";
+import { StudioNavigationLink } from "@/components/studio/StudioNavigationLink";
 import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { PluginLogo } from "./PluginLogo";
@@ -144,6 +145,7 @@ export function PluginWorkspace() {
             <Link href={`/review?lang=${lang}`}>Review</Link>
             <Link href={`/chat?lang=${lang}`}>Chat</Link>
             <Link href={`/plugins?lang=${lang}`} aria-current="page">{c.title}</Link>
+            <StudioNavigationLink compact />
             <Link href={`/review?lang=${lang}&settings=account`}>{n.settings}</Link>
           </nav>
         </details>

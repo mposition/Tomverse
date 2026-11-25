@@ -22,6 +22,8 @@ import {
 import { authOptions } from "@/lib/auth";
 import { isE2EAuthBypassEnabled } from "@/lib/e2eTestMode";
 import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
+import { StudioAvailabilityProvider } from "@/components/studio/StudioAvailability";
+import { studioAvailable } from "@/lib/studioAvailability";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { AVAILABLE_MODELS } from "@/lib/models";
 
@@ -131,7 +133,9 @@ export default async function ApplicationLayout({
           }
         >
           <ModelCatalogProvider initialModels={initialModels}>
-            {children}
+            <StudioAvailabilityProvider enabled={studioAvailable()}>
+              {children}
+            </StudioAvailabilityProvider>
           </ModelCatalogProvider>
           <SignupConsentFinalizer enabled={signupConsentEnabled} />
           <InProductConsentNotice enabled={consentNoticeEnabled} />

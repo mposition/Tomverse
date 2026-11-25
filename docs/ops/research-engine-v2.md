@@ -24,7 +24,7 @@ DB 제약(`ResearchPreviewRun_v2_shape_check`)상 run 단위 checkpoint·예약�
 | 변수 | 의미 |
 |---|---|
 | `RESEARCH_ENGINE_ENABLED` | v2 offer·API·worker 전체 |
-| `RESEARCH_ENGINE_MODEL_IDS` | 쓸 수 있는 모델. `RESEARCH_PREVIEW_P0_MODEL_SHORTLIST`(usage 계약이 검증된 Google 조합) 안에서만 고를 수 있고 새 모델을 더할 수 없음 |
+| `RESEARCH_ENGINE_MODEL_IDS` | 쓸 수 있는 모델. `RESEARCH_ENGINE_MODEL_SHORTLIST`(`lib/researchEngineService.ts`: Preview P0의 Gemini 둘과 Gemini 4 Carbon, GPT 6.2 Sol, Claude Sonnet 5.5, Claude Opus 5.5. 모두 reasoning이 출력 토큰에 포함되고 강제 tool 호출이 확인됨) 안에서만 고를 수 있고 운영 변수로 새 모델을 더할 수 없음. 목록에 넣는 것은 코드 변경 |
 | `RESEARCH_ENGINE_ROLE_MODELS` | 역할별 모델(`writer=…,researcher=…`), 위 목록 안에서만. run 시작 시 고정 |
 | `RESEARCH_ENGINE_PRIVATE_SOURCES_ENABLED` | 첨부·대화·Memory·knowledge 선택 허용 |
 | `RESEARCH_ENGINE_NATIVE_ENABLED` | Native bearer route와 capability |
@@ -86,6 +86,10 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
   흐르지 않습니다. 예산 소진 대기는 기한이 지나면 있는 근거로 끝냅니다.
 - run을 만들면 계획 작업이 바로 예약됩니다("계획 만들기"와 "바로 시작" 모두 계획에서 시작). 계획 전에
   자료를 더할 client만 `requestPlan: false`로 모델 호출 없는 draft를 남깁니다.
+- 호출별 출력 상한은 `RESEARCH_OUTPUT_TOKEN_CAPS`(`lib/researchEngineContract.ts`)에 있고 reasoning 토큰을 포함합니다.
+  상한을 생각에 다 써서 tool 호출 없이 끝난 응답은 결과 불명이 아니라 실제 usage로 정산되는 invalid output
+  (`RESEARCH_OUTPUT_TRUNCATED`)이며 재시도됩니다. 받아들이지 못한 dispatch마다 worker가 내용 없는 로그 한 줄
+  (`research_dispatch_not_accepted`: 역할, 모델, 코드, 오류 이름, 중단 이유, 출력 토큰)을 남깁니다.
 - pause는 진행 중 slice가 끝나는 경계에서, cancel은 새 dispatch를 막고 이미 보낸 요청은
   결과/비용 확인으로 남깁니다.
 

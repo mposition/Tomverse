@@ -37,6 +37,10 @@ if (mode === "accept" || mode === "promptfile") {
 } else if (mode === "cannot") {
   // What the Antigravity and Claude reviewers wrote on 2026-11-22 before the diff file existed.
   process.stdout.write(block({ verdict: "unknown", findings: [{ severity: "major", file: "a.txt", line: 1, summary: "no shell, could not read the diff" }] }));
+} else if (mode === "limit") {
+  // What the Claude reviewer printed on 2026-11-23 with its weekly plan spent.
+  process.stdout.write("You've hit your weekly limit · resets Nov 26, 1am (UTC)\n");
+  process.exit(1);
 } else if (mode === "fail") {
   process.exit(3);
 } else if (mode === "sleep") {

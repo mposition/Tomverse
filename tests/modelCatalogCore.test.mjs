@@ -48,7 +48,15 @@ import {
   codingStoredProfileSchema,
   codingStructuredOutputChoice,
 } from "../lib/modelCatalogCore.ts";
+import { APICallError } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import {
+  BenchmarkSearchOutcomeUnknown,
+  benchmarkPageSearchWith,
+  benchmarkPageSearchFromEnv,
+  benchmarkSearchPrompt,
+  benchmarkUrlsFromAnswer,
+  BENCHMARK_SEARCH_SCHEMA,
   CAPABILITY_SCHEMA,
   CAPABILITY_TASK,
   CODING_SCHEMA,
@@ -464,6 +472,28 @@ test("sources must be the provider's own https documentation", () => {
   assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/models"), false);
   assert.equal(isOfficialSourceUrl("qwen", "https://qwencloud.com/pricing/api"), false);
   assert.equal(isOfficialSourceUrl("openai", "https://www.qwencloud.com/pricing/api"), false);
+  // Launch posts and model cards (owner decision 2026-11-24): Google's blog and
+  // DeepMind's model and blog pages; the Qwen team's blog and research pages and
+  // its GitHub Pages blog. Only those paths, and only that one github.io host.
+  assert.equal(isOfficialSourceUrl("google", "https://blog.google/innovation-and-ai/models-and-research/google-deepmind/gemini-4/"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/models/gemini/"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/blog/gemini-4-model-card/"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/careers/"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://deepmind.google/"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://www.blog.google/x"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/blog?id=qwen4-max"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/blog/qwen4"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/research"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/blogger"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwen.ai/"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://chat.qwen.ai/blog"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwenlm.github.io/blog/qwen3/"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://someone.github.io/qwen"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://qwen.ai/blog?id=x"), false);
+  // A path entry with no trailing slash is that path or below it, never a longer name.
+  assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/pricing"), true);
+  assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/pricing/api"), true);
+  assert.equal(isOfficialSourceUrl("bfl", "https://bfl.ai/pricing-old"), false);
 });
 
 test("default price sources are official for their provider and fit the draft limit", () => {
@@ -1198,4 +1228,75 @@ test("coding notes: the answer is read to the limits, never cut, and the router 
     codingNotesRouterText({ strengths: ["A", "B"], weaknesses: ["C"] }),
     "Coding strengths: A; B. Coding weaknesses: C."
   );
+});
+
+test("the benchmark search is off until a model is named, asks for the provider's own pages, and keeps only those", async () => {
+  assert.equal(await benchmarkPageSearchFromEnv({}), null);
+  assert.equal(await benchmarkPageSearchFromEnv({ MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ID: "  " }), null);
+  const prompt = benchmarkSearchPrompt({ provider: "anthropic", apiModelId: "claude-x", name: "Claude X" });
+  assert.ok(prompt.includes('"Claude X" (API model id claude-x)'));
+  // The prompt names exactly the provider's official hosts, as a list.
+  const hosts = /these hosts: (.+?)\. Give/.exec(prompt)?.[1].split(", ");
+  assert.deepEqual(hosts, [...OFFICIAL_SOURCE_HOSTS.anthropic]);
+  for (const host of ["www.anthropic.com", "platform.claude.com/docs/"]) assert.ok(new Set(hosts).has(host), host);
+  assert.equal(BENCHMARK_SEARCH_SCHEMA.properties.urls.maxItems, 3);
+  assert.deepEqual(
+    benchmarkUrlsFromAnswer(
+      {
+        urls: [
+          "https://www.anthropic.com/news/claude-x",
+          "https://www.anthropic.com/news/claude-x",
+          "http://www.anthropic.com/news/claude-x-card",
+          "https://community.anthropic.com/claude-x",
+          "https://platform.claude.com/login",
+          42,
+          "https://docs.claude.com/en/models/claude-x",
+          "https://www.anthropic.com/claude-x-system-card",
+        ],
+      },
+      "anthropic"
+    ),
+    ["https://www.anthropic.com/news/claude-x", "https://docs.claude.com/en/models/claude-x", "https://www.anthropic.com/claude-x-system-card"]
+  );
+  for (const answer of [null, undefined, {}, { urls: "https://www.anthropic.com/news/claude-x" }]) {
+    assert.deepEqual(benchmarkUrlsFromAnswer(answer, "anthropic"), []);
+  }
+  assert.deepEqual(benchmarkUrlsFromAnswer({ urls: ["https://www.anthropic.com/news/claude-x"] }, "openrouter"), []);
+  assert.match(CAPABILITY_TASK, /benchmark or announcement page/);
+});
+
+test("the benchmark search through the SDK: a cut-off or unanswered call is an unknown outcome, a provider error is not", async () => {
+  const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
+  const input = { provider: "anthropic", apiModelId: "claude-x", name: "Claude X", timeoutMs: 1_000 };
+  const answering = (text) =>
+    new MockLanguageModelV4({ doGenerate: { content: [{ type: "text", text }], usage, finishReason: { unified: "stop", raw: undefined }, response: { body: {} }, warnings: [] } });
+  const official = "https://www.anthropic.com/news/claude-x";
+  assert.deepEqual(
+    await benchmarkPageSearchWith(answering(JSON.stringify({ urls: [official, "https://blog.example.com/x"] })), "search-1").findPages(input),
+    [official]
+  );
+
+  // Cut off by its deadline, whatever error the SDK wraps the abort in.
+  const hanging = new MockLanguageModelV4({
+    doGenerate: ({ abortSignal }) =>
+      new Promise((_resolve, reject) =>
+        abortSignal.addEventListener("abort", () =>
+          reject(new APICallError({ message: "aborted", url: "https://example.invalid", requestBodyValues: {}, isRetryable: true, cause: abortSignal.reason }))
+        )
+      ),
+  });
+  await assert.rejects(benchmarkPageSearchWith(hanging, "search-1").findPages({ ...input, timeoutMs: 20 }), (error) => error instanceof BenchmarkSearchOutcomeUnknown && error.name === "TimeoutError");
+
+  // A dropped connection: the provider never answered.
+  const dropped = new MockLanguageModelV4({ doGenerate: async () => { throw new Error("socket hang up"); } });
+  await assert.rejects(benchmarkPageSearchWith(dropped, "search-1").findPages(input), (error) => error instanceof BenchmarkSearchOutcomeUnknown);
+
+  // The provider answered with an error, or with an answer that does not parse: a known failure, not a timeout.
+  const refused = new MockLanguageModelV4({
+    doGenerate: async () => {
+      throw new APICallError({ message: "bad request", url: "https://example.invalid", requestBodyValues: {}, statusCode: 400, isRetryable: false, responseBody: "{}" });
+    },
+  });
+  await assert.rejects(benchmarkPageSearchWith(refused, "search-1").findPages(input), (error) => APICallError.isInstance(error) && error.name !== "TimeoutError");
+  await assert.rejects(benchmarkPageSearchWith(answering("not json"), "search-1").findPages(input), (error) => !(error instanceof BenchmarkSearchOutcomeUnknown));
 });
