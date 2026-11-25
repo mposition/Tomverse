@@ -5,24 +5,28 @@ import { join, relative, resolve } from "node:path";
 import { parseArgs, promisify } from "node:util";
 import { extractFile } from "@electron/asar";
 import sharp from "sharp";
+import { localDevPackage } from "./local-dev-package.mjs";
 import {
   inspectAppArchive, inspectPackagedFuses, inspectPortablePayload, inspectWindowsIntegrity, sha256File,
 } from "./package-payload.mjs";
 
 const { values } = parseArgs({
-  options: { publisher: { type: "string" }, makeappx: { type: "string" }, out: { type: "string" } },
+  options: { publisher: { type: "string" }, makeappx: { type: "string" }, out: { type: "string" }, "dev-local": { type: "boolean" } },
 });
 if (process.platform !== "win32" || !values.publisher?.trim()) {
   throw new Error("Use Windows and specify the matching signing certificate subject with --publisher.");
 }
 
-const name = "Tomverse Desktop";
-const out = resolve(values.out ?? "dist/package");
+const localDev = values["dev-local"] === true;
+if (localDev && values.publisher !== localDevPackage.publisher) throw new Error("Use the Local Dev signing certificate.");
+const name = localDev ? localDevPackage.name : "Tomverse Desktop";
+const identity = localDev ? localDevPackage.identity : "Tomverse.Desktop";
+const out = resolve(values.out ?? (localDev ? "dist/local-dev-package" : "dist/package"));
 const bundle = join(out, `${name}-win32-x64`);
 const archive = join(bundle, "resources", "app.asar");
 const executable = join(bundle, `${name}.exe`);
-const { manifest } = inspectAppArchive(archive);
-const portableFiles = await inspectPortablePayload(bundle, "win32");
+const { manifest } = inspectAppArchive(archive, { localDev });
+const portableFiles = await inspectPortablePayload(bundle, "win32", { localDev });
 await inspectPackagedFuses(executable, "win32");
 await inspectWindowsIntegrity(executable, archive);
 const versionParts = /^\d+\.\d+\.\d+$/.test(manifest.version) ? manifest.version.split(".").map(Number) : [];
@@ -31,7 +35,7 @@ if (versionParts.length !== 3 || versionParts.some((part) => part > 65535)) {
 }
 const version = [...versionParts, 0].join(".");
 const publisher = values.publisher.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-const destination = join(out, `Tomverse-Desktop-${version}-x64.msix`);
+const destination = join(out, `${name.replaceAll(" ", "-")}-${version}-x64.msix`);
 const stage = await mkdtemp(join(out, ".tomverse-msix-"));
 const logos = [["StoreLogo.png", 50], ["Square44x44.png", 44], ["Square150x150.png", 150]];
 const runMakeAppx = (args) => promisify(execFile)(values.makeappx ?? "makeappx.exe", args,
@@ -44,7 +48,7 @@ try {
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap10 rescap">
-  <Identity Name="Tomverse.Desktop" Publisher="${publisher}" Version="${version}" ProcessorArchitecture="x64" />
+  <Identity Name="${identity}" Publisher="${publisher}" Version="${version}" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>${name}</DisplayName>
     <PublisherDisplayName>Tomverse</PublisherDisplayName>

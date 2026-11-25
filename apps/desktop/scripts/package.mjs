@@ -5,17 +5,24 @@ import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { flipFuses, FuseVersion, FuseV1Options } from "@electron/fuses";
 import { packager } from "@electron/packager";
+import { localDevPackage } from "./local-dev-package.mjs";
 
 const { values } = parseArgs({
-  options: { platform: { type: "string" }, arch: { type: "string" }, out: { type: "string" }, version: { type: "string" }, "task-qa": { type: "boolean" } },
+  options: { platform: { type: "string" }, arch: { type: "string" }, out: { type: "string" }, version: { type: "string" },
+    "task-qa": { type: "boolean" }, "dev-local": { type: "boolean" } },
 });
 const taskQa = values["task-qa"] === true;
-const name = taskQa ? "Tomverse Desktop Task QA" : "Tomverse Desktop";
-const packageName = taskQa ? "tomverse-desktop-task-qa" : "tomverse-desktop";
-const appId = taskQa ? "app.tomverse.desktop.task-qa" : "app.tomverse.desktop";
+const localDev = values["dev-local"] === true;
+if (localDev !== (!taskQa && process.env.TOMVERSE_DESKTOP_LOCAL_DEV_UPDATE === "true")) {
+  throw new Error("Build and package Local Dev with the same channel.");
+}
+const name = taskQa ? "Tomverse Desktop Task QA" : localDev ? localDevPackage.name : "Tomverse Desktop";
+const packageName = taskQa ? "tomverse-desktop-task-qa" : localDev ? localDevPackage.packageName : "tomverse-desktop";
+const appId = taskQa ? "app.tomverse.desktop.task-qa" : localDev ? "app.tomverse.desktop.local-dev" : "app.tomverse.desktop";
 const host = taskQa ? "dist/host-task-qa" : "dist/host";
 const platform = values.platform ?? process.platform;
 const arch = values.arch ?? process.arch;
+if (localDev && (platform !== "win32" || arch !== "x64")) throw new Error("Local Dev updates require Windows x64.");
 if (!["win32-x64", "darwin-x64", "darwin-arm64", "linux-x64"].includes(`${platform}-${arch}`)) {
   throw new Error("Choose Windows x64, macOS x64/arm64, or Linux x64.");
 }
@@ -25,7 +32,7 @@ const electronVersion = manifest.devDependencies.electron;
 const checksums = JSON.parse(await readFile(require.resolve("electron/checksums.json"), "utf8"));
 const version = values.version ?? manifest.version;
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Use a numeric x.y.z Desktop package version.");
-const out = resolve(values.out ?? (taskQa ? "dist/task-qa-package" : "dist/package"));
+const out = resolve(values.out ?? (taskQa ? "dist/task-qa-package" : localDev ? "dist/local-dev-package" : "dist/package"));
 await mkdir(out, { recursive: true });
 const windowsStaging = platform === "win32" && process.platform === "win32";
 // Keep native Windows staging with the output so the bundle inherits its access rules.

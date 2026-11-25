@@ -71,7 +71,9 @@ import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/
 import { desktopNativeCopy } from "../../../../locales/desktopNative";
 
 const origin = DESKTOP_APP_ORIGIN;
-const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA" : "Tomverse Desktop";
+const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA"
+  : DESKTOP_LOCAL_DEV_PACKAGE ? "Tomverse Desktop Local Dev" : "Tomverse Desktop";
+const webOrigin = DESKTOP_LOCAL_DEV_PACKAGE ? "https://dev.tomverse.app" : DESKTOP_LIVE_ORIGIN;
 const packagedTaskQa = DESKTOP_PACKAGED_TASK_QA && app.isPackaged;
 const windowsTaskbarId = process.platform === "win32" && !process.windowsStore
   ? packagedTaskQa ? "app.tomverse.desktop.task-qa" : app.isPackaged ? "app.tomverse.desktop" : "app.tomverse.desktop.dev"
@@ -96,6 +98,7 @@ const webPaths = { chat: "/chat", review: "/review", plugins: "/plugins", settin
   help: "/support/help-centre" } as const;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 declare const DESKTOP_PACKAGED_TASK_QA: boolean;
+declare const DESKTOP_LOCAL_DEV_PACKAGE: boolean;
 declare const DESKTOP_AUTH_ALLOWED: boolean;
 declare const DESKTOP_LOGIN_WINDOW_REQUIRED: boolean;
 declare const DESKTOP_ACCOUNT_DEVICE_FIXTURE_ALLOWED: boolean;
@@ -263,7 +266,8 @@ const windowBounds = z.object({
   x: z.int().min(-1_000_000).max(1_000_000), y: z.int().min(-1_000_000).max(1_000_000),
   width: z.int().positive().max(100_000), height: z.int().positive().max(100_000),
 });
-const accountOrigin = !app.isPackaged && DESKTOP_AUTH_FIXTURE_ORIGIN ? DESKTOP_AUTH_FIXTURE_ORIGIN : undefined;
+const accountOrigin = DESKTOP_LOCAL_DEV_PACKAGE ? webOrigin
+  : !app.isPackaged && DESKTOP_AUTH_FIXTURE_ORIGIN ? DESKTOP_AUTH_FIXTURE_ORIGIN : undefined;
 const sessionVault = () => createSessionVault(join(app.getPath("userData"), "desktop-session.dat"), safeStorage, process.platform);
 const codeKeyVault = (accountId: string) => createCodeKeyVault(join(app.getPath("userData"),
   "code-key-" + createHash("sha256").update(accountId).digest("hex") + ".dat"), safeStorage, process.platform, accountId);
@@ -2964,7 +2968,7 @@ function registerIpc() {
   main("desktop:export-diagnostics", exportDiagnostics);
   main("desktop:copy-diagnostics", copyDiagnostics);
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));
-  main("desktop:web", (destination) => shell.openExternal("https://tomverse.app" + webPaths[webDestination.parse(destination)]));
+  main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
@@ -2993,7 +2997,7 @@ function registerIpc() {
     return withChatAccount((api) => api.importedSource(input));
   });
   main("chat:open-continuation", (value) =>
-    shell.openExternal(DESKTOP_LIVE_ORIGIN + continuationPath(chatId.parse(value))));
+    shell.openExternal(webOrigin + continuationPath(chatId.parse(value))));
   main("chat:rename", (value) => {
     const input = chatRenameInput.parse(value);
     return withChatAccount((api) => api.rename(input), "chat");

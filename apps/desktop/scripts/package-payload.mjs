@@ -6,6 +6,7 @@ import { join, posix } from "node:path";
 import { extractFile, getRawHeader, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { NtExecutable, NtExecutableResource } from "resedit";
+import { localDevPackage } from "./local-dev-package.mjs";
 
 const appEntries = new Set([
   "package.json", "dist", "dist/host", "dist/host/main.cjs", "dist/host/preload.cjs",
@@ -53,7 +54,7 @@ export async function inspectWindowsIntegrity(executable, archive) {
     "The Windows executable does not match the packaged app.asar.");
 }
 
-export function inspectAppArchive(archive, { cliProtocolCheck = false } = {}) {
+export function inspectAppArchive(archive, { cliProtocolCheck = false, localDev = false } = {}) {
   const entries = listPackage(archive).map((entry) => entry.replaceAll("\\", "/").slice(1));
   const actual = new Set(entries);
   for (const entry of appEntries) assert.ok(actual.has(entry), `Missing packaged entry ${entry}.`);
@@ -62,8 +63,8 @@ export function inspectAppArchive(archive, { cliProtocolCheck = false } = {}) {
       /^dist\/renderer\/assets\/[\w-]+-[\w-]+\.(js|css|png|svg|woff2)$/.test(entry), `Unexpected packaged entry ${entry}.`);
   }
   const manifest = JSON.parse(extractFile(archive, "package.json").toString("utf8"));
-  assert.equal(manifest.name, "tomverse-desktop");
-  assert.equal(manifest.productName, "Tomverse Desktop");
+  assert.equal(manifest.name, localDev ? localDevPackage.packageName : "tomverse-desktop");
+  assert.equal(manifest.productName, localDev ? localDevPackage.name : "Tomverse Desktop");
   assert.equal(manifest.main, "dist/host/main.cjs");
   const main = extractFile(archive, join("dist", "host", "main.cjs"));
   assert.equal(main.includes("--desktop-fixture"), false, "The packaged app contains the development fixture launcher.");
@@ -72,10 +73,14 @@ export function inspectAppArchive(archive, { cliProtocolCheck = false } = {}) {
   return { manifest, entries: entries.length };
 }
 
-export async function inspectPortablePayload(bundle, platform) {
+export async function inspectPortablePayload(bundle, platform, { localDev = false } = {}) {
   const runtime = runtimeByTarget[platform];
   assert.ok(runtime, `Unsupported portable payload platform ${platform}.`);
   const expected = new Set([...commonRuntime, ...runtime]);
+  if (localDev && platform === "win32") {
+    expected.delete("Tomverse Desktop.exe");
+    expected.add(localDevPackage.name + ".exe");
+  }
   const directories = new Set(["resources", "locales"]);
   const files = [];
   for (const entry of await readdir(bundle, { withFileTypes: true })) {
