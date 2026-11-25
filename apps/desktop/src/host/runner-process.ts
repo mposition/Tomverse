@@ -22,6 +22,7 @@ import { matchesHistory } from "./history-scope";
 import { nativePatches, openNativeEdits, verifiedContinuationEdits } from "./native-patches";
 import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
+import { codeMemoryFor } from "./code-memory";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -862,6 +863,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
+      // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
+      nestedInstructions: !continuation && savedCap === undefined,
+      memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin
+        ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&

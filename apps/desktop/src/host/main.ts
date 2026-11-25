@@ -22,7 +22,7 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
@@ -47,6 +47,7 @@ import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeH
 import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-scope";
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
+import { codeMemoryView } from "./code-memory";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -1175,12 +1176,14 @@ function checkpointNativeTurn(task: Task, force = false) {
   } catch { /* The startup checkpoint still blocks an implicit retry. */ }
 }
 
+const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
+
 function bootWorker() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
   const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
-    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks() },
+    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
@@ -3037,6 +3040,11 @@ function registerIpc() {
         resolve(false);
       }
     });
+  });
+  main("desktop:code-memory", (value) => {
+    const input = codeMemoryInput.parse(value);
+    if (projectRoot) assertProjectRoot(projectRoot);
+    return codeMemoryView(codeMemoryDirectory(), projectRoot, input);
   });
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);

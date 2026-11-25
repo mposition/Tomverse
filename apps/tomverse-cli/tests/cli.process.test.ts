@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- wire-format fixtures: request bodies are arbitrary JSON */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -191,6 +192,40 @@ test("a session is resumed only with the key that started it", async () => {
         assert.equal(resumed.code, 2);
         assert.match(resumed.stderr, /belongs to key tvk_abcdefgh/);
         assert.equal(gateway.completions.length, before);
+    } finally {
+        await gateway.stop();
+    }
+});
+test("project memory: the agent keeps a note, `memory show` and `memory clear` manage it, and `config set memory off` stops reading and writing", { skip: !existsSync(CLI) && "build first" }, async () => {
+    const gateway = await new FakeGateway({
+        script: (body) => (body.messages.some((m: any) => m.role === "tool")
+            ? { text: "Noted." }
+            : { toolCalls: [{ name: "remember_fact", args: { fact: "Use the staging database for integration tests." } }] }),
+    }).start();
+    try {
+        const { home, root, env } = setup(gateway);
+        const exec = (task: string) => run(["exec", task], { cwd: root, home, env });
+        assert.equal((await exec("Remember how to test.")).code, 0);
+        const shown = await run(["memory", "show"], { cwd: root, home });
+        assert.match(shown.stdout, /m-[0-9a-f]{8}  Use the staging database for integration tests\./);
+        // Another folder has its own, empty memory.
+        assert.match((await run(["memory", "show"], { cwd: tempDir("elsewhere"), home })).stdout, /Nothing is remembered/);
+        // The next task's first request carries the note.
+        gateway.completions.length = 0;
+        await exec("Another task.");
+        assert.match(gateway.completions[0]!.body.messages[0].content, /<project-memory>\n- Use the staging database/);
+        // Off: not read, not offered, not written.
+        assert.equal((await run(["config", "set", "memory", "off"], { cwd: root, home })).code, 0);
+        gateway.completions.length = 0;
+        await exec("A third task.");
+        assert.ok(!/project-memory/.test(gateway.completions[0]!.body.messages[0].content));
+        assert.ok(!gateway.completions[0]!.body.tools.some((t: any) => t.function.name === "remember_fact"));
+        assert.match((await run(["memory", "show"], { cwd: root, home })).stdout, /Memory is off/);
+        assert.equal((await run(["config", "set", "memory", "maybe"], { cwd: root, home })).code, 2);
+        // Delete.
+        assert.equal((await run(["config", "unset", "memory"], { cwd: root, home })).code, 0);
+        assert.equal((await run(["memory", "clear", "--yes"], { cwd: root, home })).code, 0);
+        assert.match((await run(["memory", "show"], { cwd: root, home })).stdout, /Nothing is remembered/);
     } finally {
         await gateway.stop();
     }

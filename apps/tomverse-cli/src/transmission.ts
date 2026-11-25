@@ -18,6 +18,8 @@ export type RequestTransmission = {
     effort?: Exclude<Effort, "default">;
     projectInstructions: boolean;
     projectInstructionsTruncated?: boolean;
+    /** The notes kept about this project were part of the request. */
+    projectMemory?: boolean;
     messageCount: number;
     toolResultCount: number;
     commandOutput?: { results: number; truncated: number };
@@ -62,6 +64,9 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
         if (!message) continue;
         if (message.role === "system" && typeof message.content === "string" && message.content.includes("\n<project-instructions>\n")) {
             evidence.projectInstructions = true;
+        }
+        if (message.role === "system" && typeof message.content === "string" && message.content.includes("\n<project-memory>\n")) {
+            evidence.projectMemory = true;
         }
         if (message.role === "user" && Array.isArray(message.content)) {
             const images = message.content.filter((part) => record(part)?.type === "image_url").length;

@@ -1,5 +1,4 @@
 /** Headless entry: no CLI main, terminal input, config or environment reads on import. */
-import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { viewChanges } from "./changes.js";
 import { Journal, type JournalIo, type SessionState } from "./session.js";
 import { Gateway, type Receipt, type CatalogModel } from "./gateway.js";
@@ -10,6 +9,8 @@ export { Runner, SMART_ADAPTIVE, EXIT_CODES, VIEW_IMAGE_MARK } from "./agent.js"
 export type { ApprovalView, ApprovalDecision, Prompter, RunnerOptions, Outcome } from "./agent.js";
 export { Gateway, GatewayError } from "./gateway.js";
 export type { CatalogModel, Receipt } from "./gateway.js";
+export { ProjectMemory, memoryFileFor } from "./memory.js";
+export type { MemoryEntry } from "./memory.js";
 export { Journal, listSessions, deleteSession, canonicalDigest, sha256, writeFileAtomic } from "./session.js";
 export type { JournalIo, SessionState } from "./session.js";
 export { Workspace, normalizeRoot, same, isSecretPath, withWorkspaceReferences } from "./workspace.js";
@@ -172,39 +173,7 @@ export const sessionCost = async (gateway: Gateway, journal: Journal, catalog?: 
     return { requests: generations.length, charged, held, unknown };
 };
 
-const MAX_INSTRUCTIONS_LENGTH = 32_000;
-
-export const readProjectInstructions = (workspace: Workspace): { text: string; truncated: boolean } | null => {
-    // Through the same real-path check as every read: an AGENTS.md that is a
-    // link out of the folder is not sent.
-    try {
-        const resolved = workspace.resolve("AGENTS.md", "read");
-        if (!resolved.exists || !statSync(resolved.absolute).isFile()) return null;
-        const file = openSync(resolved.absolute, "r");
-        try {
-            if (!fstatSync(file).isFile()) return null;
-            const buffer = Buffer.alloc(MAX_INSTRUCTIONS_LENGTH * 4 + 4);
-            let offset = 0;
-            while (offset < buffer.length) {
-                const count = readSync(file, buffer, offset, buffer.length - offset, offset);
-                if (!count) break;
-                offset += count;
-            }
-            const text = buffer.toString("utf8", 0, offset);
-            const truncated = text.length > MAX_INSTRUCTIONS_LENGTH;
-            if (!truncated) return { text, truncated };
-            const lastIncludedUnit = text.charCodeAt(MAX_INSTRUCTIONS_LENGTH - 1);
-            const end = lastIncludedUnit >= 0xd800 && lastIncludedUnit <= 0xdbff ? MAX_INSTRUCTIONS_LENGTH - 1 : MAX_INSTRUCTIONS_LENGTH;
-            return { text: `${text.slice(0, end)}\n[AGENTS.md continues; read the file for the rest]`, truncated };
-        } finally {
-            closeSync(file);
-        }
-    } catch {
-        return null;
-    }
-};
-
-export const readInstructions = (workspace: Workspace) => readProjectInstructions(workspace)?.text ?? null;
+export { readProjectInstructions, readInstructions, NestedInstructions } from "./instructions.js";
 
 /**
  * After a crash: what the journal says was under way. A write whose end was

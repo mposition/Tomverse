@@ -58,6 +58,18 @@ type Copy = {
   webRead: string;
   webReadMore: string;
   imagesSent: string;
+  memory: string;
+  memoryDetail: string;
+  memoryNotes: string;
+  memoryCount: string;
+  memoryNoProject: string;
+  memoryView: string;
+  memoryHide: string;
+  memoryEmpty: string;
+  memoryRemove: string;
+  memoryClear: string;
+  memoryFailed: string;
+  memorySent: string;
 };
 
 export const desktopCodeEngineCopy = {
@@ -119,6 +131,18 @@ export const desktopCodeEngineCopy = {
     webRead: "Web page read: {url}",
     webReadMore: "{count} more web pages read",
     imagesSent: "{count} image(s) sent as image data",
+    memory: "Project memory",
+    memoryDetail: "Short facts about a project that the agent keeps for later tasks, such as how to run the tests. They are stored on this computer, outside the project, and sent to the model with each task. When off, nothing is read or written. Applies to new tasks.",
+    memoryNotes: "Notes for the open project",
+    memoryCount: "{count} note(s) kept for this project.",
+    memoryNoProject: "Open a project to see its notes.",
+    memoryView: "View",
+    memoryHide: "Hide",
+    memoryEmpty: "Nothing is remembered for this project yet.",
+    memoryRemove: "Delete this note",
+    memoryClear: "Delete all notes",
+    memoryFailed: "The notes could not be read or changed.",
+    memorySent: "Project memory included",
   },
   ko: {
     limits: "작업 한도",
@@ -178,6 +202,18 @@ export const desktopCodeEngineCopy = {
     webRead: "읽은 웹 페이지: {url}",
     webReadMore: "읽은 웹 페이지 {count}개 더",
     imagesSent: "이미지 {count}개를 이미지 데이터로 전송",
+    memory: "프로젝트 메모리",
+    memoryDetail: "테스트 실행 방법처럼 에이전트가 다음 작업을 위해 기억해 두는 프로젝트별 짧은 사실입니다. 프로젝트 밖의 이 컴퓨터에 저장되며 작업마다 모델에 전달됩니다. 끄면 읽지도 쓰지도 않습니다. 새 작업부터 적용됩니다.",
+    memoryNotes: "열린 프로젝트의 메모",
+    memoryCount: "이 프로젝트에 메모 {count}개가 저장되어 있습니다.",
+    memoryNoProject: "프로젝트를 열면 해당 메모를 볼 수 있습니다.",
+    memoryView: "보기",
+    memoryHide: "숨기기",
+    memoryEmpty: "이 프로젝트에 저장된 메모가 아직 없습니다.",
+    memoryRemove: "이 메모 삭제",
+    memoryClear: "모든 메모 삭제",
+    memoryFailed: "메모를 읽거나 바꾸지 못했습니다.",
+    memorySent: "프로젝트 메모리 포함",
   },
   zh: {
     limits: "任务上限",
@@ -237,6 +273,18 @@ export const desktopCodeEngineCopy = {
     webRead: "已读取网页：{url}",
     webReadMore: "另有 {count} 个网页已读取",
     imagesSent: "已将 {count} 张图片作为图像数据发送",
+    memory: "项目记忆",
+    memoryDetail: "智能体为后续任务记住的项目简短事实，例如如何运行测试。它们保存在这台电脑上、项目之外，并随每个任务发送给模型。关闭后不会读取或写入任何内容。对新任务生效。",
+    memoryNotes: "当前项目的记忆条目",
+    memoryCount: "此项目已保存 {count} 条记忆。",
+    memoryNoProject: "打开项目后即可查看其记忆条目。",
+    memoryView: "查看",
+    memoryHide: "隐藏",
+    memoryEmpty: "此项目还没有保存任何记忆。",
+    memoryRemove: "删除此条",
+    memoryClear: "删除全部",
+    memoryFailed: "无法读取或更改记忆条目。",
+    memorySent: "包含项目记忆",
   },
   "zh-Hant": {
     limits: "任務上限",
@@ -296,6 +344,18 @@ export const desktopCodeEngineCopy = {
     webRead: "已讀取網頁：{url}",
     webReadMore: "另有 {count} 個網頁已讀取",
     imagesSent: "已將 {count} 張圖片作為影像資料傳送",
+    memory: "專案記憶",
+    memoryDetail: "智慧代理為後續工作記住的專案簡短事實，例如如何執行測試。它們儲存在這台電腦上、專案之外，並隨每個工作傳送給模型。關閉後不會讀取或寫入任何內容。對新工作生效。",
+    memoryNotes: "目前專案的記憶條目",
+    memoryCount: "此專案已儲存 {count} 條記憶。",
+    memoryNoProject: "開啟專案後即可查看其記憶條目。",
+    memoryView: "查看",
+    memoryHide: "隱藏",
+    memoryEmpty: "此專案還沒有儲存任何記憶。",
+    memoryRemove: "刪除此條",
+    memoryClear: "刪除全部",
+    memoryFailed: "無法讀取或變更記憶條目。",
+    memorySent: "包含專案記憶",
   },
   fr: {
     limits: "Limites de la tâche",
@@ -355,6 +415,18 @@ export const desktopCodeEngineCopy = {
     webRead: "Page web lue : {url}",
     webReadMore: "{count} autres pages web lues",
     imagesSent: "{count} image(s) envoyée(s) comme données d'image",
+    memory: "Mémoire du projet",
+    memoryDetail: "Courts faits sur un projet que l'agent garde pour les tâches suivantes, par exemple comment lancer les tests. Ils sont stockés sur cet ordinateur, hors du projet, et envoyés au modèle à chaque tâche. Désactivée, rien n'est lu ni écrit. S'applique aux nouvelles tâches.",
+    memoryNotes: "Notes du projet ouvert",
+    memoryCount: "{count} note(s) conservée(s) pour ce projet.",
+    memoryNoProject: "Ouvrez un projet pour voir ses notes.",
+    memoryView: "Afficher",
+    memoryHide: "Masquer",
+    memoryEmpty: "Rien n'est encore mémorisé pour ce projet.",
+    memoryRemove: "Supprimer cette note",
+    memoryClear: "Supprimer toutes les notes",
+    memoryFailed: "Impossible de lire ou de modifier les notes.",
+    memorySent: "Mémoire du projet incluse",
   },
   de: {
     limits: "Aufgabenlimits",
@@ -414,6 +486,18 @@ export const desktopCodeEngineCopy = {
     webRead: "Gelesene Webseite: {url}",
     webReadMore: "{count} weitere Webseiten gelesen",
     imagesSent: "{count} Bild(er) als Bilddaten gesendet",
+    memory: "Projektgedächtnis",
+    memoryDetail: "Kurze Fakten über ein Projekt, die der Agent für spätere Aufgaben behält, etwa wie die Tests laufen. Sie liegen auf diesem Computer außerhalb des Projekts und gehen mit jeder Aufgabe an das Modell. Ist die Funktion aus, wird nichts gelesen oder geschrieben. Gilt für neue Aufgaben.",
+    memoryNotes: "Notizen des geöffneten Projekts",
+    memoryCount: "{count} Notiz(en) für dieses Projekt gespeichert.",
+    memoryNoProject: "Öffnen Sie ein Projekt, um seine Notizen zu sehen.",
+    memoryView: "Anzeigen",
+    memoryHide: "Ausblenden",
+    memoryEmpty: "Für dieses Projekt ist noch nichts gespeichert.",
+    memoryRemove: "Diese Notiz löschen",
+    memoryClear: "Alle Notizen löschen",
+    memoryFailed: "Die Notizen konnten nicht gelesen oder geändert werden.",
+    memorySent: "Projektgedächtnis enthalten",
   },
   es: {
     limits: "Límites de la tarea",
@@ -473,6 +557,18 @@ export const desktopCodeEngineCopy = {
     webRead: "Página web leída: {url}",
     webReadMore: "{count} páginas web más leídas",
     imagesSent: "{count} imagen(es) enviada(s) como datos de imagen",
+    memory: "Memoria del proyecto",
+    memoryDetail: "Datos breves sobre un proyecto que el agente conserva para tareas posteriores, como cómo ejecutar las pruebas. Se guardan en este equipo, fuera del proyecto, y se envían al modelo con cada tarea. Si está desactivada, no se lee ni se escribe nada. Se aplica a las tareas nuevas.",
+    memoryNotes: "Notas del proyecto abierto",
+    memoryCount: "{count} nota(s) guardada(s) para este proyecto.",
+    memoryNoProject: "Abre un proyecto para ver sus notas.",
+    memoryView: "Ver",
+    memoryHide: "Ocultar",
+    memoryEmpty: "Aún no hay nada guardado para este proyecto.",
+    memoryRemove: "Eliminar esta nota",
+    memoryClear: "Eliminar todas las notas",
+    memoryFailed: "No se pudieron leer ni cambiar las notas.",
+    memorySent: "Memoria del proyecto incluida",
   },
   pt: {
     limits: "Limites da tarefa",
@@ -532,5 +628,17 @@ export const desktopCodeEngineCopy = {
     webRead: "Página da web lida: {url}",
     webReadMore: "Mais {count} páginas da web lidas",
     imagesSent: "{count} imagem(ns) enviada(s) como dados de imagem",
+    memory: "Memória do projeto",
+    memoryDetail: "Fatos curtos sobre um projeto que o agente guarda para tarefas futuras, como a forma de rodar os testes. Ficam neste computador, fora do projeto, e são enviados ao modelo a cada tarefa. Desativada, nada é lido nem gravado. Vale para novas tarefas.",
+    memoryNotes: "Notas do projeto aberto",
+    memoryCount: "{count} nota(s) guardada(s) para este projeto.",
+    memoryNoProject: "Abra um projeto para ver as notas dele.",
+    memoryView: "Ver",
+    memoryHide: "Ocultar",
+    memoryEmpty: "Ainda não há nada guardado para este projeto.",
+    memoryRemove: "Excluir esta nota",
+    memoryClear: "Excluir todas as notas",
+    memoryFailed: "Não foi possível ler ou alterar as notas.",
+    memorySent: "Memória do projeto incluída",
   },
 } as const satisfies Record<Language, Copy>;

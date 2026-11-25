@@ -635,6 +635,10 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
 .code-engine small { display: block; overflow-wrap: anywhere; }
 .code-queue { display: grid; gap: 4px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
 .code-queue small { color: var(--muted); }
+.execution-memory { display: grid; gap: 6px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.execution-memory ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.execution-memory li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.execution-memory li > span { min-width: 0; overflow-wrap: anywhere; }
 .code-background { display: grid; gap: 4px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
 .code-background small { color: var(--muted); }
 .code-background ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }

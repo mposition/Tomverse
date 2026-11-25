@@ -44,6 +44,7 @@ export function TransmissionPanel({ records, usage, taskId, language }: {
         <li>{formatEvidence(copy.payload, language, { messages: record.contents.messageCount, results: record.contents.toolResultCount })}</li>
         {record.contents.commandOutput && <li>{formatEvidence(copy.outputs, language, { count: record.contents.commandOutput.results })}
           {record.contents.commandOutput.truncated > 0 && ` · ${formatEvidence(copy.truncatedCount, language, { count: record.contents.commandOutput.truncated })}`}</li>}
+        {record.contents.projectMemory && <li>{desktopCodeEngineCopy[language].memorySent}</li>}
         {record.contents.projectInstructions && <li>{copy.projectInstructions}{record.contents.projectInstructionsTruncated && ` · ${copy.truncated}`}</li>}
         {!!record.contents.listedPathCount && <li>{formatEvidence(copy.listings, language, { count: record.contents.listedPathCount })}</li>}
         {!!record.contents.truncatedListingCount && <li>{formatEvidence(copy.truncatedListings, language, { count: record.contents.truncatedListingCount })}</li>}

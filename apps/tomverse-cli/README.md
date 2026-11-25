@@ -247,9 +247,29 @@ per task".
   with exit code 3 and the pending actions in the output. Review them with
   `tomverse resume <session>` in a terminal. There is no flag that approves
   everything.
-- `AGENTS.md` at the folder root is given to the model as project
-  information. It cannot grant permissions, and the CLI never runs commands or
+- **Project instructions:** the folder's `AGENTS.md`, its `CLAUDE.md` (a whole-line
+  `@file` in it pulls that file in, inside the folder only, and each file is
+  given once) and the unconditional rules of `.claude/rules/*.md` (a rule whose
+  front matter names `paths` is left out) are given to the model as project
+  information, at most 32,000 characters in all; a cut is marked. When the
+  model first reads or changes a file in a subfolder, that subfolder's own
+  `AGENTS.md` / `CLAUDE.md` come with the result of that read or change, once
+  per folder (again after a compaction), at most 48,000 characters in a task. Files go through the same path check as
+  every read, so a link out of the folder or a credential file is never sent.
+  Instructions cannot grant permissions, and the CLI never runs commands or
   install hooks because a file says so.
+- **Project memory:** the model can keep a short note about the project
+  (`remember_fact`: how the tests run, a decision, a trap) without asking you.
+  Notes are stored in `~/.tomverse/memory/` (or `$TOMVERSE_HOME`), next to the
+  sessions and outside the project, one file per folder, and the file tools
+  never touch that folder. A note is one line of at most 300 characters; at
+  most 40 notes and 8,000 characters are kept, the oldest dropped first; and
+  anything that looks like a key, token or password is refused, not stored. At
+  the start of each task the notes are given to the model after the
+  instructions, marked as unchecked notes that cannot grant anything. A
+  `--read-only` session reads them but cannot add one. `tomverse memory show`
+  lists this folder's notes and `tomverse memory clear` deletes them;
+  `tomverse config set memory off` stops all reading and writing.
 
 ## Sessions, interruption and recovery
 
