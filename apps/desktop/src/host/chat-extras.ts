@@ -3,7 +3,7 @@ import { classifyFeedbackFailure, feedbackReferenceFromId, isFeedbackReference }
 import { createHash } from "node:crypto";
 import {
   chatExtrasInput, quickSummary, reviewExportInput, type ChatExtrasInput, type ChatExtrasOutput, type CompareEstimateOutcome,
-  type CompareSummaryOutcome, type FeedbackOutcome, type ItemFeedbackOutcome, type VerifyItemOutcome,
+  type CompareSummaryOutcome, type FeedbackOutcome, type ImageTurnOutcome, type ItemFeedbackOutcome, type VerifyItemOutcome,
 } from "../chat-extras-contract";
 import type { AccountSettingsApi } from "./account-settings-api";
 
@@ -79,6 +79,40 @@ async function itemFeedback(api: Transport, input: Extract<ChatExtrasInput, { ac
 }
 
 /**
+ * Starts the image answer for a saved question. The answer id is the image group's idempotency key, so an outcome
+ * that could not be read is asked again under the same id: the image may already be reserved, and a second try
+ * recovers that group instead of charging again. A readable refusal (4xx) is final.
+ */
+export async function startImageTurn(api: Transport, input: Extract<ChatExtrasInput, { action: "imageTurn" }>,
+  pause: (ms: number) => Promise<unknown> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): Promise<ImageTurnOutcome> {
+  const body = {
+    sourceUserMessageId: input.sourceUserMessageId, assistantMessageId: input.assistantMessageId, modelId: input.modelId,
+    imageModelIds: input.imageModelIds, preset: input.preset,
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+    ...(input.routingDecisionId ? { routingDecisionId: input.routingDecisionId } : {}),
+  };
+  let last: ImageTurnOutcome = { ok: false, code: null };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await pause(attempt * 1_500);
+    let response: Response;
+    try {
+      response = await api.send({ path: conversationPath(input.conversationId) + "/image-turn", method: "POST", body }, "application/json", 60_000);
+    } catch {
+      continue;
+    }
+    const data = await response.json().catch(() => null) as unknown;
+    if (response.ok) {
+      const turn = z.object({ imageTurn: z.object({ groupId: z.string().regex(/^[A-Za-z0-9_-]{1,100}$/) }) }).safeParse(data);
+      if (turn.success) return { ok: true, groupId: turn.data.imageTurn.groupId };
+    }
+    const code = z.object({ code: z.string().regex(/^[A-Z][A-Z0-9_]{2,60}$/) }).safeParse(data);
+    last = { ok: false, code: code.success ? code.data.code : null };
+    if (response.status < 500 && data !== null) return last;
+  }
+  return last;
+}
+
+/**
  * The saved AI Review as a PDF, Word, TXT or Markdown file. The server renders the report from the stored
  * review, so only the selection travels; the byte count and digest it declares are checked before saving.
  */
@@ -114,5 +148,7 @@ export async function runChatExtras(value: unknown, api: Transport): Promise<Cha
       return verifyItem(api, input);
     case "itemFeedback":
       return itemFeedback(api, input);
+    case "imageTurn":
+      return startImageTurn(api, input);
   }
 }

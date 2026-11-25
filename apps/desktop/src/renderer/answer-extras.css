@@ -14,3 +14,11 @@
 .answer-feedback-open:hover { color: var(--text); background: var(--raised); }
 .answer-feedback-email { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .answer-feedback-actions { display: flex; gap: 8px; }
+.chat-image-offer { display: grid; gap: 8px; max-width: 520px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.chat-image-offer h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 14px; }
+.chat-image-offer p { margin: 0; color: var(--muted); font-size: 13px; }
+.chat-image-offer dl { display: grid; gap: 4px; margin: 0; font-size: 13px; }
+.chat-image-offer dl > div { display: flex; gap: 8px; }
+.chat-image-offer dt { color: var(--muted); }
+.chat-image-offer dd { margin: 0; }
+.chat-image-offer-actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -2373,6 +2373,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let failed = false;
     let contextChanged = false;
     let researchSubmitted = false;
+    let imageOffer: ChatTurnResult["imageOffer"];
     let lastProgressAt = 0;
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
       if (!id || !window || window.isDestroyed() || window.webContents.isDestroyed() || window !== mainWindow ||
@@ -2409,6 +2410,9 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           publish({ modelId: id });
         });
         researchSubmitted = Boolean(result && "deepResearch" in result);
+        if (result && "imageTurn" in result && result.imageTurn && sourceId) {
+          imageOffer = { conversationId: id, sourceUserMessageId: sourceId, assistantMessageId: assistantId, modelId: input.modelId, request: result.imageTurn };
+        }
         applied = result?.appliedReasoningEffort;
         if (applied) publish({ applied });
       } catch (error) {
@@ -2428,6 +2432,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           : answer || partial ? "partial" : contextChanged ? "failed"
             : streamStarted ? "unconfirmed" : failed ? "failed" : "unconfirmed";
       return { conversation, status, partial: answer ? "" : partial, modelId, applied, savedQuestion: Boolean(sourceId),
+        ...(imageOffer && !answer ? { imageOffer } : {}),
         ...(contextChanged && status === "failed" ? { contextChanged: true } : {}) };
     } finally {
       if (chatTurn === turn) chatTurn = null;

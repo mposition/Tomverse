@@ -31,8 +31,19 @@ export const itemFeedbackInput = z.object({
   verdict: z.enum(COMPARISON_REVIEW_ITEM_VERDICTS).nullable(),
 }).strict();
 
+/** Answers a saved question with an image in the same conversation. Charged at once, so Desktop asks first. */
+export const imageTurnInput = z.object({
+  action: z.literal("imageTurn"), conversationId: chatId, sourceUserMessageId: chatId,
+  assistantMessageId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+  modelId: z.string().min(1).max(120),
+  imageModelIds: z.array(z.string().min(1).max(120)).max(8),
+  preset: z.enum(["draft", "standard", "final"]).nullable(),
+  prompt: z.string().trim().min(1).max(4_000).optional(),
+  routingDecisionId: z.string().regex(/^[a-z0-9]{20,40}$/).optional(),
+}).strict();
+
 export const chatExtrasInput = z.discriminatedUnion("action", [
-  answerFeedbackInput, compareEstimateInput, compareSummaryInput, verifyItemInput, itemFeedbackInput,
+  answerFeedbackInput, compareEstimateInput, compareSummaryInput, verifyItemInput, itemFeedbackInput, imageTurnInput,
 ]);
 
 /** The saved AI Review the report is built from; the server re-derives everything else. */
@@ -82,6 +93,13 @@ export type VerifyItemOutcome =
   | { ok: true; status: "supported" | "unsupported" | "inconclusive"; summary: string; usageCredits: number }
   | { ok: false };
 export type ItemFeedbackOutcome = { ok: boolean };
+export type ImageTurnOutcome = { ok: true; groupId: string } | { ok: false; code: string | null };
+
+/** What the server's own image judgement decided for a saved Auto question. Nothing is generated or charged yet. */
+export type ChatImageOffer = {
+  conversationId: string; sourceUserMessageId: string; assistantMessageId: string; modelId: string;
+  request: { modelIds: string[]; preset: "draft" | "standard" | "final" | null; prompt?: string; edit?: true; routingDecisionId?: string };
+};
 
 export type ChatExtrasOutput = {
   feedback: FeedbackOutcome;
@@ -89,6 +107,7 @@ export type ChatExtrasOutput = {
   compareSummary: CompareSummaryOutcome;
   verifyItem: VerifyItemOutcome;
   itemFeedback: ItemFeedbackOutcome;
+  imageTurn: ImageTurnOutcome;
 };
 export type ChatExtrasInput = z.infer<typeof chatExtrasInput>;
 export type ChatExtrasAction = ChatExtrasInput["action"];

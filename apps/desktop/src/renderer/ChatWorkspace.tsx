@@ -38,6 +38,8 @@ export { ChatMarkdown } from "./ChatTranscript";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
 import { AnswerExtras } from "./AnswerExtras";
+import { ChatImageOffer } from "./ChatImageOffer";
+import { showImageOffer } from "./image-offer-store";
 import { HandoffDraft } from "./WorkspaceHandoff";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { readDesktopDraft, writeDesktopDraft } from "./draft-store";
@@ -404,7 +406,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
       setLive(result.partial && result.conversation ? {
         requestId, conversationId: result.conversation.id, text: result.partial, modelId: result.modelId, applied: result.applied,
       } : null);
-      setNotice(result.contextChanged ? "contextChanged" : statusNotice[result.status]);
+      if (result.imageOffer) showImageOffer(result.imageOffer);
+      setNotice(result.imageOffer ? null : result.contextChanged ? "contextChanged" : statusNotice[result.status]);
       if (!result.conversation) setRefresh((value) => value + 1);
       return result.savedQuestion;
     } catch {
@@ -995,6 +998,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             </div>
           </li>}
         </ol>
+        <ChatImageOffer conversationId={chat.conversation?.id} capability={imageCapability} language={language} onStarted={() => void chat.open(chat.selected ?? null)} />
         {chat.sending && !live?.text && <p className="chat-effort" role="status">{copy.waiting}</p>}
         {chat.conversation?.messagePage.nextCursor && <button className="soft" type="button" disabled={chat.opening || chat.sending}
           onClick={() => void chat.more()}>{copy.loadMessages}</button>}

@@ -5,6 +5,7 @@ import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
 import type { AiModel } from "../../../lib/models";
 import { attachmentRead, attachmentUploadIds } from "./attachment-contract";
+import type { ChatImageOffer } from "./chat-extras-contract";
 import { sanitizeWebSearchCitations } from "../../../lib/webSearchCitations";
 import { ARTIFACT_LIMITS, isSupportedArtifactFormat, parseChatStreamArtifacts } from "../../../lib/generatedArtifactCore";
 
@@ -152,6 +153,8 @@ export type ChatTurnResult = {
   modelId?: string;
   applied?: z.infer<typeof chatEffort>;
   contextChanged?: boolean;
+  /** The server judged this saved question an image request; Desktop asks before anything is charged. */
+  imageOffer?: ChatImageOffer;
 };
 export type ReviewCapability = z.infer<typeof reviewCapability>;
 export type ReviewTurnInput = z.infer<typeof reviewTurnInput>;
