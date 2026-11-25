@@ -56,7 +56,7 @@ catalogue's **image tab** and answers in the conversation already on screen.
 
 - **Chat** (`/chat`): the picked image model is the selected model. The
   composer's model button names it, the composer and its draft stay, and the
-  next send is answered with an image in the same conversation (policy §13 ⑥).
+  next send is answered with an image in the same conversation (docs/policy/image-generation.md §13 ⑥).
   The image-intent call still runs for what only it knows (a follow-up's
   rewritten prompt, an edit of the attached photo); the picked model replaces
   its model choice, and its "not an image" answer does not turn the send back
