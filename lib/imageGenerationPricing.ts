@@ -77,10 +77,10 @@ export type ImageEditPricing = {
   } | null;
 };
 
-const GOOGLE_PHOTO_INPUT_RATE = {
-  "gemini-3.1-flash-image": 0.50,
-  "gemini-3.1-flash-lite-image": 0.25,
-  "gemini-nano-banana-2.1": 1.50,
+const GOOGLE_PHOTO_EDIT_COST = {
+  "gemini-3.1-flash-image": { inputRate: 0.50, output: 67_200 },
+  "gemini-3.1-flash-lite-image": { inputRate: 0.25, output: 33_600 },
+  "gemini-nano-banana-2.1": { inputRate: 1.50, output: 33_600 },
 } as const;
 
 const OPENAI_2_6_PHOTO_EDIT_IDS: readonly string[] = [
@@ -217,8 +217,8 @@ export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
       verification: { verifiedAt: "2026-11-25", source: "https://bfl.ai/pricing?category=flux+3+image" },
     };
   }
-  if (process.env.IMAGE_GOOGLE_EDIT_ENABLED === "true" && Object.hasOwn(GOOGLE_PHOTO_INPUT_RATE, modelId)) {
-    const rate = GOOGLE_PHOTO_INPUT_RATE[modelId as keyof typeof GOOGLE_PHOTO_INPUT_RATE];
+  if (process.env.IMAGE_GOOGLE_EDIT_ENABLED === "true" && Object.hasOwn(GOOGLE_PHOTO_EDIT_COST, modelId)) {
+    const { inputRate: rate, output } = GOOGLE_PHOTO_EDIT_COST[modelId as keyof typeof GOOGLE_PHOTO_EDIT_COST];
     // The actual Interactions edits of a public Studio PNG on 2026-11-25
     // reported 1,120 image tokens, above the preview countTokens estimate.
     // Reserve 2,048 for one reference fitted inside 1,024 px and keep the
@@ -229,7 +229,7 @@ export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
       surchargeCredits: 0,
       inputBudgetMicroUsd: Math.ceil(maxTokens * rate),
       inputTokens: { maxTokens, usdPerMillionTokens: rate },
-      option: { provider: "google", size: "1024x1024" },
+      option: { provider: "google", size: "1024x1024", quality: "medium", minimumOutputCostMicroUsd: output },
       verification: {
         verifiedAt: "2026-11-25",
         source: "https://ai.google.dev/gemini-api/docs/pricing",

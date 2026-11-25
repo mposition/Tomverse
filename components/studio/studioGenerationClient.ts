@@ -14,6 +14,8 @@ export type StudioImageQuote = {
   pricingVersion: string;
   quality: ImageQuality;
   useCase?: StudioImageUseCase;
+  requestedSize?: ImageSize;
+  squareFallback?: boolean;
 };
 
 export class StudioGenerationError extends Error {
@@ -142,7 +144,7 @@ export function createStudioImageRunner() {
       try {
         submitted = await readJson<StudioSubmission>(await postJson("/api/studio/images", {
           prompt: input.prompt, size: input.size, modelId: quote.modelId, pricingVersion: quote.pricingVersion,
-          quality: quote.quality, credits: quote.credits,
+          quality: quote.quality, credits: quote.credits, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
           useCase: quote.useCase, idempotencyKey: run.idempotencyKey, ...(run.uploadId ? { uploadId: run.uploadId } : {}),
         }, signal));
       } catch (error) {

@@ -87,10 +87,10 @@ const body = {
   modelId: "gpt-image-2", pricingVersion: "outdated-quote",
 };
 
-function quotedSubmission(quote: { modelId: string; pricingVersion: string; quality: string; credits: number; size: string; useCase?: string }) {
+function quotedSubmission(quote: { modelId: string; pricingVersion: string; quality: string; credits: number; size: string; useCase?: string; requestedSize?: string; squareFallback?: boolean }) {
   return {
     ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion, quality: quote.quality,
-    credits: quote.credits, size: quote.size, useCase: quote.useCase,
+    credits: quote.credits, size: quote.size, useCase: quote.useCase, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
   };
 }
 
@@ -228,7 +228,9 @@ test("a verified pack route can choose a square-only model before a landscape fa
 });
 
 test("Studio reserves exactly the quoted model, quality, size and credit amount", async context => {
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
   context.after(() => {
+    registry.resetActiveImageModelCatalog();
     delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES;
     delete process.env.IMAGE_RECRAFT_EDIT_ENABLED;
   });
@@ -240,12 +242,21 @@ test("Studio reserves exactly the quoted model, quality, size and credit amount"
   const quote = await (await GET(requested)).json();
   assert.equal(quote.modelId, "recraftv4_pro");
   assert.equal(quote.size, "2048x2048");
+  assert.equal(quote.requestedSize, "1024x1024");
   assert.equal(quote.credits, 350);
   const submit = quotedSubmission(quote);
   for (const mismatch of [{ credits: 349 }, { quality: "high" }, { size: "1024x1024" }]) {
     assert.equal((await post({ ...submit, ...mismatch })).status, 409);
   }
   assert.equal(reservations.length, 0);
+  // Another preferred model can serve the output size but not the requested shape.
+  const models = registry.listEnabledImageModels();
+  const first = models.find((model: { id: string }) => model.id === "gpt-image-2");
+  registry.setActiveImageModelCatalog(models.map((model: typeof first) => model.id === first.id ? {
+    ...model, prices: [{ ...model.prices[0], size: "2048x2048", quality: "medium" }],
+  } : model));
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "live-action-character": [first.id, "recraftv4_pro"] });
+  assert.equal((await (await GET(new Request(base + "?size=2048x2048&edit=true&useCase=live-action-character"))).json()).modelId, first.id);
   assert.equal((await post(submit)).status, 202);
   assert.equal(reservations[0].size, "2048x2048");
   assert.equal(reservations[0].quality, "medium");
