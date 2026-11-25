@@ -150,6 +150,7 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
     creditCap: z.number().int().positive().nullable() }).strict(),
   z.object({ action: z.literal("revokeKey"), id: accountId }).strict(),
   z.object({ action: z.literal("usage") }).strict(),
+  z.object({ action: z.literal("exportHistory") }).strict(),
 ]);
 
 const keySummary = z.object({
@@ -161,6 +162,11 @@ const loginMethod = z.discriminatedUnion("type", [
   z.object({ type: z.literal("oauth"), provider: label, linked: z.boolean() }),
   z.object({ type: z.literal("email"), enabled: z.boolean() }),
 ]);
+
+const exportHistoryEntry = z.object({
+  id: accountId, status: z.string().max(40), refusalReason: z.string().nullable(), expiresAt: z.string(),
+  consumedAt: z.string().nullable(), byteLength: z.number().int().nonnegative().nullable(), createdAt: z.string(),
+});
 
 export const desktopAccountSettingsOutput = {
   preferences: accountPreferences,
@@ -252,6 +258,7 @@ export const desktopAccountSettingsOutput = {
   createKey: z.object({ key: z.string().min(1).max(512), summary: keySummary }),
   updateKey: z.object({ key: keySummary }),
   revokeKey: z.object({ revoked: z.literal(true) }),
+  exportHistory: z.object({ requests: z.array(exportHistoryEntry).max(200) }),
   usage: z.object({
     plan: label,
     usage: z.object({ creditsMonth: z.number().nonnegative() }).optional(),

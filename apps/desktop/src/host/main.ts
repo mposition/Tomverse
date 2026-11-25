@@ -10,6 +10,8 @@ import { createCodeBrowserView } from "./code-browser-view";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
+import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
+import { desktopAccountDataInput } from "../account-data-contract";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { solveEmailLoginChallenge } from "./login-challenge";
@@ -2307,6 +2309,26 @@ async function accountSettings(value: unknown) {
   return request(input);
 }
 
+let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
+
+function connectedAccountData() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (accountDataApi?.signal !== signal) {
+    accountDataApi = {
+      signal,
+      api: createAccountDataApi({
+        settings,
+        save: (file) => saveGeneratedFile(async () => ({ bytes: await file.load(), suggestedName: file.suggestedName, extension: file.extension }),
+          nativeCopy().saveGenerated, file.filterName, { suggestedName: file.suggestedName, extension: file.extension }),
+        afterAccountDeleted: signOut,
+        language: () => state.language ?? "en",
+      }),
+    };
+  }
+  return accountDataApi.api;
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -2496,8 +2518,10 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   }, "review");
 }
 
+// `named` asks for the destination before `load` runs, for a download that cannot be repeated
+// (a single-use link): cancelling the dialog then spends nothing.
 async function saveGeneratedFile(load: () => Promise<{ bytes: Uint8Array; suggestedName: string; extension: string }>,
-  title: string, filterName: string) {
+  title: string, filterName: string, named?: { suggestedName: string; extension: string }) {
   const window = mainWindow;
   const accountSignal = chatSession.signal;
   const owner = browserSession?.accountId;
@@ -2507,12 +2531,15 @@ async function saveGeneratedFile(load: () => Promise<{ bytes: Uint8Array; sugges
   if (!current() || savingGenerated || state.update.stage === "installing") return false;
   savingGenerated = true;
   try {
-    const { bytes, suggestedName, extension } = await load();
+    const loaded = named ? undefined : await load();
     if (!current()) return false;
     const target = await dialog.showSaveDialog(window, {
-      title, defaultPath: suggestedName, filters: [{ name: filterName, extensions: [extension] }],
+      title, defaultPath: (named ?? loaded!).suggestedName,
+      filters: [{ name: filterName, extensions: [(named ?? loaded!).extension] }],
     });
     if (target.canceled || !target.filePath || !isAbsolute(target.filePath) || !current()) return false;
+    const { bytes } = loaded ?? await load();
+    if (!current()) return false;
     const staging = join(dirname(target.filePath), `.tomverse-save-${randomUUID()}.tmp`);
     const file = await open(staging, "wx", 0o600);
     try {
@@ -3054,6 +3081,7 @@ function registerIpc() {
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));
   main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
+  main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

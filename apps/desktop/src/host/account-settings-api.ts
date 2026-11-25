@@ -115,6 +115,8 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
       return { path: "/api/user/api-keys/" + encodeURIComponent(input.id), method: "DELETE" };
     case "usage":
       return { path: "/api/user/usage" };
+    case "exportHistory":
+      return { path: "/api/user/account/export" };
   }
 }
 
@@ -150,13 +152,13 @@ export function createAccountSettingsApi(
     return renewal;
   }
 
-  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number) {
+  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number, extra?: Record<string, string>) {
     const session = await credential();
     const cookie = origin.startsWith("https:") ? "__Secure-next-auth.session-token" : "next-auth.session-token";
     return transport(new URL(path, origin), {
       method, body: body ? JSON.stringify(body) : undefined,
       headers: {
-        Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
+        ...extra, Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       redirect: "error", cache: "no-store", signal: signal(timeout),

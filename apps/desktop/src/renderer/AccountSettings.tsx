@@ -1,63 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import type { AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
 import { ASSISTANT_PROFILE_LIMITS } from "../../../../lib/assistantProfileVersioning";
 import { CONSENT_REQUIRED_PURPOSES } from "../../../../lib/emailPreferenceCore";
 import { MARKETING_ALLOWED_COUNTRY_CODES } from "../../../../lib/emailJurisdictionCore";
 import { MEMORY_KINDS } from "../../../../lib/memoryValidatorCore";
-import { en } from "../../../../locales/en";
-import { ko } from "../../../../locales/ko";
-import { zh } from "../../../../locales/zh";
-import { zhHant } from "../../../../locales/zhHant";
-import { fr } from "../../../../locales/fr";
-import { de } from "../../../../locales/de";
-import { es } from "../../../../locales/es";
-import { pt } from "../../../../locales/pt";
-import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopControlsCopy } from "../../../../locales/desktopControls";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import type { AccountPreferences, AccountSettingsResult, DesktopAccountSettingsInput } from "../account-settings-contract";
 import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
+import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
+import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
 
-const dictionaries = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };
-const languageLabel = (language: Language) => new Intl.DisplayNames(language, { type: "language" }).of(language) ?? language;
-
-export function AccountSettingRow({ label, children, description }: {
-  label: ReactNode; children: ReactNode; description?: ReactNode;
-}) {
-  return <div className="execution-setting-row account-setting-row">
-    <div>{label}{description && <small>{description}</small>}</div>
-    <div className="account-setting-control">{children}</div>
-  </div>;
-}
-
-function useSettingsRead<Data>(load: () => Promise<Data>) {
-  const [state, setState] = useState<{ load: typeof load; attempt: number; data?: Data; failed?: true }>();
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    let current = true;
-    void load().then(
-      data => { if (current) setState({ load, attempt, data }); },
-      () => { if (current) setState({ load, attempt, failed: true }); },
-    );
-    return () => { current = false; };
-  }, [load, attempt]);
-  const visible = state?.load === load && state.attempt === attempt ? state : undefined;
-  return { ...visible, reload: () => setAttempt(value => value + 1), setData: (data: Data) => setState({ load, attempt, data }) };
-}
-
-function ReadStatus({ language, failed, retry }: { language: Language; failed?: boolean; retry(): void }) {
-  return failed ? <div className="desktop-settings-feedback">
-    <p role="alert">{desktopShellCopy[language].actionFailed}</p>
-    <button type="button" className="soft" onClick={retry}>{desktopControlsCopy[language].retrySettings}</button>
-  </div> : <p role="status">{dictionaries[language].auth.loading}</p>;
-}
-
-function ActionStatus({ language, failed }: { language: Language; failed: boolean }) {
-  return failed ? <p className="notice" role="alert">{desktopShellCopy[language].actionFailed}</p> : null;
-}
+export { AccountSettingRow };
 
 const loadPreferences = () => window.desktop.accountSettings<"preferences">({ action: "preferences" });
 const loadEmail = () => window.desktop.accountSettings<"email">({ action: "email" });
@@ -69,7 +26,6 @@ const loadUsage = () => window.desktop.accountSettings<"usage">({ action: "usage
 const loadImportCapacity = () => window.desktop.accountSettings<"importCapacity">({ action: "importCapacity" });
 const loadImportRuns = () => window.desktop.accountSettings<"importRuns">({ action: "importRuns" });
 
-type Common = { language: Language };
 
 function Preferences({ language, onApply }: Common & { onApply(settings: AccountPreferences): void }) {
   const copy = dictionaries[language].auth;
@@ -225,6 +181,7 @@ function Account({ language }: Common) {
       <button className="soft" type="button" aria-expanded={email} onClick={() => setEmail(!email)}>{copy.dataTabOpen}</button>
     </AccountSettingRow>
     {email && <EmailNotifications language={language} />}
+    <DeleteAccountSection language={language} />
   </>;
 }
 
@@ -788,9 +745,12 @@ export function AccountSettings({ tab, language, onApply, onContinue, onOpenImpo
     case "ai": return <Memory language={language} />;
     case "data": {
       const copy = dictionaries[language].externalImport;
-      return <AccountSettingRow label={copy.dataTabTitle} description={desktopImportFilePrivacy[language]}>
-        <button type="button" className="soft" onClick={onOpenImports}>{copy.dataTabOpen}</button>
-      </AccountSettingRow>;
+      return <>
+        <AccountSettingRow label={copy.dataTabTitle} description={desktopImportFilePrivacy[language]}>
+          <button type="button" className="soft" onClick={onOpenImports}>{copy.dataTabOpen}</button>
+        </AccountSettingRow>
+        <AccountDataPanel language={language} />
+      </>;
     }
     case "imports": return <>
       <button type="button" className="soft" onClick={onBackToData}>{dictionaries[language].settingsNav.backToSettings}</button>
