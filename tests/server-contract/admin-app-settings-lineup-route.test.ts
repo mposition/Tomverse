@@ -28,6 +28,8 @@ type World = {
   rejectionCalls: Array<{ modelIds: readonly string[]; leadModelId?: string }>;
   audits: string[];
   reviewWrites: string[][];
+  voiceModel: string;
+  voiceOptions: string[] | null;
 };
 
 let world: World;
@@ -41,7 +43,7 @@ const SETTINGS = {
   publicSharingEnabled: true,
 };
 
-async function loadRoute(): Promise<{ PATCH: (request: Request) => Promise<Response> }> {
+async function loadRoute(): Promise<Pick<typeof import("@/app/api/admin/app-settings/route"), "GET" | "PATCH">> {
   if (!installed) {
     installed = true;
     mock.module(mod("node_modules/next-auth/next/index.js"), {
@@ -76,6 +78,13 @@ async function loadRoute(): Promise<{ PATCH: (request: Request) => Promise<Respo
       },
     });
     const off = async () => false;
+    mock.module(mod("lib/providerModelDocEvidence.ts"), { namedExports: {
+      getOpenAiLiveModelsAtRate: async (rate: number) => { assert.equal(rate, 50_000); return world.voiceOptions; },
+    } });
+    mock.module(mod("lib/voiceConversationModelSetting.ts"), { namedExports: {
+      getVoiceConversationModel: async () => world.voiceModel,
+      saveVoiceConversationModel: async (id: string) => { world.voiceModel = id; },
+    } });
     const noop = async () => {};
     mock.module(mod("lib/reviewProviderDefaults.ts"), {
       namedExports: {
@@ -140,11 +149,38 @@ const reset = (overrides: Partial<World> = {}) => {
     rejectionCalls: [],
     audits: [],
     reviewWrites: [],
+    voiceModel: "gpt-live-1.1",
+    voiceOptions: ["gpt-live-1.2", "gpt-live-1.1"],
     ...overrides,
   };
 };
 
 const LINEUP = ["gpt-6-luna", "claude-sonnet-5", "gemini-flash-lite-latest"];
+
+test("an operator can discover and select a newly published Live model without a registry edit", async () => {
+  reset();
+  const { GET, PATCH } = await loadRoute();
+  const read = () => GET(new Request("https://tomverse.app/api/admin/app-settings?section=voice-model"));
+  assert.deepEqual(await (await read()).json(), { modelId: "gpt-live-1.1", options: world.voiceOptions, canWrite: true });
+  assert.equal((await PATCH(patch({ voiceConversationModel: "gpt-live-1.2" }))).status, 200);
+  assert.equal((await (await read()).json()).modelId, "gpt-live-1.2");
+  assert.equal((await PATCH(patch({ voiceConversationModel: "gpt-live-1.1" }))).status, 200);
+  assert.equal(world.voiceModel, "gpt-live-1.1");
+});
+
+test("voice changes require write access, an independently verified rate and a standalone save", async () => {
+  const { PATCH } = await loadRoute();
+  for (const { state, body, status } of [
+    { state: { canWrite: false }, body: { voiceConversationModel: "gpt-live-1.2" }, status: 403 },
+    { state: { voiceOptions: null }, body: { voiceConversationModel: "gpt-live-1.2" }, status: 503 },
+    { state: { voiceOptions: [] }, body: { voiceConversationModel: "gpt-live-1.2" }, status: 400 },
+    { state: {}, body: { voiceConversationModel: "gpt-live-1.2", guestDefaultModelId: "other" }, status: 400 },
+  ]) {
+    reset(state);
+    assert.equal((await PATCH(patch(body))).status, status);
+    assert.equal(world.voiceModel, "gpt-live-1.1");
+  }
+});
 
 test("an accepted Review default save uses its own write path", async () => {
   reset();

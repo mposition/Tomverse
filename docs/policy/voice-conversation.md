@@ -114,6 +114,13 @@ native authentication plugin are not claimed as a verified iOS/Android release.
 
 ## Configuration and verification
 
+New sessions default to `gpt-live-1.1`. In Admin → Models → Default models →
+Chat voice conversation, choose **Check for new models** and save a model from
+OpenAI's GPT-Live list at the current tariff. The server checks the shared pricing
+page for unreviewed promotions and matches its minute rate to the model's own
+Live endpoint and pricing table. It checks again on save. A session keeps its reserved model ID
+through provider dispatch and final usage accounting.
+
 `VOICE_CONVERSATION_ENABLED=true` and a dedicated
 `VOICE_CONVERSATION_API_KEY` are required. A nonempty
 `VOICE_CONVERSATION_KILL_SWITCH` disables new starts and closes running sessions.
