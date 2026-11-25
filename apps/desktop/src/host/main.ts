@@ -62,7 +62,6 @@ import { DESKTOP_LIVE_ORIGIN, type DesktopIdentityProvider } from "../../../../l
 import { DESKTOP_APP_ORIGIN } from "../../../../lib/desktopReadApiContract";
 import { DesktopChatContextChanged, desktopChatApi } from "./chat-api";
 import { desktopCodeNotice } from "./desktop-notice";
-import { continuationPath } from "../../../../lib/continuationRoutes";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { imageRequest } from "../images-contract";
 import { imageDownloadExtension, imageDownloadFilename } from "../../../../lib/imageAssetDownload";
@@ -3081,8 +3080,6 @@ function registerIpc() {
     const input = chatSourceInput.parse(value);
     return withChatAccount((api) => api.importedSource(input));
   });
-  main("chat:open-continuation", (value) =>
-    shell.openExternal(webOrigin + continuationPath(chatId.parse(value))));
   main("chat:rename", (value) => {
     const input = chatRenameInput.parse(value);
     return withChatAccount((api) => api.rename(input), "chat");

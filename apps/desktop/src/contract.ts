@@ -359,7 +359,6 @@ export type DesktopApi = {
   chatSearch(query: string, product?: DesktopTextProduct): Promise<ChatHistoryHit[]>;
   chatConversation(input: ChatPageInput): Promise<ChatConversation>;
   chatImportedSource(input: ChatSourceInput): Promise<ChatImportedSource>;
-  openChatContinuation(id: string): Promise<void>;
   renameChat(input: ChatRenameInput): Promise<{ title: string }>;
   removeChat(id: string): Promise<boolean>;
   chatModels(): Promise<ChatModel[]>;

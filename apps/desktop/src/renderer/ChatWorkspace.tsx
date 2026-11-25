@@ -780,6 +780,7 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState<number>();
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let current = true;
     void window.desktop.chatImportedSource({ id, offset }).then((page) => {
@@ -793,16 +794,19 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
       });
     }, () => { if (current) setError(true); }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [id, offset]);
+  }, [id, offset, attempt]);
 
   const source = timeline?.source;
   return <section className="chat-imported-source" aria-label={copy.importedConversation}>
     <h3>{copy.importedConversation}{timeline && ` · ${timeline.provider}`}</h3>
     {loading && <p role="status">{copy.loadingImported}</p>}
-    {error && <button className="soft" type="button" onClick={() => void window.desktop.openChatContinuation(id)}>{copy.openImportedWeb}</button>}
+    {error && <button className="soft" type="button" onClick={() => {
+      setError(false);
+      setLoading(true);
+      setAttempt((value) => value + 1);
+    }}>{copy.retryImported}</button>}
     {source?.status === "deleted" && <p>{copy.deletedImported}</p>}
-    {source?.status === "locked" && <button className="soft" type="button"
-      onClick={() => void window.desktop.openChatContinuation(id)}>{copy.unlockImportedWeb}</button>}
+    {source?.status === "locked" && <p role="status">{copy.lockedImported}</p>}
     {source?.status === "available" && <>
       {(source.offset ?? 0) > 0 && <button className="soft" type="button" disabled={loading} onClick={() => {
         setLoading(true);
