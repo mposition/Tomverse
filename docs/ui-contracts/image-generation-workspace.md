@@ -3,7 +3,7 @@
 ## Status
 
 - Contract type: Non-negotiable product invariant
-- Applies to: The image generation workspace and its three entry points — desktop and mobile alike
+- Applies to: The image generation workspace (image conversations already in the history) and the catalogue's image tab — desktop and mobile alike
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
 - Last reviewed: 2026-08-05
@@ -27,12 +27,11 @@ its own complete full-width row.
 | Area | File |
 | --- | --- |
 | Workspace: composer, option rows, timeline, comparison grid | `components/images/ImageGenerationWorkspace.tsx` |
-| Unified new-conversation launcher (split button / menu rows) | `components/chat/NewConversationLauncher.tsx` |
 | Catalogue `Chat \| Image` tabs | `components/chat/ModelPickerPanel.tsx` |
 | Image tab rows, logos, usage meter | `components/chat/ImageModelTabPanel.tsx` |
-| Composer model-picker wiring | `components/chat/ChatInput.tsx` |
-| Draft carry-over/restore, lock derivation, workspace mounting | `app/(site)/(application)/chat/ChatPageClient.tsx` |
-| Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
+| Composer model-picker wiring, picked image models and the way back | `components/chat/ChatInput.tsx` |
+| Picked image models, send routing, lock derivation, workspace mounting | `app/(site)/(application)/chat/ChatPageClient.tsx` |
+| Review image selection and panel hosting | `lib/reviewImageTurn.ts` |
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
 | Group polling endpoint the timeline reads | `app/api/images/groups/[groupId]/route.ts` |
 | Operations view (budget, registry, invariants) | `components/admin/AdminImageGenerationPanel.tsx`, mounted at `/admin/providers` |
@@ -50,83 +49,45 @@ entry point rather than at the submit button.
 
 ## Entry points
 
-There are exactly three, and no standalone "New image" button. The composer
-tools menu has no image-generation action; image requests are judged from the
-submitted prompt through the existing LLM routing.
+There is no image mode (owner direction 2026-11-25). Nothing opens a new
+image draft: no launcher item, no composer tools-menu action, no "New image"
+button, and no starter card. An image model is picked in the model
+catalogue's **image tab** and answers in the conversation already on screen.
 
-1. Desktop sidebar **split button** — the primary click stays "new chat"; the
-   caret opens the menu that holds image generation.
-2. Mobile drawer — the same launcher, rendered as **full-size menu rows**. The
-   caret is never shrunk into a sub-44px target to fit a phone.
-3. Model catalogue → **image tab** (see below).
+- **Chat** (`/chat`): the picked image model is the selected model. The
+  composer's model button names it, the composer and its draft stay, and the
+  next send is answered with an image in the same conversation (docs/policy/image-generation.md §13 ⑥).
+  The image-intent call still runs for what only it knows (a follow-up's
+  rewritten prompt, an edit of the attached photo); the picked model replaces
+  its model choice, and its "not an image" answer does not turn the send back
+  into text.
+- **Review Professional** (`/review`): picking one image model turns every
+  answering panel into an image model -- the picked one, then an active model
+  of each other panel's provider, then other owners -- up to the number of
+  answering panels (at most three). Once in image mode a pick removes a chosen
+  model (never the last), adds another, or replaces the last one at the limit.
+  Each panel hosts one image answer; the selected chat models stay selected.
+- **Review Easy**: the pick asks the router for images; the router picks the
+  image model per provider.
+- **The way back**: the composer shows the picked models (`review-image-mode`)
+  with **Back to chat models** (`composer-image-mode-exit`), which returns to
+  the conversation models with the draft intact. Picking a chat model in the
+  chat tab, starting a new chat or opening another conversation does the same.
+- A continuation (`/continuations/*`) offers no image tab: it answers no image
+  in the conversation (`docs/policy/external-conversation-continuation.md` §5.1).
 
-On Review (`/review`) entry 3 and the starter catalogue's image card
-do not open this workspace: they arm the Review composer's image mode
-(`review-image-mode`) and the answer is generated inside the conversation
-(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). With no
-model chosen, the card arms an active model from the image catalogue, never a
-fixed default. The sidebar and drawer launcher stay explicit entries to this
-workspace there too.
+This workspace remains only for image conversations already in the history.
 
-On Chat (`/chat`) no starter card opens this workspace (owner direction
-2026-11-13). Chat's image card (`make-an-image`) seeds an ordinary Chat draft;
-the send is answered with an image in the same conversation (policy §13 ⑥), and
-the card is hidden when image triage is off.
-
-The Chat **image-request handoff chip** that used to be a fifth entry point was
-**deleted on 2026-10-20**: the LLM judgement on send (policy §13 ⑥,
-`lib/chatImageIntent.ts`) replaced the rule-based classifier behind it, and the
-classifier, the chip component, its copy and its E2E spec went with it. The
+The Chat **image-request handoff chip** was deleted on 2026-10-20 (the LLM
+judgement on send replaced it), and the launcher's image item, the image
+draft, its carry-over and the arrival auto-generate went with image mode on
+2026-11-25. `UserSettings.imageHandoffAutoGenerate` keeps its checkbox in the
+workspace composer but no landing acts on it any more. The
 `image_intent_suggestion_*` analytics event names stay registered only because
 a database CHECK constraint lists them; nothing emits them.
 
 Requirements:
 
-- The launcher renders once per shell. A second image button anywhere is a
-  contract violation, not a convenience.
-- The menu is a real menu: `role="menu"`/`role="menuitem"`, focus moves into it
-  on open, Escape closes it and returns focus to the trigger.
-- Switching to the image draft creates **no server row**. The conversation only
-  exists once a generation is actually reserved (policy §6).
-
-### A handoff from a typed request never executes by itself
-
-A request typed in words can reach the workspace through a handoff (today the
-Review Easy image triage; the Chat send answers in the conversation instead,
-policy §13 ⑥). The deleted handoff chip used to be the entry point for this;
-what survives of its rules is the following.
-
-- **Submitting a generation without confirmation is forbidden, unless the
-  account has said otherwise while looking at the price.** The default is
-  unchanged: the handoff lands in the workspace with the prompt filled and the
-  price on the button, and generating is one more click.
-
-  `UserSettings.imageHandoffAutoGenerate` is the exception, and every part of
-  how it is offered is load-bearing:
-
-  - **It can only be set beside the price.** The only control that writes it is
-    the checkbox in the workspace composer, in the same row as the submit
-    button and the credit badge. An account settings page would move the choice
-    away from the number it is a decision about, and "quoted before submission"
-    would stop being true of it.
-  - **It is an account setting, not a browser one.** It decides whether one
-    click spends credits, and a per-device preference would let a shared
-    computer spend somebody else's.
-  - **Only a handoff that began with a typed request may act on it**
-    (`fromImageRequest`). The launcher, the drawer rows and the
-    catalogue tab are someone opening the workspace to compose. A workspace
-    that generated because it was opened would spend credits on navigation.
-  - **It never bypasses a refusal.** The arrival submits only when the button
-    itself would be enabled, so a held price, an over-long prompt, a viewer
-    without the plan and a request already in flight all refuse it exactly as
-    they refuse a press.
-  - **It is spent once per landing**, and consumed even when the submit was
-    refused, so a landing that could not generate cannot fire later against a
-    prompt the user has since changed.
-  - **It stays visible and revocable on the screen it acts on**, including
-    while a generation is running, so the account that has just watched a press
-    spend credits can turn it off where it turned it on. It renders only for a
-    viewer who can actually generate.
 - **The model never names the destination.** No answer may tell the user where
   image generation is, how to reach it, or offer it as an item in a list —
   `lib/imageCapabilityPrompt.ts` forbids it, because a model that cannot
@@ -210,10 +171,6 @@ component:
 
 The composer's settings belong to the conversation, not to a React mount.
 
-- **A draft becoming the conversation it just created is not a switch.** The
-  model selection, quality and size survive it; only the prompt clears, and the
-  entry point's seed is dropped so it cannot re-fill the box with a prompt the
-  user has already paid to generate.
 - **A real conversation switch still remounts.** The workspace owns a timeline
   and a poll loop that belong to one conversation, and neither may follow the
   user. The remount key is explicit state, never derived from the conversation
@@ -422,15 +379,9 @@ already-retried failure report `partial_success` while the retry is running.
 
 ## Draft carry-over
 
-Switching from the chat composer carries the typed text into the image prompt,
-and cancelling restores the chat draft **in the conversation it belonged to**.
-
-- Attachments are never silently dropped: image generation is text-only, so the
-  attachments stay on the restored chat draft.
-- The back control (`image-generation-cancel-draft`) exists only when there is a
-  draft to go back to.
-- Arriving from the image tab seeds the picked model; an id the registry does
-  not list as enabled is dropped rather than trusted.
+There is no image draft to carry a chat draft into (2026-11-25). Picking an
+image model, and going back to chat models, leave the composer text and its
+attachments exactly where they are.
 
 ## Assets and provenance
 
@@ -480,9 +431,9 @@ Verified for **both** desktop and mobile projects:
 
 | # | State | Expected |
 | --- | --- | --- |
-| 1 | flag off | no entry point renders anywhere |
+| 1 | flag off | no image tab renders anywhere |
 | 2 | Guest | entries visible and locked; click reaches the sign-in prompt |
-| 3 | Free | entries visible and unlocked; click opens the workspace; insufficient credits refuse before generation |
+| 3 | Free | image tab unlocked; picking a model stays on the chat screen; insufficient credits refuse before generation |
 | 4 | Pro, single model | end-to-end run; price quoted before submit |
 | 5 | Pro, multiple models | one POST carrying every `modelIds`; total = sum of per-model prices |
 | 6 | moderation failure | reason stated on the card; refund retained in accounting metadata |
@@ -491,12 +442,11 @@ Verified for **both** desktop and mobile projects:
 | 9 | reload | timeline rebuilt from the server, not from client memory |
 | 10 | image tab | separate list; no chat rows, no chat selection count |
 | 11 | held models | every one listed, disabled, hold stated |
-| 12 | picked from the image tab | workspace opens seeded with that model (Review: composer image mode names that model, no workspace) |
-| 13 | composer draft carry-over | text carried; cancel restores it exactly (Review: text stays in the composer through image mode and its cancel) |
+| 12 | picked from the image tab | no workspace: Chat's model button and `review-image-mode` name the model; Review Professional fills every answering panel with an image model |
+| 13 | back to chat models | `composer-image-mode-exit` returns to the conversation models; the draft text is unchanged |
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
 | 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
 | 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |
-| 17 | draft promoted to a conversation | model selection, quality and size survive; the prompt clears and does not come back |
 | 18 | switch to a different image conversation | timeline and poll loop do not follow |
 | 19 | Enter on desktop / mobile / mid-IME | submit / newline / never submit |
 | 20 | enabled model count 2, 3, 4, 5 | inline, inline, compact, compact — with every selected price still visible (`imageComposerModelLayout()`, unit) |
@@ -534,7 +484,7 @@ rather than the behaviour.
 
 ## Change checklist
 
-- [ ] No standalone "new image" button was reintroduced
+- [ ] No image mode came back: no "new image" button, launcher item or image draft
 - [ ] Every entry point renders for Guest/Free; Guest requires sign-in, Free can enter under existing credits
 - [ ] Flag off still removes the feature entirely
 - [ ] Image generation models are still a separate catalogue from chat models
@@ -544,7 +494,7 @@ rather than the behaviour.
 - [ ] Group state is still derived from the latest attempt per target
 - [ ] Polling is still one request per group, through the group endpoint
 - [ ] A settled card still keeps its asset URLs across polls
-- [ ] Composer settings survive draft promotion, and remount still isolates a real conversation switch
+- [ ] Remount still isolates a real conversation switch
 - [ ] Re-entry restores from the latest group, and says what it could not restore
 - [ ] The running state lives on the button, not in a second sentence beside it
 - [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard

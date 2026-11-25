@@ -77,6 +77,18 @@ const cleanup = async () => {
       `ALTER TABLE "ModelCatalogPriceRevision" ENABLE TRIGGER "ModelCatalogPriceRevision_append_only_trigger"`
     );
   }
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ImageModelBillingTerms" DISABLE TRIGGER "ImageModelBillingTerms_append_only_trigger"`
+  );
+  try {
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "ImageModelBillingTerms" WHERE "apiModelId" LIKE '${PREFIX}%'`
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ImageModelBillingTerms" ENABLE TRIGGER "ImageModelBillingTerms_append_only_trigger"`
+    );
+  }
 };
 
 before(cleanup);
@@ -163,11 +175,33 @@ test("rows are copied onto this environment's ids, with one audit entry from the
         { id: `${PREFIX}-ev-1`, workItemId: "prod-item", occurredAt: AT, toStatus: "approved" },
         { id: `${PREFIX}-ev-2`, workItemId: "prod-item-b", occurredAt: AT, toStatus: "discovered" },
       ],
+      // The measurement and the operator's user id stay in production.
+      ImageModelBillingTerms: [
+        {
+          id: `${PREFIX}-terms-1`,
+          provider: "google",
+          apiModelId: `${PREFIX}-image`,
+          kind: "measured_output_limit",
+          terms: { kind: "measured_output_limit", maxOutputTokens: 2048 },
+          sources: ["https://ai.google.dev/pricing"],
+          measurementId: "prod-measurement",
+          actorId: "prod-user",
+          actorEmail: "owner@example.com",
+          createdAt: AT,
+        },
+      ],
     })
   );
 
   const result = await runModelCatalogEnvSync(SYNC_ENV);
   assert.equal(result.status, "applied");
+
+  const terms = await prisma.imageModelBillingTerms.findUnique({ where: { id: `${PREFIX}-terms-1` } });
+  assert.equal(terms?.kind, "measured_output_limit");
+  assert.equal(terms?.createdAt.toISOString(), AT.toISOString());
+  assert.equal(terms?.actorEmail, "owner@example.com");
+  assert.equal(terms?.actorId, null);
+  assert.equal(terms?.measurementId, null);
 
   const itemA = await prisma.modelLifecycleWorkItem.findUnique({ where: { id: "local-item" } });
   assert.equal(itemA?.status, "approved");
@@ -258,4 +292,31 @@ test("a price revision an operator commits while the copy waits holds the model"
   });
   assert.deepEqual(entry?.profile, { endpoint: "local-model" });
   assert.equal(spec("ModelCatalogEntry").model, "ModelCatalogEntry");
+});
+
+test("an export from production code that does not send billing terms yet still applies", async () => {
+  const modelId = `${PREFIX}-older-export`;
+  const payload = exportOf({
+    ModelRegistryEntry: [registryRow(modelId, "Older export model")],
+  }) as { tables: SyncTables; digest: string };
+  delete payload.tables.ImageModelBillingTerms;
+  payload.digest = exportDigest(payload.tables);
+  serveExport(payload);
+
+  const result = await runModelCatalogEnvSync(SYNC_ENV);
+  assert.equal(result.status, "applied");
+  assert.ok(result.status === "applied");
+  assert.deepEqual(result.plan.tables.ImageModelBillingTerms, {
+    create: 0,
+    update: 0,
+    unchanged: 0,
+    conflicts: 0,
+    localOnly: 0,
+    held: 0,
+    notExported: true,
+  });
+  assert.equal(
+    (await prisma.modelRegistryEntry.findUnique({ where: { id: modelId } }))?.name,
+    "Older export model"
+  );
 });
