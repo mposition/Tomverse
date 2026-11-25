@@ -12,7 +12,7 @@
 // worst-case cost is unbounded is refused.
 
 import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE } from "@/lib/directRasterModels";
-import { IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
+import { IDEOGRAM_SIZE, IDEOGRAM_OUTPUT_COST_MICRO_USD } from "@/lib/ideogramImageRequest";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -1139,6 +1139,9 @@ export const judgeImageModel = (
       (model.sizes.some(size => size !== IDEOGRAM_SIZE) || model.prices.some(price => price.size !== IDEOGRAM_SIZE))) {
     reasons.push("unsupported_ideogram_resolution");
   }
+  if (model.provider === "ideogram" && model.prices.some(price => price.outputCostMicroUsd < IDEOGRAM_OUTPUT_COST_MICRO_USD[price.quality])) {
+    reasons.push("ideogram_price_below_provider_cost");
+  }
   if (isDirectRasterProvider(model.provider)) {
     const contract = DIRECT_RASTER_MODELS[model.provider];
     const supportedSizes: readonly string[] = contract.sizes;
@@ -1412,7 +1415,7 @@ export const resolveImageCatalog = (input: {
     if (row?.holdReason || row?.enabled === false) {
       disabledReason = "operational_hold";
     } else {
-      const wouldServe = row?.enabled === true || disabledReason === null;
+      const wouldServe = row?.enabled === true || disabledReason === null || (base.enableWhenPriced && Boolean(revision));
       // The code seed as committed is checked by check:image-pricing. Anything
       // an operator added -- a row, a price revision, a whole model -- is
       // judged here before it can serve, so a revision priced below the floor
@@ -1428,7 +1431,7 @@ export const resolveImageCatalog = (input: {
     // A hold reason is an operator note: it stays on the admin surface and is
     // not sent to browsers as the model's public disabledNote.
     resolved.push({
-      model: { ...model, disabledReason },
+      model: { ...model, disabledReason, ...(disabledReason === null && model.enableWhenPriced ? { disabledNote: undefined } : {}) },
       order: row?.sortOrder ?? order,
     });
   }

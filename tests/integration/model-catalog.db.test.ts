@@ -1277,7 +1277,8 @@ test("a native 2K Recraft reservation uses its own approved price and exact dime
       modelId: seed.id, session,
       revision: { pricingVersion: "native-2k-test", prices: [price], verification: { ...seed.priceVerification, verifiedAt: seed.priceVerification.verifiedAt, sources: [...seed.priceVerification.sources] } },
     });
-    await updateCatalogEntry({ category: "image", modelId: seed.id, patch: { enabled: true }, session });
+    await refreshImageModelCatalog({ force: true });
+    assert.equal(getImageModel(seed.id)?.disabledReason, null);
     const request = {
       userId: user.id, modelIds: [seed.id], prompt: "A square cover", quality: price.quality,
       size: price.size, conversationId: null, idempotencyKey: randomUUID(),
@@ -1289,7 +1290,7 @@ test("a native 2K Recraft reservation uses its own approved price and exact dime
     assert.equal(reservation.provider, "recraft");
     assert.equal(reservation.size, price.size);
     assert.equal(reservation.reservedCredits, 300);
-    assert.equal(reservation.reservedCostMicroUsd, 255_000n);
+    assert.equal(reservation.reservedCostMicroUsd, BigInt(255_000));
     assert.deepEqual((reservation.pricingSnapshot as { resolutionOption: unknown }).resolutionOption, { tier: "2k", aspectRatio: "1:1" });
   } finally {
     for (const [i, name] of [day, month].entries()) {

@@ -117,6 +117,30 @@ test("NULL inherits, a hold disables, and an override changes only what it names
   assert.equal(model.pricingVersion, enabledSeed.pricingVersion);
 });
 
+test("each direct seed serves at its first approved price by default, while explicit holds and missing budgets prevail", () => {
+  for (const [id, size, cost] of [
+    ["ideogram-4", "1024x1024", 60_000],
+    ["dola-seedream-5-5-261028", "1024x1024", 20_000],
+    ["recraftv4_pro", "2048x2048", 250_000],
+  ]) {
+    const seed = getImageModel(id);
+    const revision = {
+      modelId: id, pricingVersion: "first-approved-price", effectiveFrom: new Date(0),
+      createdAt: new Date(0), prices: [{ quality: "medium", size, credits: 350, outputCostMicroUsd: cost }],
+      verification: seed.priceVerification,
+    };
+    const read = (rows, revisions, budget = true) => resolveImageCatalog({
+      seed: [seed], rows, revisions, now: new Date(), judge: judge(budget),
+    }).models[0];
+    assert.notEqual(read([], []).disabledReason, null);
+    assert.equal(read([], [revision]).disabledReason, null);
+    assert.equal(read([], [revision]).disabledNote, undefined);
+    assert.notEqual(read([], [revision], false).disabledReason, null);
+    assert.notEqual(read([row(id, { enabled: false })], [revision]).disabledReason, null);
+    assert.notEqual(read([row(id, { holdReason: "paused" })], [revision]).disabledReason, null);
+  }
+});
+
 test("direct raster profiles require exact provider terms, supported options and independent budgets", () => {
   for (const [id, unit] of [["dola-seedream-5-5-261028", 20_000], ["recraftv4_pro", 250_000]]) {
     const seed = getImageModel(id);
@@ -143,6 +167,7 @@ test("direct Ideogram requires an approved square price and a provider budget be
   assert.equal(judge()({ ...priced, apiModelId: "unregistered" }).admitted, false);
   assert.equal(judge()({ ...priced, prices: [{ ...price, size: "1536x1024" }] }).admitted, false);
   assert.equal(judge()({ ...priced, sizes: ["1536x1024"] }).admitted, false);
+  assert.equal(judge()({ ...priced, prices: [{ ...price, outputCostMicroUsd: 59_999 }] }).admitted, false);
 });
 
 test("turning on a model whose worst case is unbounded is refused by the judge, not by the row", () => {

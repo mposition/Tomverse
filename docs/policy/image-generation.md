@@ -545,14 +545,14 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | FLUX 3 Image (`flux-3-image`·`flux-3-image-klein`, BFL 직접) | **활성 (기본 켜짐, 2026-11-17)** | 1K 장당 Image $0.048 · 판매가 75크레딧 / Klein $0.009 · 20크레딧 (bfl.ai/pricing 2026-11-16) | 아래 "BFL 직접 어댑터" — 데이터 보관·리전, 첫 실제 생성의 크기·MIME, 한국어 글자 정확도 |
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
-| Ideogram 4.0 (`ideogram-4`, 직접) | 등록·운영 보류 | 1024×1024 장당 Turbo $0.03 / Default $0.06 / Quality $0.10 ([공식 가격](https://ideogram.ai/pricing/), 2026-11-25) | 판매 크레딧 승인 및 운영 예산 설정 후 활성화 |
-| Seedream 5.5 (`dola-seedream-5-5-261028`, BytePlus 직접) | 등록·운영 보류 | 정사각·가로·세로 출력 한 장 $0.020, 참조 사진 한 장 $0.008 | Standard 생성 및 사진 한 장 편집 |
-| Recraft V4 Pro (`recraftv4_pro`, Recraft 직접) | 등록·운영 보류 | 2048×2048 래스터 출력 한 장 $0.25 | Standard, 원본 PNG 한 장 |
+| Ideogram 4.0 (`ideogram-4`, 직접) | 기본 켜짐 · 판매가 적용 시 제공 | 1024×1024 장당 Turbo $0.03 / Default $0.06 / Quality $0.10 ([공식 가격](https://ideogram.ai/pricing/), 2026-11-25) | 판매 크레딧 승인 및 운영 예산 설정 후 활성화 |
+| Seedream 5.5 (`dola-seedream-5-5-261028`, BytePlus 직접) | 기본 켜짐 · 판매가 적용 시 제공 | 정사각·가로·세로 출력 한 장 $0.020, 참조 사진 한 장 $0.008 | Standard 생성 및 사진 한 장 편집 |
+| Recraft V4 Pro (`recraftv4_pro`, Recraft 직접) | 기본 켜짐 · 판매가 적용 시 제공 | 2048×2048 래스터 출력 한 장 $0.25 | Standard, 원본 PNG 한 장 |
 
 BytePlus 싱가포르 ModelArk의 서버 키는 `ARK_API_KEY`, Recraft의 키는 `RECRAFT_API_TOKEN`이다.
 운영자는 해당 공급자의 `IMAGE_PROVIDER_BYTEPLUS_COST_MICROUSD_PER_DAY`와 `_PER_MONTH`, 또는
 `IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_DAY`와 `_PER_MONTH`에 예산을 설정한다. Admin → Models → Catalog에서
-공식 출력 원가(각각 20,000·250,000µUSD)와 승인된 판매 크레딧을 적용한 뒤 활성화한다.
+공식 출력 원가(각각 20,000·250,000µUSD)와 승인된 판매 크레딧을 적용하면 첫 가격의 발효 시점부터 자동으로 제공한다. 명시적인 관리자 보류나 끄기가 우선한다.
 Seedream은 편집 스위치가 켜져 있고 선택 옵션의 판매가가 사진 입력 원가까지 충당할 때 한 장 편집을 받는다.
 두 직접 API는 요청당 한 번만 호출하고, 받은 PNG의 실제 크기를 검사해 원본을 저장한다.
 [BytePlus 가격](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
@@ -561,7 +561,7 @@ Ideogram 직접 연동은 서버의 `IDEOGRAM_API_KEY`로 [생성 API](https://d
 Draft·Standard·Final은 각각 Turbo·Default·Quality이며, 1회에 정사각 이미지 1장을 생성한다. 편집은 지원하지 않는다.
 활성화하려면 운영 환경에 `IMAGE_PROVIDER_IDEOGRAM_COST_MICROUSD_PER_DAY`와
 `IMAGE_PROVIDER_IDEOGRAM_COST_MICROUSD_PER_MONTH`를 설정하고 Admin → Models → Catalog에서
-품질별 검증 원가(30,000 / 60,000 / 100,000µUSD)와 승인된 판매 크레딧을 적용한 뒤 모델을 켠다.
+품질별 검증 원가(30,000 / 60,000 / 100,000µUSD)와 승인된 판매 크레딧을 적용한다. 기본 켜짐이므로 별도 활성화 작업은 필요하지 않다.
 키는 생성 요청에만 전달하고, 결과 이미지는 키 없이 다운로드한다.
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이

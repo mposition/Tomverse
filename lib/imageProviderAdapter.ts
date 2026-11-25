@@ -1,7 +1,7 @@
 import "server-only";
 
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
-import { IDEOGRAM_MODEL_ID, IDEOGRAM_RENDERING_SPEED, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_RENDERING_SPEED, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
   IMAGE_GENERATION_MODEL_ID,
@@ -1510,7 +1510,8 @@ const generateWithDirectRaster = async (
 
 const generateWithIdeogram = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
   const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
-  if (model.apiModelId !== IDEOGRAM_MODEL_ID || input.size !== IDEOGRAM_SIZE || !price) {
+  if (model.apiModelId !== IDEOGRAM_MODEL_ID || input.size !== IDEOGRAM_SIZE || !price ||
+      price.outputCostMicroUsd < IDEOGRAM_OUTPUT_COST_MICRO_USD[input.quality]) {
     throw new ImageProviderError("provider_failed", "Unsupported Ideogram generation option.");
   }
   const apiKey = process.env.IDEOGRAM_API_KEY?.trim();

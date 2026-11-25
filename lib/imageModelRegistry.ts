@@ -31,7 +31,7 @@ import {
  * lookup, provider health and readiness. Keeping the name attached to that
  * meaning is what makes adding a gateway safe -- nothing has to be re-read.
  */
-export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram" | DirectRasterProvider;
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram" | "byteplus" | "recraft";
 
 /**
  * Who made the model, which is a different question and is about to stop having
@@ -116,6 +116,8 @@ export type ImageModelProfile = {
   shortName?: string;
   lifecycle: ImageModelLifecycle;
   disabledReason: ImageModelDisabledReason | null;
+  /** Owner-enabled seed awaiting its first operator-approved sale price. */
+  enableWhenPriced?: boolean;
   sizes: readonly ImageSize[];
   qualities: readonly ImageQuality[];
   prices: readonly ImageModelOptionPrice[];
@@ -791,7 +793,8 @@ const IDEOGRAM_4: ImageModelProfile = {
   name: "Ideogram 4.0",
   lifecycle: "stable",
   disabledReason: "operational_hold",
-  disabledNote: "Direct API pricing verified. Configure the provider budget and approve sale credits before enabling.",
+  enableWhenPriced: true,
+  disabledNote: "Enabled by default when an approved sale price and provider budget are available.",
   sizes: [IDEOGRAM_SIZE],
   qualities: ["low", "medium", "high"],
   prices: [],
@@ -819,7 +822,8 @@ function directRasterProfile(provider: DirectRasterProvider, name: string, useCa
     routingNote,
     lifecycle: "stable",
     disabledReason: "operational_hold",
-    disabledNote: "Approve sale credits and configure the direct provider budget before enabling.",
+    enableWhenPriced: true,
+    disabledNote: "Enabled by default when an approved sale price and provider budget are available.",
     sizes: contract.sizes,
     qualities: ["medium"],
     prices: [],
