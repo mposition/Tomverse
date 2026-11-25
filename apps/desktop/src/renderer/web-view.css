@@ -27,3 +27,5 @@ main.work { position: relative; }
   .web-view-toc span { display: none; }
   .web-view-toc button { white-space: nowrap; }
 }
+.chat-answer-link, .answer-link { color: var(--action); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; cursor: pointer; }
+.dark .chat-answer-link, .dark .answer-link { color: var(--focus); }

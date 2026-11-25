@@ -3,6 +3,8 @@ import { Check, Copy } from "lucide-react";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 import { AnswerMarkdown } from "@tomverse/chat-ui";
+import { linkViewUrl } from "../web-view-contract";
+import { openLink } from "./WebViewer";
 import { getModelBrand } from "../../../../lib/modelBranding";
 import { getModel } from "../../../../lib/models";
 import { splitInlineCode, splitUserMessageSegments } from "../../../../lib/userMessageSegments";
@@ -51,7 +53,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
 const markdownComponents = {
   pre: CodeBlock,
-  a: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
+  a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+    const target = href ? linkViewUrl(href) : null;
+    return target ? <a className="chat-answer-link" href={target.href} title={target.host}
+      onClick={(event) => { event.preventDefault(); void openLink(target.href).catch(() => {}); }}>{children}</a> : <span>{children}</span>;
+  },
   img: ({ alt }: { alt?: string }) => <span>{alt}</span>,
 };
 
