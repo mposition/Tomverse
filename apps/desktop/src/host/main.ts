@@ -38,7 +38,7 @@ import {
   type ChatTurnInput, type ChatTurnProgress, type ChatTurnResult, type DesktopTextProduct,
   type ReviewTurnInput, type ReviewTurnProgress, type ReviewTurnResult, type SaveArtifactInput,
 } from "../chat-contract";
-import { canAnswerClarification, canResumeJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
+import { canAnswerClarification, canResumeJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
 import { codeDiagnostics } from "./code-diagnostics";
 import { cliFixtureInput, qwenFixtureInput, zCodeFixtureInput } from "./cli-fixture-input";
 import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeHistory, matchesNativeContinuation, readNativeCheckpoint, readNativeHistory,
@@ -1420,6 +1420,7 @@ function readTaskHistory(id: string, apiOnly = false): Task | null {
     canResumeAfterQuota: available && record.storage === record.scope.home && canResumeQuotaJournal(saved),
     canAnswerClarification: available && record.storage === record.scope.home && canAnswerClarification(saved),
     pendingFollowUp: journalPendingFollowUp(saved, key),
+    ...journalEngine(saved, key), context: journalContext(saved),
   };
   if (apiOnly || record.worktree) return task;
   if (DESKTOP_FIXTURE_ALLOWED && saved.codeContinuation) {

@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, DEFAULTS, Gateway, Journal, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, readProjectInstructions,
-  reconcile, renderChange, resolveEndpoint, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, readProjectInstructions,
+  reconcile, renderChange, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
@@ -12,7 +12,7 @@ import { asProposedCodePlan, sessionId as taskIdSchema, type ApprovalRequest, ty
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
 import { canAnswerClarification, canContinueApiQuota, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
-  journalChecks, journalCommand, journalApiUsage, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
+  journalChecks, journalCommand, journalApiUsage, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
 import type { Connection, RecordedSession, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { desktopCodeNotice } from "./desktop-notice";
@@ -613,7 +613,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
   const control: ActiveRun = { runId: command.runId, cancelled: false, abort: new AbortController() };
   active = control;
   if (!resuming) transient = undefined;
-  const publish = () => send({ type: "task", runId: command.runId, task });
+  const publish = () => {
+    if (journal) Object.assign(task, journalEngine(journal.state, command.connection.key));
+    send({ type: "task", runId: command.runId, task });
+  };
   const addEvent = (event: string | ReturnType<typeof desktopCodeNotice>) => {
     const entry = typeof event === "string" ? { role: "event" as const, text: event } : event;
     task.entries.push({ ...entry, text: clean(entry.text).slice(0, 1_200) });
@@ -749,7 +752,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         readOnly: command.input.mode !== "agent",
         codeMode: command.input.mode,
         codePermission,
-        limits: { maxRequests: DEFAULTS.maxRequests, timeoutMs: DEFAULTS.timeoutMinutes * 60_000, commandTimeoutMs: DEFAULTS.commandTimeoutSeconds * 1000 },
+        limits: resolveLimits(command.input.limits),
+        ...(command.input.goal && command.input.mode === "agent" ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
         ...(continuation && { sessionId: continuation.taskId, codeContinuation: {
           segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap,
         } }),
@@ -799,8 +803,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           return;
         }
+        if ((event.type === "goal_check" || event.type === "queued_follow_up_started") && journal) publish();
         if (event.type === "response" && journal) {
           Object.assign(task, journalApiUsage(journal.state, command.connection.key));
+          task.context = journalContext(journal.state);
           task.actual = task.transmission.findLast((record) => record.purpose === "agent")?.appliedEffort;
           publish();
         }
@@ -919,7 +925,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       }
       task.changes = journalChanges(journal.state);
       task.checks = journalChecks(journal.state);
-      Object.assign(task, journalApiUsage(journal.state, command.connection.key));
+      Object.assign(task, journalApiUsage(journal.state, command.connection.key), journalEngine(journal.state, command.connection.key));
+      task.context = journalContext(journal.state);
       task.actual = task.transmission.findLast((record) => record.purpose === "agent")?.appliedEffort;
       task.plan = journalPlan(journal.state, command.connection.key);
       task.pendingFollowUp = journalPendingFollowUp(journal.state, command.connection.key);

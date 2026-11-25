@@ -36,6 +36,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
+import { CodeEngineBar, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -283,6 +284,11 @@ function Desktop() {
   const [codeReferences, setCodeReferences] = useState<CodeReference[]>([]);
   const [mode, setMode] = useState<StartInput["mode"]>("agent");
   const [effort, setEffort] = useState<StartInput["effort"]>("default");
+  const [engine, setEngine] = useState<CodeEnginePreference>(readCodeEnginePreference);
+  function changeEngine(value: CodeEnginePreference) {
+    setEngine(value);
+    writeCodeEnginePreference(value);
+  }
   const [modelId, setModelId] = useState("");
   const [notice, setNotice] = useState<ShellNotice | null>(null);
   const [handoffNotice, setHandoffNotice] = useState<HandoffNotice | null>(null);
@@ -720,6 +726,8 @@ function Desktop() {
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
+        ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
+        ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       setSaveHistory(true);
@@ -948,6 +956,7 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
+          {task && surface === "code" && <CodeEngineBar task={task} language={language} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>
@@ -1082,7 +1091,8 @@ function Desktop() {
             provider={cliSettingsProvider}
             goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable} />
           : settingsView === "execution" ? <CodeExecutionSettings key={snapshot?.codeFallback?.scope ?? "disconnected"}
-            snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act} />
+            snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act}
+            engine={engine} changeEngine={changeEngine} />
           : <section className="execution-settings settings">
           <h2 id={settingsView === "account" ? "desktop-account" : undefined} tabIndex={-1}>{settingsTitle}</h2>
           {settingsView === "permissions" && <div className="desktop-setting-section">

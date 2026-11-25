@@ -1,4 +1,5 @@
 import type { Language } from "../../../../lib/language";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopEvidenceCopy } from "../../../../locales/desktopEvidence";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopCodeQuotaCopy } from "../../../../locales/desktopCodeQuota";
@@ -26,7 +27,7 @@ export function TransmissionPanel({ records, usage, taskId, language }: {
     <p>{formatEvidence(copy.creditSummary, language, usage)}</p>
     {usage.requestCount > records.length && <p>{formatEvidence(desktopCodeUsageCopy(language).recentRequests, language, { count: records.length })}</p>}
     <ul>{records.map((record) => <li key={record.seq}>
-      {formatEvidence(copy.request, language, { count: record.seq })} · {record.purpose === "compact" ? copy.compact : copy.codeTurn}
+      {formatEvidence(copy.request, language, { count: record.seq })} · {record.purpose === "compact" ? copy.compact : record.purpose === "goal" ? desktopCodeEngineCopy[language].goalRequest : copy.codeTurn}
       {` · ${Object.hasOwn(states, record.state) ? states[record.state] : record.state}`}
       {record.contents?.model && ` · ${formatEvidence(copy.requestedModel, language, { model: record.contents.model })}`}
       {record.model && ` · ${formatEvidence(copy.reportedModel, language, { model: record.model })}`}

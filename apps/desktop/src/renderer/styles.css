@@ -630,3 +630,6 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
 .desktop-research-dialog dd { margin: 0; font-weight: 650; }
 .desktop-research-dialog dd svg { width: 14px; height: 14px; vertical-align: middle; margin-inline-end: 4px; }
 .desktop-research-dialog footer button { flex: 1; }
+.code-engine { display: grid; gap: 4px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+.code-engine > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.code-engine small { display: block; overflow-wrap: anywhere; }

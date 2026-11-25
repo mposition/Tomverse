@@ -1,6 +1,6 @@
 import { codeReferenceKind, codeReferencePath, MAX_CODE_REFERENCES, type Change, type CodeQuotaEvidence, type CommandInspection, type Entry, type RunStatus,
   type CodeTaskPlan, type Task, type Transmission, type Verification } from "../contract";
-import { hasUnconfirmedToolOutcome, safeText, type SessionState } from "../../../tomverse-cli/src/runtime.js";
+import { estimateTokens, hasUnconfirmedToolOutcome, safeText, type SessionState } from "../../../tomverse-cli/src/runtime.js";
 import { isEffort } from "../../../tomverse-cli/src/effort.js";
 import { confirmedApiQuota } from "../../../tomverse-cli/src/quota-refusal.js";
 import { reportedGenerationModel } from "../../../tomverse-cli/src/transmission.js";
@@ -60,6 +60,26 @@ export function journalEntries(state: SessionState, key?: string): Entry[] {
 export function journalPendingFollowUp(state: SessionState, key?: string): string | undefined {
   const latest = state.tasks.at(-1)?.followUps?.at(-1);
   return latest && latest.messageIndex === undefined ? cleanText(latest.text, key) : undefined;
+}
+
+/** Limits, goal mode and held messages of a saved task: cheap, so it is read on every publish. */
+export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued"> {
+  const task = state.tasks.at(-1);
+  const profile = state.limits.profile;
+  const last = task?.goalChecks?.at(-1);
+  return {
+    limits: profile === "extended" || profile === "unlimited" ? profile : undefined,
+    goal: state.goal ? {
+      maxContinuations: state.goal.maxContinuations, continuations: task?.goalContinuations ?? 0,
+      ...(last ? { last: { met: last.met, summary: cleanText(last.summary, key), ...(last.next ? { next: cleanText(last.next, key) } : {}) } } : {}),
+    } : undefined,
+    queued: task?.queued?.length ? task.queued.map(({ id, text }) => ({ id, text: cleanText(text.slice(0, 24_000), key) })) : undefined,
+  };
+}
+
+/** A rough size of the saved conversation: it walks every message, so it is read when a request ends, not on every publish. */
+export function journalContext(state: SessionState): Task["context"] {
+  return { tokens: estimateTokens(state.messages), window: state.model.contextWindowTokens || 128_000 };
 }
 
 export function journalPlan(state: Pick<SessionState, "tasks" | "generations" | "id" | "codeContinuation" | "codeMode" | "readOnly">,

@@ -47,6 +47,8 @@ export type CodeWorktree = {
 export type CodeGitWorkspace = { kind: "unavailable" } | {
   kind: "git"; id: string; path: string; branch: string; bases: CodeWorktreeBase[];
 };
+export const codeLimitProfile = z.enum(["standard", "extended", "unlimited"]);
+export type CodeLimitProfile = z.infer<typeof codeLimitProfile>;
 export const startInput = z.object({
   pluginConnectionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
   workspace: codeWorktreeChoice.optional(),
@@ -55,6 +57,8 @@ export const startInput = z.object({
   model: z.string().min(1).max(240),
   effort: z.enum(["default", "low", "high"]),
   executionMode: codeExecutionMode.optional(),
+  limits: codeLimitProfile.optional(),
+  goal: z.boolean().optional(),
   permissionProfile: codePermissionProfile.optional(),
   saveHistory: z.boolean().optional(),
   handoffId: z.uuid().optional(),
@@ -193,6 +197,10 @@ export type Transmission = {
     listedPathCount?: number; truncatedListingCount?: number;
     fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number };
 };
+export type CodeGoalState = {
+  maxContinuations: number; continuations: number;
+  last?: { met: boolean; summary: string; next?: string };
+};
 export type CodeApiUsage = { requestCount: number; settled: number; held: number; unknown: number };
 export type Task = {
   id: string | null;
@@ -222,6 +230,13 @@ export type Task = {
   canResumeAfterQuota?: boolean;
   canAnswerClarification?: boolean;
   pendingFollowUp?: string;
+  /** Messages held for after the model finishes, in the order they will run. */
+  queued?: Array<{ id: string; text: string }>;
+  /** The saved limit profile when it is not the standard one. */
+  limits?: Exclude<CodeLimitProfile, "standard">;
+  goal?: CodeGoalState;
+  /** An estimate of the conversation the next request would carry, against the model's context window. */
+  context?: { tokens: number; window: number };
   unreadable?: true;
   savedLocally?: boolean;
   readOnly?: boolean;

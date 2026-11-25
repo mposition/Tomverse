@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { isEffort, type Effort } from "./effort.js";
 import { generateText, isStepCount, streamText, tool, type ModelMessage, type ToolSet } from "ai";
@@ -89,6 +90,32 @@ type CodePluginReply = { type: "list"; version: number; tools: { name: string; i
 
 const MAX_OUTPUT_TOKENS = 16_384;
 const COMPACT_AT = 0.75;
+/** The longest delay a timer can be given; a task with no time limit asks for this much at most per request. */
+const MAX_TIMER_MS = 2_147_483_647;
+const MAX_QUEUED_MESSAGES = 20;
+const GOAL_SYSTEM = [
+    "You judge whether a coding agent has finished the request its user gave it. You get the request and the session so far.",
+    "Answer with one JSON object and nothing else: {\"met\": boolean, \"summary\": string, \"next\": string}.",
+    "met is true only when the request is fully done and the work was verified (for a code change: a relevant test, build or check was run and its result is shown), or when the request needed no change and the answer was given.",
+    "If anything is missing or unverified, met is false and next is the single most useful next action, written as an instruction to the agent.",
+    "summary is one or two sentences on what is and is not verified. Never ask the agent for anything the user did not ask for.",
+].join(" ");
+
+const goalVerdict = z.object({ met: z.boolean(), summary: z.string().max(2000).default(""), next: z.string().max(2000).optional() });
+export type GoalVerdict = z.infer<typeof goalVerdict>;
+
+/** The judge's answer: the first JSON object in its text, or null when there is none that fits. */
+export const parseGoalVerdict = (text: string): GoalVerdict | null => {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    try {
+        const parsed = goalVerdict.safeParse(JSON.parse(text.slice(start, end + 1)));
+        return parsed.success ? parsed.data : null;
+    } catch {
+        return null;
+    }
+};
 
 /** A rough, script-aware size: ASCII ~3.5 chars a token, other scripts ~1.3 tokens a char. */
 export const estimateTokens = (value: unknown) => {
@@ -517,6 +544,171 @@ export class Runner {
         return true;
     }
 
+    /** Holds an instruction for the next model request of the running task: the same as queueFollowUp. */
+    steer(text: string): boolean {
+        return this.queueFollowUp(text);
+    }
+
+    private queueOpen() {
+        const task = this.journal.state.tasks.at(-1);
+        return task && !this.controller.signal.aborted ? task : undefined;
+    }
+
+    /** Holds a message for after the model finishes; messages run in the order they were added. */
+    enqueue(text: string): string | null {
+        const { journal, options } = this;
+        const task = this.queueOpen();
+        if (!task || journal.state.status !== "running" || task.requests >= task.allowance || task.activeMs >= task.timeAllowanceMs ||
+            (task.queued?.length ?? 0) >= MAX_QUEUED_MESSAGES) return null;
+        options.assertAllowed?.();
+        const id = `q-${randomBytes(4).toString("hex")}`;
+        (task.queued ??= []).push({ id, text });
+        journal.commit();
+        return id;
+    }
+
+    editQueued(id: string, text: string): boolean {
+        const entry = this.queueOpen()?.queued?.find((item) => item.id === id);
+        if (!entry) return false;
+        this.options.assertAllowed?.();
+        entry.text = text;
+        this.journal.commit();
+        return true;
+    }
+
+    removeQueued(id: string): boolean {
+        const task = this.queueOpen();
+        const index = task?.queued?.findIndex((item) => item.id === id) ?? -1;
+        if (!task?.queued || index < 0) return false;
+        this.options.assertAllowed?.();
+        task.queued.splice(index, 1);
+        this.journal.commit();
+        return true;
+    }
+
+    /** Moves one message a place earlier (-1) or later (1). */
+    moveQueued(id: string, direction: -1 | 1): boolean {
+        const task = this.queueOpen();
+        const from = task?.queued?.findIndex((item) => item.id === id) ?? -1;
+        const to = from + direction;
+        if (!task?.queued || from < 0 || to < 0 || to >= task.queued.length) return false;
+        this.options.assertAllowed?.();
+        const [entry] = task.queued.splice(from, 1);
+        task.queued.splice(to, 0, entry!);
+        this.journal.commit();
+        return true;
+    }
+
+    /** The model is done: the first held message becomes the next instruction. */
+    private promoteQueued() {
+        const task = this.currentTask();
+        const next = task.queued?.shift();
+        if (!next) return false;
+        (task.followUps ??= []).push({ text: next.text });
+        this.journal.commit();
+        this.options.output.event({ type: "queued_follow_up_started", id: next.id });
+        return true;
+    }
+
+    /**
+     * Goal mode: the model says it is done; one request of the same model
+     * says whether the goal is verified. An unmet goal continues with the
+     * judge's next action as the user's instruction, at most
+     * goal.maxContinuations times in a row. Nothing here grants anything:
+     * approvals, limits and the path checks apply to what follows as before.
+     */
+    private async goalCheck(): Promise<"met" | "continue" | { outcome: Outcome; message: string }> {
+        const { journal, options } = this;
+        const goal = journal.state.goal;
+        const task = this.currentTask();
+        if (!goal || journal.state.readOnly || options.taskPlan === "plan" || task.plan?.clarification || this.controller.signal.aborted) return "met";
+        if (task.requests >= task.allowance || task.activeMs >= task.timeAllowanceMs) {
+            options.output.info("Goal check skipped: the task's limit is reached.");
+            return "met";
+        }
+        const clean = (text: string) => options.redactText?.(text) ?? text;
+        const model = this.model();
+        const window = model.contextWindowTokens || 128_000;
+        const reserve = 2000 + estimateTokens(this.systemPrompt());
+        const budgetChars = Math.min(80_000, Math.max(20_000, Math.floor((window - reserve) * 0.5 * 3)));
+        const attemptStart = journal.state.generations.length;
+        const started = Date.now();
+        options.output.info("Checking whether the goal is met (one model request)...");
+        try {
+            const result = await generateText({
+                model: options.gateway.chatModel(model.id, this.hooks("goal"), model.reasoningEfforts === undefined ? undefined : task.effort),
+                system: GOAL_SYSTEM,
+                messages: [{ role: "user", content: `The user's request:\n${task.prompt}\n\nThe session so far:\n${transcriptFor(journal.state.messages, budgetChars)}\n\n${this.recordedFacts()}` }],
+                maxRetries: 0,
+                maxOutputTokens: Math.min(1500, model.maxOutputTokens || 1500),
+                abortSignal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, Math.min(120_000, task.timeAllowanceMs - task.activeMs)))]),
+            });
+            task.activeMs += Date.now() - started;
+            journal.closeGenerations(journal.state.generations.slice(attemptStart));
+            const verdict = parseGoalVerdict(result.text);
+            const continuation = (task.goalContinuations ?? 0) + 1;
+            if (!verdict) {
+                journal.commit();
+                options.output.info("The goal check gave no usable answer; the task is left as it is.");
+                options.output.event({ type: "goal_check", status: "unclear", continuation: continuation - 1, max: goal.maxContinuations });
+                return "met";
+            }
+            const summary = clean(verdict.summary).slice(0, 600);
+            const next = verdict.next ? clean(verdict.next).slice(0, 800) : undefined;
+            const checks = (task.goalChecks ??= []);
+            checks.push({ at: new Date().toISOString(), met: verdict.met, summary, ...(next ? { next } : {}), continuation: continuation - 1 });
+            if (checks.length > 50) checks.splice(0, checks.length - 50);
+            const emit = (status: string) => options.output.event({ type: "goal_check", status, met: verdict.met, summary, ...(next ? { next } : {}),
+                continuation: task.goalContinuations ?? 0, max: goal.maxContinuations });
+            if (verdict.met) {
+                journal.commit();
+                options.output.info(`Goal verified: ${summary}`);
+                emit("met");
+                return "met";
+            }
+            if ((task.goalContinuations ?? 0) >= goal.maxContinuations) {
+                journal.commit();
+                const message = `Goal mode stopped after ${goal.maxContinuations} automatic continuations; the goal is not verified: ${summary}`;
+                options.output.info(message);
+                emit("limit");
+                return { outcome: "limit_reached", message };
+            }
+            task.goalContinuations = continuation;
+            (task.followUps ??= []).push({ text: [
+                `[Goal check ${continuation}/${goal.maxContinuations}] The goal is not verified yet: ${summary}`,
+                ...(next ? [`Next: ${next}`] : []),
+                "Continue toward the original request. If you need an approval or an answer from the user, ask for it instead of guessing.",
+            ].join("\n") });
+            journal.commit();
+            options.output.info(`Goal not verified (${continuation}/${goal.maxContinuations}): ${summary}`);
+            emit("continue");
+            return "continue";
+        } catch (error) {
+            task.activeMs += Date.now() - started;
+            if (error instanceof JournalError || journal.broken) throw journal.broken ?? error;
+            const record = journal.state.generations.slice(attemptStart).at(-1);
+            if (this.controller.signal.aborted) {
+                await this.lookUp(record);
+                if (record?.lookup === "found" && record.receipt && record.receipt.status !== "held") journal.closeGenerations([record]);
+                journal.commit();
+                return { outcome: "cancelled", message: "Cancelled." };
+            }
+            const message = this.describe(error);
+            options.output.info(`The goal check failed (${message}); it was not retried and the task is left as it is.`);
+            options.output.event({ type: "goal_check", status: "failed", continuation: task.goalContinuations ?? 0, max: goal.maxContinuations, message });
+            if (record && (record.httpStatus ?? 0) >= 400) record.error = httpRefusal(error, message);
+            if (record && !(await this.resolvedAfterFailure(record))) {
+                options.output.info(this.unknownReport(record));
+                journal.commit();
+                return { outcome: "unknown_outcome", message: `The outcome of request ${record.seq} is not known.` };
+            }
+            journal.closeGenerations(journal.state.generations.slice(attemptStart));
+            journal.commit();
+            if (confirmedApiQuota(record)) return { outcome: "error", message: "A confirmed API credit limit stopped the task." };
+            return "met";
+        }
+    }
+
     private pendingFollowUp() {
         const entry = this.currentTask().followUps?.at(-1);
         return entry?.messageIndex === undefined ? entry : undefined;
@@ -608,7 +800,10 @@ export class Runner {
                 }
                 if (step.kind === "continue") continue;
                 if (step.kind === "done") {
-                    if (this.pendingFollowUp()) continue;
+                    if (this.pendingFollowUp() || this.promoteQueued()) continue;
+                    const goal = await this.goalCheck();
+                    if (goal === "continue") continue;
+                    if (goal !== "met") return this.finish(goal.outcome, goal.message);
                     return this.finish("success");
                 }
                 return this.finish(step.outcome, step.message);
@@ -638,7 +833,7 @@ export class Runner {
         const model = this.model();
         this.assertEffort(this.currentTask().effort ?? "default");
         const before = journal.state.generations.length;
-        const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, remainingMs))]);
+        const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, Math.min(MAX_TIMER_MS, remainingMs)))]);
         const pending: PendingApproval[] = [];
         let text = "";
         let streamError: unknown = null;

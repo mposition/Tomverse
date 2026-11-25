@@ -23,7 +23,36 @@ export type { Output } from "./display.js";
 export { planPatchCall } from "./tools.js";
 export { currentDigest } from "./patch.js";
 export type { PlannedEdit } from "./patch.js";
+export { estimateTokens } from "./agent.js";
 export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
+
+/**
+ * Named limit sets for one task. standard is the long-standing default.
+ * unlimited has no request count or time limit of its own: the user stopping
+ * it, the server refusing (key cap, quota), or the model finishing ends it.
+ */
+export type LimitProfile = NonNullable<SessionState["limits"]["profile"]>;
+export const LIMIT_PROFILES = ["standard", "extended", "unlimited"] as const satisfies readonly LimitProfile[];
+export const isLimitProfile = (value: unknown): value is LimitProfile => LIMIT_PROFILES.includes(value as LimitProfile);
+/** Stands for "no limit" in a saved task: far above any real count or duration, and still plain JSON. */
+export const NO_LIMIT = Number.MAX_SAFE_INTEGER;
+const PROFILE_LIMITS = {
+    standard: { maxRequests: DEFAULTS.maxRequests, timeoutMs: DEFAULTS.timeoutMinutes * 60_000 },
+    extended: { maxRequests: 200, timeoutMs: 120 * 60_000 },
+    unlimited: { maxRequests: NO_LIMIT, timeoutMs: NO_LIMIT },
+} as const satisfies Record<LimitProfile, { maxRequests: number; timeoutMs: number }>;
+/** A profile with the more specific numbers (a flag such as --max-requests) laid over it. */
+export const resolveLimits = (
+    profile: LimitProfile = "standard",
+    overrides: { maxRequests?: number; timeoutMs?: number; commandTimeoutMs?: number } = {},
+): SessionState["limits"] => ({
+    maxRequests: overrides.maxRequests ?? PROFILE_LIMITS[profile].maxRequests,
+    timeoutMs: overrides.timeoutMs ?? PROFILE_LIMITS[profile].timeoutMs,
+    commandTimeoutMs: overrides.commandTimeoutMs ?? DEFAULTS.commandTimeoutSeconds * 1000,
+    profile,
+});
+/** Goal mode: automatic continuations in a row before it stops and says so. */
+export const GOAL_MAX_CONTINUATIONS = 10;
 export const createSession = (
     home: string | null,
     options: {
@@ -34,6 +63,7 @@ export const createSession = (
         model: CatalogModel;
         readOnly: boolean;
         limits: SessionState["limits"];
+        goal?: SessionState["goal"];
         sessionId?: string;
         codeContinuation?: SessionState["codeContinuation"];
         codeMode?: SessionState["codeMode"];
@@ -61,6 +91,7 @@ export const createSession = (
                 maxOutputTokens: options.model.maxOutputTokens,
             },
             limits: options.limits,
+            ...(options.goal ? { goal: options.goal } : {}),
         },
         io,
         options.sessionId,

@@ -5,7 +5,9 @@ import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { cliProviders, codeExecutionMode, providerClis } from "../code-execution";
 import { codeFallbackModelAvailable, codeFallbackUpdate, codeTransferScope, defaultCodeFallbackSettings,
   type CodeFallbackUpdate } from "../code-fallback";
-import type { Snapshot } from "../contract";
+import { codeLimitProfile, type CodeLimitProfile, type Snapshot } from "../contract";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import type { CodeEnginePreference } from "./CodeEngine";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -39,10 +41,13 @@ function ApiCap({ credits, disabled, copy, save }: { credits: number | null; dis
   </form>;
 }
 
-export function CodeExecutionSettings({ snapshot, language, actionFailed, act }: {
+export function CodeExecutionSettings({ snapshot, language, actionFailed, act, engine: taskEngine, changeEngine }: {
   snapshot: Snapshot | null; language: Language; actionFailed: boolean; act: (action: () => Promise<unknown>) => Promise<void>;
+  engine: CodeEnginePreference; changeEngine: (value: CodeEnginePreference) => void;
 }) {
   const copy = desktopCodeExecutionCopy[language];
+  const engineCopy = desktopCodeEngineCopy[language];
+  const limitLabels = { standard: engineCopy.limitsStandard, extended: engineCopy.limitsExtended, unlimited: engineCopy.limitsUnlimited } as const satisfies Record<CodeLimitProfile, string>;
   const [reviewScope, setReviewScope] = useState(false);
   const [writing, setWriting] = useState(false);
   const current = snapshot?.codeFallback;
@@ -86,6 +91,21 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act }:
         }}>
         <option value="tomverse_api">Tomverse API</option>
         <option value="provider_cli">{copy.providerCli}</option>
+      </select>
+    } />
+    <SettingRow field="code-task-limits" label={engineCopy.limits} detail={engineCopy.limitsDetail} control={
+      <select id="code-task-limits" aria-describedby="code-task-limits-info" value={taskEngine.limits}
+        onChange={(event) => {
+          const next = codeLimitProfile.safeParse(event.currentTarget.value);
+          if (next.success) changeEngine({ ...taskEngine, limits: next.data });
+        }}>
+        {codeLimitProfile.options.map((value) => <option key={value} value={value}>{limitLabels[value]}</option>)}
+      </select>
+    } />
+    <SettingRow field="code-goal-mode" label={engineCopy.goal} detail={engineCopy.goalDetail} control={
+      <select id="code-goal-mode" aria-describedby="code-goal-mode-info" value={taskEngine.goal ? "on" : "off"}
+        onChange={(event) => changeEngine({ ...taskEngine, goal: event.currentTarget.value === "on" })}>
+        <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
       </select>
     } />
     <SettingRow field="code-fallback-automatic" label={copy.automatic} detail={automatic ? copy.awaitingVerification : copy.automaticDetail}
