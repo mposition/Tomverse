@@ -36,8 +36,38 @@ test("an address is private unless it is an ordinary public one, in every notati
         "198.18.0.1", "198.51.100.1", "203.0.113.1", "224.0.0.1", "240.0.0.1", "255.255.255.255",
         "::", "::1", "fc00::1", "fd12:3456::1", "fe80::1", "fec0::1", "ff02::1", "2001:db8::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "100::1",
         "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:10.0.0.1", "::127.0.0.1", "64:ff9b::7f00:1", "2002:7f00:1::1", "2002:c0a8:101::1", "not an address", "1.2.3", "::g",
+        "192.88.99.1",
     ]) assert.equal(isPrivateAddress(address), true, address);
     for (const address of ["8.8.8.8", "1.1.1.1", "93.184.216.34", "172.32.0.1", "100.63.255.255", "198.20.0.1", "2606:4700:4700::1111", "2a00:1450:4001::200e", "::ffff:8.8.8.8", "2002:0808:0808::1"]) {
+        assert.equal(isPrivateAddress(address), false, address);
+    }
+});
+
+test("every IPv6 translation and special-purpose range is refused, one representative address each", () => {
+    const refused: Record<string, string[]> = {
+        // NAT64: the well-known /96 carrying a private IPv4, and the local-use /48 (RFC 8215) with any embedded address, the reviewer's example first.
+        "NAT64 well-known 64:ff9b::/96": ["64:ff9b::a9fe:a9fe", "64:ff9b::169.254.169.254", "64:ff9b::a00:1"],
+        "NAT64 local-use 64:ff9b:1::/48": ["64:ff9b:1:a9fe:a9:fe00::", "64:ff9b:1::1", "64:ff9b:1::a9fe:a9fe", "64:ff9b:1:ffff:ffff:ffff:ffff:ffff", "64:ff9b:1:0:0:0:808:808"],
+        "rest of 64:ff9b::/32 (not a /96 form)": ["64:ff9b:0:0:1::1", "64:ff9b:2::1"],
+        "IPv4-mapped ::ffff:0:0/96": ["::ffff:169.254.169.254", "::ffff:a9fe:a9fe"],
+        "IPv4-compatible ::/96": ["::10.0.0.1", "::a9fe:a9fe", "::2"],
+        "IPv4-translated ::ffff:0:0:0/96": ["::ffff:0:127.0.0.1", "::ffff:0:a9fe:a9fe", "::ffff:0:10.1.2.3"],
+        "6to4 2002::/16": ["2002:a9fe:a9fe::1", "2002:ac10:1::1", "2002:0a00:1::1"],
+        "Teredo 2001::/32": ["2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001::1"],
+        "IETF protocol assignments 2001::/23": ["2001:1::1", "2001:2::1", "2001:10::1", "2001:1ff:ffff::1"],
+        "documentation 2001:db8::/32": ["2001:db8::1", "2001:db8:ffff::1"],
+        "documentation 3fff::/20": ["3fff::1", "3fff:fff:ffff::1"],
+        "unique local fc00::/7": ["fc00::1", "fd00::1", "fdff:ffff::1"],
+        "link-local fe80::/10": ["fe80::1", "febf::1", "fe80::1%eth0"],
+        "site-local fec0::/10": ["fec0::1", "feff::1"],
+        "multicast ff00::/8": ["ff02::1", "ff0e::1"],
+        "discard 100::/64 and dummy 100:0:0:1::/64": ["100::1", "100:0:0:1::1"],
+        "unspecified and loopback": ["::", "0:0:0:0:0:0:0:0", "::1", "0:0:0:0:0:0:0:1"],
+        "outside global unicast 2000::/3": ["4000::1", "8000::1", "5f00::1", "e000::1"],
+    };
+    for (const [range, addresses] of Object.entries(refused)) for (const address of addresses) assert.equal(isPrivateAddress(address), true, `${range}: ${address}`);
+    // Just outside those ranges, and the forms that carry a public IPv4, stay readable.
+    for (const address of ["64:ff9b::808:808", "64:ff9b::8.8.8.8", "::ffff:0:8.8.8.8", "::ffff:0:808:808", "2001:200::1", "2001:4860:4860::8888", "2001:db9::1", "3fff:1000::1", "2400:cb00::1", "2002:0808:0808::1"]) {
         assert.equal(isPrivateAddress(address), false, address);
     }
 });
@@ -260,18 +290,6 @@ test("allowing a site for the run skips the question for that site only", async 
     }
 });
 
-test("a read-only session, and a Runner that was not given web, have no web_fetch tool", async () => {
-    const gateway = await new FakeGateway({ script: () => ({ text: "ok" }) }).start();
-    try {
-        const readOnly = await makeRunner(gateway, makeRepo(), { readOnly: true, runner: { web: {} } });
-        assert.equal(await readOnly.runner.runTask("Look."), "success");
-        const plain = await makeRunner(gateway, makeRepo());
-        assert.equal(await plain.runner.runTask("Look."), "success");
-        for (const body of gateway.completions.map((c) => c.body)) assert.ok(!body.tools.some((t: any) => t.function.name === "web_fetch"));
-    } finally {
-        await gateway.stop();
-    }
-});
 // A site that answers with a redirect to a second site, as a terminal prompter with "always" answers would be asked about both.
 const FIRST = "https://a.example.com/start";
 const SECOND = "https://b.example.org/page";
@@ -387,3 +405,15 @@ test("a redirect to a site that was not allowed is not followed; the model asks 
     }
 });
 
+test("a read-only session, and a Runner that was not given web, have no web_fetch tool", async () => {
+    const gateway = await new FakeGateway({ script: () => ({ text: "ok" }) }).start();
+    try {
+        const readOnly = await makeRunner(gateway, makeRepo(), { readOnly: true, runner: { web: {} } });
+        assert.equal(await readOnly.runner.runTask("Look."), "success");
+        const plain = await makeRunner(gateway, makeRepo());
+        assert.equal(await plain.runner.runTask("Look."), "success");
+        for (const body of gateway.completions.map((c) => c.body)) assert.ok(!body.tools.some((t: any) => t.function.name === "web_fetch"));
+    } finally {
+        await gateway.stop();
+    }
+});

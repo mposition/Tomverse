@@ -74,6 +74,7 @@ const privateV4 = (address: string) => {
         (a === 169 && b === 254) ||
         (a === 172 && b >= 16 && b <= 31) ||
         (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+        (a === 192 && b === 88 && c === 99) ||
         (a === 192 && b === 168) ||
         (a === 198 && (b === 18 || b === 19)) ||
         (a === 198 && b === 51 && c === 100) ||
@@ -114,16 +115,20 @@ export const isPrivateAddress = (address: string): boolean => {
     if (!g) return true;
     const [g0, g1, g2, g3, g4, g5, g6, g7] = g as [number, number, number, number, number, number, number, number];
     if (g.every((x) => x === 0) || (g.slice(0, 7).every((x) => x === 0) && g7 === 1)) return true;
-    // ::ffff:a.b.c.d (mapped), ::a.b.c.d (compatible) and 64:ff9b::/96 (NAT64) carry an IPv4 address.
-    if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && (g5 === 0xffff || g5 === 0)) return privateV4(embeddedV4(g6, g7));
-    if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return privateV4(embeddedV4(g6, g7));
+    // Forms that carry an IPv4 address in the last 32 bits are judged by that address: ::ffff:a.b.c.d (mapped),
+    // ::a.b.c.d (compatible) and ::ffff:0:a.b.c.d (SIIT translated).
+    if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && ((g4 === 0 && (g5 === 0xffff || g5 === 0)) || (g4 === 0xffff && g5 === 0))) return privateV4(embeddedV4(g6, g7));
+    // 64:ff9b::/96 (NAT64, RFC 6052) carries one too. The rest of 64:ff9b::/32, which includes the local-use 64:ff9b:1::/48
+    // (RFC 8215), is operator-defined translation space whose embedded address cannot be trusted, so all of it is refused.
+    if (g0 === 0x64 && g1 === 0xff9b) return g2 !== 0 || g3 !== 0 || g4 !== 0 || g5 !== 0 || privateV4(embeddedV4(g6, g7));
     // 6to4 carries one in its second and third group.
     if (g0 === 0x2002) return privateV4(embeddedV4(g1, g2));
-    if ((g0 & 0xfe00) === 0xfc00) return true; // unique local
-    if ((g0 & 0xffc0) === 0xfe80 || (g0 & 0xffc0) === 0xfec0) return true; // link-local, site-local
-    if ((g0 & 0xff00) === 0xff00) return true; // multicast
-    if (g0 === 0x2001 && (g1 === 0xdb8 || g1 === 0)) return true; // documentation, Teredo
-    if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return true; // discard-only
+    // Only 2000::/3 is global unicast, so everything else is refused here: unique local fc00::/7, link-local fe80::/10,
+    // site-local fec0::/10, multicast ff00::/8, discard 100::/64 and the other reserved space.
+    if ((g0 & 0xe000) !== 0x2000) return true;
+    // Inside 2000::/3: IETF protocol assignments 2001::/23 (which holds Teredo 2001::/32), documentation 2001:db8::/32 and 3fff::/20.
+    if (g0 === 0x2001 && (g1 < 0x200 || g1 === 0xdb8)) return true;
+    if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true;
     return false;
 };
 
