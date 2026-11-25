@@ -87,7 +87,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const wasConnected = useRef(false);
   const openVersion = useRef(0);
   const historyVersion = useRef(0);
-  const changingConversation = useRef(false);
+  const changingConversation = useRef<symbol | undefined>(undefined);
   const listQuery = product === "chat" || searching ? query.trim() : "";
   const result = searchResult?.query === listQuery ? searchResult : null;
   const selectedRow = selected && (rows.find(row => row.id === selected.id) ?? selected);
@@ -128,7 +128,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setConversation(null);
     setOpening(false);
     setWriting(false);
-    changingConversation.current = false;
+    changingConversation.current = undefined;
     setSending(false);
     draftScope.current = "new";
     draftAccount.current = undefined;
@@ -234,45 +234,46 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   }
 
   async function rename(title: string, row = selectedRow) {
-    if (!row || writing) return false;
+    if (!row) return false;
     const decision = renameDecision({ initialValue: chatTitle(row, language), nextValue: title });
     if (decision.action !== "save") return decision.action === "none";
     const id = row.id;
     const request = openVersion.current;
-    setWriting(true);
-    setNotice(null);
     try {
-      const updated = await window.desktop.renameChat({ id, title: decision.title });
-      setRows((items) => items.map((row) => row.id === id ? { ...row, title: updated.title } : row));
-      setSelected((row) => row?.id === id ? { ...row, title: updated.title } : row);
-      setRefresh((value) => value + 1);
-      return true;
+      return await withConversationWrite(async current => {
+        setNotice(null);
+        const updated = await window.desktop.renameChat({ id, title: decision.title });
+        if (!current()) return;
+        historyVersion.current++;
+        setRows((items) => items.map((row) => row.id === id ? { ...row, title: updated.title } : row));
+        setSelected((row) => row?.id === id ? { ...row, title: updated.title } : row);
+        setRefresh((value) => value + 1);
+      });
     } catch {
       if (openVersion.current === request) setNotice("renameUnconfirmed");
       setRefresh((value) => value + 1);
       return false;
-    } finally {
-      setWriting(false);
     }
   }
 
   async function remove(row = selectedRow) {
-    if (!row || writing) return;
+    if (!row) return;
     const id = row.id;
     const request = openVersion.current;
-    setWriting(true);
-    setNotice(null);
     try {
-      if (await window.desktop.removeChat(id)) {
-        writeDesktopDraft(draftAccount.current, `${product}:${id}`, "");
-        setRows((items) => items.filter((row) => row.id !== id));
-        if (selected?.id === id && openVersion.current === request) await open(null);
-      }
+      await withConversationWrite(async current => {
+        setNotice(null);
+        if (await window.desktop.removeChat(id) && current()) {
+          historyVersion.current++;
+          writeDesktopDraft(draftAccount.current, `${product}:${id}`, "");
+          setRows((items) => items.filter((row) => row.id !== id));
+          if (draftScope.current === id) await open(null);
+        }
+      });
     } catch {
       if (openVersion.current === request) setNotice("deleteUnconfirmed");
     } finally {
       setRefresh((value) => value + 1);
-      setWriting(false);
     }
   }
 
@@ -291,18 +292,18 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   }
 
   async function moveToProject(projectId: string | null, target = selectedRow) {
-    if (!target || target.isLocked || writing) return;
-    setWriting(true);
-    try {
-      const result = await window.desktop.accountSettings<"moveToProject">({
-        action: "moveToProject", id: target.id, projectId,
-      });
-      setRows(items => items.map(row => row.id === target.id ? { ...row, projectId: result.projectId } : row));
-      setSelected(row => row?.id === target.id ? { ...row, projectId: result.projectId } : row);
-    } finally {
-      setWriting(false);
-      refreshProjects();
-    }
+    if (!target || target.isLocked) return;
+    await withConversationWrite(async current => {
+      try {
+        const result = await window.desktop.accountSettings<"moveToProject">({ action: "moveToProject", id: target.id, projectId });
+        if (!current()) return;
+        historyVersion.current++;
+        setRows(items => items.map(row => row.id === target.id ? { ...row, projectId: result.projectId } : row));
+        setSelected(row => row?.id === target.id ? { ...row, projectId: result.projectId } : row);
+      } finally {
+        if (current()) refreshProjects();
+      }
+    });
   }
 
   function updateConversationActions(target: ChatHistoryRow, changes: Pick<ChatHistoryRow, "isLocked" | "shareEnabled">) {
@@ -316,17 +317,18 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setRefresh(value => value + 1);
   }
 
-  async function withConversationWrite(operation: () => Promise<void>) {
+  async function withConversationWrite(operation: (current: () => boolean) => Promise<void>) {
     if (changingConversation.current || writing || sendingId.current) return false;
-    changingConversation.current = true;
+    const marker = Symbol();
+    changingConversation.current = marker;
     setWriting(true);
-    const owner = draftAccount.current;
+    const current = () => changingConversation.current === marker;
     try {
-      await operation();
-      return true;
+      await operation(current);
+      return current();
     } finally {
-      if (draftAccount.current === owner) {
-        changingConversation.current = false;
+      if (current()) {
+        changingConversation.current = undefined;
         setWriting(false);
       }
     }
@@ -604,18 +606,20 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
     if (!confirming || actionBusy || (confirming !== "lock" && blockedShare)) return;
     setActionError(false);
     try {
-      const applied = await chat.withConversationWrite(async () => {
+      const applied = await chat.withConversationWrite(async current => {
         if (confirming === "lock") {
           const result = await window.desktop.accountSettings<"changeConversationLock">({ action: "changeConversationLock", id: target.id,
             values: target.isLocked ? { password: null, currentPassword: password } : { password } });
-          chat.updateConversationActions(target, result);
+          if (current()) chat.updateConversationActions(target, result);
         } else if (confirming === "share") {
           const { url } = await window.desktop.accountSettings<"shareConversation">({ action: "shareConversation", id: target.id });
+          if (!current()) return;
           chat.updateConversationActions(target, { shareEnabled: true });
           if (menu.current?.open) setShareUrl(url);
           await window.desktop.copyChatText(url).catch(() => {});
         } else {
           await window.desktop.accountSettings<"revokeConversationShare">({ action: "revokeConversationShare", id: target.id });
+          if (!current()) return;
           chat.updateConversationActions(target, { shareEnabled: false });
           setShareUrl("");
         }

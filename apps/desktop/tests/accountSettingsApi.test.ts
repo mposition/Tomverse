@@ -51,6 +51,7 @@ test("the settings IPC refuses arbitrary routes and rejects an invalid resource 
 test("a conversation export with original messages requires complete verified bytes", async () => {
   const content = "Original and continued conversations.\n";
   const digest = createHash("sha256").update(content).digest("hex");
+  let body = content;
   const headers: Record<string, string> = { "content-type": "text/plain", "x-export-sha256": digest, "x-export-bytes": String(content.length) };
   const transport: typeof fetch = async (input) => {
     const url = new URL(String(input));
@@ -58,11 +59,14 @@ test("a conversation export with original messages requires complete verified by
       return Response.json({ token: fixtureCookie, expiresAt: Date.now() + 300_000 });
     }
     assert.equal(url.href, origin + "/api/conversations/test-conversation/export?include=source");
-    return new Response(content, { headers });
+    return new Response(body, { headers });
   };
   const settings = createAccountSettingsApi(origin, async () => "fixture-desktop", new AbortController().signal, transport);
   assert.equal((await settings.exportConversation("test-conversation", true)).toString("utf8"), content);
   headers["x-export-sha256"] = "0".repeat(64);
+  await assert.rejects(settings.exportConversation("test-conversation", true), /verification/);
+  headers["x-export-sha256"] = digest;
+  body = content.slice(0, -1);
   await assert.rejects(settings.exportConversation("test-conversation", true), /verification/);
   delete headers["x-export-bytes"];
   await assert.rejects(settings.exportConversation("test-conversation", true), /verification headers/);

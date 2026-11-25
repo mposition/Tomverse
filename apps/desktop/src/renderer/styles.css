@@ -195,7 +195,7 @@ pre, code { font-family: var(--font-code); }
 .settings-navigation button[aria-current] { border-left-color: var(--action); }
 .account-setting-row { grid-template-columns: minmax(0, 1fr) minmax(110px, 31%); }
 .account-setting-row > div:first-child { overflow-wrap: anywhere; }
-.account-setting-control { display: flex; justify-content: flex-end; min-width: 0; }
+.account-setting-control { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 .account-setting-control select, .account-settings-form input, .account-settings-form textarea {
   min-height: 36px; max-width: 100%; padding: 8px 10px; border: 1px solid var(--line);
   border-radius: 8px; color: var(--text); background: var(--raised);
