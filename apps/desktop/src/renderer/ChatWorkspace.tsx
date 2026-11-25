@@ -1112,7 +1112,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" tool />
             {research.tools}
           </ComposerTools>
-          {connectors && <ChatConnectorPicker key={toolsScope} language={language} conversationId={activeId}
+          {connectors && <ChatConnectorPicker key={"connectors:" + toolsScope} language={language} conversationId={activeId}
             disabled={chat.sending || chat.writing} onManage={onManageConnectors ?? (() => {})} />}
           <span className="spacer" />
           <DesktopModelPicker key={activeId ?? "new"} account={chat.account} language={language} label={copy.modelEffort}
