@@ -173,8 +173,6 @@ const httpsTransport: WebTransport = (target, signal) =>
 
 export type WebFetchOptions = {
     signal: AbortSignal;
-    /** A host the person already allowed in this task: a redirect may go on to it. */
-    allowedHost?: (host: string) => boolean;
     maxBytes?: number;
     timeoutMs?: number;
     maxRedirects?: number;
@@ -215,8 +213,8 @@ const publicAddresses = async (host: string, resolve: HostResolver, signal: Abor
 };
 
 /**
- * Fetches one page. Never follows a redirect to another host that was not
- * allowed; every hop is classified, resolved and checked again.
+ * Fetches one page. Never follows a redirect to another host; every hop on the
+ * approved host is classified, resolved and checked again.
  */
 export const fetchWebPage = async (startUrl: string, options: WebFetchOptions): Promise<WebFetched> => {
     const resolve = options.resolve ?? resolveWithDns;
@@ -249,7 +247,9 @@ export const fetchWebPage = async (startUrl: string, options: WebFetchOptions): 
                     throw new WebError("The site redirected to an address that is not valid.");
                 }
                 if (!next.ok) throw new WebError(`The site redirected to an address that is not read: ${next.reason}`);
-                if (next.host !== approvedHost && !options.allowedHost?.(next.host)) {
+                // Only the host the person was asked about is read. No earlier answer, remembered or recorded, lets a redirect go
+                // elsewhere: the model calls again with the address and the approval for that host is decided then.
+                if (next.host !== approvedHost) {
                     return { kind: "redirect_elsewhere", to: next.url.href, host: next.host };
                 }
                 current = next;

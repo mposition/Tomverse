@@ -4,8 +4,9 @@ import test from "node:test";
 import { ApprovalMemory } from "../src/approvals.js";
 import { classifyWebUrl, fetchWebPage, frameWebContent, htmlToText, isPrivateAddress, WebError, type HostResolver, type WebResponse, type WebTransport } from "../src/web.js";
 import { FakeGateway, toolResultsSinceUser } from "./fakeGateway.js";
-import { makeRepo, makeRunner } from "./helpers.js";
-import type { ApprovalView, Prompter } from "../src/agent.js";
+import { makeRepo, makeRunner, tempDir } from "./helpers.js";
+import { Runner, type ApprovalView, type Prompter } from "../src/agent.js";
+import { Journal } from "../src/session.js";
 
 const never = new AbortController().signal;
 
@@ -113,7 +114,7 @@ test("a redirect to an address that may not be read is refused, wherever it poin
     }
 });
 
-test("a redirect to another site is not followed unless the person already allowed that site", async () => {
+test("a redirect to another site is never followed, whatever was allowed before", async () => {
     const seen: Array<{ url: string; address: string }> = [];
     const responses = {
         "https://example.com/a": () => page("", { location: "https://other.example.org/x" }, 307),
@@ -122,13 +123,12 @@ test("a redirect to another site is not followed unless the person already allow
     const blocked = await fetchWebPage("https://example.com/a", { signal: never, resolve: publicResolver(), transport: scripted(responses, seen) });
     assert.deepEqual(blocked, { kind: "redirect_elsewhere", to: "https://other.example.org/x", host: "other.example.org" });
     assert.equal(seen.length, 1, "the other site was never contacted");
-    const allowed = await fetchWebPage("https://example.com/a", { signal: never, resolve: publicResolver(), allowedHost: (host) => host === "other.example.org", transport: scripted(responses) });
-    assert.equal(allowed.kind === "page" && allowed.text, "other");
-    // An allowed site that resolves privately is still refused.
-    await assert.rejects(fetchWebPage("https://example.com/a", {
-        signal: never, allowedHost: () => true, transport: scripted(responses),
-        resolve: async (host) => [{ address: host === "other.example.org" ? "10.0.0.9" : "93.184.216.34", family: 4 }],
-    }), /private or internal/);
+    // Not even by a differently written host of the same site: the host is compared as the address names it.
+    const sibling = await fetchWebPage("https://example.com/a", {
+        signal: never, resolve: publicResolver(),
+        transport: scripted({ "https://example.com/a": () => page("", { location: "https://www.example.com/x" }, 301) }),
+    });
+    assert.equal(sibling.kind, "redirect_elsewhere");
 });
 
 test("redirects are bounded", async () => {
@@ -272,3 +272,118 @@ test("a read-only session, and a Runner that was not given web, have no web_fetc
         await gateway.stop();
     }
 });
+// A site that answers with a redirect to a second site, as a terminal prompter with "always" answers would be asked about both.
+const FIRST = "https://a.example.com/start";
+const SECOND = "https://b.example.org/page";
+
+/** Records every address the transport is asked for, in order. */
+const redirectingTransport = (hits: string[]): WebTransport => async ({ url }) => {
+    hits.push(url.href);
+    if (url.href === FIRST) return page("", { location: SECOND }, 302);
+    if (url.href === SECOND) return page("second", { "content-type": "text/plain" });
+    throw new WebError("no route");
+};
+
+/** The questions a terminal prompter asks: an earlier "always" answer in this process is the only thing that skips one. */
+const alwaysPrompter = (memory: ApprovalMemory, asked: string[]): Prompter => ({
+    approve: async (view) => {
+        const remembered = memory.match(view);
+        if (remembered) return { approved: true, remembered };
+        asked.push(view.web!.url);
+        return { approved: true, remember: memory.remember(view) ?? undefined };
+    },
+    confirm: async () => false,
+});
+
+const webStatuses = (journal: Journal) => journal.state.tools.map((t) => (t.output as { status?: string } | undefined)?.status);
+
+test("after /approvals clear the site and a redirect to it are asked about again", async () => {
+    let urls = [FIRST, SECOND];
+    const gateway = await new FakeGateway({ script: (body: any) => {
+        const done = toolResultsSinceUser(body).length;
+        return done < urls.length ? { toolCalls: [{ name: "web_fetch", args: { url: urls[done] } }] } : { text: "Read them." };
+    } }).start();
+    try {
+        const memory = new ApprovalMemory();
+        const asked: string[] = [];
+        const hits: string[] = [];
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: alwaysPrompter(memory, asked), runner: { web: { resolve: publicResolver(), transport: redirectingTransport(hits) } } });
+        // Both sites were allowed for this run (answered "a"), so their approvals are recorded as remembered in the session.
+        assert.equal(await runner.runTask("Read both."), "success");
+        assert.deepEqual(asked, [FIRST, SECOND]);
+        assert.deepEqual(journal.state.approvals.map((a) => a.remember ?? null), ["web_host", "web_host"]);
+        assert.deepEqual(webStatuses(journal), ["redirect", "ok"]);
+
+        // The person clears what they allowed. The record of the earlier answers stays in the session, but is only a record.
+        memory.clear();
+        asked.length = 0;
+        hits.length = 0;
+        assert.equal(await runner.runTask("Read both again."), "success");
+        assert.deepEqual(asked, [FIRST, SECOND], "the site is asked about again, and so is the site a redirect went to");
+        assert.deepEqual(hits, [FIRST, SECOND], "the redirect was not followed on the strength of the old record; the second site was read only after its own question");
+        assert.deepEqual(webStatuses(journal), ["redirect", "ok", "redirect", "ok"]);
+
+        // With only the first address asked for, the second site is never contacted at all.
+        urls = [FIRST];
+        memory.clear();
+        asked.length = 0;
+        hits.length = 0;
+        assert.equal(await runner.runTask("Read the first only."), "success");
+        assert.deepEqual(asked, [FIRST]);
+        assert.deepEqual(hits, [FIRST]);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a resumed session does not carry the earlier run's site allowance", async () => {
+    const urls = [FIRST, SECOND];
+    const gateway = await new FakeGateway({ script: (body: any) => {
+        const done = toolResultsSinceUser(body).length;
+        return done < urls.length ? { toolCalls: [{ name: "web_fetch", args: { url: urls[done] } }] } : { text: "Read them." };
+    } }).start();
+    try {
+        const home = tempDir("home");
+        const hits: string[] = [];
+        const first = await makeRunner(gateway, makeRepo(), { home, prompter: alwaysPrompter(new ApprovalMemory(), []), runner: { web: { resolve: publicResolver(), transport: redirectingTransport(hits) } } });
+        assert.equal(await first.runner.runTask("Read both."), "success");
+        assert.deepEqual(first.journal.state.approvals.map((a) => a.remember ?? null), ["web_host", "web_host"]);
+        const id = first.journal.state.id;
+        first.journal.release();
+
+        const resumed = Journal.open(home, id);
+        const asked: string[] = [];
+        const options = first.runner["options"];
+        const second = new Runner({
+            gateway: options.gateway, journal: resumed, workspace: options.workspace, output: options.output, catalog: options.catalog, commandEnv: [], instructions: null,
+            prompter: alwaysPrompter(new ApprovalMemory(), asked), web: { resolve: publicResolver(), transport: redirectingTransport(hits) },
+        });
+        hits.length = 0;
+        assert.equal(await second.runTask("Read both again."), "success");
+        assert.deepEqual(asked, [FIRST, SECOND], "the resumed session asks about both sites again");
+        assert.deepEqual(hits, [FIRST, SECOND]);
+        assert.deepEqual(webStatuses(resumed).slice(-2), ["redirect", "ok"]);
+        resumed.release();
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a redirect to a site that was not allowed is not followed; the model asks again and that site is asked about", async () => {
+    const gateway = await new FakeGateway({ script: webScript([FIRST, SECOND]) }).start();
+    try {
+        const asked: string[] = [];
+        const hits: string[] = [];
+        // Only the first site is allowed, once and not for the run: nothing is remembered.
+        const prompter: Prompter = { approve: async (view) => (asked.push(view.web!.host), view.web!.host === "a.example.com"), confirm: async () => false };
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter, runner: { web: { resolve: publicResolver(), transport: redirectingTransport(hits) } } });
+        assert.equal(await runner.runTask("Read both."), "success");
+        assert.deepEqual(hits, [FIRST], "the second site was never contacted: not by the redirect, and not after its question was declined");
+        assert.deepEqual(asked, ["a.example.com", "b.example.org"]);
+        const first = journal.state.tools[0]!.output as { status: string; host: string; to: string };
+        assert.deepEqual([first.status, first.host, first.to], ["redirect", "b.example.org", SECOND]);
+    } finally {
+        await gateway.stop();
+    }
+});
+

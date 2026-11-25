@@ -47,7 +47,7 @@ export type ToolContext = {
     /** The commands this task keeps running in the background; without it the background tools do not exist. */
     background?: BackgroundCommands;
     /** Reading public web pages; without it the web_fetch tool does not exist. Each host is approved by the person first. */
-    web?: { transport?: WebTransport; resolve?: HostResolver; allowedHost?: (host: string) => boolean };
+    web?: { transport?: WebTransport; resolve?: HostResolver };
     signal: () => AbortSignal;
     assertAllowed?: () => void;
     effectBlockReason?: () => string | undefined;
@@ -643,7 +643,7 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
                 ctx.onActivity(`web_fetch ${target.url.href}`);
                 try {
                     ctx.assertAllowed?.();
-                    const page = await fetchWebPage(target.url.href, { signal: ctx.signal(), allowedHost: web.allowedHost, resolve: web.resolve, transport: web.transport });
+                    const page = await fetchWebPage(target.url.href, { signal: ctx.signal(), resolve: web.resolve, transport: web.transport });
                     const clean = (text: string) => ctx.redactText?.(text) ?? text;
                     if (page.kind === "redirect_elsewhere") {
                         return endTool(ctx, toolCallId, "completed", {

@@ -315,12 +315,7 @@ export class Runner {
             ...(options.images ? { attachImage: (image: ImageAttachment) => {
                 if (this.pendingImages.length < MAX_IMAGES_PER_STEP) this.pendingImages.push(image);
             } } : {}),
-            ...(options.web ? { web: {
-                ...options.web,
-                // A redirect may go on to a site the person allowed for the rest of this run, never to any other.
-                allowedHost: (host: string) => options.journal.state.approvals.some((a) =>
-                    a.toolName === "web_fetch" && a.decision === "approved" && a.binding.host === host && (a.rule === "web_host" || a.remember === "web_host")),
-            } } : {}),
+            ...(options.web ? { web: options.web } : {}),
             // One read may use at most about a quarter of the model's window.
             readByteLimit: Math.max(8 * 1024, Math.min(100 * 1024, Math.floor(window * 0.25 * 3))),
             workspace: options.workspace,
