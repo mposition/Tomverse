@@ -4,6 +4,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { VOICE_CONVERSATION_MICRO_USD_PER_MINUTE } from "@tomverse/chat-core";
+import { getOpenAiLiveModelsAtRate } from "@/lib/providerModelDocEvidence";
+import { getVoiceConversationModel, saveVoiceConversationModel } from "@/lib/voiceConversationModelSetting";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -46,6 +49,7 @@ import {
 
 const updateAppSettingsSchema = z
   .object({
+    voiceConversationModel: z.string().min(1).max(120).optional(),
     reviewEasyDefaultProviders: z.array(z.string()).min(1).max(3).refine(value => parseReviewProviderDefaults(value) !== null, "Choose distinct providers.").optional(),
     // Optional so a guest-lead save and a feature-flag save are different
     // requests. One request that carries an invalid lead used to refuse the
@@ -123,6 +127,10 @@ const PLATFORM_FLAG_KEYS = [
 ] as const;
 
 const appSettingsWriteSchema = updateAppSettingsSchema.superRefine((value, ctx) => {
+  if (value.voiceConversationModel !== undefined) {
+    if (Object.keys(value).length !== 1) ctx.addIssue({ code: "custom", message: "Save the voice model separately." });
+    return;
+  }
   if (value.reviewEasyDefaultProviders !== undefined) {
     if (Object.keys(value).length !== 1) ctx.addIssue({ code: "custom", message: "Review defaults are saved separately." });
     return;
@@ -185,6 +193,12 @@ export async function GET(req: Request) {
       day: 500,
     });
 
+    if (new URL(req.url).searchParams.get("section") === "voice-model") {
+      const [modelId, options] = await Promise.all([
+        getVoiceConversationModel(), getOpenAiLiveModelsAtRate(VOICE_CONVERSATION_MICRO_USD_PER_MINUTE),
+      ]);
+      return NextResponse.json({ modelId, options, canWrite: hasAdminPermission(session, "ops:write") });
+    }
     const [settings, guestLead] = await Promise.all([
       getPublicAppSettings(),
       readGuestLeadFacts(),
@@ -231,6 +245,15 @@ export async function PATCH(req: Request) {
     });
 
     const body = await readLimitedJson(req, 4 * 1024, appSettingsWriteSchema);
+    if (body.voiceConversationModel !== undefined) {
+      const models = await getOpenAiLiveModelsAtRate(VOICE_CONVERSATION_MICRO_USD_PER_MINUTE);
+      if (!models) return NextResponse.json({ error: "OpenAI Live pricing is unavailable. Try again." }, { status: 503 });
+      if (!models.includes(body.voiceConversationModel)) {
+        return NextResponse.json({ error: "Choose a published GPT-Live model at the current voice rate." }, { status: 400 });
+      }
+      await saveVoiceConversationModel(body.voiceConversationModel, session, req);
+      return NextResponse.json({ modelId: body.voiceConversationModel });
+    }
     if (body.reviewEasyDefaultProviders !== undefined) {
       const current = await getAdminReviewProviderDefaults();
       if (body.reviewEasyDefaultProviders.some(provider => !current.reviewEasyProviderOptions.includes(provider))) {

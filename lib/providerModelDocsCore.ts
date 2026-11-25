@@ -451,6 +451,46 @@ const tableAfter = (markdown: string, start: number) => {
   return { header: rows[0], body: rows.slice(2) };
 };
 
+// Read on 2026-11-25. These exact OpenAI notices cover named text models or
+// Ultrafast text processing only. This acknowledgement is scoped to Live.
+const reviewedNonVoicePricingNotices = new Set([
+  "For GPT-6.2 Astra and GPT-6.2 Sol, Ultrafast costs 3 times the Standard rate through February 28, 2027, and 6 times the Standard rate starting March 1, 2027 (Pacific time).",
+  "GPT-5.6 Sol’s promotional pricing is available until November 30, 2026.",
+  "GPT-6 Astra for Law, GPT-6.2 Astra for Law, GPT-6 Rosalind, GPT-6.2 Astra Healthcare, GPT-6.2 Sol Healthcare, GPT-6 Astra Healthcare, and GPT-6.1 Sol Healthcare promotional pricing is available at least through December 31, 2026.",
+]);
+
+export function openAiLiveModelsAtPublishedRate(markdown: string, microUsdPerMinute: number): string[] | null {
+  const notices = promotionNotices("openai", markdown);
+  if (notices.unacknowledged.some(sentence => !reviewedNonVoicePricingNotices.has(sentence))) return null;
+  const heading = /^(?:#{1,6} )?GPT-Live(?: sessions)?[ \t]*\r?$/im.exec(markdown);
+  if (!heading) return null;
+  // Both editions put the table immediately after its caption. The older one
+  // precedes that caption with a linked description of GPT-Live sessions.
+  const blocks = markdown.slice(heading.index + heading[0].length).trimStart().split(/\r?\n\s*\r?\n/);
+  if (blocks[0]?.startsWith("[GPT-Live ")) blocks.shift();
+  if (blocks[0]?.trim() === "### Pricing Table data") blocks.shift();
+  if (!blocks[0]?.startsWith("|")) return null;
+  const table = tableAfter(blocks[0], 0);
+  if (!table?.body.length) return null;
+  const columns = table.header.join("|");
+  const legacy = columns === "Model|Price per minute";
+  if (!legacy && columns !== "Model|Active rate|Standby rate") return null;
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const row of table.body) {
+    if (row.length !== table.header.length) return null;
+    const [id, price] = row;
+    if (!/^gpt-live-\d[\da-z.-]{0,99}$/.test(id) || notices.promoted.has(id)) continue;
+    if (seen.has(id)) return null;
+    seen.add(id);
+    const amount = legacy ? price : price?.match(/^(\$[\d.]+)\s*\/\s*minute$/i)?.[1];
+    const rate = amount ? dollars(amount, "plain") : null;
+    if (rate === null) return null;
+    if (rate * 1_000_000 === microUsdPerMinute) candidates.push(id);
+  }
+  return candidates;
+}
+
 /** The text of one `##`/`###` section, up to the next heading of the same or higher level. */
 const section = (markdown: string, heading: RegExp) => {
   const match = markdown.match(heading);
@@ -460,6 +500,24 @@ const section = (markdown: string, heading: RegExp) => {
   const next = rest.search(new RegExp(`\\n#{1,${level}} `));
   return next === -1 ? rest : rest.slice(0, next);
 };
+
+/** Confirm the shared tariff independently on the exact model's Live endpoint. */
+export function openAiLiveMinuteRate(markdown: string, id: string): number | null {
+  const notices = promotionNotices("openai", markdown);
+  if (notices.unacknowledged.length || notices.promoted.has(id)) return null;
+  if (markdown.match(/^Model ID: `([^`]+)`\s*$/m)?.[1] !== id) return null;
+  const endpoints = section(markdown, /^## Endpoints\s*$/m);
+  const supported = endpoints && tableAfter(endpoints, 0)?.body.some(([name, route, support]) =>
+    name === "Live" && route === "`v1/live/sessions`" && support === "Supported");
+  if (!supported) return null;
+  const pricing = section(markdown, /^### Live session duration\s*$/m);
+  const table = pricing && tableAfter(pricing, 0);
+  if (!table || table.header.join("|") !== "Metric|Price|Unit") return null;
+  const activeRows = table.body.filter(([metric]) => metric === "Active");
+  if (activeRows.length !== 1 || activeRows[0][2] !== "minute") return null;
+  const rate = dollars(activeRows[0][1], "plain");
+  return rate === null ? null : rate * 1_000_000;
+}
 
 const LONG_CONTEXT_RULE =
   /Prompts with (?:more than |>\s*)(\d+)K input tokens are priced at (\d+(?:\.\d+)?)x input( and cache rates)? and (\d+(?:\.\d+)?)x output/i;

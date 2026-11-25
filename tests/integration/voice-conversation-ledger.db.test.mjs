@@ -18,20 +18,45 @@ const { getUserChatUsageKey, usagePeriodStart } = await import(mod("lib/chatSecu
 const { reserveVoiceConversationCredits, reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits } = await import(mod("lib/voiceConversationCredits.ts"));
 const { recordVoiceUsage, finalizeVoiceReservation, claimVoiceRecoveryLease, releaseVoiceRecoveryLease } = await import(mod("lib/voiceConversationRecovery.ts"));
 const { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } = await import(mod("lib/voiceConversationTasks.ts"));
+const { getVoiceConversationModel, saveVoiceConversationModel } = await import(mod("lib/voiceConversationModelSetting.ts"));
 let userId;
 beforeEach(async () => {
   await prisma.chatCreditReservation.deleteMany({}); await prisma.chatUsageBucket.deleteMany({});
   const user = await prisma.user.create({ data: { email: `voice-${randomUUID()}@example.test` } }); userId = user.id;
 });
 after(async () => { await prisma.$disconnect(); });
-const reserve = () => reserveVoiceConversationCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36, maxSeconds: 60 });
+const reserve = () => reserveVoiceConversationCredits({ userId, requestId: randomUUID(), modelId: "gpt-live-1.1", conversationId: null, creditsPerMinute: 36, maxSeconds: 60 });
+
+test("an Admin upgrade persists for new calls while the open call settles against its original model", async () => {
+  const session = { user: { id: userId } };
+  const request = new Request("http://localhost/api/admin/app-settings");
+  const start = async () => reserveContinuousVoiceCredits({
+    userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36, modelId: await getVoiceConversationModel(),
+  });
+  await prisma.appSetting.deleteMany({ where: { key: "voiceConversation.model" } });
+  assert.equal(await getVoiceConversationModel(), "gpt-live-1.1");
+  await saveVoiceConversationModel("gpt-live-1", session, request);
+  const first = await start();
+  await saveVoiceConversationModel("gpt-live-1.1", session, request);
+  const second = await start();
+  assert.equal(first.modelId, "gpt-live-1");
+  assert.equal(second.modelId, "gpt-live-1.1");
+  const costForFirstModel = async () => (await prisma.providerDailyUsage.aggregate({
+    where: { provider: "openai", modelId: first.modelId }, _sum: { estimatedCostMicroUsd: true },
+  }))._sum.estimatedCostMicroUsd ?? 0;
+  const previousCost = await costForFirstModel();
+  await settleVoiceConversationCredits(first.id, 15, true);
+  assert.equal(await costForFirstModel() - previousCost, 12_500);
+  const edits = await prisma.adminAuditLog.findMany({ where: { actorUserId: userId, targetId: "voiceConversation.model" }, orderBy: { createdAt: "asc" } });
+  assert.deepEqual(edits.map(edit => edit.metadata.modelId), ["gpt-live-1", "gpt-live-1.1"]);
+});
 
 test("the smaller viable startup window rolls back its refused larger hold and refunds unused credits", async () => {
   const subjectKey = getUserChatUsageKey(userId);
   await prisma.chatUsageBucket.createMany({ data: ["day", "month"].map(period => ({
     key: subjectKey, period, periodStart: usagePeriodStart(period, new Date()), count: 267,
   })) });
-  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });
+  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), modelId: "gpt-live-1.1", conversationId: null, creditsPerMinute: 36 });
   assert.equal(row.reservedCredits, 33); assert.equal(row.reservationPayload.maxSeconds, 55);
   await finalizeVoiceReservation(row.id, 15);
   const month = await prisma.chatUsageBucket.findFirst({ where: { key: subjectKey, period: "month" } });
@@ -39,7 +64,7 @@ test("the smaller viable startup window rolls back its refused larger hold and r
 });
 
 async function rollingDue() {
-  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), conversationId: null, creditsPerMinute: 36 });
+  const row = await reserveContinuousVoiceCredits({ userId, requestId: randomUUID(), modelId: "gpt-live-1.1", conversationId: null, creditsPerMinute: 36 });
   return prisma.chatCreditReservation.update({ where: { id: row.id }, data: {
     createdAt: new Date(Date.now()-15_000),
     reservationPayload: { ...row.reservationPayload, closeAt: new Date(Date.now()+14_000).toISOString(), webLeaseUntil: new Date(Date.now()+30_000).toISOString() },
