@@ -22,6 +22,7 @@ import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
 import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
+import { DesktopCompareSummary } from "./DesktopCompareSummary";
 import type { ImageCapability } from "../images-contract";
 
 type Message = ChatConversation["messages"][number];
@@ -332,6 +333,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           : <button className="send" type="submit" aria-label={copy.send}
             disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading}><ArrowUp size={18} /></button>}
       </div>
+      {id && !history.selected?.isLocked && <DesktopCompareSummary key={`${history.account ?? ""}:${id}:${latest?.answers.map((answer) => answer.id).join(",")}`} language={language}
+        conversationId={id} ready={online && !run.running && !history.writing && completedModels.size >= 2} />}
       {analysisEnabled && <DesktopReviewAnalysis key={`${history.account ?? ""}:${id ?? "new"}`} language={language}
         conversationId={id} scope={JSON.stringify([latest?.question.id, latest?.answers.map(({ id }) => id)])}
         ready={online && !run.running && !history.writing && completedModels.size >= 2} />}

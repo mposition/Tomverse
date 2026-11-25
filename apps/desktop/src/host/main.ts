@@ -10,7 +10,7 @@ import { createCodeBrowserView } from "./code-browser-view";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
-import { runChatExtras } from "./chat-extras";
+import { reviewExportFile, runChatExtras } from "./chat-extras";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { solveEmailLoginChallenge } from "./login-challenge";
@@ -3117,6 +3117,7 @@ function registerIpc() {
   main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
+  main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

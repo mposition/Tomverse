@@ -7,6 +7,8 @@ import { studioAnswerAnalysisCopy } from "@/lib/studioAnswerAnalysisCopy";
 import { StudioAnswerAnalysisSession } from "@/lib/studioAnswerAnalysisSession";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import type { Language } from "@/lib/language";
+import { ReviewItemFeedback, VerifyReviewItem } from "./ReviewItemActions";
+import { ReviewExport } from "./ReviewExport";
 import logo from "../../../../public/tomverse-logo.png";
 import "@/components/chat/studio-answer-analysis.css";
 
@@ -50,6 +52,9 @@ function Analysis({ conversationId, scope, ready }: { conversationId?: string; s
       });
     }
   }
+  const handoffSource = review && entry?.setup && conversationId ? {
+    kind: "review" as const, conversationId, setup: entry.setup, review, mode: "balanced" as const, includeSynthesis: false, reviewer,
+  } : null;
   return <>
     <div className="studio-analysis-entry" data-state={entry?.phase === "error" ? "error" : review ? "done" : "new"}>
       <button type="button" ref={trigger} disabled={!ready} onClick={show} aria-haspopup="dialog" aria-expanded={open}>
@@ -111,13 +116,20 @@ function Analysis({ conversationId, scope, ready }: { conversationId?: string; s
               <SourceGroundingBadge grounding={toSourceGrounding(result)} labels={{ label: t("chat.aiReviewSourceGroundingOverall"),
                 unavailable: t("chat.aiReviewSourceGroundingUnavailable"), quotesMatched: t("chat.aiReviewSourceGroundingQuotesMatched"),
                 description: t("chat.aiReviewSourceGroundingDescription"), infoLabel: t("chat.aiReviewSourceGroundingInfoLabel") }} />
-              <ComparisonReviewWorkspace result={result} responseMap={review.responseMap} source={source} renderActions={() => null} />
+              <ComparisonReviewWorkspace result={result} responseMap={review.responseMap} source={source} renderActions={(item) => conversationId && review?.id ? <>
+                {item.section === "verificationNeeded" && review.webVerificationAvailable !== false && <>
+                  <VerifyReviewItem conversationId={conversationId} item={item.text} language={lang} />
+                  <p className="studio-analysis-fineprint">{copy.external}</p>
+                </>}
+                <ReviewItemFeedback conversationId={conversationId} reviewId={review.id} language={lang}
+                  itemId={review.reviewItems?.find((value) => value.reviewer === reviewer && value.section === item.section && value.ordinal === item.ordinal)?.id} />
+              </> : null} />
             </div>
             {result.limitations.length > 0 && <details className="studio-analysis-limitations"><summary>{t("chat.aiReviewLimitations")}</summary>
               <ul>{result.limitations.map((item, index) => <li key={index}>{item}</li>)}</ul></details>}
           </>}
         </div>
-        <footer className="desktop-analysis-footer">{copy.disclaimer}</footer>
+        <footer className="desktop-analysis-footer">{copy.disclaimer}<ReviewExport source={handoffSource} ready={entry?.phase === "done"} /></footer>
       </div>
     </dialog>
   </>;
