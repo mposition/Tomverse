@@ -581,7 +581,12 @@ export function AdminModelCatalogPanel() {
             m={m}
             mode={form.mode}
             value={form.value}
-            onChange={(value) => setForm({ ...form, value })}
+            onChange={(value) => {
+              if (value.provider === form.value.provider) return setForm({ ...form, value });
+              const sizes = formSizes(value.provider);
+              const kept = value.sizes.filter(size => sizes.some(supported => supported === size));
+              setForm({ ...form, value: { ...value, sizes: kept.length ? kept : sizes } });
+            }}
             providers={providers}
             sizes={formSizes(form.value.provider)}
             qualities={RUNTIME_IMAGE_QUALITIES}

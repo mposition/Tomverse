@@ -403,9 +403,8 @@ export function ImageGenerationWorkspace({
     (sum, entry) => sum + (entry.credits ?? 0),
     0
   );
-  const hasUnpricedSelection = selectedModelPrices.some(
-    (entry) => entry.credits === null
-  );
+  const unpricedModels = selectedModelPrices.filter(entry => entry.credits === null);
+  const hasUnpricedSelection = unpricedModels.length > 0;
   const groups = useMemo(() => groupAttempts(generations), [generations]);
   const estimatedTokens = useMemo(
     () => (prompt.trim() ? estimatePromptTokens(prompt) : 0),
@@ -1655,6 +1654,13 @@ export function ImageGenerationWorkspace({
               })}
             </div>
           </div>
+          {hasUnpricedSelection && (
+            <p role="status" className="text-xs text-zinc-600 dark:text-zinc-300">
+              {interpolateCopy(t("chat.imageGenerationUnavailableOptions"), {
+                models: unpricedModels.map(entry => imageModelName(entry.modelId)).join(", "),
+              })}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <span
               data-testid="image-token-estimate"

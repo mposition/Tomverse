@@ -19,6 +19,7 @@ import { z } from "zod";
 import {
   billingTermsApplyTo,
   type ConfirmedImageBillingTerms,
+  imageDeliveryMimeType,
   imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
   imageThinkingCapMinimumMicroUsd,
@@ -1150,7 +1151,7 @@ export const judgeImageModel = (
         model.sizes.some(size => !supportedSizes.includes(size)) ||
         model.prices.some(price => price.quality !== "medium" || !supportedSizes.includes(price.size) ||
           price.outputCostMicroUsd < contract.outputCostMicroUsd) ||
-        !model.outputMimeTypes.includes("image/png") || (model.deliveryMimeType && model.deliveryMimeType !== "image/png")) {
+        !model.outputMimeTypes.includes("image/png") || imageDeliveryMimeType(model) !== "image/png") {
       reasons.push("unsupported_direct_raster_option");
     }
   }

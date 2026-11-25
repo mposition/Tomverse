@@ -141,16 +141,18 @@ export const deriveImageComposerRestore = (input: {
   const modelIds =
     selectable.length > 0 ? selectable : [DEFAULT_IMAGE_MODEL_ID];
 
+  const fallbackCanRestore = selectable.length > 0 || !quality || !size ||
+    getImageModelPrice(DEFAULT_IMAGE_MODEL_ID, quality, size) !== null;
   return {
     sourceGroupId: input.groupId,
     // Registry order, so the same set always comes back in the same order.
     // Selection order is not recorded anywhere and carries no product meaning,
     // so inventing one from row order would be arbitrary and unstable.
     modelIds: [...modelIds].sort((a, b) => registryOrder(a) - registryOrder(b)),
-    preset,
-    quality,
-    size,
+    preset: fallbackCanRestore ? preset : null,
+    quality: fallbackCanRestore ? quality : null,
+    size: fallbackCanRestore ? size : null,
     excludedModelIds,
-    optionsConsistent,
+    optionsConsistent: optionsConsistent && fallbackCanRestore,
   };
 };

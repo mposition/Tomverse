@@ -151,6 +151,7 @@ test("direct raster profiles require exact provider terms, supported options and
     assert.equal(judge(false)(priced).admitted, false);
     for (const override of [
       { apiModelId: "unregistered" }, { qualities: ["low"] },
+      { deliveryMimeType: undefined, outputMimeTypes: ["image/jpeg", "image/png"] },
       { sizes: [id === "recraftv4_pro" ? "1024x1024" : "2048x2048"] },
       { prices: [{ ...prices[0], outputCostMicroUsd: unit - 1 }] },
     ]) assert.equal(judge()({ ...priced, ...override }).admitted, false);
