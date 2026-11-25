@@ -16,6 +16,7 @@ export const adminModelsBoardMessages = defineAdminMessages({
       saved: "Saved. New calls use this model.", failed: "Could not confirm the voice model setting. Check again.",
       unavailable: "OpenAI pricing is unavailable. Check again to see eligible models.",
       noAlternative: "There are no other models at the current rate.",
+      noneEligible: "No published Live model matches the current rate.",
     },
     registry: {
       tableCaption: "Model registry",
@@ -101,6 +102,7 @@ export const adminModelsBoardMessages = defineAdminMessages({
       saved: "저장했습니다. 새 통화부터 적용됩니다.", failed: "음성 모델 설정을 확인하지 못했습니다. 다시 확인해 주세요.",
       unavailable: "OpenAI 가격표를 읽지 못했습니다. 새 모델 확인을 다시 눌러 주세요.",
       noAlternative: "현재 요금으로 선택할 수 있는 다른 모델이 없습니다.",
+      noneEligible: "공개된 Live 모델 중 현재 요금과 일치하는 모델이 없습니다.",
     },
     registry: {
       tableCaption: "모델 레지스트리",

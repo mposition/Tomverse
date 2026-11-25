@@ -26,9 +26,9 @@ export function VoiceModelSettings({ initialModel }: { initialModel: string }) {
     setFailure(null);
     try {
       const response = action === "check"
-        ? await adminFetch("/api/admin/app-settings?section=voice-model", { cache: "no-store" })
+        ? await adminFetch("/api/admin/app-settings?section=voice-model", { cache: "no-store", timeoutMs: 30_000 })
         : await adminFetch("/api/admin/app-settings", {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
+          method: "PATCH", timeoutMs: 30_000, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ voiceConversationModel: candidate }),
         });
       const data = await response.json();
@@ -42,6 +42,7 @@ export function VoiceModelSettings({ initialModel }: { initialModel: string }) {
         setOptions(data.options ?? []);
         setCanWrite(data.canWrite);
         if (data.options === null) setNotice(copy.unavailable);
+        else if (!data.options.length) setNotice(copy.noneEligible);
         else if (!data.options.some((id: string) => id !== data.modelId)) setNotice(copy.noAlternative);
       } else {
         setNotice(copy.saved);

@@ -24,4 +24,8 @@ test("the voice model picker discovers a successor, saves it and can switch back
     await expect(card.getByRole("status")).toHaveText("Saved. New calls use this model.");
     await expect(card.locator("strong")).toHaveText(option);
   }
+  options.length = 0;
+  await card.getByRole("button", { name: "Check for new models" }).click();
+  await expect(card.getByRole("status")).toHaveText("No published Live model matches the current rate.");
+  await expect(card.locator("strong")).toHaveText("gpt-live-1.1");
 });

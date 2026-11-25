@@ -18,7 +18,8 @@ import {
   parseAnthropicPricingPage,
   parseOpenAiModelPage,
   parseOpenAiStandardPricingTable,
-  liveModelsAtMinuteRate,
+  listedOpenAiLiveModels,
+  openAiLiveMinuteRate,
   type AnthropicPricingPage,
   promotionNotices,
   type DocEvidenceSource,
@@ -165,7 +166,14 @@ const fetchDocument = async (url: string): Promise<FetchedDocument> => {
 /** On-demand lookup for an operator choosing a Live model. No provider credentials required. */
 export async function getOpenAiLiveModelsAtRate(microUsdPerMinute: number) {
   const pricing = await fetchDocument(OPENAI_PRICING_MARKDOWN_URL);
-  return pricing.ok ? liveModelsAtMinuteRate(pricing.body, microUsdPerMinute) : null;
+  const ids = pricing.ok ? listedOpenAiLiveModels(pricing.body) : null;
+  if (!ids?.length) return null;
+  const rates = await Promise.all(ids.map(async id => {
+    const page = await fetchDocument(openAiModelMarkdownUrl(id));
+    return page.ok ? openAiLiveMinuteRate(page.body, id) : null;
+  }));
+  if (rates.every(rate => rate === null)) return null;
+  return ids.filter((_, i) => rates[i] === microUsdPerMinute);
 }
 
 type EvidenceWrite = {

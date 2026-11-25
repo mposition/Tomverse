@@ -451,17 +451,13 @@ const tableAfter = (markdown: string, start: number) => {
   return { header: rows[0], body: rows.slice(2) };
 };
 
-/** These models use the same active-session tariff as the voice reservation. */
-export function liveModelsAtMinuteRate(markdown: string, microUsdPerMinute: number): string[] | null {
-  const header = /^\|\s*Model\s*\|\s*Active rate\s*\|\s*Standby rate\s*\|[ \t]*\r?$/im.exec(markdown);
-  if (!header) return null;
-  const table = tableAfter(markdown, header.index);
-  if (!table?.body.length) return null;
-  return table.body.flatMap(([id, active]) => {
-    const rate = /^\$(\d+(?:\.\d+)?)\s*\/\s*minute$/i.exec(active ?? "");
-    return /^gpt-live-[a-z0-9][a-z0-9.-]{0,100}$/.test(id) && rate && Number(rate[1]) * 1_000_000 === microUsdPerMinute
-      ? [id] : [];
-  });
+/** Read only model identities here. Each model's own Live endpoint and tariff are verified separately. */
+export function listedOpenAiLiveModels(markdown: string): string[] | null {
+  const heading = /^(?:#{1,6} )?GPT-Live(?: sessions)?[ \t]*\r?$/im.exec(markdown);
+  if (!heading) return null;
+  const table = tableAfter(markdown, heading.index + heading[0].length);
+  if (!table || !["Model|Active rate|Standby rate", "Model|Price per minute"].includes(table.header.join("|"))) return null;
+  return [...new Set(table.body.map(([id]) => id).filter(id => /^gpt-live-\d[\da-z.-]{0,99}$/.test(id)))];
 }
 
 /** The text of one `##`/`###` section, up to the next heading of the same or higher level. */
@@ -473,6 +469,24 @@ const section = (markdown: string, heading: RegExp) => {
   const next = rest.search(new RegExp(`\\n#{1,${level}} `));
   return next === -1 ? rest : rest.slice(0, next);
 };
+
+/** Prices on the shared pricing page may be promotional. Use only the model's own documented rate. */
+export function openAiLiveMinuteRate(markdown: string, id: string): number | null {
+  const notices = promotionNotices("openai", markdown);
+  if (notices.unacknowledged.length || notices.promoted.has(id)) return null;
+  if (markdown.match(/^Model ID: `([^`]+)`\s*$/m)?.[1] !== id) return null;
+  const endpoints = section(markdown, /^## Endpoints\s*$/m);
+  const supported = endpoints && tableAfter(endpoints, 0)?.body.some(([name, route, support]) =>
+    name === "Live" && route === "`v1/live/sessions`" && support === "Supported");
+  if (!supported) return null;
+  const pricing = section(markdown, /^### Live session duration\s*$/m);
+  const table = pricing && tableAfter(pricing, 0);
+  if (!table || table.header.join("|") !== "Metric|Price|Unit") return null;
+  const activeRows = table.body.filter(([metric]) => metric === "Active");
+  if (activeRows.length !== 1 || activeRows[0][2] !== "minute") return null;
+  const rate = dollars(activeRows[0][1], "plain");
+  return rate === null ? null : rate * 1_000_000;
+}
 
 const LONG_CONTEXT_RULE =
   /Prompts with (?:more than |>\s*)(\d+)K input tokens are priced at (\d+(?:\.\d+)?)x input( and cache rates)? and (\d+(?:\.\d+)?)x output/i;
