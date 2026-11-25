@@ -5,6 +5,7 @@ import { desktopImagesCopy } from "../../../../locales/desktopImages";
 import type { ChatConversation, ChatHistoryRow, ReviewImageOffer } from "../chat-contract";
 import type { ImageCapability, ImageGeneration, ImageGroup, ImageRequest } from "../images-contract";
 import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
+import { RECRAFT_SIZE } from "@/lib/directRasterModels";
 
 const activeImage = (image: ImageGeneration) => ["pending", "processing", "settling"].includes(image.status);
 const sizeLabels = { "1024x1024": "square", "1536x1024": "landscape", "1024x1536": "portrait" } as const;
@@ -245,8 +246,12 @@ export function SavedImageTurn({ turn, language, capability }: {
 export function ImageWorkspace({ workspace, capability }: { workspace: Workspace; capability: ImageCapability | null }) {
   const { language } = workspace;
   const copy = desktopImagesCopy[language];
-  const [size, setSize] = useState<ImageRequest["size"]>("1024x1024");
-  const [quality, setQuality] = useState<ImageRequest["quality"]>(workspace.seed?.quality ?? "medium");
+  const initialModel = capability?.models.find(({ id }) => id === workspace.seed?.models[0]);
+  const initialQuality = workspace.seed?.quality ?? "medium";
+  const initialPrice = initialModel?.prices.find(({ size, quality }) => size === "1024x1024" && quality === initialQuality)
+    ?? initialModel?.prices.find(({ quality }) => quality === initialQuality) ?? initialModel?.prices[0];
+  const [size, setSize] = useState<ImageRequest["size"]>(initialPrice?.size ?? "1024x1024");
+  const [quality, setQuality] = useState<ImageRequest["quality"]>(initialPrice?.quality ?? initialQuality);
   const [selected, setSelected] = useState<string[]>(() => {
     const offered = [...new Set(workspace.seed?.models ?? [])];
     return offered.filter((id) => capability?.models.some((model) => model.id === id &&
@@ -301,6 +306,8 @@ export function ImageWorkspace({ workspace, capability }: { workspace: Workspace
           <label>{copy.ratio} <select aria-label={copy.ratio} value={size} disabled={workspace.sending}
             onChange={(event) => setSize(event.currentTarget.value as ImageRequest["size"])}>
             {Object.entries(sizeLabels).map(([value, label]) => <option key={value} value={value}>{copy[label]}</option>)}
+            {capability?.models.some(({ prices }) => prices.some(({ size }) => size === RECRAFT_SIZE)) &&
+              <option value={RECRAFT_SIZE}>{copy.square} · 2048×2048</option>}
           </select></label>
           <label>{copy.quality} <select aria-label={copy.quality} value={quality} disabled={workspace.sending}
             onChange={(event) => setQuality(event.currentTarget.value as ImageRequest["quality"])}>

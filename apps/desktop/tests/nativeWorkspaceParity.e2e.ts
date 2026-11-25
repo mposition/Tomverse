@@ -53,7 +53,9 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
           case "/api/products/chat/capabilities": return Response.json({ autoSelection: { offered: true }, desktopWrite: true, desktopAttachments: true,
             desktopReview: { easy: false, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true, desktopSearchReadiness: { brave: true },
             desktopImages: { maxModels: 2, models: [{ id: "gpt-image-2", name: "GPT Image 2", provider: "openai", pricingVersion: "fixture",
-              prices: [{ size: "1024x1024", quality: "medium", credits: 15 }] }] } });
+              prices: [{ size: "1024x1024", quality: "medium", credits: 15 }] },
+            { id: "recraftv4_pro", name: "Recraft V4 Pro", provider: "recraft", pricingVersion: "fixture-2k",
+              prices: [{ size: "2048x2048", quality: "high", credits: 350 }] }] } });
           case "/api/models/catalog": return Response.json({ models: [
             { id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", usageClass: "standard" },
             { id: "gemini-flash-lite", name: "Gemini Flash-Lite", provider: "google", usageClass: "premium-reasoning" },

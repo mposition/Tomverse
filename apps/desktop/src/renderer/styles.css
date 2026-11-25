@@ -371,7 +371,7 @@ dialog.desktop-review-analysis::backdrop { background: transparent; }
 .chat-thread .entry { padding: 0; background: transparent; white-space: normal; }
 .chat-thread .entry--user { max-width: min(92%, 740px); min-width: 0; }
 .chat-thread .entry--assistant { width: min(100%, 740px); }
-.desktop-chat-workspace[data-thread="true"] :is(.chat-content, .chat-composer-slot),
+.desktop-chat-workspace[data-thread="true"] .chat-content, .desktop-chat-workspace .chat-composer-slot,
 .review-content--conversation, .review-composer-slot { width: 100%; padding-inline: clamp(13px, 2vw, 36px); }
 .desktop-chat-workspace[data-thread="true"] .chat-thread .entry--user { max-width: 86%; }
 .desktop-chat-workspace[data-thread="true"] .chat-thread .entry--assistant { width: 100%; }

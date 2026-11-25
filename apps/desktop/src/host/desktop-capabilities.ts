@@ -15,7 +15,7 @@ const capabilities = z.object({
   desktopImport: z.boolean().optional(),
   desktopStarters: z.array(z.object({ id: z.string(), label: z.string(), outcome: z.string(), seed: z.string() })).max(CHAT_STARTER_MAX_VISIBLE).optional(),
   desktopReview: reviewCapability.optional(),
-  desktopImages: imageCapability.optional(),
+  desktopImages: imageCapability.optional().catch(undefined),
   desktopAttachments: z.boolean().optional(),
   desktopPlugins: z.boolean().optional(),
   desktopCodeMcp: z.boolean().optional(),
