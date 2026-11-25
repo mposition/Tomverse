@@ -11,7 +11,9 @@ import { userShell } from "./commands.js";
 import { ConfigError, endpointMoveNote, ensureHome, readConfig, resolveEndpoint, tomverseHome, writeConfig, type CliConfig } from "./config.js";
 import { createOutput, safeLine, type Output } from "./display.js";
 import { Gateway, GatewayError, type CatalogModel } from "./gateway.js";
+import { forkThrough, rewindDialog } from "./history-cli.js";
 import { askLine, isInteractive, terminalPrompter } from "./interactive.js";
+import { RewindError } from "./rewind.js";
 import { deleteSession, Journal, JournalError, listSessions, SessionLockedError, sessionsDir } from "./session.js";
 import { CLI_VERSION } from "./version.js";
 import { gitAvailable, normalizeRoot, PathError, ripgrepAvailable, same, Workspace } from "./workspace.js";
@@ -29,6 +31,9 @@ Usage:
   tomverse models [--json]        Models this key can use, with credits per request
   tomverse usage [--session <id>] [--json]
   tomverse sessions list [--json] | sessions delete <session> [--yes]
+  tomverse sessions fork <session> [--turn <n>]
+                                  Copy the conversation (through turn n; all of it by default) into a new session; no file is touched.
+                                  Inside a session: /rewind takes files and conversation back to a turn, /fork [n] copies as above.
   tomverse diff [--session <id>]  Changes this CLI made (and only those)
   tomverse undo <change-id> [--session <id>]
   tomverse doctor [--json]        Checks Node, folder, key and API without a model request
@@ -73,6 +78,7 @@ const parse = (argv: string[]) =>
             "no-persist": { type: "boolean" },
             json: { type: "boolean" },
             session: { type: "string" },
+            turn: { type: "string" },
             yes: { type: "boolean" },
             help: { type: "boolean", short: "h" },
             version: { type: "boolean", short: "v" },
@@ -296,6 +302,18 @@ const sessions = async (ctx: Context, args: string[]) => {
         }
         deleteSession(home, id);
         ctx.output.info(`Deleted ${target}.`);
+        return EXIT_CODES.success;
+    }
+    if (sub === "fork") {
+        if (!id) throw new UsageError("sessions fork needs a session id.");
+        const source = Journal.open(home, id);
+        try {
+            const { id: forked, turns } = forkThrough(home, source, ctx.flags.turn);
+            ctx.output.event({ type: "session_forked", session_id: forked, from: id, turns });
+            ctx.output.info(`Forked ${id} (${turns} turn(s)) into ${forked}. No file was touched. Continue it with \`tomverse resume ${forked}\`.`);
+        } finally {
+            source.release();
+        }
         return EXIT_CODES.success;
     }
     throw new UsageError(`Unknown sessions command '${sub}'.`);
@@ -556,7 +574,7 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         const text = line.trim();
         if (!text) continue;
         if (text === "/help") {
-            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
+            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /rewind  take files and conversation back to a turn   /fork [turn]  copy the conversation into a new session   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
             continue;
         }
         if (text === "/diff") {
@@ -599,6 +617,21 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         }
         if (text === "/compact") {
             await runner.maybeCompact(true);
+            continue;
+        }
+        if (text === "/rewind") {
+            await rewindDialog(runner.journal, { ask: askLine, say: (line) => ctx.output.info(line) }, () => runner.historyChanged());
+            continue;
+        }
+        if (text === "/fork" || text.startsWith("/fork ")) {
+            try {
+                if (!runner.journal.persisted) throw new RewindError("A session kept in memory only (--no-persist) cannot be forked.");
+                const { id: forked, turns } = forkThrough(tomverseHome(), runner.journal, text.slice("/fork".length).trim() || undefined);
+                ctx.output.info(`Forked this session (${turns} turn(s)) into ${forked}. No file was touched, and this session goes on as it was. Continue the copy with \`tomverse resume ${forked}\`.`);
+            } catch (error) {
+                if (!(error instanceof RewindError)) throw error;
+                ctx.output.info(error.message);
+            }
             continue;
         }
         try {
@@ -755,6 +788,7 @@ export const main = async (argv: string[]): Promise<number> => {
             error instanceof JournalError ||
             error instanceof SessionLockedError ||
             error instanceof UndoError ||
+            error instanceof RewindError ||
             error instanceof GatewayError;
         const message = error instanceof GatewayError ? describeApiError(error) : (error as Error).message;
         output.event({ type: "error", code: error instanceof GatewayError ? (error.extra.code ?? error.kind) : (error as Error).constructor.name, message });

@@ -123,7 +123,8 @@ export type WebDestination = z.infer<typeof webDestination>;
 export type Model = { id: string; name: string; provider: string; efforts: string[] };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
-export type Entry = { role: "user" | "assistant"; text: string } | { role: "plan" } | CodeEventEntry;
+/** turn: the position of a user message among the turns of a saved task, for rewinding and forking there. */
+export type Entry = { role: "user" | "assistant"; text: string; turn?: number } | { role: "plan" } | CodeEventEntry;
 export const kimiNativeSessionId = z.string().regex(/^session_[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i);
 export const zCodeNativeSessionId = z.string().regex(/^sess_[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i);
 export const miniMaxNativeSessionId = z.string().regex(/^mvs_[a-f\d]{32}$/);
@@ -159,6 +160,15 @@ export function asProposedCodePlan(plan: CodeTaskPlan): CodeTaskPlan {
 export type Change = { id: string; path: string; kind: string; current: string };
 export type ChangeInspection = { text: string | null; current: string; canUndo: boolean };
 export type CompactHistoryResult = "compacted" | "nothing" | "failed" | "unavailable";
+export type CodeRewindMode = "both" | "files" | "conversation";
+/** What a rewind to a turn would do, for the confirmation: the files newest first, the commands that cannot be undone, and what can be chosen. */
+export type CodeRewindPlan = {
+  text: string; files: Array<{ path: string; kind: string; outcome: "will_undo" | "conflict"; reason?: string }>;
+  commands: string[]; conversationAvailable: boolean; blocked?: true;
+};
+export type RewindTurnResult = { result: "rewound" | "cancelled" | "unavailable" | "unconfirmed"; text?: string; undone?: number; conflicts?: number };
+export const historyTurnInput = z.object({ id: sessionId, turn: z.int().min(0).max(100_000) }).strict();
+export type ForkTurnResult = { result: "forked" | "cancelled" | "unavailable" | "unconfirmed" };
 export type UndoChangeResult = "undone" | "cancelled" | "conflict" | "unavailable" | "unconfirmed";
 export type DeleteHistoryResult = "deleted" | "cancelled" | "locked" | "unavailable" | "unconfirmed";
 export type CodeNativeRecoverySummary = { turn: "running" | "completed" | "stopped" | "failed" | "unconfirmed"; passed: number; failed: number; unconfirmed: number };
@@ -274,6 +284,8 @@ export type Task = {
   queued?: Array<{ id: string; text: string }>;
   /** Commands this task keeps running in the background; they end with the task. */
   background?: CodeBackgroundCommand[];
+  /** The saved task can be taken back to the start of one of its turns, or forked. */
+  canRewind?: true;
   /** Subagents the model started in this task, newest last. */
   subagents?: CodeSubagent[];
   /** The saved limit profile when it is not the standard one. */
@@ -405,6 +417,8 @@ export type DesktopApi = {
   moreHistory(): Promise<void>;
   readChange(id: string): Promise<ChangeInspection | null>;
   undoChange(id: string): Promise<UndoChangeResult>;
+  rewindTurn(taskId: string, turn: number): Promise<RewindTurnResult>;
+  forkTurn(taskId: string, turn: number): Promise<ForkTurnResult>;
   readCommand(id: string): Promise<CommandInspection | null>;
   checkRecovery(id: string): Promise<RecoveryResult>;
   exportDiagnostics(): Promise<boolean>;

@@ -80,6 +80,8 @@ if (trustedWindow) {
     moreHistory: () => ipcRenderer.invoke("desktop:more-history"),
     readChange: (id: string) => ipcRenderer.invoke("desktop:read-change", id),
     undoChange: (id: string) => ipcRenderer.invoke("desktop:undo-change", id),
+    rewindTurn: (id: string, turn: number) => ipcRenderer.invoke("desktop:rewind-turn", { id, turn }),
+    forkTurn: (id: string, turn: number) => ipcRenderer.invoke("desktop:fork-turn", { id, turn }),
     readCommand: (id: string) => ipcRenderer.invoke("desktop:read-command", id),
     checkRecovery: (id: string) => ipcRenderer.invoke("desktop:check-recovery", id),
     resume: (id: string) => ipcRenderer.invoke("desktop:resume", id),

@@ -26,6 +26,8 @@ export { currentDigest } from "./patch.js";
 export type { PlannedEdit } from "./patch.js";
 export { estimateTokens } from "./agent.js";
 export { SUBAGENT_LIMITS } from "./subagent.js";
+export { RewindError, forkSession, historyBlockReason, listTurns, planRewind, rewindSession } from "./rewind.js";
+export type { RewindCommand, RewindFile, RewindMode, RewindOutcome, RewindPlan, RewindTurn } from "./rewind.js";
 export type { SubagentRecord, CheckpointRecord, RewindRecord } from "./session.js";
 export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
 

@@ -231,3 +231,28 @@ test("project memory: the agent keeps a note, `memory show` and `memory clear` m
         await gateway.stop();
     }
 });
+
+test("sessions fork copies a saved session into a new one, and says which turns it holds", { skip: !existsSync(CLI) && "build first" }, async () => {
+    const gateway = await new FakeGateway({ script: () => ({ text: "sum subtracts" }) }).start();
+    try {
+        const { home, root, env } = setup(gateway);
+        const first = await run(["exec", "--json", "--read-only", "What does sum do?"], { cwd: root, home, env });
+        assert.equal(first.code, 0, first.stderr);
+        const id = jsonl(first.stdout).at(-1).session_id as string;
+        const forked = await run(["sessions", "fork", id, "--json"], { cwd: root, home, env });
+        assert.equal(forked.code, 0, forked.stderr);
+        const event = jsonl(forked.stdout).find((e) => e.type === "session_forked");
+        assert.equal(event.from, id);
+        assert.equal(event.turns, 1);
+        assert.notEqual(event.session_id, id);
+        const listed = jsonl((await run(["sessions", "list", "--json"], { cwd: root, home, env })).stdout);
+        assert.deepEqual(listed.map((s) => s.id).sort(), [id, event.session_id].sort());
+        // A turn that does not exist is refused, and the original is untouched.
+        const bad = await run(["sessions", "fork", id, "--turn", "2"], { cwd: root, home, env });
+        assert.equal(bad.code, 1);
+        assert.match(bad.stderr, /from 1 to 1/);
+        assert.equal((await run(["sessions", "fork"], { cwd: root, home, env })).code, 2);
+    } finally {
+        await gateway.stop();
+    }
+});

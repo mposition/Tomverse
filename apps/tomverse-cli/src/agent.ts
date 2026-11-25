@@ -786,6 +786,11 @@ export class Runner {
         return this.loop();
     }
 
+    /** The conversation was cut back from outside (a rewind): the folder instructions it had been given are gone with it. */
+    historyChanged() {
+        this.nested?.reset();
+    }
+
     /** Records where the conversation and the file changes stand just before a user message, so a rewind or a fork can come back here. */
     private markTurn(kind: CheckpointRecord["kind"], task: number, text: string) {
         const { journal } = this;

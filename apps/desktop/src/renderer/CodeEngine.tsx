@@ -119,6 +119,49 @@ export function BackgroundPanel({ task, language, live }: { task: Task; language
   </section>;
 }
 
+/**
+ * Rewind or fork a saved task at one of its user messages. Rewinding asks first (the host shows the files, the conflicts and the commands
+ * that cannot be undone); the message that was taken out goes back into the input box.
+ */
+export function TurnMenu({ task, turn, language, onRewound, notify }: {
+  task: Task; turn: number; language: Language; onRewound: (text: string) => void; notify: (text: string | null) => void;
+}) {
+  const copy = desktopCodeEngineCopy[language];
+  const setMessage = notify;
+  const [working, setWorking] = useState(false);
+  if (!task.id || !task.canRewind) return null;
+  const taskId = task.id;
+  async function rewind() {
+    setWorking(true);
+    try {
+      const outcome = await window.desktop.rewindTurn(taskId, turn);
+      if (outcome.result === "rewound") {
+        if (outcome.text) onRewound(outcome.text);
+        const base = outcome.text ? copy.rewindDone : copy.rewindDoneFiles;
+        setMessage(outcome.conflicts ? `${base} ${copy.rewindConflicts.replace("{count}", String(outcome.conflicts))}` : base);
+      } else setMessage(outcome.result === "cancelled" ? null : outcome.result === "unconfirmed" ? copy.rewindUnconfirmed : copy.rewindUnavailable);
+    } catch { setMessage(copy.rewindUnavailable); }
+    finally { setWorking(false); }
+  }
+  async function fork() {
+    setWorking(true);
+    try {
+      const outcome = await window.desktop.forkTurn(taskId, turn);
+      setMessage(outcome.result === "forked" ? copy.forkDone : outcome.result === "cancelled" ? null : copy.forkFailed);
+    } catch { setMessage(copy.forkFailed); }
+    finally { setWorking(false); }
+  }
+  return <div className="turn-menu">
+    <details>
+      <summary aria-label={copy.turnMenu} title={copy.turnMenu}>⋯</summary>
+      <div role="group" aria-label={copy.turnMenu}>
+        <button className="soft" type="button" disabled={working} onClick={() => void rewind()}>{copy.rewindHere}</button>
+        <button className="soft" type="button" disabled={working} onClick={() => void fork()}>{copy.forkHere}</button>
+      </div>
+    </details>
+  </div>;
+}
+
 /** The subagents the model started: what each was asked, whether it still runs, how many requests it used and how it ended. */
 export function SubagentPanel({ task, language }: { task: Task; language: Language }) {
   const copy = desktopCodeEngineCopy[language];

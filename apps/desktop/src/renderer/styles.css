@@ -663,6 +663,11 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
 .code-background li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .code-background li code { min-width: 0; overflow-wrap: anywhere; }
 .code-background pre { max-height: 180px; margin: 4px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.turn-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; }
+.turn-menu details { position: relative; }
+.turn-menu summary { cursor: pointer; padding: 0 6px; color: var(--muted); list-style: none; border-radius: 6px; }
+.turn-menu details[open] > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.turn-notice { margin: 6px 0; font-size: 13px; color: var(--muted); }
 .code-subagents { display: grid; gap: 4px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
 .code-subagents small { color: var(--muted); overflow-wrap: anywhere; }
 .code-subagents ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }

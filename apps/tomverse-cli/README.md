@@ -98,12 +98,13 @@ tomverse exec --json "explain src/index.ts" --read-only
 
 | Command | What it does |
 |---|---|
-| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
+| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/rewind`, `/fork [turn]`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
 | `tomverse exec <task> [--json]` | One task, no prompts. Stops with exit code 3 at the first action that needs approval. |
 | `tomverse resume <session> [task]` | Continue a saved session (and answer pending approvals in a terminal). |
 | `tomverse models` | Models this key can use. |
 | `tomverse usage [--session <id>]` | Key cap, committed and held credits; or one session's own receipts. |
 | `tomverse sessions list` / `sessions delete <id>` | Local sessions. Delete asks first (or `--yes`). |
+| `tomverse sessions fork <id> [--turn <n>]` | Copy a session's conversation (through turn n) into a new session; no file is touched. |
 | `tomverse diff [--session <id>]` | Changes this CLI made, and only those. |
 | `tomverse undo <change-id>` | Undo one of them (see below). |
 | `tomverse doctor` | Node, folder, key, API and recovery lookup checks. Makes no model request. |
@@ -367,6 +368,28 @@ A session stays on one model. With `smart-adaptive`, the model that answers the
 first request is pinned for the rest of the session (including compaction and
 resume). Native protocol features (signed thinking, encrypted reasoning state)
 are not used by this CLI.
+
+### Rewind and fork
+
+Every user message of a session is a turn: a task's prompt, or a message you sent while it ran.
+The session records where the conversation and its list of file changes stood just before each one.
+
+- `/rewind` (interactive) lists the turns and asks which one to go back to. It then shows what
+  would be put back, newest change first, which files would conflict, and which commands ran in
+  that part (their effects cannot be undone), and asks what to rewind: `b` files and conversation,
+  `f` files only, `c` conversation only. A file is put back only if it is still exactly what the
+  session wrote, the same check as `tomverse undo`; a file you edited since is left alone and
+  reported as a conflict, and so is an earlier change to the same file that waits behind it. The
+  message that was taken out is shown so you can edit it and send it again. The model is told
+  what was and was not put back, so its next request does not rest on history that no longer
+  matches the folder. A rewind is recorded in the session. It is refused while a task runs,
+  waits for an approval, or has an unknown outcome, and the conversation cannot be cut at a turn
+  that a compaction folded into a summary (the files still can).
+- `/fork [n]` and `tomverse sessions fork <session> [--turn <n>]` copy the conversation through
+  turn `n` (all of it by default) into a new session and touch no file. The original stays as it
+  was; the copy starts with no changes of the original to undo, no requests and no approvals, and
+  continues with `tomverse resume <new id>`. Sessions saved by an older CLI have no turns and
+  cannot be rewound or forked.
 
 ## Support
 

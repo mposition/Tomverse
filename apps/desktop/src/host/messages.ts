@@ -1,4 +1,4 @@
-import type { ApprovalRequest, Change, CompactHistoryResult, ChangeInspection, CodeNativeAssignment, CommandInspection, Decision, DeleteHistoryResult, Model, QueueOperation, RecoveryResult, StartInput, Task, UndoChangeResult } from "../contract";
+import type { ApprovalRequest, Change, CodeRewindMode, CodeRewindPlan, CompactHistoryResult, ChangeInspection, CodeNativeAssignment, CommandInspection, Decision, DeleteHistoryResult, Model, QueueOperation, RecoveryResult, StartInput, Task, UndoChangeResult } from "../contract";
 import type { WorkspaceReference } from "../../../tomverse-cli/src/runtime";
 import type { ProjectRoot } from "./project-root";
 import type { HistoryScope } from "./history-scope";
@@ -50,7 +50,10 @@ export type WorkerCommand =
   | { type: "clean-deleted-history"; protectedRoot: string }
   | (RecordedSession & { type: "delete-history"; storage: string; protectedRoot: string; directoryIdentity: string;
     nativeSource?: { home: string; provider: NativeFixtureProvider; directory: string; identity: string } })
-  | (RecordedItem & { type: "undo-change" });
+  | (RecordedItem & { type: "undo-change" })
+  | (RecordedSession & { type: "plan-rewind"; turn: number })
+  | (RecordedSession & { type: "rewind-history"; turn: number; mode: CodeRewindMode })
+  | (RecordedSession & { type: "fork-history"; turn: number });
 
 export type WorkerEvent =
   | { type: "catalog"; requestId: string; models: Model[] }
@@ -68,4 +71,7 @@ export type WorkerEvent =
   | { type: "command-detail"; requestId: string; inspection: CommandInspection | null }
   | { type: "history-deleted"; requestId: string; result: DeleteHistoryResult }
   | { type: "change-undone"; requestId: string; result: UndoChangeResult; changes?: Change[] }
-  | { type: "history-compacted"; requestId: string; result: CompactHistoryResult };
+  | { type: "history-compacted"; requestId: string; result: CompactHistoryResult }
+  | { type: "rewind-planned"; requestId: string; plan: CodeRewindPlan | null }
+  | { type: "history-rewound"; requestId: string; result: "rewound" | "unavailable" | "unconfirmed"; text?: string; undone: number; conflicts: number }
+  | { type: "history-forked"; requestId: string; result: "forked" | "unavailable" | "unconfirmed"; id?: string };
