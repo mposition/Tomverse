@@ -114,12 +114,16 @@ train은 이 변경 이전의 script로 돌리면 staging을 기다립니다.
 
 결정: 운영자, 2026-11-08. dev와 Test의 모델 카탈로그를 production과 맞춥니다. 레지스트리, 이미지·코딩 카탈로그, 가격
 revision에 더해 발견 테이블(provider 카탈로그 관찰, 문서 근거, lifecycle work item과 그 event)까지 함께 옮깁니다.
-레지스트리만 옮기면 발견 큐가 없는 모델을 가리키게 되기 때문입니다.
+레지스트리만 옮기면 발견 큐가 없는 모델을 가리키게 되기 때문입니다. 확정된 이미지 billing terms(`ImageModelBillingTerms`)도
+옮깁니다(2026-11-25). 이미지 판정 함수가 이 값을 읽으므로, 없으면 production에서 켜진 모델(Nano Banana 2.1, Wan 2.7)이
+아래 환경에서 `worst_case_cost_unbounded`로 거절됩니다. 그 근거가 된 측정(`ImageBillingMeasurement`)은 production
+provider 예산을 쓴 기록이라 옮기지 않으며, 복사한 terms 행의 `measurementId`는 비워 둡니다. production export가 이
+테이블을 아직 보내지 않으면(릴리스 전) 그 표만 건너뜁니다(`notExported`).
 
 - **언제:** 일요일 Maintenance Cron(03:00 UTC, 브리즈번 13:00). staging과 dev에서만 돕니다(`lib/modelCatalogEnvSync.ts`).
 - **어떻게:** 아래 환경이 `https://tomverse.app/api/internal/model-catalog/export`를 읽어 자기 DB와 비교합니다. 없는 행은
   만들고, 다른 행은 production 값으로 바꿉니다. 아래 환경에만 있는 행은 지우지 않고 `localOnly`로 셉니다. append-only
-  행(가격 revision, work item event)은 없을 때만 넣습니다. 사용자 id는 옮기지 않고, 함께 있는 이메일은 옮깁니다.
+  행(가격 revision, billing terms, work item event)은 없을 때만 넣습니다. 사용자 id는 옮기지 않고, 함께 있는 이메일은 옮깁니다.
   `ModelCatalogSnapshot`은 옮기지 않습니다. 아래 환경의 가격 revision이 production에 없는(또는 내용이 다른) 카탈로그
   모델은 그 모델의 카탈로그 행과 가격 revision을 모두 그대로 두고 `held`로 셉니다(`heldModels`에 이름이 나옵니다).
   다른 profile에 맞춘 가격으로 production profile이 실행되지 않게 하려는 것입니다.

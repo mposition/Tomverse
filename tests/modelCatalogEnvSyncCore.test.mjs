@@ -72,6 +72,7 @@ test("the registry, the image/coding catalogue and the discovery tables travel t
       "ModelOverride",
       "ModelCatalogEntry",
       "ModelCatalogPriceRevision",
+      "ImageModelBillingTerms",
       "ProviderModelCatalogEntry",
       "ProviderModelDocEvidence",
       "ModelLifecycleWorkItem",
@@ -342,6 +343,56 @@ test("an export is accepted only when it is production's, complete and undamaged
   missingKey.tables.ModelRegistryEntry = [{ name: "no id" }];
   missingKey.digest = exportDigest(missingKey.tables);
   assert.throws(() => validateModelCatalogExport(missingKey), /missing id/);
+});
+
+const billingTerms = (id, createdAt, kind = "measured_output_limit") =>
+  normalizeSyncRow(spec("ImageModelBillingTerms"), {
+    id,
+    provider: "google",
+    apiModelId: "gemini-nano-banana-2.1",
+    kind,
+    terms: { kind },
+    sources: ["https://ai.google.dev/pricing"],
+    measurementId: "prod-measurement",
+    actorId: "prod-user",
+    actorEmail: "owner@example.com",
+    createdAt: new Date(createdAt),
+  });
+
+test("confirmed image billing terms are inserted when missing and never rewritten", () => {
+  const row = billingTerms("terms-1", "2026-11-13T00:00:00.000Z");
+  assert.equal("measurementId" in row, false);
+  assert.equal("actorId" in row, false);
+
+  const source = emptyTables();
+  const local = emptyTables();
+  source.ImageModelBillingTerms = [row];
+  local.ImageModelBillingTerms = [billingTerms("local-terms", "2026-11-20T00:00:00.000Z")];
+  const plan = tablePlan(planModelCatalogEnvSync(source, local), "ImageModelBillingTerms");
+  assert.equal(plan.create.length, 1);
+  assert.equal(plan.create[0].createdAt, "2026-11-13T00:00:00.000Z");
+  assert.equal(plan.localOnly, 1);
+
+  local.ImageModelBillingTerms = [billingTerms("terms-1", "2026-11-13T00:00:00.000Z", "per_image_no_thinking")];
+  const changed = tablePlan(planModelCatalogEnvSync(source, local), "ImageModelBillingTerms");
+  assert.equal(changed.conflicts, 1);
+  assert.equal(changed.update.length + changed.create.length, 0);
+});
+
+test("an export from production code that predates the billing terms table is accepted", () => {
+  const older = validExport();
+  delete older.tables.ImageModelBillingTerms;
+  older.digest = exportDigest(older.tables);
+  assert.equal(validateModelCatalogExport(older).environment, "production");
+
+  const local = emptyTables();
+  local.ImageModelBillingTerms = [billingTerms("local-terms", "2026-11-20T00:00:00.000Z")];
+  const plan = planModelCatalogEnvSync(older.tables, local);
+  const terms = tablePlan(plan, "ImageModelBillingTerms");
+  assert.equal(terms.notExported, true);
+  assert.equal(terms.create.length + terms.localOnly, 0);
+  assert.equal(tablePlan(plan, "ModelRegistryEntry").create.length, 1);
+  assert.equal(MODEL_CATALOG_SYNC_TABLES.filter((item) => item.optionalInExport).length, 1);
 });
 
 test("the weekly step runs on Sunday in UTC", () => {
