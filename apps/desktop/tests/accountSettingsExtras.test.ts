@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAccountSettingsApi } from "../src/host/account-settings-api";
 import { createAccountDataApi } from "../src/host/account-data-api";
-import { desktopAccountSettingsInput, type DesktopAccountSettingsInput } from "../src/account-settings-contract";
+import { desktopAccountSettingsInput, type AccountSettingsResult, type DesktopAccountSettingsInput } from "../src/account-settings-contract";
 
 const origin = "https://tomverse.example";
 
@@ -31,7 +31,7 @@ test("memory actions map to the memory routes and validate what comes back", asy
   });
   assert.deepEqual(await settings({ action: "deleteMemory", id: "mem_1" }), { outcome: "deleted" });
   assert.deepEqual(await settings({ action: "moveMemoryScope", id: "mem_1", expectedRevision: 3, projectId: "proj_1" }), { moved: true, projectId: "proj_1" });
-  assert.equal((await settings({ action: "extractionRuns" })).activeRunId, "run_1");
+  assert.equal(((await settings({ action: "extractionRuns" })) as AccountSettingsResult<"extractionRuns">).activeRunId, "run_1");
   await settings({ action: "cancelExtraction", id: "run_1" });
   assert.deepEqual(calls, [
     { path: "/api/memories/mem_1", method: "DELETE", body: undefined },
@@ -49,10 +49,10 @@ test("a memory detail from an older server without revision or scope still parse
   const base = { id: "mem_1", kind: "preference", statement: "Likes tea", status: "active", pinned: false, expiresAt: null,
     sensitivity: "standard", evidence: [] };
   const { settings } = settingsWith(() => Response.json({ memory: base, conflicts: [] }));
-  const old = await settings({ action: "memoryDetail", id: "mem_1" });
+  const old = (await settings({ action: "memoryDetail", id: "mem_1" })) as AccountSettingsResult<"memoryDetail">;
   assert.equal(old.memory.revision, undefined);
   const { settings: current } = settingsWith(() => Response.json({ memory: { ...base, revision: 2, projectId: "proj_1" }, conflicts: [] }));
-  const detail = await current({ action: "memoryDetail", id: "mem_1" });
+  const detail = (await current({ action: "memoryDetail", id: "mem_1" })) as AccountSettingsResult<"memoryDetail">;
   assert.equal(detail.memory.revision, 2);
   assert.equal(detail.memory.projectId, "proj_1");
 });

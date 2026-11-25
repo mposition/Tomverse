@@ -17,7 +17,7 @@ function ExtractionRuns({ language }: Common) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const reload = useRef(state.reload);
-  reload.current = state.reload;
+  useEffect(() => { reload.current = state.reload; });
   const active = !!state.data?.activeRunId;
   useEffect(() => {
     if (!active) return;
