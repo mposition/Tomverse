@@ -39,6 +39,8 @@ import { tmpdir } from "node:os";
 import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
+import { permissionCommand } from "../permission-contract";
+import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
   MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
@@ -276,6 +278,7 @@ const updates = () => configureUpdates(
 );
 const codeNotificationsPath = () => join(app.getPath("userData"), "code-notifications.txt");
 const codeExecutionPreferencePath = () => join(app.getPath("userData"), "code-execution-preference.txt");
+const permissionHost = new DesktopPermissions({ modeFile: () => join(app.getPath("userData"), "permission-mode.txt"), root: () => projectRoot?.path ?? null });
 const codeFallbackFile = (scope: string) => join(app.getPath("userData"), `code-fallback-${scope}.json`);
 const cliPathsFile = () => join(app.getPath("userData"), "provider-cli-paths.json");
 const storedCliPaths = z.partialRecord(cliProvider, cliFilePath);
@@ -446,6 +449,7 @@ function broadcast() {
   state.draftNamespace = workspaceNamespace();
   state.handoff = currentHandoff();
   state.projectPermissionProfile = readProjectPermissionProfile();
+  state.permissions = permissionHost.view();
   if (accountWindowsReady && DESKTOP_LOGIN_WINDOW_REQUIRED) syncAccountWindow();
   if (loginWindow && !loginWindow.isDestroyed() && !loginWindow.webContents.isDestroyed()) {
     loginWindow.webContents.send("login:changed", { account: state.account, language: state.language });
@@ -1235,6 +1239,7 @@ function bootWorker() {
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
+  child.postMessage(permissionHost.runtimeMessage());
   child.on("message", onWorkerMessage);
   child.once("exit", () => {
     if (worker !== child) return;
@@ -3236,6 +3241,15 @@ function registerIpc() {
     codeWorktreeDraft = undefined;
     broadcast();
   });
+  main("desktop:permissions", (value) => {
+    if (signingOut || closing) return { ok: false, error: "The app is closing." };
+    const result = permissionHost.run(permissionCommand.parse(value));
+    if (result.ok) {
+      worker?.postMessage(permissionHost.runtimeMessage());
+      broadcast();
+    }
+    return result;
+  });
   main("desktop:permission-profile", (value) => {
     const profile = codePermissionProfile.parse(value);
     const path = projectPermissionPath();
@@ -3720,6 +3734,7 @@ else {
     session.defaultSession.on("will-download", (event) => event.preventDefault());
     loadLanguage();
     loadCodeExecutionPreference();
+    permissionHost.load();
     loadCliPaths();
     loadCodeNotifications();
     powerMonitor.on("suspend", () => {

@@ -196,6 +196,24 @@ per task".
   including descendants that moved to their own session — and anything that
   survived is reported. A program that detaches itself after the command has
   already finished is outside what the CLI can see.
+- **Permission rules and modes:** `tomverse permissions` keeps allow, ask and
+  deny rules for file edits (a path glob), commands (a command prefix) and web
+  hosts, in `<home>/permissions.json` (all projects) and
+  `<project>/.tomverse/permissions.json` (this project). Deny beats ask beats
+  allow, and the two files are merged. **A repository cannot widen what the
+  agent may do:** the project's deny and ask rules apply at once, but its allow
+  rules apply only after you run `tomverse permissions trust` (which shows them);
+  if the file changes, you are asked again. The file tools cannot touch either
+  file. Desktop has modes on top of the same rules: read only, ask (default),
+  auto review (a separate, charged model request judges each approval; three
+  denials in a row hand it back to you; anything it cannot parse is yours to
+  decide) and allow all (never saved; asks you to confirm). **Whatever the mode,
+  rule or model answer, these stay a person's call or are refused:** files
+  outside the work folder and credential files (refused); a command that sends
+  something out of the computer (git push, gh, curl, npm publish, a network
+  address in the command), names a credential file or the app's own data folder;
+  a web host nobody approved. This is a check of the command's text, not a
+  sandbox: a script that does these things on its own is not seen.
 - **Web pages (`web_fetch`):** the model can read a public web page, for
   documentation. **Every site (host) is asked about first**, with the host and the
   full address shown; `a` allows that host for the rest of this run, and a

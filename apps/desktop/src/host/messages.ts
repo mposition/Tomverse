@@ -17,6 +17,8 @@ type NativeFixtureTask = { runId: string; project: ProjectRoot; fixture: CliFixt
   history?: { id: string; directory: string; previous?: Task };
   afterQuota?: { requestId: string; connection: Connection } };
 export type WorkerCommand =
+  /** The permission mode (a person's choice in the app) and the folder of the user's permission rules; the runtime asks until it has one. */
+  | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
   | { type: "catalog"; requestId: string; connection: Connection }
   | { type: "start"; runId: string; project: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
     references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean;

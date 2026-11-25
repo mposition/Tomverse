@@ -17,6 +17,7 @@ import { createTools, imageMessage, planCommandCall, planPatchCall, READ_TOOLS, 
 import { estimateTokens } from "./tokens.js";
 import { Subagents } from "./subagent.js";
 import type { RememberedRule } from "./approvals.js";
+import type { PermissionGate, PolicyNote } from "./permissions.js";
 import type { CommandLaunch, CommandPlan } from "./commands.js";
 import type { PlannedEdit } from "./patch.js";
 import { withWorkspaceReferences, type Workspace } from "./workspace.js";
@@ -74,6 +75,11 @@ export type RunnerOptions = {
     workspace: Workspace;
     output: Output;
     prompter: Prompter | null;
+    /**
+     * The permission mode and rules of this task (permissions.ts). It answers an approval before the prompter is asked, or hands it
+     * to the prompter; without it every approval goes to the prompter as before.
+     */
+    permissions?: PermissionGate;
     catalog: CatalogModel[];
     commandEnv: string[];
     launchCommand?: CommandLaunch;
@@ -1444,11 +1450,21 @@ export class Runner {
         let approved = false;
         let reason: string | undefined;
         let decision: ApprovalDecision = { approved: false };
+        // The mode and rules answer first; only what they leave to a person reaches the prompter.
+        const auto = view.error || denyReason || !options.permissions ? null
+            : await options.permissions.decide(view, { review: (system, user) => this.reviewCall(system, user), userRequest: this.currentTask().prompt });
+        let policy: PolicyNote | undefined;
+        if (auto?.info) options.output.info(`  · ${auto.info}`);
         if (view.error) {
             reason = `Not offered to the user: ${view.error}`;
             options.output.info(`  · ${view.toolName} could not be prepared: ${view.error}`);
         } else if (denyReason) {
             reason = denyReason;
+        } else if (auto && auto.kind !== "human") {
+            policy = auto.policy;
+            approved = auto.kind === "allow";
+            reason = auto.kind === "deny" ? auto.reason : undefined;
+            if (!auto.info) options.output.info(`  · ${view.toolName} ${approved ? "allowed" : "refused"} without asking (${auto.policy.source}: ${auto.policy.detail})`);
         } else {
             // The person's time answering is not model time: inside a step it stops that step's clock.
             const answer = await this.whileWaiting(async () => options.prompter!.approve(view));
@@ -1469,10 +1485,47 @@ export class Runner {
             decision: approved ? "approved" : "denied",
             ...(approved && decision.remembered ? { by: "remembered_answer" as const, rule: decision.remembered } : {}),
             ...(approved && decision.remember ? { remember: decision.remember } : {}),
+            ...(policy ? { by: "permission_policy" as const, policy } : {}),
             decidedAt: new Date().toISOString(),
         });
         this.observePlanResult(view.toolCallId, approved ? "running" : "denied");
         return { approved, ...(reason ? { reason } : {}) };
+    }
+
+    /**
+     * One request to the task's model on behalf of the permission gate (auto review). It goes through the same gateway and journal
+     * as every other request: it is recorded, counts against the task's request limit, and is charged like any request. An outcome
+     * that is not known leaves the request open, as for a goal check, and a person decides the approval.
+     */
+    private async reviewCall(system: string, user: string): Promise<string> {
+        const { journal, options } = this;
+        const model = this.model();
+        const attemptStart = journal.state.generations.length;
+        try {
+            const result = await generateText({
+                model: options.gateway.chatModel(model.id, this.hooks("review")),
+                system,
+                messages: [{ role: "user", content: options.redactText?.(user) ?? user }],
+                maxRetries: 0,
+                maxOutputTokens: Math.min(400, model.maxOutputTokens || 400),
+                abortSignal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(60_000)]),
+            });
+            journal.closeGenerations(journal.state.generations.slice(attemptStart));
+            journal.commit();
+            return result.text;
+        } catch (error) {
+            if (error instanceof JournalError || journal.broken) throw journal.broken ?? error;
+            const record = journal.state.generations.slice(attemptStart).at(-1);
+            if (record && (record.httpStatus ?? 0) >= 400) record.error = httpRefusal(error, this.describe(error));
+            if (record && !(await this.resolvedAfterFailure(record))) {
+                journal.commit();
+                options.output.info(this.unknownReport(record));
+            } else {
+                journal.closeGenerations(journal.state.generations.slice(attemptStart));
+                journal.commit();
+            }
+            throw error;
+        }
     }
 
     /**

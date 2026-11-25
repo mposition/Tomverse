@@ -66,6 +66,10 @@ New Tomverse API Agent tasks in a Git project start in their own worktree when G
 
 A worktree keeps the path relative to the repository of the folder you opened. Attachments for an isolated task must exist in the selected commit. After restarting Desktop, open the source folder and select the saved task from history to resume in its worktree. If the worktree is missing or on a different branch, Desktop blocks resumption and undo until the original checkout is available. Saved diffs and command details can still be inspected. Worktree files stay on disk when you delete Desktop task history.
 
+## Permissions
+
+**Settings > Task permissions** has the permission mode for Tomverse API Agent tasks and the allow, ask and deny rules. The modes are read only, ask each time (default), auto review (a separate model request judges each approval and is charged like any request; off by default) and allow all (asks for a confirmation, stays on show on the Code screen, and is not remembered after the app closes). Rules are saved by the CLI's rule store: user rules in the CLI configuration folder (`~/.tomverse/permissions.json`, or `TOMVERSE_HOME`) and project rules in `.tomverse/permissions.json` of the project; a project's own allow rules wait for your confirmation. The "always" answer on an approval card is saved as a project allow rule. Credential files, files outside the project and actions that leave the app (git push, pull requests, uploads) are never decided by a mode or a rule. The main process owns the mode; the Code runtime receives it as a message and nothing the model writes can change it.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

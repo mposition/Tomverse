@@ -42,7 +42,7 @@ export const SESSION_SCHEMA_VERSION = 1;
 
 export type GenerationRecord = {
     seq: number;
-    purpose: "agent" | "compact" | "goal" | "subagent";
+    purpose: "agent" | "compact" | "goal" | "subagent" | "review";
     /** The subagent run this request was made for (purpose "subagent"). */
     subagentId?: string;
     idempotencyKey: string;
@@ -91,8 +91,10 @@ export type ApprovalRecord = {
         host?: string;
     };
     decision: "approved" | "denied";
-    /** Approved without asking, by an earlier "always" answer in the same process. */
-    by?: "remembered_answer";
+    /** Decided without asking: by an earlier "always" answer in the same process, or by the permission mode and rules. */
+    by?: "remembered_answer" | "permission_policy";
+    /** What the permission policy decided on (a boundary, a rule, the mode, or an auto review), for either answer. */
+    policy?: import("./permissions.js").PolicyNote;
     rule?: "file_edits" | "same_command" | "web_host";
     /** This answer was "always" for the rest of that process. */
     remember?: "file_edits" | "same_command" | "web_host";

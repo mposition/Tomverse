@@ -49,6 +49,7 @@ import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
+import { PermissionModeBadge, PermissionSettings } from "./PermissionSettings";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
 import { ConnectorWorkspace } from "./ConnectorWorkspace";
@@ -1053,6 +1054,7 @@ function Desktop() {
               {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api"
                 ? <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />
                 : <span className="permission"><ShieldCheck size={15} /> {copy.manual}</span>}
+              {codeMode === "agent" && codeRoute.executionMode === "tomverse_api" && <PermissionModeBadge mode={snapshot?.permissions?.mode} language={language} />}
               {codeHistoryControl}
               {pluginNamespace && <CodePluginPicker key={pluginNamespace} language={language} value={pluginConnectionId ?? ""}
                 disabled={Boolean(busy || pausedForInput || canFollowUp)} select={(id) => setCodePlugin(id ? { id, namespace: pluginNamespace } : undefined)} />}
@@ -1135,6 +1137,7 @@ function Desktop() {
             {snapshot?.projectPermissionProfile
               ? <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy} act={act} />
               : <span className="permission"><ShieldCheck size={15} aria-hidden="true" /> {copy.manual}</span>}
+            <PermissionSettings view={snapshot?.permissions} language={language} act={act} />
           </div>}
           {settingsView === "local-history" && <div className="execution-setting-row">
             <div>{codeHistoryControl}<small>{privacyCopy.historyDetail}</small></div>

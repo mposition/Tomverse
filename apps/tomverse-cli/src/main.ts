@@ -19,6 +19,9 @@ import { CLI_VERSION } from "./version.js";
 import { gitAvailable, normalizeRoot, PathError, ripgrepAvailable, same, Workspace } from "./workspace.js";
 
 import { memoryFileFor, ProjectMemory } from "./memory.js";
+import { PERMISSIONS_HELP, PermissionsUsageError, permissionsCommand } from "./permission-cli.js";
+import { PermissionGate } from "./permissions.js";
+import { PermissionRuleStore } from "./permission-rules.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -40,6 +43,7 @@ Usage:
   tomverse trust [folder]         Allow the CLI to work in a folder
   tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory> <value> | unset <key>
   tomverse memory [show|clear]    The notes the agent kept about this folder (clear asks first, or --yes)
+${PERMISSIONS_HELP.map((line) => `  ${line}`).join("\n")}
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
@@ -80,6 +84,10 @@ const parse = (argv: string[]) =>
             session: { type: "string" },
             turn: { type: "string" },
             yes: { type: "boolean" },
+            project: { type: "boolean" },
+            user: { type: "boolean" },
+            exact: { type: "boolean" },
+            revoke: { type: "boolean" },
             help: { type: "boolean", short: "h" },
             version: { type: "boolean", short: "v" },
         },
@@ -460,6 +468,8 @@ const engineExtras = (ctx: Context, root: string) => ({
     subagents: true,
     nestedInstructions: true,
     ...(ctx.config.memory === false ? {} : { memory: projectMemory(ctx, root) }),
+    // The permission rules (tomverse permissions): deny rules refuse, ask rules always ask, allow rules skip the question.
+    permissions: new PermissionGate({ mode: "ask", rules: () => new PermissionRuleStore({ root }).effective(), protectedDirs: [tomverseHome()] }),
 });
 
 const memoryCommand = async (ctx: Context, args: string[]) => {
@@ -762,6 +772,10 @@ export const main = async (argv: string[]): Promise<number> => {
                 return await configCommand(ctx, args);
             case "memory":
                 return await memoryCommand(ctx, args);
+            case "permissions":
+                return await permissionsCommand(args, normalizeRoot(flags.cwd ?? process.cwd()), flags, {
+                    write: (text) => void process.stdout.write(text), interactive: isInteractive(), confirm: (question) => terminalPrompter().confirm(question),
+                });
             case "resume":
                 return await resume(ctx, args, !flags.json && isInteractive());
             case "exec": {
@@ -782,6 +796,7 @@ export const main = async (argv: string[]): Promise<number> => {
     } catch (error) {
         const known =
             error instanceof UsageError ||
+            error instanceof PermissionsUsageError ||
             error instanceof ConfigError ||
             error instanceof AuthError ||
             error instanceof PathError ||
@@ -793,6 +808,6 @@ export const main = async (argv: string[]): Promise<number> => {
         const message = error instanceof GatewayError ? describeApiError(error) : (error as Error).message;
         output.event({ type: "error", code: error instanceof GatewayError ? (error.extra.code ?? error.kind) : (error as Error).constructor.name, message });
         output.info(known ? message : `Unexpected error: ${message}`);
-        return error instanceof UsageError ? EXIT_CODES.usage : EXIT_CODES.error;
+        return error instanceof UsageError || error instanceof PermissionsUsageError ? EXIT_CODES.usage : EXIT_CODES.error;
     }
 };

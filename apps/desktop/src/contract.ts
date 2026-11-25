@@ -28,6 +28,7 @@ import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, t
   type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
+import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
 
 type DesktopDetail = keyof typeof desktopNativeCopy.en;
 
@@ -332,6 +333,8 @@ export type Snapshot = {
   codeNotifications: { available: boolean; enabled: boolean };
   codeExecutionPreference: CodeExecutionMode;
   projectPermissionProfile?: CodePermissionProfile;
+  /** The permission mode and the allow, ask and deny rules (permission-contract.ts). */
+  permissions?: PermissionsView;
   codeFallback: { scope: string; settings: CodeFallbackSettings } | null;
   codeFallbackCliModels: CodeFallbackCliModels;
   cliPaths: CliPaths;
@@ -387,6 +390,7 @@ export type DesktopApi = {
   subscribeWebView: (listener: (state: WebViewState | null) => void) => () => void;
   state(): Promise<Snapshot>;
   setProjectPermissionProfile(profile: CodePermissionProfile): Promise<boolean>;
+  permissions(command: PermissionCommand): Promise<PermissionResult>;
   setLanguage(language: Language): Promise<void>;
   setCodeExecutionPreference(mode: CodeExecutionMode): Promise<void>;
   updateCodeFallback(input: CodeFallbackUpdate): Promise<void>;
