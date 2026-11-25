@@ -121,6 +121,7 @@ export type GenerationIntent = {
  */
 export type GenerationHooks = {
     before(): Promise<GenerationIntent>;
+    transmission?(intent: GenerationIntent, body: unknown): void;
     headers(intent: GenerationIntent, info: { status: number; requestId: string | null; routedModel: string | null; appliedEffort?: Effort }): Promise<void>;
     failed(intent: GenerationIntent, error: GatewayError): Promise<void>;
     ended(intent: GenerationIntent, how: "complete" | "interrupted"): Promise<void>;
@@ -131,8 +132,13 @@ export class Gateway {
         readonly endpoint: Endpoint,
         private readonly key: string,
         private readonly fetchImpl: typeof fetch = globalThis.fetch,
-        private readonly client = `tomverse-cli/${CLI_VERSION}`
-    ) {}
+        private readonly client = `tomverse-cli/${CLI_VERSION}`,
+        private readonly maximumKeyCreditCap?: number
+    ) {
+        if (maximumKeyCreditCap !== undefined && (!Number.isSafeInteger(maximumKeyCreditCap) || maximumKeyCreditCap <= 0)) {
+            throw new GatewayError("protocol", "An approved continuation requires a positive credit cap.");
+        }
+    }
 
     /** The key's public prefix: lookups only find requests of this key. */
     get keyPrefix() {
@@ -177,9 +183,15 @@ export class Gateway {
         return response;
     }
 
-    private async getJson<T>(path: string, init: { headers?: Record<string, string>; signal?: AbortSignal } = {}) {
+    private async getJson<T>(path: string, { requireCappedContinuation, ...init }: {
+        headers?: Record<string, string>; signal?: AbortSignal; requireCappedContinuation?: boolean;
+    } = {}) {
         const response = await this.send(this.url(path), { method: "GET", ...init, timeoutMs: 20_000 });
         if (!response.ok) throw await readError(response);
+        if (requireCappedContinuation && response.headers.get("x-tomverse-code-capped-continuation") !== "key-cap-v1") {
+            await response.body?.cancel().catch(() => undefined);
+            throw new GatewayError("protocol", "The Code API has not enabled capped continuation.");
+        }
         try {
             return (await response.json()) as T;
         } catch {
@@ -206,7 +218,7 @@ export class Gateway {
         }));
     }
 
-    usage(limit = 20) {
+    usage(limit = 20, options?: { signal?: AbortSignal; requireCappedContinuation?: boolean }) {
         return this.getJson<{
             key: null | {
                 prefix: string;
@@ -218,7 +230,20 @@ export class Gateway {
                 expires_at: string | null;
             };
             requests: Receipt[];
-        }>(`/usage?limit=${limit}`);
+        }>(`/usage?limit=${limit}`, options);
+    }
+
+    async verifyCappedContinuation(signal: AbortSignal) {
+        const maximum = this.maximumKeyCreditCap;
+        if (maximum === undefined) throw new GatewayError("protocol", "No continuation credit cap was approved.");
+        const { key } = await this.usage(1, { signal, requireCappedContinuation: true });
+        const cap = key?.credit_cap;
+        const remaining = key?.remaining_cap_credits;
+        if (key?.prefix !== this.keyPrefix || typeof cap !== "number" || !Number.isSafeInteger(cap) || cap <= 0 || cap > maximum ||
+            typeof remaining !== "number" || !Number.isSafeInteger(remaining) || remaining <= 0 || remaining > cap) {
+            throw new GatewayError("limit", "The API key needs available credits and a cap within the approved continuation limit.");
+        }
+        return { cap, remaining };
     }
 
     /**
@@ -250,10 +275,16 @@ export class Gateway {
             if (href !== allowed || (init?.method ?? "GET").toUpperCase() !== "POST") {
                 throw new GatewayError("protocol", "Refused a model request outside POST /chat/completions.");
             }
-            const requestBody = isExplicitEffort(effort)
-                ? JSON.stringify({ ...JSON.parse(String(init?.body)), tomverse_effort: effort })
+            const requestBody = isExplicitEffort(effort) || this.maximumKeyCreditCap !== undefined
+                ? JSON.stringify({
+                    ...JSON.parse(String(init?.body)),
+                    ...(isExplicitEffort(effort) ? { tomverse_effort: effort } : {}),
+                    // Older servers reject this unknown body field before dispatch.
+                    ...(this.maximumKeyCreditCap !== undefined ? { tomverse_max_key_credit_cap: this.maximumKeyCreditCap } : {}),
+                })
                 : init?.body;
             const intent = await hooks.before();
+            hooks.transmission?.(intent, requestBody);
             const headers = new Headers(init?.headers);
             // The SDK's own key header is replaced by send(); one source of truth.
             headers.delete("authorization");

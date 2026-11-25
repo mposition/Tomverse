@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { FakeGateway, TEST_KEY, toolResultsSinceUser } from "./fakeGateway.js";
-import { makeRepo, makeRunner, scriptedPrompter } from "./helpers.js";
+import { FakeGateway, fixtureWorkAnalysis, TEST_KEY, toolResultsSinceUser } from "./fakeGateway.js";
+import { captureOutput, makeRepo, makeRunner, scriptedPrompter } from "./helpers.js";
 import type { ApprovalView } from "../src/agent.js";
 
 /** The scripted model of a small bug fix: read, patch, run the test, report. */
@@ -97,6 +97,132 @@ test("read-only sessions offer no write or command tool at all", async () => {
         await gateway.stop();
     }
 });
+
+test("Desktop Agent keeps analysis read-only and only offers approved actions after publishing a work plan", async () => {
+    const plannedPatch = { name: "apply_patch", args: {
+        edits: [{ path: "sum.js", action: "update", replacements: [{ old: "return a - b;", new: "return a + b;" }] }],
+    } };
+    const gateway = await new FakeGateway({
+        script(body, index) {
+            const toolNames = body.tools.map((tool: any) => tool.function.name);
+            if (index < 2) assert.deepEqual([...toolNames].sort(), ["list_files", "read_file", "search_text", "update_task_plan"]);
+            if (index === 0) return { toolCalls: [{ name: "read_file", args: { path: "sum.js" } }] };
+            if (index === 1) return { toolCalls: [{ name: "update_task_plan", args: {
+                revision: 0, items: [{ id: "fix", title: "Correct the sum result" }], activeId: "fix",
+                analysis: { ...fixtureWorkAnalysis, verifiedFacts: ["sum.js subtracts the two inputs."] },
+            } }, plannedPatch] };
+            if (index === 2) {
+                assert.ok(toolNames.includes("apply_patch"));
+                assert.match(JSON.stringify(body.messages), /read-only analysis|not available|not registered|denied|not found/i);
+                return { toolCalls: [plannedPatch] };
+            }
+            return { text: "The sum now adds its two inputs." };
+        },
+    }).start();
+    try {
+        const root = makeRepo();
+        const seen: ApprovalView[] = [];
+        const { runner, journal } = await makeRunner(gateway, root, { taskPlan: "agent", prompter: scriptedPrompter([true], seen) });
+        assert.equal(await runner.runTask("The sum is wrong. Inspect and correct it."), "success");
+        assert.equal(seen.length, 1);
+        assert.equal(journal.state.changes.length, 1);
+        assert.equal(journal.state.tasks[0]?.plan?.analysis?.verifiedFacts[0], "sum.js subtracts the two inputs.");
+        assert.match(readFileSync(join(root, "sum.js"), "utf8"), /a \+ b/);
+        assert.equal(gateway.completions.length, 4);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("Desktop Agent can inspect an ambiguous request and ask before choosing work", async () => {
+    const gateway = await new FakeGateway({
+        script(body, index) {
+            assert.deepEqual(body.tools.map((tool: any) => tool.function.name).sort(),
+                ["list_files", "read_file", "search_text", "update_task_plan"]);
+            assert.match(body.messages[0].content, /clarification field/);
+            if (index === 0) return { toolCalls: [{ name: "read_file", args: { path: "sum.js" } }] };
+            assert.match(JSON.stringify(toolResultsSinceUser(body)), /return a - b/);
+            return { toolCalls: [{ name: "update_task_plan", args: {
+                revision: 0, items: [], activeId: null, analysis: fixtureWorkAnalysis,
+                clarification: "Should the function add the inputs or keep subtracting?",
+            } }] };
+        },
+    }).start();
+    try {
+        const root = makeRepo();
+        const seen: ApprovalView[] = [];
+        const captured = captureOutput();
+        const { runner, journal } = await makeRunner(gateway, root,
+            { taskPlan: "agent", output: captured.output, prompter: scriptedPrompter([], seen) });
+        assert.equal(await runner.runTask("The result looks wrong. Can you check it?"), "success");
+        assert.match(captured.out.join(""), /Should the function add the inputs or keep subtracting\?/);
+        assert.equal(gateway.completions.length, 2);
+        assert.deepEqual(journal.state.tasks[0]?.plan?.items, []);
+        assert.equal(journal.state.tasks[0]?.plan?.activeId, null);
+        assert.equal(journal.state.tasks[0]?.plan?.clarification, "Should the function add the inputs or keep subtracting?");
+        assert.deepEqual(journal.state.messages.at(-1), {
+            role: "assistant", content: "Should the function add the inputs or keep subtracting?",
+        });
+        assert.equal(journal.state.tools.length, 0);
+        assert.equal(seen.length, 0);
+        assert.match(readFileSync(join(root, "sum.js"), "utf8"), /return a - b/);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+for (const mode of ["tool arguments", "assistant text"]) {
+    test("A clarification keeps a denied tool response adjacent before resuming (" + mode + ")", async () => {
+        const question = "Should the report include archived records?";
+        const answer = "Include the archived records.";
+        const rows = [{ id: "change", title: "Check the report" }];
+        const gateway = await new FakeGateway({
+            script(body, index) {
+                if (index === 0) return { toolCalls: [{ name: "update_task_plan", args: {
+                    revision: 0, items: rows, activeId: "change", analysis: fixtureWorkAnalysis,
+                } }] };
+                if (index === 1) return { ...(mode === "assistant text" ? { text: question } : {}), toolCalls: [
+                    { name: "update_task_plan", args: { revision: 1, items: [], activeId: null,
+                        analysis: fixtureWorkAnalysis, clarification: question } },
+                    { name: "apply_patch", args: { edits: [{ path: "sum.js", action: "update",
+                        replacements: [{ old: "return a - b;", new: "return a + b;" }] }] } },
+                ] };
+                const transcript = JSON.stringify(body.messages);
+                assert.ok(transcript.includes(question) && transcript.includes(answer));
+                return { finish: "length", text: "I will check the archived records." };
+            },
+        }).start();
+        try {
+            const root = makeRepo();
+            const seen: ApprovalView[] = [];
+            const captured = captureOutput();
+            const { runner, journal } = await makeRunner(gateway, root,
+                { taskPlan: "agent", output: captured.output, prompter: scriptedPrompter([], seen) });
+            assert.equal(await runner.runTask("Check the search report."), "success");
+            assert.equal(gateway.completions.length, 2);
+            assert.equal(seen.length, 0);
+            assert.equal(journal.state.approvals.at(-1)?.decision, "denied");
+            assert.match(readFileSync(join(root, "sum.js"), "utf8"), /return a - b/);
+            const messages = journal.state.messages;
+            const responseIndex = messages.findIndex((message) => message.role === "tool" &&
+                message.content.some((part) => part.type === "tool-approval-response"));
+            const questionIndex = messages.findIndex((message) => message.role === "assistant" && (
+                typeof message.content === "string" ? message.content === question :
+                message.content.some((part) => part.type === "text" && part.text === question)));
+            assert.ok(responseIndex >= 0 && questionIndex >= 0);
+            if (mode === "tool arguments") assert.equal(questionIndex, responseIndex + 1);
+            else assert.ok(questionIndex < responseIndex);
+            const denial = messages[responseIndex];
+            assert.ok(denial?.role === "tool" && denial.content.some((part) =>
+                part.type === "tool-result" && part.toolName === "apply_patch" && part.output.type === "execution-denied"));
+            assert.equal(await runner.loop({ text: answer, confirmed() {} }), "success", captured.err.join("") + captured.out.join(""));
+            assert.match(captured.err.join("") + captured.out.join(""), /reached the output limit/);
+            assert.equal(gateway.completions.length, 3);
+        } finally {
+            await gateway.stop();
+        }
+    });
+}
 
 test("without a terminal an approval stops the run as needs_approval; nothing is written", async () => {
     const gateway = await new FakeGateway({ script: fixScript }).start();

@@ -89,6 +89,12 @@ const eslintConfig = defineConfig([
     "vendor/amux/**",
   ]),
   {
+    // Electron renders local assets and blob previews without a Next.js image server.
+    name: "tomverse/desktop-renderer-images",
+    files: ["apps/desktop/src/renderer/**/*.tsx"],
+    rules: { "@next/next/no-img-element": "off" },
+  },
+  {
     // The one rule PACKAGE-01 is measured on. `npm run check:shared-packages`
     // counts violations of it through ESLint's own API rather than
     // re-implementing the scan, so the gate metric and the lint failure can

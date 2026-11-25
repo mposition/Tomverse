@@ -302,7 +302,13 @@ const diff = async (ctx: Context) => {
         for (const view of views) {
             const note = { as_written: "as the CLI left it", changed_since: "CHANGED SINCE (undo will refuse)", missing: "MISSING", undone: "undone", not_applied: "not applied", outside: "NO LONGER INSIDE THE WORKSPACE (undo will refuse)" }[view.current];
             process.stdout.write(`\n${view.changeId}  ${view.kind} ${safeLine(view.path)}  [${note}]\n`);
-            if (view.current === "as_written" || view.current === "changed_since") process.stdout.write(`${renderChange(journal, view)}\n`);
+            if (view.state === "applied" || view.state === "undone") {
+                try {
+                    process.stdout.write(`${renderChange(journal, view)}\n`);
+                } catch {
+                    process.stdout.write("The recorded diff is unavailable.\n");
+                }
+            }
         }
         process.stdout.write("\nOnly changes this CLI made are listed; other uncommitted changes in the folder are yours and are not shown.\n");
     } finally {

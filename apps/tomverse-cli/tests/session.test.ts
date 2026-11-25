@@ -60,7 +60,15 @@ test("checkpoints are atomic files; a corrupt one is reported, never silently re
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".tmp")), [], "no temp file left behind");
     writeFileSync(join(dir, "session.json"), '{"schemaVersion":1,"id":"trunc');
     assert.throws(() => Journal.open(home, journal.state.id), /cannot be read\. The previous checkpoint is kept/);
+    assert.equal(existsSync(join(dir, "lock")), false);
     assert.equal(listSessions(home)[0]!.status, "unreadable");
+});
+
+test("a failed first checkpoint leaves no empty task in the session list", () => {
+    const home = tempDir("home");
+    assert.throws(() => Journal.create(home, init(), { writeFileAtomic: () => { throw new Error("No space left"); } }), JournalError);
+    assert.deepEqual(readdirSync(sessionsDir(home)), []);
+    assert.deepEqual(listSessions(home), []);
 });
 
 test("session files are private to their owner on POSIX", { skip: process.platform === "win32" }, () => {

@@ -1,9 +1,10 @@
 /** Headless entry: no CLI main, terminal input, config or environment reads on import. */
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { viewChanges } from "./changes.js";
 import { Journal, type JournalIo, type SessionState } from "./session.js";
 import { Gateway, type Receipt, type CatalogModel } from "./gateway.js";
 import { Workspace, normalizeRoot, same } from "./workspace.js";
+import { catalogProviderFor } from "./transmission.js";
 import type { Endpoint } from "./config.js";
 export { Runner, SMART_ADAPTIVE, EXIT_CODES } from "./agent.js";
 export type { ApprovalView, ApprovalDecision, Prompter, RunnerOptions, Outcome } from "./agent.js";
@@ -11,11 +12,12 @@ export { Gateway, GatewayError } from "./gateway.js";
 export type { CatalogModel, Receipt } from "./gateway.js";
 export { Journal, listSessions, deleteSession, canonicalDigest, sha256, writeFileAtomic } from "./session.js";
 export type { JournalIo, SessionState } from "./session.js";
-export { Workspace, normalizeRoot, same, isSecretPath } from "./workspace.js";
+export { Workspace, normalizeRoot, same, isSecretPath, withWorkspaceReferences } from "./workspace.js";
+export type { WorkspaceReference } from "./workspace.js";
 export { resolveEndpoint, DEFAULT_ENDPOINT } from "./config.js";
 export type { Endpoint } from "./config.js";
 export { ApprovalMemory } from "./approvals.js";
-export { viewChanges, undoChange } from "./changes.js";
+export { viewChange, viewChanges, renderChange, undoChange, canUndoChange, UndoError } from "./changes.js";
 export { safeText, safeLine } from "./display.js";
 export type { Output } from "./display.js";
 export { planPatchCall } from "./tools.js";
@@ -32,6 +34,10 @@ export const createSession = (
         model: CatalogModel;
         readOnly: boolean;
         limits: SessionState["limits"];
+        sessionId?: string;
+        codeContinuation?: SessionState["codeContinuation"];
+        codeMode?: SessionState["codeMode"];
+        codePermission?: SessionState["codePermission"];
     },
     io?: JournalIo,
 ) =>
@@ -43,6 +49,9 @@ export const createSession = (
             endpointBase: options.endpoint.base,
             keyPrefix: options.keyPrefix,
             ...(options.keyIdentity ? { keyIdentity: options.keyIdentity } : {}),
+            ...(options.codeContinuation ? { codeContinuation: options.codeContinuation } : {}),
+            ...(options.codeMode ? { codeMode: options.codeMode } : {}),
+            ...(options.codePermission ? { codePermission: options.codePermission } : {}),
             readOnly: options.readOnly,
             model: {
                 requested: options.model.id,
@@ -54,6 +63,7 @@ export const createSession = (
             limits: options.limits,
         },
         io,
+        options.sessionId,
     );
 export const validateSession = (journal: Journal, endpoint: Endpoint, keyPrefix: string, catalog?: CatalogModel[]) => {
     const state = journal.state;
@@ -68,7 +78,7 @@ export const validateSession = (journal: Journal, endpoint: Endpoint, keyPrefix:
     return root;
 };
 /** This session's own receipts, summed. Never the key's total before and after. */
-export const sessionCost = async (gateway: Gateway, journal: Journal) => {
+export const sessionCost = async (gateway: Gateway, journal: Journal, catalog?: CatalogModel[]) => {
     const generations = journal.state.generations;
     const byId = new Map<string, Receipt>();
     try {
@@ -99,17 +109,23 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
         .sort((x, y) => (x.lookupAt ?? "").localeCompare(y.lookupAt ?? ""))
         .slice(0, 40);
     for (const g of open) {
+        g.lookup = undefined;
         try {
             const found = await gateway.requestStatus(g.requestId ? { requestId: g.requestId } : { idempotencyKey: g.idempotencyKey });
-            g.lookup = found.found ? "found" : "not_found";
-            g.receipt = found.found ? found.receipt : null;
-            if (found.found) g.requestId = found.receipt.requestId;
+            if (!found.found || !g.requestId || found.receipt.requestId === g.requestId) {
+                g.lookup = found.found ? "found" : "not_found";
+                g.receipt = found.found ? found.receipt : null;
+                if (found.found) g.requestId = found.receipt.requestId;
+            }
         } catch {
             // left as it was: unknown
         }
         g.lookupAt = new Date().toISOString();
     }
     try {
+        if (catalog) for (const generation of generations) {
+            if (generation.state === "complete") generation.catalogProvider = catalogProviderFor(generation, catalog);
+        }
         journal.commit();
     } catch {
         // the totals below are still right for this process
@@ -125,20 +141,39 @@ export const sessionCost = async (gateway: Gateway, journal: Journal) => {
     return { requests: generations.length, charged, held, unknown };
 };
 
-export const readInstructions = (workspace: Workspace) => {
+const MAX_INSTRUCTIONS_LENGTH = 32_000;
+
+export const readProjectInstructions = (workspace: Workspace): { text: string; truncated: boolean } | null => {
     // Through the same real-path check as every read: an AGENTS.md that is a
     // link out of the folder is not sent.
-    let path: string;
     try {
         const resolved = workspace.resolve("AGENTS.md", "read");
         if (!resolved.exists || !statSync(resolved.absolute).isFile()) return null;
-        path = resolved.absolute;
+        const file = openSync(resolved.absolute, "r");
+        try {
+            if (!fstatSync(file).isFile()) return null;
+            const buffer = Buffer.alloc(MAX_INSTRUCTIONS_LENGTH * 4 + 4);
+            let offset = 0;
+            while (offset < buffer.length) {
+                const count = readSync(file, buffer, offset, buffer.length - offset, offset);
+                if (!count) break;
+                offset += count;
+            }
+            const text = buffer.toString("utf8", 0, offset);
+            const truncated = text.length > MAX_INSTRUCTIONS_LENGTH;
+            if (!truncated) return { text, truncated };
+            const lastIncludedUnit = text.charCodeAt(MAX_INSTRUCTIONS_LENGTH - 1);
+            const end = lastIncludedUnit >= 0xd800 && lastIncludedUnit <= 0xdbff ? MAX_INSTRUCTIONS_LENGTH - 1 : MAX_INSTRUCTIONS_LENGTH;
+            return { text: `${text.slice(0, end)}\n[AGENTS.md continues; read the file for the rest]`, truncated };
+        } finally {
+            closeSync(file);
+        }
     } catch {
         return null;
     }
-    const text = readFileSync(path, "utf8");
-    return text.length > 32_000 ? `${text.slice(0, 32_000)}\n[AGENTS.md continues; read the file for the rest]` : text;
 };
+
+export const readInstructions = (workspace: Workspace) => readProjectInstructions(workspace)?.text ?? null;
 
 /**
  * After a crash: what the journal says was under way. A write whose end was
@@ -158,3 +193,9 @@ export const reconcile = (journal: Journal) => {
     if (notes.length) journal.commit();
     return notes;
 };
+
+/** A known exit code does not settle a command with an unconfirmed process tree. */
+export function hasUnconfirmedToolOutcome(tool: SessionState["tools"][number]): boolean {
+    const result = tool.output as { processTreeChecked?: boolean; residualProcesses?: number[] } | undefined;
+    return tool.state === "started" || result?.processTreeChecked === false || Boolean(result?.residualProcesses?.length);
+}
