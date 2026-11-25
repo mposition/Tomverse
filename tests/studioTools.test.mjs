@@ -54,26 +54,33 @@ test("Poster and social exports retain their designed output ratios", () => {
   assert.deepEqual(STUDIO_EXPORT_FORMATS.map(({ width, height }) => width / height), [4 / 5, 1, 9 / 16]);
 });
 
-test("Poster briefs use the selected art direction and keep exact-copy or typeset generation distinct", () => {
+test("Poster briefs use the selected art direction and have the model set the headline once", () => {
   assert.deepEqual([STUDIO_EXPORT_FORMATS[0].width, STUDIO_EXPORT_FORMATS[0].height], [2160, 2700]);
   const posters = studioPublicationPresets("poster");
   const designs = posters.map(preset => studioPublishingDesign("poster", preset.id));
   assert.equal(new Set(designs.map(design => design.direction)).size, posters.length);
-  assert.equal(new Set(designs.map(design => design.composition)).size, 4);
   const input = {
     kind: "poster", design: studioPublishingDesign("poster", "cafe-menu"),
-    locale: "ko", brief: "여름 한정 메뉴", title: "콜드브루", details: "₩6,500",
+    language: "Korean", brief: "여름 한정 메뉴", title: "콜드브루 \"온도\"", details: "₩6,500",
     hasPhoto: true, hasLogo: true,
   };
   const exact = studioPublishingPrompt(input);
   assert.match(exact, /Premium tabletop food photography/);
-  assert.match(exact, /No letters, invented logos or additional copy/);
   assert.match(exact, /Use the reference as the featured subject/);
-  assert.ok(exact.includes('"headlineContext":"콜드브루"'));
-  const automatic = studioPublishingPrompt({ ...input, title: "", hasPhoto: false });
-  assert.match(automatic, /complete, professionally typeset artwork in ko/);
-  assert.match(automatic, /Keep important typography clear of the bottom edge/);
+  // A supplied headline reaches the model as the literal text to set; the canvas never sets it again.
+  assert.ok(exact.includes('Set this exact headline once, character for character, in its own script: "콜드브루 \\"온도\\"".'));
+  assert.equal(exact.split("콜드브루").length - 1, 1);
+  assert.match(exact, /Keep the bottom 22% free of typography/);
+  // The canvas places the details, so their text stays out of the prompt and cannot be drawn twice.
+  assert.doesNotMatch(exact, /6,500/);
+  assert.doesNotMatch(exact, /No letters/);
+  const story = studioPublishingPrompt({ ...input, kind: "social-post", placement: studioSocialFormat("instagram-story") });
+  assert.match(story, /Keep the bottom 35% free of typography/);
+  const automatic = studioPublishingPrompt({ ...input, title: "", details: "", hasPhoto: false, hasLogo: false });
+  assert.match(automatic, /Write one short headline in Korean based on the brief/);
   assert.match(automatic, /Continue the artwork to the frame edges/);
+  assert.match(automatic, /never a photograph or mockup of a poster/);
+  assert.doesNotMatch(automatic, /Keep the bottom/);
   assert.doesNotMatch(automatic, /Use the reference as the featured subject/);
 });
 
@@ -93,7 +100,7 @@ test("Social placements have their own dimensions, safe areas and recommended st
   assert.equal(studioOrderedSocialPresets("Instagram")[0].id, "photo-dump");
   assert.equal(studioOrderedSocialPresets("Pinterest")[0].id, "inspiration-pin");
   for (const preset of studioPublicationPresets("social-post")) {
-    assert.ok(studioPublishingDesign("social-post", preset.id).paper);
+    assert.ok(studioPublishingDesign("social-post", preset.id).direction.includes(preset.direction));
   }
 });
 
