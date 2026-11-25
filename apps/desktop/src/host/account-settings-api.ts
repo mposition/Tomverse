@@ -113,6 +113,8 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
         body: { name: input.name, creditCap: input.creditCap } };
     case "revokeKey":
       return { path: "/api/user/api-keys/" + encodeURIComponent(input.id), method: "DELETE" };
+    case "keyUsage":
+      return { path: "/api/user/api-keys/" + encodeURIComponent(input.id) };
     case "usage":
       return { path: "/api/user/usage" };
     case "exportHistory":

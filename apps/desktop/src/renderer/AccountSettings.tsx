@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import type { AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
 import { ASSISTANT_PROFILE_LIMITS } from "../../../../lib/assistantProfileVersioning";
@@ -14,6 +14,7 @@ import { desktopImportFilePrivacy, ExternalConversationImport } from "./External
 import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
 import { AssistantExtras } from "./AssistantExtras";
 import { LoginMethods } from "./LoginMethodsSettings";
+import { DeveloperOverview, KeyUsage } from "./DeveloperExtras";
 import { ModelFinderPanel, ReviewProviderDefaults } from "./AiSettingsExtras";
 import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
 import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
@@ -610,9 +611,10 @@ function Keys({ language }: Common) {
   const invalidCap = cap !== null && (!Number.isSafeInteger(cap) || cap < 1 || cap > max);
   return <div data-testid="native-account-api-keys">
     <h3>{copy.keysTitle}</h3>
+    <DeveloperOverview language={language} data={state.data} />
     {!enabled && <p>{copy.unavailable}</p>}
     {keys.length === 0 && <p>{copy.noKeys}</p>}
-    {keys.map(key => <AccountSettingRow key={key.id} label={key.name}
+    {keys.map(key => <Fragment key={key.id}><AccountSettingRow label={key.name}
       description={<><code>{key.keyPrefix}</code> · {key.state === "active" ? copy.stateActive
         : key.state === "expired" ? copy.stateExpired : copy.stateRevoked}</>}>
       {key.state === "active" && <div className="account-settings-actions">
@@ -623,7 +625,7 @@ function Keys({ language }: Common) {
         <button type="button" className="soft" disabled={busy}
           onClick={() => { setRevoke(key); setForm(undefined); }}>{copy.revoke}</button>
       </div>}
-    </AccountSettingRow>)}
+    </AccountSettingRow><KeyUsage language={language} keyData={key} /></Fragment>)}
     {revoke && <div className="desktop-setting-section" role="group" aria-label={copy.revoke}>
       <p>{copy.revokeConfirm.replace("{name}", () => revoke.name)}</p>
       <div className="account-settings-actions">

@@ -154,6 +154,7 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateKey"), id: accountId, name: z.string().trim().min(1).max(80),
     creditCap: z.number().int().positive().nullable() }).strict(),
   z.object({ action: z.literal("revokeKey"), id: accountId }).strict(),
+  z.object({ action: z.literal("keyUsage"), id: accountId }).strict(),
   z.object({ action: z.literal("usage") }).strict(),
   z.object({ action: z.literal("exportHistory") }).strict(),
   z.object({ action: z.literal("deleteMemory"), id: accountId }).strict(),
@@ -174,7 +175,14 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
   ]) }).strict(),
 ]);
 
+const keyRequest = z.object({
+  requestId: z.string().max(200), modelId: z.string().max(200), protocol: z.string().max(40).nullish(), surface: z.string().max(40).nullish(),
+  createdAt: z.string(), status: z.string().max(40), outcome: z.string().max(80).nullable(), heldCredits: z.number(),
+  chargedCredits: z.number().nullable(), usage: z.object({ inputTokens: z.number(), outputTokens: z.number() }).nullable(),
+});
+
 const keySummary = z.object({
+  lastUsedAt: z.string().nullable().optional(),
   id: accountId, name: label, keyPrefix: label, state: z.enum(["active", "expired", "revoked"]),
   expiresAt: z.string().nullable(), creditCap: z.number().int().positive().nullable(), committedCredits: z.number(),
 });
@@ -277,7 +285,10 @@ export const desktopAccountSettingsOutput = {
     expiresAt: importTimestamp,
   }),
   revokeConversationShare: z.object({ success: z.literal(true) }),
+  keyUsage: z.object({ requests: z.array(keyRequest).max(200) }),
   keys: z.object({
+    // The connection addresses and the plan reason come from the same list the web developer tab reads.
+    baseUrl: z.url().optional(), codingBaseUrl: z.url().optional(), reason: z.string().max(80).optional(),
     enabled: z.boolean(), keys: z.array(keySummary),
     limits: z.object({ maxKeys: z.number().int().positive(), maxCreditCap: z.number().int().positive(),
       expiryDays: z.array(z.number().int().positive()) }).optional(),

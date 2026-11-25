@@ -203,3 +203,25 @@ test("the Model Finder choices stay equal to the web catalogue", async () => {
   assert.deepEqual([...MODEL_FINDER_TASK_IDS], [...MODEL_FINDER_TASKS]);
   assert.deepEqual([...MODEL_FINDER_PRIORITY_IDS], [...MODEL_FINDER_PRIORITIES]);
 });
+
+test("the developer tab reads addresses, last use and the recent requests of a key", async () => {
+  const { settings, calls } = settingsWith((url) => url.pathname === "/api/user/api-keys" ? Response.json({
+    enabled: true, baseUrl: "https://tomverse.example/api/v1", codingBaseUrl: "https://tomverse.example/api/code/v1",
+    limits: { maxKeys: 5, maxCreditCap: 1000, expiryDays: [30] }, tomverseCli: { install: "npm i -g tomverse" },
+    keys: [{ id: "key_1", name: "Raycast", keyPrefix: "tv_abc", state: "active", expiresAt: null, creditCap: 100, committedCredits: 12,
+      heldCredits: 0, lastUsedAt: "2026-11-24T00:00:00.000Z" }],
+  }) : Response.json({ requests: [
+    { requestId: "req_1", modelId: "m1", protocol: "openai", surface: "general", createdAt: "2026-11-24T00:00:00.000Z", status: "settled",
+      outcome: "completed", heldCredits: 1, chargedCredits: 2, usage: { inputTokens: 10, outputTokens: 20 }, errorCode: null },
+  ] }));
+  const keys = (await settings({ action: "keys" })) as AccountSettingsResult<"keys">;
+  assert.equal(keys.baseUrl, "https://tomverse.example/api/v1");
+  assert.equal(keys.codingBaseUrl, "https://tomverse.example/api/code/v1");
+  assert.equal(keys.keys[0].lastUsedAt, "2026-11-24T00:00:00.000Z");
+  const usage = (await settings({ action: "keyUsage", id: "key_1" })) as AccountSettingsResult<"keyUsage">;
+  assert.equal(usage.requests[0].usage?.outputTokens, 20);
+  assert.deepEqual(calls.map(call => call.path), ["/api/user/api-keys", "/api/user/api-keys/key_1"]);
+  assert.equal(desktopAccountSettingsInput.safeParse({ action: "keyUsage", id: "../keys" }).success, false);
+  const { settings: plain } = settingsWith(() => Response.json({ enabled: false, reason: "plan_not_eligible", keys: [] }));
+  assert.equal(((await plain({ action: "keys" })) as AccountSettingsResult<"keys">).reason, "plan_not_eligible");
+});
