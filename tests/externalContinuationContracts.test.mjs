@@ -1025,16 +1025,17 @@ test("no in-conversation image path starts on a continuation route", () => {
     assert.match(client, /const imageIntentRoutedOnSend =\s*inConversationImagesAllowed &&/);
     // An ordinary composer send is one with no options, or with only a reasoning effort.
     assert.match(client, /const ordinaryComposerSend = options === undefined \|\| \(options\.reasoningEffort !== undefined && Object\.keys\(options\)\.length === 1\);/);
-    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*reviewWorkspace\.mode === "professional" &&\s*ordinaryComposerSend && reviewWorkspace\.imagePromptMode/);
+    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*reviewWorkspace\.mode === "professional" &&\s*ordinaryComposerSend && composerImageModelIds\.length > 0/);
     assert.match(client, /const professionalImageRouting = mountedSurface === "workspace" &&\s*inConversationImagesAllowed &&/);
     // Easy still routes text per question (review round 6); only an image
     // outcome is refused, before anything is saved.
     assert.match(client, /if \(mountedSurface === "workspace" && \(reviewWorkspace\.mode === "easy" \|\| professionalImageRouting\) &&/);
     assert.match(client, /if \(decision\.kind === "image"\) \{\s*if \(!inConversationImagesAllowed\) \{(?:\s*\/\/[^\n]*\n)+\s*reviewWorkspace\.setError\(t\("continuation\.imagesUnavailable"\)\); return;/);
-    // The Review image tools never enter this conversation's image mode.
-    assert.match(client, /if \(mountedSurface === "workspace"\) \{(?:\s*\/\/[^\n]*\n)+\s*if \(!inConversationImagesAllowed\) return;/);
+    // A continuation never arms in-conversation image models, in either product.
+    assert.match(client, /const selectComposerImageModel = \(modelId: string\) => \{\s*if \(!inConversationImagesAllowed\) return;/);
+    assert.match(client, /if \(mountedSurface !== "workspace" \|\| !inConversationImagesAllowed\) return;/);
     assert.equal(
-        client.split('onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ?').length - 1,
+        client.split('onSelectImageModel={canOfferNewImage && inConversationImagesAllowed ? selectComposerImageModel : undefined}').length - 1,
         2
     );
     // A failed product read is an error, never a guessed Review composer.
