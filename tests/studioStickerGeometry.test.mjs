@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam,
+  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, studioStickerRowEdge,
 } from "../lib/studioStickerGeometry.ts";
 import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
 import { IMAGE_PROMPT_MAX_TOKENS } from "../lib/imageGenerationPricing.ts";
-import { studioStickerPrompt } from "../lib/studioStickerPrompt.ts";
+import { studioStickerBrief } from "../lib/studioStickerPrompt.ts";
 
 function fill(data, stride, left, top, width, height) {
   for (let y = top; y < top + height; y++) {
@@ -13,36 +13,49 @@ function fill(data, stride, left, top, width, height) {
   }
 }
 
-test("Studio gives every sticker an ordered pose cue while keeping original identity and text separate", () => {
-  const cues = Array.from({ length: 20 }, (_, i) => "문구 " + (i + 1));
-  const pack = studioStickerPrompt("real", cues);
-  assert.match(pack, /fixed 5-column by 4-row grid/);
-  assert.match(pack, /The app places captions/);
-  assert.match(pack, /large hand-painted marker caption with thick rounded strokes/);
-  assert.match(pack, /Vary the side, angle and height between cells/);
-  assert.match(pack, /Keep the reference face shape, eye shape and spacing/);
-  assert.match(pack, /Let its longest axis nearly fill the cell/);
-  assert.match(pack, /slim green margin on all four sides/);
-  const rows = pack.split("\n").filter(line => /^Row \d+: /.test(line));
-  assert.deepEqual(rows.flatMap(row => row.replace(/^Row \d+: /, "").split(" | ").map(value => JSON.parse(value.replace(/^Act out the meaning of /, "")))), cues);
-  const short = studioStickerPrompt("character", cues.slice(0, 7));
-  assert.match(short, /Row 3: Act out the meaning of "문구 7" \| \[empty\] \| \[empty\]/);
-  assert.match(studioStickerPrompt("real", [cues[0]]), /Make one centered chat sticker/);
+test("Studio letters the exact submitted captions in reading order for either face style", () => {
+  const captions = Array.from({ length: 20 }, (_, i) => `문구 ${i + 1}`);
+  const { prompt } = studioStickerBrief("real", captions);
+  assert.match(prompt, /5-column by 4-row grid/);
+  assert.match(prompt, /lettering specimens/);
+  const rows = prompt.split("\n").filter(line => /^Row \d+: /.test(line));
+  assert.deepEqual(rows.flatMap(row => row.replace(/^Row \d+: /, "").split(" | ").map(word => JSON.parse(word))), captions);
+  const partial = studioStickerBrief("character", captions.slice(0, 7));
+  assert.match(partial.prompt, /Row 3: "문구 7"$/);
+  assert.match(partial.prompt, /unused trailing cells blank/);
+  for (const [style, caption] of [["character", "加油！"], ["real", 'He said "hi"!'], ["real", "좋아!"]]) {
+    const single = studioStickerBrief(style, [caption]).prompt;
+    assert.match(single, /one finished chat sticker/);
+    assert.ok(single.includes(JSON.stringify(caption)));
+  }
 });
 
-test("Studio storyboards known captions without asking the image model to draw their text", () => {
-  const prompt = studioStickerPrompt("real", ["굿굿!", "사랑해", "Good night", "배고파"]);
+test("Known poses still carry the exact word the model must letter", () => {
+  const captions = ["굿굿!", "사랑해", "Good night", "배고파"];
+  const { prompt } = studioStickerBrief("real", captions);
   assert.match(prompt, /foreshortened thumbs-up.*huge red felt heart/);
   assert.match(prompt, /huge pillow.*improbably tall burger/);
-  assert.match(prompt, /Capture the peak reaction/);
-  for (const caption of ["굿굿!", "사랑해", "Good night", "배고파"]) assert.ok(!prompt.includes(caption));
+  for (const caption of captions) assert.equal(prompt.split(JSON.stringify(caption)).length - 1, 1);
 });
 
-test("Studio keeps long custom action cues when compressing the art directions", () => {
-  const caption = "의견을모아서결정한뒤에다시연락할게요!";
-  const prompt = studioStickerPrompt("real", Array(20).fill(caption));
-  assert.equal(prompt.split(caption).length - 1, 20);
-  assert.ok(estimatePromptTokens(prompt) <= IMAGE_PROMPT_MAX_TOKENS);
+test("Dense multilingual packs preserve every spelling within the image prompt limit", () => {
+  for (const word of ["의견을모아서결정한뒤에다시연락할게요!", "龜".repeat(30)]) {
+    const captions = Array.from({ length: 20 }, (_, i) => word + (i + 1));
+    const { prompt, spellingKey } = studioStickerBrief("real", captions);
+    assert.ok(estimatePromptTokens(prompt) <= IMAGE_PROMPT_MAX_TOKENS);
+    if (spellingKey) assert.deepEqual(spellingKey, captions);
+    else for (const caption of captions) assert.ok(prompt.includes(JSON.stringify(caption)));
+  }
+  assert.equal(studioStickerBrief("real", Array(20).fill("龜".repeat(32))).spellingKey.length, 20);
+});
+
+test("Two native captions keep all their ink when they overhang the same gutter at different heights", () => {
+  const ink = new Uint8ClampedArray(80 * 40 * 4);
+  fill(ink, 80, 12, 4, 30, 9);
+  fill(ink, 80, 37, 18, 25, 8);
+  assert.equal(studioStickerRowEdge(ink, 80, 40, 7, 6), 42);
+  assert.equal(studioStickerRowEdge(ink, 80, 40, 20, 6), 37);
+  assert.equal(studioStickerRowEdge(ink, 80, 40, 16, 6), 40);
 });
 
 test("Studio sticker crop follows gutters offset from the nominal center", () => {

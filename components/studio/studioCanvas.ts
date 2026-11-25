@@ -1,5 +1,5 @@
 import {
-  studioStickerArt, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, type StickerRect,
+  studioStickerArt, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, studioStickerRowEdge, type StickerRect,
 } from "@/lib/studioStickerGeometry";
 import { studioStickerLayout } from "@/lib/studioTools";
 import type { Language } from "@/lib/language";
@@ -300,6 +300,28 @@ export async function makeStudioImageReference(source: string) {
   return encode(element);
 }
 
+export async function makeStudioStickerReference(source: string, spellingKey?: readonly string[]) {
+  const [portrait, specimen] = await Promise.all([readImage(source), readImage("/studio/sticker-lettering.png")]);
+  const portraitHeight = spellingKey ? 560 : 800;
+  const { element, context } = canvas(1024, spellingKey ? 1024 : portraitHeight);
+  fillStickerBackground(context);
+  drawImage(context, portrait, 752, portraitHeight, "contain");
+  const specimenHeight = Math.min(portraitHeight - 32, 500);
+  const specimenWidth = specimenHeight * specimen.naturalWidth / specimen.naturalHeight;
+  context.drawImage(specimen, 752 + (272 - specimenWidth) / 2, (portraitHeight - specimenHeight) / 2, specimenWidth, specimenHeight);
+  if (spellingKey) {
+    context.fillStyle = "#201914";
+    context.font = "22px sans-serif";
+    const rows = Math.ceil(spellingKey.length / 2);
+    spellingKey.forEach((word, i) => {
+      const x = 12 + (i % 2) * 512;
+      const y = portraitHeight + (Math.floor(i / 2) + .7) * (element.height - portraitHeight) / rows;
+      context.fillText(`${i + 1}. ${word}`, x, y, 488);
+    });
+  }
+  return encode(element);
+}
+
 export const studioStyleReferenceDirection =
   "The wide left panel is the subject reference. The narrow right panel contains material, color and lighting samples. Use the left panel for the person's identity and the right panel only for the chosen look. Output one complete image with no panel layout.";
 
@@ -321,24 +343,6 @@ export async function makeStudioStyleReference(source: string, styleSource: stri
   context.drawImage(style, 0, lower, style.naturalWidth, style.naturalHeight - lower,
     stripLeft, 640, stripWidth, element.height - 640);
   return encode(element);
-}
-
-export async function removeStudioGreenScreen(blob: Blob) {
-  const source = URL.createObjectURL(blob);
-  try {
-    const image = await readImage(source);
-    const { element, context } = canvas(image.naturalWidth, image.naturalHeight);
-    drawImage(context, image, element.width, element.height, "contain");
-    const pixels = context.getImageData(0, 0, element.width, element.height);
-    for (let i = 0; i < pixels.data.length; i += 4) {
-      const [red, green, blue] = [pixels.data[i], pixels.data[i + 1], pixels.data[i + 2]];
-      if (green >= 110 && green - Math.max(red, blue) >= 48) pixels.data[i + 3] = 0;
-    }
-    context.putImageData(pixels, 0, 0);
-    return await encode(element);
-  } finally {
-    URL.revokeObjectURL(source);
-  }
 }
 
 export async function applyStudioSubjectMask(source: string, mask: Blob) {
@@ -366,18 +370,39 @@ export async function applyStudioSubjectMask(source: string, mask: Blob) {
   }
 }
 
-export async function splitStudioSheet(source: string, captions: readonly string[], language: Language) {
+export async function splitStudioSheet(source: string, count: number) {
   const image = await readImage(source);
   if (image.naturalWidth < 250 || image.naturalHeight < 200) throw new Error("Sticker sheet too small");
-  const { columns, rows } = studioStickerLayout(captions.length);
+  const { columns, rows } = studioStickerLayout(count);
   const { naturalWidth: width, naturalHeight: height } = image;
   const { context } = canvas(width, height);
   context.drawImage(image, 0, 0);
   const pixels = context.getImageData(0, 0, width, height).data;
-  const cells = studioStickerCells(pixels, width, height, columns, rows, captions.length);
-  return Promise.all(captions.map((caption, index) => {
-    const cell = cells[index];
-    return studioStickerCrossesSeam(pixels, width, height, cell) ? null : renderStickerCell(image, cell, caption, language);
+  // Ignore the ivory paper for cut detection only. Export the model's original ink and antialiasing.
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i] >= 232 && pixels[i + 1] >= 223 && pixels[i + 2] >= 209) pixels[i + 3] = 0;
+  }
+  const cells = studioStickerCells(pixels, width, height, columns, rows, count);
+  const radius = Math.round(width / columns * .10);
+  return Promise.all(cells.map(cell => {
+    if (studioStickerCrossesSeam(pixels, width, height, cell) || !studioStickerArt(pixels, width, cell)) return null;
+    const edges = Array.from({ length: cell.height }, (_, dy) => ({
+      left: studioStickerRowEdge(pixels, width, cell.left, cell.top + dy, radius),
+      right: studioStickerRowEdge(pixels, width, cell.left + cell.width, cell.top + dy, radius),
+    }));
+    const left = Math.min(...edges.map(edge => edge.left));
+    const right = Math.max(...edges.map(edge => edge.right));
+    const tile = canvas(right - left, cell.height);
+    fillStickerBackground(tile.context);
+    for (let y = 0; y < cell.height;) {
+      const edge = edges[y];
+      let end = y + 1;
+      while (end < cell.height && edges[end].left === edge.left && edges[end].right === edge.right) end++;
+      const span = edge.right - edge.left;
+      tile.context.drawImage(image, edge.left, cell.top + y, span, end - y, edge.left - left, y, span, end - y);
+      y = end;
+    }
+    return encode(tile.element);
   }));
 }
 

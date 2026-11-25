@@ -93,6 +93,19 @@ export function studioStickerCrossesSeam(
     || (bottom < height && crosses(cell.width, i => continuous(cell.left + i, bottom - 1, cell.left + i, bottom)));
 }
 
+// Trace the short edge of a protruding prop into the gutter on this scanline.
+// The adjacent tiles use the same edge, so neither keeps a sliver of its neighbour.
+export function studioStickerRowEdge(data: Uint8ClampedArray, stride: number, x: number, y: number, radius: number) {
+  if (x === 0 || x === stride) return x;
+  const ink = (column: number) => data[(y * stride + column) * 4 + 3] >= 128;
+  if (!ink(x - 1) || !ink(x)) return x;
+  for (let i = 1; i <= radius; i++) {
+    if (x - i > 0 && !ink(x - i - 1)) return x - i;
+    if (x + i < stride && !ink(x + i)) return x + i;
+  }
+  return x;
+}
+
 export function studioStickerBounds(
   data: Uint8ClampedArray, stride: number, rect: StickerRect,
 ): StickerRect | null {
