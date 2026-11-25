@@ -55,6 +55,7 @@ import { ImageHistoryList, ImageWorkspace, useImageWorkspace } from "./ImageWork
 import { useAttachmentDraft } from "./AttachmentDraft";
 import { HandoffDraft, useHandoffSelection } from "./WorkspaceHandoff";
 import { ProviderCliSettings } from "./ProviderCliSettings";
+import { openDocs, useWebViewState, WebViewer } from "./WebViewer";
 import { clearDesktopDrafts, readCodeDraft, writeDesktopDraft } from "./draft-store";
 import "./styles.css";
 
@@ -210,6 +211,7 @@ function Desktop() {
   const [workspace, setWorkspace] = useState<Workspace>("code");
   const [openBrowserScope, setOpenBrowserScope] = useState<string | null>(null);
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
+  const webView = useWebViewState();
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const surface: Surface = settingsView ? "settings" : workspace;
   const canShowBrowser = surface === "code" && snapshot?.codeBrowserAvailable === true;
@@ -768,7 +770,7 @@ function Desktop() {
       </div>
       <div className="rail-footer">
         <button className="rail-tool rail-help" type="button" aria-label={controls.help} title={controls.help}
-          onClick={() => void act(() => window.desktop.openWeb("help"))}><CircleHelp size={19} aria-hidden="true" /><span>{controls.help}</span></button>
+          onClick={() => void act(() => openDocs("help"))}><CircleHelp size={19} aria-hidden="true" /><span>{controls.help}</span></button>
         <button ref={settingsTrigger} type="button" className="rail-tool rail-settings" aria-pressed={surface === "settings"} title={common.settings}
           onClick={() => settingsView ? closeSettings() : openSettings()}>
           <SlidersHorizontal size={19} aria-hidden="true" /><span>{common.settings}</span>
@@ -803,7 +805,7 @@ function Desktop() {
           aria-controls={searchOpen ? "code-history-filter" : undefined}
           onClick={() => searchOpen ? closeCodeHistorySearch() : setSearchOpen(true)}><Search size={18} /></button>}
         {textHistory && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
-          onClick={() => void act(() => window.desktop.openWeb("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
+          onClick={() => void act(() => openDocs("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
       </div>
       {nativeImages && <ImageHistoryList workspace={images} onClose={() => setImagesOpen(false)} />}
       {chatRail && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading} canModify={snapshot?.capabilities?.chatWrite === true}
@@ -920,6 +922,7 @@ function Desktop() {
               : <button className="icon" type="button" aria-label={copy.desktopSettings} onClick={() => openSettings()}><Ellipsis size={18} /></button>}
         </div>
       </header>
+      {webView && <WebViewer state={webView} language={language} />}
       {handoffNotice && <p className="offline-notice" role="alert">
         {filesCopy[handoffNotice].replace("{limit}", MAX_HANDOFF_EXCERPT_CHARACTERS.toLocaleString(language))}
       </p>}
@@ -1048,7 +1051,7 @@ function Desktop() {
         </div>
       </div>{canShowBrowser && browserOpen && <CodeBrowser language={language}
         canShare={snapshot?.codeBrowserInspection === true && task?.status === "running"}
-        hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen} onClose={() => setOpenBrowserScope(null)} />}
+        hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}
       </div> : nativeImages ? <ImageWorkspace key={images.seedVersion} workspace={images} capability={imageCapability} />
         : nativeChat ? <>{reviewReference && <div className="review-reference" role="status">
           <p>{reviewCopy.referencePrompt}</p>
@@ -1154,7 +1157,7 @@ function Desktop() {
           <h2>{names[surface]}</h2>{surface !== "chat" && <p>{copy.webFallback}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}
           <div className="web-launcher">
-            {surface === "chat" ? <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
+            {surface === "chat" || surface === "settings" ? <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
               : <button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb(surface))}>
                 <ExternalLink size={16} /> {copy.openSurface.replace("{surface}", () => names[surface])}</button>}
           </div>

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserState } from "../browser-contract";
+import type { WebViewState } from "../web-view-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
 import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
 import type { DesktopLoginState, LoginApi } from "../login-contract";
@@ -57,6 +58,12 @@ if (trustedWindow) {
       const onState = (_event: Electron.IpcRendererEvent, state: BrowserState) => listener(state);
       ipcRenderer.on("desktop:code-browser-state", onState);
       return () => ipcRenderer.removeListener("desktop:code-browser-state", onState);
+    },
+    webView: (command: Parameters<DesktopApi["webView"]>[0]) => ipcRenderer.invoke("desktop:web-view", command),
+    subscribeWebView(listener: (state: WebViewState | null) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: WebViewState | null) => listener(state);
+      ipcRenderer.on("desktop:web-view-state", onState);
+      return () => ipcRenderer.removeListener("desktop:web-view-state", onState);
     },
     chooseRoot: () => ipcRenderer.invoke("desktop:choose-root"),
     retryCodeCatalog: () => ipcRenderer.invoke("desktop:retry-code-catalog"),

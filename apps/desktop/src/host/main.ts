@@ -7,6 +7,7 @@ import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
+import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
@@ -69,7 +70,6 @@ import { IMAGE_QUALITY_BY_PRESET } from "../../../../lib/imageGenerationPricing"
 import { attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentUpload, type DriveImportInput } from "../attachment-contract";
 import { CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../../lib/chatAttachmentLimits";
 import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib/generatedArtifactCore";
-import { settingsSectionHref } from "../../../../lib/settingsNavigation";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import { desktopNativeCopy } from "../../../../locales/desktopNative";
 
@@ -96,9 +96,7 @@ const unsafeSwitches = [
   "remote-debugging-address",
   "no-sandbox", "disable-setuid-sandbox", "disable-web-security", "allow-running-insecure-content", "ignore-certificate-errors",
 ];
-const webPaths = { chat: "/chat", review: "/review", plugins: "/plugins", settings: "/chat", keys: "/settings/api",
-  image: "/studio", imports: "/settings/imports", memory: settingsSectionHref("memory", "chat"), privacy: "/privacy",
-  help: "/support/help-centre" } as const;
+const webPaths = { review: "/review", plugins: "/plugins", image: "/studio" } as const;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 declare const DESKTOP_PACKAGED_TASK_QA: boolean;
 declare const DESKTOP_LOCAL_DEV_PACKAGE: boolean;
@@ -635,6 +633,17 @@ const cliAuthGuides = {
   deepseek: "https://github.com/deepseek-ai/deepseek-harness",
   zhipu: "https://zcode.z.ai/en/docs/install",
 } satisfies Record<CliProvider, string>;
+
+const webViewHost = createWebViewHost({
+  owner: () => mainWindow,
+  origin: new URL(webOrigin).origin,
+  guideUrls: Object.values(cliAuthGuides),
+  language: () => state.language ?? "en",
+  publish: (next) => {
+    const owner = mainWindow;
+    if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:web-view-state", next);
+  },
+});
 
 function loadCodeNotifications() {
   let enabled = false;
@@ -2796,7 +2805,8 @@ function registerIpc() {
     const kind = z.enum(["account", "protocol"]).parse(value);
     if (cliInspection?.kind === kind) cliInspection.controller.abort();
   });
-  main("desktop:open-cli-auth-guide", (value) => shell.openExternal(cliAuthGuides[cliProvider.parse(value)]));
+  main("desktop:open-cli-auth-guide", (value) => webViewHost.openGuide(cliAuthGuides[cliProvider.parse(value)]));
+  main("desktop:web-view", (value) => webViewHost.run(value));
   main("desktop:choose-root", chooseRoot);
   main("desktop:retry-code-catalog", retryCodeCatalog);
   main("desktop:confirm-handoff", (value) => confirmWorkspaceHandoff(workspaceHandoffInput.parse(value)));

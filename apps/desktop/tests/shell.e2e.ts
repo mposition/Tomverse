@@ -37,6 +37,24 @@ test("Desktop settings follow the account tab order and return to the workspace 
     await expect(codeTitle).toHaveCSS("font-family", '"Tomverse Wordmark", sans-serif');
     assert.equal(await page.evaluate(async () => (await document.fonts.load('650 16px "Tomverse Wordmark"')).length), 1);
     await rail.getByRole("button", { name: "Help", exact: true }).click();
+    const docs = page.getByTestId("desktop-web-view");
+    await expect(docs).toBeVisible();
+    await expect(docs.getByRole("navigation", { name: "Contents", exact: true })).toBeVisible();
+    await docs.getByTestId("desktop-docs-privacy").click();
+    await expect(docs.getByTestId("desktop-docs-privacy")).toHaveAttribute("aria-current", "page");
+    const documentViews = await application.evaluate(async ({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      const views = window.contentView.children.flatMap((child) => "webContents" in child ? [child as Electron.WebContentsView] : []);
+      return Promise.all(views.map(async (view) => ({
+        globals: await view.webContents.executeJavaScript("[typeof window.desktop, typeof require, typeof process].join()"),
+        persistent: view.webContents.session.isPersistent(), shared: view.webContents.session === window.webContents.session,
+      })));
+    });
+    assert.deepEqual(documentViews, [{ globals: "undefined,undefined,undefined", persistent: false, shared: false }]);
+    await assert.rejects(page.evaluate(() => window.desktop.webView({ type: "open-link", url: "http://127.0.0.1:1/" })));
+    await assert.rejects(page.evaluate(() => window.desktop.webView({ type: "open-docs", section: "chat" as "help" })));
+    await docs.getByTestId("desktop-web-view-close").click();
+    await expect(docs).toHaveCount(0);
     await rail.getByRole("button", { name: "Review", exact: true }).click();
     await entry.click();
     await expect(account.getByRole("button")).toHaveText([
@@ -69,7 +87,7 @@ test("Desktop settings follow the account tab order and return to the workspace 
     }
     const targets = await application.evaluate(() =>
       (globalThis as typeof globalThis & { settingsTargets: string[] }).settingsTargets);
-    assert.deepEqual(targets, ["https://tomverse.app/support/help-centre"]);
+    assert.deepEqual(targets, []);
     await assert.rejects(page.evaluate(() => window.desktop.accountSettings({ action: "other" as "preferences" })));
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByRole("main").getByRole("heading", { name: "Review", exact: true })).toBeVisible();
@@ -877,7 +895,7 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
       };
     });
     assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.approvalHost]), ["undefined", "undefined"]);
-    await assert.rejects(page.evaluate(() => window.desktop.openWeb("https://example.invalid" as "chat")));
+    await assert.rejects(page.evaluate(() => window.desktop.openWeb("https://example.invalid" as "review")));
     assert.equal(await page.evaluate(() => typeof window.open("https://example.invalid")?.document), "undefined");
 
     const frame = "desktop-frame-probe";

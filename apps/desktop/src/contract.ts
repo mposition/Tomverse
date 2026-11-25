@@ -9,6 +9,7 @@ import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, Im
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState } from "./browser-contract";
+import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
@@ -81,7 +82,7 @@ export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
 }).strict();
-export const webDestination = z.enum(["chat", "review", "plugins", "settings", "image", "keys", "imports", "memory", "privacy", "help"]);
+export const webDestination = z.enum(["review", "plugins", "image"]);
 export type StartInput = z.infer<typeof startInput>;
 export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
@@ -308,6 +309,8 @@ export type DesktopApi = {
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
+  webView: (command: WebViewCommand) => Promise<void>;
+  subscribeWebView: (listener: (state: WebViewState | null) => void) => () => void;
   state(): Promise<Snapshot>;
   setProjectPermissionProfile(profile: CodePermissionProfile): Promise<boolean>;
   setLanguage(language: Language): Promise<void>;
