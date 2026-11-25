@@ -34,6 +34,7 @@ import { zhHant } from "../../../../locales/zhHant";
 import { reviewSeedFromChat } from "../../../../lib/chatReviewHandoff";
 import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
 import { DraftDictation } from "./DraftDictation";
+import { ImportedSourceUnlock } from "./ImportedSourceUnlock";
 import { AnswerModel, ChatMarkdown, CopyAnswer, UserMessageContent } from "./ChatTranscript";
 export { ChatMarkdown } from "./ChatTranscript";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
@@ -808,6 +809,8 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
     }}>{copy.retryImported}</button>}
     {source?.status === "deleted" && <p>{copy.deletedImported}</p>}
     {source?.status === "locked" && <p role="status">{copy.lockedImported}</p>}
+    {source?.status === "locked" && source.unlockable && <ImportedSourceUnlock id={id} language={language}
+      onUnlocked={() => { setLoading(true); setError(false); setAttempt((value) => value + 1); }} />}
     {source?.status === "available" && <>
       {(source.offset ?? 0) > 0 && <button className="soft" type="button" disabled={loading} onClick={() => {
         setLoading(true);

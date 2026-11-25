@@ -4,7 +4,7 @@ import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettin
 import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
 import type {
   ChatConversation, ChatHistoryHit, ChatHistoryRow, ChatImportedSource, ChatModel, ChatPageInput, ChatRenameInput, ChatSourceInput, ChatStarter,
-  ChatTurnInput, ChatTurnProgress, ChatTurnResult, DesktopTextProduct, ReviewAnalysisRequest, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
+  ChatTurnInput, ChatTurnProgress, ChatTurnResult, ChatUnlockImportedInput, ChatUnlockImportedResult, DesktopTextProduct, ReviewAnalysisRequest, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
 } from "./chat-contract";
 import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, ImageHistory, ImageRequest } from "./images-contract";
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
@@ -393,6 +393,7 @@ export type DesktopApi = {
   chatSearch(query: string, product?: DesktopTextProduct): Promise<ChatHistoryHit[]>;
   chatConversation(input: ChatPageInput): Promise<ChatConversation>;
   chatImportedSource(input: ChatSourceInput): Promise<ChatImportedSource>;
+  chatUnlockImportedSource(input: ChatUnlockImportedInput): Promise<ChatUnlockImportedResult>;
   renameChat(input: ChatRenameInput): Promise<{ title: string }>;
   removeChat(id: string): Promise<boolean>;
   chatModels(): Promise<ChatModel[]>;
