@@ -1590,3 +1590,46 @@ test("a whole-import delete keeps the chosen titles and previews them without ti
         2
     );
 });
+
+test("a locked source names its snapshot only to its owner on a Desktop request with the switch on", async (t) => {
+    const previous = process.env.TOMVERSE_DESKTOP_IMPORT_UNLOCK_ENABLED;
+    t.after(() => {
+        if (previous === undefined) delete process.env.TOMVERSE_DESKTOP_IMPORT_UNLOCK_ENABLED;
+        else process.env.TOMVERSE_DESKTOP_IMPORT_UNLOCK_ENABLED = previous;
+    });
+    const user = await createUser();
+    const stranger = await createUser();
+    const { snapshot } = await seedSnapshot(user.id, { count: 3 });
+    const created = await createExternalContinuation({
+        userId: user.id,
+        externalConversationId: snapshot.id,
+        idempotencyKey: randomUUID(),
+        productKey: "chat",
+        request: requestWithGrant(),
+    });
+    await prisma.externalConversation.update({ where: { id: snapshot.id }, data: { password: "hashed-password-stand-in" } });
+    const asked = (origin: string | null) =>
+        new Request("https://tomverse.test/api/conversations/x/continuation", { headers: origin ? { origin } : {} });
+    const { DESKTOP_APP_ORIGIN } = await import("@/lib/desktopReadApiContract");
+
+    delete process.env.TOMVERSE_DESKTOP_IMPORT_UNLOCK_ENABLED;
+    const off = await getContinuationTimeline(user.id, created.conversationId, { request: asked(DESKTOP_APP_ORIGIN) });
+    assert.deepEqual(off?.source, { status: "locked" });
+
+    process.env.TOMVERSE_DESKTOP_IMPORT_UNLOCK_ENABLED = "true";
+    const owner = await getContinuationTimeline(user.id, created.conversationId, { request: asked(DESKTOP_APP_ORIGIN) });
+    assert.deepEqual(owner?.source, { status: "locked", externalConversationId: snapshot.id });
+    // The web origin and an origin-less request never see it.
+    assert.deepEqual((await getContinuationTimeline(user.id, created.conversationId, { request: asked("https://tomverse.app") }))?.source, { status: "locked" });
+    assert.deepEqual((await getContinuationTimeline(user.id, created.conversationId, { request: asked(null) }))?.source, { status: "locked" });
+    // Another account has no bridge to read, so there is nothing to name.
+    assert.equal(await getContinuationTimeline(stranger.id, created.conversationId, { request: asked(DESKTOP_APP_ORIGIN) }), null);
+    // With the grant the transcript is available and carries no id.
+    const unlocked = await getContinuationTimeline(user.id, created.conversationId, {
+        request: new Request("https://tomverse.test/x", { headers: {
+            origin: DESKTOP_APP_ORIGIN,
+            cookie: createResourceUnlockCookie("external_conversation", user.id, snapshot.id, 0).split(";")[0]!,
+        } }),
+    });
+    assert.equal(unlocked?.source.status, "available");
+});

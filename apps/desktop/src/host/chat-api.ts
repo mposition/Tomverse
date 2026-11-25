@@ -23,7 +23,7 @@ import { imageGroup, imageHistory, imageReceipt, type ImageGenerationResult, typ
 import { formatByMediaType, resolveChatAttachmentFormat } from "../../../../lib/chatAttachmentFormats";
 import { attachmentUpload, type AttachmentBytesInput, type AttachmentUpload } from "../attachment-contract";
 import {
-  chatConversation, chatHistoryHit, chatHistoryRow, chatId, chatImportedSource, isDesktopChat, isDesktopReview,
+  chatConversation, chatHistoryHit, chatHistoryRow, chatId, chatImportedSourceWire, isDesktopChat, isDesktopReview,
   type ChatConversation, type ChatModel, type ChatRenameInput, type ChatPageInput, type ChatSourceInput, type ChatTurnInput, type DesktopTextProduct, type ReviewTurnInput, type SaveArtifactInput,
 } from "../chat-contract";
 import type { ReviewAnalysisRequest } from "../chat-contract";
@@ -277,7 +277,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       if (!response.ok) throw new DesktopApiError(response.status);
     },
     async importedSource({ id, offset }: ChatSourceInput) {
-      return request(pathFor(id) + "/continuation?offset=" + (offset ?? "end") + "&limit=50", chatImportedSource);
+      return request(pathFor(id) + "/continuation?offset=" + (offset ?? "end") + "&limit=50", chatImportedSourceWire);
     },
     async models(): Promise<ChatModel[]> {
       const { models } = await request("/api/models/catalog", catalog, "GET", undefined, { publicRead: true });

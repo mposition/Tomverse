@@ -125,15 +125,30 @@ export type ChatHistoryHit = z.infer<typeof chatHistoryHit>;
 export type ChatConversation = z.infer<typeof chatConversation>;
 export type ChatPageInput = z.infer<typeof chatPageInput>;
 export type DesktopTextProduct = z.infer<typeof desktopTextProduct>;
+const importedSourceBody = z.object({
+  status: z.enum(["available", "locked", "deleted"]),
+  messages: z.array(z.object({ id: chatId, role: z.string(), content: z.string() })).optional(),
+  offset: z.number().optional(),
+  messageTotal: z.number().optional(),
+});
+/** What the renderer gets. A locked original says only whether a password can open it here. */
 export const chatImportedSource = z.object({
   provider: z.string(),
-  source: z.object({
-    status: z.enum(["available", "locked", "deleted"]),
-    messages: z.array(z.object({ id: chatId, role: z.string(), content: z.string() })).optional(),
-    offset: z.number().optional(),
-    messageTotal: z.number().optional(),
-  }),
+  source: importedSourceBody.extend({ unlockable: z.boolean().optional() }),
 });
+/** What the server sends: the snapshot id stays in the main process and never reaches the renderer. */
+export const chatImportedSourceWire = z.object({
+  provider: z.string(),
+  source: importedSourceBody.extend({ externalConversationId: chatId.optional() }),
+});
+export const chatUnlockImportedInput = z.object({ id: chatId, password: z.string().min(1).max(128) }).strict();
+export const chatUnlockImportedResult = z.object({
+  status: z.enum(["unlocked", "wrong", "limited", "unavailable", "failed"]),
+  retryAfterSeconds: z.number().int().positive().max(86_400).optional(),
+}).strict();
+export type ChatUnlockImportedInput = z.infer<typeof chatUnlockImportedInput>;
+export type ChatUnlockImportedResult = z.infer<typeof chatUnlockImportedResult>;
+export type ChatImportedSourceWire = z.infer<typeof chatImportedSourceWire>;
 export type ChatSourceInput = z.infer<typeof chatSourceInput>;
 export type ChatImportedSource = z.infer<typeof chatImportedSource>;
 export type ChatRenameInput = z.infer<typeof chatRenameInput>;

@@ -116,6 +116,7 @@ if (trustedWindow) {
     chatSearch: (query: string, product?: DesktopTextProduct) => ipcRenderer.invoke("chat:search", { query, product }),
     chatConversation: (input: Parameters<DesktopApi["chatConversation"]>[0]) => ipcRenderer.invoke("chat:conversation", input),
     chatImportedSource: (input: Parameters<DesktopApi["chatImportedSource"]>[0]) => ipcRenderer.invoke("chat:imported-source", input),
+    chatUnlockImportedSource: (input: Parameters<DesktopApi["chatUnlockImportedSource"]>[0]) => ipcRenderer.invoke("chat:unlock-imported-source", input),
     renameChat: (input: Parameters<DesktopApi["renameChat"]>[0]) => ipcRenderer.invoke("chat:rename", input),
     removeChat: (id: string) => ipcRenderer.invoke("chat:remove", id),
     chatModels: () => ipcRenderer.invoke("chat:models"),

@@ -181,10 +181,21 @@ export function createAccountSettingsApi(
   async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number, extra?: Record<string, string>) {
     const session = await credential();
     const cookie = origin.startsWith("https:") ? "__Secure-next-auth.session-token" : "next-auth.session-token";
-    return transport(new URL(path, origin), {
+    // The session cookie goes to the account origin and nowhere else, whatever path a module builds.
+    const url = new URL(path, origin);
+    if (url.origin !== new URL(origin).origin) throw new Error("Account settings requests stay on the account origin.");
+    // A caller may add cookies (an imported-source unlock grant); they ride behind the session cookie
+    // and can never replace it. Every other extra header keeps its old, lower precedence.
+    const added: string[] = [];
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(extra ?? {})) {
+      if (name.toLowerCase() === "cookie") added.push(value);
+      else headers[name] = value;
+    }
+    return transport(url, {
       method, body: body ? JSON.stringify(body) : undefined,
       headers: {
-        ...extra, Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
+        ...headers, Cookie: [cookie + "=" + session.token, ...added].join("; "), Origin: origin, Accept: accept,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       redirect: "error", cache: "no-store", signal: signal(timeout),

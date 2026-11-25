@@ -15,6 +15,7 @@ import { openConnectorOAuthWindow } from "./connector-oauth-window";
 import { connectorInput } from "../connector-contract";
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
+import { createImportedSourceUnlock, type ImportedSourceUnlock } from "./imported-source-unlock";
 import { AccountDataRefusal } from "./account-data-refusal";
 import { desktopAccountDataInput } from "../account-data-contract";
 import { reviewExportFile, runChatExtras, startImageTurn } from "./chat-extras";
@@ -48,7 +49,7 @@ import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPat
 import { probeIsolatedClaudeAccount } from "./claude-account";
 import { probeIsolatedAcpAccount, probeIsolatedCliProtocol, probeIsolatedCodexAccount } from "./cli-protocol";
 import {
-  chatId, chatHistorySearchInput, chatPageInput, chatRenameInput, chatSourceInput, chatTurnInput, desktopTextProduct, reviewAnalysisRequest, reviewTurnInput, saveArtifactInput,
+  chatId, chatHistorySearchInput, chatPageInput, chatRenameInput, chatSourceInput, chatTurnInput, chatUnlockImportedInput, desktopTextProduct, reviewAnalysisRequest, reviewTurnInput, saveArtifactInput,
   type ChatTurnInput, type ChatTurnProgress, type ChatTurnResult, type DesktopTextProduct,
   type ReviewTurnInput, type ReviewTurnProgress, type ReviewTurnResult, type SaveArtifactInput,
 } from "../chat-contract";
@@ -2386,6 +2387,15 @@ function connectors() {
 }
 
 let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
+let importedUnlockApi: { signal: AbortSignal; api: ImportedSourceUnlock } | undefined;
+
+// Unlock grants for imported originals live in this object only, and end with the account session.
+function connectedImportedUnlock() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (importedUnlockApi?.signal !== signal) importedUnlockApi = { signal, api: createImportedSourceUnlock({ settings, signal }) };
+  return importedUnlockApi.api;
+}
 
 async function pickLocalFile({ extensions, maxBytes }: { extensions: readonly string[]; maxBytes: number }) {
   const window = mainWindow;
@@ -3260,7 +3270,11 @@ function registerIpc() {
   });
   main("chat:imported-source", (value) => {
     const input = chatSourceInput.parse(value);
-    return withChatAccount((api) => api.importedSource(input));
+    return connectedImportedUnlock().read(input, () => withChatAccount((api) => api.importedSource(input)));
+  });
+  main("chat:unlock-imported-source", (value) => {
+    const input = chatUnlockImportedInput.parse(value);
+    return connectedImportedUnlock().unlock(input.id, input.password);
   });
   main("chat:rename", (value) => {
     const input = chatRenameInput.parse(value);

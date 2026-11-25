@@ -256,6 +256,8 @@ pre, code { font-family: var(--font-code); }
 .chat-imported-source { display: grid; gap: 16px; margin-bottom: 24px; color: var(--muted); }
 .chat-imported-source > button, .chat-imported-source .thread { justify-self: start; }
 .chat-imported-source .thread { width: 100%; }
+.chat-imported-unlock { display: grid; gap: 8px; max-width: 360px; }
+.chat-imported-unlock label { display: grid; gap: 4px; }
 .chat-continuation-divider { border-bottom: 1px solid var(--line); padding-bottom: 10px; font-size: 12px; }
 .review-content { padding-top: 58px; }
 .review-turn { margin-bottom: 38px; }
