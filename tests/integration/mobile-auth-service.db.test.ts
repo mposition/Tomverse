@@ -194,8 +194,9 @@ test("Desktop settings sessions carry the family sign-in time only when the rece
   };
 
   const user = await createUser();
-  const signedInAt = new Date(Date.now() - 3 * 60 * 60_000);
-  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop", now: signedInAt });
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  // Back-date the sign-in in the row, not in the tokens: a token minted three hours ago would already be expired.
+  await prisma.mobileTokenFamily.updateMany({ where: { userId: user.id }, data: { createdAt: new Date(Date.now() - 3 * 60 * 60_000) } });
   const family = await prisma.mobileTokenFamily.findFirstOrThrow({ where: { userId: user.id } });
 
   delete process.env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED;

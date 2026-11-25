@@ -1607,7 +1607,9 @@ test("a locked source names its snapshot only to its owner on a Desktop request 
         productKey: "chat",
         request: requestWithGrant(),
     });
-    await prisma.externalConversation.update({ where: { id: snapshot.id }, data: { password: "hashed-password-stand-in" } });
+    // A trigger advances passwordVersion when the password changes; the grant must carry the stored one.
+    const locked = await prisma.externalConversation.update({ where: { id: snapshot.id }, data: { password: "hashed-password-stand-in" } });
+    assert.ok(locked.passwordVersion > 0);
     const asked = (origin: string | null) =>
         new Request("https://tomverse.test/api/conversations/x/continuation", { headers: origin ? { origin } : {} });
     const { DESKTOP_APP_ORIGIN } = await import("@/lib/desktopReadApiContract");
@@ -1628,7 +1630,7 @@ test("a locked source names its snapshot only to its owner on a Desktop request 
     const unlocked = await getContinuationTimeline(user.id, created.conversationId, {
         request: new Request("https://tomverse.test/x", { headers: {
             origin: DESKTOP_APP_ORIGIN,
-            cookie: createResourceUnlockCookie("external_conversation", user.id, snapshot.id, 0).split(";")[0]!,
+            cookie: createResourceUnlockCookie("external_conversation", user.id, snapshot.id, locked.passwordVersion).split(";")[0]!,
         } }),
     });
     assert.equal(unlocked?.source.status, "available");
