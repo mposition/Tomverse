@@ -22,7 +22,7 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
@@ -3037,6 +3037,15 @@ function registerIpc() {
         resolve(false);
       }
     });
+  });
+  main("desktop:stop-background", (value) => {
+    const { id, handle } = backgroundInput.parse(value);
+    const task = state.task;
+    const activeRunId = runId;
+    if (!worker || !activeRunId || activeRunId === discardedRunId || !state.busy || task?.id !== id ||
+        task.execution?.executionMode !== "tomverse_api" || suspended || closing || signingOut) return false;
+    try { send({ type: "stop-background", runId: activeRunId, handle }); return true; }
+    catch { return false; }
   });
   main("desktop:resume", (value) => {
     const session = sessionId.parse(value);

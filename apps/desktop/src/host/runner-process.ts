@@ -36,6 +36,8 @@ type ActiveRun = {
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
   queueOperation?: (operation: QueueOperation) => boolean;
+  /** Sends the task to the window again (a background command printed something or ended). */
+  refresh?: () => void;
   approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
 };
 let active: ActiveRun | undefined;
@@ -533,6 +535,17 @@ async function approveNativePatch(view: ApprovalView, signal: AbortSignal, contr
   return action === "once" && !signal.aborted;
 }
 
+/** The commands the task keeps running in the background, for the Code screen: what they are, whether they run, and their newest output. */
+function backgroundView(runner: Runner | undefined, clean: (text: string) => string): Task["background"] {
+  const list = runner?.background.list() ?? [];
+  if (!runner || !list.length) return undefined;
+  return list.slice(-8).map((info) => ({
+    handle: info.handle, command: clean(info.display).slice(0, 300), state: info.state, startedAt: info.startedAt,
+    ...(info.state !== "running" ? { exitCode: info.exitCode ?? null } : {}),
+    output: clean(runner.background.peek(info.handle, 4096)),
+  }));
+}
+
 function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalRequest {
   const clean = (text: string) => cleanText(text);
   const command = view.command;
@@ -545,6 +558,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
+      ...(command.background ? { background: true } : {}),
     },
     files: view.patch?.map((edit) => ({
       path: clean(edit.path), action: edit.action, eol: edit.eol, bom: edit.bom, preimage: edit.preimage,
@@ -616,7 +630,16 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
   if (!resuming) transient = undefined;
   const publish = () => {
     if (journal) Object.assign(task, journalEngine(journal.state, command.connection.key));
+    task.background = backgroundView(control.runner, clean);
     send({ type: "task", runId: command.runId, task });
+  };
+  let backgroundTimer: ReturnType<typeof setTimeout> | undefined;
+  control.refresh = () => {
+    if (backgroundTimer || active !== control) return;
+    backgroundTimer = setTimeout(() => {
+      backgroundTimer = undefined;
+      if (active === control) publish();
+    }, 400);
   };
   const addEvent = (event: string | ReturnType<typeof desktopCodeNotice>) => {
     const entry = typeof event === "string" ? { role: "event" as const, text: event } : event;
@@ -836,6 +859,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
+      onBackgroundActivity: () => control.refresh?.(),
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
@@ -928,7 +952,12 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
   } finally {
     control.queueFollowUp = undefined;
     control.queueOperation = undefined;
+    control.refresh = undefined;
+    clearTimeout(backgroundTimer);
     clearTimeout(streamTimer);
+    // Whatever way the task ended, nothing it started may keep running.
+    await control.runner?.stopBackground("task_ended").catch(() => undefined);
+    task.background = backgroundView(control.runner, clean);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {
         // Receipt reads may fail or lag while the server settles. Finish with the evidence available.
@@ -1386,6 +1415,9 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     try { ok = active?.runId === data.runId && active.queueOperation?.(data.operation) === true; }
     catch { /* A changed root or unwritable checkpoint cannot accept the change. */ }
     send({ type: "queue-result", runId: data.runId, requestId: data.requestId, ok });
+  } else if (data.type === "stop-background" && active?.runId === data.runId) {
+    const runner = active.runner;
+    if (runner && /^bg-[0-9a-f]{6}$/.test(data.handle)) void runner.background.stop(data.handle).then(() => active?.refresh?.(), () => undefined);
   } else if (data.type === "stop" && active?.runId === data.runId) {
     active.cancelled = true;
     active.abort.abort();

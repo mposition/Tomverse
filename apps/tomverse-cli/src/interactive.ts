@@ -44,7 +44,8 @@ export const renderApproval = (view: ApprovalView) => {
         }
     } else if (view.command) {
         const plan = view.command;
-        lines.push("── Approval needed: run a command ──");
+        lines.push(plan.background ? "── Approval needed: run a command in the BACKGROUND ──" : "── Approval needed: run a command ──");
+        if (plan.background) lines.push("  It keeps running in the background after you approve, with no time limit, until the task ends or the model stops it.");
         if (plan.mode === "argv") lines.push(`  program: ${safeLine(plan.file)}`, `  argv:    ${safeLine(plan.display)}`);
         else {
             // One shown line per real line, so a newline (a second command) is never
@@ -55,7 +56,7 @@ export const renderApproval = (view: ApprovalView) => {
             for (const line of commandLines) lines.push(`    | ${safeText(line)}`);
         }
         lines.push(`  folder:  ${safeLine(plan.cwd)}`);
-        lines.push(`  timeout: ${Math.round(plan.timeoutMs / 1000)} s`);
+        lines.push(plan.background ? "  timeout: none (background)" : `  timeout: ${Math.round(plan.timeoutMs / 1000)} s`);
         lines.push(`  env:     ${plan.envNames.length} variables (${plan.envNames.join(", ")}); your Tomverse key is not passed`);
         lines.push("  It runs with your account's permissions and is not sandboxed: it can change files outside this folder and use the network.");
     }

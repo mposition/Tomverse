@@ -95,6 +95,8 @@ export const queueOperation = z.discriminatedUnion("kind", [
 ]);
 export const queueInput = z.object({ id: z.string().regex(/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/), operation: queueOperation }).strict();
 export type QueueOperation = z.infer<typeof queueOperation>;
+const backgroundHandle = z.string().regex(/^bg-[0-9a-f]{6}$/);
+export const backgroundInput = z.object({ id: z.string().regex(/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/), handle: backgroundHandle }).strict();
 export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
@@ -212,6 +214,10 @@ export type Transmission = {
     listedPathCount?: number; truncatedListingCount?: number;
     fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number };
 };
+/** A command the task keeps running in the background: what it is, whether it still runs, and the newest of what it printed. */
+export type CodeBackgroundCommand = {
+  handle: string; command: string; state: "running" | "exited" | "stopped"; exitCode?: number | null; startedAt: string; output: string;
+};
 export type CodeGoalState = {
   maxContinuations: number; continuations: number;
   last?: { met: boolean; summary: string; next?: string };
@@ -247,6 +253,8 @@ export type Task = {
   pendingFollowUp?: string;
   /** Messages held for after the model finishes, in the order they will run. */
   queued?: Array<{ id: string; text: string }>;
+  /** Commands this task keeps running in the background; they end with the task. */
+  background?: CodeBackgroundCommand[];
   /** The saved limit profile when it is not the standard one. */
   limits?: Exclude<CodeLimitProfile, "standard">;
   goal?: CodeGoalState;
@@ -325,7 +333,7 @@ export type ApprovalRequest = {
   tool: string;
   explanation?: string;
   canRemember: boolean;
-  command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number };
+  command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
 };
 
@@ -364,6 +372,7 @@ export type DesktopApi = {
   resume(id: string): Promise<boolean>;
   followUp(id: FollowUpTarget, text: string): Promise<boolean>;
   queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
+  stopBackground(id: string, handle: string): Promise<boolean>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

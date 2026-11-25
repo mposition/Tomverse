@@ -184,6 +184,18 @@ per task".
   including descendants that moved to their own session — and anything that
   survived is reported. A program that detaches itself after the command has
   already finished is outside what the CLI can see.
+- **Background commands:** a command can be approved to keep running after the call
+  returns (a dev server, a watcher). The approval says "background" and "no
+  time limit", and is bound to that: approving a foreground command never
+  approves the same one in the background (an `a` answer does not carry over
+  either). The model gets a handle and can read what it printed since its last
+  read (bounded, stdout and stderr together), check its state and stop it,
+  without a further approval, because only handles the task itself started
+  exist. At most four run at once. They belong to the task: when it ends, is
+  stopped or cancelled, or the CLI exits, every process tree still running is
+  ended the way a timed-out command is (a hard kill of the CLI itself cannot
+  run that cleanup). The session records them; a resumed session tells the
+  model that its earlier background commands are no longer running.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a

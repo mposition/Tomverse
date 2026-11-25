@@ -152,5 +152,7 @@ export function toolPlanOutcome(name: string, output: unknown): TaskPlanEvidence
     if (typeof output !== "object" || output === null) return "failed";
     const result = output as Record<string, unknown>;
     if (result.processTreeChecked === false || (Array.isArray(result.residualProcesses) && result.residualProcesses.length > 0)) return "unconfirmed";
+    // A background command that started is not a check that passed or failed; it only has to have started.
+    if (name === "run_command" && result.background === true) return result.status === "started" ? "succeeded" : "failed";
     return result.status === "ok" && (name !== "run_command" || result.exitCode === 0) ? "succeeded" : "failed";
 }

@@ -40,6 +40,17 @@ type Copy = {
   effortMedium: string;
   effortXhigh: string;
   effortMax: string;
+  backgroundHeading: string;
+  backgroundHint: string;
+  backgroundRunning: string;
+  backgroundExited: string;
+  backgroundStopped: string;
+  backgroundStop: string;
+  backgroundOutput: string;
+  backgroundNoOutput: string;
+  backgroundStopFailed: string;
+  approvalBackground: string;
+  approvalNoTimeout: string;
 };
 
 export const desktopCodeEngineCopy = {
@@ -83,6 +94,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "Medium",
     effortXhigh: "Extra high",
     effortMax: "Maximum",
+    backgroundHeading: "Background commands",
+    backgroundHint: "These end when the task ends. You can stop one at any time.",
+    backgroundRunning: "Running",
+    backgroundExited: "Exited · code {code}",
+    backgroundStopped: "Stopped",
+    backgroundStop: "Stop",
+    backgroundOutput: "Output",
+    backgroundNoOutput: "No output yet.",
+    backgroundStopFailed: "The command could not be stopped from here.",
+    approvalBackground: "This command keeps running in the background after you allow it. It has no time limit and ends when the task ends or you stop it.",
+    approvalNoTimeout: "No time limit (background)",
   },
   ko: {
     limits: "작업 한도",
@@ -124,6 +146,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "중간",
     effortXhigh: "매우 높음",
     effortMax: "최대",
+    backgroundHeading: "백그라운드 명령",
+    backgroundHint: "작업이 끝나면 함께 종료됩니다. 언제든 직접 종료할 수 있습니다.",
+    backgroundRunning: "실행 중",
+    backgroundExited: "종료됨 · 코드 {code}",
+    backgroundStopped: "중지됨",
+    backgroundStop: "종료",
+    backgroundOutput: "출력 보기",
+    backgroundNoOutput: "아직 출력이 없습니다.",
+    backgroundStopFailed: "여기서 명령을 종료하지 못했습니다.",
+    approvalBackground: "허용하면 이 명령은 백그라운드에서 계속 실행됩니다. 시간 제한이 없으며, 작업이 끝나거나 직접 종료할 때까지 유지됩니다.",
+    approvalNoTimeout: "시간 제한 없음 (백그라운드)",
   },
   zh: {
     limits: "任务上限",
@@ -165,6 +198,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "中等",
     effortXhigh: "极高",
     effortMax: "最大",
+    backgroundHeading: "后台命令",
+    backgroundHint: "任务结束时它们会一并结束。你也可以随时手动停止。",
+    backgroundRunning: "运行中",
+    backgroundExited: "已退出 · 代码 {code}",
+    backgroundStopped: "已停止",
+    backgroundStop: "停止",
+    backgroundOutput: "查看输出",
+    backgroundNoOutput: "暂无输出。",
+    backgroundStopFailed: "无法在此停止该命令。",
+    approvalBackground: "允许后，此命令会在后台持续运行。它没有时间限制，直到任务结束或你手动停止才会结束。",
+    approvalNoTimeout: "无时间限制（后台）",
   },
   "zh-Hant": {
     limits: "任務上限",
@@ -206,6 +250,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "中等",
     effortXhigh: "極高",
     effortMax: "最大",
+    backgroundHeading: "背景命令",
+    backgroundHint: "工作結束時它們會一併結束。你也可以隨時手動停止。",
+    backgroundRunning: "執行中",
+    backgroundExited: "已結束 · 代碼 {code}",
+    backgroundStopped: "已停止",
+    backgroundStop: "停止",
+    backgroundOutput: "查看輸出",
+    backgroundNoOutput: "尚無輸出。",
+    backgroundStopFailed: "無法在此停止該命令。",
+    approvalBackground: "允許後，此命令會在背景持續執行。它沒有時間限制，直到工作結束或你手動停止才會結束。",
+    approvalNoTimeout: "無時間限制（背景）",
   },
   fr: {
     limits: "Limites de la tâche",
@@ -247,6 +302,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "Moyen",
     effortXhigh: "Très élevé",
     effortMax: "Maximum",
+    backgroundHeading: "Commandes en arrière-plan",
+    backgroundHint: "Elles se terminent avec la tâche. Vous pouvez en arrêter une à tout moment.",
+    backgroundRunning: "En cours",
+    backgroundExited: "Terminée · code {code}",
+    backgroundStopped: "Arrêtée",
+    backgroundStop: "Arrêter",
+    backgroundOutput: "Sortie",
+    backgroundNoOutput: "Pas encore de sortie.",
+    backgroundStopFailed: "Impossible d'arrêter la commande d'ici.",
+    approvalBackground: "Une fois autorisée, cette commande continue de s'exécuter en arrière-plan. Elle n'a pas de limite de durée et s'arrête avec la tâche ou quand vous l'arrêtez.",
+    approvalNoTimeout: "Pas de limite de durée (arrière-plan)",
   },
   de: {
     limits: "Aufgabenlimits",
@@ -288,6 +354,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "Mittel",
     effortXhigh: "Sehr hoch",
     effortMax: "Maximal",
+    backgroundHeading: "Hintergrundbefehle",
+    backgroundHint: "Sie enden mit der Aufgabe. Sie können jeden Befehl jederzeit selbst beenden.",
+    backgroundRunning: "Läuft",
+    backgroundExited: "Beendet · Code {code}",
+    backgroundStopped: "Gestoppt",
+    backgroundStop: "Beenden",
+    backgroundOutput: "Ausgabe",
+    backgroundNoOutput: "Noch keine Ausgabe.",
+    backgroundStopFailed: "Der Befehl konnte von hier nicht beendet werden.",
+    approvalBackground: "Nach der Freigabe läuft dieser Befehl im Hintergrund weiter. Er hat kein Zeitlimit und endet mit der Aufgabe oder wenn Sie ihn beenden.",
+    approvalNoTimeout: "Kein Zeitlimit (Hintergrund)",
   },
   es: {
     limits: "Límites de la tarea",
@@ -329,6 +406,17 @@ export const desktopCodeEngineCopy = {
     effortMedium: "Medio",
     effortXhigh: "Muy alto",
     effortMax: "Máximo",
+    backgroundHeading: "Comandos en segundo plano",
+    backgroundHint: "Terminan cuando termina la tarea. Puedes detener cada una cuando quieras.",
+    backgroundRunning: "En ejecución",
+    backgroundExited: "Finalizado · código {code}",
+    backgroundStopped: "Detenido",
+    backgroundStop: "Detener",
+    backgroundOutput: "Salida",
+    backgroundNoOutput: "Aún no hay salida.",
+    backgroundStopFailed: "No se pudo detener el comando desde aquí.",
+    approvalBackground: "Una vez permitido, este comando sigue ejecutándose en segundo plano. No tiene límite de tiempo y termina cuando acaba la tarea o lo detienes.",
+    approvalNoTimeout: "Sin límite de tiempo (segundo plano)",
   },
   pt: {
     limits: "Limites da tarefa",
@@ -370,5 +458,16 @@ export const desktopCodeEngineCopy = {
     effortMedium: "Médio",
     effortXhigh: "Muito alto",
     effortMax: "Máximo",
+    backgroundHeading: "Comandos em segundo plano",
+    backgroundHint: "Terminam quando a tarefa termina. Você pode parar qualquer uma a qualquer momento.",
+    backgroundRunning: "Em execução",
+    backgroundExited: "Encerrado · código {code}",
+    backgroundStopped: "Parado",
+    backgroundStop: "Parar",
+    backgroundOutput: "Saída",
+    backgroundNoOutput: "Ainda não há saída.",
+    backgroundStopFailed: "Não foi possível parar o comando daqui.",
+    approvalBackground: "Depois de permitido, este comando continua em execução em segundo plano. Não tem limite de tempo e termina quando a tarefa termina ou você o para.",
+    approvalNoTimeout: "Sem limite de tempo (segundo plano)",
   },
 } as const satisfies Record<Language, Copy>;

@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { commandEnv, planCommand, runCommand, CommandError, type CommandLaunch, type CommandPlan } from "./commands.js";
+import { BACKGROUND_READ_BYTES, type BackgroundCommands, type BackgroundInfo } from "./background.js";
 import { assertBoundFile, currentDigest, pathIdentity, planPatch, PatchError, removeFile, writeFileReplacing, type PatchEdit, type PlannedEdit } from "./patch.js";
 import { canonicalDigest, JournalError, sha256, type Journal } from "./session.js";
 import { PathError, type Workspace } from "./workspace.js";
@@ -33,6 +34,8 @@ export type ToolContext = {
     commandTimeoutMs: number;
     commandEnv: string[];
     launchCommand?: CommandLaunch;
+    /** The commands this task keeps running in the background; without it the background tools do not exist. */
+    background?: BackgroundCommands;
     signal: () => AbortSignal;
     assertAllowed?: () => void;
     effectBlockReason?: () => string | undefined;
@@ -43,6 +46,14 @@ export type ToolContext = {
     beforeCommand?: (plan: CommandPlan, toolCallId: string) => void;
     onActivity: (line: string) => void;
     onCommandOutput: (stream: "stdout" | "stderr", text: string) => void;
+};
+
+/** What the model is told about a background command's end. */
+const backgroundExit = (info: BackgroundInfo) => info.state === "running" ? {} : {
+    exitCode: info.exitCode ?? null,
+    ...(info.signal ? { signal: info.signal } : {}),
+    ...(info.endReason ? { endReason: info.endReason } : {}),
+    ...(info.residualProcesses?.length ? { residualProcesses: info.residualProcesses } : {}),
 };
 
 const toolError = (error: unknown) => ({
@@ -72,6 +83,7 @@ export const commandSchema = z.object({
     command: z.string().optional().describe("A shell line, for pipes, globs or Windows npm/npx (.cmd). Runs in PowerShell on Windows, bash/zsh/sh elsewhere."),
     cwd: z.string().optional().describe("Folder relative to the workspace root."),
     timeoutSeconds: z.number().optional(),
+    background: z.boolean().optional().describe("Keep the command running after this call returns, for a dev server or a watcher. It has no time limit and the user's approval says it runs in the background. You get a handle: read what it printed with read_background_output, stop it with stop_background. It is ended when this task ends."),
 });
 
 export type PatchInput = z.infer<typeof patchSchema>;
@@ -435,6 +447,9 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             if (decision.approval.binding.cwd !== plan.cwd) {
                 return { status: "error", error: "The working folder resolves differently than when it was approved; not run." };
             }
+            if ((decision.approval.binding.background ?? false) !== (plan.background ?? false)) {
+                return { status: "error", error: "The approval was for a different kind of run (background or not); not run." };
+            }
             // The program the approval showed (resolved on PATH on Windows) is the one that runs.
             if (decision.approval.binding.program !== undefined && decision.approval.binding.program !== plan.file) {
                 return { status: "error", error: `The program now resolves to ${plan.file}, not the ${decision.approval.binding.program} that was approved; not run.` };
@@ -447,6 +462,27 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             }
             plan.envNames = envNames;
             startTool(ctx, "run_command", toolCallId, decision.digest, plan);
+            if (plan.background) {
+                if (!ctx.background) return endTool(ctx, toolCallId, "failed", { status: "error", error: "Background commands are not available here." });
+                ctx.onActivity(`run in the background ${plan.display}`);
+                try {
+                    const started = await ctx.background.start(plan, toolCallId, ctx.redactText?.(plan.display) ?? plan.display, ctx.signal());
+                    return endTool(ctx, toolCallId, "completed", {
+                        status: "started",
+                        background: true,
+                        handle: started.info.handle,
+                        state: started.info.state,
+                        ...backgroundExit(started.info),
+                        output: ctx.redactText?.(started.output) ?? started.output,
+                        ...(started.more ? { moreOutput: true } : {}),
+                        note: started.info.state === "running"
+                            ? "Running in the background until this task ends. Read new output with read_background_output, stop it with stop_background."
+                            : "It already ended; see exitCode.",
+                    });
+                } catch (error) {
+                    return endTool(ctx, toolCallId, "failed", toolError(error));
+                }
+            }
             ctx.onActivity(`run ${plan.display}`);
             const execution = runCommand(plan, ctx.signal(), ctx.onCommandOutput, ctx.commandEnv, ctx.launchCommand).then((result) => {
                 const output = {
@@ -467,5 +503,64 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             return execution;
         },
     });
+    if (ctx.background) {
+        const background = ctx.background;
+        const clean = (text: string) => ctx.redactText?.(text) ?? text;
+        const guarded = <T>(run: () => T | Promise<T>) => async () => {
+            try {
+                ctx.assertAllowed?.();
+                ctx.signal().throwIfAborted();
+                return await run();
+            } catch (error) {
+                return toolError(error);
+            }
+        };
+        tools.read_background_output = tool({
+            description: "Read what a background command printed since the last time you read it (stdout and stderr together, bounded). Needs no approval.",
+            inputSchema: z.object({ handle: z.string(), maxBytes: z.number().optional() }),
+            execute: (input) => guarded(() => {
+                ctx.onActivity(`read_background_output ${input.handle}`);
+                const read = background.read(input.handle, input.maxBytes ?? BACKGROUND_READ_BYTES);
+                return {
+                    status: "ok",
+                    handle: read.info.handle,
+                    state: read.info.state,
+                    ...backgroundExit(read.info),
+                    output: clean(read.output),
+                    ...(read.more ? { moreOutput: true } : {}),
+                    ...(read.skippedBytes ? { skippedBytes: read.skippedBytes, note: "Older output was dropped to keep memory bounded." } : {}),
+                };
+            })(),
+        });
+        tools.background_status = tool({
+            description: "Whether the background commands this task started are still running. Without a handle, lists all of them.",
+            inputSchema: z.object({ handle: z.string().optional() }),
+            execute: (input) => guarded(() => {
+                ctx.onActivity(`background_status${input.handle ? ` ${input.handle}` : ""}`);
+                return {
+                    status: "ok",
+                    commands: background.status(input.handle).map((info) => ({
+                        handle: info.handle, state: info.state, command: info.display, startedAt: info.startedAt, ...backgroundExit(info),
+                    })),
+                };
+            })(),
+        });
+        tools.stop_background = tool({
+            description: "Stop a background command this task started, with all the processes it started. Needs no approval because only your own handles exist.",
+            inputSchema: z.object({ handle: z.string() }),
+            execute: (input) => guarded(async () => {
+                ctx.onActivity(`stop_background ${input.handle}`);
+                const stopped = await background.stop(input.handle);
+                return {
+                    status: "ok",
+                    handle: stopped.info.handle,
+                    state: stopped.info.state,
+                    ...backgroundExit(stopped.info),
+                    output: clean(stopped.output),
+                    ...(stopped.more ? { moreOutput: true } : {}),
+                };
+            })(),
+        });
+    }
     return tools;
 };

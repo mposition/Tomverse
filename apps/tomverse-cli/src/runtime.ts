@@ -218,6 +218,13 @@ export const reconcile = (journal: Journal) => {
         change.state = view?.current === "as_written" ? "applied" : "failed";
         notes.push(`A write of ${change.path} was under way: it is ${change.state === "applied" ? "complete" : "not complete (the file was left as it is)"}.`);
     }
+    for (const record of (journal.state.background ?? []).filter((b) => b.state === "running")) {
+        // The CLI that started it is gone: it was ended with its task if that ended cleanly, otherwise it is no longer tracked.
+        record.state = "exited";
+        record.endReason ??= "task_ended";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Background command ${record.handle} (${record.display.slice(0, 80)}) was running when the CLI stopped; it is no longer tracked.`);
+    }
     for (const tool of journal.state.tools.filter((t) => t.state === "started")) {
         notes.push(`${tool.toolName} (${tool.toolCallId}) had started and its outcome is unknown; it was not run again.`);
     }

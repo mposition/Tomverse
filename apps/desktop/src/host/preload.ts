@@ -84,6 +84,7 @@ if (trustedWindow) {
     resume: (id: string) => ipcRenderer.invoke("desktop:resume", id),
     queueMessage: (id: string, operation: Parameters<DesktopApi["queueMessage"]>[1]) => ipcRenderer.invoke("desktop:queue", { id, operation }),
     compactTask: (id: string) => ipcRenderer.invoke("desktop:compact-task", id),
+    stopBackground: (id: string, handle: string) => ipcRenderer.invoke("desktop:stop-background", { id, handle }),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),

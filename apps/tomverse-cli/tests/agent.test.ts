@@ -48,7 +48,7 @@ test("read -> approved patch -> approved test command -> report, over the real H
             assert.equal(c.body.model, "fake-coder");
             assert.equal(c.body.stream, true);
             assert.ok(c.body.max_tokens <= 8000);
-            assert.deepEqual(c.body.tools.map((t: any) => t.function.name).sort(), ["apply_patch", "list_files", "read_file", "run_command", "search_text"]);
+            assert.deepEqual(c.body.tools.map((t: any) => t.function.name).sort(), ["apply_patch", "background_status", "list_files", "read_background_output", "read_file", "run_command", "search_text", "stop_background"]);
         }
         // The journal holds the same keys, each recorded before its request.
         assert.deepEqual(journal.state.generations.map((g) => g.idempotencyKey), keys);

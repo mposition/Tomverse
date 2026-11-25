@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { journalContext, journalEngine } from "../src/host/journal-view";
 import { estimateTokens } from "../../tomverse-cli/src/runtime";
-import { MAX_CODE_PROMPT_CHARACTERS, queueInput, startInput } from "../src/contract";
+import { MAX_CODE_PROMPT_CHARACTERS, backgroundInput, queueInput, startInput } from "../src/contract";
 import { effortLabel, effortOptions } from "../src/renderer/CodeEngine";
 import { desktopCodeEngineCopy } from "../../../locales/desktopCodeEngine";
 import { SUPPORTED_LANGUAGES } from "../../../lib/language";
@@ -93,4 +93,12 @@ test("queue operations are validated: ids have one shape, text is trimmed and bo
     { kind: "move", itemId: item, direction: 2 }, { kind: "remove", itemId: "q-nothex" }, { kind: "remove", itemId: item, extra: true },
     { kind: "clear" }]) assert.throws(() => queueInput.parse({ id, operation }), JSON.stringify(operation).slice(0, 40));
   assert.throws(() => queueInput.parse({ id: "../../etc", operation: { kind: "add", text: "x" } }));
+});
+
+test("stopping a background command takes a session id and one handle shape, and nothing else", () => {
+  const id = "s-20260101-000000-abcdef";
+  assert.deepEqual(backgroundInput.parse({ id, handle: "bg-0a1b2c" }), { id, handle: "bg-0a1b2c" });
+  for (const input of [{ id, handle: "bg-xyz" }, { id, handle: "../bg-0a1b2c" }, { id, handle: "bg-0a1b2c", extra: 1 }, { id: "../etc", handle: "bg-0a1b2c" }, { id }]) {
+    assert.throws(() => backgroundInput.parse(input), JSON.stringify(input));
+  }
 });

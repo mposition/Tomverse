@@ -14,7 +14,8 @@ export type RememberedRule = "file_edits" | "same_command";
  * - file_edits: creating and changing files in the workspace where it was
  *   given (another folder is asked). Deleting a file is always asked.
  * - same_command: exactly the same program, arguments, working folder and
- *   environment names; any other command is asked. The timeout may differ.
+ *   environment names, and the same kind of run (background or not); any other
+ *   command is asked. The timeout may differ.
  */
 export class ApprovalMemory {
     /** Workspace roots where file edits were allowed; an edit without a root is always asked. */
@@ -24,7 +25,7 @@ export class ApprovalMemory {
     private static commandKey(view: ApprovalView) {
         const c = view.command;
         if (!c) return null;
-        return JSON.stringify([c.mode, c.file, c.args, c.shell, c.cwd, [...c.envNames].sort()]);
+        return JSON.stringify([c.mode, c.file, c.args, c.shell, c.cwd, [...c.envNames].sort(), c.background === true]);
     }
 
     private static deletes(view: ApprovalView) {

@@ -83,6 +83,8 @@ export type ApprovalRecord = {
         cwd?: string;
         program?: string;
         envNames?: string[];
+        /** The command was approved as one that keeps running in the background. */
+        background?: boolean;
     };
     decision: "approved" | "denied";
     /** Approved without asking, by an earlier "always" answer in the same process. */
@@ -91,6 +93,23 @@ export type ApprovalRecord = {
     /** This answer was "always" for the rest of that process. */
     remember?: "file_edits" | "same_command";
     decidedAt: string;
+};
+
+/** A command a task kept running in the background, and how it ended. Processes never outlive the task that started them. */
+export type BackgroundRecord = {
+    handle: string;
+    toolCallId: string;
+    display: string;
+    cwd: string;
+    startedAt: string;
+    state: "running" | "exited" | "stopped";
+    endedAt?: string;
+    exitCode?: number | null;
+    endReason?: "exited" | "stopped" | "task_ended" | "failed_to_start";
+    /** Which run of the CLI started it; a record from another run is one a resume tells the model about. */
+    epoch: string;
+    /** The model has been told how it ended. */
+    acknowledged?: boolean;
 };
 
 export type ToolRecord = {
@@ -171,6 +190,7 @@ export type SessionState = {
     approvals: ApprovalRecord[];
     tools: ToolRecord[];
     changes: ChangeRecord[];
+    background?: BackgroundRecord[];
     pendingApprovals: PendingApproval[];
     /**
      * One entry per user prompt. Limits apply per task and are never reset by
