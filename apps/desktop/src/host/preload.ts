@@ -94,6 +94,7 @@ if (trustedWindow) {
     accountSettings: (input: Parameters<DesktopApi["accountSettings"]>[0]) =>
       ipcRenderer.invoke("desktop:account-settings", input),
     accountData: (input: Parameters<DesktopApi["accountData"]>[0]) => ipcRenderer.invoke("desktop:account-data", input),
+    assistantImport: (input: Parameters<DesktopApi["assistantImport"]>[0]) => ipcRenderer.invoke("desktop:assistant-import", input),
     billing: (input: Parameters<DesktopApi["billing"]>[0]) => ipcRenderer.invoke("desktop:billing", input),
     subscribeBillingWindow(listener: (state: BillingWindowState) => void) {
       const onState = (_event: Electron.IpcRendererEvent, state: BillingWindowState) => listener(state);

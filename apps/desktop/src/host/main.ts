@@ -18,6 +18,8 @@ import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
 import { createImportedSourceUnlock, type ImportedSourceUnlock } from "./imported-source-unlock";
 import { AccountDataRefusal } from "./account-data-refusal";
 import { desktopAccountDataInput } from "../account-data-contract";
+import { createAssistantImportApi, type AssistantImportApi } from "./assistant-import-api";
+import { assistantImportInput } from "../assistant-import-contract";
 import { reviewExportFile, runChatExtras, startImageTurn } from "./chat-extras";
 import { imageTurnFromOffer } from "../image-turn-request";
 import { createProjectActions } from "./project-host";
@@ -2433,6 +2435,18 @@ function connectedAccountData() {
   return accountDataApi.api;
 }
 
+let assistantImportApi: { signal: AbortSignal; api: AssistantImportApi } | undefined;
+
+// The package wizard runs in the window; its requests and its file dialog stay here, bound to the account.
+function connectedAssistantImport() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (assistantImportApi?.signal !== signal) {
+    assistantImportApi = { signal, api: createAssistantImportApi({ settings, origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, pickFile: pickLocalFile }) };
+  }
+  return assistantImportApi.api;
+}
+
 let billingApi: { request: ReturnType<typeof createAccountSettingsApi>; billing: ReturnType<typeof createBillingApi> } | undefined;
 
 async function billing(value: unknown) {
@@ -3260,6 +3274,7 @@ function registerIpc() {
   main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
   main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
+  main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));
   main("desktop:billing", billing);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
   main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));

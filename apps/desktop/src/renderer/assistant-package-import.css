@@ -1,0 +1,14 @@
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css" source(none);
+@source "../../../../components/assistants/import/AssistantPackageImportWizard.tsx";
+@source "../../../../components/assistants/ModelSelector.tsx";
+@source "../../../../components/imports/importFormatting.ts";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* The web page runs under Tailwind's preflight; the window does not, so the few browser defaults it resets are reset here, inside the wizard only. */
+.assistant-package-import ol, .assistant-package-import ul { list-style: none; margin: 0; padding: 0; }
+.assistant-package-import dl, .assistant-package-import dd, .assistant-package-import h4 { margin: 0; }
+.assistant-package-import fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.assistant-package-import legend { padding: 0; }
+.assistant-package-import svg { display: block; flex-shrink: 0; }

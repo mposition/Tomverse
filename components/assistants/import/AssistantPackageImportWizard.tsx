@@ -1,8 +1,14 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useReducer,
+    useRef,
+    useState,
+    type ComponentType,
+    type ReactNode,
+} from "react";
 import {
     AlertTriangle,
     ArrowLeft,
@@ -14,7 +20,6 @@ import {
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { ModelSelector } from "@/components/assistants/ModelSelector";
-import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     formatBytes,
     interpolate,
@@ -61,22 +66,15 @@ import {
 } from "@/lib/assistantPackageImportWizard";
 import {
     ImportRequestError,
-    cancelImport,
-    createImport,
-    finalizeImportUpload,
-    prepareImportUpload,
-    publishImport,
-    putImportObject,
-    readImport,
     sha256Hex,
+    type AssistantPackageImportRequests,
 } from "@/lib/assistantPackageImportClient";
 import { findingKey } from "@/lib/assistantPackageSecretScan";
-import { trackProductEvent, trackProductEventOnce } from "@/lib/productAnalyticsClient";
+import type {
+    trackProductEvent,
+    trackProductEventOnce,
+} from "@/lib/productAnalyticsClient";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
-import {
-    ASSISTANT_PROFILE_LIST_PATH,
-    assistantProfileHierarchy,
-} from "@/lib/settingsNavigation";
 import type { AssistantPackageReview } from "@/lib/assistantPackageReview";
 import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPackageWorker";
 
@@ -117,6 +115,64 @@ import type { WorkerRequest, WorkerResponse } from "@/lib/workers/assistantPacka
  * screens are full-page settings wizards, and two definitions of "what a
  * section looks like" is how two wizards stop looking like one product.
  */
+
+/* ------------------------------------------------------------------ host */
+
+/**
+ * A package the host's own file picker returned.
+ *
+ * Either the file, or a refusal the host already decided before it could hand
+ * one over -- a container past the size limit is never read at all, and the
+ * wizard shows it on the same screen as a refusal from the parser.
+ */
+export type PickedAssistantPackage =
+    | { file: File }
+    | {
+          refused: AssistantPackageRefusalCode;
+          cause: string;
+          name: string;
+          bytes: number;
+      };
+
+type DoneLinkProps = {
+    className: string;
+    "data-testid": string;
+    children: ReactNode;
+};
+
+/**
+ * Everything the wizard needs from the app it runs in.
+ *
+ * The web page and the Desktop app run this same component, and the safety
+ * steps -- the secret scan, the loss acknowledgement, the per-field decisions,
+ * the 6 -> 7 consent and the approval digest -- are the component's, not the
+ * host's. What differs is only where bytes and requests go: the web uses its
+ * own routes and a file input, the Desktop app keeps its account session and
+ * its file dialog in the main process and answers the same five requests from
+ * there. A host cannot skip a step; it has no hook to.
+ */
+export type AssistantPackageImportHost = {
+    requests: AssistantPackageImportRequests;
+    /** A host's own file dialog. Without it the wizard renders a file input. */
+    pickPackage?: () => Promise<PickedAssistantPackage | null>;
+    /** Product analytics. A host with none leaves these out. */
+    track?: typeof trackProductEvent;
+    trackOnce?: typeof trackProductEventOnce;
+    /** The navigation above the title. */
+    header?: ReactNode;
+    /** Where the owner goes once the assistant is published. */
+    DoneLink: ComponentType<DoneLinkProps>;
+    /** Re-reads what the host read when the wizard opened. */
+    refresh: () => void;
+    /**
+     * Cancel an import that is still staged when the wizard is closed.
+     *
+     * The web keeps it, because the page offers to resume it. A host with no
+     * way to list staged imports has no way back to one either, and a merge
+     * import blocks ordinary publishing on that assistant until it expires.
+     */
+    cancelOnLeave?: boolean;
+};
 
 /* --------------------------------------------------------- locale mapping */
 
@@ -303,14 +359,22 @@ const POLL_ATTEMPTS = 300;
 export function AssistantPackageImportWizard({
     mergeTargets,
     resumable = [],
+    host,
 }: {
     /** The owner's existing assistants, read by the page. May be empty. */
     mergeTargets: readonly ImportMergeTarget[];
     /** Imports the server is still holding for this account. */
     resumable?: readonly ResumableImport[];
+    host: AssistantPackageImportHost;
 }) {
     const { t } = useLanguage();
-    const router = useRouter();
+    /**
+     * The host as of this render, for callbacks that outlive it.
+     *
+     * Read at call time rather than captured, so the run and the unmount
+     * handler never hold a host a later render replaced.
+     */
+    const hostRef = useRef(host);
     const [state, dispatch] = useReducer(
         assistantPackageImportReducer,
         undefined,
@@ -351,6 +415,8 @@ export function AssistantPackageImportWizard({
      * abandon. Read by the unmount handler, which cannot see the state.
      */
     const stepAtUnmountRef = useRef<AssistantPackageImportStep | null>(null);
+    /** The staged import to let go of on unmount, for a host that asks for it. */
+    const leaveImportRef = useRef<string | null>(null);
 
     // In an effect rather than during render: writing a ref while rendering is
     // a write React may throw away, and the run reads this across awaits where
@@ -361,7 +427,19 @@ export function AssistantPackageImportWizard({
         // once it is published.
         stepAtUnmountRef.current =
             state.file === null || state.run.kind === "published" ? null : state.step;
-    }, [state]);
+        hostRef.current = host;
+        // Not while publishing: that request's outcome is not known yet, and
+        // taking the import away under it would be a second write racing the
+        // first. Everything staged before it, and a publish that failed, may go.
+        const run = state.run;
+        leaveImportRef.current =
+            host.cancelOnLeave &&
+            "importId" in run &&
+            run.kind !== "published" &&
+            run.kind !== "publishing"
+                ? run.importId
+                : null;
+    }, [state, host]);
 
     /**
      * Each step, once, as it is reached.
@@ -372,7 +450,7 @@ export function AssistantPackageImportWizard({
      * consecutive steps read as negative.
      */
     useEffect(() => {
-        trackProductEventOnce(
+        hostRef.current.trackOnce?.(
             `assistant-package-import-step:${state.step}`,
             "assistant_package_import_step_entered",
             0,
@@ -389,9 +467,15 @@ export function AssistantPackageImportWizard({
             // counts, exactly as the conversation import's funnel works.
             const step = stepAtUnmountRef.current;
             if (step !== null) {
-                trackProductEvent("assistant_package_import_step_abandoned", 0, {
+                hostRef.current.track?.("assistant_package_import_step_abandoned", 0, {
                     package_import_step: step,
                 });
+            }
+            const leaving = leaveImportRef.current;
+            if (leaving) {
+                void hostRef.current.requests
+                    .cancelImport(leaving)
+                    .catch(() => undefined);
             }
             workerRef.current?.terminate();
             workerRef.current = null;
@@ -452,7 +536,7 @@ export function AssistantPackageImportWizard({
                     // counted is what packages contain, not what anybody
                     // scrolled past.
                     for (const warning of reviewWarnings(message.review)) {
-                        trackProductEvent("assistant_package_import_warning", 0, {
+                        hostRef.current.track?.("assistant_package_import_warning", 0, {
                             package_import_warning: warning,
                         });
                     }
@@ -462,7 +546,7 @@ export function AssistantPackageImportWizard({
                         code: message.code,
                         cause: message.cause,
                     });
-                    trackProductEvent("assistant_package_import_warning", 0, {
+                    hostRef.current.track?.("assistant_package_import_warning", 0, {
                         package_import_warning: "package_refused",
                     });
                 }
@@ -471,6 +555,32 @@ export function AssistantPackageImportWizard({
         },
         [askWorker]
     );
+
+    /**
+     * The host's own file dialog, for a host that has one.
+     *
+     * A package the host refused before reading it joins the same path as one
+     * the parser refused: the same screen, the same sentence per code.
+     */
+    const choosePackage = useCallback(async () => {
+        const pick = hostRef.current.pickPackage;
+        if (!pick) return;
+        const picked = await pick();
+        if (!picked || goneRef.current) return;
+        if ("file" in picked) {
+            openPackage(picked.file);
+            return;
+        }
+        fileRef.current = null;
+        dispatch({
+            type: "file_selected",
+            file: { name: picked.name, bytes: picked.bytes },
+        });
+        dispatch({ type: "parse_refused", code: picked.refused, cause: picked.cause });
+        hostRef.current.track?.("assistant_package_import_warning", 0, {
+            package_import_warning: "package_refused",
+        });
+    }, [openPackage]);
 
     /** The bytes of the chosen documents, asked for once, at upload time. */
     const extractSelected = useCallback(
@@ -516,7 +626,7 @@ export function AssistantPackageImportWizard({
                 current.knowledgeSelection.includes(candidate.path)
             );
 
-            const created = await createImport({
+            const created = await hostRef.current.requests.createImport({
                 // The wizard calls the first case "new" because that is what
                 // the owner chose; the server calls it "create" because that
                 // is what it does. Translated here rather than renaming
@@ -549,7 +659,16 @@ export function AssistantPackageImportWizard({
                     previousProvenance: null,
                 },
             });
-            if (goneRef.current) return;
+            if (goneRef.current) {
+                // Left while the import was being created: nothing on screen
+                // will ever name it, so a host that cannot resume lets it go.
+                if (hostRef.current.cancelOnLeave) {
+                    void hostRef.current.requests
+                        .cancelImport(created.id)
+                        .catch(() => undefined);
+                }
+                return;
+            }
 
             const uploads: ImportUploadFile[] = chosen.map((candidate) => ({
                 path: candidate.path,
@@ -603,22 +722,10 @@ export function AssistantPackageImportWizard({
                     path: candidate.path,
                     status: "uploading",
                 });
-                const prepared = await prepareImportUpload(created.id, {
-                    filename: candidate.name,
-                    mime,
-                    bytes: bytes.byteLength,
-                });
-                await putImportObject({
-                    uploadUrl: prepared.uploadUrl,
-                    uploadHeaders: prepared.uploadHeaders,
-                    bytes,
-                    mime,
-                });
-                const stored = await finalizeImportUpload(created.id, {
-                    uploadKey: prepared.uploadKey,
-                    filename: candidate.name,
-                    mime,
-                });
+                const stored = await hostRef.current.requests.uploadDocument(
+                    created.id,
+                    { filename: candidate.name, mime, bytes }
+                );
                 if (goneRef.current) return;
                 dispatch({
                     type: "upload_progressed",
@@ -633,7 +740,7 @@ export function AssistantPackageImportWizard({
             // that holds it.
             for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
                 if (goneRef.current) return;
-                const snapshot = await readImport(created.id);
+                const snapshot = await hostRef.current.requests.readImport(created.id);
                 dispatch({ type: "processing_observed", files: snapshot.files });
                 if (snapshot.ready) {
                     dispatch({ type: "advanced" });
@@ -642,7 +749,7 @@ export function AssistantPackageImportWizard({
                 if (
                     snapshot.files.some((entry) => entry.processingStatus === "failed")
                 ) {
-                    trackProductEventOnce(
+                    hostRef.current.trackOnce?.(
                         `assistant-package-import-unreadable:${created.id}`,
                         "assistant_package_import_warning",
                         0,
@@ -681,7 +788,7 @@ export function AssistantPackageImportWizard({
         const importId =
             "importId" in current.run ? (current.run.importId as string | null) : null;
         try {
-            if (importId) await cancelImport(importId);
+            if (importId) await hostRef.current.requests.cancelImport(importId);
         } catch {
             // A cancellation that could not be delivered is not worth a second
             // error screen: the expiry sweep takes an abandoned import anyway,
@@ -708,7 +815,7 @@ export function AssistantPackageImportWizard({
         setResumeFailed(null);
         setResumeBusyId(waiting.id);
         try {
-            const snapshot = await readImport(waiting.id);
+            const snapshot = await hostRef.current.requests.readImport(waiting.id);
             const draft = resumableDraftFromManifest(snapshot.stagingManifest);
             if (!draft) {
                 // Cancelling is still offered, so an import this build cannot
@@ -761,14 +868,14 @@ export function AssistantPackageImportWizard({
         setResumeFailed(null);
         setResumeBusyId(waiting.id);
         try {
-            await cancelImport(waiting.id);
-            if (!goneRef.current) router.refresh();
+            await hostRef.current.requests.cancelImport(waiting.id);
+            if (!goneRef.current) hostRef.current.refresh();
         } catch {
             setResumeFailed(waiting.id);
         } finally {
             if (!goneRef.current) setResumeBusyId(null);
         }
-    }, [router]);
+    }, []);
 
     /** Step 8: the one action on the screen, and the only one that publishes. */
     const publish = useCallback(async () => {
@@ -779,7 +886,7 @@ export function AssistantPackageImportWizard({
         dispatch({ type: "publish_started" });
         try {
             const draft = resolveImportDraft(current);
-            const outcome = await publishImport(importId, {
+            const outcome = await hostRef.current.requests.publishImport(importId, {
                 approvedDigest: await sha256Hex(importApprovalPayload(current)),
                 digestVersion: IMPORT_APPROVAL_DIGEST_VERSION,
                 keepFileIds: keepFileIds(current),
@@ -804,7 +911,7 @@ export function AssistantPackageImportWizard({
                 });
                 return;
             }
-            trackProductEvent("assistant_package_import_completed", 0, {
+            hostRef.current.track?.("assistant_package_import_completed", 0, {
                 // What the parser read the package as, never what it claimed
                 // to be: the claim is display-only and this is a measurement.
                 package_import_source:
@@ -840,11 +947,7 @@ export function AssistantPackageImportWizard({
 
     return (
         <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-            <SettingsDetailNav
-                hierarchy={assistantProfileHierarchy()}
-                currentLabel={t("assistantPackageImport.title")}
-                backTestId="assistant-package-import-back"
-            />
+            {host.header}
 
             <header className="mt-6">
                 <h1 className="text-xl font-semibold">
@@ -900,7 +1003,16 @@ export function AssistantPackageImportWizard({
                                 t={t}
                             />
                         )}
-                        <SourceStep state={state} onFile={openPackage} t={t} />
+                        <SourceStep
+                            state={state}
+                            onFile={openPackage}
+                            onPick={
+                                host.pickPackage
+                                    ? () => void choosePackage()
+                                    : undefined
+                            }
+                            t={t}
+                        />
                     </>
                 )}
                 {state.step === "detect" && <DetectStep state={state} t={t} />}
@@ -929,6 +1041,7 @@ export function AssistantPackageImportWizard({
                         state={state}
                         onPublish={publish}
                         onCancel={cancelRun}
+                        DoneLink={host.DoneLink}
                         mergeTargets={mergeTargets}
                         t={t}
                     />
@@ -1095,10 +1208,13 @@ function ResumeStep({
 function SourceStep({
     state,
     onFile,
+    onPick,
     t,
 }: {
     state: WizardState;
     onFile: (file: File) => void;
+    /** Present when the host has its own file dialog. */
+    onPick?: () => void;
     t: Translate;
 }) {
     return (
@@ -1117,21 +1233,33 @@ function SourceStep({
             <p className="mt-2 text-xs text-zinc-500">
                 {t("assistantPackageImport.sourceNoRemote")}
             </p>
-            <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600">
-                <Upload className="h-4 w-4" aria-hidden="true" />
-                {t("assistantPackageImport.sourceChoose")}
-                <input
-                    type="file"
-                    accept={ACCEPT}
-                    className="sr-only"
+            {onPick ? (
+                <button
+                    type="button"
+                    className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600"
+                    onClick={onPick}
                     data-testid="assistant-package-import-file"
-                    onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (file) onFile(file);
-                        event.target.value = "";
-                    }}
-                />
-            </label>
+                >
+                    <Upload className="h-4 w-4" aria-hidden="true" />
+                    {t("assistantPackageImport.sourceChoose")}
+                </button>
+            ) : (
+                <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-blue-600">
+                    <Upload className="h-4 w-4" aria-hidden="true" />
+                    {t("assistantPackageImport.sourceChoose")}
+                    <input
+                        type="file"
+                        accept={ACCEPT}
+                        className="sr-only"
+                        data-testid="assistant-package-import-file"
+                        onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) onFile(file);
+                            event.target.value = "";
+                        }}
+                    />
+                </label>
+            )}
             {state.file && (
                 <p className="mt-3 text-sm" data-testid="assistant-package-import-file-name">
                     {state.file.name} · {formatBytes(state.file.bytes)}
@@ -1918,12 +2046,14 @@ function ConfirmStep({
     state,
     onPublish,
     onCancel,
+    DoneLink,
     mergeTargets,
     t,
 }: {
     state: WizardState;
     onPublish: () => void;
     onCancel: () => void;
+    DoneLink: AssistantPackageImportHost["DoneLink"];
     mergeTargets: readonly ImportMergeTarget[];
     t: Translate;
 }) {
@@ -1954,13 +2084,12 @@ function ConfirmStep({
                         { revision: run.revision }
                     )}
                 </p>
-                <Link
-                    href={ASSISTANT_PROFILE_LIST_PATH}
+                <DoneLink
                     className={`mt-3 ${secondaryButtonClass}`}
                     data-testid="assistant-package-import-done"
                 >
                     {t("assistantPackageImport.publishedGoToList")}
-                </Link>
+                </DoneLink>
             </section>
         );
     }
