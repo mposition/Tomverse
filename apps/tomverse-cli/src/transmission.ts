@@ -25,6 +25,9 @@ export type RequestTransmission = {
     truncatedListingCount: number;
     fileReads: Array<{ path: string; truncated: boolean }>;
     moreFileReads: number;
+    /** Public web pages whose text was part of the request, by address. */
+    webReads?: Array<{ url: string; truncated: boolean }>;
+    moreWebReads?: number;
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -69,7 +72,7 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
         evidence.toolResultCount += 1;
         if (typeof message.tool_call_id !== "string") continue;
         const name = tools.get(message.tool_call_id);
-        if (name !== "read_file" && name !== "list_files" && name !== "run_command") continue;
+        if (name !== "read_file" && name !== "list_files" && name !== "run_command" && name !== "web_fetch") continue;
         const output = record(parseJson(message.content));
         if (name === "run_command") {
             const omitted = record(output?.omittedBytes);
@@ -83,6 +86,13 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
             continue;
         }
         if (output?.status !== "ok") continue;
+        if (name === "web_fetch") {
+            if (typeof output.url !== "string") continue;
+            const reads = evidence.webReads ??= [];
+            if (reads.length < 24) reads.push({ url: redact(output.url).slice(0, 500), truncated: output.truncated === true });
+            else evidence.moreWebReads = (evidence.moreWebReads ?? 0) + 1;
+            continue;
+        }
         if (name === "list_files") {
             evidence.listedPathCount += Array.isArray(output.files) ? output.files.filter((file) => typeof file === "string").length : 0;
             if (output.truncated === true) evidence.truncatedListingCount += 1;

@@ -51,6 +51,12 @@ type Copy = {
   backgroundStopFailed: string;
   approvalBackground: string;
   approvalNoTimeout: string;
+  approvalWebHeading: string;
+  approvalWebHost: string;
+  approvalWebAddress: string;
+  approvalWebNote: string;
+  webRead: string;
+  webReadMore: string;
 };
 
 export const desktopCodeEngineCopy = {
@@ -105,6 +111,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "The command could not be stopped from here.",
     approvalBackground: "This command keeps running in the background after you allow it. It has no time limit and ends when the task ends or you stop it.",
     approvalNoTimeout: "No time limit (background)",
+    approvalWebHeading: "Read a web page",
+    approvalWebHost: "Site",
+    approvalWebAddress: "Address",
+    approvalWebNote: "Only this address is requested from the site, with no cookies, login or files from your project. The page text is sent to the model as untrusted reference material. \"Allow for this run\" allows this site until the task ends.",
+    webRead: "Web page read: {url}",
+    webReadMore: "{count} more web pages read",
   },
   ko: {
     limits: "작업 한도",
@@ -157,6 +169,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "여기서 명령을 종료하지 못했습니다.",
     approvalBackground: "허용하면 이 명령은 백그라운드에서 계속 실행됩니다. 시간 제한이 없으며, 작업이 끝나거나 직접 종료할 때까지 유지됩니다.",
     approvalNoTimeout: "시간 제한 없음 (백그라운드)",
+    approvalWebHeading: "웹 페이지 읽기",
+    approvalWebHost: "사이트",
+    approvalWebAddress: "주소",
+    approvalWebNote: "이 사이트에는 이 주소만 요청하며, 쿠키·로그인·프로젝트 파일은 보내지 않습니다. 페이지 본문은 신뢰할 수 없는 참고 자료로 모델에 전달됩니다. \"이번 실행에서 허용\"을 고르면 작업이 끝날 때까지 이 사이트를 허용합니다.",
+    webRead: "읽은 웹 페이지: {url}",
+    webReadMore: "읽은 웹 페이지 {count}개 더",
   },
   zh: {
     limits: "任务上限",
@@ -209,6 +227,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "无法在此停止该命令。",
     approvalBackground: "允许后，此命令会在后台持续运行。它没有时间限制，直到任务结束或你手动停止才会结束。",
     approvalNoTimeout: "无时间限制（后台）",
+    approvalWebHeading: "读取网页",
+    approvalWebHost: "网站",
+    approvalWebAddress: "地址",
+    approvalWebNote: "只会向该网站请求这个地址，不会发送 Cookie、登录信息或项目文件。网页文本会作为不可信的参考资料发送给模型。选择“允许本次运行”后，在任务结束前都会允许该网站。",
+    webRead: "已读取网页：{url}",
+    webReadMore: "另有 {count} 个网页已读取",
   },
   "zh-Hant": {
     limits: "任務上限",
@@ -261,6 +285,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "無法在此停止該命令。",
     approvalBackground: "允許後，此命令會在背景持續執行。它沒有時間限制，直到工作結束或你手動停止才會結束。",
     approvalNoTimeout: "無時間限制（背景）",
+    approvalWebHeading: "讀取網頁",
+    approvalWebHost: "網站",
+    approvalWebAddress: "位址",
+    approvalWebNote: "只會向該網站請求這個位址，不會傳送 Cookie、登入資訊或專案檔案。網頁文字會作為不可信的參考資料傳送給模型。選擇「允許本次執行」後，在工作結束前都會允許該網站。",
+    webRead: "已讀取網頁：{url}",
+    webReadMore: "另有 {count} 個網頁已讀取",
   },
   fr: {
     limits: "Limites de la tâche",
@@ -313,6 +343,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "Impossible d'arrêter la commande d'ici.",
     approvalBackground: "Une fois autorisée, cette commande continue de s'exécuter en arrière-plan. Elle n'a pas de limite de durée et s'arrête avec la tâche ou quand vous l'arrêtez.",
     approvalNoTimeout: "Pas de limite de durée (arrière-plan)",
+    approvalWebHeading: "Lire une page web",
+    approvalWebHost: "Site",
+    approvalWebAddress: "Adresse",
+    approvalWebNote: "Seule cette adresse est demandée au site, sans cookies, connexion ni fichiers de votre projet. Le texte de la page est envoyé au modèle comme source de référence non fiable. « Autoriser pour cette exécution » autorise ce site jusqu'à la fin de la tâche.",
+    webRead: "Page web lue : {url}",
+    webReadMore: "{count} autres pages web lues",
   },
   de: {
     limits: "Aufgabenlimits",
@@ -365,6 +401,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "Der Befehl konnte von hier nicht beendet werden.",
     approvalBackground: "Nach der Freigabe läuft dieser Befehl im Hintergrund weiter. Er hat kein Zeitlimit und endet mit der Aufgabe oder wenn Sie ihn beenden.",
     approvalNoTimeout: "Kein Zeitlimit (Hintergrund)",
+    approvalWebHeading: "Webseite lesen",
+    approvalWebHost: "Website",
+    approvalWebAddress: "Adresse",
+    approvalWebNote: "Von der Website wird nur diese Adresse angefragt, ohne Cookies, Anmeldung oder Dateien Ihres Projekts. Der Seitentext geht als nicht vertrauenswürdiges Referenzmaterial an das Modell. „Für diesen Lauf zulassen“ erlaubt diese Website bis zum Ende der Aufgabe.",
+    webRead: "Gelesene Webseite: {url}",
+    webReadMore: "{count} weitere Webseiten gelesen",
   },
   es: {
     limits: "Límites de la tarea",
@@ -417,6 +459,12 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "No se pudo detener el comando desde aquí.",
     approvalBackground: "Una vez permitido, este comando sigue ejecutándose en segundo plano. No tiene límite de tiempo y termina cuando acaba la tarea o lo detienes.",
     approvalNoTimeout: "Sin límite de tiempo (segundo plano)",
+    approvalWebHeading: "Leer una página web",
+    approvalWebHost: "Sitio",
+    approvalWebAddress: "Dirección",
+    approvalWebNote: "Solo se solicita esta dirección al sitio, sin cookies, inicio de sesión ni archivos de tu proyecto. El texto de la página se envía al modelo como material de referencia no fiable. «Permitir durante esta ejecución» permite este sitio hasta que termine la tarea.",
+    webRead: "Página web leída: {url}",
+    webReadMore: "{count} páginas web más leídas",
   },
   pt: {
     limits: "Limites da tarefa",
@@ -469,5 +517,11 @@ export const desktopCodeEngineCopy = {
     backgroundStopFailed: "Não foi possível parar o comando daqui.",
     approvalBackground: "Depois de permitido, este comando continua em execução em segundo plano. Não tem limite de tempo e termina quando a tarefa termina ou você o para.",
     approvalNoTimeout: "Sem limite de tempo (segundo plano)",
+    approvalWebHeading: "Ler uma página da web",
+    approvalWebHost: "Site",
+    approvalWebAddress: "Endereço",
+    approvalWebNote: "Apenas este endereço é solicitado ao site, sem cookies, login ou arquivos do seu projeto. O texto da página é enviado ao modelo como material de referência não confiável. \"Permitir para esta execução\" permite este site até o fim da tarefa.",
+    webRead: "Página da web lida: {url}",
+    webReadMore: "Mais {count} páginas da web lidas",
   },
 } as const satisfies Record<Language, Copy>;

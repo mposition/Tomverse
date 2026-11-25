@@ -49,6 +49,9 @@ export function TransmissionPanel({ records, usage, taskId, language }: {
         {!!record.contents.truncatedListingCount && <li>{formatEvidence(copy.truncatedListings, language, { count: record.contents.truncatedListingCount })}</li>}
         {record.contents.fileReads.map((file, index) => <li key={index}>{formatEvidence(copy.fileRead, language, { path: file.path })}
           {file.truncated && ` · ${copy.truncated}`}</li>)}
+        {record.contents.webReads?.map((page, index) => <li key={`web-${index}`}>{desktopCodeEngineCopy[language].webRead.replace("{url}", page.url)}
+          {page.truncated && ` · ${copy.truncated}`}</li>)}
+        {!!record.contents.moreWebReads && <li>{desktopCodeEngineCopy[language].webReadMore.replace("{count}", String(record.contents.moreWebReads))}</li>}
         {record.contents.moreFileReads > 0 && <li>{formatEvidence(copy.moreFileReads, language, { count: record.contents.moreFileReads })}</li>}
       </ul>}
     </li>)}</ul>

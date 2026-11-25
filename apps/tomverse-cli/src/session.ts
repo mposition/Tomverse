@@ -85,13 +85,15 @@ export type ApprovalRecord = {
         envNames?: string[];
         /** The command was approved as one that keeps running in the background. */
         background?: boolean;
+        /** The web page request was approved for this site. */
+        host?: string;
     };
     decision: "approved" | "denied";
     /** Approved without asking, by an earlier "always" answer in the same process. */
     by?: "remembered_answer";
-    rule?: "file_edits" | "same_command";
+    rule?: "file_edits" | "same_command" | "web_host";
     /** This answer was "always" for the rest of that process. */
-    remember?: "file_edits" | "same_command";
+    remember?: "file_edits" | "same_command" | "web_host";
     decidedAt: string;
 };
 

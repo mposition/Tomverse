@@ -555,6 +555,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     tool: view.toolName,
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
+    ...(view.web ? { web: { url: clean(view.web.url), host: clean(view.web.host) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
@@ -860,6 +861,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
+      web: {},
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
@@ -870,7 +872,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];

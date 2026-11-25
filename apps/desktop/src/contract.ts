@@ -212,7 +212,8 @@ export type Transmission = {
     projectInstructions: boolean; projectInstructionsTruncated?: boolean; messageCount: number; toolResultCount: number;
     commandOutput?: { results: number; truncated: number };
     listedPathCount?: number; truncatedListingCount?: number;
-    fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number };
+    fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number;
+    webReads?: Array<{ url: string; truncated: boolean }>; moreWebReads?: number };
 };
 /** A command the task keeps running in the background: what it is, whether it still runs, and the newest of what it printed. */
 export type CodeBackgroundCommand = {
@@ -334,6 +335,8 @@ export type ApprovalRequest = {
   explanation?: string;
   canRemember: boolean;
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
+  /** A public web page the task asks to read: the address, and the site the approval is for. */
+  web?: { url: string; host: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
 };
 

@@ -1227,6 +1227,14 @@ function Approval() {
     <div className="approval-content">
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
       {request.explanation && <p>{request.explanation}</p>}
+      {request.web && <section aria-label={engineCopy.approvalWebHeading}>
+        <h2>{engineCopy.approvalWebHeading}</h2>
+        <dl>
+          <dt>{engineCopy.approvalWebHost}</dt><dd><code>{request.web.host}</code></dd>
+          <dt>{engineCopy.approvalWebAddress}</dt><dd><code>{request.web.url}</code></dd>
+        </dl>
+        <p role="note">{engineCopy.approvalWebNote}</p>
+      </section>}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>
         <pre>{request.command.display}</pre>

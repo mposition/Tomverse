@@ -76,7 +76,7 @@ use the npm package.
 
 Revoke or limit a key in Settings > API keys; the CLI has no key management.
 
-The CLI talks only to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
+The CLI talks to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
 unless you set another endpoint with `tomverse config set endpoint <url>` (or
 `TOMVERSE_ENDPOINT`). An endpoint saved before the CLI moved to the coding API
 ends in `/api/v1`; it is read as `/api/code/v1` on the same server.
@@ -84,7 +84,9 @@ It must be https; plain http is accepted only for a loopback development
 server after `tomverse config set allow-insecure-localhost true`. Redirects
 are never followed, so the key cannot be carried to another address. Nothing
 in a repository (AGENTS.md, scripts, model output) can change the endpoint, the
-key or any permission.
+key or any permission. The only other host the CLI itself ever contacts is a
+public web page you approved, through `web_fetch` (below); the key is never
+sent there.
 
 ## Use
 
@@ -184,6 +186,24 @@ per task".
   including descendants that moved to their own session — and anything that
   survived is reported. A program that detaches itself after the command has
   already finished is outside what the CLI can see.
+- **Web pages (`web_fetch`):** the model can read a public web page, for
+  documentation. **Every site (host) is asked about first**, with the host and the
+  full address shown; `a` allows that host for the rest of this run, and a
+  redirect to another host is never followed without its own question. The
+  address is judged by fixed rules that no answer or model text changes: https
+  only, port 443, no user name or password, no IP address in any notation, no
+  `localhost`, single-label or internal name (`.local`, `.internal`, …); the
+  name is resolved by the CLI, every address it resolves to must be public (a
+  private, loopback, link-local or reserved one, also inside an IPv6 form, refuses
+  it), and the connection goes to the address that was checked. Every redirect
+  is judged again. The request is a plain GET with no cookies, no login and
+  nothing from your folder; the answer is limited to 2 MB and 20 seconds, only
+  text, HTML, JSON and XML are read, and the text given to the model is marked
+  as untrusted reference material, never instructions. The page text is part of
+  the next model request, and the transmission record lists the address. A
+  `--read-only` session has no `web_fetch` (it has no approvals at all, and the
+  address of a request can itself carry information out), and neither do
+  `exec` runs without a terminal. There is no web search tool.
 - **Background commands:** a command can be approved to keep running after the call
   returns (a dev server, a watcher). The approval says "background" and "no
   time limit", and is bound to that: approving a foreground command never
