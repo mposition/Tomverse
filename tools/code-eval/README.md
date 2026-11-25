@@ -33,7 +33,9 @@ Options of `run.mjs`:
 | `--concurrency <n>` | Jobs at the same time (default 1). Real routes talk to rate-limited services; raise it with care. |
 | `--allow-paid` | Required for `tomverse`, `codex` and `claude`. Without it the run stops before doing anything and says what would be billed. |
 | `--model <id>` | Model for the real routes (default: each tool's own default; `smart-adaptive` for `tomverse`). |
-| `--max-requests <n>` | Model requests per task for the `tomverse` route (default 40). |
+| `--max-requests <n>` | Model requests per task for the `tomverse` route. Without it the `--limits` profile decides; a number here is more specific and wins. |
+| `--limits <profile>` | `tomverse` route: `standard` (20 requests), `extended` (200 requests, the default for measurements) or `unlimited` (no request count). The task's own `timeoutSeconds` always applies, whatever the profile says. |
+| `--engine <list>` | `tomverse` route: the engine features to turn on, `none`, or a comma list of `backgroundCommands`, `images`, `nestedInstructions`, `subagents` (default: all four). `web_fetch` and the Code memory are never turned on: the tasks use no network, and notes kept between tasks would carry one task's lessons into the next. |
 | `--keep-workdirs` | Keep the temporary working folders (they are git repositories, so `git diff` shows what the agent did). |
 
 ## What a run does
@@ -80,8 +82,8 @@ npm run code:eval -- --route tomverse,codex,claude --allow-paid --out ./eval-202
 What each real route needs and what it costs:
 
 - **tomverse**: `TOMVERSE_API_KEY` in the environment (the only place it is read
-  from). One model request per agent step, up to `--max-requests` per task, at
-  the credits of the chosen model. Set a credit limit on the key in Tomverse
+  from). One model request per agent step (subagents' requests included), up to the `--limits` profile's request count (or `--max-requests`) per task, at
+  the credits of the chosen model; the default `extended` allows 200 per task, so try `--limits standard` or `--max-requests` first. Set a credit limit on the key in Tomverse
   Settings > API keys: that is the only hard cap. Optional `TOMVERSE_ENDPOINT`.
   The agent runs in a child process (`routes/tomverse-worker.mjs`) that removes
   the key from its environment at once, never writes it anywhere and does not
@@ -135,6 +137,15 @@ node tools/code-eval/compare.mjs ./eval/before ./eval/after --out compare.md --r
 ```
 
 Arguments are `--out` folders or `results.json` files.
+
+The engine conditions of the `tomverse` route are recorded: `results.json` has an `engine` block
+(the limit profile and the features turned on), each result has the limits the session really had
+and the features, and `metrics` has `subagentRuns` and `subagentRequests` (the requests of
+subagents are already part of `turns` and `credits`). `compare.mjs` prints the conditions of
+every run under the route, and says so when two runs did not have the same ones, so a change
+in the pass rate is not read as the engine's alone. Use `--engine none --limits standard` to
+run without the newer engine features.
+
 
 ## The tasks
 

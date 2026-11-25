@@ -18,7 +18,8 @@ export const loadRun = (input) => {
     const data = JSON.parse(readFileSync(file, "utf8"));
     if (!Array.isArray(data.results)) throw new Error(`${input} is not a code-eval results file`);
     const label = statSync(path).isDirectory() ? basename(path) : basename(join(file, ".."));
-    return { label, results: data.results };
+    // The conditions the run recorded (older results files have none).
+    return { label, results: data.results, ...(data.engine ? { engine: data.engine } : {}) };
 };
 
 export const main = (argv = process.argv.slice(2)) => {

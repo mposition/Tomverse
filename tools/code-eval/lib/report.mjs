@@ -88,6 +88,13 @@ export const renderSummary = ({ results, meta = {} }) => {
     return lines.join("\n");
 };
 
+/** The engine conditions of a run in one line, for the comparison. */
+export const describeConditions = (engine) => {
+    if (!engine) return "not recorded";
+    const features = Array.isArray(engine.features) ? engine.features : [];
+    return `limits ${engine.limits}${engine.maxRequests ? ` (max ${engine.maxRequests} requests)` : ""}; engine features: ${features.length ? features.join(", ") : "none"}`;
+};
+
 /** Side-by-side comparison of several runs; the first run is the baseline. */
 export const renderComparison = (runs, { route } = {}) => {
     const lines = ["# Code eval comparison", "", `Baseline: ${runs[0].label}`, ""];
@@ -97,6 +104,13 @@ export const renderComparison = (runs, { route } = {}) => {
         if (!present.length) continue;
         lines.push(`## Route ${name}`, "");
         const base = present[0];
+        if (name === "tomverse") {
+            // A difference in the conditions is part of what a comparison shows, so it is stated, not left to be found.
+            lines.push("Conditions:", ...present.map((run) => `- ${run.label}: ${describeConditions(run.engine)}`));
+            const text = present.map((run) => JSON.stringify(run.engine ?? null));
+            if (new Set(text).size > 1) lines.push("", "The runs did not have the same conditions, so a difference between them is not only the engine.");
+            lines.push("");
+        }
         const rows = present.map((run) => {
             const s = summarizeRoute(run.results, name);
             const delta = run === base ? "-" : `${((s.passed / s.total - summarizeRoute(base.results, name).passed / summarizeRoute(base.results, name).total) * 100).toFixed(1)} pt`;

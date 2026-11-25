@@ -23,14 +23,14 @@ const toolModels = (models) => models.filter((m) => m.tools && m.protocols.inclu
 const main = async () => {
     const runtime = await tsImport(RUNTIME, import.meta.url);
     if (process.argv.includes("--selftest")) {
-        for (const name of ["Gateway", "Runner", "createSession", "Workspace", "normalizeRoot", "resolveEndpoint", "sessionCost", "readInstructions"]) {
+        for (const name of ["Gateway", "Runner", "createSession", "Workspace", "normalizeRoot", "resolveEndpoint", "sessionCost", "readInstructions", "resolveLimits"]) {
             if (typeof runtime[name] !== "function") throw new Error(`runtime export ${name} is missing`);
         }
         console.log("selftest ok");
         return;
     }
     const request = JSON.parse(await readStdin());
-    const { Gateway, Runner, createSession, Workspace, normalizeRoot, resolveEndpoint, sessionCost, readInstructions, SMART_ADAPTIVE, EXIT_CODES } = runtime;
+    const { Gateway, Runner, createSession, Workspace, normalizeRoot, resolveEndpoint, sessionCost, readInstructions, resolveLimits, NO_LIMIT, SMART_ADAPTIVE, EXIT_CODES } = runtime;
 
     const key = process.env.TOMVERSE_API_KEY?.trim();
     delete process.env.TOMVERSE_API_KEY;
@@ -58,7 +58,12 @@ const main = async () => {
         keyPrefix: key.slice(0, 12),
         model,
         readOnly: false,
-        limits: { maxRequests: request.maxRequests, timeoutMs: request.timeoutMs, commandTimeoutMs: request.commandTimeoutMs },
+        // The profile gives the request count and time; a count given on the command line and the task's own time limit are more specific and win.
+        limits: resolveLimits(request.limits ?? "extended", {
+            ...(request.maxRequests ? { maxRequests: request.maxRequests } : {}),
+            timeoutMs: request.timeoutMs,
+            commandTimeoutMs: request.commandTimeoutMs,
+        }),
     });
     const decisions = { approved: 0, denied: 0, deniedReasons: [] };
     const prompter = {
@@ -74,7 +79,10 @@ const main = async () => {
         confirm: async () => false,
     };
     const workspace = new Workspace(root);
-    const runner = new Runner({ gateway, journal, workspace, output, prompter, catalog, commandEnv: [], instructions: readInstructions(workspace) });
+    // The engine features of this measurement, by Runner option. web and memory are never among them (see routes/tomverse.mjs).
+    const features = request.engine ?? [];
+    const engineOptions = Object.fromEntries(["backgroundCommands", "images", "nestedInstructions", "subagents"].filter((name) => features.includes(name)).map((name) => [name, true]));
+    const runner = new Runner({ gateway, journal, workspace, output, prompter, catalog, commandEnv: [], instructions: readInstructions(workspace), ...engineOptions });
     let outcome = "error";
     try {
         outcome = await runner.runTask(request.prompt);
@@ -93,6 +101,8 @@ const main = async () => {
             }),
             { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
         );
+        const subagents = journal.state.subagents ?? [];
+        const limits = journal.state.limits;
         journal.release();
         finish({
             status: outcome === "success" ? "ok" : outcome,
@@ -105,6 +115,18 @@ const main = async () => {
                 creditsUnknownRequests: cost ? cost.unknown.length : null,
                 turns: cost ? cost.requests : journal.state.generations.length,
                 ...usage,
+                // Included in the turns and the credits above: the requests subagents made.
+                subagentRuns: subagents.length,
+                subagentRequests: journal.state.generations.filter((g) => g.purpose === "subagent").length,
+            },
+            // The conditions this run had, recorded so a comparison of two runs shows them.
+            engine: {
+                limits: {
+                    profile: limits.profile ?? "standard",
+                    maxRequests: limits.maxRequests >= NO_LIMIT ? null : limits.maxRequests,
+                    timeoutMs: limits.timeoutMs >= NO_LIMIT ? null : limits.timeoutMs,
+                },
+                features,
             },
             approvals: decisions,
             logTail: lines.join("\n").slice(-4000),
