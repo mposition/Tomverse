@@ -11,7 +11,7 @@ const settingsCredential = z.object({
   expiresAt: z.number().int().refine((value) => value > Date.now() && value <= Date.now() + 360_000),
 }).strict();
 
-type SettingsRequest = { path: string; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: object };
+export type SettingsRequest = { path: string; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: object };
 
 function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
   switch (input.action) {
@@ -232,5 +232,9 @@ export function createAccountSettingsApi(
     }
     return Buffer.concat(chunks, length);
   }
-  return Object.assign(request, { exportConversation });
+  // Feature modules in the main process (billing, connectors, account data) share
+  // this account session. The renderer never supplies a path.
+  return Object.assign(request, { exportConversation, send, forget: () => { saved = undefined; } });
 }
+
+export type AccountSettingsApi = ReturnType<typeof createAccountSettingsApi>;
