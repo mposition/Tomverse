@@ -1,0 +1,12 @@
+{
+  "id": "rf-extract-validators",
+  "title": "Extract duplicated order validation into one module",
+  "category": "refactor",
+  "prompt": "`src/orders.js` validates e-mail addresses, shipping addresses and order items with copy-pasted code in `createOrder`, `updateShipping` and `addItem`. Refactor without changing behaviour (same errors, same messages, same field names): create `src/validate.js` exporting `validateEmail(value)`, `validateAddress(address, prefix = \"address\")`, `validateItem(item, index)` and `validateOrderInput(input)`. Each returns the normalised value (trimmed, lower-cased e-mail, and so on) and throws `ValidationError` exactly as the current code does; `validateOrderInput` returns `{ email, address, items }`. After the refactor `src/orders.js` must use these functions and must not construct `ValidationError` itself. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

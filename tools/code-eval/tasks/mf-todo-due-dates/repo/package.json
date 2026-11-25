@@ -1,0 +1,8 @@
+{
+  "name": "mf-todo-due-dates",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

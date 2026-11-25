@@ -1,0 +1,12 @@
+{
+  "id": "rf-dedupe-formatters",
+  "title": "Share row building between three report formatters",
+  "category": "refactor",
+  "prompt": "The three report formatters (`src/format-text.js`, `src/format-csv.js`, `src/format-json.js`) each contain the same code that turns records into display cells (empty for null and undefined, ISO dates, yes/no booleans, plain strings, label defaulting to the key). Refactor without changing any output byte: create `src/rows.js` exporting `buildRows(records, columns)` that returns `{ headers, rows }` (`headers` is the array of labels, `rows` an array of arrays of cell strings) and make all three formatters use it. The formatters must no longer contain cell formatting code themselves. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

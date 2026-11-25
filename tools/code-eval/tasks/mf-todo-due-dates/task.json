@@ -1,0 +1,12 @@
+{
+  "id": "mf-todo-due-dates",
+  "title": "Add due dates to the todo app end to end",
+  "category": "multi-file",
+  "prompt": "Add an optional due date to the todo app, as described in README.md (\"To add\"). The change touches validation, the todo model, saving and loading, text formatting and the API (`TodoApi`), and old saved data must still load. Everything that works today must keep working. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1800
+}

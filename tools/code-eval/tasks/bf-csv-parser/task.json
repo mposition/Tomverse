@@ -1,0 +1,12 @@
+{
+  "id": "bf-csv-parser",
+  "title": "CSV parser mangles quotes and trailing newlines",
+  "category": "bugfix",
+  "prompt": "The CSV helpers in this project misbehave on real exports. Fields such as `\"say \"\"hi\"\"\"` lose their doubled quotes; a file that ends with a newline produces an extra empty row; rows shorter than the header give `undefined` values instead of empty strings in `toObjects`; and `toCsv` does not escape quotes or quote fields that contain the delimiter. Find the causes and fix them. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 900
+}

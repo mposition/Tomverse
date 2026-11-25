@@ -1,0 +1,6 @@
+{
+  "name": "code-eval",
+  "private": true,
+  "type": "module",
+  "description": "Runs the same coding tasks through several agent routes and compares their test pass rates."
+}

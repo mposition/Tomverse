@@ -1,0 +1,12 @@
+{
+  "id": "ft-sliding-window",
+  "title": "Add a sliding-window rate limiter",
+  "category": "feature",
+  "prompt": "This project has a token-bucket limiter. Add a sliding-window limiter as described in README.md in a new module `src/window.js`, exported from `src/index.js`, using the same injectable clock approach as the bucket. Do not change the existing token-bucket behaviour. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

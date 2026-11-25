@@ -1,0 +1,8 @@
+{
+  "name": "ft-inventory-reservations",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
