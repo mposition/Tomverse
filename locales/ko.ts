@@ -253,6 +253,7 @@ export const ko = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "이미지 생성",
         imageGenerationBackToChat: "채팅으로 돌아가기",
+        imageModeBackToChatModels: "대화 모델로 돌아가기",
         toolsImageGeneration: "이미지 생성",
         toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
         imageGenerationModelLabel: "모델",

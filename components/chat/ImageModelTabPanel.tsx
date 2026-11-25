@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, LockKeyhole } from "lucide-react";
+import { Check, ChevronRight, LockKeyhole } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { UsageMeter } from "@/components/credits/UsageMeter";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -124,6 +124,8 @@ export type ImageModelTabPanelProps = {
    */
   lock: "sign_in" | "upgrade" | null;
   onSelectModel: (modelId: string) => void;
+  /** The image models the composer currently answers with. */
+  selectedModelIds?: readonly string[];
   onLockedClick: (lock: "sign_in" | "upgrade") => void;
   /** 44px rows for touch input, matching the rest of the picker. */
   touchTarget: boolean;
@@ -134,6 +136,7 @@ export type ImageModelTabPanelProps = {
 export function ImageModelTabPanel({
   lock,
   onSelectModel,
+  selectedModelIds = [],
   onLockedClick,
   touchTarget,
   isKeyboardCompact,
@@ -172,6 +175,7 @@ export function ImageModelTabPanel({
               const fromCredits = model.prices.length
                 ? Math.min(...model.prices.map((price) => price.credits))
                 : null;
+              const selected = selectedModelIds.includes(model.id);
               return (
                 <li key={model.id} className="min-w-0">
                   <button
@@ -179,6 +183,7 @@ export function ImageModelTabPanel({
                     data-testid="image-model-option"
                     data-model-id={model.id}
                     data-locked={lock ? "true" : "false"}
+                    aria-pressed={selected}
                     onClick={() => {
                       if (lock) {
                         onLockedClick(lock);
@@ -188,7 +193,9 @@ export function ImageModelTabPanel({
                     }}
                     className={`flex h-full w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
                       touchTarget ? "min-h-14 py-2.5" : "py-2.5"
-                    } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
+                    } ${selected
+                      ? "border-accent-image-500 bg-accent-image-50 dark:border-accent-image-400 dark:bg-accent-image-950"
+                      : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"}`}
                   >
                     {/* Whose model it is, like the chat list: Nano Banana 2 through
                         fal shows Google's mark, and the subtitle names fal. */}
@@ -238,10 +245,11 @@ export function ImageModelTabPanel({
                       {fromCredits !== null && (
                         <UsageMeter credits={fromCredits} kind="image" testId="image-model-credit-badge" />
                       )}
-                      <ChevronRight
-                        className="h-4 w-4 text-zinc-400"
-                        aria-hidden="true"
-                      />
+                      {selected ? (
+                        <Check className="h-4 w-4 text-accent-image-600 dark:text-accent-image-300" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-zinc-400" aria-hidden="true" />
+                      )}
                     </span>
                   </button>
                 </li>

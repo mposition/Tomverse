@@ -26,7 +26,7 @@ import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
-import { ChatInput } from "@/components/chat/ChatInput";
+import { ChatInput, type ComposerImageMode } from "@/components/chat/ChatInput";
 import { ChatProductSwitcher } from "@/components/chat/ChatProductSwitcher";
 import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
 import type { AiModel } from "@/lib/models";
@@ -244,15 +244,11 @@ type MobileChatShellProps = {
   /** Authenticated durable Chat may compose its next turn during a response. */
   allowEditingWhileSending: boolean;
   onNewChat: () => void;
-  onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (
-    draftText: string,
-    modelId?: string,
-    options?: { fromImageRequest?: boolean }
-  ) => void;
+  onSelectImageModel?: (modelId: string) => void;
+  composerImageMode?: ComposerImageMode | null;
   imageWorkspace?: ReactNode;
   /** The Project workspace pane; replaces the chat surface like `imageWorkspace`. */
   projectWorkspace?: ReactNode;
@@ -542,10 +538,10 @@ export function MobileChatShell({
   blockSubmitWhileVoiceBusy,
   allowEditingWhileSending,
   onNewChat,
-  onNewImage,
   imageLock,
   onLockedImageClick,
-  onStartImageDraft,
+  onSelectImageModel,
+  composerImageMode,
   imageWorkspace,
   projectWorkspace,
   projectComposerBar,
@@ -2006,7 +2002,8 @@ export function MobileChatShell({
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
-            onStartImageDraft={onStartImageDraft}
+            onSelectImageModel={onSelectImageModel}
+              composerImageMode={composerImageMode}
             imageGenerationLock={imageLock ?? null}
             onLockedImageGenerationClick={onLockedImageClick}
             attachments={attachments}
@@ -2078,20 +2075,6 @@ export function MobileChatShell({
                 setIsDrawerOpen(false);
                 drawerReturnFocusRef.current = null;
                 onNewChat();
-              }}
-              onNewImage={
-                onNewImage
-                  ? () => {
-                      setIsDrawerOpen(false);
-                      drawerReturnFocusRef.current = null;
-                      onNewImage();
-                    }
-                  : null
-              }
-              imageLock={imageLock ?? null}
-              onLockedImageClick={(lock) => {
-                setIsDrawerOpen(false);
-                onLockedImageClick?.(lock);
               }}
               onSelectConversation={(id, skipLockCheck, surfaceHint) => {
                 setIsDrawerOpen(false);

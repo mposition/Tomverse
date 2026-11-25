@@ -5931,3 +5931,42 @@ test.describe("Chat single-transcript mobile composer", { tag: "@ui-risk" }, () 
     });
   }
 });
+
+test("an image model picked in Chat answers the send with an image in the same conversation", { tag: "@ui-risk" }, async ({ page }) => {
+  // Owner direction 2026-11-25: no image mode. The picked image model answers
+  // in this conversation even when the triage says the text is not an image.
+  await page.context().addCookies([
+    { name: "__tomverse_e2e_image_generation", value: "1", url: "http://127.0.0.1:3100" },
+  ]);
+  await openChat(page, { fresh: true });
+  // Registered after the fixture so these answer instead of its catch-all.
+  const turns: Array<Record<string, unknown>> = [];
+  await page.route("**/api/chat/image-intent", route => route.fulfill({ json: { image: false } }));
+  await page.route("**/api/conversations/*/image-turn", route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    turns.push(body);
+    return route.fulfill({ status: 202, json: { content: "[Image generated] a lighthouse at dusk",
+      imageTurn: { groupId: "qa-chat-image-group", modelIds: body.imageModelIds } } });
+  });
+  await page.route("**/api/images/groups/qa-chat-image-group", route => route.fulfill({ json: {
+    status: "succeeded",
+    targets: [{ targetId: "qa-target", modelId: "gpt-image-2", currentGenerationId: "qa-chat-generation" }],
+    generations: [{ generationId: "qa-chat-generation", modelId: "gpt-image-2", status: "succeeded", prompt: "a lighthouse at dusk",
+      assets: [{ role: "original", url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJ1sAAAAASUVORK5CYII=" }] }],
+  } }));
+
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+  await page.getByTestId("image-model-tab-panel")
+    .locator('[data-testid="image-model-option"][data-model-id="gpt-image-2"]').click();
+  await expect(page.getByTestId("composer-model-select")).toContainText("GPT Image 2");
+  await page.getByTestId("chat-textarea").fill("a lighthouse at dusk");
+  await page.getByTestId("chat-send-button").click();
+
+  await expect(page.getByTestId("chat-image-turn")).toBeVisible({ timeout: 15_000 });
+  expect(turns).toHaveLength(1);
+  expect(turns[0]).toMatchObject({ imageModelIds: ["gpt-image-2"] });
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  // The image model stays selected for the next send, like any model.
+  await expect(page.getByTestId("composer-model-select")).toContainText("GPT Image 2");
+});

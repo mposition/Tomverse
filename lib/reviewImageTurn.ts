@@ -16,11 +16,17 @@ export function reviewImageTurnPlan(input: {
 }): { panelIds: string[]; turns: ReviewImageTurns } | null {
   const turns: ReviewImageTurns = {};
   const imageModels = input.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []).sort();
+  if (new Set(imageModels).size !== imageModels.length) return null;
+  const selected = input.panels.flatMap(id => input.models.filter(model => model.id === id));
   for (const choice of input.choices) {
-    const panel = input.panels.map(id => input.models.find(model => model.id === id))
-      .find(model => model?.provider === choice.provider) ??
-      input.models.find(model => model.provider === choice.provider);
-    if (!panel || Object.hasOwn(turns, panel.id)) return null;
+    // A panel hosts one image answer: a selected panel of the image model's
+    // provider, else any free selected panel (an image owner without a chat
+    // model, or a second model of one owner), else the provider's catalogue model.
+    const free = (model: { id: string }) => !Object.hasOwn(turns, model.id);
+    const panel = selected.find(model => model.provider === choice.provider && free(model)) ??
+      (choice.modelId ? selected.find(free) : undefined) ??
+      input.models.find(model => model.provider === choice.provider && free(model));
+    if (!panel) return null;
     turns[panel.id] = choice.modelId ? {
       modelIds: [choice.modelId], preset: input.preset,
       ...(input.prompt ? { prompt: input.prompt } : {}),
@@ -59,4 +65,45 @@ export function reviewImageDraftModelId(
 ): string | null {
   const active = activeReviewImageModels(imageModels);
   return (active.find(model => providers.includes(model.provider)) ?? active[0])?.id ?? null;
+}
+
+/**
+ * The Review composer's image models after one is picked from the catalogue.
+ *
+ * Review compares like with like: picking the first image model turns every
+ * answering panel into an image model -- the picked one, then an active model
+ * of each other panel's provider, then other owners -- up to `slots`. Once in
+ * image mode a pick toggles: a chosen model is removed (never the last one),
+ * another is added, or replaces the last one when `max` is reached.
+ */
+export function reviewImageModelSelection(input: {
+  imageModels: readonly ImageModelProfile[];
+  current: readonly string[];
+  picked: string;
+  providers: readonly string[];
+  slots: number;
+  max: number;
+}): string[] {
+  const active = activeReviewImageModels(input.imageModels);
+  const max = Math.max(1, input.max);
+  if (!active.some(model => model.id === input.picked)) return [...input.current];
+  if (input.current.length > 0) {
+    if (input.current.includes(input.picked)) {
+      return input.current.length > 1 ? input.current.filter(id => id !== input.picked) : [...input.current];
+    }
+    return input.current.length < max ? [...input.current, input.picked]
+      : [...input.current.slice(0, max - 1), input.picked];
+  }
+  const chosen = [input.picked];
+  const owner = (id: string) => active.find(model => model.id === id)?.provider;
+  const target = Math.min(max, Math.max(1, input.slots));
+  const add = (model: { id: string; provider: string } | undefined) => {
+    if (model && chosen.length < target && !chosen.includes(model.id)) chosen.push(model.id);
+  };
+  for (const provider of input.providers) {
+    if (!chosen.some(id => owner(id) === provider)) add(active.find(model => model.provider === provider));
+  }
+  for (const model of active) if (!chosen.some(id => owner(id) === model.provider)) add(model);
+  for (const model of active) add(model);
+  return chosen;
 }
