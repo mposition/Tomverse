@@ -69,7 +69,8 @@ async function imageReceipt(userId: string, key: string) {
 
 async function desktopImageRefusal(userId: string, id: string) {
   const conversation = await prisma.conversation.findFirst({
-    where: { id, userId }, select: { kind: true, password: true },
+    where: { id, userId },
+    select: { kind: true, password: true },
   });
   if (!conversation) return Response.json({ code: "CONVERSATION_NOT_FOUND" }, { status: 404 });
   if (!isImageConversationKind(conversation.kind)) {

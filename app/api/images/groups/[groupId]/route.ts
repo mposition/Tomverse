@@ -57,7 +57,8 @@ export async function GET(req: Request, { params }: Params) {
       );
     }
     if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && !(await prisma.conversation.findFirst({
-      where: { id: group.conversationId, userId, password: null }, select: { id: true },
+      where: { id: group.conversationId, userId, password: null },
+      select: { id: true },
     }))) return conversationLockedResponse();
 
     const generationIds = group.targets.flatMap((target) =>

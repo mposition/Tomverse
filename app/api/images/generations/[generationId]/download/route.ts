@@ -91,7 +91,11 @@ export async function GET(req: Request, { params }: Params) {
 
     const generation = await prisma.imageGeneration.findFirst({
       // Ownership is part of the lookup, not a check after it.
-      where: { id: generationId, userId, ...(desktop ? { conversation: { userId, password: null } } : {}) },
+      where: {
+        id: generationId,
+        userId,
+        ...(desktop ? { conversation: { userId, password: null } } : {}),
+      },
       select: {
         id: true,
         status: true,

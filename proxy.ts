@@ -46,11 +46,12 @@ import {
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
 import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
-import { DESKTOP_APP_ORIGIN, desktopWriteApiRoute } from "@/lib/desktopReadApiContract";
 import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import {
   applyMobileIdentityHeaders,
+  DESKTOP_APP_ORIGIN,
+  desktopWriteApiRoute,
   generatedArtifactRevisionEnabled,
   nativeBearerVerdict,
   nativeChatBearerRoute,

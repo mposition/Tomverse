@@ -292,3 +292,42 @@ export function nativeArtifactRevisionBearerRoute(path: string, method: string, 
   if (path === "/api/chat") return method === "DELETE";
   return method === "GET" && /^\/api\/artifacts\/[A-Za-z0-9_-]{1,64}\/versions$/.test(path);
 }
+
+// Desktop enrollment is shared by the proxy and route-level bearer checks.
+export const DESKTOP_APP_ORIGIN = "tomverse://desktop";
+const DESKTOP_CHAT_CREATE = "/api/products/chat/conversations";
+const DESKTOP_CHAT_TURN = "/api/chat";
+const DESKTOP_CHAT_CONTEXT = "/api/chat/context";
+const DESKTOP_REVIEW_CREATE = "/api/products/review/conversations";
+const DESKTOP_REVIEW_ROUTING = "/api/review/route";
+const DESKTOP_REVIEW_PREFLIGHT = "/api/chat/preflight";
+export const DESKTOP_IMAGE_GENERATIONS = "/api/images/generations";
+
+function desktopChatWriteRoute(path: string, method: string): boolean {
+  if (path === DESKTOP_CHAT_CREATE || path === DESKTOP_CHAT_TURN) return method === "POST";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/messages$/.test(path)) return method === "POST";
+  if (["/api/conversations/search", "/api/conversations/export-all", "/api/conversations/import-guest"].includes(path)) return false;
+  return (method === "PATCH" || method === "DELETE") && /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}$/.test(path);
+}
+
+export function desktopChatWriteEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED === "true";
+}
+
+export function desktopReviewWriteEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED === "true";
+}
+
+export function desktopAttachmentEnabled() {
+  return (desktopChatWriteEnabled() || desktopReviewWriteEnabled()) && process.env.TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED === "true";
+}
+
+export function desktopWriteApiRoute(path: string, method: string): boolean {
+  if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && desktopChatWriteEnabled();
+  if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
+  if (desktopChatWriteEnabled() && desktopChatWriteRoute(path, method)) return true;
+  if (!desktopReviewWriteEnabled()) return false;
+  if (path === DESKTOP_CHAT_CREATE || method === "DELETE") return false;
+  return desktopChatWriteRoute(path, method) || (method === "POST" &&
+    [DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_ROUTING, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_IMAGE_GENERATIONS].includes(path));
+}

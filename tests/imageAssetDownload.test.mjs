@@ -132,8 +132,9 @@ test("the download route answers with an attachment disposition and refuses to s
   assert.ok(source.includes('"Cache-Control": "private, no-store"'));
   // Ownership belongs in the lookup: a `findUnique` followed by a comparison
   // has a branch that can leak "exists but not yours".
-  assert.ok(
-    source.includes("where: { id: generationId, userId }"),
+  assert.match(
+    source,
+    /where:\s*\{\s*id:\s*generationId,\s*userId\s*[,}]/,
     "The generation lookup must be scoped by userId."
   );
   // readR2Object() deletes an object whose metadata disagrees with the
