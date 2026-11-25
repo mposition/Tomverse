@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { ArrowDown, ArrowUp, Pencil, X } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
-import { codeLimitProfile, type CodeLimitProfile, type CompactHistoryResult, type Task } from "../contract";
+import { MAX_CODE_PROMPT_CHARACTERS, codeLimitProfile, type CodeLimitProfile, type CompactHistoryResult, type QueueOperation, type Task } from "../contract";
 
 /** A reasoning level for display: the named ones are translated, any other id the catalog reports is shown as it is. */
 export function effortLabel(language: Language, effort: string): string {
@@ -20,9 +21,16 @@ export function effortLabel(language: Language, effort: string): string {
   }
 }
 
-/** The levels to offer for a model: default first, then the ones its catalog entry names, and a level already chosen so the choice stays visible. */
+const effortRank = ["default", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * The levels to offer: default, low and high as always (a model that does not name them uses its default), then the levels its
+ * catalog entry adds, and a level already chosen so the choice stays visible. Ordered from least to most effort.
+ */
 export function effortOptions(offered: readonly string[] | undefined, chosen: string): string[] {
-  return [...new Set(["default", ...(offered ?? []), chosen])];
+  const position = (id: string) => effortRank.includes(id) ? effortRank.indexOf(id) : effortRank.length;
+  return [...new Set(["default", "low", "high", ...(offered ?? []), chosen])]
+    .sort((left, right) => position(left) - position(right) || left.localeCompare(right));
 }
 
 const storageKey = "tomverse.desktop.codeEngine";
@@ -79,4 +87,56 @@ export function CodeEngineBar({ task, language, idle }: { task: Task; language: 
       {!last.met && last.next ? ` · ${copy.goalNext.replace("{action}", last.next)}` : ""}
     </small>}
   </div>;
+}
+
+/** Messages held for after the current turn: edit, reorder or remove them while the task runs. */
+export function QueuePanel({ task, language, live }: { task: Task; language: Language; live: boolean }) {
+  const copy = desktopCodeEngineCopy[language];
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const queued = task.queued ?? [];
+  if (!queued.length || !task.id) return null;
+  const taskId = task.id;
+  async function run(operation: QueueOperation) {
+    try {
+      const done = await window.desktop.queueMessage(taskId, operation);
+      setFailed(!done);
+      return done;
+    } catch {
+      setFailed(true);
+      return false;
+    }
+  }
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (editing?.text.trim() && await run({ kind: "edit", itemId: editing.id, text: editing.text })) setEditing(null);
+  }
+  const heading = copy.queueHeading.replace("{count}", String(queued.length));
+  return <section className="code-queue" aria-label={heading}>
+    <strong>{heading}</strong>
+    <small>{live ? copy.queueHint : copy.queueLeft}</small>
+    <ol>{queued.map((item, index) => <li key={item.id}>
+      {editing?.id === item.id
+        ? <form onSubmit={(event) => void save(event)}>
+          <textarea aria-label={copy.queueEdit} value={editing.text} maxLength={MAX_CODE_PROMPT_CHARACTERS}
+            onChange={(event) => setEditing({ id: item.id, text: event.currentTarget.value })} />
+          <button className="soft" type="submit" disabled={!editing.text.trim()}>{copy.queueSave}</button>
+          <button className="soft" type="button" onClick={() => setEditing(null)}>{copy.queueCancel}</button>
+        </form>
+        : <>
+          <span>{item.text}</span>
+          {live && <span className="code-queue-actions">
+            <button className="icon" type="button" aria-label={copy.queueUp} title={copy.queueUp} disabled={index === 0}
+              onClick={() => void run({ kind: "move", itemId: item.id, direction: -1 })}><ArrowUp size={13} /></button>
+            <button className="icon" type="button" aria-label={copy.queueDown} title={copy.queueDown} disabled={index === queued.length - 1}
+              onClick={() => void run({ kind: "move", itemId: item.id, direction: 1 })}><ArrowDown size={13} /></button>
+            <button className="icon" type="button" aria-label={copy.queueEdit} title={copy.queueEdit}
+              onClick={() => setEditing({ id: item.id, text: item.text })}><Pencil size={13} /></button>
+            <button className="icon" type="button" aria-label={copy.queueRemove} title={copy.queueRemove}
+              onClick={() => void run({ kind: "remove", itemId: item.id })}><X size={13} /></button>
+          </span>}
+        </>}
+    </li>)}</ol>
+    {failed && <small role="alert">{copy.queueFailed}</small>}
+  </section>;
 }

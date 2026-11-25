@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { journalContext, journalEngine } from "../src/host/journal-view";
 import { estimateTokens } from "../../tomverse-cli/src/runtime";
-import { startInput } from "../src/contract";
+import { MAX_CODE_PROMPT_CHARACTERS, queueInput, startInput } from "../src/contract";
 import { effortLabel, effortOptions } from "../src/renderer/CodeEngine";
 import { desktopCodeEngineCopy } from "../../../locales/desktopCodeEngine";
 import { SUPPORTED_LANGUAGES } from "../../../lib/language";
@@ -69,13 +69,28 @@ test("start input takes any level id the catalog could name, and rejects what is
   for (const effort of ["", "Extra High", "high ", "1high", "x".repeat(40)]) assert.throws(() => startInput.parse({ ...base, effort }), effort);
 });
 
-test("the effort picker offers default and the model's own levels, keeping a level already chosen", () => {
-  assert.deepEqual(effortOptions(undefined, "default"), ["default"]);
-  assert.deepEqual(effortOptions([], "default"), ["default"]);
+test("the effort picker keeps low and high, adds the levels the model's catalog entry names, and keeps a level already chosen", () => {
+  assert.deepEqual(effortOptions(undefined, "default"), ["default", "low", "high"]);
+  assert.deepEqual(effortOptions([], "default"), ["default", "low", "high"]);
   assert.deepEqual(effortOptions(["low", "medium", "high"], "default"), ["default", "low", "medium", "high"]);
-  assert.deepEqual(effortOptions(["low", "high"], "xhigh"), ["default", "low", "high", "xhigh"]);
+  assert.deepEqual(effortOptions(["xhigh", "minimal", "low", "turbo"], "default"), ["default", "minimal", "low", "high", "xhigh", "turbo"]);
+  assert.deepEqual(effortOptions(["low", "high"], "max"), ["default", "low", "high", "max"]);
   assert.equal(effortLabel("en", "low"), "Low");
   assert.equal(effortLabel("en", "medium"), "Medium");
   assert.equal(effortLabel("ko", "xhigh"), "매우 높음");
   assert.equal(effortLabel("en", "turbo"), "turbo", "an id with no translation is shown as the catalog gives it");
+});
+
+test("queue operations are validated: ids have one shape, text is trimmed and bounded, and nothing else is accepted", () => {
+  const id = "s-20260101-000000-abcdef";
+  const item = "q-0a1b2c3d";
+  assert.equal(queueInput.parse({ id, operation: { kind: "add", text: "  then run the tests  " } }).operation.kind, "add");
+  assert.deepEqual(queueInput.parse({ id, operation: { kind: "add", text: "  then run the tests  " } }).operation, { kind: "add", text: "then run the tests" });
+  assert.equal(queueInput.parse({ id, operation: { kind: "move", itemId: item, direction: -1 } }).operation.kind, "move");
+  assert.equal(queueInput.parse({ id, operation: { kind: "edit", itemId: item, text: "x" } }).operation.kind, "edit");
+  assert.equal(queueInput.parse({ id, operation: { kind: "remove", itemId: item } }).operation.kind, "remove");
+  for (const operation of [{ kind: "add", text: "   " }, { kind: "add", text: "x".repeat(MAX_CODE_PROMPT_CHARACTERS + 1) },
+    { kind: "move", itemId: item, direction: 2 }, { kind: "remove", itemId: "q-nothex" }, { kind: "remove", itemId: item, extra: true },
+    { kind: "clear" }]) assert.throws(() => queueInput.parse({ id, operation }), JSON.stringify(operation).slice(0, 40));
+  assert.throws(() => queueInput.parse({ id: "../../etc", operation: { kind: "add", text: "x" } }));
 });

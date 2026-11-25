@@ -83,6 +83,17 @@ export const workspaceHandoffInput = z.discriminatedUnion("target", [
   z.object({ target: z.literal("code"), excerpt: handoffExcerpt }).strict(),
   z.object({ target: z.literal("chat"), excerpt: handoffExcerpt, sourceTaskId: sessionId }).strict(),
 ]);
+const queueItemId = z.string().regex(/^q-[0-9a-f]{8}$/);
+const queueText = z.string().trim().min(1).max(MAX_CODE_PROMPT_CHARACTERS);
+/** What the person can do with the messages held for after the current turn. */
+export const queueOperation = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add"), text: queueText }).strict(),
+  z.object({ kind: z.literal("edit"), itemId: queueItemId, text: queueText }).strict(),
+  z.object({ kind: z.literal("remove"), itemId: queueItemId }).strict(),
+  z.object({ kind: z.literal("move"), itemId: queueItemId, direction: z.union([z.literal(-1), z.literal(1)]) }).strict(),
+]);
+export const queueInput = z.object({ id: z.string().regex(/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/), operation: queueOperation }).strict();
+export type QueueOperation = z.infer<typeof queueOperation>;
 export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
@@ -349,6 +360,7 @@ export type DesktopApi = {
   start(input: StartInput): Promise<void>;
   resume(id: string): Promise<boolean>;
   followUp(id: FollowUpTarget, text: string): Promise<boolean>;
+  queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

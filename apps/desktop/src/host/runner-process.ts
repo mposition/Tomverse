@@ -8,7 +8,7 @@ import {
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
-import { asProposedCodePlan, sessionId as taskIdSchema, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
+import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
 import { canAnswerClarification, canContinueApiQuota, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
@@ -35,6 +35,7 @@ type ActiveRun = {
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
+  queueOperation?: (operation: QueueOperation) => boolean;
   approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
 };
 let active: ActiveRun | undefined;
@@ -883,6 +884,16 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       publish();
       return true;
     };
+    control.queueOperation = (operation) => {
+      if (control.cancelled || ("text" in operation && hasCredential(operation.text, command.connection.key))) return false;
+      assertProjectRoot(command.project);
+      const done = operation.kind === "add" ? runner.enqueue(operation.text) !== null
+        : operation.kind === "edit" ? runner.editQueued(operation.itemId, operation.text)
+        : operation.kind === "remove" ? runner.removeQueued(operation.itemId)
+        : runner.moveQueued(operation.itemId, operation.direction);
+      if (done) publish();
+      return done;
+    };
     if (resuming) {
       await control.runner.loop(resumedInstruction && { text: resumedInstruction.text, confirmed: () => {
         resumedInstructionSaved = true;
@@ -916,6 +927,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       : task.status === "unknown" ? "runUnknown" : control.cancelled ? "runStoppedEarly" : "runtimeFailed"));
   } finally {
     control.queueFollowUp = undefined;
+    control.queueOperation = undefined;
     clearTimeout(streamTimer);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {
@@ -1369,6 +1381,11 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     void executeStructuredFixture(data);
   } else if (data.type === "follow-up") {
     void followUp(data);
+  } else if (data.type === "queue") {
+    let ok = false;
+    try { ok = active?.runId === data.runId && active.queueOperation?.(data.operation) === true; }
+    catch { /* A changed root or unwritable checkpoint cannot accept the change. */ }
+    send({ type: "queue-result", runId: data.runId, requestId: data.requestId, ok });
   } else if (data.type === "stop" && active?.runId === data.runId) {
     active.cancelled = true;
     active.abort.abort();

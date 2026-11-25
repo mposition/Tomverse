@@ -14,6 +14,7 @@ import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } 
 import { isLanguage, type Language } from "../../../../lib/language";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopCliAccountCopy } from "../../../../locales/desktopCliAccount";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopCodeExecutionCopy } from "../../../../locales/desktopCodeExecution";
 import { desktopCodeContinuationCopy } from "../../../../locales/desktopCodeQuota";
 import { desktopControlsCopy } from "../../../../locales/desktopControls";
@@ -36,7 +37,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
-import { CodeEngineBar, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
+import { CodeEngineBar, QueuePanel, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -563,6 +564,9 @@ function Desktop() {
   const canFollowUp = followUpTarget && (snapshot?.busy ? task?.status === "running" :
     pausedByQuota ? task.canResumeAfterQuota : waitingForAnswer && task.canAnswerClarification) &&
     !task?.pendingFollowUp && !codeHandoff && !codeReferences.length;
+  const queueTarget = task?.id && snapshot?.busy && (task.status === "running" || task.status === "approval") &&
+    task.execution?.executionMode === "tomverse_api" && !codeHandoff && !codeReferences.length ? task.id : undefined;
+  const canQueue = !!queueTarget && online && !requesting && !!prompt.trim();
   const codeGit = codeMode === "agent" && codeRoute.executionMode === "tomverse_api" ? snapshot?.codeGitWorkspace : undefined;
   const workspaceKey = JSON.stringify([snapshot?.draftNamespace, codeGit?.kind === "git" ? codeGit.id : codeGit?.kind]);
   const workspaceChoice: CodeWorktreeChoice | undefined = !codeGit ? undefined
@@ -699,8 +703,26 @@ function Desktop() {
     menu?.querySelector("summary")?.focus();
   }
 
+  async function queueDraft() {
+    if (!queueTarget || !canQueue) return;
+    const submitted = prompt;
+    const namespace = previousNamespace.current;
+    setRequesting(true);
+    nearBottom.current = true;
+    await act(async () => {
+      if (!await window.desktop.queueMessage(queueTarget, { kind: "add", text: submitted })) throw new Error("The message was not queued.");
+      if (previousNamespace.current === namespace && composer.current?.value === submitted) changeDraft("");
+    });
+    setRequesting(false);
+  }
+
   async function send(event: FormEvent) {
     event.preventDefault();
+    // One instruction can wait to be sent into the running turn; a second one waits in the queue.
+    if (canQueue && task?.pendingFollowUp) {
+      await queueDraft();
+      return;
+    }
     if (!canSendCode) return;
     if (canFollowUp && followUpTarget) {
       const submitted = prompt;
@@ -940,8 +962,9 @@ function Desktop() {
           nearBottom.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 48;
         }}>
           <div className="content">
-            {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} /> : <section className="welcome">
+            {task ? <><TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
+              language={language} openSettings={() => openSettings("execution")} />
+              <CodeEngineBar key={task.id ?? "new"} task={task} language={language} idle={!busy && online} /></> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
                 onClick={(event) => void openCodeProject(event.currentTarget)}>
@@ -953,7 +976,7 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
-          {task && surface === "code" && <CodeEngineBar key={task.id ?? "new"} task={task} language={language} idle={!busy && online} />}
+          {task && surface === "code" && <QueuePanel key={`queue-${task.id ?? "new"}`} task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>
@@ -1046,8 +1069,11 @@ function Desktop() {
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
               {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftLocation location={codeAskLocation} language={language}
                 draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} deviceLocation={false} />}
+              {queueTarget && <button className="soft" type="button" disabled={!canQueue} onClick={() => void queueDraft()}>
+                {desktopCodeEngineCopy[language].queueAdd}</button>}
               <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
-                disabled={!canSendCode}><ArrowUp size={19} /></button>
+                title={queueTarget ? desktopCodeEngineCopy[language].sendNow : undefined}
+                disabled={!canSendCode && !(canQueue && !!task?.pendingFollowUp)}><ArrowUp size={19} /></button>
               {snapshot?.busy && <button className="icon stop" type="button" aria-label={copy.stopCode} onClick={() => void act(() => window.desktop.stop())}><Square size={15} /></button>}
             </div>
           </form>

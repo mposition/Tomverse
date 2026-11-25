@@ -462,7 +462,12 @@ export class Runner {
                 record.routedModel = info.routedModel;
                 if (record.transmission && info.status < 400) record.catalogProvider = catalogProviderFor(record, this.options.catalog);
                 const requestedEffort = this.currentTask().effort;
-                const appliedEffort = info.appliedEffort ?? (
+                // A level the server reports is taken only if the catalog names it for this model (or the model it routed to); low and high always were.
+                const named = (id: string | null | undefined) => (id ? this.options.catalog.find((m) => m.id === id)?.reasoningEfforts : undefined) ?? [];
+                const reported = info.appliedEffort === undefined || info.appliedEffort === "default" || info.appliedEffort === "low" || info.appliedEffort === "high" ||
+                    [journal.state.model.pinned ?? journal.state.model.requested, info.routedModel].some((id) => named(id).includes(info.appliedEffort!))
+                    ? info.appliedEffort : undefined;
+                const appliedEffort = reported ?? (
                     info.status < 400 && requestedEffort && this.model().reasoningEfforts === undefined
                         ? "default" : undefined
                 );

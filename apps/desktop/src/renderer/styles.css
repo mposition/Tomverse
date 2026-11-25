@@ -633,3 +633,11 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
 .code-engine { display: grid; gap: 4px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 .code-engine > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .code-engine small { display: block; overflow-wrap: anywhere; }
+.code-queue { display: grid; gap: 4px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.code-queue small { color: var(--muted); }
+.code-queue ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.code-queue li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.code-queue li > span:first-child { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.code-queue li form { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; }
+.code-queue li textarea { flex: 1 1 100%; min-height: 56px; resize: vertical; }
+.code-queue-actions { display: inline-flex; flex: none; gap: 2px; }

@@ -21,7 +21,7 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, followUpInput, sessionId, startInput, webDestination, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
@@ -171,6 +171,7 @@ let worker: Electron.UtilityProcess | null = null;
 let runId: string | null = null;
 let discardedRunId: string | null = null;
 let pendingFollowUp: { requestId: string; resolve: (queued: boolean) => void } | null = null;
+let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null = null;
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
@@ -934,6 +935,13 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
+  if (event.type === "queue-result") {
+    if (pendingQueue?.requestId === event.requestId) {
+      pendingQueue.resolve(event.ok && event.runId === runId && event.runId !== discardedRunId);
+      pendingQueue = null;
+    }
+    return;
+  }
   if (event.type === "follow-up-queued") {
     if (pendingFollowUp?.requestId === event.requestId) {
       pendingFollowUp.resolve(event.queued && event.runId === runId && event.runId !== discardedRunId);
@@ -965,6 +973,8 @@ function onWorkerMessage(event: WorkerEvent) {
     } else if (event.type === "finished") {
       pendingFollowUp?.resolve(false);
       pendingFollowUp = null;
+      pendingQueue?.resolve(false);
+      pendingQueue = null;
       if (discarded) discardTransientTask(event.task);
       const reverse = pendingCliContinuation;
       pendingCliContinuation = undefined;
@@ -1172,6 +1182,8 @@ function bootWorker() {
     worker = null;
     pendingFollowUp?.resolve(false);
     pendingFollowUp = null;
+    pendingQueue?.resolve(false);
+    pendingQueue = null;
     pendingInspection?.settle(null);
     pendingMutation?.settle(null);
     pending = null;
@@ -2989,6 +3001,30 @@ function registerIpc() {
       try { send({ type: "follow-up", runId: activeRunId, requestId, text }); }
       catch {
         pendingFollowUp = null;
+        resolve(false);
+      }
+    });
+  });
+  main("desktop:queue", (value) => {
+    const { id, operation } = queueInput.parse(value);
+    const task = state.task;
+    const connection = codeConnection();
+    const activeRunId = runId;
+    if (!worker || !connection || !projectRoot || !activeRunId || activeRunId === discardedRunId || !state.busy ||
+        task?.id !== id || task.execution?.executionMode !== "tomverse_api" || (task.status !== "running" && task.status !== "approval") ||
+        pendingQueue || suspended || closing || signingOut || ("text" in operation && hasCredential(operation.text, connection.key))) return false;
+    assertProjectRoot(projectRoot);
+    if (task.worktree) {
+      const scope = currentHistoryScope();
+      const activeWorktree = scope && readManagedWorktree(managedWorktreeHome(scope), task.root);
+      if (!activeWorktree || activeWorktree.info.unavailable) return false;
+    }
+    return new Promise<boolean>((resolve) => {
+      const requestId = randomUUID();
+      pendingQueue = { requestId, resolve };
+      try { send({ type: "queue", runId: activeRunId, requestId, operation }); }
+      catch {
+        pendingQueue = null;
         resolve(false);
       }
     });

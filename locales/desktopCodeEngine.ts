@@ -26,6 +26,7 @@ type Copy = {
   compactFailed: string;
   queueHeading: string;
   queueHint: string;
+  queueLeft: string;
   queueAdd: string;
   sendNow: string;
   queueEdit: string;
@@ -68,6 +69,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "The context could not be compacted. The history was kept.",
     queueHeading: "Queued · {count}",
     queueHint: "These run in order after the current turn.",
+    queueLeft: "Not sent. These run in order if the task continues.",
     queueAdd: "Queue",
     sendNow: "Send now",
     queueEdit: "Edit queued message",
@@ -108,6 +110,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "컨텍스트를 압축하지 못했습니다. 기록은 그대로 유지했습니다.",
     queueHeading: "대기 중 · {count}",
     queueHint: "현재 turn이 끝나면 순서대로 실행됩니다.",
+    queueLeft: "아직 보내지 않았습니다. 작업이 이어지면 순서대로 실행됩니다.",
     queueAdd: "대기열에 추가",
     sendNow: "지금 보내기",
     queueEdit: "대기 메시지 편집",
@@ -148,6 +151,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "无法压缩上下文。已保留原有记录。",
     queueHeading: "排队中 · {count}",
     queueHint: "当前这一轮结束后将按顺序执行。",
+    queueLeft: "尚未发送。若任务继续，将按顺序执行。",
     queueAdd: "加入队列",
     sendNow: "立即发送",
     queueEdit: "编辑排队消息",
@@ -188,6 +192,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "無法壓縮內容。已保留原有記錄。",
     queueHeading: "排隊中 · {count}",
     queueHint: "目前這一輪結束後將依序執行。",
+    queueLeft: "尚未傳送。若任務繼續，將依序執行。",
     queueAdd: "加入佇列",
     sendNow: "立即傳送",
     queueEdit: "編輯排隊訊息",
@@ -228,6 +233,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "Le contexte n'a pas pu être compacté. L'historique est conservé.",
     queueHeading: "En attente · {count}",
     queueHint: "Ces messages s'exécutent dans l'ordre après le tour en cours.",
+    queueLeft: "Pas encore envoyés. Ils s'exécutent dans l'ordre si la tâche reprend.",
     queueAdd: "Mettre en file",
     sendNow: "Envoyer maintenant",
     queueEdit: "Modifier le message en attente",
@@ -268,6 +274,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "Der Kontext konnte nicht komprimiert werden. Der Verlauf blieb erhalten.",
     queueHeading: "In der Warteschlange · {count}",
     queueHint: "Diese laufen nach dem aktuellen Durchgang der Reihe nach.",
+    queueLeft: "Noch nicht gesendet. Sie laufen der Reihe nach, wenn die Aufgabe fortgesetzt wird.",
     queueAdd: "In Warteschlange",
     sendNow: "Jetzt senden",
     queueEdit: "Wartende Nachricht bearbeiten",
@@ -308,6 +315,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "No se pudo compactar el contexto. Se conservó el historial.",
     queueHeading: "En cola · {count}",
     queueHint: "Se ejecutan en orden cuando termine el turno actual.",
+    queueLeft: "Aún sin enviar. Se ejecutan en orden si la tarea continúa.",
     queueAdd: "Poner en cola",
     sendNow: "Enviar ahora",
     queueEdit: "Editar mensaje en cola",
@@ -348,6 +356,7 @@ export const desktopCodeEngineCopy = {
     compactFailed: "Não foi possível compactar o contexto. O histórico foi mantido.",
     queueHeading: "Na fila · {count}",
     queueHint: "Estas são executadas em ordem depois do turno atual.",
+    queueLeft: "Ainda não enviadas. Serão executadas em ordem se a tarefa continuar.",
     queueAdd: "Colocar na fila",
     sendNow: "Enviar agora",
     queueEdit: "Editar mensagem na fila",
