@@ -128,7 +128,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     const exportPath = join(profile, "chat-export.txt");
     await application.evaluate(async ({ shell, clipboard, dialog }, { origin, chat, exportPath }) => {
       const host = globalThis as typeof globalThis & {
-        clips?: number; sent?: number; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
+        clips?: number; sent?: number; mcpSent?: string[]; decided?: boolean[]; oauthCallbacks?: string[]; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
         pauseTranscript?: boolean; finishTranscript?: () => void; lockFromAnotherDevice?: () => void;
       };
       host.importRequests = [];
@@ -149,6 +149,8 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       const memory = { id: "memory-1", kind: "preference", statement: "The user prefers short answers.", pinned: false,
         status: "active", expiresAt: null, sensitivity: "standard" };
       let pinState = { pinned: false, pinSeq: 0 };
+      let pendingApproval = false;
+      let linearConnected = false;
       let projectName = "";
       let projectId: string | null = null;
       let shareEnabled = false;
@@ -406,7 +408,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         if (target.pathname === "/api/chat/context") return Response.json({ ok: true, contextBundle: null });
         if (target.pathname === "/api/chat" && options?.method === "POST") {
           host.sent = (host.sent ?? 0) + 1;
-          assistantId = JSON.parse(String(options.body)).assistantMessageId;
+          const turnBody = JSON.parse(String(options.body));
+          assistantId = turnBody.assistantMessageId;
+          // A chosen plugin turn asks for approval before anything leaves Tomverse.
+          if (turnBody.mcpConnectionId) {
+            (host.mcpSent ??= []).push(turnBody.mcpConnectionId + ":" + String(turnBody.contextBundle));
+            pendingApproval = true;
+            return new Response(String.fromCharCode(0) + "TOMVERSE_MCP_PROGRESS" + JSON.stringify({ state: "approval_required" }) + "Sent by the desktop test.",
+              { headers: { "X-Chat-Routed-Model": "gpt-5-4-mini" } });
+          }
           return new Response("Sent by the desktop test.", { headers: { "X-Chat-Routed-Model": "gpt-5-4-mini" } });
         }
         if (target.pathname === `/api/conversations/${newChatId}`) return Response.json({
@@ -417,10 +427,39 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           ],
           messagePage: { nextCursor: null },
         });
-        if (target.pathname === "/api/mcp/connections") return Response.json({ enabled: true,
-          servers: [{ id: "github", name: "GitHub", custom: false }, { id: "custom-1", name: "Custom GitHub", custom: true }],
-          connections: [{ id: "test-connection", serverId: "github", name: "GitHub", status: "connected", tools: 3, granted: 1 }],
-        });
+        if (target.pathname === "/api/mcp/invocations/inv-1" && options?.method === "POST") {
+          const decision = JSON.parse(String(options.body));
+          (host.decided ??= []).push(decision.approve);
+          pendingApproval = false;
+          return Response.json({ status: "ok" });
+        }
+        if (target.pathname === "/api/mcp/oauth/start" && options?.method === "POST") {
+          return Response.json({ status: "authorization_required", authorizationUrl: "https://provider.org/authorize?state=" + "S".repeat(43) });
+        }
+        if (target.pathname === "/api/mcp/oauth/callback") {
+          const callbackHeaders = new Headers(options?.headers);
+          if (callbackHeaders.get("cookie") !== "next-auth.session-token=fixture..settings.web.session") throw new Error("Invalid OAuth callback transport");
+          (host.oauthCallbacks ??= []).push(target.search);
+          linearConnected = true;
+          return new Response(null, { status: 303, headers: { Location: origin + "/plugins?oauth=connected" } });
+        }
+        if (target.pathname === "/api/mcp/connections") {
+          const headers = new Headers(options?.headers);
+          if (headers.get("cookie") !== "next-auth.session-token=fixture..settings.web.session" ||
+              headers.get("origin") !== origin || headers.has("authorization")) throw new Error("Invalid connector credential transport");
+          return Response.json({ enabled: true, customEnabled: true,
+            servers: [{ id: "github", name: "GitHub", auth: "oauth", origin: "https://api.githubcopilot.com" },
+              { id: "custom-1", name: "Custom GitHub", auth: "bearer", origin: "https://mcp.example.com", custom: true },
+              { id: "google-drive", name: "Google Drive", auth: "oauth", origin: "https://drivemcp.googleapis.com" },
+              { id: "linear", name: "Linear", auth: "oauth", origin: "https://mcp.linear.app" }],
+            connections: [{ id: "test-connection", serverId: "github", name: "GitHub", status: "connected", version: 1,
+              catalog: [{ name: "search_issues", mode: "read" }, { name: "issue_read", mode: "read" }, { name: "create_issue", mode: "confirm" }],
+              grants: [{ name: "search_issues", mode: "read" }] },
+              ...(linearConnected ? [{ id: "linear-connection", serverId: "linear", name: "Linear", status: "connected", version: 1,
+                catalog: [{ name: "list_issues", mode: "read" }], grants: [] }] : [])],
+            invocations: pendingApproval ? [{ id: "inv-1", connectionId: "test-connection", toolName: "create_issue", state: "pending",
+              arguments: { title: "Fixture issue" }, expiresAt: new Date(Date.now() + 600_000).toISOString() }] : [] });
+        }
         if (target.pathname === "/api/conversations") return Response.json([{ ...chat, ...pinState, projectId, shareEnabled, isLocked }, {
           ...chat, id: "older-shared-chat", title: "An older shared chat", updatedAt: "2025-01-01T09:00:00Z",
           shareEnabled: true, selectedModels: ["gpt-5-4-mini"],
@@ -752,13 +791,52 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await plugins.getByRole("searchbox", { name: "Search plugins" }).fill("custom");
     await expect(connected).toHaveCount(0);
     await expect(custom).toBeVisible();
+    await plugins.getByRole("searchbox", { name: "Search plugins" }).fill("");
+    await connected.getByRole("button", { name: "Manage access", exact: true }).click();
+    const detail = plugins.getByTestId("desktop-connector-detail");
+    await expect(detail.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
+    await expect(detail.getByRole("checkbox", { name: /create_issue/ })).not.toBeChecked();
+    // A provider that blocks sign-in inside an app window is reported, not handed to the system browser.
+    await plugins.getByRole("listitem").filter({ hasText: "Google Drive" }).getByRole("button", { name: "Connect", exact: true }).click();
+    await expect(plugins.getByRole("alert")).toContainText("drivemcp.googleapis.com");
+    await expect(plugins.getByTestId("desktop-connector-submit")).toBeDisabled();
+    // OAuth runs in an app-owned window that names its host and never holds the account cookie.
+    await plugins.getByRole("listitem").filter({ hasText: "Linear" }).getByRole("button", { name: "Connect", exact: true }).click();
+    await plugins.getByTestId("desktop-connector-submit").click();
+    const signIn = () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
+      .filter((window) => window.getTitle().startsWith("provider.org")).length);
+    await expect.poll(signIn).toBe(1);
+    assert.deepEqual(await application.evaluate(async ({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      return { cookies: (await window.webContents.session.cookies.get({})).length, title: window.getTitle(), modal: window.isModal() };
+    }), { cookies: 0, title: "provider.org · Tomverse connection", modal: true });
+    // Tomverse's callback is answered by the app, not loaded in the window.
+    await application.evaluate(async ({ BrowserWindow }, callback) => {
+      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      await window.webContents.loadURL(callback).catch(() => {});
+    }, authOrigin + "/api/mcp/oauth/callback?state=" + "S".repeat(43) + "&code=provider-code");
+    await expect.poll(signIn).toBe(0);
+    await expect(plugins.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
+    await expect(plugins.getByTestId("desktop-connector-detail")).toContainText("Linear");
+    assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { oauthCallbacks?: string[] }).oauthCallbacks),
+      ["?state=" + "S".repeat(43) + "&code=provider-code"]);
     await rail.getByRole("button", { name: "Chat", exact: true }).click();
     await page.getByRole("button", { name: "New chat", exact: true }).click();
+    await page.getByTestId("desktop-chat-connector").click();
+    await page.getByTestId("desktop-chat-connector-select").selectOption({ label: "GitHub" });
     await message.fill("Send from the Desktop composer.");
     await page.getByRole("button", { name: "Send Chat message", exact: true }).click();
     await expect(page.getByText("Sent by the desktop test.", { exact: true })).toBeVisible();
     await expect(page.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
     assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 1);
+    // The chosen plugin travelled with the turn (no signed context) and its pending action waits for approval.
+    const approval = page.getByTestId("desktop-chat-approval");
+    await expect(approval).toContainText("create_issue");
+    await expect(approval).toContainText("Fixture issue");
+    assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { mcpSent?: string[] }).mcpSent), ["test-connection:undefined"]);
+    await approval.getByRole("button", { name: "Approve this action", exact: true }).click();
+    await expect(approval).toHaveCount(0);
+    assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { decided?: boolean[] }).decided), [true]);
     await application.evaluate(() => { (globalThis as typeof globalThis & { pauseTranscript?: boolean }).pauseTranscript = true; });
     await chat.click();
     await expect.poll(() => application!.evaluate(() =>
@@ -925,7 +1003,8 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await tools.getByRole("button", { name: "Review", exact: true }).click();
     await page.getByRole("button", { name: "Open Review", exact: true }).click();
     await tools.getByRole("button", { name: "Plugins", exact: true }).click();
-    await page.getByRole("button", { name: "Open Plugins", exact: true }).click();
+    // Plugins stay inside Desktop: there is no web launcher for them.
+    await expect(page.getByRole("button", { name: "Open Plugins", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Desktop settings" }).click();
     await page.getByTestId("desktop-settings-ai").click();
     await expect(page.getByRole("heading", { name: "Memory and privacy" })).toBeVisible();
@@ -939,7 +1018,7 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await expect(page.getByRole("heading", { name: "What shall we build?" })).toBeVisible();
     assert.deepEqual(await application.evaluate(() =>
       (globalThis as typeof globalThis & { desktopDestinations: string[] }).desktopDestinations), [
-      "https://tomverse.app/review", "https://tomverse.app/plugins",
+      "https://tomverse.app/review",
     ]);
     assert.equal(await tools.getByRole("button", { name: "Image", exact: true }).count(), 0);
     await application.evaluate(({ BrowserWindow }) => {

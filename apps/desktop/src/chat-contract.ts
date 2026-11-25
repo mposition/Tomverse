@@ -4,6 +4,7 @@ import { parseChatLocation } from "@tomverse/chat-core";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
 import type { AiModel } from "../../../lib/models";
+import type { McpProgressState } from "../../../lib/mcpConnectorProgress";
 import { attachmentRead, attachmentUploadIds } from "./attachment-contract";
 import { ARTIFACT_LIMITS, isSupportedArtifactFormat, parseChatStreamArtifacts } from "../../../lib/generatedArtifactCore";
 
@@ -40,6 +41,8 @@ export const chatTurnInput = z.object({
   currentLocation: z.unknown().transform((value) => parseChatLocation(value)).optional(),
   tools: composerOptions.optional(),
   deepResearchDepth: deepResearchDepth.optional(),
+  /** The plugin connection the user chose for this conversation; the server re-checks that it is theirs. */
+  mcpConnectionId: chatId.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length || input.handoffId));
 export const reviewCapability = z.object({
   easy: z.boolean(), modelLimit: z.number().int().positive(), plan: z.enum(["Free", "Pro", "Max"]),
@@ -139,6 +142,8 @@ export type ChatTurnProgress = {
   text?: string;
   modelId?: string;
   applied?: z.infer<typeof chatEffort>;
+  /** Where the selected plugin stands in this turn, as the server reports it in the stream. */
+  mcpProgress?: McpProgressState;
 };
 export type ChatTurnResult = {
   conversation: ChatConversation | null;

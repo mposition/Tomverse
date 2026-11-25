@@ -11,6 +11,7 @@ import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState } from "./browser-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
+import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
@@ -82,7 +83,7 @@ export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
 }).strict();
-export const webDestination = z.enum(["review", "plugins", "image"]);
+export const webDestination = z.enum(["review", "image"]);
 export type StartInput = z.infer<typeof startInput>;
 export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
@@ -379,6 +380,8 @@ export type DesktopApi = {
   saveImage(input: { id: string; modelId: string }): Promise<boolean>;
   saveArtifact(input: SaveArtifactInput): Promise<boolean>;
   pluginInventory(): Promise<DesktopPluginInventory>;
+  connectorInventory(): Promise<ConnectorInventory>;
+  connectorAction(input: ConnectorInput): Promise<ConnectorResult>;
   importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
   checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;
   uploadAttachment(input: AttachmentBytesInput): Promise<AttachmentUpload>;

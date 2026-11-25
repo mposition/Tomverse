@@ -16,6 +16,7 @@ import { DesktopResearchSetup } from "./DesktopResearchSetup";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
+import { ChatConnectorPicker, ChatConnectorStatus, useChatConnector } from "./ChatConnectorPicker";
 import type { ComposerOptions, DeepResearchDepth } from "../chat-contract";
 import { de } from "../../../../locales/de";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
@@ -823,7 +824,7 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
 }
 
 export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture,
-  plan, imageCapability, onModelImage, composerTools, searchReadiness, deepResearch }: {
+  plan, imageCapability, onModelImage, composerTools, searchReadiness, deepResearch, connectors, onManageConnectors }: {
   chat: History; chatWrite: boolean; autoOffered: boolean; onImport?: () => void; onCompare?: (prompt: string, continuationId?: string) => void; starters?: ChatStarter[];
   preferredModelId?: string;
   attachments: DesktopAttachmentDraft;
@@ -832,6 +833,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   deviceFixture: boolean;
   plan: ModelTier; imageCapability: ImageCapability | null; onModelImage(modelId: string, prompt: string): void;
   composerTools?: boolean; searchReadiness?: { brave: boolean }; deepResearch?: boolean;
+  /** The server offers plugins to Desktop; without it the composer shows no plugin control. */
+  connectors?: boolean; onManageConnectors?: () => void;
 }) {
   const { language } = chat;
   const copy = desktopChatCopy[language];
@@ -845,6 +848,13 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const [effort, setEffort] = useState<ChatTurnInput["effort"]>("default");
   const activeId = chat.selected?.id;
   const toolsScope = `${chat.account ?? ""}:${activeId ?? "new"}`;
+  const connector = useChatConnector(activeId);
+  const [connectorApproval, setConnectorApproval] = useState(false);
+  const connectorProgress = chat.live?.mcpProgress;
+  // Event-driven, not render-driven: a short turn can finish before any render shows its progress.
+  useEffect(() => connectors ? window.desktop.subscribeChat((change) => {
+    if (change.mcpProgress === "approval_required") setConnectorApproval(true);
+  }) : undefined, [connectors]);
   const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
   const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
   const location = useChatDraftLocation((chat.account ?? "") + ":" + (activeId ?? "new"));
@@ -892,7 +902,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     if (!attachmentUploadIds) return;
     const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
       effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
-      ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation: location.current() }),
+      ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation: location.current(),
+        ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
       tools: composerTools ? toolChanges : undefined });
     location.remove();
     if (saved) { attachments.clear(); setToolDraft(undefined); }
@@ -994,6 +1005,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           </li>}
         </ol>
         {chat.sending && !live?.text && <p className="chat-effort" role="status">{copy.waiting}</p>}
+        {connectors && <ChatConnectorStatus language={language} progress={connectorProgress} waiting={connectorApproval} sending={chat.sending}
+          onManage={onManageConnectors ?? (() => {})} onResolved={() => setConnectorApproval(false)} />}
         {chat.conversation?.messagePage.nextCursor && <button className="soft" type="button" disabled={chat.opening || chat.sending}
           onClick={() => void chat.more()}>{copy.loadMessages}</button>}
       </>}
@@ -1032,6 +1045,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
               tool deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
             <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" tool />
           </ComposerTools>
+          {connectors && <ChatConnectorPicker key={toolsScope} language={language} conversationId={activeId}
+            disabled={chat.sending || chat.writing} onManage={onManageConnectors ?? (() => {})} />}
           <span className="spacer" />
           <DesktopModelPicker key={activeId ?? "new"} account={chat.account} language={language} label={copy.modelEffort}
             models={textModels} choices={selectedModel ? [selectedModel.id] : []} limit={1} singleModel plan={plan} disabled={chat.sending || chat.writing}

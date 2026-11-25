@@ -49,7 +49,8 @@ import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebar
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
-import { PluginWorkspace } from "./PluginWorkspace";
+import { ConnectorWorkspace } from "./ConnectorWorkspace";
+import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
 import { ReviewWorkspace, useReviewRun } from "./ReviewWorkspace";
 import { ImageHistoryList, ImageWorkspace, useImageWorkspace } from "./ImageWorkspace";
 import { useAttachmentDraft } from "./AttachmentDraft";
@@ -1067,6 +1068,7 @@ function Desktop() {
         plan={(usage?.account === accountDraft ? usage?.plan : undefined) ?? snapshot?.capabilities?.review?.plan ?? "Free"}
         imageCapability={imageCapability} onModelImage={openImageModel}
         deepResearch={snapshot?.capabilities?.deepResearch} composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
+        connectors={snapshot?.capabilities?.plugins === true} onManageConnectors={() => select("plugins")}
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
@@ -1153,11 +1155,13 @@ function Desktop() {
             </button>
           </section>}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
-          ? <PluginWorkspace key={account.label} language={language} /> : <section className="welcome">
-          <h2>{names[surface]}</h2>{surface !== "chat" && <p>{copy.webFallback}</p>}
+          ? <ConnectorWorkspace key={account.label} language={language} /> : <section className="welcome">
+          <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>
+            : surface !== "chat" && <p>{copy.webFallback}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}
           <div className="web-launcher">
-            {surface === "chat" || surface === "settings" ? <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
+            {surface === "plugins" ? account?.stage !== "connected" && <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
+              : surface === "chat" || surface === "settings" ? <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
               : <button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb(surface))}>
                 <ExternalLink size={16} /> {copy.openSurface.replace("{surface}", () => names[surface])}</button>}
           </div>
