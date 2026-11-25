@@ -156,6 +156,31 @@ export function createAccountDataApi(options: {
     return { status: "deleted" as const, deleted: body.deleted };
   }
 
+  async function saveMemories() {
+    const saved = await save({
+      suggestedName: "tomverse-memories.json", extension: "json", filterName: "JSON",
+      load: async () => {
+        const res = await call({ path: "/api/memories/export" }, "application/json", 120_000);
+        if (mediaType(res) !== "application/json") {
+          await res.body?.cancel().catch(() => {});
+          throw new AccountDataRefusal("failed");
+        }
+        const bytes = await readBoundedBody(res, FILE_MAX_BYTES);
+        // A stream that stopped early is a truncated file, not a smaller export.
+        const parsed = z.object({ format: z.string(), items: z.array(z.unknown()), itemCount: z.number() }).passthrough()
+          .safeParse(JSON.parse(bytes.toString("utf8")));
+        if (!parsed.success || parsed.data.itemCount !== parsed.data.items.length) throw new AccountDataRefusal("failed");
+        return bytes;
+      },
+    });
+    return { status: saved ? "saved" as const : "cancelled" as const };
+  }
+
+  async function deleteAllMemories(confirmationText: string) {
+    await call({ path: "/api/memories/delete-all", method: "POST", body: { confirm: true, confirmationText } });
+    return { status: "deleted" as const };
+  }
+
   async function deleteAccount(confirmationText: string) {
     const res = await call({ path: "/api/user/account", method: "DELETE", body: { confirm: true, confirmationText } });
     z.object({ success: z.literal(true) }).passthrough().parse(await res.json());
@@ -175,6 +200,8 @@ export function createAccountDataApi(options: {
           case "saveAllConversations": return saveAllConversations();
           case "deleteAllConversations": return deleteAllConversations();
           case "deleteAccount": return deleteAccount(input.confirmation);
+          case "saveMemories": return saveMemories();
+          case "deleteAllMemories": return deleteAllMemories(input.confirmation);
         }
       });
     },

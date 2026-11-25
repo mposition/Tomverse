@@ -117,6 +117,15 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
       return { path: "/api/user/usage" };
     case "exportHistory":
       return { path: "/api/user/account/export" };
+    case "deleteMemory":
+      return { path: `/api/memories/${encodeURIComponent(input.id)}`, method: "DELETE" };
+    case "moveMemoryScope":
+      return { path: `/api/memories/${encodeURIComponent(input.id)}/scope`, method: "POST",
+        body: { expectedRevision: input.expectedRevision, targetProjectId: input.projectId } };
+    case "extractionRuns":
+      return { path: "/api/memories/extraction-runs" };
+    case "cancelExtraction":
+      return { path: `/api/memories/extraction-runs/${encodeURIComponent(input.id)}/cancel`, method: "POST" };
   }
 }
 

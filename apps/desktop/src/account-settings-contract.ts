@@ -151,6 +151,11 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("revokeKey"), id: accountId }).strict(),
   z.object({ action: z.literal("usage") }).strict(),
   z.object({ action: z.literal("exportHistory") }).strict(),
+  z.object({ action: z.literal("deleteMemory"), id: accountId }).strict(),
+  z.object({ action: z.literal("moveMemoryScope"), id: accountId, expectedRevision: z.number().int().positive(),
+    projectId: accountId.nullable() }).strict(),
+  z.object({ action: z.literal("extractionRuns") }).strict(),
+  z.object({ action: z.literal("cancelExtraction"), id: accountId }).strict(),
 ]);
 
 const keySummary = z.object({
@@ -163,6 +168,10 @@ const loginMethod = z.discriminatedUnion("type", [
   z.object({ type: z.literal("email"), enabled: z.boolean() }),
 ]);
 
+const extractionRun = z.object({
+  id: accountId, status: z.string().max(40), chunkTotal: z.number().int().nonnegative(),
+  chunkCompleted: z.number().int().nonnegative(), createdAt: z.string(), completedAt: z.string().nullable(),
+});
 const exportHistoryEntry = z.object({
   id: accountId, status: z.string().max(40), refusalReason: z.string().nullable(), expiresAt: z.string(),
   consumedAt: z.string().nullable(), byteLength: z.number().int().nonnegative().nullable(), createdAt: z.string(),
@@ -181,7 +190,9 @@ export const desktopAccountSettingsOutput = {
     memories: z.array(memorySummary),
   }),
   memoryDetail: z.object({
-    memory: memorySummary.extend({ evidence: z.array(memoryEvidence) }),
+    // revision and projectId let the scope control move a memory; an older server omits them.
+    memory: memorySummary.extend({ evidence: z.array(memoryEvidence),
+      revision: z.number().int().positive().optional(), projectId: accountId.nullable().optional() }),
     conflicts: z.array(z.object({ id: accountId, statement: z.string() })),
   }),
   updateMemory: z.object({ ok: z.literal(true) }),
@@ -258,6 +269,10 @@ export const desktopAccountSettingsOutput = {
   createKey: z.object({ key: z.string().min(1).max(512), summary: keySummary }),
   updateKey: z.object({ key: keySummary }),
   revokeKey: z.object({ revoked: z.literal(true) }),
+  deleteMemory: z.looseObject({ outcome: z.string() }),
+  moveMemoryScope: z.object({ moved: z.boolean(), projectId: accountId.nullable() }),
+  extractionRuns: z.object({ runs: z.array(extractionRun).max(50), activeRunId: accountId.nullable() }),
+  cancelExtraction: z.looseObject({}),
   exportHistory: z.object({ requests: z.array(exportHistoryEntry).max(200) }),
   usage: z.object({
     plan: label,

@@ -12,6 +12,7 @@ import type { AccountPreferences, AccountSettingsResult, DesktopAccountSettingsI
 import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
 import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
+import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
 import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
 
 export { AccountSettingRow };
@@ -277,6 +278,9 @@ function MemoryDetail({ id, language, close }: Common & { id: string; close(): v
           <button type="submit" className="primary" disabled={busy || failed || !statement.trim() || statement === memory.statement}>{copy.save}</button>
         </div>
       </form> : <p>{memory.statement}</p>}
+      {memory.status === "active" && memory.revision !== undefined && <MemoryScope language={language} id={id}
+        revision={memory.revision} projectId={memory.projectId ?? null} onMoved={state.reload} />}
+      <DeleteMemory language={language} id={id} onDeleted={close} />
       {memory.evidence.length > 0 && <ul>{memory.evidence.map(evidence => <li key={evidence.id}>
         {evidence.manualContent ? <>{copy.evidenceManual} {evidence.manualContent}</> :
           <>{copy.evidenceExternal}{evidence.sourceTitle && " · " + evidence.sourceTitle}</>}
@@ -325,6 +329,7 @@ function Memory({ language }: Common) {
     </AccountSettingRow>
     {browse && <StoredMemories language={language} />}
     <ActionStatus language={language} failed={failed} />
+    <MemoryDataActions language={language} />
   </div>;
 }
 

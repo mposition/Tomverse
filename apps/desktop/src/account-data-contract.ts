@@ -6,6 +6,7 @@ import { z } from "zod";
 
 export const DELETE_ACCOUNT_PHRASE = "DELETE MY ACCOUNT";
 export const DELETE_ALL_CHATS_PHRASE = "DELETE ALL CHATS";
+export const DELETE_ALL_MEMORIES_PHRASE = "DELETE ALL MEMORIES";
 
 const accountId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
@@ -16,6 +17,8 @@ export const desktopAccountDataInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("saveAllConversations") }).strict(),
   z.object({ action: z.literal("deleteAllConversations"), confirmation: z.literal(DELETE_ALL_CHATS_PHRASE) }).strict(),
   z.object({ action: z.literal("deleteAccount"), confirmation: z.literal(DELETE_ACCOUNT_PHRASE) }).strict(),
+  z.object({ action: z.literal("saveMemories") }).strict(),
+  z.object({ action: z.literal("deleteAllMemories"), confirmation: z.literal(DELETE_ALL_MEMORIES_PHRASE) }).strict(),
 ]);
 
 export const accountDataStatus = z.enum([
