@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
 
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import {
@@ -64,7 +65,8 @@ export async function GET(
         // being unlocked separately does not open the conversation that
         // continues it.
         const conversation = await prisma.conversation.findFirst({
-            where: { id: conversationId, userId },
+            where: { id: conversationId, userId,
+                ...(req.headers.get("origin") === DESKTOP_APP_ORIGIN ? { productKey: { in: ["chat", "review"] }, kind: "chat" } : {}) },
             select: { id: true, password: true, passwordVersion: true },
         });
         if (!conversation) {

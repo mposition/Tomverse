@@ -3,6 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 import { copyGeneratedArtifactForRevision, generatedArtifactCopySchema, GeneratedArtifactRevisionError } from "@/lib/generatedArtifactRevision";
 import {
     stepCountIs,
@@ -872,6 +873,9 @@ export async function PUT(req: Request) {
             16 * 1024,
             uploadPreparationSchema
         );
+        if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && body.action !== undefined) {
+            return Response.json({ error: "Desktop attachments are prepared from local files." }, { status: 400 });
+        }
         if (body.action === "generated-artifact-copy") {
             const registered = await copyGeneratedArtifactForRevision({
                 ...body,
@@ -1547,6 +1551,12 @@ async function handleChatPost(
         if (routeAuth.response) return routeAuth.response;
         const session = routeAuth.session;
         const body = await readChatJsonBody(req);
+        const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
+        if (desktop && (!body || typeof body !== "object" ||
+            Object.keys(body).some((key) => !["messages", "modelId", "conversationId", "assistantMessageId",
+                "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle"].includes(key)))) {
+            return tracedJsonError("Invalid Desktop Chat request.", "INVALID_REQUEST", 400, traceId);
+        }
         const currentLocation = parseChatLocation(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
@@ -1569,6 +1579,28 @@ async function handleChatPost(
             guestClientTurnId,
             researchMode,
         } = validateChatPayload(body);
+        if (desktop) {
+            const attachmentsAllowed = desktopAttachmentEnabled();
+            const invalidAttachments = requestMessages.some((message) => message.attachments?.some((attachment) => {
+                const reference = messageAttachmentReferenceSchema.safeParse(attachment);
+                return !attachmentsAllowed || message.role !== "user" || !reference.success ||
+                    !reference.data.attachmentId || Boolean(reference.data.uploadId);
+            }));
+            if (!conversationId || !assistantMessageId || !sourceUserMessageId || invalidAttachments) {
+                return tracedJsonError("Desktop Chat requires a saved question and saved attachments.", "INVALID_REQUEST", 400, traceId);
+            }
+            const desktopConversation = conversationId && session?.user?.id
+                ? await prisma.conversation.findFirst({
+                    where: { id: conversationId, userId: session.user.id },
+                    select: { productKey: true, kind: true, password: true },
+                })
+                : null;
+            const desktopProduct = desktopConversationWriteProduct(desktopConversation);
+            if (!desktopProduct || (desktopProduct === "chat" && admissionToken)) {
+                return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
+            }
+            if (desktopConversation?.password != null) return conversationLockedResponse();
+        }
         if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview")) {
             return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
         }
@@ -8382,7 +8414,9 @@ async function handleChatPost(
                                             content: storedContent,
                                             status: completionOutcome.status,
                                             modelId: dispatched.modelId,
-                                            searchMetadata: webSearchExecution,
+                                            searchMetadata: reasoningEffort
+                                                ? { ...webSearchExecution, reasoningEffort: { requested: reasoningEffort, applied: appliedEffort ?? "default" } }
+                                                : webSearchExecution,
                                             // Spread, so an answer with no
                                             // bundle writes neither column
                                             // and both stay NULL (§22).

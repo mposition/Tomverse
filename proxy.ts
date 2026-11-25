@@ -50,6 +50,8 @@ import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthCont
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import {
   applyMobileIdentityHeaders,
+  DESKTOP_APP_ORIGIN,
+  desktopWriteApiRoute,
   generatedArtifactRevisionEnabled,
   nativeBearerVerdict,
   nativeChatBearerRoute,
@@ -300,12 +302,17 @@ export function proxy(request: NextRequest) {
       nativeParityBearerRoute(request.nextUrl.pathname, request.method, process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true", process.env.TOMVERSE_NATIVE_WORKSPACE_ENABLED === "true") ||
       (process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true" && nativeArtifactRevisionBearerRoute(request.nextUrl.pathname, request.method, generatedArtifactRevisionEnabled())));
   const nativeBilling = process.env.MOBILE_BILLING_ENABLED === "true" && request.method === "POST" && request.nextUrl.pathname === "/api/mobile/billing";
+  const desktopChat = request.headers.get("origin") === DESKTOP_APP_ORIGIN &&
+    desktopWriteApiRoute(request.nextUrl.pathname, request.method);
+  if (desktopChat && (request.headers.has("cookie") || request.headers.has("x-tomverse-conversation-unlocks"))) {
+    return blockedBearerResponse();
+  }
   const bearer = nativeBearerVerdict({
     pathname: request.nextUrl.pathname,
     authorization: request.headers.get("authorization"),
-    registeredRoutes: [...N1B_BEARER_ROUTES, ...(nativeChat || nativeBilling ? [request.nextUrl.pathname] : [])],
+    registeredRoutes: [...N1B_BEARER_ROUTES, ...(nativeChat || nativeBilling || desktopChat ? [request.nextUrl.pathname] : [])],
     verify: (token) => {
-      const verdict = verifyMobileAccessTokenString(token);
+      const verdict = verifyMobileAccessTokenString(token, desktopChat ? { client: "desktop" } : undefined);
       return verdict.ok
         ? { ok: true, identity: verdict.identity }
         : { ok: false, failure: verdict.failure };
@@ -314,7 +321,7 @@ export function proxy(request: NextRequest) {
   if (bearer.kind === "reject") {
     return withNativeCors(blockedBearerResponse(), request);
   }
-  if (bearer.kind === "yes") {
+  if (bearer.kind === "yes" && !desktopChat) {
     if ((nativeChat || nativeBilling) && request.headers.get("origin") && !isNativeAppOrigin(request.headers.get("origin"))) {
       return withNativeCors(blockedBearerResponse(), request);
     }

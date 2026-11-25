@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
+import { useSettingsReturnTarget } from "@/components/settings/useSettingsReturnProduct";
 import {
     settingsBackTarget,
     settingsEntryHierarchy,
@@ -56,7 +56,7 @@ export function SettingsDetailNav({
     backTestId: string;
 }) {
     const { t } = useLanguage();
-    const product = useSettingsReturnProduct();
+    const { product, entry } = useSettingsReturnTarget();
     // One of the two is always supplied; `section` is the common case and
     // `hierarchy` is the general one. Preferring the explicit list means a
     // caller that passes both cannot get a trail that disagrees with it.
@@ -66,7 +66,7 @@ export function SettingsDetailNav({
         hierarchy ?? (section ? settingsEntryHierarchy(section) : [])
     ).map((ancestor) =>
         ancestor.href
-            ? { ...ancestor, href: settingsHrefForProduct(ancestor.href, product) }
+            ? { ...ancestor, href: settingsHrefForProduct(ancestor.href, product, entry) }
             : ancestor
     );
     // The nearest ancestor that is actually somewhere -- not simply the last

@@ -7,6 +7,8 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
 import { BoundedBufferError } from "@/lib/boundedBuffer";
 import { detectImageMimeType } from "@/lib/imageDimensions";
 import {
@@ -65,7 +67,10 @@ const notFound = () =>
 
 export async function GET(req: Request, { params }: Params) {
   try {
-    const session = await getServerSession(authOptions);
+    const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
+    const authentication = desktop ? await resolveChatRouteSession(req) : null;
+    if (authentication?.response) return authentication.response;
+    const session = authentication ? authentication.session : await getServerSession(authOptions);
     if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Authentication required." },
@@ -75,7 +80,8 @@ export async function GET(req: Request, { params }: Params) {
     const userId = session.user.id;
     // Its own bucket, not the status budget: a poll and a download are not the
     // same action and a comparison spends the first freely.
-    await consumeApiRateLimit(req, userId, "image-asset-download", {
+    const preview = desktop && new URL(req.url).searchParams.get("preview") === "1";
+    await consumeApiRateLimit(req, userId, preview ? "image-asset-preview" : "image-asset-download", {
       minute: 30,
       day: 500,
     });
@@ -85,7 +91,11 @@ export async function GET(req: Request, { params }: Params) {
 
     const generation = await prisma.imageGeneration.findFirst({
       // Ownership is part of the lookup, not a check after it.
-      where: { id: generationId, userId },
+      where: {
+        id: generationId,
+        userId,
+        ...(desktop ? { conversation: { userId, password: null } } : {}),
+      },
       select: {
         id: true,
         status: true,
@@ -93,13 +103,15 @@ export async function GET(req: Request, { params }: Params) {
         assets: {
           // The original only. The thumbnail is a display artefact this
           // application derived; nobody asked to download it.
-          where: { role: "original", status: "ready", deletedAt: null },
-          select: { r2Key: true, mimeType: true, byteSize: true },
+          where: { role: preview ? { in: ["thumbnail", "original"] } : "original", status: "ready", deletedAt: null },
+          select: { r2Key: true, mimeType: true, byteSize: true, role: true },
         },
       },
     });
 
-    const asset = generation?.assets[0];
+    const asset = preview
+      ? generation?.assets.find(({ role }) => role === "thumbnail") ?? generation?.assets.find(({ role }) => role === "original")
+      : generation?.assets[0];
     if (!generation || generation.status !== "succeeded" || !asset) {
       return notFound();
     }
@@ -149,7 +161,7 @@ export async function GET(req: Request, { params }: Params) {
     // A download is the strongest quiet signal that the picture was wanted
     // (image routing measurement). Awaited, but never allowed to cost the
     // person the file they just paid for.
-    await recordImageGenerationSignal({
+    if (!preview) await recordImageGenerationSignal({
       userId,
       generationId: generation.id,
       kind: "download",
@@ -162,7 +174,7 @@ export async function GET(req: Request, { params }: Params) {
         "Content-Length": String(bytes.byteLength),
         // The half that was missing. Named from the mime type, so a provider
         // that returned JPEG does not arrive as `original.png`.
-        "Content-Disposition": imageDownloadContentDisposition(filename),
+        "Content-Disposition": preview ? "inline" : imageDownloadContentDisposition(filename),
         // One account's image. A shared cache that kept it would serve it to
         // the next person through the same proxy.
         "Cache-Control": "private, no-store",

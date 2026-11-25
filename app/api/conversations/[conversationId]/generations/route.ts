@@ -13,6 +13,8 @@ import {
   serializeImageGeneration,
 } from "@/lib/imageGenerationRead";
 import { prisma } from "@/lib/prisma";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
+import { conversationLockedResponse } from "@/lib/conversationLock";
 
 // GET /api/conversations/[conversationId]/generations -- the history read for
 // an image conversation. Image conversations have no Message rows; this is
@@ -42,7 +44,7 @@ export async function GET(req: Request, { params }: Params) {
     const { conversationId } = await params;
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, userId: true, kind: true },
+      select: { id: true, userId: true, kind: true, password: true },
     });
     if (!conversation || conversation.userId !== userId) {
       return NextResponse.json(
@@ -52,6 +54,9 @@ export async function GET(req: Request, { params }: Params) {
     }
     if (!isImageConversationKind(conversation.kind)) {
       return conversationKindNotSupportedResponse();
+    }
+    if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && conversation.password !== null) {
+      return conversationLockedResponse();
     }
 
     const generations = await prisma.imageGeneration.findMany({
