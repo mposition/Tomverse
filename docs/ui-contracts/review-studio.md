@@ -136,7 +136,14 @@ regressions. These local checks use no paid provider execution.
 Image prompts stay in the current Review conversation, as in Chat. Easy routes
 once for the selected providers and gives each panel only its own image model;
 unsupported panels show their notice without a text or image provider call.
-Professional keeps explicit image-model choices in the composer. Its automatic
+Professional keeps explicit image-model choices in the composer, and they are
+all-or-nothing (owner direction 2026-11-25): picking one image model in the
+catalogue's image tab turns every answering panel into an image model -- the
+picked one, then an active model of each other panel's provider, then other
+owners -- up to the number of answering panels, and each panel hosts one of
+them. The composer row (`review-image-mode`) names them, and **Back to chat
+models** (`composer-image-mode-exit`) returns to the selected conversation
+models with the draft intact; picking a chat model does the same. Its automatic
 image-intent check uses the existing Chat image-triage switch; text decisions
 retain the manually selected text models. When enabled, this adds one existing
 budgeted router call per eligible Professional prompt, as Chat's image triage
@@ -146,7 +153,8 @@ cards, saved-question path, image reservation and idempotent retry. Supported
 panels share one atomic group and workflow lease per question; each card and
 restored message shows only its own target. They neither
 open an image workspace nor change the conversation kind or product identity.
-The separate new-image launcher remains an explicit image-workspace entry.
+There is no image mode: no launcher item or other control opens a new image
+workspace (`docs/ui-contracts/image-generation-workspace.md`).
 
 ## Chat Studio and interactive focus (owner approval, 2026-10-20)
 

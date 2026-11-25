@@ -197,9 +197,11 @@ import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageTurn } from "@/lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
+import type { ComposerImageMode } from "@/components/chat/ChatInput";
 import {
   reviewImageDraftModelId,
   reviewImageProviders,
+  reviewImageModelSelection,
   reviewImageTurnPlan,
   type ReviewImageTurns,
 } from "@/lib/reviewImageTurn";
@@ -1010,7 +1012,13 @@ export function ChatPageClient({
     isEnabledModelId,
   } = useModelCatalog();
   const imageCatalog = useImageModelCatalog();
-  const [reviewImageModelId, setReviewImageModelId] = useState<string | null>(null);
+  /*
+    Image models picked in the catalogue's image tab. Chat answers the next
+    send with one of them in this conversation; Review turns every answering
+    panel into one. Empty means the conversation models answer (owner
+    direction 2026-11-25: no separate image mode).
+  */
+  const [composerImageModelIds, setComposerImageModelIds] = useState<string[]>([]);
   const router = useRouter();
   // Which URL this mount is actually at, so a selection that already has the
   // right one does not push it again (a repeated push of the current path is
@@ -1078,34 +1086,9 @@ export function ChatPageClient({
     }
   }, [currentChatId, initialConversationId, settleInitialConversationHandoff]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  // True while a "new image" draft is open: the workspace renders with no
-  // server row, which is only created by the first successful generation
-  // request (docs/policy/image-generation.md §6).
-  const [isImageDraftActive, setIsImageDraftActive] = useState(false);
-  // What the chat composer held when the user switched to the image draft.
-  // Restored verbatim on the way back: attachments included, since image
-  // generation is text-only and silently dropping them would lose work
-  // (policy §13).
-  const [chatDraftBeforeImage, setChatDraftBeforeImage] = useState<{
-    scopeId: string | null;
-    text: string;
-  } | null>(null);
-  // The image workspace's remount identity, held explicitly rather than
-  // derived from the conversation id.
-  //
-  // Remounting on a real conversation switch is deliberate -- the workspace
-  // owns a timeline and a poll loop that belong to exactly one conversation.
-  // But a draft being adopted as the conversation it just created is not a
-  // switch: it is the same workspace continuing, and remounting there threw
-  // away the model selection, quality, size and prompt the user had chosen,
-  // re-seeding them from the entry point instead.
-  const [imageWorkspaceKey, setImageWorkspaceKey] = useState("image-draft:0");
-  const imageDraftSerialRef = useRef(0);
-  const nextImageDraftKey = () => {
-    imageDraftSerialRef.current += 1;
-    return `image-draft:${imageDraftSerialRef.current}`;
-  };
-  const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
+  // The image workspace's remount identity: an image conversation from the
+  // history still opens there, and a switch must not carry its poll loop over.
+  const [imageWorkspaceKey, setImageWorkspaceKey] = useState("image-conversation");
   /*
     The account's "stop asking me" choice, and whether this particular landing
     is allowed to act on it.
@@ -1119,17 +1102,6 @@ export function ChatPageClient({
     its own.
   */
   const [imageHandoffAutoGenerate, setImageHandoffAutoGenerate] = useState(false);
-  const [imageDraftAutoGenerate, setImageDraftAutoGenerate] = useState(false);
-  // Set only when the user reached the draft by choosing a model in the
-  // catalogue's image tab, or the image-intent triage chose one; otherwise
-  // the workspace keeps its own default.
-  const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
-    string[] | undefined
-  >(undefined);
-  // The image-intent triage's preset, for the same landing only.
-  const [imageDraftSeedPreset, setImageDraftSeedPreset] = useState<
-    ImagePreset | undefined
-  >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Which identity this tab is operating as. A conversation id belongs to
@@ -2371,7 +2343,6 @@ export function ChatPageClient({
   });
   const webSearchModeRef = useRef(webSearchMode);
   const pendingProfileIdRef = useRef(pendingProfileId);
-  const isImageDraftActiveRef = useRef(isImageDraftActive);
   // A second press while the image-intent call is out is the same send.
   const imageIntentCheckPendingRef = useRef(false);
   // One serialized, coalescing PATCH queue per conversation. Never aborts an
@@ -2463,9 +2434,6 @@ export function ChatPageClient({
     window.addEventListener(CONVERSATION_PROJECT_CHANGED_EVENT, onMoved);
     return () => window.removeEventListener(CONVERSATION_PROJECT_CHANGED_EVENT, onMoved);
   }, []);
-  useEffect(() => {
-    isImageDraftActiveRef.current = isImageDraftActive;
-  }, [isImageDraftActive]);
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
   const localComparisonResponsesRef = useRef<
@@ -2837,8 +2805,7 @@ export function ChatPageClient({
       (!isGuestMode && currentChatId !== null) ||
       (isGuestMode && currentChatId !== null &&
         !isGuestConversationId(currentChatId)) ||
-      !isInitialConversationResolved ||
-      isImageDraftActive
+      !isInitialConversationResolved
     ) {
       return;
     }
@@ -2853,8 +2820,7 @@ export function ChatPageClient({
           selectionTicket !== conversationSelectionTicketRef.current ||
           (!isGuestMode && currentChatIdRef.current !== null) ||
           (isGuestMode && currentChatIdRef.current !== null &&
-            !isGuestConversationId(currentChatIdRef.current)) ||
-          isImageDraftActiveRef.current
+            !isGuestConversationId(currentChatIdRef.current))
         ) return;
         const guestAuthority = isGuestMode &&
           typeof data?.guestAutoCapability === "string"
@@ -2916,7 +2882,6 @@ export function ChatPageClient({
     currentChatId,
     blankChatCapabilityRevision,
     identityKey,
-    isImageDraftActive,
     isInitialConversationResolved,
     mountedSurface,
     isGuestMode,
@@ -4778,8 +4743,7 @@ export function ChatPageClient({
     setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
     setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
     setIsDeepResearchPending(false);
-    setIsImageDraftActive(false);
-    setReviewImageModelId(null);
+    setComposerImageModelIds([]);
     if (blankedDraftScope !== undefined) discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
@@ -4787,83 +4751,52 @@ export function ChatPageClient({
       setFocusToken((prev) => prev + 1);
   };
 
-    // From the composer: carry the typed text into the image prompt and
-    // remember the chat draft so cancelling restores it.
-    const handleStartImageDraft = (
-        draftText: string,
-        modelId?: string,
-        options?: {
-            fromImageRequest?: boolean;
-            chatDraftOnReturn?: string;
-            /** The image-intent triage's preset; the workspace default otherwise. */
-            preset?: ImagePreset;
-            /** The image-intent triage's models; wins over `modelId` when non-empty. */
-            modelIds?: readonly string[];
-        }
-    ) => {
-        if (mountedSurface === "workspace") {
-            // A Review continuation has no in-conversation image mode
-            // (docs/policy/external-conversation-continuation.md §5.1).
-            if (!inConversationImagesAllowed) return;
-            // A fixed default model outlived its catalogue row: GPT Image 2
-            // was disabled and the image mode it armed could never send. The
-            // fallback is an active model, preferably of a provider already
-            // answering here.
-            const draftModelId = modelId ?? options?.modelIds?.[0] ??
-                reviewImageDraftModelId(imageCatalog.models, [...new Set(selectedModels.flatMap(id => {
-                    const model = getModel(id); return model ? [model.provider] : [];
-                }))]);
-            if (!draftModelId) {
-                setInputValue(draftText);
-                setFocusToken(value => value + 1);
-                return;
-            }
-            setReviewImageModelId(draftModelId);
+    // An image model picked in the catalogue's image tab. The composer and
+    // its draft stay; only the models that answer the next send change.
+    const selectComposerImageModel = (modelId: string) => {
+        if (!inConversationImagesAllowed) return;
+        if (mountedSurface === "chat") {
+            setComposerImageModelIds([modelId]);
+        } else if (reviewWorkspace.mode === "easy") {
+            // Easy picks the image models per question; it only asks for an image.
             reviewWorkspace.setImagePromptMode(true);
-            setInputValue(draftText);
-            setFocusToken(value => value + 1);
-            return;
+        } else {
+            const answering = selectedModels.filter(id => !disabledPanels.includes(id));
+            setComposerImageModelIds(current => reviewImageModelSelection({
+                imageModels: imageCatalog.models,
+                current,
+                picked: modelId,
+                providers: [...new Set(answering.flatMap(id => {
+                    const model = getModel(id); return model ? [model.provider] : [];
+                }))],
+                slots: answering.length,
+                max: Math.min(3, maxSelectableModels, imageGroupMaxModelsProp),
+            }));
         }
-        if (promptRefinerMode === "e2e_fixture") {
-            // The no-cost Refiner fixture cannot hand an accepted synthetic
-            // Chat draft to a second provider-facing workspace either.
-            return;
-        }
-        resetPromptRefinerState();
-        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
-        setChatDraftBeforeImage({
-            scopeId: currentChatIdRef.current,
-            /*
-              What the chat composer gets back if the image draft is cancelled.
+        setFocusToken(value => value + 1);
+    };
 
-              The composer hands over its own draft, so there the seed and the
-              sentence to restore are the same string and the default is right.
-              A starter card hands over a seed that was never in the chat box,
-              and restoring it would put an image prompt in the chat composer --
-              against this handler's own promise below that the chat draft comes
-              back exactly as it was.
-            */
-            text: options?.chatDraftOnReturn ?? draftText,
-        });
-        setImageDraftAutoGenerate(
-            Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
-        );
-        setImageDraftSeedPrompt(draftText);
-        setImageDraftSeedModelIds(
-            options?.modelIds?.length
-                ? [...options.modelIds]
-                : modelId
-                  ? [modelId]
-                  : undefined
-        );
-        setImageDraftSeedPreset(options?.preset);
-        setImageWorkspaceKey(nextImageDraftKey());
-        setIsImageDraftActive(true);
-        currentChatIdRef.current = null;
-        setCurrentChatId(null);
-        setPromptPayload(null);
-        setIsDeepResearchPending(false);
-        setIsInitialConversationResolved(true);
+    // A Review starter card's image sentence: the same composer, asking for images.
+    const handleStartImageDraft = (draftText: string, modelId?: string) => {
+        setInputValue(draftText);
+        setFocusToken(value => value + 1);
+        // A Review continuation has no in-conversation image mode
+        // (docs/policy/external-conversation-continuation.md §5.1).
+        if (mountedSurface !== "workspace" || !inConversationImagesAllowed) return;
+        if (reviewWorkspace.mode === "easy") {
+            reviewWorkspace.setImagePromptMode(true);
+            return;
+        }
+        // A fixed default model outlived its catalogue row: GPT Image 2 was
+        // disabled and the image mode it armed could never send. The fallback
+        // is an active model, preferably of a provider already answering here.
+        const draftModelId = modelId ?? reviewImageDraftModelId(imageCatalog.models,
+            [...new Set(selectedModels.flatMap(id => {
+                const model = getModel(id); return model ? [model.provider] : [];
+            }))]);
+        if (!draftModelId) return;
+        setComposerImageModelIds([]);
+        selectComposerImageModel(draftModelId);
     };
 
     /*
@@ -4891,42 +4824,6 @@ export function ChatPageClient({
             .catch(() => setImageHandoffAutoGenerate(previous));
     };
 
-    // Leaving the image draft without generating: the chat draft comes back
-    // exactly as it was, in the conversation it belonged to.
-    const handleCancelImageDraft = () => {
-        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
-        const restore = chatDraftBeforeImage;
-        setIsImageDraftActive(false);
-        setImageDraftSeedPrompt("");
-        setImageDraftSeedModelIds(undefined);
-        setImageDraftSeedPreset(undefined);
-        setChatDraftBeforeImage(null);
-        if (restore) {
-            currentChatIdRef.current = restore.scopeId;
-            setCurrentChatId(restore.scopeId);
-            setInputValue(restore.text);
-        }
-        setFocusToken((prev) => prev + 1);
-    };
-
-    const handleNewImage = () => {
-        resetPromptRefinerState();
-        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
-        localComparisonResponsesRef.current.clear();
-        latestLocalComparisonPromptRef.current = null;
-        setIsImageDraftActive(true);
-        setImageDraftSeedPrompt("");
-        setImageDraftSeedModelIds(undefined);
-        setImageDraftSeedPreset(undefined);
-        setImageWorkspaceKey(nextImageDraftKey());
-        setChatDraftBeforeImage(null);
-        currentChatIdRef.current = null;
-        setCurrentChatId(null);
-        setPromptPayload(null);
-        setIsDeepResearchPending(false);
-        setIsInitialConversationResolved(true);
-    };
-
     // The first successful generation request created the conversation row
     // atomically server-side; adopt it so the sidebar shows it immediately.
     const handleImageConversationCreated = (conversation: {
@@ -4942,18 +4839,8 @@ export function ChatPageClient({
             },
             ...prev,
         ]);
-        setIsImageDraftActive(false);
         // Deliberately NOT touching imageWorkspaceKey: this is the same
         // workspace continuing, so its composer settings survive.
-        //
-        // The seed is cleared even though nothing reads it right now. It was
-        // the carried-over chat draft, and leaving it set meant a later, real
-        // remount re-filled the composer with the prompt the user had already
-        // paid to generate -- next to an enabled submit button.
-        setImageDraftSeedPrompt("");
-        setImageDraftSeedModelIds(undefined);
-        setImageDraftSeedPreset(undefined);
-        setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
     };
@@ -5171,7 +5058,6 @@ export function ChatPageClient({
         // and the workspace loads its own generation history.
         const selectedTarget = conversations.find((c) => c.id === id);
         if (selectedTarget?.kind === "image") {
-            setIsImageDraftActive(false);
             // A real switch, so a new workspace instance: the timeline and the
             // poll loop of the conversation being left must not follow.
             setImageWorkspaceKey(id);
@@ -5205,7 +5091,6 @@ export function ChatPageClient({
       setCurrentChatId(id);
 	  setPromptPayload(null);
       setIsDeepResearchPending(false);
-      setIsImageDraftActive(false);
 
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
@@ -6110,7 +5995,7 @@ export function ChatPageClient({
     identityKey, conversationId: currentChatId, modelId: selectedModels[0], question: inputValue.trim(), locale: lang, assistantProfileId: currentChatId ? undefined : pendingProfileId,
     revision: JSON.stringify([assistantProfile, assistantProfileRemovedAt, accountUsage?.plan]),
     enabled: mountedSurface === "chat" && !isGuestMode && selectionMode === "manual" &&
-      selectedModels.length === 1 && activeModelCount === 1 && !isImageDraftActive,
+      selectedModels.length === 1 && activeModelCount === 1,
   });
 
   // STG-F003: nothing marks the composer busy until well after the submit
@@ -6149,21 +6034,30 @@ export function ChatPageClient({
     }
     if (mountedSurface === "workspace" && inConversationImagesAllowed &&
       reviewWorkspace.mode === "professional" &&
-      ordinaryComposerSend && reviewWorkspace.imagePromptMode && reviewImageModelId) {
-      const model = imageCatalog.getModel(reviewImageModelId);
-      if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled ||
+      ordinaryComposerSend && composerImageModelIds.length > 0) {
+      const models = composerImageModelIds.map(id => imageCatalog.getModel(id));
+      if (models.some(model => !model || model.disabledReason) || isGuestMode || !imageGenerationEnabled ||
         !planAllowsImageGeneration(accountUsage?.plan ?? "Free")) return;
-      const plan = reviewImageTurnPlan({ choices: [{ provider: imageModelOwner(model), modelId: model.id }],
-        panels: selectedModels, models: AVAILABLE_MODELS.filter(item => item.enabled && canUseModelWithPlan(currentAccessPlan, item)),
-        preset: "standard", comparisonId: crypto.randomUUID() });
+      if (!inputValue.trim()) return;
+      const textModels = AVAILABLE_MODELS.filter(item => item.enabled && canUseModelWithPlan(currentAccessPlan, item));
+      const answering = selectedModels.filter(id => !disabledPanels.includes(id));
+      // Every answering panel is an image model now: one image per panel,
+      // hosted by the selected panels first so the chat models come back.
+      const plan = reviewImageTurnPlan({
+        choices: models.flatMap(model => model ? [{ provider: imageModelOwner(model) as string, modelId: model.id }] : []),
+        panels: [...answering, ...textModels.map(item => item.id).filter(id => !answering.includes(id))],
+        models: textModels, preset: "standard", comparisonId: crypto.randomUUID(),
+      });
       if (!plan) { reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return; }
-      // An image choice sends only its provider's panel without discarding
-      // the other text models the Professional user selected.
-      const panelId = plan.panelIds[0];
-      const panels = selectedModels.includes(panelId) ? selectedModels :
-        [...selectedModels.slice(0, Math.max(0, maxSelectableModels - 1)), panelId];
+      // The chat models stay selected for the way back; only hosts send.
+      let panels = [...selectedModels, ...plan.panelIds.filter(id => !selectedModels.includes(id))];
+      while (panels.length > maxSelectableModels) {
+        const drop = [...panels].reverse().find(id => !plan.panelIds.includes(id));
+        if (!drop) break;
+        panels = panels.filter(id => id !== drop);
+      }
       flushSync(() => mutateModelSettings(currentChatIdRef.current, panels,
-        disabledPanels.filter(id => id !== panelId)));
+        disabledPanels.filter(id => panels.includes(id) && !plan.panelIds.includes(id))));
       return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true,
         imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds }, submitJourney);
     }
@@ -6173,7 +6067,7 @@ export function ChatPageClient({
       reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
       !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
     if (mountedSurface === "workspace" && (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
-      !options?.reviewRouteChecked && !isImageDraftActiveRef.current) {
+      !options?.reviewRouteChecked) {
       if (!isModelSelectionReady || !isInitialConversationResolved) return;
       if ((!reviewEasyAvailable && !professionalImageRouting) || isGuestMode) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].unavailable);
@@ -6287,6 +6181,39 @@ export function ChatPageClient({
       return;
     }
     /*
+      An image model picked in Chat answers this send with an image in the
+      conversation, whatever the text asks. The image-intent call still runs
+      for what only it knows -- a follow-up's rewritten prompt, an edit of the
+      attached photo -- and its model choice is replaced by the picked one.
+    */
+    if (mountedSurface === "chat" && ordinaryComposerSend && composerImageModelIds.length > 0 &&
+      inputValue.trim().length > 0) {
+      const model = imageCatalog.getModel(composerImageModelIds[0]);
+      if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled || !inConversationImagesAllowed ||
+        !planAllowsImageGeneration(accountUsage?.plan ?? "Free")) return;
+      if (imageIntentCheckPendingRef.current) return;
+      imageIntentCheckPendingRef.current = true;
+      const attachedPhoto = chatImageEditEnabled && attachments.some(attachment =>
+        IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(attachment.mediaType.toLowerCase()));
+      const imageTurnDecision = askChatImageTurn(inputValue, {
+        conversationId: currentChatIdRef.current,
+        ...(attachedPhoto ? { attachedPhoto: true } : {}),
+      }).then((decision): ChatImageTurnRequest => ({
+        modelIds: [model.id],
+        preset: decision?.preset ?? "standard",
+        ...(decision?.prompt ? { prompt: decision.prompt } : {}),
+        ...(decision?.edit && attachedPhoto ? { edit: true as const } : {}),
+      })).finally(() => {
+        imageIntentCheckPendingRef.current = false;
+      });
+      return handleGlobalSubmitRef.current({
+        ...options,
+        imageIntentChecked: true,
+        submittedAtMonotonicMs,
+        imageTurnDecision,
+      }, submitJourney);
+    }
+    /*
       A composer send that asks for a picture is answered with an image in
       this conversation instead of text, decided by one small model call
       before the question is saved (lib/chatImageIntent.ts). Any failure or "no"
@@ -6298,7 +6225,6 @@ export function ChatPageClient({
       // An Auto turn is asked on the server, beside its router call
       // (app/api/chat/route.ts), so it does not wait for this call first.
       selectionModeRef.current !== "auto" &&
-      !isImageDraftActiveRef.current &&
       // A photo is the one attachment the image turn uses: it may be edited.
       (attachments.length === 0 ||
         (chatImageEditEnabled &&
@@ -6363,7 +6289,6 @@ export function ChatPageClient({
       autoSelectionOffered &&
       mountedSurface === "chat" &&
       !isGuestMode &&
-      !isImageDraftActiveRef.current &&
       !newChatAutoPreparationRef.current
     ) {
       if (!identityKey) return;
@@ -6407,7 +6332,6 @@ export function ChatPageClient({
             expectedSelectionTicket === conversationSelectionTicketRef.current &&
             currentChatIdRef.current === null &&
             mountedSurface === "chat" &&
-            !isImageDraftActiveRef.current &&
             sameStringList(capturedModels, latestModelSettingsRef.current.models) &&
             sameStringList(capturedDisabled, latestModelSettingsRef.current.disabled) &&
             capturedWebSearchMode === webSearchModeRef.current &&
@@ -8735,7 +8659,7 @@ export function ChatPageClient({
       setSelectionMode("manual");
       return true;
     }
-    if (!autoSelectionOffered || isImageDraftActive) return false;
+    if (!autoSelectionOffered) return false;
 
     const selectionTicket = conversationSelectionTicketRef.current;
     const existingPreparation = newChatAutoPreparationRef.current;
@@ -8789,8 +8713,7 @@ export function ChatPageClient({
       (!sendAuthority || sendAuthority.identityEpoch === submitIdentityFenceRef.current.epoch) &&
       selectionTicket === conversationSelectionTicketRef.current &&
       currentChatIdRef.current === null &&
-      mountedSurface === "chat" &&
-      !isImageDraftActiveRef.current;
+      mountedSurface === "chat";
     const scopeStillCurrent = () => {
       const currentDraft = readDraft(null);
       return (
@@ -9259,7 +9182,7 @@ export function ChatPageClient({
     const active = sendEchoRef.current;
     if (active && active.ticket === conversationSelectionTicketRef.current) return;
     const text = inputValue.trim();
-    const mine = !isImageDraftActiveRef.current && (text || attachments.length > 0)
+    const mine = (text || attachments.length > 0)
       ? {
           ticket: conversationSelectionTicketRef.current,
           echo: { text, attachmentCount: attachments.length },
@@ -10340,7 +10263,7 @@ export function ChatPageClient({
       conversation.id === currentChatId && conversation.kind === "image"
   );
   const isImageWorkspaceActive =
-    !isGuestMode && (isImageDraftActive || Boolean(activeImageConversation));
+    !isGuestMode && Boolean(activeImageConversation);
   // Visible for everyone the flag is on for; locked (never hidden, never
   // dead-ended) for viewers who cannot use it yet (policy §13).
   const imageEntitled =
@@ -10479,18 +10402,11 @@ export function ChatPageClient({
     starterSeedMemoriesRef.current = application.memories;
     setWebSearchMode(application.webSearchMode);
     if (handsToStudio) {
-      // An image card belongs to the image workspace, and `handleStartImageDraft`
-      // is how the composer already hands a sentence over. Called without
-      // `fromImageRequest`, so `imageDraftAutoGenerate` stays false: the draft
-      // is seeded and the person still presses generate.
-      //
-      // The chat composer is left empty rather than holding a previous card's
-      // sentence: that seed was withdrawn together with its toggle just above,
-      // and a seed is applied as a unit or not at all.
-      setInputValue("");
-      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0], {
-        chatDraftOnReturn: "",
-      });
+      // A Review image card asks this same composer for images; the person
+      // still presses send. The seed replaces a previous card's sentence as a
+      // unit, together with the toggle withdrawn just above.
+      invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
+      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0]);
       return;
     }
     invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
@@ -10524,6 +10440,32 @@ export function ChatPageClient({
       ? reviewImageProviders(imageCatalog.models) : [],
     [imageCatalog.models, imageGenerationEnabled, inConversationImagesAllowed]
   );
+
+  // The picked image models as the composer shows them; none where this
+  // viewer or conversation cannot answer with an image.
+  const composerImageModels = canOfferNewImage && inConversationImagesAllowed
+    ? composerImageModelIds.flatMap(id => {
+        const model = imageCatalog.getModel(id);
+        return model && !model.disabledReason ? [{ id, name: model.name, owner: imageModelOwner(model) as string }] : [];
+      })
+    : [];
+  const composerImageMode: ComposerImageMode | null = composerImageModels.length > 0 &&
+    (mountedSurface === "chat" || reviewWorkspace.mode === "professional")
+    ? {
+        modelIds: composerImageModels.map(model => model.id),
+        labels: composerImageModels.map(model => model.name),
+        onExit: () => { setComposerImageModelIds([]); setFocusToken(value => value + 1); },
+      }
+    : null;
+  // Picking a conversation model in the chat tab leaves the image models.
+  const toggleConversationModel = (...args: Parameters<typeof toggleModel>) => {
+    setComposerImageModelIds([]);
+    return toggleModel(...args);
+  };
+  const swapConversationModel = (...args: Parameters<typeof swapSelectedModel>) => {
+    setComposerImageModelIds([]);
+    return swapSelectedModel(...args);
+  };
 
   // Keep the server's starter order for the rest of this browser session: a
   // session cookie (no Max-Age), written only when it differs.
@@ -10575,22 +10517,16 @@ export function ChatPageClient({
       // Seed ids are deliberately NOT part of this: re-picking a model from
       // the catalogue mid-draft used to remount and discard the typed prompt.
       key={imageWorkspaceKey}
-      conversationId={isImageDraftActive ? null : currentChatId}
+      conversationId={currentChatId}
       onConversationCreated={handleImageConversationCreated}
-      initialPrompt={imageDraftSeedPrompt}
-      initialModelIds={imageDraftSeedModelIds}
       modelSelectionLocked={mountedSurface === "workspace" && reviewWorkspace.mode === "easy"}
       onResolveModels={mountedSurface === "workspace" && reviewWorkspace.mode === "easy" ? resolveReviewImageModels : undefined}
       layout={(mountedSurface === "workspace" ? reviewWorkspace.appearance : chatWorkspace.appearance) === "studio" ? "studio" : "classic"}
-      initialPreset={imageDraftSeedPreset}
-      onCancelDraft={chatDraftBeforeImage ? () => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setUnsupportedProviders([]); handleCancelImageDraft(); } : undefined}
       flagEnabled={imageGenerationEnabled}
       maxModels={imageGroupMaxModelsProp}
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
       }
-      autoGenerateOnArrival={imageDraftAutoGenerate}
-      onAutoGenerateArrivalConsumed={() => setImageDraftAutoGenerate(false)}
       autoGeneratePreference={imageHandoffAutoGenerate}
       onAutoGeneratePreferenceChange={handleImageAutoGeneratePreferenceChange}
     /></>
@@ -10964,7 +10900,7 @@ export function ChatPageClient({
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
-            imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
+            imageModels: reviewWorkspace.mode === "professional" ? composerImageModels : [],
             imageProviders: reviewImageProviderIds,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
@@ -11004,22 +10940,17 @@ export function ChatPageClient({
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
-          onNewImage={canOfferNewImage ? () => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); handleNewImage(); } : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
-            if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
-              invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
-              reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
-            } else handleStartImageDraft(text, modelId, options);
-          } : undefined}
+          onSelectImageModel={canOfferNewImage && inConversationImagesAllowed ? selectComposerImageModel : undefined}
+          composerImageMode={composerImageMode}
           imageWorkspace={imageWorkspaceElement}
           starterGallery={starterGalleryElement}
           hasImportedTranscript={hasConversationPrelude}
           importedMessages={importedMessages}
           importedTranscript={importedTranscript}
           hasConversationPrelude={hasConversationPrelude}
-          onSelectConversation={(id, skipLockCheck, surfaceHint) => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); return handleSelectConversation(id, skipLockCheck, surfaceHint); }}
+          onSelectConversation={(id, skipLockCheck, surfaceHint) => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); setComposerImageModelIds([]); return handleSelectConversation(id, skipLockCheck, surfaceHint); }}
           onRename={handleRename}
           onDelete={handleDelete}
           onLock={handleLock}
@@ -11027,8 +10958,8 @@ export function ChatPageClient({
           onShare={handleShareConversation}
           onRevokeShare={handleRevokeShare}
           onDownload={handleDownloadConversation}
-          onToggleModel={toggleModel}
-          onSwapModel={swapSelectedModel}
+          onToggleModel={toggleConversationModel}
+          onSwapModel={swapConversationModel}
           modelSwapRequest={deepResearchSwapRequest}
           onModelSwapRequestResolved={handleDeepResearchSwapResolved}
           canSelectModel={canSelectModelForPlan}
@@ -11157,7 +11088,7 @@ export function ChatPageClient({
               if (inputValue.trim()) return;
               setInputValue(t(card.entry.seed.promptSeedKey));
               if (canOfferNewImage && inConversationImagesAllowed) {
-                setReviewImageModelId(null);
+                setComposerImageModelIds([]);
                 reviewWorkspace.setImagePromptMode(true);
               }
             } else handleStarterSeed(card.entry);
@@ -11168,7 +11099,7 @@ export function ChatPageClient({
             ready: isModelSelectionReady && isInitialConversationResolved,
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
-            imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
+            imageModels: reviewWorkspace.mode === "professional" ? composerImageModels : [],
             imageProviders: reviewImageProviderIds,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
@@ -11207,22 +11138,17 @@ export function ChatPageClient({
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
-          onNewImage={canOfferNewImage ? () => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); handleNewImage(); } : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
-          onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
-            if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
-              invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
-              reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
-            } else handleStartImageDraft(text, modelId, options);
-          } : undefined}
+          onSelectImageModel={canOfferNewImage && inConversationImagesAllowed ? selectComposerImageModel : undefined}
+          composerImageMode={composerImageMode}
           imageWorkspace={imageWorkspaceElement}
           starterGallery={starterGalleryElement}
           hasImportedTranscript={hasConversationPrelude}
           importedMessages={importedMessages}
           importedTranscript={importedTranscript}
           hasConversationPrelude={hasConversationPrelude}
-          onSelectConversation={(id, skipLockCheck, surfaceHint) => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); return handleSelectConversation(id, skipLockCheck, surfaceHint); }}
+          onSelectConversation={(id, skipLockCheck, surfaceHint) => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); setComposerImageModelIds([]); return handleSelectConversation(id, skipLockCheck, surfaceHint); }}
           onRename={handleRename}
           onDelete={handleDelete}
           onLock={handleLock}
@@ -11230,8 +11156,8 @@ export function ChatPageClient({
           onShare={handleShareConversation}
           onRevokeShare={handleRevokeShare}
           onDownload={handleDownloadConversation}
-          onToggleModel={toggleModel}
-          onSwapModel={swapSelectedModel}
+          onToggleModel={toggleConversationModel}
+          onSwapModel={swapConversationModel}
           modelSwapRequest={deepResearchSwapRequest}
           onModelSwapRequestResolved={handleDeepResearchSwapResolved}
           canSelectModel={canSelectModelForPlan}
