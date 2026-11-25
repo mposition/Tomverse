@@ -19,7 +19,7 @@ import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import type { AccountPreferences, AccountSettingsResult, DesktopAccountSettingsInput } from "../account-settings-contract";
 import type { ChatModel } from "../chat-contract";
-import { ExternalConversationImport } from "./ExternalConversationImport";
+import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
 
 const dictionaries = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };
 const languageLabel = (language: Language) => new Intl.DisplayNames(language, { type: "language" }).of(language) ?? language;
@@ -788,7 +788,7 @@ export function AccountSettings({ tab, language, onApply, onContinue, onOpenImpo
     case "ai": return <Memory language={language} />;
     case "data": {
       const copy = dictionaries[language].externalImport;
-      return <AccountSettingRow label={copy.dataTabTitle} description={copy.dataTabDescription}>
+      return <AccountSettingRow label={copy.dataTabTitle} description={desktopImportFilePrivacy[language]}>
         <button type="button" className="soft" onClick={onOpenImports}>{copy.dataTabOpen}</button>
       </AccountSettingRow>;
     }

@@ -18,7 +18,7 @@ type Receipt = {
 };
 const format = (template: string, values: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (token, name: string) => String(values[name] ?? token));
-const filePrivacy: Record<Language, string> = {
+export const desktopImportFilePrivacy: Record<Language, string> = {
   en: "The export file stays on this device. Tomverse receives only the text of the conversations you select.",
   ko: "내보내기 파일은 이 기기에만 남습니다. 선택한 대화의 텍스트만 Tomverse로 전송됩니다.",
   zh: "导出文件保留在此设备上。Tomverse 只接收您选中的对话文本。",
@@ -219,7 +219,7 @@ export function ExternalConversationImport({ copy, language, onClose }: {
           onClick={() => void prepare()}>{copy.continueToReview}</button>
       </> : scan !== undefined ? <p role="status">{format(copy.parsingProgress, { conversations: scan })}</p> : <>
         <p>{copy.guideFormats}</p>
-        <p>{filePrivacy[language]}</p>
+        <p>{desktopImportFilePrivacy[language]}</p>
         <p>{copy.guideMediaExcluded}</p>
         {capacity && <>
           <p>{format(copy.remainingSpace, { remaining: size(capacity.normalizedTextBytes) })}</p>
