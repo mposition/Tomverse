@@ -416,7 +416,11 @@ test("both FLUX 3 photo edits hold the priced output and omit their bytes from t
     });
     assert.equal(calls[2].init.headers, undefined);
     assert.equal(Object.hasOwn(result.requestParams, "images"), false);
-    assert.equal(JSON.stringify(result.requestParams).includes(reference), false);
+    assert.equal(Object.hasOwn(result.requestParams, "prompt"), false);
+    const audit = JSON.stringify(result.requestParams);
+    assert.equal(audit.includes(reference), false);
+    assert.equal(audit.includes("a single red apple"), false);
+    assert.equal(result.requestParams.resolution, "1k");
     assert.equal(result.requestParams.image.sha256, editImage.sha256);
   }
 });
