@@ -113,14 +113,13 @@ export function DesktopModelPicker({ account, language, label, children, models,
                   onRememberRecentModel={(id) => remember("recent", id)} onBackToActions={close} onDone={close}
                   onTrackEvent={() => {}} autoSelectionOffered={autoOffered} selectionMode={mode} selectionModePending={disabled}
                   onSelectionModeChange={onModeChange && (async (next) => { onModeChange(next ? "auto" : "manual"); return true; })}
-                  reasoningEffortSlot={effort}
+                  reasoningEffortSlot={effort && <div className="desktop-model-effort">{effort}</div>}
                   onSelectImageModel={imageModels.length && onImage ? (id) => { close(); onImage(id); } : undefined} />
                 </WebSearchBackendReadinessProvider>
               </ImageModelCatalogProvider>
             </AvailableCreditsProvider>
           </ModelLogoAssets.Provider>
         </LanguageProvider>
-        {effort && mode !== "auto" && <div className="desktop-model-effort">{effort}</div>}
         {swap && <div className="desktop-model-swap" role="group" aria-label={swap.name}>
           <strong>{swap.name}</strong>
           {choices.map((id) => <button className="soft" type="button" key={id} onClick={() => {

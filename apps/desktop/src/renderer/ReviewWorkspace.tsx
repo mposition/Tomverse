@@ -164,7 +164,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   }
 
   return <><div className="scroll">
-    <div className="content review-content">
+    <div className={`content review-content${history.selected || run.running ? " review-content--conversation" : ""}`}>
       {!history.selected && !run.running && <section className="desktop-review-welcome" aria-label={welcome.newReview}>
         <div className="desktop-review-intro-bar">
           <span>{welcome.newReview}</span>
@@ -213,11 +213,11 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
             </button>
           </div>
         </>
-        {!capability && <p role="status">{common.sendUnavailable}</p>}
+        {!capability && <p role="status">{copy.readOnlyServer}</p>}
       </section>}
       {history.opening && !history.conversation && <p role="status">{common.loadingConversation}</p>}
       {history.notice && <p className="notice" role="status">{history.notice}</p>}
-      {readOnly && <p role="status">{common.sendUnavailable}</p>}
+      {readOnly && <p role="status">{copy.readOnlyConversation}</p>}
       {history.conversation?.surface === "continuation" &&
         <ImportedSource key={history.conversation.id} id={history.conversation.id} language={language} />}
       {history.conversation && !turns.length && !run.running && <p className="notice">{copy.empty}</p>}
@@ -266,7 +266,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         onClick={() => void history.more()}>{common.loadMessages}</button>}
     </div>
   </div>
-  {showComposer && <div className="composer-slot chat-composer-slot">
+  {showComposer && <div className="composer-slot chat-composer-slot review-composer-slot">
     <form className="composer chat-composer" aria-label={copy.composer} onSubmit={async (event) => {
       event.preventDefault();
       if (!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || run.running) return;

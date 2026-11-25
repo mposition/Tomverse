@@ -54,9 +54,13 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
             desktopReview: { easy: false, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true, desktopSearchReadiness: { brave: true },
             desktopImages: { maxModels: 2, models: [{ id: "gpt-image-2", name: "GPT Image 2", provider: "openai", pricingVersion: "fixture",
               prices: [{ size: "1024x1024", quality: "medium", credits: 15 }] }] } });
-          case "/api/models/catalog": return Response.json({ models: [{ id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai" },
-            { id: "gemini-flash-lite", name: "Gemini Flash-Lite", provider: "google" }].map((model) => ({ ...model,
-              minimumPlan: "Free", enabled: true, status: "enabled", usageClass: "standard" })) });
+          case "/api/models/catalog": return Response.json({ models: [
+            { id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", usageClass: "standard" },
+            { id: "gemini-flash-lite", name: "Gemini Flash-Lite", provider: "google", usageClass: "premium-reasoning" },
+            { id: "research-fixture", name: "Research model", provider: "perplexity", usageClass: "research" },
+            { id: "deep-research-fixture", name: "Deep research model", provider: "perplexity", usageClass: "deep-research" },
+            { id: "unrecognized-fixture", name: "Unrecognized model", provider: "openai", usageClass: "unknown-usage-class" },
+          ].map((model) => ({ ...model, minimumPlan: "Free", enabled: true, status: "enabled" })) });
           case "/api/conversations": return Response.json([chat, review]);
           case `/api/conversations/${chat.id}`: return Response.json({ ...chat, messagePage: { nextCursor: null }, selectionMode: "auto", autoSelection: { offered: true }, messages: [
             { id: questionId, role: "user", content: "Create a tiny image", status: "normal" },
@@ -94,12 +98,17 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
     await page.getByRole("button", { name: "Sign in with your browser", exact: true }).click();
     await expect.poll(() => page.evaluate(async () => (await window.desktop.state()).account.stage)).toBe("connected");
     await page.getByRole("navigation", { name: "Workspaces" }).getByRole("button", { name: "Chat", exact: true }).click();
+    await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setContentSize(2100, 920); });
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeGreaterThan(1600);
     const chatTitle = page.getByRole("button", { name: "A saved image", exact: true });
     await chatTitle.click();
     const image = page.getByRole("img", { name: "Create a tiny image" });
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1);
     await expect(page.getByText("[Image generated]", { exact: false })).toHaveCount(0);
+    await expect.poll(() => page.locator(".chat-content").evaluate((content) =>
+      content.getBoundingClientRect().width / content.parentElement!.clientWidth)).toBeGreaterThan(0.95);
+    await expect.poll(() => page.locator(".chat-thread .entry--assistant").evaluate((entry) => entry.getBoundingClientRect().width)).toBeGreaterThan(1000);
 
     const menu = page.locator(".chat-row-actions").first();
     await menu.locator("summary").click();
@@ -145,11 +154,21 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
 
     await page.getByRole("navigation", { name: "Workspaces" }).getByRole("button", { name: "Review", exact: true }).click();
     await expect(page.locator(".history--chat #review-history-filters")).toBeAttached();
+    await expect(page.locator(".history-header h1")).toHaveText("Review");
+    await expect(page.locator(".history-header img")).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Review question", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Attach files", exact: true })).toHaveCount(0);
+    await page.locator(".composer-tools summary").click();
+    await expect(page.getByRole("button", { name: "Attach files", exact: true })).toBeVisible();
     await expect(page.locator(".desktop-review-starter-grid button")).toHaveCount(3);
     await page.locator(".desktop-review-research").click();
     await expect(page.locator("#review-draft-input")).not.toHaveValue("");
     await page.screenshot({ path: join(artifacts, "review-welcome.png") });
     await page.getByRole("button", { name: /Two saved answers/ }).click();
+    const answerList = page.locator(".review-answers").first();
+    await expect.poll(() => answerList.evaluate((list) => list.getBoundingClientRect().width)).toBeGreaterThan(1200);
+    await expect.poll(() => page.locator(".review-composer-slot").evaluate((slot) => slot.getBoundingClientRect().width)).toBeGreaterThan(1200);
+    await page.screenshot({ path: join(artifacts, "review-wide.png") });
     const analysis = page.getByRole("button", { name: "Analyze answers with Tomverse" });
     await expect(analysis).toBeEnabled();
     await analysis.click();

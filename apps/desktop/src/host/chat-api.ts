@@ -7,7 +7,7 @@ import {
   DESKTOP_IMAGE_GENERATIONS, DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_REVIEW_ROUTING,
 } from "../../../../lib/nativeBearerGate";
 import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "../../../../lib/chatWorkspaceEntry";
-import { getModel, isPubliclySelectableModel, MODEL_USAGE_CREDIT_WEIGHTS, type AiProvider, type ModelUsageClass } from "../../../../lib/models";
+import { getModel, isPubliclySelectableModel, MODEL_USAGE_CLASSES, type AiProvider } from "../../../../lib/models";
 import { createChatLivenessWatchdog } from "../../../../lib/chatStreamLiveness";
 import { consumeChatStream } from "../../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../../lib/chatRequestLimits";
@@ -32,18 +32,17 @@ import { DesktopSessionRefused } from "./browser-login";
 
 const DESKTOP_PLUGIN_INVENTORY = "/api/mcp/connections";
 
-const catalog = z.object({
-  models: z.array(z.object({
+const catalog = z.object({ models: z.array(z.unknown()) });
+const catalogModel = z.object({
     id: z.string(), name: z.string(), provider: z.string(), minimumPlan: z.enum(["Guest", "Free", "Pro"]),
     publiclyListed: z.boolean().optional(), enabled: z.boolean(),
     status: z.enum(["enabled", "limited", "disabled", "coming-soon"]), catalogDeleted: z.boolean().optional(),
     reasoningEfforts: z.array(z.enum(["low", "high"])).optional(),
     icon: z.string().optional(), bestFor: z.string().optional(), userVisibleNote: z.string().optional(),
-    usageClass: z.custom<ModelUsageClass>((value) => typeof value === "string" && Object.hasOwn(MODEL_USAGE_CREDIT_WEIGHTS, value)).optional(),
+    usageClass: z.enum(MODEL_USAGE_CLASSES).optional(),
     creditWeight: z.number().nonnegative().optional(), reasoning: z.enum(["none", "low", "medium", "high"]).optional(),
     inputCapabilities: z.object({ image: z.boolean(), nativePdf: z.boolean() }).optional(),
     webSearchOverride: z.enum(["off", "app-managed"]).optional(),
-  })),
 });
 const questionReceipt = z.object({ messageMappings: z.array(z.object({ requestId: z.uuid(), messageId: chatId })) });
 const reviewAnalysis = z.custom<ComparisonReview>((value) => {
@@ -263,11 +262,14 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     },
     async models(): Promise<ChatModel[]> {
       const { models } = await request("/api/models/catalog", catalog, "GET", undefined, { publicRead: true });
-      return models.filter(isPubliclySelectableModel).map((model) => {
+      return models.flatMap((entry) => {
+        const parsed = catalogModel.safeParse(entry);
+        if (!parsed.success || !isPubliclySelectableModel(parsed.data)) return [];
+        const model = parsed.data;
         const seed = getModel(model.id);
-        return { ...model, provider: model.provider as AiProvider, apiModel: model.id,
+        return [{ ...model, provider: model.provider as AiProvider, apiModel: model.id,
           icon: model.icon ?? seed?.icon ?? "", bestFor: model.bestFor ?? seed?.bestFor ?? "",
-          usageClass: model.usageClass ?? seed?.usageClass ?? "standard" };
+          usageClass: model.usageClass ?? seed?.usageClass ?? "standard" }];
       });
     },
     async rename({ id, title }: ChatRenameInput) {

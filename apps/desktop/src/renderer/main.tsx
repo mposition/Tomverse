@@ -534,7 +534,7 @@ function Desktop() {
     const refresh = () => void window.desktop.accountSettings<"usage">({ action: "usage" }).then(({ usage, limits, plan }) => {
       if (current) setUsage({ account: accountDraft, value: usage && limits ? usagePercent(usage.creditsMonth, limits.creditsMonth) : null,
         plan: plan === "Free" || plan === "Pro" || plan === "Max" ? plan : undefined });
-    }, () => { if (current) setUsage({ account: accountDraft, value: null }); });
+    }, () => { if (current) setUsage((last) => ({ account: accountDraft, value: null, plan: last?.account === accountDraft ? last.plan : undefined })); });
     refresh();
     window.addEventListener("focus", refresh);
     return () => { current = false; window.removeEventListener("focus", refresh); };
@@ -797,7 +797,7 @@ function Desktop() {
       }}>
       <div className="history-header">
         <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>
-          {textHistory ? <><img src={logo} alt="" />{chatRail ? <TomverseWordmark /> : names.review}</> : names[surface]}
+          {chatRail ? <><img src={logo} alt="" /><TomverseWordmark /></> : names[surface]}
         </h1>
         {surface === "code" && <button ref={historySearchToggle} className="icon" type="button" aria-label={copy.searchHistory} aria-expanded={searchOpen}
           aria-controls={searchOpen ? "code-history-filter" : undefined}
