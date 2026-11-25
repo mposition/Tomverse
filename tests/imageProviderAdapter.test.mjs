@@ -487,6 +487,8 @@ test("Google edits use the exact priced option and keep photo bytes out of the a
       const ceiling = maxImageEditRequestCostMicroUsd(model, price);
       assert.ok(ceiling > price.outputCostMicroUsd);
       assert.equal(imageEditCredits(model, price), 120);
+      assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: 67_199 }), null);
+      assert.equal(imageEditCredits(model, { ...price, quality: "high" }), null);
       assert.equal(imageEditCredits(model, { ...price, size: "1536x1024" }), null);
       assert.equal(imageEditCredits(model, { ...price, credits: 1 }), null);
       const steps = [{ type: "model_output", content: [{ type: "image", mime_type: "image/jpeg", data: "aW1hZ2U=" }] }];
@@ -851,7 +853,6 @@ test("Recraft V4 Pro edits a square reference with zero data retention and deliv
   const sharp = (await import("sharp")).default;
   const png = (width, height) => sharp({ create: { width, height, channels: 3, background: "blue" } }).png().toBuffer();
   const source = await png(640, 480);
-  const output = await png(2048, 2048);
   const editImage = { bytes: source, mimeType: "image/png", width: 640, height: 480, sha256: "e".repeat(64) };
   const model = IMAGE_MODEL_REGISTRY.find(row => row.id === "recraftv4_pro");
   const price = model.prices[0];
@@ -865,10 +866,11 @@ test("Recraft V4 Pro edits a square reference with zero data retention and deliv
       model: model.apiModelId, response_format: "b64_json", strength: 0.65, zdr: true, image_format: "png", n: 1, prompt: request.prompt,
     });
     assert.ok(image_url.startsWith("data:image/png;base64,"));
-    const photo = await sharp(Buffer.from(image_url.split(",")[1], "base64")).metadata();
-    assert.equal(photo.width, 1024);
-    assert.equal(photo.height, 1024);
-    return Response.json({ credits: 250, data: [{ image_id: "recraft-edit-1", b64_json: output.toString("base64") }] });
+    const reference = image_url.split(",")[1];
+    const photo = await sharp(Buffer.from(reference, "base64")).metadata();
+    assert.equal(photo.width, 2048);
+    assert.equal(photo.height, 2048);
+    return Response.json({ credits: 250, data: [{ image_id: "recraft-edit-1", b64_json: reference }] });
   });
   try {
     await withEnv("IMAGE_RECRAFT_EDIT_ENABLED", "false", () => assert.rejects(generateImageWithProvider(request), /cannot edit/));
@@ -877,9 +879,10 @@ test("Recraft V4 Pro edits a square reference with zero data retention and deliv
       assert.equal(imageEditCredits(model, { ...price, size: "1024x1024" }), null);
       assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: 249_999 }), null);
       const result = await generateImageWithProvider(request);
-      assert.deepEqual(result.imageBytes, output);
+      assert.equal(result.outputWidth, 2048);
+      assert.equal(result.outputHeight, 2048);
       assert.equal(result.reportedCostMicroUsd, 250_000);
-      assert.equal(result.requestParams.image.width, 1024);
+      assert.equal(result.requestParams.image.width, 2048);
       assert.equal(result.requestParams.endpoint, "imageToImage");
       assert.ok(!JSON.stringify(result.requestParams).includes("base64"));
       assert.ok(!JSON.stringify(result.requestParams).includes(request.prompt));
