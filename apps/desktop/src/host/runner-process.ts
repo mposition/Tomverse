@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
+import { tomverseHome } from "../../../tomverse-cli/src/config.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
@@ -42,6 +43,8 @@ type ActiveRun = {
   approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
 };
 let active: ActiveRun | undefined;
+/** What the main process last said: the permission mode and where the user's rules are. Ask until it says otherwise. */
+let permissionSetting: { mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string } | undefined;
 let recovery: { requestId: string; abort: AbortController } | undefined;
 let transient: { journal: Journal; scopeHome: string } | undefined;
 const send = (event: WorkerEvent) => parent.postMessage(event);
@@ -799,7 +802,15 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     const instructions = continuation || savedCap !== undefined ? null : readProjectInstructions(workspace);
     if (instructions?.truncated) addEvent(desktopCodeNotice("instructionClipped"));
     publish();
-    const memory = new ApprovalMemory();
+    const permissionEnv: NodeJS.ProcessEnv = permissionSetting ? { TOMVERSE_HOME: permissionSetting.home } : {};
+    const rulesFor = () => new PermissionRuleStore({ root: workspace.root, env: permissionEnv });
+    // An "always" answer on the approval card is saved as an allow rule for this project.
+    const memory = new ApprovalMemory((rule) => { rulesFor().add("project", rule); });
+    const permissions = new PermissionGate({
+      mode: () => permissionSetting?.mode ?? "ask",
+      rules: () => rulesFor().effective(),
+      protectedDirs: [tomverseHome(permissionEnv), ...protectedRoots(command.protectedRoot)],
+    });
     const output: Output = {
       json: false,
       info: (text) => { addEvent(text); publish(); },
@@ -859,7 +870,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     };
     const mode = journal.state.codeMode ?? (journal.state.readOnly ? journal.state.tasks.at(-1)?.plan ? "plan" : "ask" : "agent");
     control.runner = new Runner({
-      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch,
+      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch, permissions,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
@@ -1452,7 +1463,9 @@ function deleteRecordedHistory(command: DeleteRecordedHistory): WorkerEvent {
 }
 
 parent.on("message", ({ data }: { data: WorkerCommand }) => {
-  if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
+  if (data.type === "permissions") {
+    permissionSetting = { mode: data.mode, home: data.home };
+  } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
     cleanDeletedHistory(data.protectedRoot);
   } else if (data.type === "read-change") {
     let checkoutAvailable = false;

@@ -110,6 +110,7 @@ if (trustedWindow) {
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>
       ipcRenderer.invoke("desktop:permission-profile", profile),
+    permissions: (command: Parameters<DesktopApi["permissions"]>[0]) => ipcRenderer.invoke("desktop:permissions", command),
     setCodeNotifications: (enabled: boolean) => ipcRenderer.invoke("desktop:code-notifications", enabled),
     signIn: () => ipcRenderer.invoke("desktop:sign-in"),
     signOut: () => ipcRenderer.invoke("desktop:sign-out"),

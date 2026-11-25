@@ -1,0 +1,17 @@
+.permission-modes { display: grid; gap: 8px; margin-block: 10px; }
+.permission-mode-option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.permission-mode-option.selected { border-color: var(--action); }
+.permission-mode-option span { display: grid; gap: 2px; }
+.permission-mode-option small, .permission-muted { color: var(--muted); font-size: 12px; }
+.permission-confirm, .permission-trust { display: grid; gap: 8px; margin-block: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.permission-confirm p, .permission-trust p { margin: 0; }
+.permission-confirm button, .permission-trust button { justify-self: start; }
+.permission-rules h4 { margin: 14px 0 6px; font-size: 13px; }
+.permission-rules ul, .permission-trust ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.permission-rules li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; overflow-wrap: anywhere; }
+.permission-rules li[data-effect="deny"] { border-style: dashed; }
+.permission-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.permission-add input[type="text"], .permission-add input:not([type]) { min-width: 200px; flex: 1 1 200px; }
+.permission-exact { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+.permission-problem { color: #b3261e; font-size: 13px; }
+.permission-allow-all { color: #b3261e; font-weight: 600; }

@@ -1,4 +1,5 @@
 import type { ApprovalView } from "./agent.js";
+import { checkBoundaries, ruleForApproval, type PermissionRule } from "./permissions.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
 export type RememberedRule = "file_edits" | "same_command" | "web_host";
@@ -18,12 +19,22 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host";
  * - same_command: exactly the same program, arguments, working folder and
  *   environment names, and the same kind of run (background or not); any other
  *   command is asked. The timeout may differ.
+ *
+ * Nothing the permission boundaries (permissions.ts) leave to a person is ever
+ * remembered: a command that sends something out of the computer, names a
+ * credential file, or a change that is refused, is asked every time.
+ *
+ * A host that keeps rules in files (Desktop) gives a `persist` function: an
+ * "always" answer is then also saved as an allow rule for the project, which
+ * is how the permission rules and this memory are one thing.
  */
 export class ApprovalMemory {
     /** Workspace roots where file edits were allowed; an edit without a root is always asked. */
     private readonly fileEdits = new Set<string>();
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
+
+    constructor(private readonly persist?: (rule: PermissionRule) => void) {}
 
     private static commandKey(view: ApprovalView) {
         const c = view.command;
@@ -37,14 +48,14 @@ export class ApprovalMemory {
 
     /** Whether "always" can be offered for this request. */
     canRemember(view: ApprovalView) {
-        if (view.error) return false;
+        if (view.error || checkBoundaries(view)) return false;
         if (view.web) return true;
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
         return Boolean(view.command);
     }
 
     match(view: ApprovalView): RememberedRule | null {
-        if (view.error) return null;
+        if (view.error || checkBoundaries(view)) return null;
         if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
         const key = ApprovalMemory.commandKey(view);
@@ -53,6 +64,14 @@ export class ApprovalMemory {
 
     remember(view: ApprovalView): RememberedRule | null {
         if (!this.canRemember(view)) return null;
+        const rule = this.persist ? ruleForApproval(view) : null;
+        if (rule) {
+            try {
+                this.persist!(rule);
+            } catch {
+                // The answer still holds for this run; a file that cannot be written only means it is asked again next time.
+            }
+        }
         if (view.web) {
             this.webHosts.add(view.web.host);
             return "web_host";
