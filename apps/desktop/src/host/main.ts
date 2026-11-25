@@ -26,9 +26,9 @@ import { createProjectActions } from "./project-host";
 import { createResearchActions } from "./research-host";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
-import { createBillingApi } from "./billing-api";
+import { createBillingApi, type BillingApi } from "./billing-api";
 import { createBillingWindowHost } from "./billing-window";
-import { desktopBillingInput } from "../billing-contract";
+import { desktopBillingInput, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
 import { solveEmailLoginChallenge } from "./login-challenge";
 import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, type DesktopLoginEmail } from "../login-contract";
@@ -664,14 +664,32 @@ const webViewHost = createWebViewHost({
   },
 });
 
+// The checkout window and the account's purchase records, as one state the Plan tab draws. The records
+// belong to the account session's billing API, so they outlive the Plan tab and the Settings screen.
+let billingApi: { request: ReturnType<typeof createAccountSettingsApi>; signal: AbortSignal; api: BillingApi } | undefined;
+let billingWindow: BillingState["window"] = null;
+let billingVersion = 0;
+
+const currentBilling = () => billingApi && billingApi.signal === chatSession.signal && !billingApi.signal.aborted
+  ? billingApi.api : undefined;
+const billingState = (): BillingState => ({ version: billingVersion, window: billingWindow, purchases: currentBilling()?.purchases() ?? [] });
+
+function publishBilling() {
+  billingVersion += 1;
+  const owner = mainWindow;
+  if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:billing-state", billingState());
+}
+
 const billingWindowHost = createBillingWindowHost({
   parent: () => mainWindow,
   returnOrigins: () => [...new Set([accountOrigin ?? DESKTOP_LIVE_ORIGIN, webOrigin].map((value) => new URL(value).origin))],
   language: () => state.language ?? "en",
   title: () => desktopBillingCopy(state.language ?? "en").windowTitle,
   publish: (next) => {
-    const owner = mainWindow;
-    if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:billing-window", next);
+    billingWindow = next.stage === "open" ? next : null;
+    // A window the account session closed has no account left to check; the records went with the session.
+    if (next.stage === "closed" && !closing) currentBilling()?.checkoutClosed(next.outcome);
+    publishBilling();
   },
 });
 
@@ -2547,23 +2565,24 @@ function connectedAssistantImport() {
   return assistantImportApi.api;
 }
 
-let billingApi: { request: ReturnType<typeof createAccountSettingsApi>; billing: ReturnType<typeof createBillingApi> } | undefined;
-
 async function billing(value: unknown) {
   const input = desktopBillingInput.parse(value);
   if (input.action === "closeCheckout") return { ok: true, value: { closed: billingWindowHost.close() } };
   if (!state.capabilities?.billing) throw new Error("Billing is unavailable.");
+  // A Plan tab that mounts later asks for the current state once; only the connected account's records are in it.
+  if (input.action === "purchases") return { ok: true, value: billingState() };
   const request = connectedSettingsApi();
   if (billingApi?.request !== request) {
     const signal = chatSession.signal;
-    billingApi = { request, billing: createBillingApi(request, {
+    billingApi = { request, signal, api: createBillingApi(request, {
       accountSignal: signal,
       timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || null,
       checkoutOpen: billingWindowHost.isOpen,
       openCheckout: (url, purpose) => billingWindowHost.open(url, purpose, signal),
+      purchasesChanged: publishBilling,
     }) };
   }
-  return billingApi.billing(input);
+  return billingApi.api.billing(input);
 }
 
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {

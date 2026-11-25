@@ -5,8 +5,7 @@ import { billingRequest, createBillingApi } from "../src/host/billing-api";
 import { readDesktopCapabilities } from "../src/host/desktop-capabilities";
 import {
   checkoutReturnOutcome, classifyCheckoutNavigation, desktopBillingInput, desktopBillingResponse, isTomverseUrl, purchaseConfirmed,
-  PURCHASE_CHECK_ATTEMPTS, PURCHASE_CHECK_INTERVAL_MS, readUntilConfirmed, repeatsPurchase, stripeCheckoutUrl, type BillingUsage,
-  type CheckoutPurpose,
+  purchaseItem, stripeCheckoutUrl, type CheckoutPurpose,
 } from "../src/billing-contract";
 
 const origin = "https://tomverse.example";
@@ -15,30 +14,48 @@ const attempt = "6f1d3c9e-6a55-4a4c-9f3e-2f3b8b8f6a01";
 
 type Call = { url: URL; method: string; body: unknown; headers: Headers };
 
+/**
+ * The billing API over a fake account origin. The account's usage and the pack list are answered here
+ * (and not recorded in `calls`): `account.plan`/`account.purchased` are what the server reports now.
+ */
 function fixture(respond: (call: Call) => Response) {
   const calls: Call[] = [];
   const opened: { url: URL; purpose: CheckoutPurpose }[] = [];
+  const state = { plan: "Free" as "Free" | "Pro" | "Max", purchased: 0, usageReads: 0, changes: 0 };
   let windowOpen = false;
   const transport: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === "/api/auth/desktop/settings-session") {
       return Response.json({ token: fixtureCookie, expiresAt: Date.now() + 300_000 });
     }
-    const call = { url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined,
-      headers: new Headers(init?.headers) };
+    const method = init?.method ?? "GET";
+    if (url.pathname === "/api/user/usage") {
+      state.usageReads += 1;
+      return Response.json(usage(state.plan, state.purchased));
+    }
+    if (url.pathname === "/api/billing/credit-packs" && method === "GET") return Response.json({ plan: state.plan, packs: [
+      { id: "starter_500", name: "Starter", credits: 500, priceMinor: 500, currency: "USD", validityDays: 90 },
+      { id: "project_1500", name: "Project", credits: 1_500, priceMinor: 1_200, currency: "USD", validityDays: 90 },
+    ] });
+    const call = { url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers: new Headers(init?.headers) };
     calls.push(call);
     return respond(call);
   };
   const account = new AbortController();
   const settings = createAccountSettingsApi(origin, async () => "fixture-desktop", account.signal, transport);
-  const billing = createBillingApi(settings, {
+  const api = createBillingApi(settings, {
     accountSignal: account.signal,
     timeZone: () => "Australia/Brisbane",
     checkoutOpen: () => windowOpen,
     openCheckout: (url, purpose) => { opened.push({ url, purpose }); windowOpen = true; },
+    purchasesChanged: () => { state.changes += 1; },
+    wait: async () => {},
   });
-  return { billing, calls, opened, account, setWindowOpen: (value: boolean) => { windowOpen = value; } };
+  return { billing: api.billing, api, calls, opened, account, state, setWindowOpen: (value: boolean) => { windowOpen = value; } };
 }
+
+/** Lets the account checks the tracker started in the background run to their end. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 const quote = {
   requestId: "pcr_123", direction: "upgrade", execution: "immediate_upgrade", fromTier: "Pro", toTier: "Max",
@@ -77,13 +94,26 @@ test("the billing IPC names actions only and refuses paths, extra fields and con
   const promo = desktopBillingInput.parse({ action: "validatePromotion", planId: "max", billingInterval: "annual",
     promoCode: " tomverse50 ", currency: "AUD" });
   assert.deepEqual(promo, { action: "validatePromotion", planId: "max", billingInterval: "annual", promoCode: "TOMVERSE50", currency: "AUD" });
+  // The purchase records are read and re-checked by item name only; a warning token is a UUID the main process issued.
+  assert.equal(desktopBillingInput.safeParse({ action: "purchases" }).success, true);
+  assert.equal(desktopBillingInput.safeParse({ action: "purchases", account: "other" }).success, false);
+  for (const item of ["subscription", "credits:starter_500"]) {
+    assert.equal(desktopBillingInput.safeParse({ action: "checkPurchase", item }).success, true, item);
+  }
+  for (const item of ["credits:", "credits:../x", "credits:Starter", "subscription:pro", "", 5]) {
+    assert.equal(desktopBillingInput.safeParse({ action: "checkPurchase", item }).success, false, String(item));
+  }
+  assert.equal(desktopBillingInput.safeParse({ action: "buyCreditPack", packId: "starter_500", currency: "USD", language: "en",
+    repeatHold: "seen-the-warning" }).success, false);
+  assert.equal(desktopBillingInput.safeParse({ action: "buyCreditPack", packId: "starter_500", currency: "USD", language: "en",
+    repeatHold: true }).success, false);
 });
 
 test("every action maps to the web's own billing route with the web's request body", () => {
   const map = (value: unknown) => {
     const input = desktopBillingInput.parse(value);
-    assert.notEqual(input.action, "closeCheckout");
-    return billingRequest(input as Exclude<typeof input, { action: "closeCheckout" }>, "Asia/Seoul");
+    assert.ok(!["closeCheckout", "purchases", "checkPurchase"].includes(input.action));
+    return billingRequest(input as Parameters<typeof billingRequest>[0], "Asia/Seoul");
   };
   assert.deepEqual(map({ action: "usage" }), { path: "/api/user/usage" });
   assert.deepEqual(map({ action: "config" }), { path: "/api/billing/config?tz=Asia%2FSeoul" });
@@ -95,6 +125,12 @@ test("every action maps to the web's own billing route with the web's request bo
     planId: "max", billingInterval: "annual", language: "ko", currency: "KRW", purchaseAttemptId: attempt } });
   assert.deepEqual(map({ action: "buyCreditPack", packId: "project_1500", currency: "EUR", language: "de" }),
     { path: "/api/billing/credit-packs", method: "POST", body: { packId: "project_1500", language: "de", currency: "EUR" } });
+  // The main process's warning token stays in the main process.
+  assert.deepEqual(map({ action: "buyCreditPack", packId: "project_1500", currency: "EUR", language: "de", repeatHold: attempt }),
+    { path: "/api/billing/credit-packs", method: "POST", body: { packId: "project_1500", language: "de", currency: "EUR" } });
+  assert.deepEqual(map({ action: "checkout", planId: "pro", billingInterval: "monthly", currency: "USD", language: "en",
+    purchaseAttemptId: attempt, repeatHold: attempt }).body, { planId: "pro", billingInterval: "monthly", language: "en", currency: "USD",
+    purchaseAttemptId: attempt });
   assert.deepEqual(map({ action: "previewPlanChange", targetTier: "Pro", billingInterval: "annual" }),
     { path: "/api/billing/plan-change/preview", method: "POST", body: { targetTier: "Pro", billingInterval: "annual" } });
   assert.deepEqual(map({ action: "confirmPlanChange", requestId: "pcr_1" }),
@@ -147,61 +183,130 @@ test("a purchase counts as done only when the account the server reports shows i
   assert.equal(purchaseConfirmed({ kind: "credits", packId: "starter_500" }, usage("Pro", 100), usage("Pro", 600)), true);
 });
 
-test("a cancel page does not end the account check: a payment recorded late still ends confirmed", async () => {
-  const account = (plan: "Free" | "Pro" | "Max", purchased: number): BillingUsage => desktopBillingResponse.usage.parse(usage(plan, purchased));
-  const waits: number[] = [];
-  const wait = async (ms: number) => { waits.push(ms); };
-  const credits = { kind: "credits", packId: "starter_500" } as const;
-  // The window came back on the cancel page; the server records the payment by the third read.
-  const answers = [account("Pro", 100), null, account("Pro", 600), account("Pro", 600)];
-  let reads = 0;
-  const seen: number[] = [];
-  assert.equal(await readUntilConfirmed({ intent: credits, before: account("Pro", 100), attempts: PURCHASE_CHECK_ATTEMPTS,
-    current: () => true, wait, read: async () => answers[reads++] ?? null,
-    onRead: (after) => seen.push(after.balances.purchasedRemainingCredits) }), "confirmed");
-  assert.equal(reads, 3);
-  assert.deepEqual(seen, [100, 600]);
-  assert.deepEqual(waits, [PURCHASE_CHECK_INTERVAL_MS, PURCHASE_CHECK_INTERVAL_MS]);
-  assert.equal(PURCHASE_CHECK_ATTEMPTS, 5);
-  assert.equal(PURCHASE_CHECK_INTERVAL_MS, 2_500);
-
-  // A subscription paid late reads the same way.
-  reads = 0;
-  const plans = [account("Free", 0), account("Free", 0), account("Free", 0), account("Pro", 0)];
-  assert.equal(await readUntilConfirmed({ intent: { kind: "subscription", planId: "pro" }, before: account("Free", 0),
-    attempts: PURCHASE_CHECK_ATTEMPTS, current: () => true, wait, read: async () => plans[reads++] ?? null }), "confirmed");
-  assert.equal(reads, 4);
-});
-
-test("an account that never shows the purchase is unconfirmed only after every read, and failed reads count as not shown", async () => {
-  const account = (purchased: number): BillingUsage => desktopBillingResponse.usage.parse(usage("Pro", purchased));
-  const credits = { kind: "credits", packId: "starter_500" } as const;
-  let reads = 0;
-  assert.equal(await readUntilConfirmed({ intent: credits, before: account(100), attempts: PURCHASE_CHECK_ATTEMPTS, current: () => true,
-    wait: async () => {}, read: async () => { reads++; if (reads % 2) throw new TypeError("fetch failed"); return account(100); } }),
-  "unconfirmed");
-  assert.equal(reads, PURCHASE_CHECK_ATTEMPTS);
-
-  // A newer check or purchase takes over: the older one reports nothing.
-  let live = true;
-  reads = 0;
-  assert.equal(await readUntilConfirmed({ intent: credits, before: account(100), attempts: PURCHASE_CHECK_ATTEMPTS, current: () => live,
-    wait: async () => {}, read: async () => { reads++; live = false; return account(600); } }), "superseded");
-  assert.equal(reads, 1);
-});
-
-test("a new checkout repeats an unconfirmed one for any subscription and for the same credit pack", () => {
-  const pro = { kind: "subscription", planId: "pro" } as const;
-  const max = { kind: "subscription", planId: "max" } as const;
-  const starter = { kind: "credits", packId: "starter_500" } as const;
-  const project = { kind: "credits", packId: "project_1500" } as const;
-  assert.equal(repeatsPurchase(pro, pro), true);
+test("one record per item: any subscription plan shares one, each credit pack has its own", () => {
+  assert.equal(purchaseItem({ kind: "subscription", planId: "pro" }), "subscription");
   // One account holds one subscription: a different plan would still be a second subscription.
-  assert.equal(repeatsPurchase(pro, max), true);
-  assert.equal(repeatsPurchase(pro, starter), false);
-  assert.equal(repeatsPurchase(starter, starter), true);
-  assert.equal(repeatsPurchase(starter, project), false);
-  assert.equal(repeatsPurchase(starter, pro), false);
+  assert.equal(purchaseItem({ kind: "subscription", planId: "max" }), "subscription");
+  assert.equal(purchaseItem({ kind: "credits", packId: "starter_500" }), "credits:starter_500");
+  assert.notEqual(purchaseItem({ kind: "credits", packId: "project_1500" }), purchaseItem({ kind: "credits", packId: "starter_500" }));
+});
+
+const pack = (packId: string, repeatHold?: string) =>
+  ({ action: "buyCreditPack", packId, currency: "USD", language: "en", ...(repeatHold ? { repeatHold } : {}) }) as const;
+const subscription = (repeatHold?: string) => ({ action: "checkout", planId: "pro", billingInterval: "monthly", currency: "USD",
+  language: "en", purchaseAttemptId: attempt, ...(repeatHold ? { repeatHold } : {}) }) as const;
+const stripe = () => Response.json({ url: "https://checkout.stripe.com/c/pay/cs_test_fixture" });
+const posts = (calls: Call[], path: string) => calls.filter((call) => call.method === "POST" && call.url.pathname === path).length;
+
+test("the main process keeps each unconfirmed purchase: another pack or the subscription does not replace pack A's record", async () => {
+  const { billing, api, calls, state, setWindowOpen } = fixture(stripe);
+  const close = async (outcome: "success" | "cancelled" | "closed") => { setWindowOpen(false); api.checkoutClosed(outcome); await settle(); };
+  // Pack A comes back on the cancel page and the account never shows it.
+  assert.deepEqual(await billing(pack("starter_500")), { ok: true, value: { kind: "window" } });
+  await close("cancelled");
+  assert.deepEqual(api.purchases().map(({ item, stage, cancelled }) => [item, stage, cancelled]),
+    [["credits:starter_500", "unconfirmed", true]]);
+  // Pack B lands; A's record stays unconfirmed, because B's credits explain the whole increase.
+  assert.deepEqual(await billing(pack("project_1500")), { ok: true, value: { kind: "window" } });
+  state.purchased += 1_500;
+  await close("closed");
+  // The subscription is bought too and not shown yet.
+  assert.deepEqual(await billing(subscription()), { ok: true, value: { kind: "window" } });
+  await close("success");
+  assert.deepEqual(api.purchases().map(({ item, stage }) => [item, stage]), [
+    ["credits:starter_500", "unconfirmed"], ["subscription", "unconfirmed"],
+  ]);
+  // Buying pack A again: the account is read first and the main process holds the checkout back.
+  const reads = state.usageReads;
+  const before = posts(calls, "/api/billing/credit-packs");
+  const held = await billing(pack("starter_500"));
+  assert.equal(held.ok && (held.value as { kind: string }).kind, "held");
+  assert.equal(state.usageReads, reads + 1);
+  assert.equal(posts(calls, "/api/billing/credit-packs"), before);
+  // So does another subscription plan.
+  const max = await billing({ ...subscription(), planId: "max" });
+  assert.equal(max.ok && (max.value as { kind: string }).kind, "held");
+  assert.equal(posts(calls, "/api/billing/checkout"), 1);
+  // A different pack is a different item and goes ahead.
+  assert.deepEqual(await billing(pack("project_1500")), { ok: true, value: { kind: "window" } });
+});
+
+test("a repeat goes ahead only with the hold the main process issued, once; a made-up hold is answered with a new warning", async () => {
+  const { billing, api, calls, setWindowOpen } = fixture(stripe);
+  const close = async () => { setWindowOpen(false); api.checkoutClosed("closed"); await settle(); };
+  const holdOf = (result: Awaited<ReturnType<typeof billing>>) => {
+    assert.ok(result.ok);
+    const value = result.value as { kind: string; hold?: string };
+    assert.equal(value.kind, "held");
+    return value.hold!;
+  };
+  await billing(pack("starter_500"));
+  await close();
+  await billing(subscription());
+  await close();
+  // The renderer claims the customer chose to repeat, without the main process having warned: refused.
+  holdOf(await billing(pack("starter_500", "0b6f6b50-3d1c-4a0e-8a43-5d4b7c3f9a11")));
+  assert.equal(posts(calls, "/api/billing/credit-packs"), 1);
+  // A hold issued for the subscription is not one for this pack.
+  const subscriptionHold = holdOf(await billing(subscription()));
+  holdOf(await billing(pack("starter_500", subscriptionHold)));
+  // A newer warning replaces the earlier hold.
+  const first = holdOf(await billing(pack("starter_500")));
+  const second = holdOf(await billing(pack("starter_500")));
+  assert.notEqual(first, second);
+  const third = holdOf(await billing(pack("starter_500", first)));
+  assert.equal(posts(calls, "/api/billing/credit-packs"), 1);
+  // The customer's choice in the latest warning opens the checkout, once.
+  assert.deepEqual(await billing(pack("starter_500", third)), { ok: true, value: { kind: "window" } });
+  assert.equal(posts(calls, "/api/billing/credit-packs"), 2);
+  await close();
+  holdOf(await billing(pack("starter_500", third)));
+  assert.equal(posts(calls, "/api/billing/credit-packs"), 2);
+  assert.equal(posts(calls, "/api/billing/checkout"), 1);
+});
+
+test("a repeat whose earlier payment the fresh read now shows opens nothing and reports it settled", async () => {
+  const { billing, api, calls, state, setWindowOpen } = fixture(stripe);
+  await billing(pack("starter_500"));
+  setWindowOpen(false);
+  api.checkoutClosed("cancelled");
+  await settle();
+  assert.equal(api.purchases()[0].stage, "unconfirmed");
+  state.purchased = 500;
+  assert.deepEqual(await billing(pack("starter_500")), { ok: true, value: { kind: "settled" } });
+  assert.equal(api.purchases()[0].stage, "confirmed");
+  assert.equal(posts(calls, "/api/billing/credit-packs"), 1);
+  // Buying it again now is a new purchase.
+  assert.deepEqual(await billing(pack("starter_500")), { ok: true, value: { kind: "window" } });
+});
+
+test("the account check after the window closes runs in the main process with nothing on screen, and stops with the account", async () => {
+  const { billing, api, account, state, setWindowOpen } = fixture(stripe);
+  await billing(pack("starter_500"));
+  assert.deepEqual(api.purchases().map(({ stage }) => stage), ["open"]);
+  // No renderer is involved: the close alone starts the reads, and a late payment ends confirmed.
+  const reads = state.usageReads;
+  setWindowOpen(false);
+  api.checkoutClosed("cancelled");
+  state.purchased = 500;
+  await settle();
+  assert.ok(state.usageReads > reads);
+  assert.deepEqual(api.purchases().map(({ stage, cancelled }) => [stage, cancelled]), [["confirmed", true]]);
+  // An unconfirmed record, then the account session ends: nothing is kept and a later close checks nothing.
+  await billing(pack("project_1500"));
+  setWindowOpen(false);
+  api.checkoutClosed("closed");
+  await settle();
+  assert.equal(api.purchases().length, 1);
+  const changes = state.changes;
+  account.abort();
+  assert.deepEqual(api.purchases(), []);
+  assert.ok(state.changes > changes, "the emptied list is published");
+  const after = state.usageReads;
+  api.checkoutClosed("closed");
+  await settle();
+  assert.equal(state.usageReads, after);
+  await assert.rejects(billing({ action: "checkPurchase", item: "credits:project_1500" }), { name: "AbortError" });
 });
 
 test("server responses are parsed to the fields the screen uses", () => {
@@ -270,7 +375,7 @@ test("cancellation, a refund request and promotion validation send the web's req
 
 test("checkout opens only a verified Stripe URL, outside the account session, and never twice at once", async () => {
   let reply: unknown = { url: "https://checkout.stripe.com/c/pay/cs_test_a1#fidkdWx" };
-  const { billing, calls, opened, setWindowOpen } = fixture(() => Response.json(reply));
+  const { billing, api, calls, opened, state, setWindowOpen } = fixture(() => Response.json(reply));
   const input = { action: "checkout", planId: "pro", billingInterval: "monthly", currency: "USD", language: "en",
     purchaseAttemptId: attempt } as const;
   assert.deepEqual(await billing(input), { ok: true, value: { kind: "window" } });
@@ -280,7 +385,11 @@ test("checkout opens only a verified Stripe URL, outside the account session, an
   assert.deepEqual(await billing({ ...input, purchaseAttemptId: "0b6f6b50-3d1c-4a0e-8a43-5d4b7c3f9a11" }),
     { ok: false, status: 0, code: "CHECKOUT_WINDOW_OPEN" });
   assert.equal(calls.length, 1);
+  // The window closes and the account shows the plan.
   setWindowOpen(false);
+  state.plan = "Pro";
+  api.checkoutClosed("success");
+  await settle();
   reply = { url: "https://checkout.stripe.com.evil.example/c/pay/cs_test_a1" };
   assert.deepEqual(await billing(input), { ok: false, status: 200, code: "CHECKOUT_URL_REJECTED" });
   reply = { url: "https://checkout.stripe.com/c/pay/cs_test_b2" };
@@ -289,6 +398,9 @@ test("checkout opens only a verified Stripe URL, outside the account session, an
   assert.equal(opened.length, 2);
   assert.equal(opened[1].purpose, "credits");
   setWindowOpen(false);
+  state.purchased = 500;
+  api.checkoutClosed("closed");
+  await settle();
   reply = { success: true, redirectUrl: "https://tomverse.app/chat?billing=success&access=founding-tester-pass",
     periodEnd: "2027-01-24T00:00:00.000Z", accessType: "founding_tester_pass", automaticRenewal: false };
   assert.deepEqual(await billing({ ...input, promoCode: "TOMFRIEND100" }),
@@ -314,7 +426,7 @@ test("a lost connection is reported as an unknown outcome and a sign-in lapse re
     return Response.json({ reservation: null });
   };
   const settings = createAccountSettingsApi(origin, async () => "fixture-desktop", account.signal, transport);
-  const billing = createBillingApi(settings, { accountSignal: account.signal, timeZone: () => null, checkoutOpen: () => false,
+  const { billing } = createBillingApi(settings, { accountSignal: account.signal, timeZone: () => null, checkoutOpen: () => false,
     openCheckout: () => assert.fail("no checkout") });
   assert.deepEqual(await billing({ action: "confirmPlanChange", requestId: "pcr_1" }), { ok: false, status: 0, code: "NETWORK_ERROR" });
   mode = "expired";

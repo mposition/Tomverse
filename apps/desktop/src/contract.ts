@@ -16,7 +16,7 @@ import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportI
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
-import type { BillingAction, BillingResult, BillingWindowState, DesktopBillingInput } from "./billing-contract";
+import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
@@ -430,7 +430,8 @@ export type DesktopApi = {
   accountData(input: DesktopAccountDataInput): Promise<DesktopAccountDataResult>;
   assistantImport<Action extends AssistantImportAction>(input: Extract<AssistantImportInput, { action: Action }>): Promise<AssistantImportResult<Action>>;
   billing<Action extends BillingAction>(input: Extract<DesktopBillingInput, { action: Action }>): Promise<BillingResult<Action>>;
-  subscribeBillingWindow(listener: (state: BillingWindowState) => void): () => void;
+  /** The checkout window and this account's purchase records, pushed on every change (see `billing({ action: "purchases" })`). */
+  subscribeBilling(listener: (state: BillingState) => void): () => void;
   chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
   exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
   projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;

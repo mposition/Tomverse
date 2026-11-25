@@ -15,8 +15,9 @@ const authOrigin = process.env.DESKTOP_E2E_AUTH_ORIGIN;
 type Host = typeof globalThis & {
   billingEnabled: boolean; plan: "Free" | "Pro" | "Max"; requests: Array<{ method: string; path: string; body: unknown }>;
   checkoutUrl: string; usage(): unknown;
-  /** Purchased credits, and how many more usage reads until a late payment adds 500 of them (0: none pending). */
-  purchased: number; landAfterReads: number;
+  /** Purchased credits, and how many more usage reads until a late payment adds `landCredits` (0: none pending). */
+  purchased: number; landAfterReads: number; landCredits: number;
+  accountId: string;
 };
 
 test("Desktop plan screen buys, changes and cancels in the app and decides success from the account", {
@@ -36,6 +37,8 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
       host.checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_fixture";
       host.purchased = 0;
       host.landAfterReads = 0;
+      host.landCredits = 500;
+      host.accountId = "billing-account";
       // Stripe is never contacted: every https request from a new session is answered here.
       app.on("session-created", (created) => {
         created.protocol.handle("https", (request) => request.url.startsWith("https://checkout.stripe.com/")
@@ -66,7 +69,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
           return Response.json({ ok: true, accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresIn: 600 });
         }
         if (target.pathname === "/api/auth/desktop/session") {
-          return Response.json({ ok: true, account: { id: "billing-account", name: "Billing Fixture", email: null } });
+          return Response.json({ ok: true, account: { id: host.accountId, name: "Billing Fixture", email: null } });
         }
         if (target.pathname === "/api/auth/desktop/logout") return Response.json({ ok: true });
         if (target.pathname === "/api/auth/desktop/settings-session") {
@@ -84,7 +87,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
           host.requests.push({ method, path: target.pathname + target.search, body });
           if (target.pathname === "/api/user/usage") {
             // A payment the server records late: the balance grows only on a later read.
-            if (host.landAfterReads > 0 && --host.landAfterReads === 0) host.purchased += 500;
+            if (host.landAfterReads > 0 && --host.landAfterReads === 0) host.purchased += host.landCredits;
             return Response.json(host.usage());
           }
           if (target.pathname === "/api/billing/config") return Response.json({
@@ -99,6 +102,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
           });
           if (target.pathname === "/api/billing/credit-packs" && method === "GET") return Response.json({ plan: host.plan, packs: [
             { id: "starter_500", name: "Starter", credits: 500, priceMinor: 500, currency: "USD", validityDays: 90 },
+            { id: "project_1500", name: "Project", credits: 1_500, priceMinor: 1_200, currency: "USD", validityDays: 90 },
           ] });
           if (target.pathname === "/api/billing/plan-change" && method === "GET") return Response.json({ reservation: null });
           if (target.pathname === "/api/billing/refund-request" && method === "GET") return Response.json({ pendingRequest: null });
@@ -211,15 +215,23 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
 
     // A cancel page is not evidence either: a credit pack the server records on a later read ends confirmed.
     const packs = page.getByTestId("native-billing-credit-packs");
+    // The fixture lists Starter (500 credits) first and Project (1,500 credits) second.
+    const buy = (index: 0 | 1) => packs.getByRole("button", { name: "Buy", exact: true }).nth(index);
     const checkoutWindow = page.getByTestId("native-billing-window");
-    const openPack = async () => {
-      await packs.getByRole("button", { name: "Buy", exact: true }).click();
+    const openPack = async (index: 0 | 1 = 0) => {
+      await buy(index).click();
       await expect(checkoutWindow).toContainText("checkout.stripe.com");
       await expect.poll(async () => (await checkoutView(null))?.url).toBe("https://checkout.stripe.com/c/pay/cs_test_fixture");
     };
+    const land = (afterReads: number, credits: number) => application!.evaluate((_electron, value) => {
+      (globalThis as Host).landAfterReads = value.afterReads;
+      (globalThis as Host).landCredits = value.credits;
+    }, { afterReads, credits });
+    const notice = (item: string) => page.locator(`[data-testid="native-billing-verification"][data-item="${item}"]`);
+    const repeatNotice = page.locator('[data-testid="native-billing-verification"][data-stage="repeat"]');
     await openPack();
     reads = await usageReads();
-    await application.evaluate(() => { (globalThis as Host).landAfterReads = 3; });
+    await land(3, 500);
     await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
     await expect(verification).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
     await expect(verification).toContainText("Credits added");
@@ -235,26 +247,83 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(verification.getByRole("button", { name: "Check again" })).toBeVisible();
     assert.ok((await usageReads()) - reads >= 5, "every read is made before the screen says it is not confirmed");
 
-    // Buying the same pack again reads the account, warns, and opens a new checkout only on the customer's choice.
+    // Another pack bought meanwhile does not replace Starter's record: Project lands and is confirmed, Starter stays
+    // unconfirmed, and buying Starter again still reads the account and warns before a second checkout.
+    await openPack(1);
+    await land(1, 1_500);
+    await checkoutWindow.getByRole("button", { name: "Close checkout window" }).click();
+    await expect(page.getByTestId("native-billing-verification").filter({ hasText: "Credits added" })).toBeVisible({ timeout: 30_000 });
     const packPosts = await posts("/api/billing/credit-packs");
     reads = await usageReads();
-    await packs.getByRole("button", { name: "Buy", exact: true }).click();
-    await expect(verification).toHaveAttribute("data-stage", "repeat", { timeout: 30_000 });
-    assert.ok((await usageReads()) > reads);
+    await buy(0).click();
+    await expect(repeatNotice).toBeVisible({ timeout: 30_000 });
+    await expect(repeatNotice).toHaveAttribute("data-item", "credits:starter_500");
+    await expect(repeatNotice).toContainText("A payment you just made may still be processing.");
+    assert.ok((await usageReads()) > reads, "the account is read again before the warning");
     assert.equal(await posts("/api/billing/credit-packs"), packPosts);
     assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-    await verification.getByRole("button", { name: "Start a new payment anyway" }).click();
+    await expect(notice("credits:project_1500")).toHaveAttribute("data-stage", "confirmed");
+    await expect(notice("credits:project_1500")).toContainText("Project");
+
+    // The records live in the main process: another Settings tab and back still shows Starter unconfirmed,
+    // and buying it again still warns.
+    await page.getByTestId("desktop-settings-account").click();
+    await expect(page.getByTestId("native-account-plan")).toHaveCount(0);
+    await planTab.click();
+    await expect(notice("credits:starter_500")).toHaveAttribute("data-stage", "unconfirmed");
+    await expect(notice("credits:starter_500")).toContainText("It looks like you did not finish paying.");
+    await buy(0).click();
+    await expect(repeatNotice).toHaveAttribute("data-item", "credits:starter_500", { timeout: 30_000 });
+    assert.equal(await posts("/api/billing/credit-packs"), packPosts);
+
+    // A renderer that skips the warning and claims the customer chose to repeat is refused by the main process.
+    const skipped = await page.evaluate(() => window.desktop.billing({ action: "buyCreditPack", packId: "starter_500", currency: "USD",
+      language: "en", repeatHold: crypto.randomUUID() }));
+    assert.equal(skipped.ok && skipped.value.kind, "held");
+    assert.equal(await posts("/api/billing/credit-packs"), packPosts);
+    assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+
+    // The customer's choice in the warning opens the new checkout.
+    await buy(0).click();
+    await expect(repeatNotice).toBeVisible({ timeout: 30_000 });
+    await repeatNotice.getByRole("button", { name: "Start a new payment anyway" }).click();
     await expect(checkoutWindow).toContainText("checkout.stripe.com");
     assert.equal(await posts("/api/billing/credit-packs"), packPosts + 1);
-    // A window the customer closes is checked the same way.
-    await application.evaluate(() => { (globalThis as Host).landAfterReads = 1; });
+
+    // Settings closed while the window is open: the window comes back on the cancel page, the main process still
+    // reads the account, and the result is there when the Plan tab opens again.
+    await rail.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(planTab).toHaveCount(0);
+    reads = await usageReads();
+    await expect.poll(async () => (await checkoutView(null))?.url).toBe("https://checkout.stripe.com/c/pay/cs_test_fixture");
+    await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
+    await expect.poll(usageReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(reads + 5);
+    await openPlan();
+    await expect(notice("credits:starter_500")).toHaveAttribute("data-stage", "unconfirmed");
+    await expect(notice("credits:starter_500")).toContainText("It looks like you did not finish paying.");
+
+    // Another account never sees these records, and its own first purchase of the same pack is not held back.
+    await page.evaluate(() => window.desktop.signOut());
+    await application.evaluate(() => { (globalThis as Host).accountId = "billing-account-2"; });
+    await page.evaluate(() => window.desktop.signIn());
+    await expect.poll(() => page.evaluate(async () => (await window.desktop.state()).account.stage)).toBe("connected");
+    await openPlan();
+    await expect(page.getByTestId("native-billing-balances")).toBeVisible();
+    await expect(page.getByTestId("native-billing-verification")).toHaveCount(0);
+    assert.deepEqual(await page.evaluate(async () => {
+      const result = await window.desktop.billing({ action: "purchases" });
+      return result.ok ? result.value.purchases : null;
+    }), []);
+    await openPack(0);
+    assert.equal(await posts("/api/billing/credit-packs"), packPosts + 2);
+    await land(1, 500);
     await checkoutWindow.getByRole("button", { name: "Close checkout window" }).click();
-    await expect(verification).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
-    await expect(verification).toContainText("Credits added");
+    await expect(notice("credits:starter_500")).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
+    await expect(notice("credits:starter_500")).toContainText("Credits added");
 
     // A Checkout URL that is not Stripe's is never opened.
     await application.evaluate(() => { (globalThis as Host).checkoutUrl = "https://checkout.stripe.com.example/c/pay/cs_test"; });
-    await page.getByTestId("native-billing-credit-packs").getByRole("button", { name: "Buy", exact: true }).click();
+    await buy(0).click();
     await expect(page.getByRole("alert").filter({ hasText: "could not be verified" })).toBeVisible();
     assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 
@@ -280,10 +349,11 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(refund.getByRole("status")).toHaveText("Refund request received.");
     const writes = (await requests()).filter(({ method }) => method !== "GET")
       .filter(({ path }) => !["/api/billing/checkout", "/api/billing/promotion/validate"].includes(path));
-    const pack = ["POST", "/api/billing/credit-packs", { packId: "starter_500", language: "en", currency: "USD" }];
+    const pack = (packId: string) => ["POST", "/api/billing/credit-packs", { packId, language: "en", currency: "USD" }];
+    const starter = pack("starter_500");
     assert.deepEqual(writes.map(({ method, path, body }) => [method, path, body]), [
-      pack, pack, pack,
-      pack,
+      starter, starter, pack("project_1500"), starter, starter,
+      starter,
       ["POST", "/api/billing/plan-change/preview", { targetTier: "Max", billingInterval: "monthly" }],
       ["POST", "/api/billing/plan-change/confirm", { requestId: "pcr_fixture", resumeRenewal: true }],
       ["POST", "/api/billing/cancel-subscription", {}],

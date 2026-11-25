@@ -21,9 +21,9 @@ import { classifyBillingError, resolvePlanCtaState } from "../../../../lib/purch
 import { ACTIVE_SUBSCRIPTION_STATUSES } from "../../../../lib/checkoutPlanEligibilityCore";
 import { formatBillingMinor, normalizeBillingCurrency } from "../../../../lib/billingMarkets";
 import {
-  PURCHASE_CHECK_ATTEMPTS, readUntilConfirmed, repeatsPurchase,
-  type BillingAction, type BillingConfig, type BillingPromotion, type BillingResult, type BillingUsage, type BillingValue,
-  type BillingWindowState, type DesktopBillingInput, type PlanChangeQuote, type PlanChangeReservation, type PurchaseIntent,
+  purchaseItem,
+  type BillingAction, type BillingConfig, type BillingPromotion, type BillingResult, type BillingState, type BillingUsage, type BillingValue,
+  type DesktopBillingInput, type PlanChangeQuote, type PlanChangeReservation, type PurchaseIntent, type PurchaseItem, type PurchaseRecord,
 } from "../billing-contract";
 import { openDocs } from "./WebViewer";
 import "./billing.css";
@@ -46,6 +46,23 @@ function useBillingEnabled() {
     return () => { live = false; stop(); };
   }, []);
   return enabled;
+}
+
+/**
+ * The checkout window and the account's purchase records as the main process holds them. The
+ * screen subscribes, then asks once for the current state, and keeps whichever is newer: a Plan
+ * tab that mounts while a purchase is open or unconfirmed shows it as it is.
+ */
+function useBillingState() {
+  const [state, setState] = useState<BillingState>({ version: -1, window: null, purchases: [] });
+  useEffect(() => {
+    let live = true;
+    const apply = (next: BillingState) => { if (live) setState(current => next.version >= current.version ? next : current); };
+    const stop = window.desktop.subscribeBilling(apply);
+    void billing<"purchases">({ action: "purchases" }).then(result => { if (result.ok) apply(result.value); }, () => {});
+    return () => { live = false; stop(); };
+  }, []);
+  return state;
 }
 
 function useBillingRead<Action extends ReadAction>(action: Action) {
@@ -114,21 +131,10 @@ function purchaseFailure(result: Extract<BillingResult<BillingAction>, { ok: fal
   }), language);
 }
 
-/**
- * A purchase whose checkout window opened and that the account has not shown yet.
- * `cancelled`: the window came back on the cancel page. It sets the wording only.
- */
-type Pending = { intent: PurchaseIntent; label: string; before: BillingUsage; cancelled: boolean };
-type StartRun = () => Promise<BillingResult<"checkout"> | BillingResult<"buyCreditPack">>;
-/** A new checkout held back until the customer chooses it over the unconfirmed one. */
-type Repeat = { intent: PurchaseIntent; label: string; run: StartRun };
-type Verification =
-  | { stage: "verifying" | "confirmed" | "unconfirmed"; pending: Pending }
-  | { stage: "repeat"; pending: Pending; repeat: Repeat }
-  | { stage: "pass" };
-
-/** Re-checking after "Check again" reads a little less than after the window closes. */
-const CHECK_AGAIN_ATTEMPTS = 3;
+/** A checkout request; sent again with the main process's hold when the customer repeats it. */
+type StartRun = (repeatHold?: string) => Promise<BillingResult<"checkout"> | BillingResult<"buyCreditPack">>;
+/** The main process held a new checkout of `item` back: it waits for the customer's choice in the warning. */
+type Repeat = { item: PurchaseItem; hold: string; intent: PurchaseIntent; run: StartRun };
 
 /**
  * The Plan tab with in-app purchases. Off (the server's `desktopBilling` capability),
@@ -149,18 +155,18 @@ function BillingPlan({ language }: { language: Language }) {
   const [view, setView] = useState<{ kind: "overview" } | { kind: "checkout"; planId: "pro" | "max" } |
     { kind: "change"; tier: "Pro" | "Max"; interval: Interval }>({ kind: "overview" });
   const [cycle, setCycle] = useState<Interval>("monthly");
-  const [windowState, setWindowState] = useState<BillingWindowState>();
-  const [verification, setVerification] = useState<Verification>();
+  // The window and the purchase records are the main process's; this screen only draws them.
+  const billingState = useBillingState();
+  const windowState = billingState.window;
+  const [repeat, setRepeat] = useState<Repeat>();
+  const [pass, setPass] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [starting, setStarting] = useState(false);
-  const pending = useRef<Pending | undefined>(undefined);
-  // Each account check has a number; a newer check or purchase makes an older one drop its result.
-  const checkRun = useRef(0);
   const auth = dictionaries[language].auth;
   const desk = desktopBillingCopy(language);
   const purchase = purchaseCtaCopy[language];
 
-  const { reload: reloadUsage, setData: setUsage } = usage;
+  const { reload: reloadUsage } = usage;
   const { reload: reloadConfig } = config;
   const { reload: reloadPacks } = packs;
   const { reload: reloadPlanChange } = planChange;
@@ -169,56 +175,35 @@ function BillingPlan({ language }: { language: Language }) {
     reloadUsage(); reloadConfig(); reloadPacks(); reloadPlanChange(); reloadRefund();
   }, [reloadUsage, reloadConfig, reloadPacks, reloadPlanChange, reloadRefund]);
 
-  // Whether a payment went through is read from the account, never from the window's address.
-  const check = useCallback(async (target: Pending, attempts: number) => {
-    const run = ++checkRun.current;
-    setVerification({ stage: "verifying", pending: target });
-    const outcome = await readUntilConfirmed({
-      intent: target.intent, before: target.before, attempts, current: () => checkRun.current === run, onRead: setUsage,
-      read: () => billing<"usage">({ action: "usage" }).then(result => result.ok ? result.value : null),
-    });
-    if (outcome === "superseded") return outcome;
-    if (outcome === "confirmed" && pending.current === target) pending.current = undefined;
-    setVerification({ stage: outcome, pending: target });
-    if (outcome === "confirmed") refreshAccount();
-    return outcome;
-  }, [refreshAccount, setUsage]);
+  // A purchase the account now shows changes the plan and balances on this screen.
+  const seenConfirmed = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = billingState.purchases.filter(record => record.stage === "confirmed" && !seenConfirmed.current.has(record.id));
+    for (const record of fresh) seenConfirmed.current.add(record.id);
+    if (fresh.length) queueMicrotask(refreshAccount);
+  }, [billingState.purchases, refreshAccount]);
 
-  useEffect(() => window.desktop.subscribeBillingWindow(state => {
-    setWindowState(state);
-    const target = pending.current;
-    if (state.stage !== "closed" || !target) return;
-    // A success page, a cancel page and a closed window get the same reads; the cancel page only changes the wording.
-    const returned = { ...target, cancelled: state.outcome === "cancelled" };
-    pending.current = returned;
-    void check(returned, PURCHASE_CHECK_ATTEMPTS);
-  }), [check]);
+  const labelOf = (intent: PurchaseIntent) => intent.kind === "subscription"
+    ? config.data?.plans.find(plan => plan.id === intent.planId)?.name ?? tierOf(intent.planId)
+    : packs.data?.packs.find(pack => pack.id === intent.packId)?.name ?? intent.packId;
 
-  const start = async (intent: PurchaseIntent, label: string, run: StartRun, repeatChosen = false) => {
-    const before = usage.data;
-    if (!before || starting) return;
+  const start = async (intent: PurchaseIntent, run: StartRun, repeatHold?: string) => {
+    if (starting) return;
     setStarting(true);
     setFailure(undefined);
+    setRepeat(undefined);
+    setPass(false);
     try {
-      const earlier = pending.current;
-      if (earlier && !repeatChosen && repeatsPurchase(earlier.intent, intent)) {
-        // The earlier payment may still be on its way: read the account once more, and open a second
-        // checkout only after the customer has been warned and chooses to.
-        setView({ kind: "overview" });
-        if (await check(earlier, 1) === "unconfirmed") setVerification({ stage: "repeat", pending: earlier, repeat: { intent, label, run } });
-        return;
-      }
-      checkRun.current++;
-      setVerification(undefined);
-      const result = await run();
+      const result = await run(repeatHold);
       if (!result.ok) return setFailure(purchaseFailure(result, language));
+      setView({ kind: "overview" });
       if (result.value.kind === "pass") {
-        setVerification({ stage: "pass" });
-        setView({ kind: "overview" });
+        setPass(true);
         return refreshAccount();
       }
-      pending.current = { intent, label, before, cancelled: false };
-      setView({ kind: "overview" });
+      // The main process read the account again and still does not see the earlier payment of this item:
+      // no checkout was created, and a new one opens only from the customer's choice in the warning.
+      if (result.value.kind === "held") setRepeat({ item: purchaseItem(intent), hold: result.value.hold, intent, run });
     } catch {
       setFailure(desktopShellCopy[language].actionFailed);
     } finally {
@@ -232,13 +217,15 @@ function BillingPlan({ language }: { language: Language }) {
   const account = usage.data;
   const activeSubscription = typeof account.subscription.status === "string" &&
     ACTIVE_SUBSCRIPTION_STATUSES.has(account.subscription.status);
-  // No new checkout starts while the window is open or the account is being read for the last one.
-  const purchaseBusy = windowState?.stage === "open" || verification?.stage === "verifying";
+  // No new checkout starts while the window is open; a repeat of an unconfirmed item is held back by the main process.
+  const purchaseBusy = windowState !== null;
+  const withHold = <Input extends object>(input: Input, repeatHold?: string) => repeatHold ? { ...input, repeatHold } : input;
 
   if (view.kind === "checkout" && config.data) {
     return <Checkout language={language} planId={view.planId} config={config.data} interval={cycle} onCycle={setCycle}
       busy={starting} failure={failure} onBack={() => { setFailure(undefined); setView({ kind: "overview" }); }}
-      onStart={(input, label) => void start({ kind: "subscription", planId: input.planId }, label, () => billing<"checkout">(input))} />;
+      onStart={input => void start({ kind: "subscription", planId: input.planId },
+        repeatHold => billing<"checkout">(withHold(input, repeatHold)))} />;
   }
   if (view.kind === "change") {
     return <PlanChange language={language} tier={view.tier} interval={view.interval}
@@ -256,9 +243,12 @@ function BillingPlan({ language }: { language: Language }) {
   const changeText = planChangeText(language);
 
   return <div data-testid="native-account-plan" data-billing="enabled">
-    <CheckoutStatus language={language} windowState={windowState} verification={verification}
-      onCheckAgain={target => { pending.current = target; void check(target, CHECK_AGAIN_ATTEMPTS); }}
-      onRepeat={repeat => void start(repeat.intent, repeat.label, repeat.run, true)} />
+    <CheckoutStatus language={language} windowState={windowState} pass={pass} purchases={billingState.purchases} repeat={repeat}
+      labelOf={labelOf} onRepeat={next => void start(next.intent, next.run, next.hold)}
+      onCheckAgain={item => {
+        setRepeat(undefined);
+        void billing<"checkPurchase">({ action: "checkPurchase", item }).catch(() => {});
+      }} />
     {failure && <p className="notice" role="alert">{failure}</p>}
 
     <section className="desktop-setting-section" data-testid="native-billing-current">
@@ -334,8 +324,8 @@ function BillingPlan({ language }: { language: Language }) {
 
     <CreditPacks language={language} packs={packs.data} failed={packs.failed} retry={packs.reload}
       busy={starting || purchaseBusy}
-      onBuy={pack => void start({ kind: "credits", packId: pack.id }, pack.name,
-        () => billing<"buyCreditPack">({ action: "buyCreditPack", packId: pack.id, currency: pack.currency, language }))} />
+      onBuy={pack => void start({ kind: "credits", packId: pack.id }, repeatHold => billing<"buyCreditPack">(
+        withHold({ action: "buyCreditPack" as const, packId: pack.id, currency: pack.currency, language }, repeatHold)))} />
 
     {(account.plan === "Pro" || account.plan === "Max") && <>
       <CancelSubscription language={language} account={account} periodEnd={periodEnd} onSettled={usage.reload} />
@@ -352,45 +342,53 @@ function IntervalChoice({ language, interval, onCycle }: { language: Language; i
   </div>;
 }
 
-function CheckoutStatus({ language, windowState, verification, onCheckAgain, onRepeat }: {
-  language: Language; windowState?: BillingWindowState; verification?: Verification; onCheckAgain(target: Pending): void;
-  onRepeat(repeat: Repeat): void;
+function CheckoutStatus({ language, windowState, pass, purchases, repeat, labelOf, onCheckAgain, onRepeat }: {
+  language: Language; windowState: BillingState["window"]; pass: boolean; purchases: PurchaseRecord[]; repeat?: Repeat;
+  labelOf(intent: PurchaseIntent): string; onCheckAgain(item: PurchaseItem): void; onRepeat(repeat: Repeat): void;
 }) {
   const desk = desktopBillingCopy(language);
-  const purchase = purchaseCtaCopy[language];
   const billingCopy = dictionaries[language].billing;
-  if (windowState?.stage === "open") {
-    return <div className="billing-notice" role="status" data-testid="native-billing-window">
+  return <>
+    {windowState && <div className="billing-notice" role="status" data-testid="native-billing-window">
       <p><strong>{desk.windowOpen}</strong></p>
       <p>{fillBillingCopy(desk.windowHost, { host: windowState.host })}</p>
       {windowState.failed ? <p role="alert">{desk.windowFailed}</p> : windowState.loading ? <p>{desk.windowLoading}</p> : null}
       <button type="button" className="soft" onClick={() => void billing<"closeCheckout">({ action: "closeCheckout" })}>{desk.closeWindow}</button>
-    </div>;
-  }
-  if (!verification) return null;
-  if (verification.stage === "pass") {
-    return <div className="billing-notice" role="status" data-testid="native-billing-verification" data-stage="pass">
+    </div>}
+    {pass && <div className="billing-notice" role="status" data-testid="native-billing-verification" data-stage="pass">
       <p><strong>{billingCopy.testerPassActivatedTitle}</strong></p><p>{billingCopy.testerPassNotice}</p>
-    </div>;
-  }
-  const { pending } = verification;
-  const credits = pending.intent.kind === "credits";
-  // Only the account decides "confirmed"; anything short of that stays open with a way to check again.
-  return <div className="billing-notice" role="status" data-testid="native-billing-verification" data-stage={verification.stage}>
-    {verification.stage === "verifying" ? <p>{desk.verifying}</p>
-      : verification.stage === "confirmed" ? credits
-        ? <><p><strong>{purchase.purchaseSuccessTitle}</strong></p><p>{purchase.purchaseSuccessBody(pending.label)}</p></>
-        : <p><strong>{fillBillingCopy(desk.planConfirmed, { plan: pending.label })}</strong></p>
-        : <>
-          {verification.stage === "repeat"
-            ? <><p><strong>{desk.repeatTitle}</strong></p><p>{desk.repeatBody}</p></>
-            : <p>{pending.cancelled ? desk.notConfirmedCancelled : desk.notConfirmed}</p>}
+    </div>}
+    {purchases.filter(record => record.stage !== "open").map(record => <PurchaseNotice key={record.id} language={language}
+      record={record} label={labelOf(record.intent)} onCheckAgain={onCheckAgain} onRepeat={onRepeat}
+      repeat={repeat?.item === record.item && record.stage === "unconfirmed" ? repeat : undefined} />)}
+  </>;
+}
+
+/** One purchase record. Only the account decides "confirmed"; short of that it stays open with a way to check again. */
+function PurchaseNotice({ language, record, label, repeat, onCheckAgain, onRepeat }: {
+  language: Language; record: PurchaseRecord; label: string; repeat?: Repeat;
+  onCheckAgain(item: PurchaseItem): void; onRepeat(repeat: Repeat): void;
+}) {
+  const desk = desktopBillingCopy(language);
+  const purchase = purchaseCtaCopy[language];
+  const credits = record.intent.kind === "credits";
+  return <div className="billing-notice" role="status" data-testid="native-billing-verification" data-item={record.item}
+    data-stage={repeat ? "repeat" : record.stage}>
+    {record.stage === "confirmed" ? credits
+      ? <><p><strong>{purchase.purchaseSuccessTitle}</strong></p><p>{purchase.purchaseSuccessBody(label)}</p></>
+      : <p><strong>{fillBillingCopy(desk.planConfirmed, { plan: label })}</strong></p>
+      : <>
+        <p><strong>{label}</strong></p>
+        {record.stage === "checking" ? <p>{desk.verifying}</p> : <>
+          {repeat ? <><p><strong>{desk.repeatTitle}</strong></p><p>{desk.repeatBody}</p></>
+            : <p>{record.cancelled ? desk.notConfirmedCancelled : desk.notConfirmed}</p>}
           <div className="billing-notice-actions">
-            <button type="button" className="soft" onClick={() => onCheckAgain(pending)}>{desk.checkAgain}</button>
-            {verification.stage === "repeat" && <button type="button" className="soft" data-testid="native-billing-repeat"
-              onClick={() => onRepeat(verification.repeat)}>{desk.startAnyway}</button>}
+            <button type="button" className="soft" onClick={() => onCheckAgain(record.item)}>{desk.checkAgain}</button>
+            {repeat && <button type="button" className="soft" data-testid="native-billing-repeat"
+              onClick={() => onRepeat(repeat)}>{desk.startAnyway}</button>}
           </div>
         </>}
+      </>}
   </div>;
 }
 

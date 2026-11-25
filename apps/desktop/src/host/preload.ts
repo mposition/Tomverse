@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserState } from "../browser-contract";
 import type { WebViewState } from "../web-view-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
-import type { BillingWindowState } from "../billing-contract";
+import type { BillingState } from "../billing-contract";
 import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
 import type { DesktopLoginState, LoginApi } from "../login-contract";
 
@@ -97,10 +97,10 @@ if (trustedWindow) {
     accountData: (input: Parameters<DesktopApi["accountData"]>[0]) => ipcRenderer.invoke("desktop:account-data", input),
     assistantImport: (input: Parameters<DesktopApi["assistantImport"]>[0]) => ipcRenderer.invoke("desktop:assistant-import", input),
     billing: (input: Parameters<DesktopApi["billing"]>[0]) => ipcRenderer.invoke("desktop:billing", input),
-    subscribeBillingWindow(listener: (state: BillingWindowState) => void) {
-      const onState = (_event: Electron.IpcRendererEvent, state: BillingWindowState) => listener(state);
-      ipcRenderer.on("desktop:billing-window", onState);
-      return () => ipcRenderer.removeListener("desktop:billing-window", onState);
+    subscribeBilling(listener: (state: BillingState) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: BillingState) => listener(state);
+      ipcRenderer.on("desktop:billing-state", onState);
+      return () => ipcRenderer.removeListener("desktop:billing-state", onState);
     },
     chatExtras: (input: Parameters<DesktopApi["chatExtras"]>[0]) => ipcRenderer.invoke("desktop:chat-extras", input),
     exportReviewAnalysis: (input: Parameters<DesktopApi["exportReviewAnalysis"]>[0]) => ipcRenderer.invoke("desktop:review-export", input),

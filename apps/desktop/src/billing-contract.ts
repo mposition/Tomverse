@@ -25,6 +25,14 @@ const label = z.string().max(400);
 const amount = z.number().finite();
 const minor = z.number().int().nonnegative();
 const timestamp = z.string().max(64);
+// The token the main process issued with its warning about an unconfirmed payment of the same item.
+// It is checked in the main process and never sent to the server.
+const repeatHold = z.uuid().optional();
+
+/** One thing the account can buy: its subscription (whatever the plan), or one credit pack. */
+export type PurchaseItem = "subscription" | `credits:${string}`;
+const PURCHASE_ITEM = /^(subscription|credits:[a-z0-9_]{1,32})$/;
+const purchaseItemInput = z.custom<PurchaseItem>((value) => typeof value === "string" && PURCHASE_ITEM.test(value));
 
 export const desktopBillingInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("usage") }).strict(),
@@ -37,8 +45,9 @@ export const desktopBillingInput = z.discriminatedUnion("action", [
     action: z.literal("checkout"), planId, billingInterval, promoCode: promoCode.optional(), currency, language,
     // One customer submission; the server turns it into the Stripe idempotency key.
     purchaseAttemptId: z.uuid(),
+    repeatHold,
   }).strict(),
-  z.object({ action: z.literal("buyCreditPack"), packId, currency, language }).strict(),
+  z.object({ action: z.literal("buyCreditPack"), packId, currency, language, repeatHold }).strict(),
   z.object({ action: z.literal("previewPlanChange"), targetTier: changeTier, billingInterval }).strict(),
   // Only ever the customer's own tick of the separate renewal control.
   z.object({ action: z.literal("confirmPlanChange"), requestId, resumeRenewal: z.literal(true).optional() }).strict(),
@@ -46,11 +55,16 @@ export const desktopBillingInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cancelSubscription") }).strict(),
   z.object({ action: z.literal("requestRefund"), reason: z.string().trim().max(1_000) }).strict(),
   z.object({ action: z.literal("closeCheckout") }).strict(),
+  // The purchase records the main process keeps for the account, and a renewed account check for one of them.
+  z.object({ action: z.literal("purchases") }).strict(),
+  z.object({ action: z.literal("checkPurchase"), item: purchaseItemInput }).strict(),
 ]);
 
 export type DesktopBillingInput = z.infer<typeof desktopBillingInput>;
 export type BillingAction = DesktopBillingInput["action"];
-export type BillingServerAction = Exclude<BillingAction, "closeCheckout">;
+/** Actions the main process answers itself, without a billing route. */
+export type BillingDesktopAction = "closeCheckout" | "purchases" | "checkPurchase";
+export type BillingServerAction = Exclude<BillingAction, BillingDesktopAction>;
 
 const promotion = z.object({
   discountPercent: amount,
@@ -149,12 +163,21 @@ export const desktopBillingResponse = {
 
 type ServerValue<Action extends BillingServerAction> = z.infer<(typeof desktopBillingResponse)[Action]>;
 
+/**
+ * A checkout the main process did not start: "held" when the account still does not show an earlier
+ * payment of the same item (the customer is warned; only a request carrying `hold` goes ahead),
+ * "settled" when the fresh read showed that earlier payment after all.
+ */
+export type PurchaseHeldBack = { kind: "held"; hold: string } | { kind: "settled" };
+
 /** What the renderer receives. Checkout never hands the Stripe URL back to the renderer. */
 export type BillingValue<Action extends BillingAction> =
-  Action extends "checkout" ? { kind: "window" } | { kind: "pass"; periodEnd: string }
-    : Action extends "buyCreditPack" ? { kind: "window" }
+  Action extends "checkout" ? { kind: "window" } | { kind: "pass"; periodEnd: string } | PurchaseHeldBack
+    : Action extends "buyCreditPack" ? { kind: "window" } | PurchaseHeldBack
       : Action extends "closeCheckout" ? { closed: boolean }
-        : Action extends BillingServerAction ? ServerValue<Action> : never;
+        : Action extends "purchases" ? BillingState
+          : Action extends "checkPurchase" ? { checking: boolean }
+            : Action extends BillingServerAction ? ServerValue<Action> : never;
 
 /** Codes Desktop reports itself, beside the server's own `code` values. */
 export const DESKTOP_BILLING_CODES = ["NETWORK_ERROR", "INVALID_RESPONSE", "CHECKOUT_URL_REJECTED", "CHECKOUT_WINDOW_OPEN"] as const;
@@ -237,6 +260,33 @@ export type BillingWindowState =
 export type PurchaseIntent = { kind: "subscription"; planId: "pro" | "max" } | { kind: "credits"; packId: string };
 
 /**
+ * The record a purchase is tracked under. An account holds one subscription, so every plan
+ * shares one record and any subscription checkout repeats an unconfirmed one; each credit
+ * pack has its own.
+ */
+export const purchaseItem = (intent: PurchaseIntent): PurchaseItem =>
+  intent.kind === "subscription" ? "subscription" : `credits:${intent.packId}`;
+
+/**
+ * A purchase the main process tracks for the connected account: "open" while its checkout
+ * window is, "checking" while the account is read after it, then "confirmed" when the account
+ * shows it or "unconfirmed" when the reads did not (never "unpaid"). `cancelled`: the window
+ * came back on the cancel page, which sets the wording only.
+ */
+export type PurchaseStage = "open" | "checking" | "unconfirmed" | "confirmed";
+export type PurchaseRecord = {
+  id: string; item: PurchaseItem; intent: PurchaseIntent; stage: PurchaseStage; cancelled: boolean; startedAt: number;
+};
+
+/** What the main process publishes to the Plan tab, and answers when a screen asks on mount. */
+export type BillingState = {
+  /** Increases with every change; a screen keeps the highest it has seen. */
+  version: number;
+  window: Extract<BillingWindowState, { stage: "open" }> | null;
+  purchases: PurchaseRecord[];
+};
+
+/**
  * True only when the account the server reports shows the purchase: the plan moved
  * to the one bought, or the purchased-credit balance grew.
  */
@@ -250,50 +300,4 @@ export function purchaseConfirmed(
     return after.plan === tier && before.plan !== tier;
   }
   return after.balances.purchasedRemainingCredits > before.balances.purchasedRemainingCredits;
-}
-
-/** The account reads after a checkout window ends, however it ended. */
-export const PURCHASE_CHECK_ATTEMPTS = 5;
-export const PURCHASE_CHECK_INTERVAL_MS = 2_500;
-
-export type PurchaseCheck = "confirmed" | "unconfirmed" | "superseded";
-
-/**
- * Reads the account until it shows the purchase or the attempts run out. A success page,
- * a cancel page and a window the customer closed all get the same reads: the window's
- * address is not evidence either way, so a payment the server records late still ends
- * here as confirmed. A failed read counts as "not shown yet". "unconfirmed" means only
- * that these reads did not show the purchase, never that nothing was paid.
- */
-export async function readUntilConfirmed(input: {
-  intent: PurchaseIntent;
-  before: Pick<BillingUsage, "plan" | "balances">;
-  read: () => Promise<BillingUsage | null>;
-  attempts: number;
-  /** False once a newer check or purchase has taken over; the result is then dropped. */
-  current: () => boolean;
-  onRead?: (usage: BillingUsage) => void;
-  wait?: (ms: number) => Promise<void>;
-}): Promise<PurchaseCheck> {
-  const wait = input.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  for (let attempt = 0; attempt < input.attempts; attempt++) {
-    if (attempt) await wait(PURCHASE_CHECK_INTERVAL_MS);
-    if (!input.current()) return "superseded";
-    const after = await input.read().catch(() => null);
-    if (!input.current()) return "superseded";
-    if (!after) continue;
-    input.onRead?.(after);
-    if (purchaseConfirmed(input.intent, input.before, after)) return "confirmed";
-  }
-  return "unconfirmed";
-}
-
-/**
- * Whether a new checkout would buy again what an unconfirmed payment may already have
- * bought. An account holds one subscription, so any subscription checkout repeats an
- * unconfirmed subscription; a credit pack repeats the same pack.
- */
-export function repeatsPurchase(unconfirmed: PurchaseIntent, next: PurchaseIntent): boolean {
-  return unconfirmed.kind === "subscription" ? next.kind === "subscription"
-    : next.kind === "credits" && next.packId === unconfirmed.packId;
 }
