@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
+import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
 import type {
   ChatConversation, ChatHistoryHit, ChatHistoryRow, ChatImportedSource, ChatModel, ChatPageInput, ChatRenameInput, ChatSourceInput, ChatStarter,
   ChatTurnInput, ChatTurnProgress, ChatTurnResult, DesktopTextProduct, ReviewAnalysisRequest, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
@@ -380,6 +381,7 @@ export type DesktopApi = {
   accountSettings<Action extends AccountSettingsAction>(
     input: Extract<DesktopAccountSettingsInput, { action: Action }>,
   ): Promise<AccountSettingsResult<Action>>;
+  accountData(input: DesktopAccountDataInput): Promise<DesktopAccountDataResult>;
   checkUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   setCodeNotifications(enabled: boolean): Promise<void>;

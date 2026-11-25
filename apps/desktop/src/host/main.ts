@@ -14,6 +14,9 @@ import { createConnectorApi } from "./connector-api";
 import { openConnectorOAuthWindow } from "./connector-oauth-window";
 import { connectorInput } from "../connector-contract";
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
+import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
+import { AccountDataRefusal } from "./account-data-refusal";
+import { desktopAccountDataInput } from "../account-data-contract";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { solveEmailLoginChallenge } from "./login-challenge";
@@ -2365,6 +2368,39 @@ function connectors() {
   return connectorApi.api;
 }
 
+let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
+
+async function pickLocalFile({ extensions, maxBytes }: { extensions: readonly string[]; maxBytes: number }) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || closing) return null;
+  const result = await dialog.showOpenDialog(window, { properties: ["openFile", "dontAddToRecent"],
+    filters: [{ name: "Files", extensions: [...extensions] }] });
+  const path = result.filePaths[0];
+  if (result.canceled || !path || closing || !isAbsolute(path)) return null;
+  if (!statSync(path).isFile() || statSync(path).size > maxBytes) throw new AccountDataRefusal("failed", "FILE_TOO_LARGE");
+  return { name: basename(path), bytes: await readFile(path) };
+}
+
+function connectedAccountData() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (accountDataApi?.signal !== signal) {
+    accountDataApi = {
+      signal,
+      api: createAccountDataApi({
+        settings,
+        save: (file) => saveGeneratedFile(async () => ({ bytes: await file.load(), suggestedName: file.suggestedName, extension: file.extension }),
+          nativeCopy().saveGenerated, file.filterName, { suggestedName: file.suggestedName, extension: file.extension }),
+        afterAccountDeleted: signOut,
+        language: () => state.language ?? "en",
+        origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN,
+        pickFile: pickLocalFile,
+      }),
+    };
+  }
+  return accountDataApi.api;
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -2562,8 +2598,10 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   }, "review");
 }
 
+// `named` asks for the destination before `load` runs, for a download that cannot be repeated
+// (a single-use link): cancelling the dialog then spends nothing.
 async function saveGeneratedFile(load: () => Promise<{ bytes: Uint8Array; suggestedName: string; extension: string }>,
-  title: string, filterName: string) {
+  title: string, filterName: string, named?: { suggestedName: string; extension: string }) {
   const window = mainWindow;
   const accountSignal = chatSession.signal;
   const owner = browserSession?.accountId;
@@ -2573,12 +2611,15 @@ async function saveGeneratedFile(load: () => Promise<{ bytes: Uint8Array; sugges
   if (!current() || savingGenerated || state.update.stage === "installing") return false;
   savingGenerated = true;
   try {
-    const { bytes, suggestedName, extension } = await load();
+    const loaded = named ? undefined : await load();
     if (!current()) return false;
     const target = await dialog.showSaveDialog(window, {
-      title, defaultPath: suggestedName, filters: [{ name: filterName, extensions: [extension] }],
+      title, defaultPath: (named ?? loaded!).suggestedName,
+      filters: [{ name: filterName, extensions: [(named ?? loaded!).extension] }],
     });
     if (target.canceled || !target.filePath || !isAbsolute(target.filePath) || !current()) return false;
+    const { bytes } = loaded ?? await load();
+    if (!current()) return false;
     const staging = join(dirname(target.filePath), `.tomverse-save-${randomUUID()}.tmp`);
     const file = await open(staging, "wx", 0o600);
     try {
@@ -3145,6 +3186,7 @@ function registerIpc() {
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));
   main("desktop:web", (destination) => shell.openExternal(webOrigin + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
+  main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

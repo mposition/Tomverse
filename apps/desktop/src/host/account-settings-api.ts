@@ -113,8 +113,36 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
         body: { name: input.name, creditCap: input.creditCap } };
     case "revokeKey":
       return { path: "/api/user/api-keys/" + encodeURIComponent(input.id), method: "DELETE" };
+    case "keyUsage":
+      return { path: "/api/user/api-keys/" + encodeURIComponent(input.id) };
     case "usage":
       return { path: "/api/user/usage" };
+    case "exportHistory":
+      return { path: "/api/user/account/export" };
+    case "deleteMemory":
+      return { path: `/api/memories/${encodeURIComponent(input.id)}`, method: "DELETE" };
+    case "moveMemoryScope":
+      return { path: `/api/memories/${encodeURIComponent(input.id)}/scope`, method: "POST",
+        body: { expectedRevision: input.expectedRevision, targetProjectId: input.projectId } };
+    case "extractionRuns":
+      return { path: "/api/memories/extraction-runs" };
+    case "reviewProviders":
+      return { path: "/api/user/settings" };
+    case "saveReviewProviders":
+      return { path: "/api/user/settings", method: "POST", body: { reviewEasyDefaultProviders: input.providers } };
+    case "modelFinder":
+      return { path: "/api/user/model-finder" };
+    case "saveModelFinder":
+      return { path: "/api/user/model-finder", method: "POST", body: input.values.mode === "default" ? { action: "accept_default" }
+        : { action: "complete", answers: { tasks: input.values.tasks, priority: input.values.priority }, modelIds: input.values.modelIds } };
+    case "knowledge":
+      return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}/knowledge` };
+    case "deleteKnowledgeFile":
+      return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}/knowledge/${encodeURIComponent(input.fileId)}`, method: "DELETE" };
+    case "deleteAssistant":
+      return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}`, method: "DELETE" };
+    case "cancelExtraction":
+      return { path: `/api/memories/extraction-runs/${encodeURIComponent(input.id)}/cancel`, method: "POST" };
   }
 }
 
@@ -150,13 +178,13 @@ export function createAccountSettingsApi(
     return renewal;
   }
 
-  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number) {
+  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number, extra?: Record<string, string>) {
     const session = await credential();
     const cookie = origin.startsWith("https:") ? "__Secure-next-auth.session-token" : "next-auth.session-token";
     return transport(new URL(path, origin), {
       method, body: body ? JSON.stringify(body) : undefined,
       headers: {
-        Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
+        ...extra, Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       redirect: "error", cache: "no-store", signal: signal(timeout),
