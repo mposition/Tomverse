@@ -102,6 +102,8 @@ if (trustedWindow) {
     },
     chatExtras: (input: Parameters<DesktopApi["chatExtras"]>[0]) => ipcRenderer.invoke("desktop:chat-extras", input),
     exportReviewAnalysis: (input: Parameters<DesktopApi["exportReviewAnalysis"]>[0]) => ipcRenderer.invoke("desktop:review-export", input),
+    projects: (input) => ipcRenderer.invoke("desktop:projects", input),
+    research: (input) => ipcRenderer.invoke("desktop:research", input),
     checkUpdate: () => ipcRenderer.invoke("desktop:check-update"),
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>

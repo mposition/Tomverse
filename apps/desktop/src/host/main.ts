@@ -20,6 +20,8 @@ import { AccountDataRefusal } from "./account-data-refusal";
 import { desktopAccountDataInput } from "../account-data-contract";
 import { reviewExportFile, runChatExtras, startImageTurn } from "./chat-extras";
 import { imageTurnFromOffer } from "../image-turn-request";
+import { createProjectActions } from "./project-host";
+import { createResearchActions } from "./research-host";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { createBillingApi } from "./billing-api";
@@ -3261,6 +3263,10 @@ function registerIpc() {
   main("desktop:billing", billing);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
   main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
+  main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,
+    window: () => mainWindow, language: () => state.language ?? "en", saveFile: saveGeneratedFile, saveTitle: () => nativeCopy().saveGenerated }));
+  main("desktop:research", createResearchActions({ settings: connectedSettingsApi, withChat: (action) => withChatAccount(action, "chat"),
+    saveFile: saveGeneratedFile, saveTitle: () => nativeCopy().saveGenerated }));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

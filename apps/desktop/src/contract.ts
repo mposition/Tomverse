@@ -16,6 +16,8 @@ import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingWindowState, DesktopBillingInput } from "./billing-contract";
+import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
+import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
 import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
@@ -411,6 +413,8 @@ export type DesktopApi = {
   subscribeBillingWindow(listener: (state: BillingWindowState) => void): () => void;
   chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
   exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
+  projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;
+  research<Action extends DesktopResearchAction>(input: Extract<DesktopResearchInput, { action: Action }>): Promise<DesktopResearchOutcome<Action>>;
   checkUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   setCodeNotifications(enabled: boolean): Promise<void>;

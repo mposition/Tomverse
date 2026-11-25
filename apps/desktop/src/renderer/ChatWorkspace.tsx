@@ -42,6 +42,12 @@ import { GeneratedFiles } from "./GeneratedFiles";
 import { AnswerExtras } from "./AnswerExtras";
 import { ChatImageRetry } from "./ChatImageRetry";
 import { showImageOffer } from "./image-offer-store";
+import { ProjectComposerBar, ProjectWorkspace } from "./ProjectWorkspace";
+import { MessageProjectSaves } from "./ProjectSaveToProject";
+import { useChatResearch } from "./ResearchEngine";
+import type { ProjectWorkspaceRoute } from "../../../../lib/projectWorkspaceRoute";
+import type { ProjectConversationRow } from "../../../../packages/api-client/src/projectWorkspace";
+import { projectWorkspaceCopy } from "../../../../locales/projectWorkspace";
 import { HandoffDraft } from "./WorkspaceHandoff";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { readDesktopDraft, writeDesktopDraft } from "./draft-store";
@@ -80,6 +86,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const pins = useSyncExternalStore(subscribePinStore, getPinOverrides, getServerPinOverrides);
   const [projects, setProjects] = useState<AccountSettingsResult<"projects">["projects"]>();
   const [projectRefresh, setProjectRefresh] = useState(0);
+  const [projectRoute, setProjectRoute] = useState<ProjectWorkspaceRoute | null>(null);
+  const [newChatProject, setNewChatProject] = useState<{ id: string; name: string } | null>(null);
   const [searchResult, setSearchResult] = useState<{ query: string; hits: ChatHistoryHit[]; failed: boolean } | null>(null);
   const [query, setQuery] = useState("");
   const [listStatus, setListStatus] = useState<"loading" | "ready" | "failed">("loading");
@@ -162,6 +170,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     historyVersion.current++;
     setRows([]);
     setProjects(undefined);
+    setProjectRoute(null);
+    setNewChatProject(null);
     setSearchResult(null);
     setListStatus("loading");
     setQuery("");
@@ -239,6 +249,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
 
   async function open(row: ChatHistoryRow | null) {
     const request = ++openVersion.current;
+    setNewChatProject(null);
     setSelected(row);
     setConversation(null);
     setLive(null);
@@ -332,6 +343,31 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setRefresh(value => value + 1);
   }
 
+  /** Reads a conversation again and shows it; with onlyIfOpen, only when it is still the open one. */
+  async function showConversation(id: string, onlyIfOpen = false) {
+    if (onlyIfOpen && draftScope.current !== id) return;
+    try {
+      const item = await window.desktop.chatConversation({ id, product });
+      if (!onlyIfOpen || draftScope.current === id) applyConversation(item);
+    } catch {
+      setRefresh(value => value + 1);
+    }
+  }
+
+  /** A new chat whose first turn creates the conversation inside the project. */
+  async function openProjectChat(project: { id: string; name: string }) {
+    setProjectRoute(null);
+    await open(null);
+    setNewChatProject(project);
+  }
+
+  /** A chat listed in a project workspace; the history row is used when it is loaded, else one is built from the project row. */
+  function openConversationRow(row: ProjectConversationRow) {
+    setProjectRoute(null);
+    void open(rows.find(item => item.id === row.id) ?? { id: row.id, title: row.title ?? "", kind: row.kind,
+      surface: row.continuation ? "continuation" : "chat", productKey: row.productKey, isLocked: row.locked, projectId: null });
+  }
+
   async function moveToProject(projectId: string | null, target = selectedRow) {
     if (!target || target.isLocked) return;
     await withConversationWrite(async current => {
@@ -401,10 +437,11 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setLive(null);
     setNotice(null);
     try {
-      const result = await window.desktop.sendChat({ ...input, prompt: draft, requestId, conversationId: previous?.id });
+      const result = await window.desktop.sendChat({ ...input, prompt: draft, requestId, conversationId: previous?.id,
+        ...(!previous && newChatProject ? { projectId: newChatProject.id } : {}) });
       if (sendingId.current !== requestId) return false;
       if (result.savedQuestion) setDraft("");
-      if (result.conversation) applyConversation(result.conversation);
+      if (result.conversation) { applyConversation(result.conversation); setNewChatProject(null); }
       setLive(result.partial && result.conversation ? {
         requestId, conversationId: result.conversation.id, text: result.partial, modelId: result.modelId, applied: result.applied,
       } : null);
@@ -429,6 +466,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     conversation: selectedRow?.isLocked ? null : conversation, language,
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
     opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject, updateConversationActions,
+    projectRoute, setProjectRoute, newChatProject, openProjectChat, openConversationRow, showConversation,
     withConversationWrite, draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
     sending, send, live: selectedRow?.isLocked ? null : live, reload: () => setRefresh((value) => value + 1) };
 }
@@ -567,6 +605,9 @@ function ConversationProjects({ chat, active, select }: { chat: History; active?
         <button className="soft" type="button" aria-pressed={active === project.id} onClick={() => select(active === project.id ? undefined : project.id)}>
           {project.name}
         </button>
+        <button className="soft" type="button" data-testid="project-open-workspace" title={projectWorkspaceCopy[chat.language].sidebar.open}
+          aria-label={projectWorkspaceCopy[chat.language].sidebar.open + " · " + project.name}
+          onClick={() => chat.setProjectRoute({ kind: "project", projectId: project.id, tab: "overview" })}>▤</button>
         <button className="soft" type="button" title={copy.renameProject} aria-label={copy.renameProject + " · " + project.name}
           disabled={busy} onClick={() => { setRemove(undefined); setForm(project); }}>✎</button>
         <button className="soft" type="button" title={copy.deleteProject} aria-label={copy.deleteProject + " · " + project.name} disabled={busy}
@@ -594,6 +635,9 @@ function ConversationProjects({ chat, active, select }: { chat: History; active?
         </button>
       </form> : <button className="soft" type="button" disabled={busy} onClick={() => { setRemove(undefined); setForm({ name: "" }); }}>
         {addLabel}
+      </button>}
+      {!form && <button className="soft" type="button" data-testid="project-new-workspace" disabled={busy} onClick={() => chat.setProjectRoute({ kind: "new" })}>
+        {projectWorkspaceCopy[chat.language].sidebar.newWorkspace}
       </button>}
       {error && <p role="alert">{error}</p>}
       {needsReload && <button className="soft" type="button" onClick={() => {
@@ -876,6 +920,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     ?? eligible.find(({ id }) => id === "gpt-6-luna") ?? eligible[0];
   const mode = availableAuto ? currentPicker?.mode ?? chat.conversation?.selectionMode ?? "auto" : "manual";
   const effortEnabled = models.some((model) => model.reasoningEfforts !== undefined);
+  const research = useChatResearch({ account: chat.account, language, ready: chatWrite && online && !chat.selected?.isLocked,
+    busy: chat.sending || chat.writing || attachments.uploading, conversationId: activeId, modelId: selectedModel?.id, draft: chat.draft,
+    projectId: activeId ? chat.selected?.projectId : chat.newChatProject?.id, plain: !attachments.files.length && !draftExcerpt,
+    onStarted: (id) => void chat.showConversation(id), onSaved: () => chat.setDraft(""), onSettled: (id) => void chat.showConversation(id, true) });
   const scroll = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const lastSeed = useRef<StarterSeedMemory | null>(null);
@@ -922,6 +970,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     return role === "user" || role === "assistant" ? [{ ...message, role } as const] : [];
   }) ?? [];
   const showComposer = !chat.selected?.isLocked && (!activeId || Boolean(chat.conversation));
+  if (chat.projectRoute && chat.account) return <ProjectWorkspace language={language} route={chat.projectRoute} conversations={chat.rows}
+    onRoute={chat.setProjectRoute} onOpenConversation={chat.openConversationRow} onNewChat={(project) => void chat.openProjectChat(project)}
+    onChanged={chat.refreshProjects} onDeleted={() => { chat.setProjectRoute(null); chat.refreshProjects(); }} />;
+  const composerProjectId = activeId ? chat.selected?.projectId : chat.newChatProject?.id;
   const actualModels = new Map(chat.conversation?.responseAttempts?.flatMap(({ assistantMessageId, actualModelId, provider }) =>
     assistantMessageId && actualModelId ? [[assistantMessageId, { id: actualModelId, provider }] as const] : []));
   return <div className="desktop-chat-workspace" data-thread={Boolean(chat.conversation || chat.sending)}>
@@ -976,6 +1028,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             return <li className={`entry entry--${message.role}`} key={message.id}>
               {message.role === "assistant" && !message.imageTurn && <AnswerModel {...(actualModels.get(message.id) ?? { id: message.modelId })} />}
               <div className="chat-message-bubble">
+                {message.role === "assistant" && research.card(message.id, Boolean(chat.projects))}
                 {message.role === "assistant" && message.content && !message.imageTurn && <CopyAnswer content={message.content} language={language} />}
                 <div data-handoff-content="chat">{message.role === "user"
                   ? <UserMessageContent content={message.content} language={language} /> : message.imageTurn
@@ -987,6 +1040,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
                 {message.role === "user" && <SavedAttachments message={message} language={language} />}
                 <GeneratedFiles artifacts={message.artifacts} language={language} />
                 <AnswerExtras message={message} conversationId={chat.conversation?.id} language={language} product="chat" />
+                {chat.projects && <MessageProjectSaves message={message} language={language} projectId={chat.selected?.projectId}
+                  onViewMaterials={(projectId) => chat.setProjectRoute({ kind: "project", projectId, tab: "materials" })} />}
                 {message.searchMetadata?.reasoningEffort && <small className="chat-effort">
                   {message.searchMetadata.reasoningEffort.applied && `${copy.reasoningEffort} · ${effortLabels[message.searchMetadata.reasoningEffort.applied]}`}
                   {message.searchMetadata.reasoningEffort.requested !== message.searchMetadata.reasoningEffort.applied &&
@@ -1028,6 +1083,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     {showComposer && <div className="composer-slot chat-composer-slot">
       {!chatWrite && <p className="chat-compose-notice" role="status">{copy.sendUnavailable}</p>}
       {modelError && <p className="notice" role="alert">{copy.modelsUnavailable}</p>}
+      {composerProjectId && <ProjectComposerBar projectId={composerProjectId} language={language}
+        onOpen={() => chat.setProjectRoute({ kind: "project", projectId: composerProjectId, tab: "overview" })} />}
       <form className="composer chat-composer" onSubmit={(event) => { event.preventDefault(); void send(); }} aria-label={copy.composer}>
         {draftExcerpt && <HandoffDraft handoff={draftExcerpt} busy={chat.sending} language={language} />}
         <AttachmentDraftStatus draft={attachments} busy={chat.sending} />
@@ -1053,6 +1110,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             <ChatDraftLocation location={location} language={language} draft={chat.draft} setDraft={chat.setDraft}
               tool deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
             <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" tool />
+            {research.tools}
           </ComposerTools>
           {connectors && <ChatConnectorPicker key={toolsScope} language={language} conversationId={activeId}
             disabled={chat.sending || chat.writing} onManage={onManageConnectors ?? (() => {})} />}
@@ -1080,6 +1138,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
         </div>
       </form>
     </div>}
+    {research.dialogs}
     {showComposer && researchModel && researchSetup === toolsScope && <DesktopResearchSetup language={language}
       model={researchModel.name} credits={getWeightedUsageCredits(researchModel, estimateDeepResearchInputTokens(chat.draft))}
       locked={!canUseModelWithPlan(plan, researchModel)}

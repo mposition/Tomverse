@@ -45,6 +45,8 @@ export const chatTurnInput = z.object({
   deepResearchDepth: deepResearchDepth.optional(),
   /** The plugin connection the user chose for this conversation; the server re-checks that it is theirs. */
   mcpConnectionId: chatId.optional(),
+  /** Binds a new conversation to a project; the server reads the project from the saved conversation. */
+  projectId: chatId.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length || input.handoffId));
 export const reviewCapability = z.object({
   easy: z.boolean(), modelLimit: z.number().int().positive(), plan: z.enum(["Free", "Pro", "Max"]),

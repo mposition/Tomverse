@@ -1,0 +1,11 @@
+/* Research engine and Preview inside Desktop Chat. Reuses the workspace tokens in project-workspace.css. */
+.research-run-card { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); margin-block: 8px; }
+.research-run-card h4 { font-size: 13px; margin: 6px 0 2px; }
+.research-run-card code { font-family: var(--font-code); font-size: 12px; padding-inline: 4px; border-radius: 4px; background: var(--raised); }
+.research-sheet { width: min(620px, 94vw); }
+.research-form { max-height: 62vh; overflow-y: auto; padding-inline-end: 4px; }
+.research-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.research-question { margin: 0; padding: 8px 10px; border-inline-start: 3px solid var(--line); background: var(--raised); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.research-sheet fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+@media (max-width: 700px) { .research-grid { grid-template-columns: 1fr; } }
+.research-run-card .pw-link { margin-inline-start: 6px; }
