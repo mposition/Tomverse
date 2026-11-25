@@ -113,6 +113,8 @@ test("usage errors exit with 2", () => {
     assert.equal(runNode([RUN, "--route", "bogus"]).status, 2);
     assert.equal(runNode([RUN, "--route", "fake", "--task", "bogus"]).status, 2);
     assert.equal(runNode([RUN, "--route", "fake", "--concurrency", "0"]).status, 2);
+    assert.equal(runNode([RUN, "--route", "fake", "--limits", "huge"]).status, 2);
+    assert.equal(runNode([RUN, "--route", "fake", "--engine", "web"]).status, 2);
     assert.equal(runNode([RUN, "--wat"]).status, 2);
     assert.equal(runNode([RUN, "--help"]).status, 0);
 });

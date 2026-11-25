@@ -25,6 +25,10 @@ export { planPatchCall } from "./tools.js";
 export { currentDigest } from "./patch.js";
 export type { PlannedEdit } from "./patch.js";
 export { estimateTokens } from "./agent.js";
+export { SUBAGENT_LIMITS } from "./subagent.js";
+export { RewindError, forkSession, historyBlockReason, listTurns, planRewind, rewindSession } from "./rewind.js";
+export type { RewindCommand, RewindFile, RewindMode, RewindOutcome, RewindPlan, RewindTurn } from "./rewind.js";
+export type { SubagentRecord, CheckpointRecord, RewindRecord } from "./session.js";
 export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
 
 /**
@@ -193,6 +197,11 @@ export const reconcile = (journal: Journal) => {
         record.endReason ??= "task_ended";
         record.endedAt ??= new Date().toISOString();
         notes.push(`Background command ${record.handle} (${record.display.slice(0, 80)}) was running when the CLI stopped; it is no longer tracked.`);
+    }
+    for (const record of (journal.state.subagents ?? []).filter((r) => r.state === "running")) {
+        record.state = "unknown";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Subagent ${record.id} (${record.kind}: ${record.task.slice(0, 80)}) was running when the CLI stopped; what it did is not known.`);
     }
     for (const tool of journal.state.tools.filter((t) => t.state === "started")) {
         notes.push(`${tool.toolName} (${tool.toolCallId}) had started and its outcome is unknown; it was not run again.`);

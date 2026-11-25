@@ -1,6 +1,6 @@
 import { codeReferenceKind, codeReferencePath, MAX_CODE_REFERENCES, type Change, type CodeQuotaEvidence, type CommandInspection, type Entry, type RunStatus,
   type CodeTaskPlan, type Task, type Transmission, type Verification } from "../contract";
-import { VIEW_IMAGE_MARK, estimateTokens, hasUnconfirmedToolOutcome, safeText, type SessionState } from "../../../tomverse-cli/src/runtime.js";
+import { VIEW_IMAGE_MARK, estimateTokens, hasUnconfirmedToolOutcome, historyBlockReason, safeText, type SessionState } from "../../../tomverse-cli/src/runtime.js";
 import { isEffort } from "../../../tomverse-cli/src/effort.js";
 import { confirmedApiQuota } from "../../../tomverse-cli/src/quota-refusal.js";
 import { reportedGenerationModel } from "../../../tomverse-cli/src/transmission.js";
@@ -56,7 +56,30 @@ export function journalEntries(state: SessionState, key?: string): Entry[] {
     const introduction = entries.findIndex((entry) => entry.role === "assistant");
     entries.splice(introduction < 0 ? entries.length : introduction + 1, 0, { role: "plan" });
   }
+  return markTurns(entries, state);
+}
+
+/**
+ * Marks the user entries that are turns of the saved task, in order, by the text the session recorded for each. An entry that is not
+ * one (a continuation goal mode wrote, a note) stays unmarked, and so does anything that cannot be matched.
+ */
+export function markTurns<T extends Entry>(entries: T[], state: Pick<SessionState, "checkpoints">): T[] {
+  let at = 0;
+  (state.checkpoints ?? []).forEach((mark, turn) => {
+    for (let index = at; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.role !== "user" || !entry.text.startsWith(mark.text.slice(0, 160))) continue;
+      entry.turn = turn;
+      at = index + 1;
+      return;
+    }
+  });
   return entries;
+}
+
+/** Whether a saved task can be taken back to a turn or forked: it has turns and nothing about it is running or unknown. */
+export function canRewindJournal(state: SessionState): true | undefined {
+  return !!state.checkpoints?.length && !historyBlockReason(state) && journalStatus(state) !== "unknown" ? true : undefined;
 }
 
 export function journalPendingFollowUp(state: SessionState, key?: string): string | undefined {
@@ -65,7 +88,7 @@ export function journalPendingFollowUp(state: SessionState, key?: string): strin
 }
 
 /** Limits, goal mode and held messages of a saved task: cheap, so it is read on every publish. */
-export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued"> {
+export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued" | "subagents"> {
   const task = state.tasks.at(-1);
   const profile = state.limits.profile;
   const last = task?.goalChecks?.at(-1);
@@ -76,7 +99,20 @@ export function journalEngine(state: SessionState, key?: string): Pick<Task, "li
       ...(last ? { last: { met: last.met, summary: cleanText(last.summary, key), ...(last.next ? { next: cleanText(last.next, key) } : {}) } } : {}),
     } : undefined,
     queued: task?.queued?.length ? task.queued.map(({ id, text }) => ({ id, text: cleanText(text.slice(0, 24_000), key) })) : undefined,
+    subagents: journalSubagents(state, key),
   };
+}
+
+/** The subagents of a session for the Code screen. A run still marked running in a session that is not running is one whose result is not known. */
+export function journalSubagents(state: SessionState, key?: string): Task["subagents"] {
+  const list = state.subagents;
+  if (!list?.length) return undefined;
+  const live = state.status === "running";
+  return list.slice(-12).map((record) => ({
+    id: record.id, kind: record.kind, task: cleanText(record.task, key).slice(0, 300), requests: record.requests,
+    state: record.state === "running" && !live ? "unknown" as const : record.state,
+    ...(record.summary ? { summary: cleanText(record.summary, key).slice(0, 400) } : {}),
+  }));
 }
 
 /** A rough size of the saved conversation: it walks every message, so it is read when a request ends, not on every publish. */

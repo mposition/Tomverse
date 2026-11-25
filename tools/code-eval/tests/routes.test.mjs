@@ -6,7 +6,7 @@ import { ROOT, runNode } from "./helpers.mjs";
 import { ROUTE_NAMES, getRoute } from "../routes/index.mjs";
 import { buildCodexArgs, parseCodexEvents } from "../routes/codex.mjs";
 import { ALLOWED_TOOLS, DEFAULT_MAX_BUDGET_USD, DISALLOWED_TOOLS, buildClaudeArgs, parseClaudeResult } from "../routes/claude.mjs";
-import { buildWorkerRequest } from "../routes/tomverse.mjs";
+import { ENGINE_FEATURES, buildWorkerRequest, parseEngineFeatures } from "../routes/tomverse.mjs";
 import { decideApproval, isInside } from "../routes/tomverse-approval.mjs";
 import { envWithout, runProcess } from "../lib/proc.mjs";
 
@@ -75,8 +75,26 @@ test("claude result parsing", () => {
 test("no real route puts the prompt or a key into argv", () => {
     for (const args of [buildCodexArgs(), buildClaudeArgs()]) assert.ok(args.every((a) => a.length < 200));
     const request = buildWorkerRequest({ prompt: "p", workDir: "w", resultFile: "r", timeoutMs: 5, model: null, maxRequests: undefined });
-    assert.deepEqual(Object.keys(request).sort(), ["commandTimeoutMs", "maxRequests", "model", "prompt", "resultFile", "timeoutMs", "workDir"]);
+    assert.deepEqual(Object.keys(request).sort(), ["commandTimeoutMs", "engine", "limits", "maxRequests", "model", "prompt", "resultFile", "timeoutMs", "workDir"]);
     assert.ok(!JSON.stringify(request).includes("tvk_"));
+});
+
+test("the worker request carries the engine conditions: extended limits and every engine feature by default", () => {
+    const base = { prompt: "p", workDir: "w", resultFile: "r", timeoutMs: 5 };
+    const request = buildWorkerRequest(base);
+    assert.equal(request.limits, "extended");
+    assert.deepEqual(request.engine, ["backgroundCommands", "images", "nestedInstructions", "subagents"]);
+    assert.equal(request.maxRequests, null, "without --max-requests the profile decides the request count");
+    assert.equal(buildWorkerRequest({ ...base, maxRequests: 7, limits: "standard", engine: [] }).maxRequests, 7);
+    assert.throws(() => buildWorkerRequest({ ...base, limits: "huge" }), /--limits must be one of/);
+});
+
+test("--engine takes none or a list of the features a measurement may turn on, never web or memory", () => {
+    assert.deepEqual(parseEngineFeatures(undefined), ENGINE_FEATURES);
+    assert.deepEqual(parseEngineFeatures("none"), []);
+    assert.deepEqual(parseEngineFeatures("subagents, images"), ["images", "subagents"]);
+    for (const bad of ["web", "memory", "subagents,web_fetch", "", ","]) assert.throws(() => parseEngineFeatures(bad), /--engine takes/, bad);
+    assert.ok(!ENGINE_FEATURES.some((name) => /web|memory/i.test(name)));
 });
 
 test("approval policy: only inside the working folder", () => {

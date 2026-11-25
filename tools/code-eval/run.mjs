@@ -11,6 +11,7 @@ import { renderSummary, routesIn, summarizeRoute, percent } from "./lib/report.m
 import { CATEGORIES, loadTasks, selectTasks } from "./lib/tasks.mjs";
 import { changedFiles, installCheck, prepareWorkspace } from "./lib/workspace.mjs";
 import { ROUTE_NAMES, getRoute } from "./routes/index.mjs";
+import { ENGINE_FEATURES, LIMIT_PROFILES, engineConditions, parseEngineFeatures, parseLimitProfile } from "./routes/tomverse.mjs";
 
 export const CHECK_TIMEOUT_MS = 120_000;
 
@@ -23,7 +24,10 @@ const USAGE = `Usage: node tools/code-eval/run.mjs --route <name>[,<name>] [opti
   --concurrency <n>    jobs at the same time (default 1)
   --allow-paid         required for tomverse, codex and claude: they call real models and cost money
   --model <id>         model for the real routes (default: each tool's own default)
-  --max-requests <n>   model requests per task for the tomverse route (default 40)
+  --max-requests <n>   model requests per task for the tomverse route (default: what --limits gives; a number here wins over it)
+  --limits <profile>   tomverse route: ${LIMIT_PROFILES.join(", ")} (default extended: 200 requests; the task's own time limit always applies)
+  --engine <list>      tomverse route: engine features to turn on: "none", or a list of ${ENGINE_FEATURES.join(", ")}
+                       (default: all of them; web_fetch and the Code memory are never on in a measurement)
   --keep-workdirs      keep the temporary working folders (for debugging a failure)
   --list               print the task ids and exit`;
 
@@ -40,6 +44,8 @@ const parse = (argv) =>
             "allow-paid": { type: "boolean" },
             model: { type: "string" },
             "max-requests": { type: "string" },
+            limits: { type: "string" },
+            engine: { type: "string" },
             "keep-workdirs": { type: "boolean" },
             list: { type: "boolean" },
             help: { type: "boolean", short: "h" },
@@ -73,6 +79,7 @@ export const runJob = async ({ route, task, options, env = process.env }) => {
         if (outcome.error) record.adapterError = String(outcome.error).slice(0, 500);
         if (outcome.metrics && Object.keys(outcome.metrics).length) record.metrics = outcome.metrics;
         if (outcome.approvals) record.approvals = outcome.approvals;
+        if (outcome.engine) record.engine = outcome.engine;
         if (outcome.logTail) record.agentLogTail = outcome.logTail;
         record.changedFiles = await changedFiles(workDir);
 
@@ -154,7 +161,13 @@ export const main = async (argv = process.argv.slice(2), env = process.env) => {
         const tasks = selectTasks(all, { ids: values.task ?? [], categories: values.category ?? [] });
         if (!tasks.length) throw new Error("No task matches the filters.");
         const concurrency = positiveInt(values.concurrency, "concurrency", 1);
-        const options = { model: values.model, maxRequests: positiveInt(values["max-requests"], "max-requests", undefined), keepWorkdirs: Boolean(values["keep-workdirs"]) };
+        const options = {
+            model: values.model,
+            maxRequests: positiveInt(values["max-requests"], "max-requests", undefined),
+            limits: parseLimitProfile(values.limits),
+            engine: parseEngineFeatures(values.engine),
+            keepWorkdirs: Boolean(values["keep-workdirs"]),
+        };
         const out = resolve(values.out ?? join(tmpdir(), "tomverse-code-eval", new Date().toISOString().replace(/[:.]/g, "-")));
         mkdirSync(out, { recursive: true });
 
@@ -178,6 +191,8 @@ export const main = async (argv = process.argv.slice(2), env = process.env) => {
             tasks: tasks.map((t) => t.id),
             concurrency,
             model: values.model ?? null,
+            // The conditions of the tomverse route, so compare.mjs can show them next to the results.
+            ...(routeNames.includes("tomverse") ? { engine: engineConditions({ limits: options.limits, engine: options.engine, maxRequests: options.maxRequests }) } : {}),
         };
         writeFileSync(join(out, "results.json"), `${JSON.stringify({ ...meta, results }, null, 2)}\n`);
         writeFileSync(join(out, "summary.md"), `${renderSummary({ results, meta })}\n`);

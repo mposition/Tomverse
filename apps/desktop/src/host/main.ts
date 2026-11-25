@@ -40,9 +40,9 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, queueInput, sessionId, startInput, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
-  type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
+  type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
   type NativeFixtureProvider,
   type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
@@ -57,7 +57,7 @@ import {
   type ChatTurnInput, type ChatTurnProgress, type ChatTurnResult, type DesktopTextProduct,
   type ReviewTurnInput, type ReviewTurnProgress, type ReviewTurnResult, type SaveArtifactInput,
 } from "../chat-contract";
-import { canAnswerClarification, canResumeJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
+import { canAnswerClarification, canResumeJournal, canRewindJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
 import { codeDiagnostics } from "./code-diagnostics";
 import { cliFixtureInput, qwenFixtureInput, zCodeFixtureInput } from "./cli-fixture-input";
 import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeHistory, matchesNativeContinuation, readNativeCheckpoint, readNativeHistory,
@@ -90,6 +90,7 @@ import { CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../../lib/chatAttachmentL
 import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib/generatedArtifactCore";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import { desktopNativeCopy } from "../../../../locales/desktopNative";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 
 const origin = DESKTOP_APP_ORIGIN;
 const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA"
@@ -190,8 +191,8 @@ let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
-type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" }>;
-type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" }>;
+type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" }>;
+type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" }>;
 let pendingInspection: { id: string; type: InspectionCommand["type"]; settle: (event: InspectionEvent | null) => void } | null = null;
 let pendingMutation: { id: string; settle: (event: MutationEvent | null) => void } | null = null;
 let confirmingMutation = false;
@@ -990,7 +991,8 @@ function onWorkerMessage(event: WorkerEvent) {
     if (pendingInspection?.id === event.requestId) pendingInspection.settle(event);
     return;
   }
-  if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted") {
+  if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted" ||
+      event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked") {
     if (pendingMutation?.id === event.requestId) pendingMutation.settle(event);
     return;
   }
@@ -1470,6 +1472,7 @@ function readTaskHistory(id: string, apiOnly = false): Task | null {
     canResume: available && record.storage === record.scope.home && canResumeJournal(saved),
     canResumeAfterQuota: available && record.storage === record.scope.home && canResumeQuotaJournal(saved),
     canAnswerClarification: available && record.storage === record.scope.home && canAnswerClarification(saved),
+    canRewind: available && record.storage === record.scope.home ? canRewindJournal(saved) : undefined,
     pendingFollowUp: journalPendingFollowUp(saved, key),
     ...journalEngine(saved, key), context: journalContext(saved),
   };
@@ -1756,6 +1759,104 @@ async function undoSelectedChange(changeId: string): Promise<UndoChangeResult> {
       }
       return event.result;
     });
+  } finally {
+    confirmingMutation = false;
+  }
+}
+
+/** Whether a saved task can be taken back or forked right now, and the record it lives in. */
+function historyEditTarget(taskId: string) {
+  const task = state.task;
+  const record = selectedRecord();
+  const owner = mainWindow;
+  const runtime = worker;
+  if (!record || !owner || !runtime || task?.id !== taskId || !task.canRewind || task.savedLocally === false || task.execution?.executionMode !== "tomverse_api" ||
+      task.continuation || task.cliContinuation || record.storage === null || record.storage !== record.scope.home || record.worktree?.unavailable ||
+      state.busy || pendingMutation || recoveryCheckPending() || confirmingMutation || choosing || signingOut || closing || suspended ||
+      state.update.stage === "installing" || owner.isDestroyed()) return null;
+  return { task, record, owner, runtime, sourceProject: projectRoot, session: chatSession.signal };
+}
+
+/** Still the same task in the same project after the person was asked something. */
+function historyEditStillHolds(target: NonNullable<ReturnType<typeof historyEditTarget>>) {
+  const { task, record, owner, runtime, sourceProject, session } = target;
+  return !owner.isDestroyed() && owner === mainWindow && runtime === worker && !session.aborted && !signingOut && !closing && !state.busy && !pendingMutation &&
+    !recoveryCheckPending() && !choosing && state.update.stage !== "installing" && state.task?.id === task.id && projectRoot === sourceProject &&
+    currentHistoryScope()?.home === record.scope.home;
+}
+
+/**
+ * Takes a saved task back to the start of one of its turns, after showing what would be put back (newest first), which files would
+ * conflict, and which commands ran and cannot be undone. The person chooses files and conversation, or only one of them.
+ */
+async function rewindSelectedTurn(taskId: string, turn: number): Promise<RewindTurnResult> {
+  const target = historyEditTarget(taskId);
+  if (!target) return { result: "unavailable" };
+  const { record, owner, runtime } = target;
+  confirmingMutation = true;
+  try {
+    const planned = await runRecordedMutation(runtime, { type: "plan-rewind", requestId: randomUUID(), ...record, turn },
+      (event) => event?.type === "rewind-planned" ? event.plan : null);
+    if (!planned || planned === "unconfirmed" || planned === "unavailable" || planned.blocked) return { result: "unavailable" };
+    const copy = desktopCodeEngineCopy[state.language ?? "en"];
+    const native = nativeCopy();
+    const line = (text: string) => text.replaceAll("\n", "\\n").slice(0, 200);
+    const detail = [
+      `"${line(planned.text)}"`,
+      planned.files.length ? [copy.rewindFiles, ...planned.files.slice(0, 12).map((file) =>
+        `  ${file.outcome === "will_undo" ? copy.rewindPutBack : copy.rewindConflict} ${line(file.path)}`),
+      ...(planned.files.length > 12 ? [`  … ${planned.files.length - 12}`] : [])].join("\n") : copy.rewindNoFiles,
+      ...(planned.files.some((file) => file.outcome === "conflict") ? [copy.rewindConflictNote] : []),
+      ...(planned.commands.length ? [[copy.rewindCommands, ...planned.commands.slice(0, 6).map((command) => `  ${line(command)}`),
+        ...(planned.commands.length > 6 ? [`  … ${planned.commands.length - 6}`] : [])].join("\n")] : []),
+    ].join("\n\n");
+    const modes = planned.conversationAvailable
+      ? [["both", copy.rewindBoth], ["files", copy.rewindFilesOnly], ["conversation", copy.rewindConversationOnly]] as const
+      : [["files", copy.rewindFilesOnly]] as const;
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "warning", title: copy.rewindTitle, message: copy.rewindPrompt, detail,
+      buttons: [native.cancel, ...modes.map(([, label]) => label)], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    const mode = modes[response - 1]?.[0];
+    if (!mode) return { result: "cancelled" };
+    if (!historyEditStillHolds(target)) return { result: "unavailable" };
+    const done = await runRecordedMutation(runtime, { type: "rewind-history", requestId: randomUUID(), ...record, turn, mode },
+      (event) => event?.type === "history-rewound" ? event : null);
+    if (done === "unconfirmed") return { result: "unconfirmed" };
+    if (done === "unavailable" || !done || done.result !== "rewound") return { result: done && done !== "unavailable" ? done.result : "unavailable" };
+    if (historyEditStillHolds(target)) {
+      const updated = readTaskHistory(taskId);
+      if (updated) { state.task = updated; refreshHistory(); broadcast(); }
+    }
+    return { result: "rewound", ...(mode === "files" ? {} : { text: done.text }), undone: done.undone, conflicts: done.conflicts };
+  } finally {
+    confirmingMutation = false;
+  }
+}
+
+/** Copies a saved task's conversation through a turn into a new saved task and opens it. No file is touched. */
+async function forkSelectedTurn(taskId: string, turn: number): Promise<ForkTurnResult> {
+  const target = historyEditTarget(taskId);
+  if (!target) return { result: "unavailable" };
+  const { record, owner, runtime } = target;
+  confirmingMutation = true;
+  try {
+    const copy = desktopCodeEngineCopy[state.language ?? "en"];
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "question", title: copy.forkTitle, message: copy.forkPrompt, detail: copy.forkDetail,
+      buttons: [nativeCopy().cancel, copy.forkAccept], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response !== 1) return { result: "cancelled" };
+    if (!historyEditStillHolds(target)) return { result: "unavailable" };
+    const created = await runRecordedMutation(runtime, { type: "fork-history", requestId: randomUUID(), ...record, turn },
+      (event) => event?.type === "history-forked" ? event : null);
+    if (created === "unconfirmed") return { result: "unconfirmed" };
+    if (created === "unavailable" || !created) return { result: "unavailable" };
+    if (created.result === "forked" && created.id && historyEditStillHolds(target)) {
+      refreshHistory();
+      loadHistory(created.id);
+    }
+    return { result: created.result };
   } finally {
     confirmingMutation = false;
   }
@@ -3267,6 +3368,8 @@ function registerIpc() {
   main("desktop:check-recovery", (id) => checkSelectedRecovery(sessionId.parse(id)));
   main("desktop:compact-task", (id) => compactSelectedTask(sessionId.parse(id)));
   main("desktop:undo-change", (id) => undoSelectedChange(z.string().min(1).max(128).parse(id)));
+  main("desktop:rewind-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return rewindSelectedTurn(id, turn); });
+  main("desktop:fork-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return forkSelectedTurn(id, turn); });
   main("desktop:export-diagnostics", exportDiagnostics);
   main("desktop:copy-diagnostics", copyDiagnostics);
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));

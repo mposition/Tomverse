@@ -71,7 +71,8 @@ test("exec --json: read-only task, JSON lines only on stdout, exit 0, receipts s
         assert.equal(final.cost.requests, 2);
         assert.equal(final.cost.charged, 6, "two requests at 3 credits each, from the server's receipts");
         assert.ok(!result.stdout.includes(TEST_KEY) && !result.stderr.includes(TEST_KEY.slice(13)));
-        assert.deepEqual(gateway.completions.map((c) => c.body.tools.length), [3, 3]);
+        // The three read tools and delegate (explore subagents only: a read-only session has nothing a worker could change).
+        assert.deepEqual(gateway.completions.map((c) => c.body.tools.map((t: any) => t.function.name).sort()), [["delegate", "list_files", "read_file", "search_text"], ["delegate", "list_files", "read_file", "search_text"]]);
         assert.deepEqual(gateway.completions.map((c) => c.body.tomverse_effort), ["high", "high"]);
     } finally {
         await gateway.stop();
@@ -226,6 +227,31 @@ test("project memory: the agent keeps a note, `memory show` and `memory clear` m
         assert.equal((await run(["config", "unset", "memory"], { cwd: root, home })).code, 0);
         assert.equal((await run(["memory", "clear", "--yes"], { cwd: root, home })).code, 0);
         assert.match((await run(["memory", "show"], { cwd: root, home })).stdout, /Nothing is remembered/);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("sessions fork copies a saved session into a new one, and says which turns it holds", { skip: !existsSync(CLI) && "build first" }, async () => {
+    const gateway = await new FakeGateway({ script: () => ({ text: "sum subtracts" }) }).start();
+    try {
+        const { home, root, env } = setup(gateway);
+        const first = await run(["exec", "--json", "--read-only", "What does sum do?"], { cwd: root, home, env });
+        assert.equal(first.code, 0, first.stderr);
+        const id = jsonl(first.stdout).at(-1).session_id as string;
+        const forked = await run(["sessions", "fork", id, "--json"], { cwd: root, home, env });
+        assert.equal(forked.code, 0, forked.stderr);
+        const event = jsonl(forked.stdout).find((e) => e.type === "session_forked");
+        assert.equal(event.from, id);
+        assert.equal(event.turns, 1);
+        assert.notEqual(event.session_id, id);
+        const listed = jsonl((await run(["sessions", "list", "--json"], { cwd: root, home, env })).stdout);
+        assert.deepEqual(listed.map((s) => s.id).sort(), [id, event.session_id].sort());
+        // A turn that does not exist is refused, and the original is untouched.
+        const bad = await run(["sessions", "fork", id, "--turn", "2"], { cwd: root, home, env });
+        assert.equal(bad.code, 1);
+        assert.match(bad.stderr, /from 1 to 1/);
+        assert.equal((await run(["sessions", "fork"], { cwd: root, home, env })).code, 2);
     } finally {
         await gateway.stop();
     }

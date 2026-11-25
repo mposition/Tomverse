@@ -37,7 +37,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
-import { BackgroundPanel, CodeEngineBar, QueuePanel, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
+import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -125,9 +125,12 @@ function CodePlanAnalysis({ analysis, language }: {
   </li>;
 }
 
-function TaskConversation({ task, models, language, openSettings, engine }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode }) {
+function TaskConversation({ task, models, language, openSettings, engine, onRewound }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode; onRewound?: (text: string) => void }) {
   const copy = desktopShellCopy[language];
   const native = desktopNativeCopy[language];
+  // What happened to the last rewind or fork: kept here, because the message it was started from may be gone after a rewind.
+  const [turnNotice, setTurnNotice] = useState<{ key: string; text: string } | null>(null);
+  const turnKey = `${task.id}:${task.status}`;
   const continuation = task.continuation;
   const reverseContinuation = task.cliContinuation;
   const continuationCopy = desktopCodeContinuationCopy[language];
@@ -154,6 +157,7 @@ function TaskConversation({ task, models, language, openSettings, engine }: { ta
           ? <EventEntry text={entry.notice ? native[entry.notice] : entry.text} />
           : entry.role === "assistant" ? <div data-handoff-content="code"><AnswerMessage text={entry.text} language={language} /></div> : <div>
             <div data-handoff-content="code">{entry.text}</div>
+            {entry.turn !== undefined && onRewound && <TurnMenu task={task} turn={entry.turn} language={language} onRewound={onRewound} notify={(text) => setTurnNotice(text ? { key: turnKey, text } : null)} />}
             {index === 0 && !!task.references?.length && <ul className="saved-attachments" aria-label={copy.savedReferences}>
               {task.references.map((reference) => <li key={reference.path}><CodeReferenceLabel reference={reference} copy={copy} /></li>)}
             </ul>}
@@ -175,6 +179,7 @@ function TaskConversation({ task, models, language, openSettings, engine }: { ta
         <small className="pending-follow-up" role="status">{copy.queuedFollowUp}</small>
       </li>}
     </ol>
+    {turnNotice?.key === turnKey && <p className="turn-notice" role="status">{turnNotice.text}</p>}
     {task.status === "blocked" && task.quota && <CodeQuotaPanel quota={task.quota} language={language} openSettings={openSettings} />}
     {continued && <details className="code-continuation-details">
       <summary>{continuationCopy.details}</summary>
@@ -968,7 +973,7 @@ function Desktop() {
         }}>
           <div className="content">
             {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")}
+              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined}
               engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
@@ -982,6 +987,7 @@ function Desktop() {
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
           {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
+          {task && surface === "code" && <SubagentPanel task={task} language={language} />}
           {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">

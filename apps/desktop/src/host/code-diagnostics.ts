@@ -14,7 +14,7 @@ export function codeDiagnostics(task: Task, version: string) {
       state: commandStates.has(state) ? state : "unknown", exitCode: Number.isSafeInteger(exitCode) ? exitCode : undefined,
     })),
     requests: task.transmission.map(({ seq, purpose, state, httpStatus, receipt }) => ({
-      seq: count(seq), purpose: purpose === "agent" || purpose === "compact" || purpose === "goal" ? purpose : "unknown",
+      seq: count(seq), purpose: purpose === "agent" || purpose === "compact" || purpose === "goal" || purpose === "subagent" ? purpose : "unknown",
       state: requestStates.has(state) ? state : "unknown",
       httpStatus: httpStatus !== undefined && httpStatus >= 100 && httpStatus <= 599 ? count(httpStatus) : undefined,
       receipt: receipt.status === "held" || receipt.status === "settled" || receipt.status === "released"
