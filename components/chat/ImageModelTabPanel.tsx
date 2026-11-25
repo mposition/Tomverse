@@ -52,6 +52,9 @@ const OWNER_LABELS: Record<ImageModelOwner, string> = {
   fal: "fal",
   qwen: "Qwen",
   bfl: "Black Forest Labs",
+  ideogram: "Ideogram",
+  byteplus: "BytePlus",
+  recraft: "Recraft",
 };
 
 /** Same table, for the supplier when it differs from the owner. */
@@ -62,6 +65,9 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
   fal: "fal",
   qwen: "Alibaba Cloud",
   bfl: "Black Forest Labs",
+  ideogram: "Ideogram",
+  byteplus: "BytePlus",
+  recraft: "Recraft",
 };
 
 /**
@@ -69,7 +75,7 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
  * the rest after them in this order. Grouped by owner, not supplier: Nano
  * Banana 2 through fal sits with Google, and its row still names fal.
  */
-const OWNER_DISPLAY_ORDER: readonly ImageModelOwner[] = ["openai", "google", "xai", "qwen", "bfl", "fal"];
+const OWNER_DISPLAY_ORDER: readonly ImageModelOwner[] = ["openai", "google", "xai", "qwen", "bfl", "ideogram", "byteplus", "recraft", "fal"];
 
 /** Enabled models grouped by owner; within a group, the catalogue's own order. */
 export const groupImageModelsByOwner = <T extends Parameters<typeof imageModelBrandParts>[0]>(

@@ -49,7 +49,7 @@ const activeReviewImageModels = (imageModels: readonly ImageModelProfile[]) =>
     return model ? [{ id: model.id, provider: imageModelOwner(model) as string }] : [];
   });
 
-/** Providers with at least one active image model, in catalogue order. */
+/** Providers with an active model priced for the 1K square Review comparison, in catalogue order. */
 export const reviewImageProviders = (imageModels: readonly ImageModelProfile[]): string[] =>
   [...new Set(activeReviewImageModels(imageModels).map(model => model.provider))];
 

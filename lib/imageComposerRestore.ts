@@ -64,7 +64,7 @@ const isPreset = (value: string): value is ImagePreset =>
 const isQuality = (value: string): value is ImageQuality =>
   value === "low" || value === "medium" || value === "high";
 const isSize = (value: string): value is ImageSize =>
-  value === "1024x1024" || value === "1536x1024" || value === "1024x1536";
+  value === "1024x1024" || value === "1536x1024" || value === "1024x1536" || value === "2048x2048";
 
 /**
  * Derive the composer's starting state from one comparison group.
@@ -141,16 +141,18 @@ export const deriveImageComposerRestore = (input: {
   const modelIds =
     selectable.length > 0 ? selectable : [DEFAULT_IMAGE_MODEL_ID];
 
+  const fallbackCanRestore = selectable.length > 0 || !quality || !size ||
+    getImageModelPrice(DEFAULT_IMAGE_MODEL_ID, quality, size) !== null;
   return {
     sourceGroupId: input.groupId,
     // Registry order, so the same set always comes back in the same order.
     // Selection order is not recorded anywhere and carries no product meaning,
     // so inventing one from row order would be arbitrary and unstable.
     modelIds: [...modelIds].sort((a, b) => registryOrder(a) - registryOrder(b)),
-    preset,
-    quality,
-    size,
+    preset: fallbackCanRestore ? preset : null,
+    quality: fallbackCanRestore ? quality : null,
+    size: fallbackCanRestore ? size : null,
     excludedModelIds,
-    optionsConsistent,
+    optionsConsistent: optionsConsistent && fallbackCanRestore,
   };
 };

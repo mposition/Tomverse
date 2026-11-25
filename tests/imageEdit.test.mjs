@@ -41,8 +41,9 @@ test("every edit option stays under the per-credit ceiling with its surcharge", 
   }
 });
 
-test("OpenAI, xAI and fal have edit adapters; Google direct does not", () => {
+test("OpenAI, xAI, fal and Seedream have priced edit adapters", () => {
   assert.deepEqual([...IMAGE_EDIT_MODEL_IDS].sort(), [
+    "dola-seedream-5-5-261028",
     "fal-ai/nano-banana-2",
     "gpt-image-2",
     "grok-imagine-image-quality-20260403",
@@ -64,8 +65,16 @@ test("each edit price is the measured one", () => {
   assert.equal(fal.inputBudgetMicroUsd, 0);
   assert.equal(fal.surchargeCredits, 0);
   for (const modelId of IMAGE_EDIT_MODEL_IDS) {
-    assert.equal(imageEditPricing(modelId).verification.verifiedAt, "2026-10-29", modelId);
+    const published = modelId === "dola-seedream-5-5-261028" ? "2026-11-25" : "2026-10-29";
+    assert.equal(imageEditPricing(modelId).verification.verifiedAt, published, modelId);
   }
+  const seedream = getImageModel("dola-seedream-5-5-261028");
+  const option = { quality: "medium", size: "1024x1024", outputCostMicroUsd: 20_000, credits: 37 };
+  for (const price of seedream.prices) assert.equal(imageEditCredits(seedream, price), 45);
+  assert.equal(imageEditPricing(seedream.id).inputBudgetMicroUsd, 8_000);
+  assert.equal(maxImageEditRequestCostMicroUsd(seedream, option), 33_000);
+  assert.equal(imageEditCredits(seedream, option), 37);
+  assert.equal(imageEditCredits(seedream, { ...option, credits: 36 }), null);
   // A model without edit pricing has no edit worst case.
   const gemini = getImageModel("gemini-3.1-flash-image");
   assert.equal(maxImageEditRequestCostMicroUsd(gemini, { quality: "medium", size: "1024x1024", credits: 1, outputCostMicroUsd: 1 }), null);

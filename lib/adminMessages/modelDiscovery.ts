@@ -147,7 +147,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       imageDraft: "Catalog draft",
       noImageAdapter: (provider: string) => `No image adapter (${provider})`,
       noImageAdapterTitle:
-        "Image models can be added at runtime only for providers the code can already call (openai, google, xai, fal, qwen, bfl). This one needs an adapter first.",
+        "Image models can be added at runtime only for providers the code can already call (openai, google, xai, fal, qwen, bfl, ideogram, byteplus, recraft). This one needs an adapter first.",
       codingDraft: "Coding draft",
       noCodingProvider: (provider: string) => `No coding draft provider (${provider})`,
       noCodingProviderTitle:
@@ -333,7 +333,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       imageDraft: "카탈로그 초안",
       noImageAdapter: (provider: string) => `이미지 어댑터 없음 (${provider})`,
       noImageAdapterTitle:
-        "런타임 이미지 모델은 코드가 이미 호출할 수 있는 공급자(openai, google, xai, fal, qwen, bfl)만 추가할 수 있습니다. 이 공급자는 어댑터부터 필요합니다.",
+        "런타임 이미지 모델은 코드가 이미 호출할 수 있는 공급자(openai, google, xai, fal, qwen, bfl, ideogram, byteplus, recraft)만 추가할 수 있습니다. 이 공급자는 어댑터부터 필요합니다.",
       codingDraft: "코딩 초안",
       noCodingProvider: (provider: string) => `코딩 초안 공급자 아님 (${provider})`,
       noCodingProviderTitle:

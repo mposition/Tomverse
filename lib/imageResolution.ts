@@ -14,12 +14,8 @@ import type { ImageSize } from "@/lib/imageGenerationPricing";
 // vocabulary and those translations, and nothing else -- it is pure, has no
 // provider client in it, and does not decide what is for sale.
 //
-// What has NOT changed, deliberately:
-//   * the price table is still keyed by the legacy `ImageSize` string;
-//   * the stored `ImageGeneration.size` column still holds that string;
-//   * the sold option set is exactly the three it was.
-// Those move with a migration and a pricing version, not with a vocabulary.
-// Existing rows are history and are never rewritten (section 12.1).
+// Stored pixel pairs remain exact. Recraft Pro has a distinct 2K square key,
+// and each new reservation also records the resolution option it priced.
 
 export type ImageResolutionTier = "0.5k" | "1k" | "2k" | "4k";
 
@@ -39,10 +35,7 @@ export type ImageResolutionOption = {
 /**
  * The legacy `ImageSize` string each sold option corresponds to.
  *
- * Only 1K has entries, because 1K is all the catalogue sells. A 2K option has
- * no legacy string at all -- that is the point: when 2K ships it ships with
- * its own storage and pricing representation rather than being squeezed into
- * a pixel pair that means something else.
+ * Recraft has a distinct native 2K square key. Its price never aliases a 1K option.
  */
 const LEGACY_SIZE_BY_OPTION: Record<
   ImageResolutionTier,
@@ -54,11 +47,12 @@ const LEGACY_SIZE_BY_OPTION: Record<
     "3:2": "1536x1024",
     "2:3": "1024x1536",
   },
-  "2k": {},
+  "2k": { "1:1": "2048x2048" },
   "4k": {},
 };
 
 const OPTION_BY_LEGACY_SIZE: Record<ImageSize, ImageResolutionOption> = {
+  "2048x2048": { tier: "2k", aspectRatio: "1:1" },
   "1024x1024": { tier: "1k", aspectRatio: "1:1" },
   "1536x1024": { tier: "1k", aspectRatio: "3:2" },
   "1024x1536": { tier: "1k", aspectRatio: "2:3" },
@@ -67,8 +61,8 @@ const OPTION_BY_LEGACY_SIZE: Record<ImageSize, ImageResolutionOption> = {
 /**
  * The option a stored or requested legacy size means.
  *
- * Total over `ImageSize`, so history reads back without a fallback: every row
- * ever written carries one of these three strings, and a lookup that could
+ * Total over `ImageSize`, so history reads back without a fallback: every stored pixel pair
+ * has its own option, and a lookup that could
  * miss would turn an old record into an unknown one.
  */
 export const optionForLegacyImageSize = (
@@ -93,7 +87,7 @@ export const legacyImageSizeForOption = (
  */
 export const openAiSizeForOption = (
   option: ImageResolutionOption
-): ImageSize | null => legacyImageSizeForOption(option);
+): ImageSize | null => option.tier === "1k" ? legacyImageSizeForOption(option) : null;
 
 /** xAI's two request fields. Its tiers are named, not sized. */
 export const xaiRequestForOption = (
@@ -116,7 +110,7 @@ export const googleRequestForOption = (
   aspectRatio: option.aspectRatio,
 });
 
-/** Every option the catalogue can currently price and store. */
+/** The original three 1K options with default sale prices. */
 export const SELLABLE_IMAGE_OPTIONS: readonly ImageResolutionOption[] = [
   { tier: "1k", aspectRatio: "1:1" },
   { tier: "1k", aspectRatio: "3:2" },

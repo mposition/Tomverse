@@ -10,6 +10,8 @@
 // Policy: docs/policy/image-generation.md. Numbers here are micro-USD
 // integers, same unit as the rest of the billing code.
 
+import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, SEEDREAM_API_MODEL } from "@/lib/directRasterModels";
+
 export const IMAGE_GENERATION_MODEL_ID = "gpt-image-2";
 
 export const IMAGE_PRICING_VERSION = "2026-08-03-v1";
@@ -67,6 +69,14 @@ export type ImageEditPricing = {
 };
 
 const IMAGE_EDIT_PRICING: Readonly<Record<string, ImageEditPricing>> = {
+  // One reference is a fixed $0.008. The approved option must carry the
+  // entire edit under the ceiling before imageEditCredits admits the edit.
+  [SEEDREAM_API_MODEL]: {
+    surchargeCredits: 0,
+    inputBudgetMicroUsd: 8_000,
+    inputTokens: null,
+    verification: { verifiedAt: "2026-11-25", source: DIRECT_RASTER_MODELS.byteplus.pricing },
+  },
   // POST /v1/images/edits bills the photo as image input at US$8 per million
   // tokens (read 2026-10-29 from developers.openai.com/api/docs/pricing). The
   // budget is 10,000 tokens. Measured 2026-10-29 (owner-approved run,
@@ -179,7 +189,7 @@ export const IMAGE_EDIT_MODEL_IDS: readonly string[] = Object.keys(IMAGE_EDIT_PR
 
 
 export type ImageQuality = "low" | "medium" | "high";
-export type ImageSize = "1024x1024" | "1536x1024" | "1024x1536";
+export type ImageSize = (typeof CATALOG_IMAGE_SIZES)[number];
 export type ImagePreset = "draft" | "standard" | "final";
 
 export const IMAGE_QUALITY_BY_PRESET: Record<ImagePreset, ImageQuality> = {

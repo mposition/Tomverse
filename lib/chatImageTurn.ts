@@ -144,7 +144,9 @@ export async function startChatImageTurn(
     // An edit starts from the question's own photo, looked up from the saved
     // message so a request can never point an edit at another file.
     let editSource: { attachmentId: string } | undefined;
-    let size: ImageSize = "1024x1024";
+    const selectedImages = input.imageGroupModelIds ?? input.imageModelIds;
+    const singleModel = selectedImages.length === 1 ? getImageModel(selectedImages[0]) : null;
+    let size: ImageSize = singleModel?.sizes.length === 1 ? singleModel.sizes[0] : "1024x1024";
     if (input.edit) {
         if (isReview) {
             throw new ChatAccessError(400, "IMAGE_EDIT_NOT_SUPPORTED", "Review does not edit photos.");
