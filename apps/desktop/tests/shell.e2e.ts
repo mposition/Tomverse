@@ -670,6 +670,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(page.getByTestId("native-account-imports")).toContainText("Saved external conversation");
     await expect(page.getByRole("region", { name: "Import storage" })).toContainText("1 of 2,000 imported conversations");
     await expect(page.getByRole("region", { name: "Imported exports" })).toContainText("Completed");
+    if (chatQa) await page.screenshot({ path: join(chatQa, "native-imports.png"), animations: "disabled" });
     await page.getByRole("button", { name: "View · Saved external conversation" }).click();
     const nativeSource = page.getByTestId("native-import-conversation");
     await expect(nativeSource).toContainText("<script>Private imported text</script>");
