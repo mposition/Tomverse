@@ -79,7 +79,7 @@ test("a model that takes images gets view_image, and the image reaches the next 
     writeFileSync(join(root, "shot.png"), PNG);
     const gateway = await new FakeGateway({ models: visionModels, script: viewScript(["shot.png"]) }).start();
     try {
-        const { runner, journal } = await makeRunner(gateway, root, { model: "fake-vision", readOnly: true });
+        const { runner, journal } = await makeRunner(gateway, root, { model: "fake-vision", readOnly: true, runner: { images: true } });
         assert.equal(await runner.runTask("What is in shot.png?"), "success");
         assert.equal(gateway.completions.length, 2);
         assert.ok(gateway.completions[0]!.body.tools.some((t: any) => t.function.name === "view_image"), "offered to a vision model, even read-only");
@@ -102,7 +102,7 @@ test("a model that does not take images is not offered view_image", async () => 
     const root = makeRepo();
     const gateway = await new FakeGateway({ models: visionModels, script: () => ({ text: "ok" }) }).start();
     try {
-        const { runner } = await makeRunner(gateway, root, { model: "fake-small" });
+        const { runner } = await makeRunner(gateway, root, { model: "fake-small", runner: { images: true } });
         assert.equal(await runner.runTask("Look."), "success");
         assert.ok(!gateway.completions[0]!.body.tools.some((t: any) => t.function.name === "view_image"));
         assert.doesNotMatch(gateway.completions[0]!.body.messages[0].content, /view_image/);
@@ -117,7 +117,7 @@ test("only the newest three images stay attached; older ones become a note, and 
     for (const [i, name] of names.entries()) writeFileSync(join(root, name), [PNG, JPEG, GIF, WEBP, PNG][i]!);
     const gateway = await new FakeGateway({ models: visionModels, script: viewScript([...names, "secret.png"]) }).start();
     try {
-        const { runner } = await makeRunner(gateway, root, { model: "fake-vision" });
+        const { runner } = await makeRunner(gateway, root, { model: "fake-vision", runner: { images: true } });
         assert.equal(await runner.runTask("Look at all of them."), "success");
         const images = (body: any) => body.messages.flatMap((m: any) => Array.isArray(m.content) ? m.content.filter((p: any) => p.type === "image_url") : []);
         assert.deepEqual(gateway.completions.map((c) => images(c.body).length), [0, 1, 2, 3, 3, 3, 3]);
@@ -125,6 +125,17 @@ test("only the newest three images stay attached; older ones become a note, and 
         assert.match(text, /no longer attached/);
         assert.match(text, /can hold credentials/);
         assert.equal(images(gateway.completions.at(-1)!.body).length, 3);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a host that did not opt in never offers view_image, even to a vision model", async () => {
+    const gateway = await new FakeGateway({ models: visionModels, script: () => ({ text: "ok" }) }).start();
+    try {
+        const { runner } = await makeRunner(gateway, makeRepo(), { model: "fake-vision" });
+        assert.equal(await runner.runTask("Look."), "success");
+        assert.ok(!gateway.completions[0]!.body.tools.some((t: any) => t.function.name === "view_image"));
     } finally {
         await gateway.stop();
     }

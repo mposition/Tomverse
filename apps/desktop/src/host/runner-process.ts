@@ -863,6 +863,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
+      backgroundCommands: true,
+      images: true,
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
       nestedInstructions: !continuation && savedCap === undefined,
       memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin

@@ -138,7 +138,7 @@ test("the agent starts a background command through an approval that says so, re
     const gateway = await new FakeGateway({ script: backgroundScript(TREE) }).start();
     try {
         const seen: ApprovalView[] = [];
-        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([true], seen) });
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([true], seen), runner: { backgroundCommands: true } });
         assert.equal(await runner.runTask("Start the dev server."), "success");
         assert.equal(seen.length, 1);
         assert.equal(seen[0]!.command!.background, true, "the approval view says it runs in the background");
@@ -168,7 +168,7 @@ test("a denied background command starts nothing", async () => {
         script: (body) => toolResultsSinceUser(body).length ? { text: "ok" } : { toolCalls: [{ name: "run_command", args: { argv: [process.execPath, "-e", PRINTER], background: true } }] },
     }).start();
     try {
-        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([false]) });
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([false]), runner: { backgroundCommands: true } });
         assert.equal(await runner.runTask("Start it."), "success");
         assert.equal(journal.state.tools.length, 0);
         assert.equal(journal.state.background, undefined);
@@ -181,7 +181,7 @@ test("a denied background command starts nothing", async () => {
 test("stopping the task ends a running background command", async () => {
     const gateway = await new FakeGateway({ script: backgroundScript(PRINTER) }).start();
     try {
-        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([true]) });
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([true]), runner: { backgroundCommands: true } });
         const running = runner.runTask("Start the dev server and wait.");
         assert.ok(await until(() => runner.background.running === 1), "the command started");
         runner.cancel();
@@ -204,7 +204,7 @@ test("a resumed session tells the model its earlier background commands are not 
     }).start();
     try {
         const root = makeRepo();
-        const { runner, journal, client } = await makeRunner(gateway, root, { prompter: scriptedPrompter([true]) });
+        const { runner, journal, client } = await makeRunner(gateway, root, { prompter: scriptedPrompter([true]), runner: { backgroundCommands: true } });
         assert.equal(await runner.runTask("First task."), "success");
         assert.equal(journal.state.background!.length, 1);
         // A new run of the CLI over the same session: another Runner, another epoch.
@@ -212,7 +212,7 @@ test("a resumed session tells the model its earlier background commands are not 
         const { Workspace } = await import("../src/workspace.js");
         const catalog = (await client.models()).filter((m) => m.tools);
         const resumed = new Runner({ gateway: client, journal, workspace: new Workspace(root), output: (await import("./helpers.js")).captureOutput().output,
-            prompter: scriptedPrompter([]), catalog, commandEnv: [], instructions: null });
+            prompter: scriptedPrompter([]), catalog, commandEnv: [], instructions: null, backgroundCommands: true });
         assert.equal(await resumed.runTask("Second task."), "success");
         const system = gateway.completions.at(-1)!.body.messages.find((m: any) => m.role === "system").content as string;
         assert.match(system, /background commands of earlier runs .* were ended with their task/);
@@ -221,6 +221,25 @@ test("a resumed session tells the model its earlier background commands are not 
         journal.state.background!.push({ handle: "bg-aaaaaa", toolCallId: "x", display: "npm run dev", cwd: root, startedAt: new Date().toISOString(), state: "running", epoch: "old" });
         assert.match(reconcile(journal).join("\n"), /bg-aaaaaa .* no longer tracked/);
         assert.equal(journal.state.background!.at(-1)!.state, "exited");
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a host that did not opt in has no background tools, and a background request is refused before any approval", async () => {
+    const gateway = await new FakeGateway({
+        script: (body) => (toolResultsSinceUser(body).length ? { text: "ok" } : { toolCalls: [{ name: "run_command", args: { argv: [process.execPath, "-e", PRINTER], background: true } }] }),
+    }).start();
+    try {
+        const seen: ApprovalView[] = [];
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([true], seen) });
+        assert.equal(await runner.runTask("Start the dev server."), "success");
+        assert.deepEqual(seen, [], "nothing was put to the person");
+        assert.equal(journal.state.tools.length, 0);
+        const names = gateway.completions[0]!.body.tools.map((t: any) => t.function.name).sort();
+        assert.deepEqual(names, ["apply_patch", "list_files", "read_file", "run_command", "search_text"]);
+        assert.doesNotMatch(gateway.completions[0]!.body.messages[0].content, /background: true/);
+        assert.match(JSON.stringify(gateway.completions[1]!.body.messages.filter((m: any) => m.role === "tool")), /not available here/);
     } finally {
         await gateway.stop();
     }

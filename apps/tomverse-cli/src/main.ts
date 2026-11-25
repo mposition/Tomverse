@@ -437,6 +437,8 @@ const projectMemory = (ctx: Context, root: string) => new ProjectMemory(memoryFi
 /** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, and project memory unless it is turned off. */
 const engineExtras = (ctx: Context, root: string) => ({
     web: {},
+    backgroundCommands: true,
+    images: true,
     nestedInstructions: true,
     ...(ctx.config.memory === false ? {} : { memory: projectMemory(ctx, root) }),
 });

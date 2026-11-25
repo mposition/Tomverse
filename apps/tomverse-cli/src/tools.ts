@@ -117,7 +117,8 @@ export type CommandToolInput = z.infer<typeof commandSchema>;
 /** The plan the approval screen shows and the approval is bound to. */
 export const planPatchCall = (ctx: Pick<ToolContext, "workspace">, input: PatchInput) => planPatch(ctx.workspace, input.edits as PatchEdit[]);
 
-export const planCommandCall = (ctx: Pick<ToolContext, "workspace" | "commandTimeoutMs" | "commandEnv">, input: CommandToolInput): CommandPlan => {
+export const planCommandCall = (ctx: Pick<ToolContext, "workspace" | "commandTimeoutMs" | "commandEnv" | "background">, input: CommandToolInput): CommandPlan => {
+    if (input.background && !ctx.background) throw new CommandError("Background commands are not available here; run the command in the foreground.");
     const cwd = ctx.workspace.resolve(input.cwd ?? ".", "read");
     if (!existsSync(cwd.absolute) || !statSync(cwd.absolute).isDirectory()) throw new CommandError(`${cwd.relative} is not a folder.`);
     return planCommand(input, cwd.absolute, ctx.commandTimeoutMs, ctx.commandEnv);
