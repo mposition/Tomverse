@@ -318,7 +318,8 @@ test("Code waits for a clarification and keeps the answer in the saved conversat
     script(body, index) {
       const names = body.tools.map((tool: { function: { name: string } }) => tool.function.name);
       const transcript = JSON.stringify(body.messages);
-      if (index < 3) assert.deepEqual(names.sort(), ["list_files", "read_file", "search_text", "update_task_plan"]);
+      // Before a work item is active: the read tools, the plan, and explore subagents (read-only).
+      if (index < 3) assert.deepEqual(names.sort(), ["delegate", "list_files", "read_file", "search_text", "update_task_plan"]);
       if (index === 0) return { toolCalls: [{ name: "read_file", args: { path: "search.txt" } }] };
       assert.ok(transcript.includes(marker));
       if (index === 1) return { toolCalls: [{ name: "update_task_plan", args: {

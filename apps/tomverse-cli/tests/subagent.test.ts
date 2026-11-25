@@ -364,3 +364,23 @@ test("the time a worker waits for an answer does not count as the task's active 
         await gateway.stop();
     }
 });
+
+test("while the plan has no active item a worker is refused, and an explore subagent (read-only) still runs", async () => {
+    const root = makeRepo();
+    const gateway = await new FakeGateway({ script: delegating(["look"]) }).start();
+    try {
+        const { runner, journal } = await makeRunner(gateway, root, { taskPlan: "agent", runner: { subagents: true } });
+        journal.state.tasks.push({ prompt: "go", startedAt: new Date().toISOString(), requests: 0, activeMs: 0, allowance: 20, timeAllowanceMs: 900_000 });
+        const delegate = runner.tools.delegate as any;
+        const worker = await delegate.execute({ kind: "worker", tasks: ["change it"] }, { toolCallId: "w1", messages: [] });
+        assert.equal(worker.status, "denied");
+        assert.match(worker.error, /read-only analysis/);
+        assert.equal(gateway.completions.length, 0, "a refused worker made no request");
+        const explore = await delegate.execute({ kind: "explore", tasks: ["look"] }, { toolCallId: "e1", messages: [] });
+        assert.equal(explore.status, "ok");
+        assert.equal(gateway.completions.filter((c) => isSub(c.body)).length, 2);
+        assert.ok(gateway.completions.every((c) => c.body.model === "fake-coder"));
+    } finally {
+        await gateway.stop();
+    }
+});
