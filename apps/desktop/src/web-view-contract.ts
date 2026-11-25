@@ -38,7 +38,7 @@ export const webViewCommand = z.discriminatedUnion("type", [
   z.object({ type: z.literal("open-docs"), section: z.enum(DOC_SECTIONS) }).strict(),
   z.object({ type: z.literal("open-link"), url: z.string().trim().min(1).max(2048) }).strict(),
   z.object({ type: z.literal("layout"), bounds: bounds.nullable() }).strict(),
-  z.object({ type: z.enum(["back", "forward", "reload", "stop", "return-to-docs", "close"]) }).strict(),
+  z.object({ type: z.enum(["back", "forward", "reload", "stop", "return-to-docs", "close", "sync"]) }).strict(),
 ]);
 export type WebViewCommand = z.infer<typeof webViewCommand>;
 export type WebViewKind = "docs" | "link";

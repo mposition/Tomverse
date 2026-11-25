@@ -97,7 +97,7 @@ test("Web view commands name a documentation section or a link and nothing else"
   assert.ok(webViewCommand.safeParse({ type: "open-link", url: "https://example.com" }).success);
   assert.ok(webViewCommand.safeParse({ type: "layout", bounds: null }).success);
   assert.ok(webViewCommand.safeParse({ type: "layout", bounds: { x: 1, y: 2, width: 3, height: 4 } }).success);
-  for (const type of ["back", "forward", "reload", "stop", "return-to-docs", "close"]) assert.ok(webViewCommand.safeParse({ type }).success, type);
+  for (const type of ["back", "forward", "reload", "stop", "return-to-docs", "close", "sync"]) assert.ok(webViewCommand.safeParse({ type }).success, type);
   for (const value of [
     { type: "open-docs", section: "chat" }, { type: "open-docs", section: "help", url: "https://example.com" },
     { type: "open-docs", url: "https://tomverse.app/chat" }, { type: "open-link", url: "" }, { type: "open-link", url: "x".repeat(2049) },

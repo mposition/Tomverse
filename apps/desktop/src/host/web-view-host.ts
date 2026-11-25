@@ -100,6 +100,8 @@ export function createWebViewHost(deps: {
         return open(target.origin === deps.origin && docPathAllowed(target.pathname) ? "docs" : "link", target.href);
       }
       if (command.type === "close") { layout = null; return close(); }
+      // A renderer that mounts after the view opened (or reloaded) asks for the current state once.
+      if (command.type === "sync") return deps.publish(snapshot());
       if (command.type === "return-to-docs") {
         const target = returnTo;
         if (target) open("docs", target);

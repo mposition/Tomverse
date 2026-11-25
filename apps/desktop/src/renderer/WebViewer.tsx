@@ -15,7 +15,11 @@ const groups = [
 
 export function useWebViewState() {
   const [state, setState] = useState<WebViewState | null>(null);
-  useEffect(() => window.desktop.subscribeWebView(setState), []);
+  useEffect(() => {
+    const unsubscribe = window.desktop.subscribeWebView(setState);
+    void window.desktop.webView({ type: "sync" }).catch(() => {});
+    return unsubscribe;
+  }, []);
   return state;
 }
 
