@@ -91,7 +91,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   const pendingCaption = captions.length < STUDIO_STICKER_LIMIT ? captionDraft.trim() : "";
   const captionEntries = [...captions, ...(pendingCaption ? [{ text: pendingCaption }] : [])];
   const words = captionEntries.map(({ text }) => text);
-  const outputSize = words.length <= 1 ? singleSize : sheetSize;
+  const outputSize = style === "real" || words.length <= 1 ? singleSize : sheetSize;
   const packUseCase = style === "real" ? "real-sticker-pack" : "character-sticker-pack";
   const stickerUseCase = style === "real" ? "real-sticker" : "character-sticker";
   const sheetQuote = useStudioImageQuote(outputSize, true, words.length > 0,
@@ -381,7 +381,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
           </div>
         </div>
         <StudioGenerateButton label={words.length ? copy.generatePack.replace("{count}", String(words.length)) : copy.generate} busy={busy} disabled={!sheetQuote.quote || !words.length} onClick={createPack} />
-        <StudioQuoteHint {...sheetQuote} />
+        <StudioQuoteHint {...sheetQuote} showModel={false} />
         <StudioStatus status={status} />
       </section>
       <section className={styles.panel}>
@@ -432,7 +432,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
           <StudioGenerateButton label={copy.regenerate} busy={regenerating}
             disabled={!singleQuote.quote || !replacement.caption.trim()} onClick={() => void createSticker()} />
         </div>
-        <StudioQuoteHint {...singleQuote} />
+        <StudioQuoteHint {...singleQuote} showModel={false} />
         {replacementError && <StudioStatus status={{ error: true, text: replacementError }} />}
         <div className={styles.compare}>
           <figure><figcaption>{copy.currentImage}</figcaption>{stickers[replacement.index].source
