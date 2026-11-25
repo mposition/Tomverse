@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import type { ImageSize } from "@/lib/imageGenerationPricing";
+import type { StudioImageUseCase } from "@/lib/studioTools";
+import type { ImageQuality, ImageSize } from "@/lib/imageGenerationPricing";
 import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 
 export type StudioImageQuote = {
@@ -11,6 +12,8 @@ export type StudioImageQuote = {
   model: string;
   credits: number;
   pricingVersion: string;
+  quality: ImageQuality;
+  useCase?: StudioImageUseCase;
 };
 
 export class StudioGenerationError extends Error {
@@ -39,11 +42,16 @@ function postJson(path: string, body: object, signal: AbortSignal, method = "POS
 
 type SizedStudioImageQuote = StudioImageQuote & { size: ImageSize };
 
-export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signal: AbortSignal, fallbackSize?: ImageSize): Promise<SizedStudioImageQuote> {
+export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signal: AbortSignal, fallbackSize?: ImageSize, useCase?: StudioImageUseCase): Promise<SizedStudioImageQuote> {
   const requestQuote = async (requestedSize: ImageSize) => {
-    const quote = await fetch("/api/studio/images?" + new URLSearchParams({ size: requestedSize, edit: String(edit) }), { signal, cache: "no-store" })
-      .then(readJson<StudioImageQuote>);
-    return { ...quote, size: requestedSize };
+    const params = new URLSearchParams({ size: requestedSize, edit: String(edit) });
+    if (useCase) {
+      params.set("useCase", useCase);
+      if (fallbackSize === "1024x1024" && fallbackSize !== requestedSize) params.set("squareFallback", "true");
+    }
+    const quote = await fetch("/api/studio/images?" + params, { signal, cache: "no-store" })
+      .then(readJson<StudioImageQuote & { size?: ImageSize }>);
+    return { ...quote, size: quote.size ?? requestedSize };
   };
   try {
     return await requestQuote(size);
@@ -54,15 +62,15 @@ export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signa
   }
 }
 
-export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = true, fallbackSize?: ImageSize) {
+export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = true, fallbackSize?: ImageSize, useCase?: StudioImageUseCase) {
   const [result, setResult] = useState<{ key: string; quote?: SizedStudioImageQuote; error?: number }>();
   const [version, setVersion] = useState(0);
-  const key = [size, edit, fallbackSize, version].join("/");
+  const key = [size, edit, fallbackSize, useCase, version].join("/");
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     const signal = controller.signal;
-    void loadStudioImageQuote(size, edit, signal, fallbackSize)
+    void loadStudioImageQuote(size, edit, signal, fallbackSize, useCase)
       .then(quote => {
         if (!signal.aborted) setResult({ key, quote });
       })
@@ -70,7 +78,7 @@ export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = tr
         if (!signal.aborted) setResult({ key, error: error instanceof StudioGenerationError ? error.status : 503 });
       });
     return () => controller.abort();
-  }, [enabled, size, edit, fallbackSize, key]);
+  }, [enabled, size, edit, fallbackSize, useCase, key]);
   return {
     quote: enabled && result?.key === key ? result.quote : undefined,
     error: enabled && result?.key === key ? result.error : undefined,
@@ -123,7 +131,7 @@ export function createStudioImageRunner() {
     signal: AbortSignal;
   }): Promise<Blob> => {
     const { signal, quote } = input;
-    const key = JSON.stringify([input.inputKey, input.prompt, input.size, quote.modelId, quote.pricingVersion]);
+    const key = JSON.stringify([input.inputKey, input.prompt, input.size, quote.modelId, quote.pricingVersion, quote.quality, quote.credits, quote.useCase]);
     if (current?.inputKey !== key) current = { inputKey: key, idempotencyKey: crypto.randomUUID() };
     const run = current;
     if (!run.groupId) {
@@ -134,7 +142,8 @@ export function createStudioImageRunner() {
       try {
         submitted = await readJson<StudioSubmission>(await postJson("/api/studio/images", {
           prompt: input.prompt, size: input.size, modelId: quote.modelId, pricingVersion: quote.pricingVersion,
-          idempotencyKey: run.idempotencyKey, ...(run.uploadId ? { uploadId: run.uploadId } : {}),
+          quality: quote.quality, credits: quote.credits,
+          useCase: quote.useCase, idempotencyKey: run.idempotencyKey, ...(run.uploadId ? { uploadId: run.uploadId } : {}),
         }, signal));
       } catch (error) {
         if (signal.aborted || (error instanceof StudioGenerationError && error.status < 500)) {

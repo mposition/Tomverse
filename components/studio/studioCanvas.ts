@@ -127,12 +127,12 @@ export type StickerComposition = true | "opaque";
 
 const stickerLineHeight = 1.16;
 const stickerCaptionColors = [
-  { hue: 292, ink: "#89519f", edge: "#e9ccfa" },
-  { hue: 350, ink: "#a34a74", edge: "#f6c9df" },
-  { hue: 28, ink: "#985429", edge: "#ffdbb4" },
-  { hue: 119, ink: "#557544", edge: "#daedb9" },
-  { hue: 177, ink: "#397a74", edge: "#bdeee5" },
-  { hue: 226, ink: "#536aa3", edge: "#cddcfc" },
+  { hue: 292, ink: "#830e61", edge: "#f6d4f0" },
+  { hue: 350, ink: "#a8114a", edge: "#ffdbeb" },
+  { hue: 28, ink: "#b53d09", edge: "#ffe2ba" },
+  { hue: 119, ink: "#3d6725", edge: "#e3efc6" },
+  { hue: 177, ink: "#075b54", edge: "#c9f3e4" },
+  { hue: 226, ink: "#284698", edge: "#dce8ff" },
 ];
 
 function stickerCaptionPalette(pixels: Uint8ClampedArray, stride: number, art: StickerRect) {
@@ -149,12 +149,12 @@ function stickerCaptionPalette(pixels: Uint8ClampedArray, stride: number, art: S
         : max === green ? 2 + (blue - red) / chroma
         : 4 + (red - green) / chroma;
       const hue = (sector * 60 + 360) % 360;
-      if (hue >= 12 && hue <= 52 && red > 160 && chroma < 105) continue;
+      if (hue >= 12 && hue <= 52 && chroma < 112) continue;
       const distance = (other: number) => Math.min(Math.abs(other - hue), 360 - Math.abs(other - hue));
       const closest = stickerCaptionColors.reduce((best, color, i) => (
         distance(color.hue) < distance(stickerCaptionColors[best].hue) ? i : best
       ), 0);
-      weights[closest] += chroma;
+      weights[closest] += chroma ** 2;
     }
   }
   return stickerCaptionColors[weights.indexOf(Math.max(...weights))];
@@ -165,49 +165,59 @@ function stickerCaption(
   font: (size: number) => string,
 ) {
   const shortSide = Math.min(art.width, art.height);
-  const maxSize = shortSide * .18;
+  const maxSize = shortSide * .29;
   context.font = font(100);
   context.textAlign = "center";
   context.textBaseline = "middle";
-  const measure = (lines: string[], maxWidth: number, maxHeight: number) => {
+  const measure = (lines: string[], maxWidth: number, maxHeight: number, angle: number) => {
     const metrics = lines.map(line => context.measureText(line));
     const widest = metrics.map(line => Math.max(line.width, 2 * Math.max(line.actualBoundingBoxLeft, line.actualBoundingBoxRight)));
     const width = Math.max(1, ...widest) / 100 + .14;
     const height = Math.max(1, ...metrics.map(line => 2 * Math.max(line.actualBoundingBoxAscent, line.actualBoundingBoxDescent) / 100))
       + (lines.length - 1) * stickerLineHeight + .14;
-    const size = Math.min(maxSize, maxWidth / width, maxHeight / height);
-    return { lines, size, width: width * size, height: height * size };
+    const sin = Math.abs(Math.sin(angle));
+    const cos = Math.cos(angle);
+    const rotatedWidth = width * cos + height * sin;
+    const rotatedHeight = width * sin + height * cos;
+    const size = Math.min(maxSize, maxWidth / rotatedWidth, maxHeight / rotatedHeight);
+    return { lines, size, width: rotatedWidth * size, height: rotatedHeight * size, angle };
   };
   const lineOptions = text.length > 6 ? [[text], splitCaption(text)] : [[text]];
-  const choose = (width: number, height: number) => {
-    const [single, wrapped] = lineOptions.map(lines => measure(lines, width, height));
+  const choose = (width: number, height: number, angle = 0) => {
+    const [single, wrapped] = lineOptions.map(lines => measure(lines, width, height, angle));
     return wrapped && wrapped.size > single.size * 1.16 ? wrapped : single;
   };
   const { ink, edge } = stickerCaptionPalette(pixels, stride, art);
-  const slot = studioStickerCaptionSlot(pixels, stride, art, Math.max(2, Math.round(art.height * .19)));
-  if (slot && slot.width >= art.width * .5) {
+  const placeOnColor = (slot: StickerRect) => {
+    if (slot.width < art.width * .5) return null;
     const label = choose(slot.width * .92, slot.height);
-    if (label.size >= maxSize * .86) {
-      const left = slot.left + (slot.width - label.width) / 2;
-      const top = slot.top + (slot.height - label.height) / 2;
-      let sum = 0, squares = 0, samples = 0;
-      for (let y = Math.ceil(top); y < top + label.height; y += 2) {
-        for (let x = Math.ceil(left); x < left + label.width; x += 2) {
-          const i = (y * stride + x) * 4;
-          const luma = pixels[i] * .2126 + pixels[i + 1] * .7152 + pixels[i + 2] * .0722;
-          sum += luma;
-          squares += luma * luma;
-          samples++;
-        }
-      }
-      const brightness = sum / samples;
-      if (squares / samples - brightness ** 2 < 16 ** 2) {
-        return { ...label, left, top, ink: brightness < 128 ? edge : ink, edge: brightness < 128 ? ink : edge };
+    if (label.size < maxSize * .70) return null;
+    const left = slot.left + (slot.width - label.width) / 2;
+    const top = slot.top + (slot.height - label.height) / 2;
+    let sum = 0, squares = 0, chroma = 0, samples = 0;
+    for (let y = Math.ceil(top); y < top + label.height; y += 2) {
+      for (let x = Math.ceil(left); x < left + label.width; x += 2) {
+        const i = (y * stride + x) * 4;
+        const red = pixels[i], green = pixels[i + 1], blue = pixels[i + 2];
+        const luma = red * .2126 + green * .7152 + blue * .0722;
+        sum += luma;
+        squares += luma * luma;
+        chroma += Math.max(red, green, blue) - Math.min(red, green, blue);
+        samples++;
       }
     }
-  }
+    const brightness = sum / samples;
+    if (chroma / samples <= 65 || squares / samples - brightness ** 2 >= 23 ** 2) return null;
+    return { ...label, left, top, ink: brightness < 128 ? edge : ink, edge: brightness < 128 ? ink : edge };
+  };
+  const slot = studioStickerCaptionSlot(pixels, stride, art, Math.max(2, Math.round(shortSide * .26)),
+    candidate => placeOnColor(candidate) !== null);
+  const inside = slot && placeOnColor(slot);
+  if (inside) return inside;
 
-  const label = choose(art.width * .86, shortSide * .40);
+  // Short captions lean in alternating directions like hand-lettered marks.
+  const angle = Array.from(text).length <= 7 ? (((text.codePointAt(0) ?? 0) % 3) - 1) * .1 : 0;
+  const label = choose(art.width * .94, shortSide * .48, angle);
   const placement = studioStickerCaptionOutside(pixels, stride, art, label.width, label.height);
   return { ...label, ...placement, ink, edge };
 }
@@ -239,20 +249,20 @@ async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, cap
   context.scale(outputScale, outputScale);
   context.drawImage(original.element, left, top, width, height, left - minX, top - minY, width, height);
   if (label) {
-    const { lines, size, ink, edge } = label;
+    const { lines, size, ink, edge, angle } = label;
     context.font = font(size);
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillStyle = ink;
     context.strokeStyle = edge;
-    context.lineWidth = size * .065;
+    context.lineWidth = size * .05;
     context.lineJoin = "round";
-    const x = label.left - minX + label.width / 2;
-    const centerY = label.top - minY + label.height / 2;
+    context.translate(label.left - minX + label.width / 2, label.top - minY + label.height / 2);
+    context.rotate(angle);
     lines.forEach((line, index) => {
-      const y = centerY + (index - (lines.length - 1) / 2) * size * stickerLineHeight;
-      context.strokeText(line, x, y);
-      context.fillText(line, x, y);
+      const y = (index - (lines.length - 1) / 2) * size * stickerLineHeight;
+      context.strokeText(line, 0, y);
+      context.fillText(line, 0, y);
     });
   }
   return encode(output.element);

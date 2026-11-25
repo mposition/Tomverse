@@ -17,6 +17,8 @@ const {
   IMAGE_MODEL_REGISTRY,
   resetActiveImageModelCatalog,
   setActiveImageModelCatalog,
+  imageEditCredits,
+  maxImageEditRequestCostMicroUsd,
 } = createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
 
 test("429 is rate limited, 5xx is provider failure", () => {
@@ -464,6 +466,117 @@ const withEnv = async (name, value, run) => {
   }
 };
 
+test("Google edits use the exact priced option and keep photo bytes out of the audit", async t => {
+  const apiModelId = "gemini-3.1-flash-image";
+  const price = { quality: "medium", size: "1024x1024", credits: 120, outputCostMicroUsd: 67_200 };
+  const model = {
+    ...IMAGE_MODEL_REGISTRY.find(entry => entry.id === apiModelId),
+    disabledReason: null,
+    prices: [price],
+  };
+  const photo = Buffer.from("private photo");
+  const editImage = { bytes: photo, width: 1024, height: 768, mimeType: "image/png", sha256: "b".repeat(64) };
+  const request = { prompt: "private brief", modelId: model.id, quality: price.quality, size: price.size, editImage };
+  const network = t.mock.method(globalThis, "fetch");
+  setActiveImageModelCatalog([model]);
+  try {
+    await withEnv("IMAGE_GOOGLE_EDIT_ENABLED", "false", () =>
+      assert.rejects(generateImageWithProvider(request), /cannot edit/));
+    assert.equal(network.mock.callCount(), 0);
+    await withEnv("IMAGE_GOOGLE_EDIT_ENABLED", "true", () => withEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key", async () => {
+      const ceiling = maxImageEditRequestCostMicroUsd(model, price);
+      assert.ok(ceiling > price.outputCostMicroUsd);
+      assert.equal(imageEditCredits(model, price), 120);
+      assert.equal(imageEditCredits(model, { ...price, size: "1536x1024" }), null);
+      assert.equal(imageEditCredits(model, { ...price, credits: 1 }), null);
+      const steps = [{ type: "model_output", content: [{ type: "image", mime_type: "image/jpeg", data: "aW1hZ2U=" }] }];
+      const usage = { total_input_tokens: 1491, total_output_tokens: 1120 };
+      network.mock.mockImplementationOnce(async (url, init) => {
+        assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/interactions");
+        const body = JSON.parse(init.body);
+        assert.equal(body.store, false);
+        assert.equal(body.response_format.mime_type, "image/jpeg");
+        assert.deepEqual(body.input, [
+          { type: "text", text: request.prompt },
+          { type: "image", mime_type: "image/png", data: photo.toString("base64") },
+        ]);
+        return Response.json({ steps, usage: { ...usage, input_tokens_by_modality: [
+          { modality: "image", tokens: 1100 },
+          { modality: "text", tokens: 371 },
+          { modality: "image", tokens: 20 },
+        ] } });
+      });
+      const result = await generateImageWithProvider(request);
+      assert.equal(result.inputTokens, 371);
+      assert.equal(result.imageInputTokens, 1120);
+      assert.equal(result.requestParams.image.sha256, editImage.sha256);
+      assert.ok(!JSON.stringify(result.requestParams).includes(photo.toString("base64")));
+      assert.ok(!JSON.stringify(result.requestParams).includes(request.prompt));
+
+      network.mock.mockImplementationOnce(async () => Response.json({ steps, usage }));
+      const missingSplit = await generateImageWithProvider(request);
+      assert.equal(missingSplit.inputTokens, 1000);
+      assert.equal(missingSplit.imageInputTokens, null);
+    }));
+  } finally {
+    resetActiveImageModelCatalog();
+  }
+});
+
+test("OpenAI 2.6 edits are opt-in with the measured quality, budget, and private multipart reference", async t => {
+  const ids = ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"];
+  const price = { quality: "medium", size: "1024x1024", credits: 65, outputCostMicroUsd: 43_470 };
+  const models = ids.map(id => candidate("openai", id, {
+    id,
+    prices: [price],
+    priceVerification: { verifiedAt: "2026-11-25", sources: [], thinkingCapMicroUsd: 0 },
+  }));
+  const editImage = { bytes: Buffer.from("private photo"), width: 1024, height: 1024, mimeType: "image/png", sha256: "c".repeat(64) };
+  const request = { prompt: "private brief", quality: price.quality, size: price.size, editImage };
+  const network = t.mock.method(globalThis, "fetch");
+  setActiveImageModelCatalog(models);
+  try {
+    await withEnv("IMAGE_OPENAI_2_6_EDIT_ENABLED", "false", async () => {
+      for (const modelId of ids) await assert.rejects(generateImageWithProvider({ ...request, modelId }), /cannot edit/);
+    });
+    assert.equal(network.mock.callCount(), 0);
+    await withEnv("IMAGE_OPENAI_2_6_EDIT_ENABLED", "true", () => withEnv("OPENAI_IMAGE_API_KEY", "test-key", async () => {
+      for (const model of models) {
+        assert.equal(maxImageEditRequestCostMicroUsd(model, price), 57_686);
+        assert.equal(imageEditCredits(model, price), 65);
+        assert.equal(imageEditCredits(model, { ...price, credits: 64 }), null);
+        assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: 43_469 }), null);
+        assert.equal(imageEditCredits(model, { ...price, quality: "high" }), null);
+        assert.equal(imageEditCredits(model, { ...price, size: "1536x1024" }), null);
+        network.mock.mockImplementationOnce(async (url, init) => {
+          assert.equal(url, "https://api.openai.com/v1/images/edits");
+          assert.equal(init.body.get("model"), model.id);
+          assert.equal(init.body.get("n"), "1");
+          assert.deepEqual(Buffer.from(await init.body.get("image").arrayBuffer()), editImage.bytes);
+          return Response.json({
+            data: [{ b64_json: "aW1hZ2U=" }],
+            usage: { input_tokens: 1583, input_tokens_details: { text_tokens: 559, image_tokens: 1024 }, output_tokens: 1449 },
+          });
+        });
+        const result = await generateImageWithProvider({ ...request, modelId: model.id });
+        assert.equal(result.imageInputTokens, 1024);
+        assert.equal(result.inputTokens, 559);
+        assert.equal(result.outputTokens, 1449);
+        assert.equal(result.requestParams.image.sha256, editImage.sha256);
+        assert.ok(!JSON.stringify(result.requestParams).includes(editImage.bytes.toString("base64")));
+      }
+      const failedEdit = { ...request, modelId: ids[0] };
+      network.mock.mockImplementationOnce(async () => Response.json({}, { status: 503 }));
+      await assert.rejects(generateImageWithProvider(failedEdit), error => error.status === 503);
+      network.mock.mockImplementationOnce(async () => { throw new Error("lost response"); });
+      await assert.rejects(generateImageWithProvider(failedEdit), /Image provider request failed/);
+    }));
+    assert.equal(network.mock.callCount(), 4);
+  } finally {
+    resetActiveImageModelCatalog();
+  }
+});
+
 test("a measurement sample is one request: a 5xx is not retried into a second paid generation", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -692,4 +805,87 @@ test("direct Ideogram rejects unsafe, malformed, or untrusted output and never r
     }
   });
   assert.equal(network.mock.callCount(), replies.length);
+});
+
+test("Ideogram Medium photo edit uses one multipart reference and the existing 90-credit option", async t => {
+  const sharp = (await import("sharp")).default;
+  const bytes = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: "red" } }).png().toBuffer();
+  const photo = Buffer.from("private source photo");
+  const editImage = { bytes: photo, mimeType: "image/png", width: 640, height: 480, sha256: "d".repeat(64) };
+  const network = t.mock.method(globalThis, "fetch", async (url, init) => {
+    if (url === ideogramAsset) {
+      assert.equal(init.headers, undefined);
+      const asset = new Response(bytes, { headers: { "content-type": "image/png" } });
+      Object.defineProperty(asset, "url", { value: url });
+      return asset;
+    }
+    assert.equal(url, "https://api.ideogram.ai/v2/image/generate/ideogram-4-6");
+    assert.equal(init.headers["Api-Key"], "ideogram-test-key");
+    assert.ok(!Object.hasOwn(init.headers, "Content-Type"));
+    assert.deepEqual([...init.body.keys()], ["prompt", "size", "quality", "background", "num_images", "magic_prompt", "async", "images"]);
+    assert.equal(init.body.get("quality"), "medium");
+    assert.equal(init.body.get("size"), "1024x1024");
+    assert.equal(init.body.get("num_images"), "1");
+    assert.deepEqual(Buffer.from(await init.body.get("images").arrayBuffer()), photo);
+    return Response.json({ generation_id: "sample-1", data: [ideogramItem] });
+  });
+  await withPricedIdeogram(() => withEnv("IMAGE_IDEOGRAM_EDIT_ENABLED", "true", async () => {
+    const model = IMAGE_MODEL_REGISTRY.find(row => row.id === ideogramRequest.modelId);
+    const medium = model.prices.find(price => price.quality === "medium");
+    assert.equal(imageEditCredits(model, medium), 90);
+    assert.equal(maxImageEditRequestCostMicroUsd(model, medium), 65_000);
+    assert.equal(imageEditCredits(model, { ...medium, outputCostMicroUsd: 59_999 }), null);
+    await assert.rejects(generateImageWithProvider({ ...ideogramRequest, quality: "high", editImage }), /cannot edit/);
+    const result = await generateImageWithProvider({ ...ideogramRequest, editImage });
+    assert.deepEqual(result.imageBytes, bytes);
+    assert.equal(result.requestParams.image.sha256, editImage.sha256);
+    const audit = JSON.stringify(result.requestParams);
+    for (const privateValue of [photo.toString("base64"), photo.toString(), ideogramRequest.prompt, "ideogram-test-key"]) {
+      assert.ok(!audit.includes(privateValue));
+    }
+  }));
+  assert.equal(network.mock.callCount(), 2);
+});
+
+test("Recraft V4 Pro edits a square reference with zero data retention and delivers native 2K", async t => {
+  const sharp = (await import("sharp")).default;
+  const png = (width, height) => sharp({ create: { width, height, channels: 3, background: "blue" } }).png().toBuffer();
+  const source = await png(640, 480);
+  const output = await png(2048, 2048);
+  const editImage = { bytes: source, mimeType: "image/png", width: 640, height: 480, sha256: "e".repeat(64) };
+  const model = IMAGE_MODEL_REGISTRY.find(row => row.id === "recraftv4_pro");
+  const price = model.prices[0];
+  const request = { modelId: model.id, quality: price.quality, size: price.size, prompt: "private edit brief", editImage };
+  setActiveImageModelCatalog([model]);
+  const network = t.mock.method(globalThis, "fetch", async (url, init) => {
+    assert.equal(url, "https://external.api.recraft.ai/v1/images/imageToImage");
+    assert.equal(init.redirect, "error");
+    const { image_url, ...params } = JSON.parse(init.body);
+    assert.deepEqual(params, {
+      model: model.apiModelId, response_format: "b64_json", strength: 0.65, zdr: true, image_format: "png", n: 1, prompt: request.prompt,
+    });
+    assert.ok(image_url.startsWith("data:image/png;base64,"));
+    const photo = await sharp(Buffer.from(image_url.split(",")[1], "base64")).metadata();
+    assert.equal(photo.width, 1024);
+    assert.equal(photo.height, 1024);
+    return Response.json({ credits: 250, data: [{ image_id: "recraft-edit-1", b64_json: output.toString("base64") }] });
+  });
+  try {
+    await withEnv("IMAGE_RECRAFT_EDIT_ENABLED", "false", () => assert.rejects(generateImageWithProvider(request), /cannot edit/));
+    await withEnv("IMAGE_RECRAFT_EDIT_ENABLED", "true", () => withEnv("RECRAFT_API_TOKEN", "test-key", async () => {
+      assert.equal(imageEditCredits(model, price), 350);
+      assert.equal(imageEditCredits(model, { ...price, size: "1024x1024" }), null);
+      assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: 249_999 }), null);
+      const result = await generateImageWithProvider(request);
+      assert.deepEqual(result.imageBytes, output);
+      assert.equal(result.reportedCostMicroUsd, 250_000);
+      assert.equal(result.requestParams.image.width, 1024);
+      assert.equal(result.requestParams.endpoint, "imageToImage");
+      assert.ok(!JSON.stringify(result.requestParams).includes("base64"));
+      assert.ok(!JSON.stringify(result.requestParams).includes(request.prompt));
+    }));
+  } finally {
+    resetActiveImageModelCatalog();
+  }
+  assert.equal(network.mock.callCount(), 1);
 });

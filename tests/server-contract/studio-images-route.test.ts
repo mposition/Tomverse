@@ -87,6 +87,13 @@ const body = {
   modelId: "gpt-image-2", pricingVersion: "outdated-quote",
 };
 
+function quotedSubmission(quote: { modelId: string; pricingVersion: string; quality: string; credits: number; size: string; useCase?: string }) {
+  return {
+    ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion, quality: quote.quality,
+    credits: quote.credits, size: quote.size, useCase: quote.useCase,
+  };
+}
+
 beforeEach(() => {
   delete process.env.STUDIO_IMAGE_GENERATION_ENABLED;
   process.env.STUDIO_ENABLED = "true";
@@ -139,7 +146,7 @@ test("a fresh quoted edit binds the authenticated upload through the transaction
   assert.equal(quoted.status, 200);
   const quote = await quoted.json();
   assert.ok(quote.credits > 0);
-  const accepted = await post({ ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion });
+  const accepted = await post(quotedSubmission(quote));
   assert.equal(accepted.status, 202);
   assert.deepEqual(await accepted.json(), { groupId: "studio-group" });
   assert.equal(reservations.length, 1);
@@ -154,4 +161,92 @@ test("a fresh quoted edit binds the authenticated upload through the transaction
   assert.deepEqual(dispatched, [["studio-image"]]);
   assert.equal((await post({ ...body, attachmentId: "must-not-be-trusted" })).status, 400);
   assert.equal(reservations.length, 1);
+});
+
+test("an open tab can still submit its versioned Medium quote", async () => {
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const quote = await (await GET(quoteRequest())).json();
+  const result = await post({ ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion });
+  assert.equal(result.status, 202);
+  assert.equal(reservations[0].quality, "medium");
+  assert.equal((await post({ ...quotedSubmission(quote), quality: undefined })).status, 409);
+});
+
+test("Studio automatically routes a feature to a quoted catalogue model and rejects an outdated route", async (context) => {
+  const routingEnv = "STUDIO_IMAGE_ROUTE_PREFERENCES";
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
+  context.after(() => {
+    delete process.env[routingEnv];
+    registry.resetActiveImageModelCatalog();
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const originalModels = registry.listEnabledImageModels();
+  const squareEditModels = originalModels.filter((model: typeof originalModels[number]) => {
+    const price = registry.getImageModelPrice(model.id, "medium", "1024x1024");
+    return price && registry.imageEditCredits(model, price) !== null;
+  });
+  const primary = squareEditModels.find((model: { id: string }) => model.id === registry.DEFAULT_IMAGE_MODEL_ID);
+  const alternate = squareEditModels.find((model: { id: string }) => model.id !== primary?.id);
+  assert.ok(primary && alternate);
+  process.env[routingEnv] = JSON.stringify({
+    "real-sticker-pack": ["missing-model", alternate.id],
+    "live-action-character": "invalid configuration for a different feature",
+  });
+
+  const requested = new Request(base + "?size=1024x1024&edit=true&useCase=real-sticker-pack");
+  const quote = await (await GET(requested)).json();
+  assert.equal(quote.useCase, "real-sticker-pack");
+  assert.equal(quote.modelId, alternate.id);
+  assert.equal((await (await GET(quoteRequest())).json()).modelId, primary.id);
+  assert.equal((await GET(new Request(requested.url.replace("real-sticker-pack", "invalid")))).status, 400);
+  assert.equal((await post(quotedSubmission(quote))).status, 202);
+  assert.deepEqual(reservations[0].modelIds, [alternate.id]);
+
+  registry.setActiveImageModelCatalog(originalModels.map((model: typeof originalModels[number]) =>
+    model.id === alternate.id ? { ...model, disabledReason: "price_unverified" } : model
+  ));
+  assert.equal((await (await GET(requested)).json()).modelId, primary.id);
+  assert.equal((await post(quotedSubmission(quote))).status, 409);
+  assert.equal(reservations.length, 1);
+});
+
+test("a verified pack route can choose a square-only model before a landscape fallback", async context => {
+  const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
+  context.after(() => { delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES; });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const grok = registry.getImageModel("grok-imagine-image-quality-20260403");
+  assert.ok(grok);
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "real-sticker-pack": [grok.id] });
+  const preferred = new Request(base + "?size=1536x1024&edit=true&useCase=real-sticker-pack&squareFallback=true");
+  const quote = await (await GET(preferred)).json();
+  assert.equal(quote.modelId, grok.id);
+  assert.equal(quote.size, "1024x1024");
+  const response = await post(quotedSubmission(quote));
+  assert.equal(response.status, 202);
+  assert.equal(reservations[0].size, quote.size);
+  assert.equal(reservations[0].quality, quote.quality);
+});
+
+test("Studio reserves exactly the quoted model, quality, size and credit amount", async context => {
+  context.after(() => {
+    delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES;
+    delete process.env.IMAGE_RECRAFT_EDIT_ENABLED;
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "live-action-character": ["recraftv4_pro"] });
+  const requested = new Request(base + "?size=1024x1024&edit=true&useCase=live-action-character");
+  assert.notEqual((await (await GET(requested)).json()).modelId, "recraftv4_pro");
+  process.env.IMAGE_RECRAFT_EDIT_ENABLED = "true";
+  const quote = await (await GET(requested)).json();
+  assert.equal(quote.modelId, "recraftv4_pro");
+  assert.equal(quote.size, "2048x2048");
+  assert.equal(quote.credits, 350);
+  const submit = quotedSubmission(quote);
+  for (const mismatch of [{ credits: 349 }, { quality: "high" }, { size: "1024x1024" }]) {
+    assert.equal((await post({ ...submit, ...mismatch })).status, 409);
+  }
+  assert.equal(reservations.length, 0);
+  assert.equal((await post(submit)).status, 202);
+  assert.equal(reservations[0].size, "2048x2048");
+  assert.equal(reservations[0].quality, "medium");
 });

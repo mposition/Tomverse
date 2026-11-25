@@ -160,7 +160,7 @@ export function StudioToolEditor({ tool, preset }: {
     source: artworkSource, logo: logo || undefined, width: dim.width, height: dim.height,
     design, placement: social ? socialFormat : undefined, title: exactTitle, details, locale: lang,
   } : undefined, [artworkSource, logo, dim, design, social, socialFormat, exactTitle, details, lang]);
-  const imageQuote = useStudioImageQuote(size, hasReference, true, publishing ? "1024x1024" : undefined);
+  const imageQuote = useStudioImageQuote(size, hasReference, true, publishing ? "1024x1024" : undefined, id);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {

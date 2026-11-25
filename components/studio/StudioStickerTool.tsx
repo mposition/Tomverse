@@ -86,12 +86,16 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   const captionEntries = [...captions, ...(pendingCaption ? [{ text: pendingCaption }] : [])];
   const words = captionEntries.map(({ text }) => text);
   const outputSize = words.length <= 1 ? singleSize : sheetSize;
-  const sheetQuote = useStudioImageQuote(outputSize, true, true, outputSize === sheetSize ? singleSize : undefined);
+  const packUseCase = style === "real" ? "real-sticker-pack" : "character-sticker-pack";
+  const stickerUseCase = style === "real" ? "real-sticker" : "character-sticker";
+  const sheetQuote = useStudioImageQuote(outputSize, true, words.length > 0,
+    outputSize === sheetSize ? singleSize : undefined, words.length > 1 ? packUseCase : stickerUseCase);
   const [sample, setSample] = useState(true);
   const [replacement, setReplacement] = useState<Replacement | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [replacementError, setReplacementError] = useState<string | null>(null);
-  const singleQuote = useStudioImageQuote(singleSize, true, Boolean(replacement));
+  const singleQuote = useStudioImageQuote(singleSize, true, Boolean(replacement), undefined,
+    reference.style === "real" ? "real-sticker" : "character-sticker");
   const checkoutDraft = useStudioCheckoutDraft<StickerCheckoutDraft>("stickers", saved => {
     const restoreSource = (source: StudioDraftImage) => typeof source === "string" ? source : urls.make(source);
     urls.release(photo.source);

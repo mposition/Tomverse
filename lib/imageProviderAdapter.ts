@@ -1,16 +1,20 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+import sharp from "sharp";
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
   IMAGE_GENERATION_MODEL_ID,
+  IMAGE_PROMPT_MAX_TOKENS,
   imageModelSupportsEdit,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
 import {
   getImageModel,
+  imageEditCredits,
   GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
   imageDeliveryMimeType,
   imageMeasuredOutputLimitBound,
@@ -52,6 +56,7 @@ import {
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
   googleBilledImageTokens,
+  googleBilledPhotoInputTokens,
   googleNonImageBillableTokens,
   parseGoogleImageResponse,
   readGoogleImageInteraction,
@@ -421,7 +426,7 @@ const getImageApiKey = () => {
  * audit blob. The set is the guard, so adding a provider means adding its name
  * here rather than remembering that this filter exists.
  */
-const PROMPT_FIELD_NAMES = new Set(["prompt", "input"]);
+const REQUEST_CONTENT_FIELDS = new Set(["prompt", "input", "images"]);
 
 /**
  * The audit view of a request body: everything except the prompt, which is
@@ -432,7 +437,7 @@ const auditableRequestParams = (
   body: Record<string, unknown>
 ): Record<string, unknown> =>
   Object.fromEntries(
-    Object.entries(body).filter(([key]) => !PROMPT_FIELD_NAMES.has(key))
+    Object.entries(body).filter(([key]) => !REQUEST_CONTENT_FIELDS.has(key))
   );
 
 /**
@@ -502,12 +507,12 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} has no thinking cap its request can enforce.`
     );
   }
-  // OpenAI, xAI and fal have edit requests. Any other model asked to edit
-  // would draw a new picture from the prompt alone -- charged as an edit and
-  // ignoring the photo -- so it is refused, as is one whose edit price is held.
+  // An edit must have both a photo path and a verified price for this option.
+  const price = input.editImage && model.prices.find(option => option.size === input.size && option.quality === input.quality);
   if (
     input.editImage &&
-    !(["openai", "xai", "fal", "byteplus"].includes(model.provider) && imageModelSupportsEdit(model.id))
+    !(["openai", "xai", "fal", "byteplus", "qwen", "bfl", "google", "recraft", "ideogram"].includes(model.provider) &&
+      imageModelSupportsEdit(model.id) && price && imageEditCredits(model, price))
   ) {
     throw new ImageProviderError(
       "provider_failed",
@@ -624,7 +629,9 @@ const generateWithOpenAi = async (
   };
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
-  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
+  // An edit reservation funds one output. A timeout or 5xx could follow a
+  // completed billable edit, so submit once.
+  const retries = input.retry === false || editImage ? 0 : RETRY_DELAYS_MS.length;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
@@ -642,6 +649,7 @@ const generateWithOpenAi = async (
           ...(init.headers as Record<string, string> | undefined),
           Authorization: `Bearer ${apiKey}`,
         },
+        redirect: "error",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -762,7 +770,7 @@ const generateWithOpenAi = async (
  */
 const generateWithGoogle = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize; retry?: boolean }
+  input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
   const body = buildGoogleImageRequest({
     apiModelId: model.apiModelId,
@@ -771,6 +779,7 @@ const generateWithGoogle = async (
     maxOutputTokens: model.maxOutputTokens ?? null,
     thinkingLevel: model.thinkingLevel ?? null,
     deliveryMimeType: imageDeliveryMimeType(model),
+    referencePngBase64: input.editImage?.bytes.toString("base64"),
   });
   if (!body) {
     throw new ImageProviderError(
@@ -778,7 +787,7 @@ const generateWithGoogle = async (
       `Image size ${input.size} has no Google request mapping for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(input.editImage, "interactions") };
   const apiKey = getGoogleApiKey();
   let lastError: ImageProviderError | null = null;
   // A measurement sends one request per sample, a rate limit included.
@@ -798,6 +807,7 @@ const generateWithGoogle = async (
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        redirect: "error",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -877,10 +887,20 @@ const generateWithGoogle = async (
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
     const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+    const imageInputTokens = input.editImage ? googleBilledPhotoInputTokens(payload) : null;
+    let inputTokens = parsed.usage.inputTokens;
+    if (input.editImage) {
+      // Without the split, settle the photo and prompt at their separate
+      // reserved bounds. The combined count includes image tokens.
+      inputTokens = imageInputTokens === null
+        ? IMAGE_PROMPT_MAX_TOKENS
+        : Math.max(0, inputTokens - imageInputTokens);
+    }
     return {
       imageBytes,
       mimeType: parsed.mimeType,
-      inputTokens: parsed.usage.inputTokens,
+      ...(input.editImage ? { imageInputTokens } : {}),
+      inputTokens,
       thinkingTokens: parsed.usage.thinkingTokens,
       nonImageBillableTokens,
       billedImageTokens: googleBilledImageTokens(payload),
@@ -1231,9 +1251,8 @@ const generateWithXai = async (
  * Qwen on Alibaba Cloud Model Studio International: one synchronous call, then
  * the result fetched from the URL it returns (valid 24 hours).
  *
- * Reached only through a runtime catalogue row the judge admitted -- no Qwen
- * model is seeded -- and generation only: the edit check above refuses this
- * provider.
+ * Reached only through an admitted runtime catalogue row. An edit sends a single
+ * normalized photo on the same endpoint.
  *
  * Shaped like the fal path, for the same reasons:
  *   * **one attempt.** Billing is per image, and a generation that succeeded
@@ -1249,12 +1268,21 @@ const generateWithXai = async (
  */
 const generateWithQwen = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  let reference: ImageEditInput | undefined;
+  if (input.editImage) {
+    const sharp = (await import("sharp")).default;
+    const bytes = await sharp(input.editImage.bytes)
+      .resize(1024, 1024, { fit: "contain", background: "#ffffff" })
+      .flatten({ background: "#ffffff" }).png().toBuffer();
+    reference = { bytes, mimeType: "image/png", width: 1024, height: 1024, sha256: createHash("sha256").update(bytes).digest("hex") };
+  }
   const body = buildQwenImageRequest({
     apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
+    ...(reference ? { reference: `data:image/png;base64,${reference.bytes.toString("base64")}` } : {}),
   });
   if (!body) {
     throw new ImageProviderError(
@@ -1262,7 +1290,7 @@ const generateWithQwen = async (
       `Image size ${input.size} has no Qwen request mapping for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(reference, "multimodal-generation") };
   const apiKey = getQwenApiKey();
 
   let response: Response;
@@ -1274,6 +1302,7 @@ const generateWithQwen = async (
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      redirect: "error",
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
   } catch (error) {
@@ -1301,7 +1330,7 @@ const generateWithQwen = async (
     );
   }
 
-  const parsed = parseQwenImageResponse(payload);
+  const parsed = parseQwenImageResponse(payload, reference ? 1 : 0);
   if (!parsed) {
     throw new ImageProviderError(
       "provider_failed",
@@ -1447,26 +1476,44 @@ const generateWithDirectRaster = async (
   const isSeedream = provider === "byteplus";
   const apiKey = (isSeedream ? process.env.ARK_API_KEY : process.env.RECRAFT_API_TOKEN)?.trim();
   if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+  const recraftEdit = !isSeedream && Boolean(input.editImage);
+  let editImage = input.editImage;
+  if (recraftEdit && editImage) {
+    // This endpoint derives its shape from the single input; keep the photo
+    // intact inside the square that the 2K catalogue option prices.
+    const bytes = await sharp(editImage.bytes)
+      .resize(1024, 1024, { fit: "contain", background: "#fff" })
+      .png()
+      .toBuffer();
+    editImage = {
+      bytes, width: 1024, height: 1024, mimeType: "image/png",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
 
   const params = {
     model: contract.apiModelId,
-    size: input.size,
     response_format: "b64_json",
+    ...(recraftEdit ? { strength: 0.65, zdr: true } : { size: input.size }),
     // On Seedream 5.5, layer decomposition is the one-to-many image mode.
     ...(isSeedream
       ? { output_format: "png", background: "opaque", layer_decomposition: false, watermark: false }
       : { image_format: "png", n: 1 }),
   };
   // The audit stores only the prepared photo's dimensions, digest and byte count.
-  const requestParams = { ...params, ...editAuditParams(input.editImage, "generations") };
+  const requestParams = { ...params, ...editAuditParams(editImage, recraftEdit ? "imageToImage" : "generations") };
   const body = {
     ...params,
     prompt: input.prompt,
-    ...(input.editImage ? { image: `data:image/png;base64,${input.editImage.bytes.toString("base64")}` } : {}),
+    ...(editImage ? {
+      [recraftEdit ? "image_url" : "image"]: `data:image/png;base64,${editImage.bytes.toString("base64")}`,
+    } : {}),
   };
   const endpoint = isSeedream
     ? "https://ark.ap-southeast.bytepluses.com/api/v3/images/generations"
-    : "https://external.api.recraft.ai/v1/images/generations";
+    : recraftEdit
+      ? "https://external.api.recraft.ai/v1/images/imageToImage"
+      : "https://external.api.recraft.ai/v1/images/generations";
   const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
   let response: Response;
   try {
@@ -1503,11 +1550,15 @@ const generateWithDirectRaster = async (
     error.afterGeneration = true;
     throw error;
   }
+  const units = payload?.credits;
   return {
     imageBytes: bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
     providerRequestId: requestId, provenance: [...model.provenance],
     outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
     providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
+    ...(!isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
+      ? { reportedCostMicroUsd: units * 1000 }
+      : {}),
   };
 };
 
@@ -1529,14 +1580,25 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
     magic_prompt: "off",
     async: false,
   };
-  const requestParams = auditableRequestParams(body);
+  const { editImage } = input;
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(editImage, "generations") };
+  let requestBody: BodyInit = JSON.stringify(body);
+  const headers: Record<string, string> = { "Api-Key": apiKey };
+  if (editImage) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(body)) form.set(key, String(value));
+    form.set("images", new Blob([new Uint8Array(editImage.bytes)], { type: editImage.mimeType }), "reference.png");
+    requestBody = form;
+  } else {
+    headers["Content-Type"] = "application/json";
+  }
   let response: Response;
   try {
     // A lost response can follow a billable generation. Submit only once.
     response = await fetch("https://api.ideogram.ai/v2/image/generate/ideogram-4-6", {
       method: "POST",
-      headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      headers,
+      body: requestBody,
       redirect: "error",
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
@@ -1574,9 +1636,8 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
  * FLUX 3 on the Black Forest Labs API: submit a task, poll the URL it returns
  * until it is ready, then fetch the signed image (valid ten minutes).
  *
- * Reached only through a runtime catalogue row the judge admitted -- no BFL
- * model is seeded -- and generation only: the edit check above refuses this
- * provider.
+ * Reached through an admitted catalogue profile. The opt-in edit uses the
+ * same endpoint and sends a single inline reference.
  *
  *   * **one submit.** Billing is per image, and a submit whose answer was lost
  *     may still have started a billed task; a second submit would buy a second
@@ -1593,17 +1654,20 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
  */
 const generateWithBfl = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
   const apiModelId = model.apiModelId;
-  const body = buildBflImageRequest({ apiModelId, prompt: input.prompt, size: input.size });
+  const body = buildBflImageRequest({
+    apiModelId, prompt: input.prompt, size: input.size,
+    referenceBase64: input.editImage?.bytes.toString("base64"),
+  });
   if (!body || !isBflFlux3ImageModel(apiModelId)) {
     throw new ImageProviderError(
       "provider_failed",
       `Image size ${input.size} has no BFL request mapping for ${model.id}.`
     );
   }
-  const requestParams = auditableRequestParams(body);
+  const requestParams = { ...auditableRequestParams(body), ...editAuditParams(input.editImage, apiModelId) };
   const apiKey = getBflApiKey();
   // One budget for submit, polls and download together, so a slow queue
   // cannot stretch the job past the lease the executor planned for.

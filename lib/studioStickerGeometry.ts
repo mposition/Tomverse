@@ -68,7 +68,18 @@ export function studioStickerCells(
 export function studioStickerCrossesSeam(
   data: Uint8ClampedArray, width: number, height: number, cell: StickerRect,
 ): boolean {
-  const opaque = (x: number, y: number) => data[(y * width + x) * 4 + 3] >= 128;
+  const continuous = (x1: number, y1: number, x2: number, y2: number) => {
+    const first = (y1 * width + x1) * 4;
+    const second = (y2 * width + x2) * 4;
+    if (data[first + 3] < 128 || data[second + 3] < 128) return false;
+    // Two cutouts can touch along a seam while retaining an abrupt color
+    // edge. Only count where the artwork itself continues across the cut.
+    return Math.max(
+      Math.abs(data[first] - data[second]),
+      Math.abs(data[first + 1] - data[second + 1]),
+      Math.abs(data[first + 2] - data[second + 2]),
+    ) <= 40;
+  };
   const crosses = (length: number, touches: (offset: number) => boolean) => {
     let solid = 0;
     for (let offset = 0; offset < length; offset++) if (touches(offset)) solid++;
@@ -76,10 +87,10 @@ export function studioStickerCrossesSeam(
   };
   const right = cell.left + cell.width;
   const bottom = cell.top + cell.height;
-  return (cell.left > 0 && crosses(cell.height, i => opaque(cell.left - 1, cell.top + i) && opaque(cell.left, cell.top + i)))
-    || (right < width && crosses(cell.height, i => opaque(right - 1, cell.top + i) && opaque(right, cell.top + i)))
-    || (cell.top > 0 && crosses(cell.width, i => opaque(cell.left + i, cell.top - 1) && opaque(cell.left + i, cell.top)))
-    || (bottom < height && crosses(cell.width, i => opaque(cell.left + i, bottom - 1) && opaque(cell.left + i, bottom)));
+  return (cell.left > 0 && crosses(cell.height, i => continuous(cell.left - 1, cell.top + i, cell.left, cell.top + i)))
+    || (right < width && crosses(cell.height, i => continuous(right - 1, cell.top + i, right, cell.top + i)))
+    || (cell.top > 0 && crosses(cell.width, i => continuous(cell.left + i, cell.top - 1, cell.left + i, cell.top)))
+    || (bottom < height && crosses(cell.width, i => continuous(cell.left + i, bottom - 1, cell.left + i, bottom)));
 }
 
 export function studioStickerBounds(
@@ -103,6 +114,7 @@ export function studioStickerArt(data: Uint8ClampedArray, stride: number, rect: 
 
 export function studioStickerCaptionSlot(
   data: Uint8ClampedArray, stride: number, art: StickerRect, bandHeight: number,
+  usable?: (slot: StickerRect) => boolean,
 ): StickerRect | null {
   const start = art.top + Math.ceil(art.height * .58);
   const end = art.top + art.height - bandHeight;
@@ -126,8 +138,11 @@ export function studioStickerCaptionSlot(
         const score = width - Math.abs(runStart + width / 2 - center) * .45
           - Math.abs(top + bandHeight / 2 - preferredY) * .3;
         if (score > bestScore) {
-          best = { left: runStart, top, width, height: bandHeight };
-          bestScore = score;
+          const slot = { left: runStart, top, width, height: bandHeight };
+          if (usable?.(slot) !== false) {
+            best = slot;
+            bestScore = score;
+          }
         }
       }
       runStart = x + 1;

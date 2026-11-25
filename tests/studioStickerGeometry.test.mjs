@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam,
 } from "../lib/studioStickerGeometry.ts";
+import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
+import { IMAGE_PROMPT_MAX_TOKENS } from "../lib/imageGenerationPricing.ts";
 import { studioStickerPrompt } from "../lib/studioStickerPrompt.ts";
 
 function fill(data, stride, left, top, width, height) {
@@ -15,13 +17,32 @@ test("Studio gives every sticker an ordered pose cue while keeping original iden
   const cues = Array.from({ length: 20 }, (_, i) => "문구 " + (i + 1));
   const pack = studioStickerPrompt("real", cues);
   assert.match(pack, /fixed 5-column by 4-row grid/);
-  assert.match(pack, /quoted captions are acting cues only/);
-  assert.match(pack, /Preserve face shape, eye shape and spacing/);
+  assert.match(pack, /The app places captions/);
+  assert.match(pack, /large hand-painted marker caption with thick rounded strokes/);
+  assert.match(pack, /Vary the side, angle and height between cells/);
+  assert.match(pack, /Keep the reference face shape, eye shape and spacing/);
+  assert.match(pack, /Let its longest axis nearly fill the cell/);
+  assert.match(pack, /slim green margin on all four sides/);
   const rows = pack.split("\n").filter(line => /^Row \d+: /.test(line));
-  assert.deepEqual(rows.flatMap(row => row.replace(/^Row \d+: /, "").split(" | ").map(value => JSON.parse(value))), cues);
+  assert.deepEqual(rows.flatMap(row => row.replace(/^Row \d+: /, "").split(" | ").map(value => JSON.parse(value.replace(/^Act out the meaning of /, "")))), cues);
   const short = studioStickerPrompt("character", cues.slice(0, 7));
-  assert.match(short, /Row 3: "문구 7" \| \[empty\] \| \[empty\]/);
+  assert.match(short, /Row 3: Act out the meaning of "문구 7" \| \[empty\] \| \[empty\]/);
   assert.match(studioStickerPrompt("real", [cues[0]]), /Make one centered chat sticker/);
+});
+
+test("Studio storyboards known captions without asking the image model to draw their text", () => {
+  const prompt = studioStickerPrompt("real", ["굿굿!", "사랑해", "Good night", "배고파"]);
+  assert.match(prompt, /foreshortened thumbs-up.*huge red felt heart/);
+  assert.match(prompt, /huge pillow.*improbably tall burger/);
+  assert.match(prompt, /Capture the peak reaction/);
+  for (const caption of ["굿굿!", "사랑해", "Good night", "배고파"]) assert.ok(!prompt.includes(caption));
+});
+
+test("Studio keeps long custom action cues when compressing the art directions", () => {
+  const caption = "의견을모아서결정한뒤에다시연락할게요!";
+  const prompt = studioStickerPrompt("real", Array(20).fill(caption));
+  assert.equal(prompt.split(caption).length - 1, 20);
+  assert.ok(estimatePromptTokens(prompt) <= IMAGE_PROMPT_MAX_TOKENS);
 });
 
 test("Studio sticker crop follows gutters offset from the nominal center", () => {
@@ -47,6 +68,17 @@ test("Studio flags a tile when a seam would cut solid artwork", () => {
   const [first, second] = studioStickerCells(data, 100, 100, 2, 1);
   assert.equal(studioStickerCrossesSeam(data, 100, 100, first), true);
   assert.equal(studioStickerCrossesSeam(data, 100, 100, second), true);
+});
+
+test("a color break separates two silhouettes that meet at the crop edge", () => {
+  const data = new Uint8ClampedArray(100 * 100 * 4);
+  fill(data, 100, 20, 18, 60, 32);
+  fill(data, 100, 20, 50, 60, 32);
+  for (let y = 50; y < 82; y++) {
+    for (let x = 20; x < 80; x++) data[(y * 100 + x) * 4] = 150;
+  }
+  assert.equal(studioStickerCrossesSeam(data, 100, 100, { left: 0, top: 0, width: 100, height: 50 }), false);
+  assert.equal(studioStickerCrossesSeam(data, 100, 100, { left: 0, top: 50, width: 100, height: 50 }), false);
 });
 
 test("Studio keeps all stickers when adjacent rows or columns have staggered gutters", () => {
