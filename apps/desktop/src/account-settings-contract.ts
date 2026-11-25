@@ -156,6 +156,9 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
     projectId: accountId.nullable() }).strict(),
   z.object({ action: z.literal("extractionRuns") }).strict(),
   z.object({ action: z.literal("cancelExtraction"), id: accountId }).strict(),
+  z.object({ action: z.literal("knowledge"), id: accountId }).strict(),
+  z.object({ action: z.literal("deleteKnowledgeFile"), id: accountId, fileId: accountId }).strict(),
+  z.object({ action: z.literal("deleteAssistant"), id: accountId }).strict(),
 ]);
 
 const keySummary = z.object({
@@ -273,6 +276,15 @@ export const desktopAccountSettingsOutput = {
   moveMemoryScope: z.object({ moved: z.boolean(), projectId: accountId.nullable() }),
   extractionRuns: z.object({ runs: z.array(extractionRun).max(50), activeRunId: accountId.nullable() }),
   cancelExtraction: z.looseObject({}),
+  knowledge: z.object({
+    files: z.array(z.object({ id: accountId, name: z.string(), bytes: z.number().int().nonnegative(), processingStatus: z.string() })).max(100),
+    capacity: z.object({
+      limits: z.object({ maxFileBytes: z.number().int().positive(), maxFilesPerProfile: z.number().int().positive() }),
+      remaining: z.looseObject({}).optional(),
+    }),
+  }),
+  deleteKnowledgeFile: z.looseObject({}),
+  deleteAssistant: z.looseObject({}),
   exportHistory: z.object({ requests: z.array(exportHistoryEntry).max(200) }),
   usage: z.object({
     plan: label,

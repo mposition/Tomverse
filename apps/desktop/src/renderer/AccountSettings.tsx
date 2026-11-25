@@ -12,6 +12,7 @@ import type { AccountPreferences, AccountSettingsResult, DesktopAccountSettingsI
 import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
 import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
+import { AssistantExtras } from "./AssistantExtras";
 import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
 import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
 
@@ -377,8 +378,11 @@ function AssistantEditor({ id, language, close }: Common & { id: string; close()
     <div className="account-settings-actions">
       <button className="soft" type="button" onClick={close}>{copy.externalImport.back}</button>
     </div>
-    {state.data ? <AssistantEditorForm key={state.data.profile.currentVersion?.id ?? id} profile={state.data.profile}
-      language={language} reload={state.reload} /> : <ReadStatus language={language} failed={state.failed} retry={state.reload} />}
+    {state.data ? <>
+      <AssistantEditorForm key={state.data.profile.currentVersion?.id ?? id} profile={state.data.profile}
+        language={language} reload={state.reload} />
+      <AssistantExtras language={language} id={id} name={state.data.profile.name} reloadProfile={state.reload} onDeleted={close} />
+    </> : <ReadStatus language={language} failed={state.failed} retry={state.reload} />}
   </div>;
 }
 

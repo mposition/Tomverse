@@ -7,6 +7,7 @@ import { z } from "zod";
 export const DELETE_ACCOUNT_PHRASE = "DELETE MY ACCOUNT";
 export const DELETE_ALL_CHATS_PHRASE = "DELETE ALL CHATS";
 export const DELETE_ALL_MEMORIES_PHRASE = "DELETE ALL MEMORIES";
+export const DELETE_ASSISTANT_PHRASE = "DELETE ASSISTANT";
 
 const accountId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
@@ -18,17 +19,20 @@ export const desktopAccountDataInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("deleteAllConversations"), confirmation: z.literal(DELETE_ALL_CHATS_PHRASE) }).strict(),
   z.object({ action: z.literal("deleteAccount"), confirmation: z.literal(DELETE_ACCOUNT_PHRASE) }).strict(),
   z.object({ action: z.literal("saveMemories") }).strict(),
+  z.object({ action: z.literal("saveAssistant"), id: accountId, name: z.string().max(200) }).strict(),
+  z.object({ action: z.literal("uploadKnowledge"), id: accountId }).strict(),
   z.object({ action: z.literal("deleteAllMemories"), confirmation: z.literal(DELETE_ALL_MEMORIES_PHRASE) }).strict(),
 ]);
 
 export const accountDataStatus = z.enum([
-  "ready", "saved", "cancelled", "deleted", "expired",
+  "ready", "saved", "uploaded", "cancelled", "deleted", "expired",
   "reauth", "locked", "notIncluded", "unavailable", "failed",
 ]);
 
 export const desktopAccountDataResult = z.object({
   status: accountDataStatus,
   expiresAt: z.string().optional(),
+  code: z.string().max(80).optional(),
   deleted: z.number().int().nonnegative().optional(),
 }).strict();
 

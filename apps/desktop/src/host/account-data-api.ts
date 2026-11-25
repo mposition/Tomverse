@@ -3,6 +3,8 @@ import {
   desktopAccountDataResult, type AccountDataStatus, type DesktopAccountDataInput, type DesktopAccountDataResult,
 } from "../account-data-contract";
 import type { AccountSettingsApi } from "./account-settings-api";
+import { AccountDataRefusal } from "./account-data-refusal";
+import { createAssistantData, type PickFile } from "./assistant-data";
 
 // File downloads and irreversible account actions that run in the main process
 // on the shared Desktop account session. The renderer sends a typed action; the
@@ -18,9 +20,7 @@ const namingHeaders = (language: string) => ({
 });
 const ticketPath = /^\/api\/user\/account\/export\/[A-Za-z0-9_-]{16,256}$/;
 
-export class AccountDataRefusal extends Error {
-  constructor(readonly status: AccountDataStatus) { super("Account data action refused: " + status); }
-}
+export { AccountDataRefusal };
 
 export type AccountDataSave = (file: {
   suggestedName: string; extension: string; filterName: string; load: () => Promise<Uint8Array>;
@@ -72,6 +72,9 @@ export function createAccountDataApi(options: {
   /** Called after the server accepted an account deletion; signs this Desktop out. */
   afterAccountDeleted: () => Promise<void>;
   language: () => string;
+  origin?: string;
+  pickFile?: PickFile;
+  transport?: typeof fetch;
   now?: () => number;
 }) {
   const { settings, save } = options;
@@ -82,19 +85,27 @@ export function createAccountDataApi(options: {
     const res = await settings.send(request, accept, timeout, headers);
     if (res.status === 401) settings.forget();
     if (!res.ok) {
+      // The server code (for example a knowledge quota refusal) is the only part of the body kept.
+      const code = mediaType(res) === "application/json"
+        ? await res.json().then((body: { code?: unknown }) => typeof body?.code === "string" ? body.code.slice(0, 80) : undefined, () => undefined)
+        : undefined;
       await res.body?.cancel().catch(() => {});
-      throw new AccountDataRefusal(res.status === 401 ? "failed" : refusalStatus(res.status));
+      throw new AccountDataRefusal(res.status === 401 ? "failed" : refusalStatus(res.status), code);
     }
     return res;
   }
 
+  const assistants = createAssistantData({
+    call, origin: options.origin ?? "https://tomverse.app", readBounded: readBoundedBody, save, transport: options.transport,
+    pickFile: options.pickFile ?? (async () => null),
+  });
   const day = () => new Date(now()).toISOString().slice(0, 10);
 
   async function run(work: () => Promise<DesktopAccountDataResult>): Promise<DesktopAccountDataResult> {
     try {
       return desktopAccountDataResult.parse(await work());
     } catch (error) {
-      if (error instanceof AccountDataRefusal) return { status: error.status };
+      if (error instanceof AccountDataRefusal) return error.code ? { status: error.status, code: error.code } : { status: error.status };
       if (error instanceof Error && error.name === "AbortError") throw error;
       return { status: "failed" };
     }
@@ -201,6 +212,8 @@ export function createAccountDataApi(options: {
           case "deleteAllConversations": return deleteAllConversations();
           case "deleteAccount": return deleteAccount(input.confirmation);
           case "saveMemories": return saveMemories();
+          case "saveAssistant": return assistants.savePackage(input.id, input.name);
+          case "uploadKnowledge": return assistants.uploadKnowledge(input.id);
           case "deleteAllMemories": return deleteAllMemories(input.confirmation);
         }
       });

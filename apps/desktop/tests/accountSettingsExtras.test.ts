@@ -80,3 +80,77 @@ test("memory export is saved only when the stream is complete, and delete-all se
   const input: DesktopAccountSettingsInput = { action: "extractionRuns" };
   assert.equal(desktopAccountSettingsInput.safeParse(input).success, true);
 });
+
+test("assistant knowledge and deletion actions map to the profile routes", async () => {
+  const { settings, calls } = settingsWith((url) => url.pathname.endsWith("/knowledge") ? Response.json({
+    files: [{ id: "file_1", name: "notes.md", bytes: 1200, processingStatus: "ready", mime: "text/markdown", createdAt: "x" }],
+    capacity: { limits: { maxFileBytes: 33554432, maxFilesPerProfile: 20 }, remaining: { files: 19 } },
+  }) : Response.json({ ok: true }));
+  const listed = (await settings({ action: "knowledge", id: "prof_1" })) as AccountSettingsResult<"knowledge">;
+  assert.equal(listed.files[0].name, "notes.md");
+  await settings({ action: "deleteKnowledgeFile", id: "prof_1", fileId: "file_1" });
+  await settings({ action: "deleteAssistant", id: "prof_1" });
+  assert.deepEqual(calls.map(call => call.method + " " + call.path), [
+    "GET /api/assistant-profiles/prof_1/knowledge",
+    "DELETE /api/assistant-profiles/prof_1/knowledge/file_1",
+    "DELETE /api/assistant-profiles/prof_1",
+  ]);
+  assert.equal(desktopAccountSettingsInput.safeParse({ action: "deleteKnowledgeFile", id: "prof_1", fileId: "../x" }).success, false);
+});
+
+const storageUrl = "https://acct.r2.cloudflarestorage.com/assistant-knowledge/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc";
+
+function assistantApi(options: { prepared?: object; pick?: { name: string; bytes: Uint8Array } | null; put?: Response; refuse?: { path: string; code: string } }) {
+  const calls: string[] = [];
+  const puts: { url: string; headers: HeadersInit | undefined; length: number }[] = [];
+  const { settings } = settingsWith((url, init) => {
+    calls.push((init?.method ?? "GET") + " " + url.pathname + (init?.body ? " " + JSON.parse(String(init.body)).action : ""));
+    if (options.refuse && url.pathname === options.refuse.path) return Response.json({ code: options.refuse.code }, { status: 413 });
+    if (url.pathname.endsWith("/export")) return new Response(Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]), { headers: { "content-type": "application/zip" } });
+    if (init?.body && JSON.parse(String(init.body)).action === "prepare") return Response.json(options.prepared ?? { uploadKey: "k1", uploadUrl: storageUrl, uploadHeaders: { "Content-Type": "text/markdown" } });
+    return Response.json({ file: { id: "file_9" } }, { status: 201 });
+  });
+  const transport: typeof fetch = async (input, init) => {
+    puts.push({ url: String(input), headers: init?.headers, length: (init?.body as Uint8Array).byteLength });
+    return options.put ?? new Response(null, { status: 200 });
+  };
+  const saved: Buffer[] = [];
+  const api = createAccountDataApi({ settings, origin, transport, language: () => "en", afterAccountDeleted: async () => {},
+    save: async (file) => { saved.push(Buffer.from(await file.load())); return true; },
+    pickFile: async () => options.pick === undefined ? { name: "notes.md", bytes: new TextEncoder().encode("# Notes") } : options.pick });
+  return { api, calls, puts, saved };
+}
+
+test("a knowledge file uploads to Tomverse storage and is then registered", async () => {
+  const { api, calls, puts } = assistantApi({});
+  assert.deepEqual(await api.handle({ action: "uploadKnowledge", id: "prof_1" }), { status: "uploaded" });
+  assert.deepEqual(calls, ["POST /api/assistant-profiles/prof_1/knowledge prepare", "POST /api/assistant-profiles/prof_1/knowledge finalize"]);
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].url, storageUrl);
+  assert.equal(puts[0].length, 7);
+});
+
+test("a knowledge upload never reaches an untrusted destination or an unsupported file", async () => {
+  for (const uploadUrl of ["https://evil.example/upload?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc",
+    "http://acct.r2.cloudflarestorage.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc",
+    "https://acct.r2.cloudflarestorage.com/k"]) {
+    const { api, puts } = assistantApi({ prepared: { uploadKey: "k1", uploadUrl, uploadHeaders: { "Content-Type": "text/markdown" } } });
+    assert.deepEqual(await api.handle({ action: "uploadKnowledge", id: "prof_1" }), { status: "failed" });
+    assert.equal(puts.length, 0);
+  }
+  const unsupported = assistantApi({ pick: { name: "tool.exe", bytes: new Uint8Array([1]) } });
+  assert.deepEqual(await unsupported.api.handle({ action: "uploadKnowledge", id: "prof_1" }), { status: "failed", code: "ASSISTANT_KNOWLEDGE_UNSUPPORTED_FILE" });
+  assert.equal(unsupported.calls.length, 0);
+  assert.deepEqual(await assistantApi({ pick: null }).api.handle({ action: "uploadKnowledge", id: "prof_1" }), { status: "cancelled" });
+  const quota = assistantApi({ refuse: { path: "/api/assistant-profiles/prof_1/knowledge", code: "ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED" } });
+  assert.deepEqual(await quota.api.handle({ action: "uploadKnowledge", id: "prof_1" }), { status: "failed", code: "ASSISTANT_KNOWLEDGE_QUOTA_EXCEEDED" });
+  const storageDown = assistantApi({ put: new Response(null, { status: 403 }) });
+  assert.deepEqual(await storageDown.api.handle({ action: "uploadKnowledge", id: "prof_1" }), { status: "failed" });
+  assert.equal(storageDown.calls.length, 1, "no registration after a failed storage write");
+});
+
+test("an assistant package is saved only when it is a zip", async () => {
+  const { api, saved } = assistantApi({});
+  assert.deepEqual(await api.handle({ action: "saveAssistant", id: "prof_1", name: "My / helper" }), { status: "saved" });
+  assert.equal(saved[0].readUInt32LE(0), 0x04034b50);
+});

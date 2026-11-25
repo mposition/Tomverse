@@ -11,6 +11,7 @@ import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
+import { AccountDataRefusal } from "./account-data-refusal";
 import { desktopAccountDataInput } from "../account-data-contract";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
@@ -2311,6 +2312,17 @@ async function accountSettings(value: unknown) {
 
 let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
 
+async function pickLocalFile({ extensions, maxBytes }: { extensions: readonly string[]; maxBytes: number }) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || closing) return null;
+  const result = await dialog.showOpenDialog(window, { properties: ["openFile", "dontAddToRecent"],
+    filters: [{ name: "Files", extensions: [...extensions] }] });
+  const path = result.filePaths[0];
+  if (result.canceled || !path || closing || !isAbsolute(path)) return null;
+  if (!statSync(path).isFile() || statSync(path).size > maxBytes) throw new AccountDataRefusal("failed", "FILE_TOO_LARGE");
+  return { name: basename(path), bytes: await readFile(path) };
+}
+
 function connectedAccountData() {
   const settings = connectedSettingsApi();
   const signal = chatSession.signal;
@@ -2323,6 +2335,8 @@ function connectedAccountData() {
           nativeCopy().saveGenerated, file.filterName, { suggestedName: file.suggestedName, extension: file.extension }),
         afterAccountDeleted: signOut,
         language: () => state.language ?? "en",
+        origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN,
+        pickFile: pickLocalFile,
       }),
     };
   }

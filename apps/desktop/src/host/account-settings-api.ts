@@ -124,6 +124,12 @@ function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
         body: { expectedRevision: input.expectedRevision, targetProjectId: input.projectId } };
     case "extractionRuns":
       return { path: "/api/memories/extraction-runs" };
+    case "knowledge":
+      return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}/knowledge` };
+    case "deleteKnowledgeFile":
+      return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}/knowledge/${encodeURIComponent(input.fileId)}`, method: "DELETE" };
+    case "deleteAssistant":
+      return { path: `/api/assistant-profiles/${encodeURIComponent(input.id)}`, method: "DELETE" };
     case "cancelExtraction":
       return { path: `/api/memories/extraction-runs/${encodeURIComponent(input.id)}/cancel`, method: "POST" };
   }
