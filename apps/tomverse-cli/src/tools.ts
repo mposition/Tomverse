@@ -1,11 +1,12 @@
 import { setImmediate as yieldTurn } from "node:timers/promises";
 import { readProcess } from "./readprocess.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { commandEnv, planCommand, runCommand, CommandError, type CommandPlan } from "./commands.js";
-import { currentDigest, planPatch, PatchError, removeFile, writeFileReplacing, type PatchEdit, type PlannedEdit } from "./patch.js";
+import { commandEnv, planCommand, runCommand, CommandError, type CommandLaunch, type CommandPlan } from "./commands.js";
+import { assertBoundFile, currentDigest, pathIdentity, planPatch, PatchError, removeFile, writeFileReplacing, type PatchEdit, type PlannedEdit } from "./patch.js";
 import { canonicalDigest, JournalError, sha256, type Journal } from "./session.js";
 import { PathError, type Workspace } from "./workspace.js";
 
@@ -31,8 +32,10 @@ export type ToolContext = {
     journal: Journal;
     commandTimeoutMs: number;
     commandEnv: string[];
+    launchCommand?: CommandLaunch;
     signal: () => AbortSignal;
     assertAllowed?: () => void;
+    effectBlockReason?: () => string | undefined;
     redactText?: (text: string) => string;
     /** Synchronous, idempotent guard: before backup and again immediately before disk mutation. */
     beforeWrite?: (edit: PlannedEdit, toolCallId: string) => void;
@@ -103,6 +106,8 @@ const gate = (ctx: ToolContext, toolName: string, toolCallId: string, input: unk
                     : { status: "unknown", error: `This ${toolName} call already started once and its outcome is unknown; it was not run again. Check the files or ask the user.` },
         };
     }
+    const blocked = ctx.effectBlockReason?.();
+    if (blocked) return { ok: false as const, result: { status: "denied", error: blocked } };
     // The latest decision for this call counts; an older approval never outlives a later denial.
     const approval = ctx.journal.state.approvals.findLast((a) => a.toolCallId === toolCallId && a.toolName === toolName);
     if (!approval || approval.decision !== "approved" || approval.inputDigest !== digest) {
@@ -111,8 +116,11 @@ const gate = (ctx: ToolContext, toolName: string, toolCallId: string, input: unk
     return { ok: true as const, digest, approval };
 };
 
-const startTool = (ctx: ToolContext, toolName: string, toolCallId: string, digest: string) => {
-    ctx.journal.state.tools.push({ toolCallId, toolName, inputDigest: digest, state: "started", startedAt: new Date().toISOString() });
+const startTool = (ctx: ToolContext, toolName: string, toolCallId: string, digest: string, plan?: CommandPlan) => {
+    const redact = (text: string) => ctx.redactText?.(text) ?? text;
+    const command = plan ? { mode: plan.mode, file: redact(plan.file), args: plan.args.map(redact), cwd: redact(plan.cwd),
+        envNames: plan.envNames, timeoutMs: plan.timeoutMs } : undefined;
+    ctx.journal.state.tools.push({ toolCallId, toolName, inputDigest: digest, state: "started", startedAt: new Date().toISOString(), command });
     ctx.journal.commit();
 };
 
@@ -127,7 +135,8 @@ const endTool = (ctx: ToolContext, toolCallId: string, state: "completed" | "fai
     return output;
 };
 
-const readFileTool = (ctx: ToolContext, input: { path: string; startLine?: number; endLine?: number }) => {
+export const readFileTool = (ctx: Pick<ToolContext, "workspace" | "readByteLimit" | "redactText">,
+    input: { path: string; startLine?: number; endLine?: number }) => {
     const resolved = ctx.workspace.resolve(input.path, "read");
     if (!resolved.exists) return { status: "error", error: `${resolved.relative} does not exist.` };
     const stat = statSync(resolved.absolute);
@@ -262,7 +271,7 @@ const searchTool = async (ctx: ToolContext, input: { pattern: string; path?: str
 };
 
 export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned: PlannedEdit[]) => {
-    const results: Array<{ path: string; action: string; status: "applied" | "failed" | "not_attempted"; error?: string }> = [];
+    const results: Array<{ path: string; action: string; status: "applied" | "failed" | "not_attempted" | "unconfirmed"; error?: string }> = [];
     let failed = false;
     for (const edit of planned) {
         if (failed) {
@@ -270,30 +279,40 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
             continue;
         }
         const changeId = `c${ctx.journal.state.changes.length + 1}-${randomBytes(3).toString("hex")}`;
-        try {
+        let wrote = false;
+        const guard = () => {
             ctx.assertAllowed?.();
             ctx.signal().throwIfAborted();
+            assertBoundFile(ctx.workspace, edit.path, edit.absolute, edit.binding, edit.preimage);
+        };
+        try {
             ctx.beforeWrite?.(edit, toolCallId);
-            // Last look before the write: the path still resolves to the same place...
-            if (ctx.workspace.resolve(edit.path, "write").absolute !== edit.absolute) throw new PatchError(`${edit.path} resolves somewhere else now; it was not written.`);
-            // ...and the file must still be what was approved.
-            if (currentDigest(edit.absolute) !== edit.preimage) throw new PatchError(`${edit.path} changed after it was approved; it was not written.`);
-            const backup = edit.preimage ? ctx.journal.saveBackup(changeId, readFileSync(edit.absolute)) : null;
+            guard();
+            const before = edit.preimage ? readFileSync(edit.absolute) : null;
+            if (before && sha256(before) !== edit.preimage) throw new PatchError(`${edit.path} changed while its backup was being read.`);
             ctx.journal.state.changes.push({
                 changeId,
                 toolCallId,
                 path: edit.path,
                 kind: edit.action,
-                preimage: { sha256: edit.preimage, backup, ...(edit.preimage ? { mode: statSync(edit.absolute).mode & 0o7777 } : {}) },
-                postimage: { sha256: edit.postimage },
+                preimage: { sha256: edit.preimage, backup: before ? ctx.journal.saveBackup(changeId, before) : null,
+                    identity: edit.binding.file, ...(before ? { mode: statSync(edit.absolute).mode & 0o7777 } : {}) },
+                postimage: { sha256: edit.postimage, backup: edit.afterBytes ? ctx.journal.saveBackup(changeId, edit.afterBytes, "post") : null },
                 state: "writing",
             });
             ctx.journal.commit();
             ctx.beforeWrite?.(edit, toolCallId);
-            if (edit.action === "delete") removeFile(edit.absolute);
-            else writeFileReplacing(edit.absolute, edit.afterBytes!);
+            if (edit.action === "delete") {
+                guard();
+                removeFile(edit.absolute);
+            } else {
+                writeFileReplacing(edit.absolute, edit.afterBytes!, undefined, guard, edit.action === "create");
+            }
+            wrote = true;
             const record = ctx.journal.state.changes.find((c) => c.changeId === changeId)!;
-            record.state = currentDigest(edit.absolute) === edit.postimage ? "applied" : "failed";
+            record.directory = pathIdentity(dirname(edit.absolute), "directory") ?? undefined;
+            record.postimage.identity = pathIdentity(edit.absolute, "file");
+            record.state = currentDigest(edit.absolute) === edit.postimage ? "applied" : "writing";
             record.appliedAt = new Date().toISOString();
             ctx.journal.commit();
             if (record.state !== "applied") throw new PatchError(`${edit.path} does not hold the written content afterwards.`);
@@ -302,7 +321,7 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
             failed = true;
             const record = ctx.journal.state.changes.find((c) => c.changeId === changeId);
             if (record && record.state === "writing") {
-                record.state = currentDigest(edit.absolute) === edit.postimage ? "applied" : "failed";
+                record.state = wrote ? "writing" : "failed";
                 try {
                     ctx.journal.commit();
                 } catch {
@@ -310,14 +329,15 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
                 }
             }
             if (error instanceof JournalError) throw error;
-            results.push({ path: edit.path, action: edit.action, status: record?.state === "applied" ? "applied" : "failed", error: (error as Error).message });
+            const status = record?.state === "applied" ? "applied" : wrote ? "unconfirmed" : "failed";
+            results.push({ path: edit.path, action: edit.action, status, error: (error as Error).message });
         }
     }
     const applied = results.filter((r) => r.status === "applied").length;
     return {
         status: failed ? (applied ? "partial" : "error") : "ok",
         files: results,
-        note: failed ? "Not every file was written. Files are written one by one; the ones marked applied are changed, the rest are not." : undefined,
+        note: failed ? "Files are changed one at a time. Check the outcome of every file, especially any marked unconfirmed, before retrying." : undefined,
     };
 };
 
@@ -384,7 +404,13 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
                 return toolError(error);
             }
             const bound = decision.approval.binding.files ?? [];
-            const drift = planned.filter((p) => bound.find((b) => b.path === p.path)?.preimage !== p.preimage || !bound.some((b) => b.path === p.path));
+            const drift = planned.filter((p) => {
+                const approved = bound.find((b) => b.path === p.path);
+                return !approved || approved.preimage !== p.preimage || (approved.disk && (
+                    approved.disk.file !== p.binding.file || approved.disk.folder !== p.binding.folder ||
+                    approved.disk.directory !== p.binding.directory
+                ));
+            });
             if (drift.length || bound.length !== planned.length) {
                 return { status: "error", error: `Changed since it was approved, so nothing was written: ${drift.map((d) => d.path).join(", ") || "file set"}. Read the files again and propose a new patch.` };
             }
@@ -414,9 +440,15 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
                 return { status: "error", error: `The program now resolves to ${plan.file}, not the ${decision.approval.binding.program} that was approved; not run.` };
             }
             try { ctx.assertAllowed?.(); ctx.signal().throwIfAborted(); ctx.beforeCommand?.(plan, toolCallId); } catch (error) { return toolError(error); }
-            startTool(ctx, "run_command", toolCallId, decision.digest);
+            const envNames = Object.keys(commandEnv(ctx.commandEnv)).sort();
+            const approvedNames = decision.approval.binding.envNames ?? plan.envNames;
+            if (envNames.length !== approvedNames.length || envNames.some((name, index) => name !== approvedNames[index])) {
+                return { status: "error", error: "The command environment changed after approval. Review the command again." };
+            }
+            plan.envNames = envNames;
+            startTool(ctx, "run_command", toolCallId, decision.digest, plan);
             ctx.onActivity(`run ${plan.display}`);
-            const execution = runCommand(plan, ctx.signal(), ctx.onCommandOutput, ctx.commandEnv).then((result) => {
+            const execution = runCommand(plan, ctx.signal(), ctx.onCommandOutput, ctx.commandEnv, ctx.launchCommand).then((result) => {
                 const output = {
                     status: result.spawnError ? "error" : result.cancelled ? "cancelled" : result.timedOut ? "timeout" : "ok",
                     exitCode: result.exitCode,

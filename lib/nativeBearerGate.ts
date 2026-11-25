@@ -295,12 +295,12 @@ export function nativeArtifactRevisionBearerRoute(path: string, method: string, 
 
 // Desktop enrollment is shared by the proxy and route-level bearer checks.
 export const DESKTOP_APP_ORIGIN = "tomverse://desktop";
-const DESKTOP_CHAT_CREATE = "/api/products/chat/conversations";
-const DESKTOP_CHAT_TURN = "/api/chat";
-const DESKTOP_CHAT_CONTEXT = "/api/chat/context";
-const DESKTOP_REVIEW_CREATE = "/api/products/review/conversations";
-const DESKTOP_REVIEW_ROUTING = "/api/review/route";
-const DESKTOP_REVIEW_PREFLIGHT = "/api/chat/preflight";
+export const DESKTOP_CHAT_CREATE = "/api/products/chat/conversations";
+export const DESKTOP_CHAT_TURN = "/api/chat";
+export const DESKTOP_CHAT_CONTEXT = "/api/chat/context";
+export const DESKTOP_REVIEW_CREATE = "/api/products/review/conversations";
+export const DESKTOP_REVIEW_ROUTING = "/api/review/route";
+export const DESKTOP_REVIEW_PREFLIGHT = "/api/chat/preflight";
 export const DESKTOP_IMAGE_GENERATIONS = "/api/images/generations";
 
 export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";

@@ -1965,3 +1965,7 @@ a6d0bd61229a658169ab90bad312ff209144556c:tests/agentAutoRecRunner.test.mjs:aws-a
 # (#4185), never a credential. The current test assembles it at runtime.
 # Suppress only the exact finding in the commit that added the literal.
 b6135529b17f4ef909c8b89a15b5924e38264f8b:apps/tomverse-vscode/tests/security.test.ts:generic-api-key:84
+
+# Synthetic image request UUID in the receipt reconciliation test (#4272).
+# It identifies the request and grants no access. The test now generates it.
+110200bab86bf664daf45aca078ace7d34ce15c4:apps/desktop/tests/imageReceipt.test.ts:generic-api-key:10

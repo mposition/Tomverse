@@ -3,7 +3,7 @@ import { commandEnv } from "./env.js";
 export { commandEnv } from "./env.js";
 import { readProcess } from "./readprocess.js";
 import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
-import { basename, delimiter, extname, isAbsolute, join } from "node:path";
+import { basename, delimiter, extname, isAbsolute, join, resolve } from "node:path";
 
 /**
  * Runs one approved command. It runs with the user's own operating-system
@@ -48,6 +48,8 @@ export type CommandResult = {
     spawnError?: string;
 };
 
+export type CommandLaunch = (file: string, args: readonly string[]) => { file: string; args: readonly string[] };
+
 export class CommandError extends Error {}
 
 const MAX_TIMEOUT_MS = 30 * 60_000;
@@ -55,10 +57,11 @@ const MAX_TIMEOUT_MS = 30 * 60_000;
 /** As for patches: what the approval cannot show as it is never reaches a command. Tab is allowed. */
 const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
 
+const windowsSystemRoot = (env: NodeJS.ProcessEnv = process.env) => env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
+
 export const userShell = (env: NodeJS.ProcessEnv = process.env) => {
     if (process.platform === "win32") {
-        const root = env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
-        return join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        return join(windowsSystemRoot(env), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     }
     const preferred = env.SHELL;
     if (preferred && isAbsolute(preferred) && ["bash", "zsh", "sh", "dash"].includes(basename(preferred)) && existsSync(preferred)) return preferred;
@@ -69,7 +72,7 @@ const shellArgs = (shell: string, command: string) =>
     process.platform === "win32" ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command] : ["-c", command];
 
 /** Finds a program on PATH the way Windows would, to tell an .exe from a .cmd. */
-const resolveWindowsProgram = (program: string, env: Record<string, string>) => {
+const resolveWindowsProgram = (program: string, cwd: string, env: Record<string, string>) => {
     const exts = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean).map((e) => e.toLowerCase());
     const candidates = (dir: string) => (extname(program) ? [join(dir, program)] : exts.map((ext) => join(dir, `${program}${ext}`)));
     if (isAbsolute(program) || program.includes("\\") || program.includes("/")) {
@@ -77,7 +80,7 @@ const resolveWindowsProgram = (program: string, env: Record<string, string>) => 
     }
     const dirs = (env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean);
     for (const dir of dirs) {
-        const hit = candidates(dir).find((p) => existsSync(p));
+        const hit = candidates(resolve(cwd, dir)).find((p) => existsSync(p));
         if (hit) return hit;
     }
     return null;
@@ -101,8 +104,9 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
             throw new CommandError("argv must be strings without control, invisible or bidi characters, so the approval shows exactly what runs.");
         }
         let file = argv[0]!;
+        if (file.includes("/") || (process.platform === "win32" && file.includes("\\"))) file = resolve(cwd, file);
         if (process.platform === "win32") {
-            const resolved = resolveWindowsProgram(file, env);
+            const resolved = resolveWindowsProgram(file, cwd, env);
             if (resolved && /\.(cmd|bat)$/i.test(resolved)) {
                 throw new CommandError(
                     `${basename(resolved)} is a batch script; Windows runs it through cmd.exe, which re-reads the arguments. Use the command form instead (it runs in PowerShell and the approval shows it as a shell line).`
@@ -112,7 +116,7 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
         } else if (!file.includes("/")) {
             // Resolved here too, so the approval shows (and binds) the exact program.
             const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
-            const hit = dirs.map((dir) => join(dir, file)).find((candidate) => {
+            const hit = dirs.map((dir) => resolve(cwd, dir, file)).find((candidate) => {
                 try {
                     accessSync(candidate, fsConstants.X_OK);
                     return statSync(candidate).isFile();
@@ -214,14 +218,15 @@ export const killTree = async (child: ChildProcess): Promise<{ residual: number[
     const pid = child.pid;
     if (!pid) return { residual: [], treeChecked: true };
     if (process.platform === "win32") {
+        const taskkill = join(windowsSystemRoot(), "System32", "taskkill.exe");
         // End the tree at once; listing it first can take seconds, and the
         // tree keeps running meanwhile.
-        await controlProcess("taskkill", ["/PID", String(pid), "/T", "/F"], 15_000);
+        await controlProcess(taskkill, ["/PID", String(pid), "/T", "/F"], 15_000);
         // Then look for anything below it that survived (an orphan keeps its
         // recorded parent id) and end that too.
         const listed = await windowsDescendants(pid);
         const descendants = (listed ?? []).filter(alive);
-        await Promise.all(descendants.map((d) => controlProcess("taskkill", ["/PID", String(d), "/T", "/F"], 15_000)));
+        await Promise.all(descendants.map((d) => controlProcess(taskkill, ["/PID", String(d), "/T", "/F"], 15_000)));
         await new Promise((r) => setTimeout(r, 300));
         return { residual: [pid, ...descendants].filter(alive), treeChecked: listed !== null };
     }
@@ -257,7 +262,8 @@ export const killTree = async (child: ChildProcess): Promise<{ residual: number[
 
 /** Processes below `pid` by parent links (`ps`), including ones in other sessions. */
 const posixDescendants = async (pid: number): Promise<number[] | null> => {
-    const result = await controlProcess("ps", ["-A", "-o", "pid=,ppid="], 10_000);
+    const ps = ["/bin/ps", "/usr/bin/ps"].find(existsSync) ?? "ps";
+    const result = await controlProcess(ps, ["-A", "-o", "pid=,ppid="], 10_000);
     if (result.code !== 0 || typeof result.stdout !== "string") return null;
     const children = new Map<number, number[]>();
     for (const line of result.stdout.split("\n")) {
@@ -277,7 +283,8 @@ const posixDescendants = async (pid: number): Promise<number[] | null> => {
     return out;
 };
 
-export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void, extraEnv: string[] = []) =>
+export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void,
+    extraEnv: string[] = [], launchCommand?: CommandLaunch) =>
     new Promise<CommandResult>((resolve) => {
         const started = Date.now();
         const stdout = new BoundedCapture();
@@ -289,7 +296,8 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
         let killing: Promise<void> | null = null;
         let child: ChildProcess;
         try {
-            child = spawn(plan.file, plan.args, {
+            const launch = launchCommand?.(plan.file, plan.args) ?? plan;
+            child = spawn(launch.file, launch.args, {
                 cwd: plan.cwd,
                 env: commandEnv(extraEnv),
                 stdio: ["ignore", "pipe", "pipe"],

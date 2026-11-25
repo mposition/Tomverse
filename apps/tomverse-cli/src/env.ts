@@ -33,12 +33,19 @@ const BASE_ENV = [
     "SHELL",
 ];
 
+const PROTECTED_ENV = /^(?:TOMVERSE_|ELECTRON_|NODE_(?:OPTIONS|PATH|REPL_EXTERNAL_MODULE|EXTRA_CA_CERTS)$)|(?:^|_)(?:API_?KEY|ACCESS_KEY|CREDENTIALS?|PASSWORD|SECRET|TOKEN)(?:_|$)/i;
+
 export const commandEnv = (extraNames: string[] = [], env: NodeJS.ProcessEnv = process.env) => {
     const out: Record<string, string> = {};
+    const names = new Set<string>();
     for (const name of [...BASE_ENV, ...extraNames]) {
-        if (/^TOMVERSE_/i.test(name)) continue;
+        const key = process.platform === "win32" ? name.toLowerCase() : name;
+        if (names.has(key) || PROTECTED_ENV.test(name)) continue;
         const value = env[name];
-        if (typeof value === "string") out[name] = value;
+        if (typeof value === "string") {
+            out[name] = value;
+            names.add(key);
+        }
     }
     out.NO_COLOR = "1";
     out.FORCE_COLOR = "0";

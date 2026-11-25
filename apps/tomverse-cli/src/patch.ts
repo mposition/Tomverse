@@ -1,8 +1,8 @@
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { sha256 } from "./session.js";
-import type { Workspace } from "./workspace.js";
+import { same, type Workspace } from "./workspace.js";
 
 /**
  * File edits as exact replacements. A replacement's `old` text must occur
@@ -31,9 +31,38 @@ export type PlannedEdit = {
     postimage: string | null;
     eol: "lf" | "crlf" | "mixed" | "none";
     bom: boolean;
+    binding: FileBinding;
 };
 
 export class PatchError extends Error {}
+
+export type FileBinding = { file: string | null; folder: string; directory: string };
+
+export function pathIdentity(path: string, kind: "file" | "directory") {
+    const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+    if (!stat) return null;
+    if (kind === "directory" ? !stat.isDirectory() : !stat.isFile()) throw new PatchError("The file or its folder has changed.");
+    return kind === "directory" ? `${stat.dev}:${stat.ino}` : `${stat.dev}:${stat.ino}:${stat.mode}`;
+}
+
+function bindFile(absolute: string): FileBinding {
+    let folder = dirname(absolute);
+    let directory = pathIdentity(folder, "directory");
+    while (directory === null && dirname(folder) !== folder) {
+        folder = dirname(folder);
+        directory = pathIdentity(folder, "directory");
+    }
+    if (directory === null) throw new PatchError("The file’s folder is unavailable.");
+    return { file: pathIdentity(absolute, "file"), folder, directory };
+}
+
+export function assertBoundFile(workspace: Workspace, path: string, absolute: string, binding: FileBinding, digest: string | null) {
+    if (!same(workspace.resolve(path, "write").absolute, absolute) ||
+        pathIdentity(binding.folder, "directory") !== binding.directory ||
+        pathIdentity(absolute, "file") !== binding.file || currentDigest(absolute) !== digest) {
+        throw new PatchError(`${path} or its folder changed. The file was left untouched.`);
+    }
+}
 
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -91,6 +120,7 @@ export const planPatch = (workspace: Workspace, edits: PatchEdit[]): PlannedEdit
         seen.add(key);
         const exists = resolved.exists;
         if (exists && !statSync(resolved.absolute).isFile()) throw new PatchError(`${resolved.relative} is not a regular file.`);
+        const binding = bindFile(resolved.absolute);
         const bytes = exists ? readFileSync(resolved.absolute) : null;
         const preimage = bytes ? sha256(bytes) : null;
         if (edit.action === "create") {
@@ -103,12 +133,12 @@ export const planPatch = (workspace: Workspace, edits: PatchEdit[]): PlannedEdit
                 throw new PatchError(`The content of ${resolved.relative} mixes CR with LF line endings; use LF, or CRLF on every line.`);
             }
             const afterBytes = Buffer.from(edit.content, "utf8");
-            return { path: resolved.relative, absolute: resolved.absolute, action: "create", preimage, beforeText: null, afterText: edit.content, afterBytes, postimage: sha256(afterBytes), eol: crlf ? "crlf" : "none", bom: false };
+            return { path: resolved.relative, absolute: resolved.absolute, action: "create", preimage, beforeText: null, afterText: edit.content, afterBytes, postimage: sha256(afterBytes), eol: crlf ? "crlf" : "none", bom: false, binding };
         }
         if (!exists || !bytes) throw new PatchError(`${resolved.relative} does not exist.`);
         const { text, bom, eol } = decode(bytes, resolved.relative);
         if (edit.action === "delete") {
-            return { path: resolved.relative, absolute: resolved.absolute, action: "delete", preimage, beforeText: text, afterText: null, afterBytes: null, postimage: null, eol, bom };
+            return { path: resolved.relative, absolute: resolved.absolute, action: "delete", preimage, beforeText: text, afterText: null, afterBytes: null, postimage: null, eol, bom, binding };
         }
         if (edit.action !== "update") throw new PatchError(`Unknown action for ${resolved.relative}.`);
         if (!Array.isArray(edit.replacements) || edit.replacements.length === 0) {
@@ -139,7 +169,7 @@ export const planPatch = (workspace: Workspace, edits: PatchEdit[]): PlannedEdit
         const afterText = normalize ? working.replaceAll("\n", "\r\n") : working;
         if (afterText === text) throw new PatchError(`The replacements leave ${resolved.relative} unchanged.`);
         const afterBytes = encode(afterText, bom);
-        return { path: resolved.relative, absolute: resolved.absolute, action: "update", preimage, beforeText: text, afterText, afterBytes, postimage: sha256(afterBytes), eol, bom };
+        return { path: resolved.relative, absolute: resolved.absolute, action: "update", preimage, beforeText: text, afterText, afterBytes, postimage: sha256(afterBytes), eol, bom, binding };
     });
 };
 
@@ -149,7 +179,8 @@ export const currentDigest = (absolute: string) => {
 };
 
 /** Writes one file so a reader sees the old or the new bytes, keeping its mode. */
-export const writeFileReplacing = (absolute: string, bytes: Buffer, restoreMode?: number) => {
+export const writeFileReplacing = (absolute: string, bytes: Buffer, restoreMode?: number, guard?: () => void, createOnly = false) => {
+    guard?.();
     mkdirSync(dirname(absolute), { recursive: true });
     // The folder must really be where it was resolved: a link swapped into a
     // part of the path after the check is not followed.
@@ -163,21 +194,22 @@ export const writeFileReplacing = (absolute: string, bytes: Buffer, restoreMode?
     const mode = restoreMode ?? (existsSync(absolute) ? statSync(absolute).mode & 0o7777 : undefined);
     const fd = openSync(tmp, "wx", mode ?? 0o644);
     try {
-        writeSync(fd, bytes);
-        fsyncSync(fd);
-    } finally {
-        closeSync(fd);
-    }
-    try {
+        try {
+            writeFileSync(fd, bytes);
+            fsyncSync(fd);
+        } finally {
+            closeSync(fd);
+        }
         if (mode !== undefined && process.platform !== "win32") chmodSync(tmp, mode);
-        renameSync(tmp, absolute);
-    } catch (error) {
+        guard?.();
+        if (createOnly) linkSync(tmp, absolute);
+        else renameSync(tmp, absolute);
+    } finally {
         try {
             unlinkSync(tmp);
         } catch {
             // best effort
         }
-        throw error;
     }
 };
 

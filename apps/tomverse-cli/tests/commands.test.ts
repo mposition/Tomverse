@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import { commandEnv, planCommand, runCommand, CommandError } from "../src/commands.js";
 import { tempDir } from "./helpers.js";
@@ -16,6 +16,15 @@ test("argv runs the program directly: shell characters are plain arguments", asy
     const result = await runCommand(plan, never);
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), ["a & b", "c|d", "$(x)", "%PATH%", "한글 값"]);
+});
+
+test("argv paths resolve against the command's working folder", async () => {
+    const cwd = tempDir("cmd");
+    const plan = planCommand({ argv: [relative(cwd, node), "-e", "console.log(process.cwd())"] }, cwd, 10_000);
+    assert.equal(plan.file.toLowerCase(), node.toLowerCase());
+    const result = await runCommand(plan, never);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.stdout.trim().toLowerCase(), cwd.toLowerCase());
 });
 
 test("the shell form names its shell and runs a pipeline there", async () => {
@@ -91,7 +100,9 @@ test("cancelling ends the command tree too", async () => {
 });
 
 test("commands get a small environment: never the Tomverse key or other secrets", async () => {
-    const env = commandEnv(["MY_TOOL_HOME", "TOMVERSE_API_KEY"], {
+    const privateNames = ["TOMVERSE_API_KEY", "TOMVERSE_ENDPOINT", "AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN",
+        "NODE_OPTIONS", "NODE_PATH", "ELECTRON_RUN_AS_NODE"];
+    const env = commandEnv(["MY_TOOL_HOME", ...privateNames], {
         PATH: "/bin",
         HOME: "/home/u",
         TOMVERSE_API_KEY: "tvk_secret",
@@ -99,11 +110,14 @@ test("commands get a small environment: never the Tomverse key or other secrets"
         AWS_SECRET_ACCESS_KEY: "aws",
         OPENAI_API_KEY: "sk",
         GITHUB_TOKEN: "gh",
+        NODE_OPTIONS: "injected",
+        NODE_PATH: "injected",
+        ELECTRON_RUN_AS_NODE: "injected",
         MY_TOOL_HOME: "/opt/tool",
     });
     assert.equal(env.PATH, "/bin");
     assert.equal(env.MY_TOOL_HOME, "/opt/tool", "a name the user listed is passed");
-    for (const name of ["TOMVERSE_API_KEY", "TOMVERSE_ENDPOINT", "AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN"]) assert.equal(env[name], undefined, name);
+    for (const name of privateNames) assert.equal(env[name], undefined, name);
     process.env.TOMVERSE_API_KEY = "tvk_should_not_leak";
     try {
         const plan = planCommand({ argv: [node, "-e", "console.log(process.env.TOMVERSE_API_KEY ?? 'absent')"] }, tempDir("cmd"), 10_000);
