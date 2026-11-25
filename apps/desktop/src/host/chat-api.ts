@@ -306,7 +306,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       return sourceId;
     },
     async stream(current: ChatConversation, input: StreamSelection, sourceId: string, assistantId: string,
-      turn: AbortSignal, progress: (text: string) => void) {
+      turn: AbortSignal, progress: (text: string) => void, reportModel?: (id: string) => void) {
       const at = current.messages.findIndex((message) => message.id === sourceId && message.role === "user");
       if (at < 0 || !current.selectedModels[0]) throw new Error("Tomverse could not confirm the source question and model.");
       const modelId = input.review ? input.modelId : current.selectedModels[0];
@@ -366,6 +366,8 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           await response.body?.cancel().catch(() => {});
           throw new Error("Tomverse could not start this Chat response.");
         }
+        const routedModel = response.headers.get("x-chat-routed-model");
+        if (routedModel && /^[a-zA-Z0-9._:-]{1,120}$/.test(routedModel)) reportModel?.(routedModel);
         const reader = response.body.getReader();
         try {
           const result = await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText }) => progress(displayText) });

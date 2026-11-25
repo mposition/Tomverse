@@ -126,11 +126,11 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
 
 export type DesktopAttachmentDraft = ReturnType<typeof useAttachmentDraft>;
 
-export function AttachmentPicker({ draft, busy = false }: { draft: DesktopAttachmentDraft; busy?: boolean }) {
+export function AttachmentPicker({ draft, busy = false, id }: { draft: DesktopAttachmentDraft; busy?: boolean; id?: string }) {
   const picker = useRef<HTMLInputElement>(null);
   if (!draft.enabled) return null;
   return <>
-    <input type="file" hidden ref={picker} multiple accept={chatAttachmentAcceptAttribute()}
+    <input id={id} type="file" hidden ref={picker} multiple accept={chatAttachmentAcceptAttribute()}
       onChange={(event) => {
         if (event.currentTarget.files) draft.add(event.currentTarget.files);
         event.currentTarget.value = "";

@@ -357,6 +357,7 @@ export type DesktopApi = {
   renameChat(input: ChatRenameInput): Promise<{ title: string }>;
   removeChat(id: string): Promise<boolean>;
   chatModels(): Promise<ChatModel[]>;
+  copyChatText(text: string): Promise<void>;
   sendChat(input: ChatTurnInput): Promise<ChatTurnResult>;
   stopChat(): Promise<void>;
   subscribeChat(listener: (progress: ChatTurnProgress) => void): () => void;

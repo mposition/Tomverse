@@ -222,6 +222,8 @@ export const desktopAccountSettingsOutput = {
   revokeKey: z.object({ revoked: z.literal(true) }),
   usage: z.object({
     plan: label,
+    usage: z.object({ creditsMonth: z.number().nonnegative() }).optional(),
+    limits: z.object({ creditsMonth: z.number().nonnegative() }).optional(),
     balances: z.object({
       dailyRemainingCredits: z.number().nullable(),
       planRemainingCredits: z.number().nullable(),

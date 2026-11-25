@@ -1,12 +1,14 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ArrowUp, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
+  ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
   Search, ShieldCheck, SlidersHorizontal, Sparkles, Square, SquareTerminal, Sun, X,
 } from "lucide-react";
 import "@tomverse/ui-tokens/tokens.css";
 import "@tomverse/ui-tokens/wordmark.css";
 import logo from "../../../../public/tomverse-logo.png";
+import { TomverseWordmark } from "../../../../components/chat/TomverseWordmark";
+import { usagePercent } from "../../../../components/chat/UsagePercentGauge";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
 import { isLanguage, type Language } from "../../../../lib/language";
@@ -43,7 +45,7 @@ import { VerificationPanel } from "./VerificationPanel";
 import { TaskList } from "./TaskList";
 import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
-import { ChatConversationActions, ChatHistory, ChatHistorySearch, ChatWorkspace, chatTitle, useChatHistory } from "./ChatWorkspace";
+import { ChatConversationActions, ChatHistory, ChatHistorySearch, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
@@ -269,7 +271,8 @@ function Desktop() {
   const [historyOpen, setHistoryOpen] = useState(() => !matchMedia(compactHistoryQuery).matches);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [reviewReference, setReviewReference] = useState("");
-  const [historyWidth, setHistoryWidth] = useState(252);
+  const [defaultHistoryWidth, setDefaultHistoryWidth] = useState(252);
+  const [chatHistoryWidth, setChatHistoryWidth] = useState(318);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -507,6 +510,26 @@ function Desktop() {
   const imagesActive = imagesOpen && !!imageCapability && (chatActive || reviewActive);
   const nativeImages = !settingsView && imagesActive;
   const images = useImageWorkspace(imagesActive, language);
+  const chatRail = nativeChat && !nativeImages;
+  const historyWidth = chatRail ? chatHistoryWidth : defaultHistoryWidth;
+  const setHistoryWidth = chatRail ? setChatHistoryWidth : setDefaultHistoryWidth;
+  const [usage, setUsage] = useState<{ account: string; value: number | null }>();
+  const usageLabel = sidebarCopy[language].currentUsage;
+  const usageValue = usage?.account === accountDraft ? usage?.value : null;
+  useEffect(() => {
+    if (!accountDraft || settingsView || chat.sending || reviewRun.running || images.sending) return;
+    let current = true;
+    const refresh = () => void window.desktop.accountSettings<"usage">({ action: "usage" }).then(({ usage, limits }) => {
+      if (current) setUsage({ account: accountDraft, value: usage && limits ? usagePercent(usage.creditsMonth, limits.creditsMonth) : null });
+    }, () => { if (current) setUsage({ account: accountDraft, value: null }); });
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { current = false; window.removeEventListener("focus", refresh); };
+  }, [accountDraft, settingsView, chat.sending, reviewRun.running, images.sending]);
+  function openImageStarter(prompt: string) {
+    setImagesOpen(true);
+    if (!images.prompt && !images.sending) void images.open().then(() => images.setPrompt(prompt));
+  }
   const handoff = snapshot?.handoff;
   const codeHandoff = handoff?.target === "code" ? handoff : undefined;
   const nativeTask = task?.nativeSession;
@@ -741,7 +764,7 @@ function Desktop() {
           </button>}
       </div>
     </nav>
-    {historyOpen && <aside id="desktop-history" className="history" aria-label={copy.history}
+    {historyOpen && <aside id="desktop-history" className={chatRail ? "history history--chat" : "history"} aria-label={copy.history}
       onBlur={(event) => {
         const next = event.relatedTarget;
         if (next && next !== historyToggle.current && !event.currentTarget.contains(next) && matchMedia(compactHistoryQuery).matches) {
@@ -756,15 +779,18 @@ function Desktop() {
         historyToggle.current?.focus();
       }}>
       <div className="history-header">
-        <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>{names[surface]}</h1>
+        <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>
+          {chatRail ? <><img src={logo} alt="" /><TomverseWordmark /></> : names[surface]}
+        </h1>
         {surface === "code" && <button ref={historySearchToggle} className="icon" type="button" aria-label={copy.searchHistory} aria-expanded={searchOpen}
           aria-controls={searchOpen ? "code-history-filter" : undefined}
           onClick={() => searchOpen ? closeCodeHistorySearch() : setSearchOpen(true)}><Search size={18} /></button>}
-        {nativeChat && !nativeImages && <ChatHistorySearch chat={chat} />}
+        {chatRail && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
+          onClick={() => void act(() => window.desktop.openWeb("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
         {nativeReview && !nativeImages && <ChatHistorySearch chat={review} />}
       </div>
       {nativeImages && <ImageHistoryList workspace={images} onClose={() => setImagesOpen(false)} />}
-      {nativeChat && !nativeImages && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading}
+      {chatRail && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading} canModify={snapshot?.capabilities?.chatWrite === true}
         onImages={imageCapability ? () => setImagesOpen(true) : undefined} onImport={openImportedConversations} />}
       {nativeReview && !nativeImages && <ChatHistory key={`review:${accountDraft}`} chat={review} product="review" busy={reviewRun.running || reviewAttachments.uploading} />}
       {settingsView && <div className="settings-navigation">
@@ -863,6 +889,8 @@ function Desktop() {
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
             aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
             onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
+          {(nativeChat || nativeReview) && <button className="soft chat-header-usage" type="button" title={usageLabel}
+            onClick={() => openSettings("plan")}><ChartNoAxesColumnIncreasing size={15} aria-hidden="true" /> {usageLabel} {usageValue == null ? "—" : `${usageValue}%`}</button>}
           <button className="icon" aria-label={theme === "dark" ? copy.useLight : copy.useDark} type="button"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}</button>
           <button ref={historyToggle} className="icon" type="button" aria-label={historyOpen ? copy.hideHistory : copy.showHistory}
@@ -1025,10 +1053,7 @@ function Desktop() {
           capability={snapshot?.capabilities?.review ?? null} run={reviewRun} preferredModelIds={accountModels}
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.deviceFixtureAvailable === true}
-          onImageStarter={imageCapability ? (prompt) => {
-            setImagesOpen(true);
-            if (!images.prompt && !images.sending) void images.open().then(() => images.setPrompt(prompt));
-          } : undefined}
+          onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">
         {settingsView ? cliSettingsOpen && cliSettingsEnabled && snapshot
@@ -1104,14 +1129,12 @@ function Desktop() {
           </section>}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
           ? <PluginWorkspace key={account.label} language={language} /> : <section className="welcome">
-          <h2>{names[surface]}</h2><p>{copy.webFallback}</p>
+          <h2>{names[surface]}</h2>{surface !== "chat" && <p>{copy.webFallback}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}
-          <div className="web-launcher"><button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb(surface))}>
-            <ExternalLink size={16} /> {copy.openSurface.replace("{surface}", () => names[surface])}</button>
-            {surface === "chat" && <details className="web-launcher-menu">
-              <summary className="soft" aria-label={copy.moreChatActions}><ChevronDown size={16} /></summary>
-              <button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb("image"))}>{chatCopy.openImagesWeb}</button>
-            </details>}
+          <div className="web-launcher">
+            {surface === "chat" ? <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>
+              : <button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb(surface))}>
+                <ExternalLink size={16} /> {copy.openSurface.replace("{surface}", () => names[surface])}</button>}
           </div>
         </section>}
         {alertText && <p className="notice" role="alert">{alertText}</p>}

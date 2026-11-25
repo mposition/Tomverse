@@ -107,10 +107,16 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     application = await electron.launch({
       executablePath, args: [desktopDir, `--user-data-dir=${profile}`, "--use-fake-device-for-media-stream"], timeout: 20_000,
     });
-    await application.evaluate(async ({ shell }, { origin, chat }) => {
-      const host = globalThis as typeof globalThis & { clips?: number; sent?: number; importRequests: string[]; pinWrites: boolean[] };
+    await application.evaluate(async ({ shell, clipboard }, { origin, chat }) => {
+      const host = globalThis as typeof globalThis & {
+        clips?: number; sent?: number; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
+      };
       host.importRequests = [];
       host.pinWrites = [];
+      clipboard.writeText = async (value) => { host.copied = value; };
+      const newChatId = "sent-chat-fixture";
+      let question = "";
+      let assistantId: string | undefined;
       const conversationDigest = "a".repeat(64);
       let importCompleted = false;
       let emailEnabled = true;
@@ -148,6 +154,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         if (target.pathname === "/api/auth/desktop/session") {
           return Response.json({ ok: true, account: { id: "fixture-account", name: "Settings Fixture", email: null } });
         }
+        if (target.pathname === "/api/auth/desktop/logout") return Response.json({ ok: true });
         if (target.pathname === "/api/auth/desktop/settings-session") {
           if (options?.method !== "POST" || new Headers(options.headers).get("authorization") !== "Bearer fixture-access") {
             return Response.json({}, { status: 401 });
@@ -304,12 +311,24 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
               { id: "evidence-1", manualContent: "Manual preference fixture", externalConversationId: null, sourceTitle: null },
             ] }, conflicts: [] });
           }
-          return Response.json({ plan: "Free", balances: { dailyRemainingCredits: 3, planRemainingCredits: 63, purchasedRemainingCredits: 0 } });
+          return Response.json({ plan: "Free", usage: { creditsMonth: 13 }, limits: { creditsMonth: 100 },
+            balances: { dailyRemainingCredits: 3, planRemainingCredits: 63, purchasedRemainingCredits: 0 } });
         }
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
-          autoSelection: { offered: false }, desktopWrite: true, desktopPlugins: true,
+          autoSelection: { offered: false }, desktopWrite: !host.readOnly, desktopImport: true, desktopPlugins: true,
           desktopReview: { easy: true, plan: "Pro", modelLimit: 3 },
+          desktopStarters: [
+            { id: "debug-stack-trace", label: "Debug a stack trace", seed: "Help me debug this stack trace.", outcome: "Understand the error." },
+            { id: "plan-a-week", label: "Plan my week", seed: "Help me plan my week.", outcome: "Make a weekly plan." },
+            { id: "summarize-text", label: "Summarize long text", seed: "Summarize the text I paste.", outcome: "Get the key points." },
+            { id: "draft-reply", label: "Draft a reply", seed: "Help me write a reply.", outcome: "Draft a response." },
+            { id: "explain-code", label: "Explain how code works", seed: "Explain this code.", outcome: "Understand the code." },
+            { id: "learn-a-concept", label: "Learn a concept", seed: "Explain a concept.", outcome: "Learn with examples." },
+          ],
         });
+        if (target.pathname === "/api/models/catalog") return Response.json({ models: [
+          { id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", minimumPlan: "Guest", enabled: true, status: "enabled" },
+        ] });
         if (target.pathname === "/api/chat/voice-transcription") {
           const headers = new Headers(options?.headers);
           if (options?.method !== "POST" || headers.get("origin") !== "tomverse://desktop" ||
@@ -321,7 +340,26 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           host.clips = (host.clips ?? 0) + 1;
           return Response.json({ transcript: "fixture transcript" });
         }
-        if (target.pathname === "/api/chat" && options?.method === "POST") host.sent = (host.sent ?? 0) + 1;
+        if (target.pathname === "/api/products/chat/conversations" && options?.method === "POST") return Response.json({ id: newChatId });
+        if (target.pathname === `/api/conversations/${newChatId}/messages` && options?.method === "POST") {
+          const { messages: [message] } = JSON.parse(String(options.body));
+          question = message.content;
+          return Response.json({ messageMappings: [{ requestId: message.clientRequestId, messageId: "saved-question" }] });
+        }
+        if (target.pathname === "/api/chat/context") return Response.json({ ok: true, contextBundle: null });
+        if (target.pathname === "/api/chat" && options?.method === "POST") {
+          host.sent = (host.sent ?? 0) + 1;
+          assistantId = JSON.parse(String(options.body)).assistantMessageId;
+          return new Response("Sent by the desktop test.", { headers: { "X-Chat-Routed-Model": "gpt-5-4-mini" } });
+        }
+        if (target.pathname === `/api/conversations/${newChatId}`) return Response.json({
+          ...chat, id: newChatId, title: question, selectionMode: "manual", autoSelection: { offered: false },
+          messages: [
+            { id: "saved-question", role: "user", content: question, status: "normal" },
+            ...(assistantId ? [{ id: assistantId, role: "assistant", status: "normal", modelId: "gpt-5-4-mini", content: "Sent by the desktop test." }] : []),
+          ],
+          messagePage: { nextCursor: null },
+        });
         if (target.pathname === "/api/mcp/connections") return Response.json({ enabled: true,
           servers: [{ id: "github", name: "GitHub", custom: false }, { id: "custom-1", name: "Custom GitHub", custom: true }],
           connections: [{ id: "test-connection", serverId: "github", name: "GitHub", status: "connected", tools: 3, granted: 1 }],
@@ -331,8 +369,11 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           shareEnabled: true, selectedModels: ["gpt-5-4-mini"],
         }]);
         if (target.pathname === `/api/conversations/${chat.id}`) return Response.json({ ...chat, messages: Array.from({ length: 48 }, (_, index) => ({
-          id: `message-${index + 1}`, role: index % 2 === 0 ? "user" : "assistant", status: "normal", content: `Saved transcript message ${index + 1}.`, artifacts: [],
+          id: `message-${index + 1}`, role: index % 2 === 0 ? "user" : "assistant", status: "normal",
+          content: `Saved transcript message ${index + 1}.` + (index === 47 ? "\n\n```python\nfor i in range(3):\n    print(i)\n```" : ""),
+          modelId: index === 47 ? "gpt-6-luna" : undefined, artifacts: [],
         })),
+          responseAttempts: [{ assistantMessageId: "message-48", actualModelId: "gpt-5-4-mini", provider: "openai" }],
           messagePage: { nextCursor: null }, selectionMode: "manual", selectedModels: [], autoSelection: { offered: false },
         });
         return Response.json({}, { status: 404 });
@@ -347,6 +388,18 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       .toMatchObject({ stage: "connected", label: "Settings Fixture" });
     await expect(rail.locator(".rail-footer button")).toHaveText(["Help", "Settings", "S"]);
     await rail.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByTestId("tomverse-wordmark")).toBeVisible();
+    await expect(page.getByRole("searchbox", { name: "Search conversation history" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Imported chats", exact: true })).toBeVisible();
+    await expect(page.locator("[data-starter-id]")).toHaveCount(6);
+    await expect(page.getByRole("button", { name: "Current usage 13%" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open Chat", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Debug a stack trace" }).click();
+    await expect(page.getByRole("textbox", { name: "Chat message", exact: true })).toHaveValue("Help me debug this stack trace.");
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 0);
+    await page.getByRole("textbox", { name: "Chat message", exact: true }).fill("");
+    const chatQa = process.env.TOMVERSE_DESKTOP_CHAT_QA;
+    if (chatQa) await page.screenshot({ path: join(chatQa, "home.png"), animations: "disabled" });
     const chat = page.getByRole("button", { name: conversation.title, exact: true });
     const older = page.getByRole("button", { name: "An older shared chat", exact: true });
     await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("button", { name: conversation.title })).toBeVisible();
@@ -366,6 +419,11 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await page.getByRole("button", { name: "New chat", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Chat message", exact: true })).toBeFocused();
     await chat.click();
+    const olderActions = page.getByLabel("Conversation actions · An older shared chat", { exact: true });
+    await olderActions.click();
+    await expect(page.getByRole("button", { name: "Pin chat", exact: true })).toBeVisible();
+    await expect(chat).toHaveAttribute("aria-current", "page");
+    await olderActions.click();
     const actions = page.getByLabel("Conversation actions", { exact: true });
     await actions.click();
     await page.getByRole("button", { name: "Pin chat", exact: true }).click();
@@ -376,6 +434,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect.poll(pinWrites).toEqual([true, false]);
     await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("button", { name: conversation.title })).toBeVisible();
     await actions.click();
+    await page.getByRole("button", { name: /Organizer tools/ }).click();
     const projects = page.locator(".chat-history-projects");
     await projects.locator("summary").click();
     await projects.getByRole("button", { name: "Create first project", exact: true }).click();
@@ -384,7 +443,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     const project = projects.getByRole("button", { name: "Fixture project", exact: true });
     await expect(project).toBeVisible();
     await actions.click();
-    const projectPicker = page.getByLabel("Move to project", { exact: true });
+    const projectPicker = page.locator(".header").getByLabel("Move to project", { exact: true });
     await projectPicker.selectOption("test-project");
     await expect(projectPicker).toHaveValue("test-project");
     await actions.click();
@@ -404,6 +463,13 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(transcript.getByRole("listitem")).toHaveCount(48);
     await expect(transcript.getByRole("listitem").last()).toHaveCSS("content-visibility", "auto");
     await expect(transcript.getByText("Saved transcript message 48.", { exact: true })).toBeVisible();
+    const lastAnswer = transcript.getByRole("listitem").last();
+    await expect(lastAnswer.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
+    await expect(lastAnswer.locator(".hljs-keyword").first()).toHaveText("for");
+    await lastAnswer.getByRole("button", { name: "Copy code", exact: true }).click();
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { copied?: string }).copied),
+      "for i in range(3):\n    print(i)");
+    if (chatQa) await page.screenshot({ path: join(chatQa, "thread.png"), animations: "disabled" });
     const message = page.getByRole("textbox", { name: "Chat message", exact: true });
     await message.fill("A draft for the selected conversation");
     if (accountDevicesFixture) {
@@ -570,6 +636,24 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await plugins.getByRole("searchbox", { name: "Search plugins" }).fill("custom");
     await expect(connected).toHaveCount(0);
     await expect(custom).toBeVisible();
+    await rail.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("button", { name: "New chat", exact: true }).click();
+    await message.fill("Send from the Desktop composer.");
+    await page.getByRole("button", { name: "Send Chat message", exact: true }).click();
+    await expect(page.getByText("Sent by the desktop test.", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 1);
+    await application.evaluate(() => { (globalThis as typeof globalThis & { readOnly?: boolean }).readOnly = true; });
+    await page.evaluate(() => window.desktop.signOut());
+    await page.evaluate(() => window.desktop.signIn());
+    await expect.poll(() => page.evaluate(async () => (await window.desktop.state()).capabilities?.chatWrite)).toBe(false);
+    await rail.getByRole("button", { name: "Chat", exact: true }).click();
+    await message.fill("Draft in a read-only environment.");
+    const send = page.getByRole("button", { name: "Send Chat message", exact: true });
+    await expect(send).toBeDisabled();
+    await message.press("Enter");
+    await expect(message).toHaveValue("Draft in a read-only environment.");
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 1);
   } finally {
     await application?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5 });
@@ -710,9 +794,7 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
 
     const tools = page.getByRole("navigation", { name: "Workspaces" });
     await tools.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("button", { name: "Open Chat", exact: true }).click();
-    await page.getByLabel("More Chat actions").click();
-    await page.getByRole("button", { name: "Open image workspace on the web" }).click();
+    await expect(page.getByRole("button", { name: "Open Chat", exact: true })).toHaveCount(0);
     await tools.getByRole("button", { name: "Review", exact: true }).click();
     await page.getByRole("button", { name: "Open Review", exact: true }).click();
     await tools.getByRole("button", { name: "Plugins", exact: true }).click();
@@ -730,7 +812,6 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await expect(page.getByRole("heading", { name: "What shall we build?" })).toBeVisible();
     assert.deepEqual(await application.evaluate(() =>
       (globalThis as typeof globalThis & { desktopDestinations: string[] }).desktopDestinations), [
-      "https://tomverse.app/chat", "https://tomverse.app/studio",
       "https://tomverse.app/review", "https://tomverse.app/plugins",
     ]);
     assert.equal(await tools.getByRole("button", { name: "Image", exact: true }).count(), 0);

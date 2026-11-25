@@ -2248,6 +2248,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let id = input.conversationId;
     let sourceId: string | undefined;
     let partial = "";
+    let modelId: string | undefined;
     let applied: ChatTurnResult["applied"];
     let streamStarted = false;
     let failed = false;
@@ -2277,6 +2278,9 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
             lastProgressAt = now;
             publish({ text });
           }
+        }, (id) => {
+          modelId = id;
+          publish({ modelId: id });
         });
         applied = result?.appliedReasoningEffort;
         if (applied) publish({ applied });
@@ -2293,7 +2297,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         : signal.aborted ? "stopped"
           : answer || partial ? "partial" : contextChanged ? "failed"
             : streamStarted ? "unconfirmed" : failed ? "failed" : "unconfirmed";
-      return { conversation, status, partial: answer ? "" : partial, applied, savedQuestion: Boolean(sourceId),
+      return { conversation, status, partial: answer ? "" : partial, modelId, applied, savedQuestion: Boolean(sourceId),
         ...(contextChanged && status === "failed" ? { contextChanged: true } : {}) };
     } finally {
       if (chatTurn === turn) chatTurn = null;
@@ -2990,6 +2994,7 @@ function registerIpc() {
   });
   main("chat:remove", (value) => removeChat(chatId.parse(value)));
   main("chat:models", () => withChatAccount((api) => api.models()));
+  main("chat:copy-text", (value) => clipboard.writeText(z.string().min(1).max(1_000_000).parse(value)));
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));

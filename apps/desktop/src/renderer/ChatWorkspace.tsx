@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { AnswerMarkdown } from "@tomverse/chat-ui";
-import { ArrowRight, ArrowUp, ChevronDown, CodeXml, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Lock, Plus, Search, SlidersHorizontal, Sparkles, Square } from "lucide-react";
+import { ArrowRight, ArrowUp, ChevronDown, CodeXml, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Lock, Paperclip, Plus, Search, SlidersHorizontal, Sparkles, Square } from "lucide-react";
 import { chatHelpCopy } from "../../../../components/chat/chatHelpCopy";
 import { continuationDisplayTitle } from "../../../../lib/continuationDisplayTitle";
 import { millisecondsUntilNextDay, partitionConversationRows } from "../../../../lib/conversationListGrouping";
 import { getPinOverrides, getServerPinOverrides, observeServerPins, reconcilePinStore, requestPin, subscribePinStore } from "../../../../lib/conversationPinStore";
 import { CONVERSATION_TITLE_MAX_LENGTH, renameDecision } from "../../../../lib/conversationRename";
-import { seededStarterOrder, STARTER_ORDER_SEED_LIMIT } from "../../../../lib/chatStarterAvailability";
 import { chatStarterCatalogFor } from "../../../../lib/chatStarterCatalog";
 import { starterSeedMayWrite, type StarterSeedMemory } from "../../../../lib/chatStarterSeed";
 import type { Language } from "../../../../lib/language";
@@ -27,6 +25,8 @@ import { zhHant } from "../../../../locales/zhHant";
 import { reviewSeedFromChat } from "../../../../lib/chatReviewHandoff";
 import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
 import { DraftDictation } from "./DraftDictation";
+import { AnswerModel, ChatMarkdown, CopyAnswer, UserMessageContent } from "./ChatTranscript";
+export { ChatMarkdown } from "./ChatTranscript";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
 import { HandoffDraft } from "./WorkspaceHandoff";
@@ -49,7 +49,7 @@ const starterIcons = new Map([
   ["spreadsheet-from-answer", FileSpreadsheet],
   ["make-an-image", ImagePlus],
 ]);
-const sidebarCopy = { de: de.sidebar, en: en.sidebar, es: es.sidebar, fr: fr.sidebar, ko: ko.sidebar,
+export const sidebarCopy = { de: de.sidebar, en: en.sidebar, es: es.sidebar, fr: fr.sidebar, ko: ko.sidebar,
   pt: pt.sidebar, zh: zh.sidebar, "zh-Hant": zhHant.sidebar };
 const importedLabel = { de: de.journey.imported, en: en.journey.imported, es: es.journey.imported, fr: fr.journey.imported,
   ko: ko.journey.imported, pt: pt.journey.imported, zh: zh.journey.imported, "zh-Hant": zhHant.journey.imported };
@@ -83,9 +83,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const [sending, setSending] = useState(false);
   const sendingId = useRef<string | null>(null);
   const wasConnected = useRef(false);
-  const [starterSeed, setStarterSeed] = useState(() => Math.floor(Math.random() * STARTER_ORDER_SEED_LIMIT));
   const openVersion = useRef(0);
-  const listQuery = searching ? query.trim() : "";
+  const listQuery = product === "chat" || searching ? query.trim() : "";
   const result = searchResult?.query === listQuery ? searchResult : null;
   const selectedRow = selected && (rows.find(row => row.id === selected.id) ?? selected);
   const selectedPinned = selectedRow && (pins[selectedRow.id] ?? selectedRow.pinned);
@@ -130,7 +129,6 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setDraftValue("");
     setLive(null);
     sendingId.current = null;
-    setStarterSeed(Math.floor(Math.random() * STARTER_ORDER_SEED_LIMIT));
     setNotice(null);
   }), []);
 
@@ -221,11 +219,11 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     }
   }
 
-  async function rename(title: string) {
-    if (!selected || writing) return false;
-    const decision = renameDecision({ initialValue: chatTitle(selected, language), nextValue: title });
+  async function rename(title: string, row = selectedRow) {
+    if (!row || writing) return false;
+    const decision = renameDecision({ initialValue: chatTitle(row, language), nextValue: title });
     if (decision.action !== "save") return decision.action === "none";
-    const id = selected.id;
+    const id = row.id;
     const request = openVersion.current;
     setWriting(true);
     setNotice(null);
@@ -244,9 +242,9 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     }
   }
 
-  async function remove() {
-    if (!selected || writing) return;
-    const id = selected.id;
+  async function remove(row = selectedRow) {
+    if (!row || writing) return;
+    const id = row.id;
     const request = openVersion.current;
     setWriting(true);
     setNotice(null);
@@ -254,7 +252,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
       if (await window.desktop.removeChat(id)) {
         writeDesktopDraft(draftAccount.current, `${product}:${id}`, "");
         setRows((items) => items.filter((row) => row.id !== id));
-        if (openVersion.current === request) await open(null);
+        if (selected?.id === id && openVersion.current === request) await open(null);
       }
     } catch {
       if (openVersion.current === request) setNotice("deleteUnconfirmed");
@@ -264,10 +262,10 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     }
   }
 
-  async function togglePin() {
-    if (!account || !selectedRow) return;
-    await requestPin({ id: selectedRow.id, identity: account, ownerId: null, seen: selectedRow,
-      pinned: !selectedPinned, transport: ({ id, pinned, seq }) =>
+  async function togglePin(row = selectedRow) {
+    if (!account || !row) return;
+    await requestPin({ id: row.id, identity: account, ownerId: null, seen: row,
+      pinned: !(pins[row.id] ?? row.pinned), transport: ({ id, pinned, seq }) =>
         window.desktop.accountSettings<"pinConversation">({ action: "pinConversation", id, pinned, seq, accountScope: account }),
     });
     setRefresh(value => value + 1);
@@ -278,15 +276,15 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setRefresh(value => value + 1);
   }
 
-  async function moveToProject(projectId: string | null) {
-    if (!selectedRow || selectedRow.isLocked || writing) return;
+  async function moveToProject(projectId: string | null, target = selectedRow) {
+    if (!target || target.isLocked || writing) return;
     setWriting(true);
     try {
       const result = await window.desktop.accountSettings<"moveToProject">({
-        action: "moveToProject", id: selectedRow.id, projectId,
+        action: "moveToProject", id: target.id, projectId,
       });
-      setRows(items => items.map(row => row.id === selectedRow.id ? { ...row, projectId: result.projectId } : row));
-      setSelected(row => row?.id === selectedRow.id ? { ...row, projectId: result.projectId } : row);
+      setRows(items => items.map(row => row.id === target.id ? { ...row, projectId: result.projectId } : row));
+      setSelected(row => row?.id === target.id ? { ...row, projectId: result.projectId } : row);
     } finally {
       setWriting(false);
       refreshProjects();
@@ -323,7 +321,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
       if (result.savedQuestion) setDraft("");
       if (result.conversation) applyConversation(result.conversation);
       setLive(result.partial && result.conversation ? {
-        requestId, conversationId: result.conversation.id, text: result.partial, applied: result.applied,
+        requestId, conversationId: result.conversation.id, text: result.partial, modelId: result.modelId, applied: result.applied,
       } : null);
       setNotice(result.contextChanged ? "contextChanged" : statusNotice[result.status]);
       if (!result.conversation) setRefresh((value) => value + 1);
@@ -346,7 +344,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
     opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject,
     draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
-    sending, send, live, starterSeed, reload: () => setRefresh((value) => value + 1) };
+    sending, send, live, reload: () => setRefresh((value) => value + 1) };
 }
 
 type History = ReturnType<typeof useChatHistory>;
@@ -356,8 +354,8 @@ export function ChatHistorySearch({ chat }: { chat: History }) {
     onClick={() => chat.setSearching(!chat.searching)}><Search size={18} /></button>;
 }
 
-export function ChatHistory({ chat, product = "chat", busy = false, onImages, onImport }: {
-  chat: History; product?: DesktopTextProduct; busy?: boolean; onImages?: () => void; onImport?: () => void;
+export function ChatHistory({ chat, product = "chat", busy = false, canModify = false, onImages, onImport }: {
+  chat: History; product?: DesktopTextProduct; busy?: boolean; canModify?: boolean; onImages?: () => void; onImport?: () => void;
 }) {
   const { language } = chat;
   const copy = desktopChatCopy[language];
@@ -390,13 +388,13 @@ export function ChatHistory({ chat, product = "chat", busy = false, onImages, on
   const dates = { today: sidebar.dateToday, yesterday: sidebar.dateYesterday,
     lastSevenDays: sidebar.dateLastSevenDays, older: sidebar.dateOlder };
   function historyButton(row: ChatHistoryRow, label = chatTitle(row, language), snippet?: string) {
-    return <button type="button" disabled={busy || chat.sending || chat.writing} aria-current={chat.selected?.id === row.id ? "page" : undefined}
+    return <><button className="chat-history-title" type="button" disabled={busy || chat.sending || chat.writing} aria-current={chat.selected?.id === row.id ? "page" : undefined}
       title={label} onClick={() => void chat.open(row)}>
       {row.isLocked && <Lock size={13} aria-label={copy.locked} />}<span>{label}</span>
       {!snippet && (row.selectedModels?.length ?? 0) > 1 && <span className="chat-history-badge">
         {sidebar.modelCount.replace("{count}", String(row.selectedModels?.length))}</span>}
       {snippet && <small>{snippet}</small>}
-    </button>;
+    </button>{product === "chat" && <ChatConversationActions chat={chat} row={row} canModify={canModify} />}</>;
   }
   function group(title: string, rows: ChatHistoryRow[]) {
     if (!rows.length) return null;
@@ -422,10 +420,12 @@ export function ChatHistory({ chat, product = "chat", busy = false, onImages, on
     {onImport && <button type="button" className="chat-history-import" onClick={onImport}>
       <Folder size={15} aria-hidden="true" /> {importedLabel[language]}
     </button>}
-    {product === "chat" && chat.projects && <ConversationProjects chat={chat} active={projectId} select={setProjectFilter} />}
-    {chat.searching && <input autoFocus className="history-search" aria-label={copy.searchHistory}
-      value={chat.query} maxLength={80} onChange={(event) => chat.setQuery(event.currentTarget.value)} />}
-    {chat.rows.length > 0 && <div className="chat-organizer">
+    {(product === "chat" || chat.searching) && <label className="chat-history-search">
+      <Search size={15} aria-hidden="true" />
+      <input type="search" autoFocus={product === "review"} className="history-search" aria-label={copy.searchHistory}
+        placeholder={sidebar.searchPlaceholder} value={chat.query} maxLength={80} onChange={(event) => chat.setQuery(event.currentTarget.value)} />
+    </label>}
+    {(product === "chat" || chat.rows.length > 0) && <div className="chat-organizer">
       <button type="button" className="chat-organizer-toggle" aria-expanded={expanded} aria-controls={`${product}-history-filters`}
         onClick={() => setExpanded(!expanded)}>
         <SlidersHorizontal size={16} aria-hidden="true" />
@@ -435,6 +435,7 @@ export function ChatHistory({ chat, product = "chat", busy = false, onImages, on
       <div id={`${product}-history-filters`} className="chat-organizer-filters" hidden={!expanded}>
         <div role="group" aria-label={sidebar.conversationStates}>{statusFilters.map(filterButton)}</div>
         {modelFilters.length > 0 && <div role="group" aria-label={sidebar.modelFilterTitle}>{modelFilters.map(filterButton)}</div>}
+        {product === "chat" && chat.projects && <ConversationProjects chat={chat} active={projectId} select={setProjectFilter} />}
       </div>
     </div>}
     <div className="projects chat-history">
@@ -526,33 +527,35 @@ export function chatTitle(row: ChatHistoryRow, language: Language) {
     sourceTitle: row.sourceTitle, fallback: desktopChatCopy[language].continuedChat });
 }
 
-export function ChatConversationActions({ chat, canModify = true }: { chat: History; canModify?: boolean }) {
+export function ChatConversationActions({ chat, row, canModify = true }: { chat: History; row?: ChatHistoryRow; canModify?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [projectError, setProjectError] = useState(false);
   const menu = useRef<HTMLDetailsElement>(null);
   const { language } = chat;
   const copy = desktopChatCopy[language];
   const handoff = reviewHandoffCopy[language === "zh-Hant" ? "zhHant" : language];
-  if (!chat.selected) return null;
-  const selected = chat.selected;
-  return <details ref={menu} className="chat-conversation-actions">
-    <summary className="icon" aria-label={copy.conversationActions}><Ellipsis size={18} /></summary>
+  const selected = row ?? chat.selected;
+  if (!selected) return null;
+  return <details ref={menu} className={row ? "chat-conversation-actions chat-row-actions" : "chat-conversation-actions"}>
+    <summary className="icon" aria-label={row ? `${copy.conversationActions} · ${chatTitle(row, language)}` : copy.conversationActions}>
+      <Ellipsis size={row ? 15 : 18} aria-hidden="true" />
+    </summary>
     <div className="chat-action-menu">
       {draft === null ? <>
-        <button type="button" disabled={chat.writing || chat.sending} onClick={() => { void chat.togglePin(); }}>
+        <button type="button" disabled={chat.writing || chat.sending} onClick={() => { void chat.togglePin(selected); }}>
           {selected.pinned ? sidebarCopy[language].unpinChat : sidebarCopy[language].pinChat}
         </button>
         {canModify && !selected.isLocked && <><button type="button" disabled={chat.writing || chat.sending}
           onClick={() => setDraft(chatTitle(selected, language))}>{copy.rename}</button>
         <button type="button" disabled={chat.writing || chat.sending} onClick={() => {
           if (menu.current) menu.current.open = false;
-          void chat.remove().finally(() => menu.current?.querySelector("summary")?.focus());
+          void chat.remove(selected).finally(() => menu.current?.querySelector("summary")?.focus());
         }}>{copy.deleteConversation}</button></>}
         {canModify && !selected.isLocked && !!chat.projects?.length && <label className="chat-project-move">
           {sidebarCopy[language].moveToProject}
           <select aria-label={sidebarCopy[language].moveToProject} value={selected.projectId ?? ""} disabled={chat.writing || chat.sending} onChange={event => {
             setProjectError(false);
-            void chat.moveToProject(event.currentTarget.value || null).catch(() => setProjectError(true));
+            void chat.moveToProject(event.currentTarget.value || null, selected).catch(() => setProjectError(true));
           }}>
             <option value="">{sidebarCopy[language].uncategorizedProject}</option>
             {chat.projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
@@ -561,7 +564,7 @@ export function ChatConversationActions({ chat, canModify = true }: { chat: Hist
         {projectError && <p role="alert">{desktopShellCopy[language].actionFailed}</p>}
       </> : <form onSubmit={(event) => {
         event.preventDefault();
-        void chat.rename(draft).then((saved) => {
+        void chat.rename(draft, selected).then((saved) => {
           if (!saved) return;
           setDraft(null);
           if (menu.current) menu.current.open = false;
@@ -574,13 +577,6 @@ export function ChatConversationActions({ chat, canModify = true }: { chat: Hist
       </form>}
     </div>
   </details>;
-}
-
-export function ChatMarkdown({ content }: { content: string }) {
-  return <AnswerMarkdown components={{
-    a: ({ children }) => <span>{children}</span>,
-    img: ({ alt }) => <span>{alt}</span>,
-  }}>{content}</AnswerMarkdown>;
 }
 
 export function ImportedSource({ id, language }: { id: string; language: Language }) {
@@ -661,18 +657,25 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   useEffect(() => {
     if (!chatWrite) return;
     let alive = true;
-    void window.desktop.chatModels().then((items) => {
-      if (alive) { setModels(items); setModelError(!items.length); }
-    }, () => { if (alive) setModelError(true); });
-    return () => { alive = false; };
-  }, [chatWrite]);
+    let pending = false;
+    function loadModels() {
+      if (pending) return;
+      pending = true;
+      void window.desktop.chatModels().then((items) => {
+        if (alive) { setModels(items); setModelError(!items.length); }
+      }, () => { if (alive) setModelError(true); }).finally(() => { pending = false; });
+    }
+    loadModels();
+    window.addEventListener("focus", loadModels);
+    return () => { alive = false; window.removeEventListener("focus", loadModels); };
+  }, [chat.account, chatWrite]);
   useLayoutEffect(() => {
     if (scroll.current && nearBottom.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat.live, chat.conversation]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.sending) return;
+    if (!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.sending || chat.writing) return;
     const attachmentUploadIds = await attachments.prepare();
     if (!attachmentUploadIds) return;
     const saved = await chat.send({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? effort : "default", attachmentUploadIds,
@@ -686,8 +689,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     const { role } = message;
     return role === "user" || role === "assistant" ? [{ ...message, role } as const] : [];
   }) ?? [];
-  const showComposer = chatWrite && !chat.selected?.isLocked && (!activeId || Boolean(chat.conversation));
-  return <>
+  const showComposer = !chat.selected?.isLocked && (!activeId || Boolean(chat.conversation));
+  const actualModels = new Map(chat.conversation?.responseAttempts?.flatMap(({ assistantMessageId, actualModelId, provider }) =>
+    assistantMessageId && actualModelId ? [[assistantMessageId, { id: actualModelId, provider }] as const] : []));
+  return <div className="desktop-chat-workspace" data-thread={Boolean(chat.conversation || chat.sending)}>
     <div className="scroll" ref={scroll} onScroll={(event) => {
       const pane = event.currentTarget;
       nearBottom.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 64;
@@ -695,26 +700,29 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     <div className="content chat-content">
       {!chat.selected && !chat.sending && <section className="welcome chat-welcome">
         <h2>{copy.welcome}<br />{copy.welcomeHelp}</h2>
-        {!chatWrite && <p role="status">{copy.sendUnavailable}</p>}
         {onImport && <button className="chat-import" type="button" onClick={onImport}>
           <FolderInput size={20} aria-hidden="true" /><span><strong>{copy.continueImported}</strong>
             <small>{copy.importDescription}</small></span><ArrowRight size={18} />
         </button>}
         {!!starters?.length && <section className="chat-starters" aria-label={copy.starterSuggestions}>
           <p>{starterCopy.hint}</p>
-          <ul>{seededStarterOrder(starters, chat.starterSeed).map((item) => {
-            const entry = language === "en" ? undefined : chatStarters.find(({ id }) => id === item.id);
-            const card = entry ? starterCopy.cards[entry.labelKey.split(".")[2] as keyof typeof starterCopy.cards] ?? item : item;
+          <ul>{starters.map((item) => {
+            const entry = chatStarters.find(({ id }) => id === item.id);
+            const card = entry && language !== "en" ? starterCopy.cards[entry.labelKey.split(".")[2] as keyof typeof starterCopy.cards] ?? item : item;
             const descriptionId = `chat-starter-${item.id}-outcome`;
             const Icon = starterIcons.get(item.id) ?? Sparkles;
+            const needsAttachment = entry?.seed.attachment === true;
+            const openAttachment = chatWrite && needsAttachment && attachments.enabled;
             return <li key={item.id}>
-              <button type="button" onClick={() => {
+              <button type="button" data-starter-id={item.id} onClick={() => {
                 if (starterSeedMayWrite({ draft: chat.draft, memory: lastSeed.current })) {
                   chat.setDraft(card.seed);
                   lastSeed.current = { scope: "new", text: card.seed, restore: "off", applied: "off" };
                 }
                 composer.current?.focus();
-              }} aria-describedby={descriptionId}><span className="chat-starter-icon"><Icon size={16} aria-hidden="true" /></span><strong>{card.label}</strong></button>
+                if (openAttachment) document.getElementById("chat-starter-attach")?.click();
+              }} aria-describedby={descriptionId}><span className="chat-starter-icon"><Icon size={16} aria-hidden="true" /></span>
+                <strong>{card.label}</strong>{openAttachment && <Paperclip size={13} aria-hidden="true" />}</button>
               <span id={descriptionId} hidden>{card.outcome}</span>
             </li>;
           })}</ul>
@@ -729,27 +737,36 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             const review = message.role === "assistant" && message.status === "normal"
               ? reviewSeedFromChat(currentMessages, message.id, copy.earlierQuestions) : null;
             return <li className={`entry entry--${message.role}`} key={message.id}>
-              <div data-handoff-content="chat">{message.role === "user" ? message.content : <ChatMarkdown content={message.content} />}</div>
-              {message.role === "user" && <SavedAttachments message={message} language={language} />}
-              <GeneratedFiles artifacts={message.artifacts} language={language} />
-              {message.searchMetadata?.reasoningEffort && <small className="chat-effort">
-                {message.searchMetadata.reasoningEffort.applied && `${copy.reasoningEffort} · ${effortLabels[message.searchMetadata.reasoningEffort.applied]}`}
-                {message.searchMetadata.reasoningEffort.requested !== message.searchMetadata.reasoningEffort.applied &&
-                  ` · ${copy.requested.replace("{effort}", effortLabels[message.searchMetadata.reasoningEffort.requested])}`}
-              </small>}
-              {message.role === "assistant" && message.memoryUsedCount && <small className="chat-effort">
-                {desktopPrivacyCopy(language).memoriesUsed.replace("{count}", message.memoryUsedCount.toLocaleString(language))}
-              </small>}
-              {review && chat.conversation && onCompare && <button className="chat-review-link" type="button" onClick={() =>
-                onCompare(review, chat.conversation?.surface === "continuation" ? chat.conversation.id : undefined)}>
-                {copy.compareReview}
-              </button>}
+              {message.role === "assistant" && <AnswerModel {...(actualModels.get(message.id) ?? { id: message.modelId })} />}
+              <div className="chat-message-bubble">
+                {message.role === "assistant" && <CopyAnswer content={message.content} language={language} />}
+                <div data-handoff-content="chat">{message.role === "user"
+                  ? <UserMessageContent content={message.content} language={language} /> : <ChatMarkdown content={message.content} language={language} />}</div>
+                {message.role === "user" && <SavedAttachments message={message} language={language} />}
+                <GeneratedFiles artifacts={message.artifacts} language={language} />
+                {message.searchMetadata?.reasoningEffort && <small className="chat-effort">
+                  {message.searchMetadata.reasoningEffort.applied && `${copy.reasoningEffort} · ${effortLabels[message.searchMetadata.reasoningEffort.applied]}`}
+                  {message.searchMetadata.reasoningEffort.requested !== message.searchMetadata.reasoningEffort.applied &&
+                    ` · ${copy.requested.replace("{effort}", effortLabels[message.searchMetadata.reasoningEffort.requested])}`}
+                </small>}
+                {message.role === "assistant" && message.memoryUsedCount && <small className="chat-effort">
+                  {desktopPrivacyCopy(language).memoriesUsed.replace("{count}", message.memoryUsedCount.toLocaleString(language))}
+                </small>}
+                {review && chat.conversation && onCompare && <button className="chat-review-link" type="button" onClick={() =>
+                  onCompare(review, chat.conversation?.surface === "continuation" ? chat.conversation.id : undefined)}>
+                  {copy.compareReview}
+                </button>}
+              </div>
             </li>;
           })}
-          {live?.savedPrompt && <li className="entry entry--user">{live.savedPrompt}</li>}
+          {live?.savedPrompt && <li className="entry entry--user"><div className="chat-message-bubble">
+            <UserMessageContent content={live.savedPrompt} language={language} />
+          </div></li>}
           {live?.text && <li className="entry entry--assistant">
-            <ChatMarkdown content={live.text} />
+            <AnswerModel id={live.modelId} />
+            <div className="chat-message-bubble"><ChatMarkdown content={live.text} language={language} />
             {live.applied && <small className="chat-effort">{copy.reasoningEffort} · {effortLabels[live.applied]}</small>}
+            </div>
           </li>}
         </ol>
         {chat.sending && !live?.text && <p className="chat-effort" role="status">{copy.waiting}</p>}
@@ -759,6 +776,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     </div>
     </div>
     {showComposer && <div className="composer-slot chat-composer-slot">
+      {!chatWrite && <p className="chat-compose-notice" role="status">{copy.sendUnavailable}</p>}
       {modelError && <p className="notice" role="alert">{copy.modelsUnavailable}</p>}
       <form className="composer chat-composer" onSubmit={submit} aria-label={copy.composer}>
         {draftExcerpt && <HandoffDraft handoff={draftExcerpt} busy={chat.sending} language={language} />}
@@ -776,7 +794,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             }
           }} />
         <div className="composer-actions">
-          <AttachmentPicker draft={attachments} busy={chat.sending} />
+          <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" />
           <ChatDraftLocation location={location} language={language} draft={chat.draft} setDraft={chat.setDraft}
             deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
           <span className="spacer" />
@@ -806,9 +824,9 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           {chat.sending
             ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={17} /></button>
             : <button className="send" type="submit" aria-label={copy.send}
-              disabled={!online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.writing || attachments.uploading}><ArrowUp size={18} /></button>}
+              disabled={!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.writing || attachments.uploading}><ArrowUp size={18} /></button>}
         </div>
       </form>
     </div>}
-  </>;
+  </div>;
 }

@@ -80,6 +80,9 @@ export const chatMessage = z.object({
 export const chatConversation = chatHistoryRow.extend({
   desktopReviewWritable: z.boolean().optional(),
   messages: z.array(chatMessage),
+  responseAttempts: z.array(z.object({
+    assistantMessageId: chatId, actualModelId: z.string().nullish(), provider: z.string().nullish(),
+  })).optional(),
   messagePage: z.object({ nextCursor: chatId.nullable() }),
   selectionMode: z.enum(["auto", "manual"]),
   selectedModels: z.array(z.string()),
@@ -119,6 +122,7 @@ export type ChatTurnProgress = {
   conversationId: string;
   savedPrompt?: string;
   text?: string;
+  modelId?: string;
   applied?: z.infer<typeof chatEffort>;
 };
 export type ChatTurnResult = {
@@ -126,12 +130,13 @@ export type ChatTurnResult = {
   savedQuestion: boolean;
   status: "saved" | "partial" | "stopped" | "failed" | "unconfirmed";
   partial: string;
+  modelId?: string;
   applied?: z.infer<typeof chatEffort>;
   contextChanged?: boolean;
 };
 export type ReviewCapability = z.infer<typeof reviewCapability>;
 export type ReviewTurnInput = z.infer<typeof reviewTurnInput>;
-export type ReviewTurnProgress = ChatTurnProgress & { modelId?: string };
+export type ReviewTurnProgress = ChatTurnProgress;
 export type ReviewImageOffer = {
   prompt: string;
   models: string[];
