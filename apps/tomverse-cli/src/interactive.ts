@@ -70,6 +70,7 @@ export const renderApproval = (view: ApprovalView) => {
 /** What is done without asking, shown so the person still sees every action. */
 export const renderRemembered = (view: ApprovalView, rule: RememberedRule) => {
     if (rule === "web_host") return safeText(`  · reading without asking (you allowed this site for this run): ${safeLine(view.web!.url)}`);
+    if (rule === "browser_origin") return safeText(`  · acting in the browser without asking (you allowed this site for this run): ${safeLine(view.browser!.selector)} on ${safeLine(view.browser!.origin)}`);
     if (rule === "file_edits") {
         const body = renderApproval(view).split("\n").slice(1).join("\n");
         return [`── Changing ${view.patch!.length} file(s) without asking: you allowed file edits for this run (/approvals clear to stop) ──`, body].join("\n");

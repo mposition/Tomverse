@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowLeft, ArrowRight, MousePointer2, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Crosshair, MousePointer2, Plus, RotateCw, Square, X } from "lucide-react";
 import type { Language } from "../../../../lib/language";
+import { desktopCodeBrowserCopy } from "../../../../locales/desktopCodeBrowser";
 import { mobileCopy } from "../../../../locales/mobile";
 import { loopbackBrowserUrl, MAX_CODE_BROWSER_TABS, type BrowserCommand, type BrowserState } from "../browser-contract";
+import { MAX_ELEMENT_COMMENTS } from "../element-comment";
+import { ElementComments, type Pin } from "./ElementComments";
 
 const copy: Record<Language, readonly [string, string, string, string, string, string, string, string]> = {
   en: ["Browser", "Local development URL", "Back", "Forward", "Reload", "Stop loading", "Enter an HTTP loopback address with a port.", "The page could not load."],
@@ -22,13 +25,19 @@ const tabControls: Record<Language, readonly [string, string, string, string]> =
 };
 export const codeBrowserLabel = (language: Language) => copy[language][0];
 
-export function CodeBrowser({ language, hidden, occluded, canShare, onClose }: {
+export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = false, onAttachComments, onClose }: {
   language: Language;
   hidden: boolean;
   occluded: boolean;
   canShare: boolean;
+  /** The task of this panel is running: a tab the agent opened shows who holds it. */
+  agentLive?: boolean;
+  /** Puts the picked elements and their comments into the next message. */
+  onAttachComments?: (block: string) => void;
   onClose: () => void;
 }) {
+  const pickCopy = desktopCodeBrowserCopy[language];
+  const [pins, setPins] = useState<Pin[]>([]);
   const [label, address, back, forward, reload, stop, invalid, failed] = copy[language];
   const common = mobileCopy[language];
   const slot = useRef<HTMLDivElement>(null);
@@ -51,7 +60,17 @@ export function CodeBrowser({ language, hidden, occluded, canShare, onClose }: {
   function send(command: BrowserCommand) { void window.desktop.codeBrowser(command).catch(() => setInvalidTab(tab)); }
   useEffect(() => {
     const addresses = new Map<string, string>();
+    const adopted = new Set<string>();
+    const unsubscribePick = window.desktop.subscribeCodeBrowserPick((pick) => {
+      setPins((previous) => previous.length >= MAX_ELEMENT_COMMENTS ? previous : [...previous, { pick, comment: "" }]);
+    });
     const unsubscribe = window.desktop.subscribeCodeBrowser((next) => {
+      // A tab the agent opened is new to this panel: show it, once, and bring it forward.
+      if (next.agent && !adopted.has(next.tab)) {
+        adopted.add(next.tab);
+        setTabList((previous) => previous.includes(next.tab) ? previous : [...previous, next.tab].slice(-MAX_CODE_BROWSER_TABS));
+        setSelected(next.tab);
+      }
       setStates((previous) => ({ ...previous, [next.tab]: next }));
       setShared((previous) => previous?.tab === next.tab && (previous.url !== next.url || next.loading || next.failed) ? undefined : previous);
       if (next.url && next.url !== addresses.get(next.tab)) {
@@ -59,7 +78,9 @@ export function CodeBrowser({ language, hidden, occluded, canShare, onClose }: {
         setDrafts((previous) => ({ ...previous, [next.tab]: next.url }));
       }
     });
-    return () => { unsubscribe(); void window.desktop.codeBrowser({ type: "close" }).catch(() => {}); };
+    // Tabs the agent opened while this panel was closed.
+    void window.desktop.codeBrowser({ type: "sync" }).catch(() => {});
+    return () => { unsubscribe(); unsubscribePick(); void window.desktop.codeBrowser({ type: "close" }).catch(() => {}); };
   }, []);
   useEffect(() => {
     const element = slot.current;
@@ -145,7 +166,17 @@ export function CodeBrowser({ language, hidden, occluded, canShare, onClose }: {
       </form>
       <button type="button" className="icon" aria-label={focusPage} disabled={!state?.url || state?.failed}
         onClick={() => send({ type: "focus", tab })}><MousePointer2 size={14} /></button>
+      <button type="button" className="icon" aria-label={state?.picking ? pickCopy.pickCancel : pickCopy.pick} aria-pressed={Boolean(state?.picking)}
+        disabled={!state?.url || state.failed || state.loading || pins.length >= MAX_ELEMENT_COMMENTS}
+        onClick={() => void window.desktop.codeBrowser({ type: "pick", tab, enabled: !state?.picking }).catch(() => {})}><Crosshair size={14} /></button>
     </div>
+    {agentLive && state?.agent && <p className="code-browser-agent" role="status" data-state={state.agent}>
+      <span>{state.agent === "stopped" ? pickCopy.agentStopped : pickCopy.agentUsing}</span>
+      <button type="button" className="soft" onClick={() => send({ type: state.agent === "stopped" ? "agent-resume" : "agent-stop", tab })}>
+        {state.agent === "stopped" ? pickCopy.resumeAgent : pickCopy.stopAgent}</button>
+    </p>}
+    {state?.picking && <p className="code-browser-hint" role="status">{pickCopy.pickHint}</p>}
+    <ElementComments language={language} pins={pins} onChange={setPins} onAttach={(block) => onAttachComments?.(block)} />
     {canShare && <button type="button" className="soft" aria-pressed={Boolean(sharing)}
       disabled={!state?.url || state.loading || state.failed} onClick={() => {
         void window.desktop.codeBrowser({ type: sharing ? "unshare" : "share", tab }).then((allowed) => {

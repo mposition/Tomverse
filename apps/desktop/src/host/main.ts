@@ -7,6 +7,7 @@ import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
+import { createBrowserAgentBridge } from "./browser-agent-bridge";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
@@ -132,6 +133,7 @@ const fixtureSchema = z.object({
   endpoint: z.url().regex(/^http:\/\/127\.0\.0\.1:[0-9]+\/api\/code\/v1$/),
   key: z.literal("tvk_abcdefgh_" + "A".repeat(43)),
   browserInspection: z.boolean().optional(),
+  browserAgent: z.boolean().optional(),
   codex: cliFixtureInput.optional(),
   claude: cliFixtureInput.optional(),
   qwen: qwenFixtureInput.optional(),
@@ -884,6 +886,7 @@ function answer(decision: Decision) {
 function stop() {
   if (!runId || !worker || state.task?.status === "stopping") return;
   if (codeBrowser) codeBrowser.grant = undefined;
+  browserAgent.abortAll();
   revokeCodePlugin();
   if (state.task) {
     state.task.status = "stopping";
@@ -995,6 +998,7 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
+  if (event.type === "browser-agent") { void browserAgent.handle(event); return; }
   if (event.type === "queue-result") {
     if (pendingQueue?.requestId === event.requestId) {
       pendingQueue.resolve(event.ok && event.runId === runId && event.runId !== discardedRunId);
@@ -2407,6 +2411,23 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
   }
 }
 
+// The agent's browser tools and the element picker; the checks that matter are in browser-agent-policy.ts.
+const browserAgent = createBrowserAgentBridge({
+  enabled: () => DESKTOP_FIXTURE_ALLOWED && fixture?.browserAgent === true && codeConnection() === fixture,
+  run: () => ({
+    runId: runId && runId !== discardedRunId ? runId : null, taskId: state.task?.id ?? null,
+    running: Boolean(state.busy && state.task?.status === "running"), apiExecution: state.task?.execution?.executionMode === "tomverse_api",
+    suspended, scope: currentCodeBrowserScope(),
+  }),
+  tab: (id) => codeBrowser?.tabs.get(id),
+  tabs: () => [...(codeBrowser?.tabs ?? [])],
+  open: (tab, url) => runCodeBrowser({ type: "open", tab, url }),
+  publish: (browserState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-state", browserState); },
+  publishPick: (pick) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-pick", pick); },
+  reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "browser-agent-result", runId: replyRunId, requestId, reply }); },
+  clean: (text) => fixture ? cleanText(text, fixture.key) : text,
+});
+
 function currentCodeBrowserScope() {
   if (!DESKTOP_FIXTURE_ALLOWED || !fixture || codeConnection() !== fixture || signingOut || closing) return null;
   const scope = currentHistoryScope();
@@ -2416,12 +2437,14 @@ function currentCodeBrowserScope() {
 function closeCodeBrowser() {
   const browser = codeBrowser;
   codeBrowser = undefined;
+  browserAgent.reset();
   for (const view of browser?.tabs.values() ?? []) view.close();
 }
 
 async function runCodeBrowser(value: unknown) {
   const command = browserCommand.parse(value);
   if (command.type === "close") { closeCodeBrowser(); return; }
+  if (command.type === "sync" || command.type === "pick" || command.type === "agent-stop" || command.type === "agent-resume") return browserAgent.command(command);
   const owner = mainWindow;
   const scope = currentCodeBrowserScope();
   if (!scope || !owner || owner.isDestroyed()) return;
@@ -2452,7 +2475,7 @@ async function runCodeBrowser(value: unknown) {
     const view = createCodeBrowserView(owner, target.origin, tabId, (next) => {
       if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
       if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
-        owner.webContents.send("desktop:code-browser-state", next);
+        owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
       }
     });
     browser.tabs.set(tabId, view);
@@ -3235,7 +3258,8 @@ function registerIpc() {
       approval?.settings.automaticFrom === "tomverse_api"
       ? { mode: input.mode, project, approval } : undefined;
     send({ type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
-      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserInspection ? { browserSnapshot: true } : {}) });
+      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserInspection ? { browserSnapshot: true } : {}),
+      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserAgent ? { browserAgent: true } : {}) });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     codeWorktreeDraft = undefined;

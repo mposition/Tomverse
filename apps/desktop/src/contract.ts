@@ -10,7 +10,7 @@ import type {
 import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, ImageHistory, ImageRequest } from "./images-contract";
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
-import type { BrowserCommand, BrowserState } from "./browser-contract";
+import type { BrowserCommand, BrowserState, ElementPick } from "./browser-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
@@ -374,6 +374,8 @@ export type ApprovalRequest = {
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
+  /** A click or typing in the local browser tab: the site, the page, the element and the text the agent would type. */
+  browser?: { action: "click" | "type"; origin: string; url: string; selector: string; text?: string; clear?: boolean; submit?: boolean };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
 };
 
@@ -386,6 +388,7 @@ export type DesktopApi = {
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
+  subscribeCodeBrowserPick: (listener: (pick: ElementPick) => void) => () => void;
   webView: (command: WebViewCommand) => Promise<void>;
   subscribeWebView: (listener: (state: WebViewState | null) => void) => () => void;
   state(): Promise<Snapshot>;

@@ -24,6 +24,7 @@ import { nativePatches, openNativeEdits, verifiedContinuationEdits } from "./nat
 import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
+import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -35,6 +36,7 @@ type ActiveRun = {
   abort: AbortController;
   runner?: Runner;
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
+  browserAgent?: Map<string, (reply: unknown) => void>;
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
   queueOperation?: (operation: QueueOperation) => boolean;
@@ -560,6 +562,9 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
     ...(view.web ? { web: { url: clean(view.web.url), host: clean(view.web.host) } } : {}),
+    ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
+      selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
+      ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
@@ -587,6 +592,26 @@ function requestBrowserSnapshot(control: ActiveRun, signal: AbortSignal) {
     stop.addEventListener("abort", aborted, { once: true });
     control.browserSnapshot = { requestId, settle };
     send({ type: "browser-snapshot", runId: control.runId, requestId });
+  });
+}
+
+/** One request of the agent's browser tools; the main process answers it (or refuses it) and the runner never touches the page. */
+function requestBrowserAgent(control: ActiveRun, request: BrowserAgentRequest, signal: AbortSignal) {
+  return new Promise<unknown>((resolve) => {
+    // The main process has its own, shorter limits and answers first; these only end a request nobody answers.
+    const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(request.tool === "navigate" ? 40_000 : 30_000)]);
+    if (stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const pending = control.browserAgent ??= new Map();
+    const settle = (reply: unknown) => {
+      stop.removeEventListener("abort", aborted);
+      pending.delete(requestId);
+      resolve(reply);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    pending.set(requestId, settle);
+    send({ type: "browser-agent", runId: control.runId, requestId, request });
   });
 }
 
@@ -887,12 +912,15 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
         /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
         ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
+      browserAgent: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserAgent &&
+        /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
+        ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
       prompter: {
         confirm: async () => false,
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.browser?.url, view.browser?.selector, view.browser?.text, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -1534,6 +1562,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     if (active.pluginRequest?.requestId === data.requestId) active.pluginRequest.settle(data.result);
   } else if (data.type === "browser-snapshot-result" && active?.runId === data.runId) {
     if (active.browserSnapshot?.requestId === data.requestId) active.browserSnapshot.settle(data.text);
+  } else if (data.type === "browser-agent-result" && active?.runId === data.runId) {
+    active.browserAgent?.get(data.requestId)?.(data.reply);
   } else if (data.type === "answer" && active?.runId === data.runId) {
     const approval = active.approval;
     if (!approval || approval.id !== data.decision.id || (data.decision.action === "run" && !approval.canRemember)) return;
