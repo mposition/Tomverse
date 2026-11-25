@@ -333,6 +333,10 @@ export function desktopReviewWriteEnabled() {
   return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED === "true";
 }
 
+export function desktopComposerToolsEnabled() {
+  return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED === "true";
+}
+
 export function desktopAttachmentEnabled() {
   return (desktopChatWriteEnabled() || desktopReviewWriteEnabled()) && process.env.TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED === "true";
 }

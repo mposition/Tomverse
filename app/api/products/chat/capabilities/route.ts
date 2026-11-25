@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopComposerToolsEnabled, desktopReviewWriteEnabled } from "@/lib/desktopReadApiContract";
 import {
   getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
@@ -49,8 +49,9 @@ async function desktopChatCapabilities(userId: string) {
   ]);
   const reviewPlan = desktopReview ? plan : null;
   const desktopAttachments = attachments && plan?.allowAttachments === true;
+  const desktopSearchReadiness = resolveWebSearchBackendReadiness();
   const modelCapabilities = new Set(resolveChatStarterCapabilities({
-    webSearchBackendReadiness: resolveWebSearchBackendReadiness(),
+    webSearchBackendReadiness: desktopSearchReadiness,
   }).filter((capability) => capability === "generated-artifact" ||
     (desktopAttachments && (capability === "document-attachment" || capability === "image-input"))));
   const starters = startersEnabled ? selectVisibleStarterCards({
@@ -69,7 +70,7 @@ async function desktopChatCapabilities(userId: string) {
     prices: model.prices.map(({ quality, size, credits }) => ({ quality, size, credits })),
   }));
   return { desktopWrite, desktopImport: importEnabled && continuationEnabled, desktopStarters: starters,
-    desktopAttachments,
+    desktopAttachments, desktopComposerTools: desktopComposerToolsEnabled(), desktopSearchReadiness,
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };

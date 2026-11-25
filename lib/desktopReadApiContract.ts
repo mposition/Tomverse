@@ -18,6 +18,7 @@ export {
   DESKTOP_CHAT_SEARCH,
   desktopAttachmentEnabled,
   desktopChatWriteEnabled,
+  desktopComposerToolsEnabled,
   desktopReadApiRoute,
   desktopReviewWriteEnabled,
   desktopWriteApiRoute,
