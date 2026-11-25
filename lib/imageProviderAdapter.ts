@@ -1,5 +1,7 @@
 import "server-only";
 
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_RENDERING_SPEED, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
+
 import {
   IMAGE_GENERATION_MODEL_ID,
   imageModelSupportsEdit,
@@ -561,6 +563,9 @@ const dispatchImageRequest = async (
   }
   if (model.provider === "qwen") {
     return generateWithQwen(model, input);
+  }
+  if (model.provider === "ideogram") {
+    return generateWithIdeogram(model, input);
   }
   if (model.provider === "bfl") {
     return generateWithBfl(model, input);
@@ -1300,13 +1305,28 @@ const generateWithQwen = async (
     );
   }
 
-  // From here the image was generated and billed: a failure to fetch or check
-  // it is not a refusal, whatever HTTP status the download answered
-  // (`afterGeneration`, read by the billing measurement).
-  const deliver = async (): Promise<ImageProviderResult> => {
+  return downloadGeneratedImage({
+    url: parsed.url, acceptsUrl: isQwenAssetUrl, model, size: input.size, providerRequestId, requestParams,
+    providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
+  });
+};
+
+/** Both providers return temporary links. Download without credentials or redirects. */
+const downloadGeneratedImage = async ({
+  url, acceptsUrl, model, size, providerRequestId, requestParams, providerUsage,
+}: {
+  url: string;
+  acceptsUrl: (value: string) => boolean;
+  model: ImageModelProfile;
+  size: ImageSize;
+  providerRequestId: string | null;
+  requestParams: Record<string, unknown>;
+  providerUsage: ImageProviderResult["providerUsage"];
+}): Promise<ImageProviderResult> => {
+  try {
     let asset: Response;
     try {
-      asset = await fetch(parsed.url, {
+      asset = await fetch(url, {
         redirect: "manual",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
@@ -1322,7 +1342,7 @@ const generateWithQwen = async (
     // Cancelled, not drained, as on the fal path: an unread image body pins its
     // connection, and reading it would spend the memory the limit refuses.
     const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
-    if (!asset.ok || !isQwenAssetUrl(asset.url)) {
+    if (!asset.ok || !acceptsUrl(asset.url)) {
       await releaseAsset();
       throw new ImageProviderError(
         "provider_failed",
@@ -1373,7 +1393,7 @@ const generateWithQwen = async (
       );
     }
     const dimensions = readImageDimensions(imageBytes, mimeType);
-    const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+    const [expectedWidth, expectedHeight] = size.split("x").map(Number);
     if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
       throw new ImageProviderError(
         "provider_failed",
@@ -1391,20 +1411,74 @@ const generateWithQwen = async (
       inputTokens: 0,
       thinkingTokens: 0,
       outputTokens: 0,
-      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
+      providerUsage,
       providerRequestId,
       provenance: [...model.provenance],
       outputWidth: dimensions.width,
       outputHeight: dimensions.height,
       requestParams,
     };
-  };
-  try {
-    return await deliver();
   } catch (error) {
     if (error instanceof ImageProviderError) error.afterGeneration = true;
     throw error;
   }
+};
+
+const generateWithIdeogram = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (model.apiModelId !== IDEOGRAM_MODEL_ID || input.size !== IDEOGRAM_SIZE || !price) {
+    throw new ImageProviderError("provider_failed", "Unsupported Ideogram generation option.");
+  }
+  const apiKey = process.env.IDEOGRAM_API_KEY?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Ideogram API key is not configured.");
+
+  const body = {
+    prompt: input.prompt,
+    resolution: input.size,
+    rendering_speed: IDEOGRAM_RENDERING_SPEED[input.quality],
+    num_images: 1,
+    magic_prompt: "off",
+    async: false,
+  };
+  const requestParams = auditableRequestParams(body);
+  let response: Response;
+  try {
+    // A lost response can follow a billable generation. Submit only once.
+    response = await fetch("https://api.ideogram.ai/v2/image/generate/ideogram-4", {
+      method: "POST",
+      headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Ideogram generation request failed.", null, null, requestParams);
+  }
+
+  // The JSON envelope contains a link, never the image bytes.
+  const payload = await readResponseToBuffer(response, 256 * 1024)
+    .then(bytes => JSON.parse(bytes.toString("utf8")))
+    .catch(() => null);
+  const requestId = typeof payload?.generation_id === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(payload.generation_id)
+    ? payload.generation_id : null;
+  if (!response.ok) {
+    const phase = response.status === 422 ? "provider_moderation_rejected"
+      : response.status === 402 ? "provider_failed" : classifyImageProviderFailure(response.status, null);
+    throw new ImageProviderError(phase, `Ideogram returned HTTP ${response.status}.`, response.status, requestId, requestParams);
+  }
+  const item = Array.isArray(payload?.data) && payload.data.length === 1 ? payload.data[0] : null;
+  if (item?.is_image_safe === false) {
+    throw new ImageProviderError("provider_moderation_rejected", "Ideogram withheld the image.", response.status, requestId, requestParams);
+  }
+  if (!requestId || item?.is_image_safe !== true || item.resolution !== input.size || !isIdeogramAssetUrl(item.url)) {
+    const error = new ImageProviderError("provider_failed", "Ideogram returned an unusable image.", response.status, requestId, requestParams);
+    error.afterGeneration = true;
+    throw error;
+  }
+  return downloadGeneratedImage({
+    url: item.url, acceptsUrl: isIdeogramAssetUrl, model, size: input.size,
+    providerRequestId: requestId, requestParams, providerUsage: null,
+  });
 };
 
 /**

@@ -216,7 +216,9 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
     assert.equal(imageThinkingCapEnforced(model), true, model.id);
   }
   // A provider with no adapter, or a prototype key, has no billing answer.
-  assert.equal(imageThinkingBilling("ideogram"), null);
+  assert.equal(imageThinkingBilling("unknown"), null);
+  assert.equal(imageThinkingBilling("ideogram", "ideogram-4"), "not_billed");
+  assert.equal(imageThinkingBilling("ideogram", "unregistered"), null);
   assert.equal(imageThinkingBilling("toString"), null);
   // Review finding 2026-11-07: an inherited key with a model id must not throw.
   assert.equal(imageThinkingBilling("toString", "qwen-image-3.0"), null);
@@ -753,7 +755,7 @@ test("every registered model resolves to an owner that can be labelled", () => {
   // The label table lives in the component and is typed exhaustively, so this
   // asserts the other half: that no registry entry produces an owner outside
   // the union the table is keyed by.
-  const known = new Set(["openai", "google", "xai", "fal", "qwen", "bfl"]);
+  const known = new Set(["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram"]);
   for (const model of IMAGE_MODEL_REGISTRY) {
     const { owner, gateway } = imageModelBrandParts(model);
     assert.ok(known.has(owner), `${model.id} owner ${owner} has no brand label`);

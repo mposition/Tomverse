@@ -545,7 +545,14 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | FLUX 3 Image (`flux-3-image`·`flux-3-image-klein`, BFL 직접) | **활성 (기본 켜짐, 2026-11-17)** | 1K 장당 Image $0.048 · 판매가 75크레딧 / Klein $0.009 · 20크레딧 (bfl.ai/pricing 2026-11-16) | 아래 "BFL 직접 어댑터" — 데이터 보관·리전, 첫 실제 생성의 크기·MIME, 한국어 글자 정확도 |
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
-| Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
+| Ideogram 4.0 (`ideogram-4`, 직접) | 등록·운영 보류 | 1024×1024 장당 Turbo $0.03 / Default $0.06 / Quality $0.10 ([공식 가격](https://ideogram.ai/pricing/), 2026-11-25) | 판매 크레딧 승인 및 운영 예산 설정 후 활성화 |
+
+Ideogram 직접 연동은 서버의 `IDEOGRAM_API_KEY`로 [생성 API](https://developer.ideogram.ai/api-reference/images/generate/ideogram-4)를 호출한다.
+Draft·Standard·Final은 각각 Turbo·Default·Quality이며, 1회에 정사각 이미지 1장을 생성한다. 편집은 지원하지 않는다.
+활성화하려면 운영 환경에 `IMAGE_PROVIDER_IDEOGRAM_COST_MICROUSD_PER_DAY`와
+`IMAGE_PROVIDER_IDEOGRAM_COST_MICROUSD_PER_MONTH`를 설정하고 Admin → Models → Catalog에서
+품질별 검증 원가(30,000 / 60,000 / 100,000µUSD)와 승인된 판매 크레딧을 적용한 뒤 모델을 켠다.
+키는 생성 요청에만 전달하고, 결과 이미지는 키 없이 다운로드한다.
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
 각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,

@@ -14,14 +14,16 @@ import {
 
 test("only providers with an image adapter can be added at runtime", () => {
   for (const provider of RUNTIME_IMAGE_PROVIDERS) assert.equal(isRuntimeImageProvider(provider), true);
-  assert.equal(isRuntimeImageProvider("ideogram"), false);
+  assert.equal(isRuntimeImageProvider("unknown"), false);
   // The profile schema enforces the same list the panels show.
-  const ideogram = imageFullProfileSchema.safeParse(runtimeImageProfileTemplate("ideogram", "ideogram-4.0"));
-  assert.equal(ideogram.success, false);
+  const unknown = imageFullProfileSchema.safeParse(runtimeImageProfileTemplate("unknown", "example"));
+  assert.equal(unknown.success, false);
+  const ideogram = imageFullProfileSchema.parse(runtimeImageProfileTemplate("ideogram", "ideogram-4"));
+  assert.deepEqual(ideogram.sizes, ["1024x1024"]);
 });
 
 test("qwen has an image adapter, so a discovered Qwen image model gets a catalogue draft", () => {
-  assert.deepEqual([...RUNTIME_IMAGE_PROVIDERS], ["openai", "google", "xai", "fal", "qwen", "bfl"]);
+  assert.deepEqual([...RUNTIME_IMAGE_PROVIDERS], ["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram"]);
   assert.equal(isRuntimeImageProvider("qwen"), true);
   const parsed = imageFullProfileSchema.safeParse(runtimeImageProfileTemplate("qwen", "qwen-image-2.0"));
   assert.equal(parsed.success, true);

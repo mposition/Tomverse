@@ -1,10 +1,12 @@
+import { IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
+
 /**
  * Providers whose image request the code already knows how to send. A model
  * of one of these can be added to the catalogue at runtime as a profile; any
  * other provider needs an adapter first. Dependency-free so the client panels
  * can read the same list the server's profile schema enforces.
  */
-export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen", "bfl"] as const;
+export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram"] as const;
 export type RuntimeImageProvider = (typeof RUNTIME_IMAGE_PROVIDERS)[number];
 
 export const isRuntimeImageProvider = (provider: string): provider is RuntimeImageProvider =>
@@ -110,6 +112,7 @@ export const runtimeImageProfileTemplate = (
   provenance: [] as string[],
   outputMimeTypes: ["image/png"] as string[],
   ...(provider === "qwen" ? { sizes: [...QWEN_RUNTIME_SIZES] } : {}),
+  ...(provider === "ideogram" ? { sizes: [IDEOGRAM_SIZE], outputMimeTypes: ["image/png", "image/jpeg"] } : {}),
   ...(provider === "bfl"
     ? {
         sizes: [...BFL_RUNTIME_PROFILE.sizes],

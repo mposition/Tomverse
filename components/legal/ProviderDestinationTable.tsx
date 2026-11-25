@@ -20,6 +20,7 @@ const PROVIDER_LABELS: Record<string, string> = {
     sail: "Sail",
     fal: "fal",
     bfl: "Black Forest Labs",
+    ideogram: "Ideogram",
 };
 
 function placeName(code: string, t: (key: string) => string): string {

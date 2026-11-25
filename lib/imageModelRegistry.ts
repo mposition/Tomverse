@@ -11,6 +11,7 @@
 // picker renders straight from these profiles.
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import type { ImageUseCase } from "@/lib/runtimeImageProviders";
 import {
@@ -29,7 +30,7 @@ import {
  * lookup, provider health and readiness. Keeping the name attached to that
  * meaning is what makes adding a gateway safe -- nothing has to be re-read.
  */
-export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl";
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram";
 
 /**
  * Who made the model, which is a different question and is about to stop having
@@ -46,7 +47,7 @@ export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | 
  * current roster, not a relationship, and the two are separate aliases so the
  * next reader has to decide which one they mean.
  */
-export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl";
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -782,6 +783,30 @@ const BFL_FLUX_3_IMAGE_KLEIN: ImageModelProfile = {
   },
 };
 
+const IDEOGRAM_4: ImageModelProfile = {
+  id: IDEOGRAM_MODEL_ID,
+  provider: "ideogram",
+  apiModelId: IDEOGRAM_MODEL_ID,
+  name: "Ideogram 4.0",
+  lifecycle: "stable",
+  disabledReason: "operational_hold",
+  disabledNote: "Direct API pricing verified. Configure the provider budget and approve sale credits before enabling.",
+  sizes: [IDEOGRAM_SIZE],
+  qualities: ["low", "medium", "high"],
+  prices: [],
+  latencyClass: "balanced",
+  useCase: "layout",
+  routingNote: "Posters, lettering and compositions with a specified text layout.",
+  provenance: [],
+  outputMimeTypes: ["image/png", "image/jpeg"],
+  pricingVersion: "ideogram-4-2026-11-25",
+  priceVerification: {
+    verifiedAt: "2026-11-25",
+    sources: ["https://ideogram.ai/pricing/", "https://developer.ideogram.ai/api-reference/images/generate/ideogram-4"],
+    thinkingCapMicroUsd: 0,
+  },
+};
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
@@ -791,6 +816,7 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   FAL_NANO_BANANA_2,
   BFL_FLUX_3_IMAGE,
   BFL_FLUX_3_IMAGE_KLEIN,
+  IDEOGRAM_4,
 ];
 
 /** The default single selection and the v1 compatibility model. */
@@ -1000,6 +1026,7 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
   // Black Forest Labs bills FLUX 3 per image by resolution tier, with prompts
   // and references "included at no extra charge" (price page, 2026-11-16).
   bfl: "not_billed",
+  ideogram: "not_billed",
 };
 
 /**
@@ -1027,6 +1054,7 @@ const imageThinkingTerms = (
   apiModelId: unknown,
   confirmed?: ConfirmedImageBillingTerms | null
 ): ImageThinkingTerms | null => {
+  if (provider === "ideogram" && apiModelId !== IDEOGRAM_MODEL_ID) return null;
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
   const bound = googleImageOutputLimitBound(provider, apiModelId, confirmed);
   if (bound) {

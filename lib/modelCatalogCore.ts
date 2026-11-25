@@ -11,6 +11,7 @@
 // from a stored boolean alone: a row that says "enabled" for a model whose
 // worst-case cost is unbounded is refused.
 
+import { IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -69,6 +70,7 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   fal: ["fal.ai"],
   // bfl.ai also serves the playground and account pages, so only /pricing there.
   bfl: ["docs.bfl.ai", "bfl.ai/pricing"],
+  ideogram: ["developer.ideogram.ai", "ideogram.ai/pricing"],
   deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
   // platform.moonshot.ai answers 301 to platform.kimi.ai since 2026-11.
@@ -1130,6 +1132,10 @@ export const judgeImageModel = (
 ): ImageAdmission => {
   const reasons: string[] = [];
   if (model.prices.length === 0) reasons.push("no_prices");
+  if (model.provider === "ideogram" &&
+      (model.sizes.some(size => size !== IDEOGRAM_SIZE) || model.prices.some(price => price.size !== IDEOGRAM_SIZE))) {
+    reasons.push("unsupported_ideogram_resolution");
+  }
   if (!model.priceVerification.verifiedAt) reasons.push("price_unverified");
   const sources = model.priceVerification.sources;
   if (sources.length === 0) reasons.push("no_price_sources");

@@ -117,6 +117,18 @@ test("NULL inherits, a hold disables, and an override changes only what it names
   assert.equal(model.pricingVersion, enabledSeed.pricingVersion);
 });
 
+test("direct Ideogram requires an approved square price and a provider budget before admission", () => {
+  const seed = getImageModel("ideogram-4");
+  assert.equal(judge()(seed).admitted, false);
+  const price = { size: "1024x1024", quality: "medium", credits: 100, outputCostMicroUsd: 60_000 };
+  const priced = { ...seed, prices: [price] };
+  assert.deepEqual(judge()(priced), { admitted: true });
+  assert.equal(judge(false)(priced).admitted, false);
+  assert.equal(judge()({ ...priced, apiModelId: "unregistered" }).admitted, false);
+  assert.equal(judge()({ ...priced, prices: [{ ...price, size: "1536x1024" }] }).admitted, false);
+  assert.equal(judge()({ ...priced, sizes: ["1536x1024"] }).admitted, false);
+});
+
 test("turning on a model whose worst case is unbounded is refused by the judge, not by the row", () => {
   const { models } = resolve([row(heldSeed.id, { enabled: true })]);
   assert.equal(models.find((m) => m.id === heldSeed.id).disabledReason, "worst_case_cost_unbounded");
