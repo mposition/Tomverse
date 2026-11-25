@@ -61,7 +61,7 @@ test("Provider guide hosts stay scoped and a shared host never opens its whole s
   assert.equal(isCliGuideUrl("https://openai.com/", guideUrls), false);
 });
 
-test("The link view accepts only public https addresses", () => {
+test("The link view accepts only https URLs with a public-looking name", () => {
   for (const url of ["https://example.com/", "https://sub.example.co.uk/a?b=c#d", "https://xn--p8jtb.example.org/", "https://example.com:8443/x"]) {
     assert.ok(linkViewUrl(url), url);
     assert.equal(classifyLinkNavigation(url), "link");
@@ -82,7 +82,7 @@ test("The link view accepts only public https addresses", () => {
   assert.equal(publicHostname("localhost"), false);
 });
 
-test("Pages can only load public https and inline subresources", () => {
+test("The subresource name rule admits only https/wss to public-looking names and inline data", () => {
   for (const url of ["https://cdn.example.com/a.js", "wss://socket.example.com/s", "data:image/png;base64,AAAA", "blob:https://example.com/x"]) {
     assert.ok(allowsSubresource(url), url);
   }

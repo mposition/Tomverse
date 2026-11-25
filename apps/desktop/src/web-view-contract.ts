@@ -58,7 +58,10 @@ export type WebViewState = {
   canReturn: boolean;
 };
 
-/** A parsed https URL, or null. Credentials, IP literals and local or single-label hosts are never public. */
+/**
+ * A parsed https URL, or null. Credentials, IP literals and local or single-label names are refused.
+ * This reads the name only: where the name resolves is checked by the host before each request.
+ */
 export function linkViewUrl(value: string): URL | null {
   if (value.length > 2048) return null;
   let target: URL;
@@ -67,6 +70,7 @@ export function linkViewUrl(value: string): URL | null {
   return publicHostname(target.hostname) ? target : null;
 }
 
+/** Whether a host name looks public. A public-looking name can still resolve to a local address. */
 export function publicHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, "");
   if (!host || host.includes("[") || host.includes(":")) return false;
@@ -76,7 +80,10 @@ export function publicHostname(hostname: string): boolean {
     !host.endsWith(".home.arpa") && !host.endsWith(".in-addr.arpa") && !host.endsWith(".ip6.arpa");
 }
 
-/** Requests a page makes after it was admitted: public https/wss hosts and inline data, nothing local. */
+/**
+ * Requests a page makes after it was admitted: https/wss to public-looking names and inline data.
+ * The name rule alone does not keep a page off the local network; see `host/resolved-host-gate.ts`.
+ */
 export function allowsSubresource(value: string): boolean {
   let target: URL;
   try { target = new URL(value); } catch { return false; }

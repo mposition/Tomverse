@@ -57,7 +57,11 @@ export function classifyOAuthNavigation(value: string, accountOrigin: string): O
   return linkViewUrl(value) ? { kind: "allow" } : { kind: "block" };
 }
 
-/** Subresources of a provider page: public hosts only, so a page cannot reach the local network. */
+/**
+ * Subresources of a provider page: https/wss to a public-looking name, or inline data. This is a
+ * name check only; the window's request filter also refuses names that resolve to internal
+ * addresses, but a name that answers differently at connection time (DNS rebinding) is not stopped.
+ */
 export { allowsSubresource as allowsOAuthSubresource } from "./web-view-contract";
 
 /** The path the main process asks Tomverse to complete, built from the validated callback parameters. */

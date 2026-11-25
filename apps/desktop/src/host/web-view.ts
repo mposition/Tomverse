@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { session, WebContentsView, type BrowserWindow } from "electron";
 import { allowsSubresource, type WebViewCommand } from "../web-view-contract";
+import { createResolvedHostGate, gatedRequestFilter } from "./resolved-host-gate";
 
 export type WebViewVerdict = "allow" | "link" | "block";
 export type WebViewRaw = { url: string; loading: boolean; failed: boolean; back: boolean; forward: boolean };
@@ -10,9 +11,12 @@ const acceptLanguages: Record<string, string> = {
 };
 
 /**
- * One isolated page for documentation or an external link. No preload, no shared session, no
- * permissions, no downloads, no new windows; every main-frame navigation goes through `decide`
- * and every other request must be a public https/wss or inline resource.
+ * One isolated page for documentation, an external link or Stripe Checkout. No preload, no shared
+ * session, no permissions, no downloads, no new windows; every main-frame navigation goes through
+ * `decide` and every other request must be https/wss to a public-looking name or an inline resource.
+ * Each admitted request then waits for the address check: its name must resolve, through this
+ * session, only to public addresses. That check cannot pin the connection to the checked address
+ * (see `resolved-host-gate.ts` for what DNS rebinding can still do).
  */
 export function createWebView(owner: BrowserWindow, input: {
   language: string;
@@ -44,10 +48,9 @@ export function createWebView(owner: BrowserWindow, input: {
       back: webContents.navigationHistory.canGoBack(), forward: webContents.navigationHistory.canGoForward(),
     });
   };
-  isolated.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (request, callback) => {
-    const cancel = closed || (request.resourceType === "mainFrame" ? input.decide(request.url) !== "allow" : !allowsSubresource(request.url));
-    callback({ cancel });
-  });
+  const addresses = createResolvedHostGate((host) => isolated.resolveHost(host));
+  isolated.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, gatedRequestFilter(addresses, (request) => !closed &&
+    (request.resourceType === "mainFrame" ? input.decide(request.url) === "allow" : allowsSubresource(request.url))));
   const load = async (target: string) => {
     if (closed || webContents.isDestroyed() || input.decide(target) !== "allow") return;
     url = target;
@@ -118,6 +121,7 @@ export function createWebView(owner: BrowserWindow, input: {
     close() {
       if (closed) return;
       closed = true;
+      addresses.clear();
       if (!owner.isDestroyed()) owner.contentView.removeChildView(view);
       if (!webContents.isDestroyed()) webContents.close({ waitForBeforeUnload: false });
       void isolated.clearStorageData().catch(() => {});

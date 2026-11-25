@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BrowserWindow, session } from "electron";
 import { allowsOAuthSubresource, classifyOAuthNavigation } from "../connector-oauth-policy";
 import type { ConnectorOAuthEnd } from "./connector-api";
+import { createResolvedHostGate, gatedRequestFilter } from "./resolved-host-gate";
 
 const acceptLanguages: Record<string, string> = {
   en: "en-US,en", ko: "ko-KR,ko,en", zh: "zh-CN,zh,en", "zh-Hant": "zh-TW,zh,en", fr: "fr-FR,fr,en", de: "de-DE,de,en", es: "es-ES,es,en", pt: "pt-PT,pt,en",
@@ -14,7 +15,9 @@ const WINDOW_LIFETIME_MS = 600_000;
  * throwaway session (no account cookie, nothing kept), no preload, a sandboxed renderer and no
  * permissions or downloads. Its title always names the host it shows. Tomverse's own callback is
  * recognised and cancelled here: the main process completes it over the account session, so the
- * window never loads a Tomverse page and never holds a Tomverse credential.
+ * window never loads a Tomverse page and never holds a Tomverse credential. Every other request
+ * must be https/wss to a public-looking name whose resolved addresses are all public at the time
+ * of the check (`resolved-host-gate.ts`, which also says what DNS rebinding can still do).
  */
 export function openConnectorOAuthWindow(input: {
   owner: BrowserWindow | null;
@@ -41,9 +44,11 @@ export function openConnectorOAuthWindow(input: {
     window.removeMenu();
     const { webContents } = window;
     let finished = false;
+    const addresses = createResolvedHostGate((host) => isolated.resolveHost(host));
     const finish = (end: ConnectorOAuthEnd) => {
       if (finished) return;
       finished = true;
+      addresses.clear();
       clearTimeout(timer);
       input.signal.removeEventListener("abort", onAbort);
       resolve(end);
@@ -61,12 +66,9 @@ export function openConnectorOAuthWindow(input: {
       if (navigation.kind === "callback" || navigation.kind === "denied") finish(navigation);
       return navigation.kind === "allow";
     };
-    isolated.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (request, callback) => {
-      const cancel = finished || (request.resourceType === "mainFrame"
-        ? !verdict(request.url)
-        : !allowsOAuthSubresource(request.url) || new URL(request.url).origin === input.accountOrigin);
-      callback({ cancel });
-    });
+    isolated.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, gatedRequestFilter(addresses, (request) => !finished &&
+      (request.resourceType === "mainFrame" ? verdict(request.url)
+        : allowsOAuthSubresource(request.url) && new URL(request.url).origin !== input.accountOrigin)));
     const guard = (event: { url: string; preventDefault(): void }) => { if (!verdict(event.url)) event.preventDefault(); };
     webContents.on("will-frame-navigate", (event) => { if (event.isMainFrame) guard(event); else if (!allowsOAuthSubresource(event.url)) event.preventDefault(); });
     webContents.on("will-redirect", guard);
