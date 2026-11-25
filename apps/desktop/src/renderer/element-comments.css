@@ -1,0 +1,13 @@
+.element-comments { display: flex; flex-direction: column; gap: 6px; max-height: 40%; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); }
+.element-comments h3 { margin: 0; font-size: 13px; }
+.element-comments ol { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.element-comments li { display: flex; align-items: flex-start; gap: 8px; }
+.element-comments li > div { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.element-comments img { width: 56px; max-height: 56px; object-fit: contain; border: 1px solid var(--line); border-radius: 5px; background: var(--canvas); }
+.element-comments code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.element-comments span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.element-comments textarea { width: 100%; resize: vertical; padding: 6px; color: inherit; font: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.element-comments p { margin: 0; font-size: 12px; color: var(--muted); }
+.code-browser-agent { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 6px 8px; font-size: 12px; border: 1px solid var(--focus); border-radius: 8px; background: var(--raised); }
+.code-browser-agent[data-state="stopped"] { border-color: var(--line); color: var(--muted); }
+.code-browser-hint { margin: 0; font-size: 12px; color: var(--muted); }

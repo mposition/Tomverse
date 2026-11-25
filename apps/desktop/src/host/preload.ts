@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { BrowserState } from "../browser-contract";
+import type { BrowserState, ElementPick } from "../browser-contract";
 import type { WebViewState } from "../web-view-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
 import type { BillingState } from "../billing-contract";
@@ -59,6 +59,11 @@ if (trustedWindow) {
       const onState = (_event: Electron.IpcRendererEvent, state: BrowserState) => listener(state);
       ipcRenderer.on("desktop:code-browser-state", onState);
       return () => ipcRenderer.removeListener("desktop:code-browser-state", onState);
+    },
+    subscribeCodeBrowserPick(listener: (pick: ElementPick) => void) {
+      const onPick = (_event: Electron.IpcRendererEvent, pick: ElementPick) => listener(pick);
+      ipcRenderer.on("desktop:code-browser-pick", onPick);
+      return () => ipcRenderer.removeListener("desktop:code-browser-pick", onPick);
     },
     webView: (command: Parameters<DesktopApi["webView"]>[0]) => ipcRenderer.invoke("desktop:web-view", command),
     subscribeWebView(listener: (state: WebViewState | null) => void) {

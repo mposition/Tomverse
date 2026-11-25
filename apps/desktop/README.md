@@ -66,6 +66,13 @@ New Tomverse API Agent tasks in a Git project start in their own worktree when G
 
 A worktree keeps the path relative to the repository of the folder you opened. Attachments for an isolated task must exist in the selected commit. After restarting Desktop, open the source folder and select the saved task from history to resume in its worktree. If the worktree is missing or on a different branch, Desktop blocks resumption and undo until the original checkout is available. Saved diffs and command details can still be inspected. Worktree files stay on disk when you delete Desktop task history.
 
+## Browser panel: agent tools and element comments
+
+The Code browser panel (loopback pages only, available in fixture builds today) has two additions. The agent tools stay off unless the fixture descriptor sets `browserAgent: true`; the element picker follows the panel itself.
+
+- The Tomverse API agent gets `browser_navigate`, `browser_read`, `browser_screenshot`, `browser_console`, `browser_click` and `browser_type`. It drives one tab that its own task opened, shown in the panel with a **Take over** button that ends its control at once. Addresses are limited to `http` on `localhost`, `127.0.0.1` or `[::1]` with a port, the same rule as the panel. Reading, screenshots and console reads need no approval; each click or typing is approved, and "Allow for this run" is remembered per site. Passwords, one-time codes and card fields are never typed. Page text is returned as untrusted data. The main process does the work: scripts run in an isolated world one call at a time, and input, pictures, the accessibility tree and the element picker use the tab's own DevTools session. Nothing is injected ahead of time.
+- **Select element** lets the person click an element of the page, write a comment, and add several comments to the next message together. The message carries the selector, a short text, the position and a `pick-xxxxxxxx` id; the cropped picture stays in memory in the main process and reaches the model only when it calls `browser_screenshot` with that id.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

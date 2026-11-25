@@ -34,6 +34,9 @@ import { DraftDictation } from "./DraftDictation";
 import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
 import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
+import { ApprovalBrowser } from "./ApprovalBrowser";
+import { appendElementComments } from "../element-comment";
+import { useAgentBrowserReveal } from "./useAgentBrowserReveal";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
@@ -223,6 +226,7 @@ function Desktop() {
   const canShowBrowser = surface === "code" && snapshot?.codeBrowserAvailable === true;
   const browserScope = JSON.stringify([snapshot?.draftNamespace, snapshot?.task?.id]);
   const browserOpen = canShowBrowser && openBrowserScope === browserScope;
+  useAgentBrowserReveal(canShowBrowser, () => setOpenBrowserScope(browserScope));
   const accountSettingsTab = isAccountSettingsTab(settingsView) ? settingsView : null;
   const importsOpen = settingsView === "imports";
   const accountPanel = importsOpen ? "imports" : accountSettingsTab;
@@ -1092,6 +1096,8 @@ function Desktop() {
         </div>
       </div>{canShowBrowser && browserOpen && <CodeBrowser language={language}
         canShare={snapshot?.codeBrowserInspection === true && task?.status === "running"}
+        agentLive={task?.status === "running" || task?.status === "approval"}
+        onAttachComments={(block) => changeDraft(appendElementComments(prompt, block).slice(0, MAX_CODE_PROMPT_CHARACTERS))}
         hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}
       </div> : nativeImages ? <ImageWorkspace key={images.seedVersion} workspace={images} capability={imageCapability} />
         : nativeChat ? <>{reviewReference && <div className="review-reference" role="status">
@@ -1241,6 +1247,7 @@ function Approval() {
         </dl>
         <p role="note">{engineCopy.approvalWebNote}</p>
       </section>}
+      {request.browser && <ApprovalBrowser browser={request.browser} copy={engineCopy} />}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>
         <pre>{request.command.display}</pre>
