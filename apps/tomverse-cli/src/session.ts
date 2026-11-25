@@ -93,9 +93,9 @@ export type ApprovalRecord = {
     decision: "approved" | "denied";
     /** Approved without asking, by an earlier "always" answer in the same process. */
     by?: "remembered_answer";
-    rule?: "file_edits" | "same_command" | "web_host";
+    rule?: "file_edits" | "same_command" | "web_host" | "browser_origin";
     /** This answer was "always" for the rest of that process. */
-    remember?: "file_edits" | "same_command" | "web_host";
+    remember?: "file_edits" | "same_command" | "web_host" | "browser_origin";
     decidedAt: string;
 };
 

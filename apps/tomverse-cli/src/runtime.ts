@@ -18,6 +18,8 @@ export type { WorkspaceReference } from "./workspace.js";
 export { resolveEndpoint, DEFAULT_ENDPOINT } from "./config.js";
 export type { Endpoint } from "./config.js";
 export { ApprovalMemory } from "./approvals.js";
+export { browserAgentReply, browserAgentRequest, elementPickId } from "./browser-tools.js";
+export type { BrowserAgentReply, BrowserAgentRequest, BrowserApproval } from "./browser-tools.js";
 export { viewChange, viewChanges, renderChange, undoChange, canUndoChange, UndoError } from "./changes.js";
 export { safeText, safeLine } from "./display.js";
 export type { Output } from "./display.js";

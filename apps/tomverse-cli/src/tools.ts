@@ -732,3 +732,6 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
     }
     return tools;
 };
+
+/** For tools of other files that change something outside the workspace and need the same approval gate and journal records. */
+export { gate as approvalGate, startTool, endTool };

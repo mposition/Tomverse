@@ -1,7 +1,7 @@
 import type { ApprovalView } from "./agent.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
-export type RememberedRule = "file_edits" | "same_command" | "web_host";
+export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin";
 
 /**
  * "Yes, and don't ask again" answers the person gave at the terminal, for the
@@ -15,6 +15,8 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host";
  *   given (another folder is asked). Deleting a file is always asked.
  * - web_host: reading public web pages from one site (host). Any other site
  *   is asked; the address is judged again on every call.
+ * - browser_origin: clicking and typing in the local browser tab, on one site (origin). Another origin is asked; the page and the
+ *   element are shown on every call that is asked, and passwords are refused by the host whatever was allowed.
  * - same_command: exactly the same program, arguments, working folder and
  *   environment names, and the same kind of run (background or not); any other
  *   command is asked. The timeout may differ.
@@ -24,6 +26,7 @@ export class ApprovalMemory {
     private readonly fileEdits = new Set<string>();
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
+    private readonly browserOrigins = new Set<string>();
 
     private static commandKey(view: ApprovalView) {
         const c = view.command;
@@ -39,6 +42,7 @@ export class ApprovalMemory {
     canRemember(view: ApprovalView) {
         if (view.error) return false;
         if (view.web) return true;
+        if (view.browser) return Boolean(view.browser.origin);
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
         return Boolean(view.command);
     }
@@ -46,6 +50,7 @@ export class ApprovalMemory {
     match(view: ApprovalView): RememberedRule | null {
         if (view.error) return null;
         if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
+        if (view.browser) return this.browserOrigins.has(view.browser.origin) ? "browser_origin" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
         const key = ApprovalMemory.commandKey(view);
         return key && this.commands.has(key) ? "same_command" : null;
@@ -56,6 +61,10 @@ export class ApprovalMemory {
         if (view.web) {
             this.webHosts.add(view.web.host);
             return "web_host";
+        }
+        if (view.browser) {
+            this.browserOrigins.add(view.browser.origin);
+            return "browser_origin";
         }
         if (view.patch) {
             this.fileEdits.add(view.root!);
@@ -70,6 +79,7 @@ export class ApprovalMemory {
             ...[...this.fileEdits].map((root) => `file edits in ${root} (creating and changing files; deleting is still asked)`),
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
+            ...[...this.browserOrigins].map((origin) => `clicking and typing in the browser tab on ${origin}`),
         ];
     }
 
@@ -77,5 +87,6 @@ export class ApprovalMemory {
         this.fileEdits.clear();
         this.commands.clear();
         this.webHosts.clear();
+        this.browserOrigins.clear();
     }
 }
