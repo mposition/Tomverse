@@ -2,6 +2,7 @@
   "name": "@tomverse/desktop",
   "version": "0.1.0",
   "private": true,
+  "author": "Tomverse <support@tomverse.app>",
   "type": "module",
   "main": "dist/host/main.cjs",
   "scripts": {

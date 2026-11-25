@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs, promisify } from "node:util";
@@ -73,6 +73,7 @@ if (values["update-origin"] !== undefined) {
     "--install-location", "/Applications", installer]);
   console.log(installer);
 } else {
+  const { author: maintainer } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const portableFiles = await inspectPortablePayload(bundle, "linux");
   const installer = join(out, `tomverse-desktop_${manifest.version}_amd64.deb`);
   const scratch = await mkdtemp(join(tmpdir(), "tomverse-deb-"));
@@ -101,7 +102,7 @@ if (values["update-origin"] !== undefined) {
     ].join("\n"));
     await writeFile(join(control, "control"), [
       `Package: ${packageName}`, `Version: ${manifest.version}`, "Architecture: amd64",
-      "Maintainer: Tomverse <support@tomverse.app>", "Homepage: https://tomverse.app",
+      `Maintainer: ${maintainer}`, "Homepage: https://tomverse.app",
       "Priority: optional", "Section: utils",
       "Depends: libasound2, libatk-bridge2.0-0, libcups2, libdrm2, libgbm1, libgtk-3-0, libnotify4, libnss3, libx11-xcb1, libxss1, libxtst6, libsecret-1-0, xdg-utils",
       "Description: Tomverse Chat, Review and Code desktop workspaces", "",

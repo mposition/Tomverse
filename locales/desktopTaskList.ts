@@ -26,7 +26,7 @@ export const desktopPlanAnalysisCopy = {
   fr: ["Analyse de la demande", "Faits vérifiés", "Hypothèses", "Périmètre", "Vérification", "Critères d’achèvement"],
   de: ["Anfrageanalyse", "Bestätigte Fakten", "Annahmen", "Umfang", "Überprüfung", "Abschlusskriterien"],
   es: ["Análisis de la solicitud", "Hechos verificados", "Supuestos", "Alcance", "Verificación", "Criterios de finalización"],
-  pt: ["Análise do pedido", "Factos verificados", "Pressupostos", "Âmbito", "Verificação", "Critérios de conclusão"],
+  pt: ["Análise do pedido", "Factos verificados", "Pressupostos", "Alcance", "Verificação", "Critérios de conclusão"],
 } satisfies Record<Language, readonly [string, string, string, string, string, string]>;
 
 const executionDetails = {

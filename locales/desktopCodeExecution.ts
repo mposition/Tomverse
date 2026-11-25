@@ -143,7 +143,7 @@ export const desktopCodeExecutionCopy = {
     awaitingVerification: "Preferência guardada. A mudança exige a verificação dos limites e da faturação.",
     destination: "Destino alternativo", destinationDetail: "Modo de execução e modelo para continuar a tarefa",
     apiCreditCap: "Limite de API por tarefa", creditDetail: "Limite de créditos pedido para a mudança para a API",
-    transfer: "Âmbito da transferência", transferSummary: "Enviar o resumo necessário para continuar a tarefa",
+    transfer: "Dados a transferir", transferSummary: "Enviar o resumo necessário para continuar a tarefa",
     transferChanges: "Enviar o resumo e as alterações de ficheiros necessários",
     connectSettings: "Ligue uma chave Code para guardar as definições de alternativa.", settingsFailed: "Não foi possível guardar as definições de alternativa.",
     model: "Modelo alternativo", unset: "Por definir", credits: "créditos", on: "Ativado", off: "Desativado", save: "Guardar", review: "Rever",

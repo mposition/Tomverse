@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -173,7 +173,7 @@ test("Electron uses real approval, patch, command, history, effort and Stop over
   await mkdir(root);
   await mkdir(profile);
   await mkdir(join(root, "fixtures"));
-  const original = "export function sum(a, b) { return a - b; }\n";
+  const original = await readFile(new URL("./fixtures/sum.mjs", import.meta.url), "utf8");
   const crlfSource = Buffer.from("\ufeffstart\r\noriginal\r\nend\r\n");
   const deletedSource = Buffer.from("visible\u202etext\r\n");
   const largeDiff = Array.from({ length: 810 }, (_, index) => `line ${index + 1}\n`).join("") + "Visible final line.\n";
@@ -186,7 +186,7 @@ test("Electron uses real approval, patch, command, history, effort and Stop over
   await writeFile(join(root, "undo-deleted.txt"), deletedSource);
   const outsidePath = join(tmp, "outside.txt");
   await writeFile(outsidePath, "Outside the project.");
-  await writeFile(join(root, "check.mjs"), 'import assert from "node:assert/strict";\nimport { sum } from "./sum.mjs";\nassert.equal(sum(2, 3), 5);\nconsole.log("sum passed");\n');
+  await copyFile(new URL("./fixtures/check.mjs", import.meta.url), join(root, "check.mjs"));
   await writeFile(join(root, "check-failure.mjs"), 'console.error("fixture assertion failed");\nprocess.exitCode = 7;\n');
   await writeFile(join(root, "noisy-tree.mjs"), `
 import { spawn } from "node:child_process";
