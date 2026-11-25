@@ -43,7 +43,7 @@ const SETTINGS = {
   publicSharingEnabled: true,
 };
 
-async function loadRoute(): Promise<{ PATCH: (request: Request) => Promise<Response> }> {
+async function loadRoute(): Promise<Pick<typeof import("@/app/api/admin/app-settings/route"), "GET" | "PATCH">> {
   if (!installed) {
     installed = true;
     mock.module(mod("node_modules/next-auth/next/index.js"), {
