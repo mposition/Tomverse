@@ -37,7 +37,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
-import { CodeEngineBar, QueuePanel, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
+import { BackgroundPanel, CodeEngineBar, QueuePanel, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -981,6 +981,7 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
+          {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
           {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
@@ -1211,6 +1212,7 @@ function Approval() {
   const [answering, setAnswering] = useState(false);
   const language = request?.language ?? readLanguage();
   const copy = desktopControlsCopy[language];
+  const engineCopy = desktopCodeEngineCopy[language];
   useEffect(() => {
     applyTheme(localStorage.getItem("tomverse.theme") === "light" ? "light" : "dark");
     void window.approvalHost.approval().then(setRequest, () => setRequest(null));
@@ -1229,6 +1231,14 @@ function Approval() {
     <div className="approval-content">
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
       {request.explanation && <p>{request.explanation}</p>}
+      {request.web && <section aria-label={engineCopy.approvalWebHeading}>
+        <h2>{engineCopy.approvalWebHeading}</h2>
+        <dl>
+          <dt>{engineCopy.approvalWebHost}</dt><dd><code>{request.web.host}</code></dd>
+          <dt>{engineCopy.approvalWebAddress}</dt><dd><code>{request.web.url}</code></dd>
+        </dl>
+        <p role="note">{engineCopy.approvalWebNote}</p>
+      </section>}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>
         <pre>{request.command.display}</pre>
@@ -1237,8 +1247,9 @@ function Approval() {
           <dt>{copy.arguments}</dt><dd><pre>{JSON.stringify(request.command.args, null, 2)}</pre></dd>
           <dt>{copy.workingDirectory}</dt><dd><code>{request.command.cwd}</code></dd>
           <dt>{copy.environment}</dt><dd><code>{request.command.env.join(", ") || copy.none}</code></dd>
-          <dt>{copy.timeout}</dt><dd>{request.command.timeoutMs} ms</dd>
+          <dt>{copy.timeout}</dt><dd>{request.command.background ? engineCopy.approvalNoTimeout : `${request.command.timeoutMs} ms`}</dd>
         </dl>
+        {request.command.background && <p role="note"><strong>{engineCopy.approvalBackground}</strong></p>}
       </section>}
       {request.files?.map((file) => <section key={file.path} className="diff" aria-label={file.path}>
         <h2>{file.path} · {file.action === "create" || file.action === "update" || file.action === "delete" ? copy[file.action] : file.action}</h2>

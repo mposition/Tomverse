@@ -16,6 +16,7 @@ import { deleteSession, Journal, JournalError, listSessions, SessionLockedError,
 import { CLI_VERSION } from "./version.js";
 import { gitAvailable, normalizeRoot, PathError, ripgrepAvailable, same, Workspace } from "./workspace.js";
 
+import { memoryFileFor, ProjectMemory } from "./memory.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -32,7 +33,8 @@ Usage:
   tomverse undo <change-id> [--session <id>]
   tomverse doctor [--json]        Checks Node, folder, key and API without a model request
   tomverse trust [folder]         Allow the CLI to work in a folder
-  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env> <value> | unset <key>
+  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory> <value> | unset <key>
+  tomverse memory [show|clear]    The notes the agent kept about this folder (clear asks first, or --yes)
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
@@ -377,13 +379,16 @@ const configCommand = async (ctx: Context, args: string[]) => {
             config.endpoint = value;
         } else if (key === "model") config.model = value;
         else if (key === "allow-insecure-localhost") config.allowInsecureLocalhost = value === "true";
-        else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
+        else if (key === "memory") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("memory must be on or off.");
+            config.memory = value === "true" || value === "on";
+        } else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
         else throw new UsageError(`Unknown config key '${key}'.`);
         writeConfig(config);
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -425,6 +430,41 @@ const pickModel = async (ctx: Context, catalog: CatalogModel[], prompter: Prompt
 };
 
 const exitFor = (outcome: Outcome) => EXIT_CODES[outcome];
+
+/** The notes kept about a folder, in the CLI's own home next to the sessions. */
+const projectMemory = (ctx: Context, root: string) => new ProjectMemory(memoryFileFor(join(tomverseHome(), "memory"), root), root);
+
+/** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, and project memory unless it is turned off. */
+const engineExtras = (ctx: Context, root: string) => ({
+    web: {},
+    backgroundCommands: true,
+    images: true,
+    nestedInstructions: true,
+    ...(ctx.config.memory === false ? {} : { memory: projectMemory(ctx, root) }),
+});
+
+const memoryCommand = async (ctx: Context, args: string[]) => {
+    const [sub] = args;
+    const root = normalizeRoot(ctx.flags.cwd ?? process.cwd());
+    const memory = projectMemory(ctx, root);
+    if (sub === "show" || sub === undefined) {
+        const entries = memory.list();
+        const lines = entries.length ? entries.map((entry) => `${entry.id}  ${safeLine(entry.text)}`) : ["Nothing is remembered for this folder."];
+        if (ctx.config.memory === false) lines.push("Memory is off (tomverse config set memory true turns it on); nothing is read or written.");
+        process.stdout.write(`${lines.join("\n")}\n`);
+        return EXIT_CODES.success;
+    }
+    if (sub === "clear") {
+        if (!ctx.flags.yes) {
+            if (!isInteractive()) throw new UsageError("Deleting the notes needs confirmation: run in a terminal or add --yes.");
+            if (!(await terminalPrompter().confirm(`Delete everything remembered for ${root}?`))) return EXIT_CODES.cancelled;
+        }
+        memory.clear();
+        ctx.output.info("Deleted the notes kept for this folder.");
+        return EXIT_CODES.success;
+    }
+    throw new UsageError(`Unknown memory command '${sub}'.`);
+};
 
 const installSigint = (runner: Runner, output: Output) => {
     // A second Ctrl+C within a few seconds of the first quits; a later one is a
@@ -487,7 +527,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     if (journal.state.goal) ctx.output.info(`Goal mode: after the model is done, the goal is checked and the task continues until it is verified (at most ${journal.state.goal.maxContinuations} automatic continuations in a row).`);
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");
     const workspace = new Workspace(root);
-    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace) });
+    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
     const removeSigint = installSigint(runner, ctx.output);
@@ -595,7 +635,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) task.allowance = Math.max(task.allowance, task.requests + positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests));
         }
         const workspace = new Workspace(root);
-        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace) });
+        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);
         for (const note of notes) ctx.output.info(note);
@@ -686,6 +726,8 @@ export const main = async (argv: string[]): Promise<number> => {
                 return await trust(ctx, args);
             case "config":
                 return await configCommand(ctx, args);
+            case "memory":
+                return await memoryCommand(ctx, args);
             case "resume":
                 return await resume(ctx, args, !flags.json && isInteractive());
             case "exec": {

@@ -91,6 +91,34 @@ export function CodeEngineBar({ task, language, idle }: { task: Task; language: 
   </div>;
 }
 
+/** The commands the task keeps running in the background: whether they run, what they printed, and a button to end each one. */
+export function BackgroundPanel({ task, language, live }: { task: Task; language: Language; live: boolean }) {
+  const copy = desktopCodeEngineCopy[language];
+  const [failed, setFailed] = useState(false);
+  const commands = task.background ?? [];
+  if (!commands.length || !task.id) return null;
+  const taskId = task.id;
+  async function stop(handle: string) {
+    try { setFailed(!await window.desktop.stopBackground(taskId, handle)); }
+    catch { setFailed(true); }
+  }
+  const label = (command: NonNullable<Task["background"]>[number]) => command.state === "running" ? copy.backgroundRunning
+    : command.state === "stopped" ? copy.backgroundStopped : copy.backgroundExited.replace("{code}", String(command.exitCode ?? "?"));
+  return <section className="code-background" aria-label={copy.backgroundHeading}>
+    <strong>{copy.backgroundHeading}</strong>
+    <small>{copy.backgroundHint}</small>
+    <ul>{commands.map((command) => <li key={command.handle}>
+      <div>
+        <code>{command.command}</code>
+        <span role="status">{label(command)}</span>
+        {command.state === "running" && live && <button className="soft" type="button" onClick={() => void stop(command.handle)}>{copy.backgroundStop}</button>}
+      </div>
+      <details><summary>{copy.backgroundOutput}</summary><pre>{command.output || copy.backgroundNoOutput}</pre></details>
+    </li>)}</ul>
+    {failed && <small role="alert">{copy.backgroundStopFailed}</small>}
+  </section>;
+}
+
 /** Messages held for after the current turn: edit, reorder or remove them while the task runs. */
 export function QueuePanel({ task, language, live }: { task: Task; language: Language; live: boolean }) {
   const copy = desktopCodeEngineCopy[language];

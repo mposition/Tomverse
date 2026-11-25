@@ -65,7 +65,9 @@ export const makeRunner = async (
     root: string,
     options: { prompter?: Prompter | null; home?: string | null; readOnly?: boolean; model?: string; maxRequests?: number;
         output?: Output; contextWindow?: number; taskPlan?: "agent" | "plan";
-        limits?: SessionState["limits"]; goal?: SessionState["goal"] } = {}
+        limits?: SessionState["limits"]; goal?: SessionState["goal"];
+        /** Runner options a test adds on top of the defaults (web, memory, nested instructions, ...). */
+        runner?: Partial<ConstructorParameters<typeof Runner>[0]> } = {}
 ) => {
     const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/code/v1" };
     const client = new Gateway(endpoint, TEST_KEY);
@@ -91,6 +93,6 @@ export const makeRunner = async (
     const output = options.output ?? captureOutput().output;
     const runner = new Runner({ gateway: client, journal, workspace: new Workspace(root), output,
         prompter: options.prompter === undefined ? scriptedPrompter([]) : options.prompter, catalog, commandEnv: [],
-        instructions: null, taskPlan: options.taskPlan });
+        instructions: null, taskPlan: options.taskPlan, ...options.runner });
     return { runner, journal, client };
 };

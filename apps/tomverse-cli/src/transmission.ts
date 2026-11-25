@@ -18,6 +18,8 @@ export type RequestTransmission = {
     effort?: Exclude<Effort, "default">;
     projectInstructions: boolean;
     projectInstructionsTruncated?: boolean;
+    /** The notes kept about this project were part of the request. */
+    projectMemory?: boolean;
     messageCount: number;
     toolResultCount: number;
     commandOutput?: { results: number; truncated: number };
@@ -25,6 +27,11 @@ export type RequestTransmission = {
     truncatedListingCount: number;
     fileReads: Array<{ path: string; truncated: boolean }>;
     moreFileReads: number;
+    /** Public web pages whose text was part of the request, by address. */
+    webReads?: Array<{ url: string; truncated: boolean }>;
+    moreWebReads?: number;
+    /** Images attached to the request (each is sent as image data). */
+    imageCount?: number;
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -58,6 +65,13 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
         if (message.role === "system" && typeof message.content === "string" && message.content.includes("\n<project-instructions>\n")) {
             evidence.projectInstructions = true;
         }
+        if (message.role === "system" && typeof message.content === "string" && message.content.includes("\n<project-memory>\n")) {
+            evidence.projectMemory = true;
+        }
+        if (message.role === "user" && Array.isArray(message.content)) {
+            const images = message.content.filter((part) => record(part)?.type === "image_url").length;
+            if (images) evidence.imageCount = (evidence.imageCount ?? 0) + images;
+        }
         if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
             for (const value of message.tool_calls) {
                 const call = record(value);
@@ -69,7 +83,7 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
         evidence.toolResultCount += 1;
         if (typeof message.tool_call_id !== "string") continue;
         const name = tools.get(message.tool_call_id);
-        if (name !== "read_file" && name !== "list_files" && name !== "run_command") continue;
+        if (name !== "read_file" && name !== "list_files" && name !== "run_command" && name !== "web_fetch") continue;
         const output = record(parseJson(message.content));
         if (name === "run_command") {
             const omitted = record(output?.omittedBytes);
@@ -83,6 +97,13 @@ export function requestTransmission(body: unknown, redact: (text: string) => str
             continue;
         }
         if (output?.status !== "ok") continue;
+        if (name === "web_fetch") {
+            if (typeof output.url !== "string") continue;
+            const reads = evidence.webReads ??= [];
+            if (reads.length < 24) reads.push({ url: redact(output.url).slice(0, 500), truncated: output.truncated === true });
+            else evidence.moreWebReads = (evidence.moreWebReads ?? 0) + 1;
+            continue;
+        }
         if (name === "list_files") {
             evidence.listedPathCount += Array.isArray(output.files) ? output.files.filter((file) => typeof file === "string").length : 0;
             if (output.truncated === true) evidence.truncatedListingCount += 1;

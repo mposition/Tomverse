@@ -1,11 +1,11 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Language } from "../../../../lib/language";
 import { desktopCodeExecutionCopy } from "../../../../locales/desktopCodeExecution";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { cliProviders, codeExecutionMode, providerClis } from "../code-execution";
 import { codeFallbackModelAvailable, codeFallbackUpdate, codeTransferScope, defaultCodeFallbackSettings,
   type CodeFallbackUpdate } from "../code-fallback";
-import { codeLimitProfile, type CodeLimitProfile, type Snapshot } from "../contract";
+import { codeLimitProfile, type CodeLimitProfile, type CodeMemoryInput, type CodeMemoryView, type Snapshot } from "../contract";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import type { CodeEnginePreference } from "./CodeEngine";
 
@@ -39,6 +39,47 @@ function ApiCap({ credits, disabled, copy, save }: { credits: number | null; dis
     </div>
     {value !== credits && <button className="soft" type="submit" disabled={disabled || !valid}>{copy.save}</button>}
   </form>;
+}
+
+/** The agent's notes about the open project: the switch for keeping them, and a list the person can read and delete from. */
+function CodeMemorySettings({ language }: { language: Language }) {
+  const copy = desktopCodeEngineCopy[language];
+  const [view, setView] = useState<CodeMemoryView | null>(null);
+  const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  async function run(input: CodeMemoryInput) {
+    try { setView(await window.desktop.codeMemory(input)); setFailed(false); }
+    catch { setFailed(true); }
+  }
+  useEffect(() => {
+    let current = true;
+    window.desktop.codeMemory({ action: "read" }).then((loaded) => { if (current) setView(loaded); }, () => { if (current) setFailed(true); });
+    return () => { current = false; };
+  }, []);
+  const entries = view?.entries ?? [];
+  return <>
+    <SettingRow field="code-memory" label={copy.memory} detail={copy.memoryDetail} control={
+      <select id="code-memory" aria-describedby="code-memory-info" value={view?.enabled === false ? "off" : "on"} disabled={!view}
+        onChange={(event) => void run({ action: "set-enabled", enabled: event.currentTarget.value === "on" })}>
+        <option value="on">{copy.on}</option><option value="off">{copy.off}</option>
+      </select>
+    } />
+    <SettingRow label={copy.memoryNotes} detail={view?.project ? copy.memoryCount.replace("{count}", String(entries.length)) : copy.memoryNoProject} control={
+      <button className="soft" type="button" aria-expanded={open} aria-controls="code-memory-notes" disabled={!view?.project}
+        onClick={() => setOpen(!open)}>{open ? copy.memoryHide : copy.memoryView}</button>
+    } />
+    {open && view?.project && <div className="execution-memory" id="code-memory-notes">
+      {entries.length ? <>
+        <ul>{entries.map((entry) => <li key={entry.id}>
+          <span>{entry.text}</span>
+          <button className="soft" type="button" aria-label={copy.memoryRemove} title={copy.memoryRemove}
+            onClick={() => void run({ action: "remove", id: entry.id })}>{copy.memoryRemove}</button>
+        </li>)}</ul>
+        <button className="soft" type="button" onClick={() => void run({ action: "clear" })}>{copy.memoryClear}</button>
+      </> : <p>{copy.memoryEmpty}</p>}
+    </div>}
+    {failed && <p role="alert">{copy.memoryFailed}</p>}
+  </>;
 }
 
 export function CodeExecutionSettings({ snapshot, language, actionFailed, act, engine: taskEngine, changeEngine }: {
@@ -108,6 +149,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
         <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
       </select>
     } />
+    <CodeMemorySettings language={language} />
     <SettingRow field="code-fallback-automatic" label={copy.automatic} detail={automatic ? copy.awaitingVerification : copy.automaticDetail}
       status={automatic} control={
       <select id="code-fallback-automatic" aria-describedby="code-fallback-automatic-info" value={automatic ? "on" : "off"}

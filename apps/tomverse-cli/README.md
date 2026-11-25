@@ -76,7 +76,7 @@ use the npm package.
 
 Revoke or limit a key in Settings > API keys; the CLI has no key management.
 
-The CLI talks only to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
+The CLI talks to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
 unless you set another endpoint with `tomverse config set endpoint <url>` (or
 `TOMVERSE_ENDPOINT`). An endpoint saved before the CLI moved to the coding API
 ends in `/api/v1`; it is read as `/api/code/v1` on the same server.
@@ -84,7 +84,9 @@ It must be https; plain http is accepted only for a loopback development
 server after `tomverse config set allow-insecure-localhost true`. Redirects
 are never followed, so the key cannot be carried to another address. Nothing
 in a repository (AGENTS.md, scripts, model output) can change the endpoint, the
-key or any permission.
+key or any permission. The only other host the CLI itself ever contacts is a
+public web page you approved, through `web_fetch` (below); the key is never
+sent there.
 
 ## Use
 
@@ -163,6 +165,15 @@ per task".
   of the folder, `..`, Windows UNC/device paths and alternate data streams are
   refused. Nothing is uploaded in bulk; only what the model asks to read, in
   bounded pieces.
+- **Images (`view_image`):** for a model whose catalogue entry says it takes
+  images, the model can look at a PNG, JPEG, WebP or GIF file of the folder (up
+  to 3 MB; the type is checked on the file's first bytes). It needs no approval
+  and follows the same rules as `read_file`: only inside the folder, never a
+  credential file. The image reaches the model as image data in the next request,
+  so it is part of what the transmission record counts; the newest three
+  images stay attached and older ones are replaced by a note. A model that does
+  not take images is not offered the tool, and an image you select as a
+  reference in Desktop is looked at the same way.
 - **Every change asks:** `apply_patch` shows the full diff of every file in the
   batch. Edits are exact text replacements; an edit whose text is not found
   exactly once is refused, not guessed. BOM and CRLF line endings are kept.
@@ -184,6 +195,36 @@ per task".
   including descendants that moved to their own session — and anything that
   survived is reported. A program that detaches itself after the command has
   already finished is outside what the CLI can see.
+- **Web pages (`web_fetch`):** the model can read a public web page, for
+  documentation. **Every site (host) is asked about first**, with the host and the
+  full address shown; `a` allows that host for the rest of this run, and a
+  redirect to another host is never followed without its own question. The
+  address is judged by fixed rules that no answer or model text changes: https
+  only, port 443, no user name or password, no IP address in any notation, no
+  `localhost`, single-label or internal name (`.local`, `.internal`, …); the
+  name is resolved by the CLI, every address it resolves to must be public (a
+  private, loopback, link-local or reserved one, also inside an IPv6 form, refuses
+  it), and the connection goes to the address that was checked. Every redirect
+  is judged again. The request is a plain GET with no cookies, no login and
+  nothing from your folder; the answer is limited to 2 MB and 20 seconds, only
+  text, HTML, JSON and XML are read, and the text given to the model is marked
+  as untrusted reference material, never instructions. The page text is part of
+  the next model request, and the transmission record lists the address. A
+  `--read-only` session has no `web_fetch` (it has no approvals at all, and the
+  address of a request can itself carry information out), and neither do
+  `exec` runs without a terminal. There is no web search tool.
+- **Background commands:** a command can be approved to keep running after the call
+  returns (a dev server, a watcher). The approval says "background" and "no
+  time limit", and is bound to that: approving a foreground command never
+  approves the same one in the background (an `a` answer does not carry over
+  either). The model gets a handle and can read what it printed since its last
+  read (bounded, stdout and stderr together), check its state and stop it,
+  without a further approval, because only handles the task itself started
+  exist. At most four run at once. They belong to the task: when it ends, is
+  stopped or cancelled, or the CLI exits, every process tree still running is
+  ended the way a timed-out command is (a hard kill of the CLI itself cannot
+  run that cleanup). The session records them; a resumed session tells the
+  model that its earlier background commands are no longer running.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a
@@ -206,9 +247,29 @@ per task".
   with exit code 3 and the pending actions in the output. Review them with
   `tomverse resume <session>` in a terminal. There is no flag that approves
   everything.
-- `AGENTS.md` at the folder root is given to the model as project
-  information. It cannot grant permissions, and the CLI never runs commands or
+- **Project instructions:** the folder's `AGENTS.md`, its `CLAUDE.md` (a whole-line
+  `@file` in it pulls that file in, inside the folder only, and each file is
+  given once) and the unconditional rules of `.claude/rules/*.md` (a rule whose
+  front matter names `paths` is left out) are given to the model as project
+  information, at most 32,000 characters in all; a cut is marked. When the
+  model first reads or changes a file in a subfolder, that subfolder's own
+  `AGENTS.md` / `CLAUDE.md` come with the result of that read or change, once
+  per folder (again after a compaction), at most 48,000 characters in a task. Files go through the same path check as
+  every read, so a link out of the folder or a credential file is never sent.
+  Instructions cannot grant permissions, and the CLI never runs commands or
   install hooks because a file says so.
+- **Project memory:** the model can keep a short note about the project
+  (`remember_fact`: how the tests run, a decision, a trap) without asking you.
+  Notes are stored in `~/.tomverse/memory/` (or `$TOMVERSE_HOME`), next to the
+  sessions and outside the project, one file per folder, and the file tools
+  never touch that folder. A note is one line of at most 300 characters; at
+  most 40 notes and 8,000 characters are kept, the oldest dropped first; and
+  anything that looks like a key, token or password is refused, not stored. At
+  the start of each task the notes are given to the model after the
+  instructions, marked as unchecked notes that cannot grant anything. A
+  `--read-only` session reads them but cannot add one. `tomverse memory show`
+  lists this folder's notes and `tomverse memory clear` deletes them;
+  `tomverse config set memory off` stops all reading and writing.
 
 ## Sessions, interruption and recovery
 
@@ -298,7 +359,7 @@ are not used by this CLI.
   tested on every one of these systems before it is published.
 - Terminal text is English; Korean and other Unicode input, file names and
   output work.
-- Not in this version: MCP, plugins or skills, image input, a code index or
+- Not in this version: MCP, plugins or skills, a code index or
   LSP, parallel agents or worktrees, IDE or desktop apps, background agents.
 
 ## Update and roll back
