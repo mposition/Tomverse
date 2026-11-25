@@ -881,6 +881,17 @@ export const IMAGE_PHOTO_TOOLS: readonly ImageModelProfile[] = [{
 export const isImagePhotoTool = (modelId: string): boolean =>
   IMAGE_PHOTO_TOOLS.some((model) => model.id === modelId);
 
+/**
+ * Whether a request may name this model. A photo tool is admitted only for
+ * the feature that names it server-side (`photoTool`) and only with a photo:
+ * a model id a client sends never selects one, because being absent from the
+ * pickers is not an admission check. Every other model is always admitted here.
+ */
+export const imagePhotoToolAdmitted = (
+  modelId: string,
+  request: { photoTool?: string; hasPhoto: boolean }
+): boolean => !isImagePhotoTool(modelId) || (request.photoTool === modelId && request.hasPhoto);
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,

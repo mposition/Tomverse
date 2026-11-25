@@ -159,6 +159,8 @@ export async function POST(req: Request) {
       idempotencyKey: body.idempotencyKey,
       modelIds: [body.modelId],
       expectedPricingVersions: { [body.modelId]: body.pricingVersion },
+      // The quote above is the only way this id is reached: it is the tool's own for this feature.
+      ...(body.useCase === "transparent-png" ? { photoTool: RECRAFT_BACKGROUND_REMOVAL.modelId } : {}),
       ...(uploadId ? {
         editSource: {
           bindAttachment: (tx, conversationId) => bindStudioImageUpload(tx, {

@@ -53,8 +53,8 @@ import {
   getImageModelPrice,
   imageMeasuredOutputLimitBound,
   imageEditCredits,
+  imagePhotoToolAdmitted,
   imageThinkingBilling,
-  isImagePhotoTool,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
@@ -256,6 +256,12 @@ export type ImageGenerationRequestInput = {
    * model's edit surcharge (lib/imageGenerationPricing.ts).
    */
   editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
+  /**
+   * The photo tool this request is for, set only by the server feature that
+   * owns it (Studio's transparent PNG). Without it a photo tool's id is
+   * refused like an unknown model, whatever the caller attached.
+   */
+  photoTool?: string;
 };
 
 export type ImageGenerationTargetResult = {
@@ -420,10 +426,10 @@ export const requestImageGeneration = async (
     const price = getImageModelPrice(modelId, input.quality, input.size);
     return { modelId, model, price };
   });
-  // A photo tool has a price row but generates nothing: only an edit may name it.
+  // A photo tool has a price row but is no model a caller may pick.
   const unavailable = targetPlans.filter(
     (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price ||
-      (isImagePhotoTool(plan.modelId) && !input.editSource)
+      !imagePhotoToolAdmitted(plan.modelId, { photoTool: input.photoTool, hasPhoto: Boolean(input.editSource) })
   );
   if (unavailable.length > 0) {
     throw new ChatAccessError(

@@ -895,12 +895,18 @@ test("Recraft V4 Pro edits a square reference with zero data retention and deliv
 
 test("the background remover sends only the padded photo and accepts only a same-size cut-out", async t => {
   const sharp = (await import("sharp")).default;
-  const { getImageModel, isImagePhotoTool, listImageModels, minimumCreditsForImageOption } =
+  const { getImageModel, imagePhotoToolAdmitted, isImagePhotoTool, listImageModels, minimumCreditsForImageOption } =
     createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
   const id = "recraft-remove-background";
   const model = getImageModel(id);
   const price = model.prices[0];
   assert.ok(isImagePhotoTool(id));
+  // Admission is the owning feature's word, never a model id the caller sent (a Chat edit carries a photo too).
+  assert.equal(imagePhotoToolAdmitted(id, { hasPhoto: true }), false);
+  assert.equal(imagePhotoToolAdmitted(id, { photoTool: "another-tool", hasPhoto: true }), false);
+  assert.equal(imagePhotoToolAdmitted(id, { photoTool: id, hasPhoto: false }), false);
+  assert.equal(imagePhotoToolAdmitted(id, { photoTool: id, hasPhoto: true }), true);
+  assert.equal(imagePhotoToolAdmitted("gpt-image-2", { hasPhoto: false }), true);
   // Never a catalogue row: no picker, router or comparison can list it.
   assert.ok(!IMAGE_MODEL_REGISTRY.some(row => row.id === id) && !listImageModels().some(row => row.id === id));
   assert.deepEqual([price.size, price.quality, price.credits, price.outputCostMicroUsd], ["1024x1024", "medium", 20, 10_000]);

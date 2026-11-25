@@ -286,7 +286,11 @@ test("a transparent PNG is quoted on the background remover alone, and only whil
   assert.notEqual((await (await GET(quoteRequest())).json()).modelId, quote.modelId);
   assert.equal((await post({ ...quotedSubmission(quote), credits: 19 })).status, 409);
   assert.equal((await post(quotedSubmission(quote))).status, 202);
-  assert.deepEqual(reservations.map(row => row.modelIds), [["recraft-remove-background"]]);
+  assert.deepEqual(reservations.map(row => [row.modelIds, row.photoTool]), [[["recraft-remove-background"], "recraft-remove-background"]]);
+  // Every other feature reserves without naming a tool, so the service refuses the tool's id for it.
+  const other = await (await GET(quoteRequest())).json();
+  assert.equal((await post({ ...quotedSubmission(other), idempotencyKey: randomUUID() })).status, 202);
+  assert.equal(reservations[1].photoTool, undefined);
   process.env.IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED = "false";
   assert.equal((await post({ ...quotedSubmission(quote), idempotencyKey: randomUUID() })).status, 409);
 });
