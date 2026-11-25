@@ -75,7 +75,7 @@ import {
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "@/lib/conversationRename";
 import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
-import { DESKTOP_APP_ORIGIN, desktopConversationWriteProduct, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopComposerToolsEnabled, desktopConversationWriteProduct, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
@@ -116,11 +116,18 @@ const updateConversationSchema = z
       body.assistantProfileId !== undefined,
     { message: "At least one update is required." }
   );
-const desktopConversationUpdateSchema = z.object({
+const desktopConversationFields = {
     title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH).optional(),
     selectedModels: z.array(modelSchema).min(1).max(APP_DEFAULTS.maxSelectedModels).optional(),
     selectionMode: z.enum(SELECTION_MODES).optional(),
-}).strict().refine((body) => Object.keys(body).length > 0);
+};
+const desktopConversationUpdateSchema = z.strictObject(desktopConversationFields).refine((body) => Object.keys(body).length > 0);
+const desktopComposerUpdateSchema = z.strictObject({
+    ...desktopConversationFields,
+    webSearchMode: updateConversationSchema.shape.webSearchMode,
+    memoryMode: updateConversationSchema.shape.memoryMode,
+    assistantProfileId: updateConversationSchema.shape.assistantProfileId,
+}).refine((body) => Object.keys(body).length > 0);
 const MESSAGE_PAGE_SIZE = 50;
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -402,7 +409,7 @@ export async function PATCH(
         const body = await readLimitedJson<z.infer<typeof updateConversationSchema>>(
             req,
             16 * 1024,
-            desktop ? desktopConversationUpdateSchema : updateConversationSchema
+            desktop ? (desktopComposerToolsEnabled() ? desktopComposerUpdateSchema : desktopConversationUpdateSchema) : updateConversationSchema
         );
         const params = await context.params;
         const conversationId = params.conversationId;
@@ -445,7 +452,9 @@ export async function PATCH(
             return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
         }
         const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;
-        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1))) {
+        const hasComposerOptions = body.webSearchMode !== undefined || body.memoryMode !== undefined || body.assistantProfileId !== undefined;
+        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1) ||
+            (desktopProduct !== "chat" && hasComposerOptions))) {
             return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
         }
 
