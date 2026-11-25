@@ -264,6 +264,7 @@ h1 { white-space: pre-line; font-size: 34px; line-height: 1.5; font-weight: 650;
 .review-provider-tabs button[aria-current="page"] { border-color: var(--mobile-action); color: var(--mobile-action); }
 .review-model-options { display: grid; gap: 8px; }
 .review-model-options label { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--mobile-paper); border-radius: 12px; gap: 12px; }
+.native-image-model-name { display: inline-flex; align-items: center; gap: 8px; }
 .review-model-options small { display: block; color: var(--mobile-muted); font-size: 12px; }
 .review-model-options input { width: 22px; height: 22px; accent-color: var(--mobile-action); }
 @media (max-width: 360px) { .review-toolbar { flex-wrap: wrap; } .review-toolbar .segmented { flex-basis: 100%; } }

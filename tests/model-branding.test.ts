@@ -18,6 +18,9 @@ const providersWithLogos = [
   "moonshot",
   "cohere",
   "bfl",
+  "ideogram",
+  "byteplus",
+  "recraft",
 ];
 
 test("every provider logo points at a file in public/", () => {

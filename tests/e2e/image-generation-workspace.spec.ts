@@ -1041,6 +1041,16 @@ test("the catalogue's image tab is its own list and seeds the picked model", { t
     await expect(panel.locator(`[data-model-id="${model.id}"]`)).toHaveCount(0);
   }
 
+  for (const [modelId, icon] of [
+    ["ideogram-4-6", "ideogram.svg"],
+    ["dola-seedream-5-5-261028", "byteplus.png"],
+    ["recraftv4_pro", "recraft.png"],
+  ]) {
+    const logo = panel.locator(`[data-model-id="${modelId}"] img`);
+    await expect(logo).toHaveAttribute("src", `/model-icons/${icon}`);
+    await expect.poll(() => logo.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  }
+
   // The subtitle credits the model's owner and names the supplier when they
   // differ. Staging showed why this needs asserting: the row read `provider`,
   // which is indistinguishable from `owner` for every direct integration, and
