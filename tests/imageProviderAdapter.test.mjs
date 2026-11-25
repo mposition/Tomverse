@@ -578,7 +578,7 @@ for (const spec of [
           const result = await generateImageWithProvider({ ...request, size });
           const common = { model: seed.apiModelId, prompt: request.prompt, size, response_format: "b64_json" };
           assert.deepEqual(JSON.parse(network.mock.calls.at(-1).arguments[1].body), spec.provider === "recraft" ?
-            { ...common, image_format: "png", n: 1 } : { ...common, output_format: "png", background: "opaque" });
+            { ...common, image_format: "png", n: 1 } : { ...common, output_format: "png", background: "opaque", layer_decomposition: false, watermark: false });
           assert.deepEqual(result.imageBytes, bytes);
           assert.equal(`${result.outputWidth}x${result.outputHeight}`, size);
           assert.equal(result.providerRequestId, "local-job");
@@ -588,6 +588,7 @@ for (const spec of [
           const result = await generateImageWithProvider({ ...request, size: seed.sizes.at(-1), editImage });
           const data = JSON.parse(network.mock.calls.at(-1).arguments[1].body);
           assert.equal(data.image, "data:image/png;base64," + editImage.bytes.toString("base64"));
+          assert.equal(result.requestParams.endpoint, "generations");
           assert.equal(result.requestParams.image.sha256, editImage.sha256);
           assert.ok(!JSON.stringify(result.requestParams).includes(editImage.bytes.toString("base64")));
         }

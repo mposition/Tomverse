@@ -439,10 +439,10 @@ const auditableRequestParams = (
  * The audit view of an edit's photo: described, never stored. The bytes are
  * the user's attachment and already live where deletion finds them.
  */
-const editAuditParams = (editImage: ImageEditInput | undefined): Record<string, unknown> =>
+const editAuditParams = (editImage: ImageEditInput | undefined, endpoint = "edits"): Record<string, unknown> =>
   editImage
     ? {
-        endpoint: "edits",
+        endpoint,
         image: {
           mimeType: editImage.mimeType,
           width: editImage.width,
@@ -1452,10 +1452,13 @@ const generateWithDirectRaster = async (
     model: contract.apiModelId,
     size: input.size,
     response_format: "b64_json",
-    ...(isSeedream ? { output_format: "png", background: "opaque" } : { image_format: "png", n: 1 }),
+    // On Seedream 5.5, layer decomposition is the one-to-many image mode.
+    ...(isSeedream
+      ? { output_format: "png", background: "opaque", layer_decomposition: false, watermark: false }
+      : { image_format: "png", n: 1 }),
   };
   // The audit stores only the prepared photo's dimensions, digest and byte count.
-  const requestParams = { ...params, ...editAuditParams(input.editImage) };
+  const requestParams = { ...params, ...editAuditParams(input.editImage, "generations") };
   const body = {
     ...params,
     prompt: input.prompt,

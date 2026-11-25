@@ -1029,15 +1029,11 @@ blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴
 
 **어휘와 변환 계층이 `lib/imageResolution.ts`에 들어갔다.** tier·aspect 정의, 기존 `ImageSize`와의 양방향 매핑, provider별
 요청 변환(OpenAI 픽셀쌍 / xAI `resolution`+`aspect_ratio` / Google
-`imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 판매 가능한
-조합은 `SELLABLE_IMAGE_OPTIONS` 3종 그대로이며, **가격표 key와
-`ImageGeneration.size` 컬럼은 아직 legacy 문자열이다** — 그 둘은 migration과
-새 `pricingVersion`이 함께 움직이는 별도 변경이다.
+`imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 기본 1K 옵션은 `SELLABLE_IMAGE_OPTIONS` 3종이며 실제 판매 가능한
+크기와 가격은 모델별 카탈로그가 결정한다. `ImageGeneration.size`와 가격표는 같은 픽셀쌍을 쓴다.
 
-`legacyImageSizeForOption()`이 2K·4K에 `null`을 돌려주는 것은 표의 빈칸이
-아니라 계약이다. 값을 채워 근처 픽셀쌍으로 매핑하면 1K 가격으로 2K 이미지를
-청구하게 되고, 사용자는 그 차이를 볼 방법이 없다.
-
+`legacyImageSizeForOption()`은 2K 정사각을 `2048x2048`로 변환한다. 다른 2K 비율과
+4K에는 `null`을 반환한다. 미지원 조합을 비슷한 1K 크기로 바꿔 과금하지 않는다.
 
 **2026-11-25 · Recraft V4 Pro**. 전용 2K 정사각 옵션은 `2048x2048`로 저장하고 1K와 별도 가격을
 검증한다. 새 예약에는 tier·aspectRatio도 보존한다. 다른 공급자의 2K 옵션은 승인 대상에 추가되지 않았다.

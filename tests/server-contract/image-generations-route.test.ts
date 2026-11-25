@@ -90,7 +90,11 @@ test("the strict schema rejects unknown fields and bad options before the gates"
   );
   assert.equal(unknownField.status, 400);
 
-  const badSize = await POST(postRequest({ ...validBody, size: "2048x2048" }));
+  const native2k = await POST(postRequest({ ...validBody, modelIds: ["recraftv4_pro"], size: "2048x2048", quality: "medium" }));
+  assert.equal(native2k.status, 403);
+  assert.equal((await native2k.json()).code, "IMAGE_GENERATION_DISABLED");
+
+  const badSize = await POST(postRequest({ ...validBody, size: "4096x4096" }));
   assert.equal(badSize.status, 400);
 
   const badKey = await POST(postRequest({ ...validBody, idempotencyKey: "x" }));
