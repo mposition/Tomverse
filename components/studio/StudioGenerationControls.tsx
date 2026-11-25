@@ -14,12 +14,10 @@ export function StudioGenerateButton({ label, busy, disabled, onClick }: {
   </button>;
 }
 
-export function StudioQuoteHint({ quote, error }: { quote?: StudioImageQuote; error?: number }) {
+export function StudioQuoteHint({ quote, error, showModel = true }: { quote?: StudioImageQuote; error?: number; showModel?: boolean }) {
   const { copy, lang } = useStudioCopy();
   if (quote) {
-    return <p className={styles.hint}>{copy.generationCredits
-      .replace("{model}", quote.model)
-      .replace("{credits}", quote.credits.toLocaleString(lang))}</p>;
+    return <p className={styles.hint}>{showModel && `${quote.model} · `}{copy.generationCredits.replace("{credits}", quote.credits.toLocaleString(lang))}</p>;
   }
   if (error) return <p className={styles.hint} role="status">{error === 401 ? copy.signInToGenerate : copy.generationUnavailable}</p>;
   return null;

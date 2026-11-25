@@ -23,7 +23,7 @@ export const studioLocale = {
   "apply": "적용",
   "generationUnavailable": "현재 생성 기능을 사용할 수 없습니다.",
   "signInToGenerate": "로그인하면 생성할 수 있습니다.",
-  "generationCredits": "{model} · {credits} 크레딧",
+  "generationCredits": "{credits} 크레딧",
   "packCaptions": "팩에 넣을 문구",
   "firstScene": "첫 장면 생성",
   "nextScene": "다음 장면 생성",

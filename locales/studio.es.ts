@@ -16,7 +16,7 @@ export const studioLocale = {
   "apply": "Aplicar",
   "generationUnavailable": "La generación no está disponible en este momento.",
   "signInToGenerate": "Inicia sesión para generar.",
-  "generationCredits": "{model} · {credits} créditos",
+  "generationCredits": "{credits} créditos",
   "packCaptions": "Textos de los stickers",
   "firstScene": "Generar primera escena",
   "nextScene": "Generar siguiente escena",
