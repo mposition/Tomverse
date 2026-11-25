@@ -75,6 +75,7 @@ if (trustedWindow) {
     readCommand: (id: string) => ipcRenderer.invoke("desktop:read-command", id),
     checkRecovery: (id: string) => ipcRenderer.invoke("desktop:check-recovery", id),
     resume: (id: string) => ipcRenderer.invoke("desktop:resume", id),
+    compactTask: (id: string) => ipcRenderer.invoke("desktop:compact-task", id),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),

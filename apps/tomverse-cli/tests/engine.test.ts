@@ -211,3 +211,22 @@ test("steer goes in as a user message right before the next request, never betwe
         await gateway.stop();
     }
 });
+
+test("a manual compaction of a finished task is one recorded request and keeps the tail of the history", async () => {
+    const gateway = await new FakeGateway({ script: (body) =>
+        typeof body.messages?.[0]?.content === "string" && body.messages[0].content.startsWith("You compress a coding session")
+            ? { text: "The user asked to look around; the files were listed." } : { text: "All looked at." } }).start();
+    try {
+        const made = await makeRunner(gateway, makeRepo());
+        assert.equal(await made.runner.maybeCompact(true), "skipped", "nothing to summarise before the first task");
+        await made.runner.runTask("Look around.");
+        assert.equal(await made.runner.maybeCompact(true), "compacted");
+        assert.equal(made.journal.state.compactions.length, 1);
+        assert.deepEqual(made.journal.state.generations.map((g) => g.purpose), ["agent", "compact"]);
+        assert.match(String(made.journal.state.messages[0]!.content), /^Summary of the earlier part of this session/);
+        assert.equal(made.journal.state.messages.at(-1)!.role, "assistant");
+        assert.ok(made.journal.state.generations.every((g) => g.closed), "the summary request is settled in the same checkpoint");
+    } finally {
+        await gateway.stop();
+    }
+});

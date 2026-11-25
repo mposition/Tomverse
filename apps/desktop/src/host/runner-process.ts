@@ -1082,6 +1082,48 @@ async function checkRecovery(command: Extract<WorkerCommand, { type: "check-reco
   }
 }
 
+/** One model request that replaces the earlier part of a saved task's history with a summary. Nothing runs and no file is touched. */
+async function compactRecorded(command: Extract<WorkerCommand, { type: "compact-history" }>): Promise<WorkerEvent> {
+  const reply = { type: "history-compacted", requestId: command.requestId } as const;
+  if (active || recovery) return { ...reply, result: "unavailable" };
+  const abort = new AbortController();
+  recovery = { requestId: command.requestId, abort };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  try {
+    unlockProject = lockProject(command.project);
+    const key = command.connection.key;
+    const endpoint = resolveEndpoint({ endpoint: command.connection.endpoint, allowInsecureLocalhost: true }, {});
+    if (endpoint.base !== command.scope.base || sha256(key) !== command.scope.keyIdentity) return { ...reply, result: "unavailable" };
+    journal = openRecordedSession(command);
+    if (!journal || journal.broken || journal.state.codeContinuation || journal.state.pendingApprovals.length ||
+        journalStatus(journal.state) === "unknown" || !journal.persisted) return { ...reply, result: "unavailable" };
+    const gateway = gatewayFor(command.connection, abort.signal);
+    validateSession(journal, gateway.endpoint, gateway.keyPrefix);
+    const catalog = await gateway.models();
+    abort.signal.throwIfAborted();
+    assertProjectRoot(command.project);
+    const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+    const mode = journal.state.codeMode ?? (journal.state.readOnly ? "ask" : "agent");
+    const runner = new Runner({
+      gateway, journal, workspace, catalog, productName: "Tomverse Code", commandEnv: [], instructions: null, prompter: null,
+      output: { json: false, info: () => undefined, stream: () => undefined, event: () => undefined },
+      assertAllowed: () => assertProjectRoot(command.project), redactText: (text) => cleanText(text, key), captureTransmission: true,
+      taskPlan: mode === "ask" ? undefined : mode,
+    });
+    const outcome = await runner.maybeCompact(true, 180_000);
+    if (journal.broken) throw journal.broken;
+    await sessionCost(gatewayFor(command.connection, AbortSignal.any([abort.signal, AbortSignal.timeout(3_000)])), journal, catalog).catch(() => undefined);
+    return { ...reply, result: outcome === "compacted" ? "compacted" : outcome === "skipped" ? "nothing" : "failed" };
+  } catch (error) {
+    return { ...reply, result: error instanceof SessionLockedError ? "unavailable" : journal?.broken ? "failed" : "unavailable" };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+    recovery = undefined;
+  }
+}
+
 function readRecorded<T>(command: Extract<WorkerCommand, { type: "read-change" | "read-command" }>, read: (journal: Journal) => T): T | null {
   if (active) return null;
   let journal: Journal | undefined;
@@ -1303,6 +1345,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send({ type: "command-detail", requestId: data.requestId, inspection: readRecorded(data, (journal) => journalCommand(journal.state, data.recordId)) });
   } else if (data.type === "check-recovery" || (DESKTOP_FIXTURE_ALLOWED && data.type === "check-native-recovery")) {
     void checkRecovery(data).then(send);
+  } else if (data.type === "compact-history") {
+    void compactRecorded(data).then(send);
   } else if (data.type === "cancel-recovery") {
     if (recovery?.requestId === data.requestId) recovery.abort.abort();
   } else if (data.type === "undo-change") {

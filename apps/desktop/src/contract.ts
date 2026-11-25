@@ -129,6 +129,7 @@ export function asProposedCodePlan(plan: CodeTaskPlan): CodeTaskPlan {
 }
 export type Change = { id: string; path: string; kind: string; current: string };
 export type ChangeInspection = { text: string | null; current: string; canUndo: boolean };
+export type CompactHistoryResult = "compacted" | "nothing" | "failed" | "unavailable";
 export type UndoChangeResult = "undone" | "cancelled" | "conflict" | "unavailable" | "unconfirmed";
 export type DeleteHistoryResult = "deleted" | "cancelled" | "locked" | "unavailable" | "unconfirmed";
 export type CodeNativeRecoverySummary = { turn: "running" | "completed" | "stopped" | "failed" | "unconfirmed"; passed: number; failed: number; unconfirmed: number };
@@ -349,6 +350,7 @@ export type DesktopApi = {
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;
+  compactTask(id: string): Promise<CompactHistoryResult>;
   moreHistory(): Promise<void>;
   readChange(id: string): Promise<ChangeInspection | null>;
   undoChange(id: string): Promise<UndoChangeResult>;

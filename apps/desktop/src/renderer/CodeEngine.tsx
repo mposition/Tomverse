@@ -1,6 +1,7 @@
+import { useState } from "react";
 import type { Language } from "../../../../lib/language";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
-import { codeLimitProfile, type CodeLimitProfile, type Task } from "../contract";
+import { codeLimitProfile, type CodeLimitProfile, type CompactHistoryResult, type Task } from "../contract";
 
 const storageKey = "tomverse.desktop.codeEngine";
 
@@ -23,8 +24,19 @@ export function writeCodeEnginePreference(value: CodeEnginePreference) {
   catch { /* The choice still applies until the window closes. */ }
 }
 
-export function CodeEngineBar({ task, language }: { task: Task; language: Language }) {
+const compactableStatuses: Task["status"][] = ["completed", "stopped", "blocked", "clarification", "failed"];
+
+export function CodeEngineBar({ task, language, idle }: { task: Task; language: Language; idle: boolean }) {
   const copy = desktopCodeEngineCopy[language];
+  const [compaction, setCompaction] = useState<"working" | CompactHistoryResult | null>(null);
+  const canCompact = idle && !!task.id && !!task.context && task.savedLocally !== false && task.execution?.executionMode === "tomverse_api" &&
+    !task.continuation && !task.cliContinuation && compactableStatuses.includes(task.status);
+  async function compact() {
+    if (!task.id) return;
+    setCompaction("working");
+    try { setCompaction(await window.desktop.compactTask(task.id)); }
+    catch { setCompaction("failed"); }
+  }
   const { limits, goal, context } = task;
   const last = goal?.last;
   if (!limits && !goal && !context) return null;
@@ -35,7 +47,11 @@ export function CodeEngineBar({ task, language }: { task: Task; language: Langua
       {goal && <span>{copy.goalChip.replace("{count}", String(goal.continuations)).replace("{max}", String(goal.maxContinuations))}</span>}
       {context && <span>{copy.contextUsage.replace("{percent}", String(percent))
         .replace("{used}", context.tokens.toLocaleString(language)).replace("{window}", context.window.toLocaleString(language))}</span>}
+      {canCompact && <button className="soft" type="button" disabled={compaction === "working"} onClick={() => void compact()}>
+        {compaction === "working" ? copy.compacting : copy.compact}</button>}
     </div>
+    {compaction && compaction !== "working" && <small role="status">
+      {compaction === "compacted" ? copy.compacted : compaction === "nothing" ? copy.compactNothing : copy.compactFailed}</small>}
     {last && <small>
       <strong>{last.met ? copy.goalVerified : copy.goalPending}</strong>{last.summary ? ` · ${last.summary}` : ""}
       {!last.met && last.next ? ` · ${copy.goalNext.replace("{action}", last.next)}` : ""}

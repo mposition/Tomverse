@@ -956,7 +956,7 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
-          {task && surface === "code" && <CodeEngineBar task={task} language={language} />}
+          {task && surface === "code" && <CodeEngineBar key={task.id ?? "new"} task={task} language={language} idle={!busy && online} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>
