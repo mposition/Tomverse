@@ -117,6 +117,60 @@ test("NULL inherits, a hold disables, and an override changes only what it names
   assert.equal(model.pricingVersion, enabledSeed.pricingVersion);
 });
 
+test("each direct seed serves with its approved default prices, while explicit holds and unbudgeted revisions prevail", () => {
+  for (const [id, size, cost] of [
+    ["ideogram-4-6", "1024x1024", 60_000],
+    ["dola-seedream-5-5-261028", "1024x1024", 20_000],
+    ["recraftv4_pro", "2048x2048", 250_000],
+  ]) {
+    const seed = getImageModel(id);
+    const revision = {
+      modelId: id, pricingVersion: "first-approved-price", effectiveFrom: new Date(0),
+      createdAt: new Date(0), prices: [{ quality: "medium", size, credits: 350, outputCostMicroUsd: cost }],
+      verification: seed.priceVerification,
+    };
+    const read = (rows, revisions, budget = true) => resolveImageCatalog({
+      seed: [seed], rows, revisions, now: new Date(), judge: judge(budget),
+    }).models[0];
+    assert.equal(read([], []).disabledReason, null);
+    assert.equal(read([], [revision]).disabledReason, null);
+    assert.equal(read([], [revision]).disabledNote, undefined);
+    assert.notEqual(read([], [revision], false).disabledReason, null);
+    assert.notEqual(read([row(id, { enabled: false })], [revision]).disabledReason, null);
+    assert.notEqual(read([row(id, { holdReason: "paused" })], [revision]).disabledReason, null);
+  }
+});
+
+test("direct raster profiles require exact provider terms, supported options and independent budgets", () => {
+  for (const [id, unit] of [["dola-seedream-5-5-261028", 20_000], ["recraftv4_pro", 250_000]]) {
+    const seed = getImageModel(id);
+    const prices = seed.sizes.map(size => ({ size, quality: "medium", outputCostMicroUsd: unit, credits: 300 }));
+    const priced = { ...seed, prices };
+    assert.equal(judge()(seed).admitted, true);
+    assert.deepEqual(judge()(priced), { admitted: true });
+    assert.equal(judge(false)(priced).admitted, false);
+    for (const override of [
+      { apiModelId: "unregistered" }, { qualities: ["low"] },
+      { deliveryMimeType: undefined, outputMimeTypes: ["image/jpeg", "image/png"] },
+      { sizes: [id === "recraftv4_pro" ? "1024x1024" : "2048x2048"] },
+      { prices: [{ ...prices[0], outputCostMicroUsd: unit - 1 }] },
+    ]) assert.equal(judge()({ ...priced, ...override }).admitted, false);
+  }
+});
+
+test("direct Ideogram requires an approved square price and a provider budget before admission", () => {
+  const seed = getImageModel("ideogram-4-6");
+  assert.equal(judge()(seed).admitted, true);
+  const price = { size: "1024x1024", quality: "medium", credits: 100, outputCostMicroUsd: 60_000 };
+  const priced = { ...seed, prices: [price] };
+  assert.deepEqual(judge()(priced), { admitted: true });
+  assert.equal(judge(false)(priced).admitted, false);
+  assert.equal(judge()({ ...priced, apiModelId: "unregistered" }).admitted, false);
+  assert.equal(judge()({ ...priced, prices: [{ ...price, size: "1536x1024" }] }).admitted, false);
+  assert.equal(judge()({ ...priced, sizes: ["1536x1024"] }).admitted, false);
+  assert.equal(judge()({ ...priced, prices: [{ ...price, outputCostMicroUsd: 59_999 }] }).admitted, false);
+});
+
 test("turning on a model whose worst case is unbounded is refused by the judge, not by the row", () => {
   const { models } = resolve([row(heldSeed.id, { enabled: true })]);
   assert.equal(models.find((m) => m.id === heldSeed.id).disabledReason, "worst_case_cost_unbounded");

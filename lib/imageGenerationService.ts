@@ -58,6 +58,7 @@ import {
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
+import { optionForLegacyImageSize } from "@/lib/imageResolution";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { imageExecutionDrift, imageExecutionProfile, stalePricingVersions } from "@/lib/modelCatalogCore";
 import {
@@ -67,7 +68,6 @@ import {
 } from "@/lib/imageProviderAdapter";
 import { ImageEditSourceError, imageEditEnabled, loadImageEditInput } from "@/lib/imageEditSource";
 import {
-  getImageGenerationPricing,
   IMAGE_EDIT_INPUT_MAX_EDGE_PX,
   imageEditPricing,
   IMAGE_GENERATION_MODEL_ID,
@@ -484,15 +484,6 @@ export const requestImageGeneration = async (
     (sum, target) => sum + target.credits,
     0
   );
-
-  const pricing = getImageGenerationPricing(input.quality, input.size);
-  if (!pricing) {
-    throw new ChatAccessError(
-      400,
-      "IMAGE_OPTION_NOT_SUPPORTED",
-      "The requested image quality or size is not supported."
-    );
-  }
 
   const promptTokens = estimatePromptTokens(input.prompt);
   if (promptTokens > IMAGE_PROMPT_MAX_TOKENS) {
@@ -926,6 +917,7 @@ export const requestImageGeneration = async (
               modelId: target.modelId,
               // What the provider call may send; checked again before the call.
               executionProfile: imageExecutionProfile(target.model),
+              resolutionOption: optionForLegacyImageSize(input.size),
               thinkingCapMicroUsd: target.model.priceVerification.thinkingCapMicroUsd,
               // The measured token bound this price rests on, frozen like the
               // price: settlement reads it here, never the live table a deploy

@@ -11,12 +11,15 @@
 // from a stored boolean alone: a row that says "enabled" for a model whose
 // worst-case cost is unbounded is refused.
 
+import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE } from "@/lib/directRasterModels";
+import { IDEOGRAM_SIZE, IDEOGRAM_OUTPUT_COST_MICRO_USD } from "@/lib/ideogramImageRequest";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
   billingTermsApplyTo,
   type ConfirmedImageBillingTerms,
+  imageDeliveryMimeType,
   imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
   imageThinkingCapMinimumMicroUsd,
@@ -69,6 +72,9 @@ export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> 
   fal: ["fal.ai"],
   // bfl.ai also serves the playground and account pages, so only /pricing there.
   bfl: ["docs.bfl.ai", "bfl.ai/pricing"],
+  ideogram: ["developer.ideogram.ai", "ideogram.ai/pricing"],
+  byteplus: ["docs.byteplus.com/en/docs/", "ai.byteplus.com/ark/region:ap-southeast-1/docs/", "ai.byteplus.com/ark/region%3Aap-southeast-1/docs/"],
+  recraft: ["www.recraft.ai/docs/api-reference/"],
   deepseek: ["api-docs.deepseek.com"],
   mistral: ["docs.mistral.ai", "mistral.ai"],
   // platform.moonshot.ai answers 301 to platform.kimi.ai since 2026-11.
@@ -228,7 +234,7 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const imagePriceSchema = z
   .object({
     quality: z.enum(["low", "medium", "high"]),
-    size: z.enum(["1024x1024", "1536x1024", "1024x1536"]),
+    size: z.enum(CATALOG_IMAGE_SIZES),
     credits: z.number().int().positive().max(10_000),
     outputCostMicroUsd: z.number().int().nonnegative().max(10_000_000),
   })
@@ -286,7 +292,7 @@ export const imageFullProfileSchema = z
     name: z.string().trim().min(1).max(80),
     shortName: z.string().trim().min(1).max(40).optional(),
     lifecycle: z.enum(["stable", "preview"]),
-    sizes: z.array(z.enum(["1024x1024", "1536x1024", "1024x1536"])).min(1),
+    sizes: z.array(z.enum(CATALOG_IMAGE_SIZES)).min(1),
     qualities: z.array(z.enum(["low", "medium", "high"])).min(1),
     latencyClass: z.enum(["fast", "balanced", "slow"]),
     provenance: z.array(z.enum(["c2pa", "synthid"])),
@@ -1130,6 +1136,28 @@ export const judgeImageModel = (
 ): ImageAdmission => {
   const reasons: string[] = [];
   if (model.prices.length === 0) reasons.push("no_prices");
+  if (model.provider === "ideogram" &&
+      (model.sizes.some(size => size !== IDEOGRAM_SIZE) || model.prices.some(price => price.size !== IDEOGRAM_SIZE))) {
+    reasons.push("unsupported_ideogram_resolution");
+  }
+  if (model.provider === "ideogram" && model.prices.some(price => price.outputCostMicroUsd < IDEOGRAM_OUTPUT_COST_MICRO_USD[price.quality])) {
+    reasons.push("ideogram_price_below_provider_cost");
+  }
+  if (isDirectRasterProvider(model.provider)) {
+    const contract = DIRECT_RASTER_MODELS[model.provider];
+    const supportedSizes: readonly string[] = contract.sizes;
+    if (model.apiModelId !== contract.apiModelId ||
+        model.qualities.some(quality => quality !== "medium") ||
+        model.sizes.some(size => !supportedSizes.includes(size)) ||
+        model.prices.some(price => price.quality !== "medium" || !supportedSizes.includes(price.size) ||
+          price.outputCostMicroUsd < contract.outputCostMicroUsd) ||
+        !model.outputMimeTypes.includes("image/png") || imageDeliveryMimeType(model) !== "image/png") {
+      reasons.push("unsupported_direct_raster_option");
+    }
+  }
+  if (model.provider !== "recraft" && (model.sizes.includes(RECRAFT_SIZE) || model.prices.some(price => price.size === RECRAFT_SIZE))) {
+    reasons.push("unsupported_native_2k");
+  }
   if (!model.priceVerification.verifiedAt) reasons.push("price_unverified");
   const sources = model.priceVerification.sources;
   if (sources.length === 0) reasons.push("no_price_sources");
@@ -1221,7 +1249,7 @@ export const imageCreditOverrideSchema = z
     z
       .object({
         quality: z.enum(["low", "medium", "high"]),
-        size: z.enum(["1024x1024", "1536x1024", "1024x1536"]),
+        size: z.enum(CATALOG_IMAGE_SIZES),
         credits: z.number().int().positive().max(10_000),
       })
       .strict()

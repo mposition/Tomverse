@@ -3,6 +3,7 @@
 // how a server reason reads, and which edited credits can be applied.
 // Deciding whether a model may serve stays on the server (lib/modelCatalogCore.ts);
 // these only describe what the server reported.
+import { CATALOG_IMAGE_SIZES } from "@/lib/directRasterModels";
 import type { AdminFlowStepState } from "@/lib/adminAmuxFlow";
 
 export type ImageOptionPrice = { quality: string; size: string; credits: number; outputCostMicroUsd: number };
@@ -384,7 +385,7 @@ export const priceRange = (prices: readonly { credits: number }[]) =>
     : { count: prices.length, min: Math.min(...prices.map((p) => p.credits)), max: Math.max(...prices.map((p) => p.credits)) };
 
 export const QUALITY_ORDER = ["low", "medium", "high"] as const;
-export const SIZE_ORDER = ["1024x1024", "1536x1024", "1024x1536"] as const;
+export const SIZE_ORDER = CATALOG_IMAGE_SIZES;
 
 /** Prices in reading order: quality, then square / landscape / portrait. */
 export const orderedPrices = <P extends { quality: string; size: string }>(prices: readonly P[]): P[] =>

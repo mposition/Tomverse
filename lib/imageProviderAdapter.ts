@@ -1,5 +1,8 @@
 import "server-only";
 
+import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
+
 import {
   IMAGE_GENERATION_MODEL_ID,
   imageModelSupportsEdit,
@@ -436,10 +439,10 @@ const auditableRequestParams = (
  * The audit view of an edit's photo: described, never stored. The bytes are
  * the user's attachment and already live where deletion finds them.
  */
-const editAuditParams = (editImage: ImageEditInput | undefined): Record<string, unknown> =>
+const editAuditParams = (editImage: ImageEditInput | undefined, endpoint = "edits"): Record<string, unknown> =>
   editImage
     ? {
-        endpoint: "edits",
+        endpoint,
         image: {
           mimeType: editImage.mimeType,
           width: editImage.width,
@@ -504,7 +507,7 @@ export const generateImageWithProvider = async (input: {
   // ignoring the photo -- so it is refused, as is one whose edit price is held.
   if (
     input.editImage &&
-    !(["openai", "xai", "fal"].includes(model.provider) && imageModelSupportsEdit(model.id))
+    !(["openai", "xai", "fal", "byteplus"].includes(model.provider) && imageModelSupportsEdit(model.id))
   ) {
     throw new ImageProviderError(
       "provider_failed",
@@ -550,6 +553,12 @@ const dispatchImageRequest = async (
   model: ImageModelProfile,
   input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  if (isDirectRasterProvider(model.provider)) {
+    return generateWithDirectRaster(model.provider, model, input);
+  }
+  if (input.size === RECRAFT_SIZE) {
+    throw new ImageProviderError("provider_failed", "No native 2K request for this model.");
+  }
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
@@ -561,6 +570,9 @@ const dispatchImageRequest = async (
   }
   if (model.provider === "qwen") {
     return generateWithQwen(model, input);
+  }
+  if (model.provider === "ideogram") {
+    return generateWithIdeogram(model, input);
   }
   if (model.provider === "bfl") {
     return generateWithBfl(model, input);
@@ -1300,13 +1312,28 @@ const generateWithQwen = async (
     );
   }
 
-  // From here the image was generated and billed: a failure to fetch or check
-  // it is not a refusal, whatever HTTP status the download answered
-  // (`afterGeneration`, read by the billing measurement).
-  const deliver = async (): Promise<ImageProviderResult> => {
+  return downloadGeneratedImage({
+    url: parsed.url, acceptsUrl: isQwenAssetUrl, model, size: input.size, providerRequestId, requestParams,
+    providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
+  });
+};
+
+/** Both providers return temporary links. Download without credentials or redirects. */
+const downloadGeneratedImage = async ({
+  url, acceptsUrl, model, size, providerRequestId, requestParams, providerUsage,
+}: {
+  url: string;
+  acceptsUrl: (value: string) => boolean;
+  model: ImageModelProfile;
+  size: ImageSize;
+  providerRequestId: string | null;
+  requestParams: Record<string, unknown>;
+  providerUsage: ImageProviderResult["providerUsage"];
+}): Promise<ImageProviderResult> => {
+  try {
     let asset: Response;
     try {
-      asset = await fetch(parsed.url, {
+      asset = await fetch(url, {
         redirect: "manual",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
@@ -1322,7 +1349,7 @@ const generateWithQwen = async (
     // Cancelled, not drained, as on the fal path: an unread image body pins its
     // connection, and reading it would spend the memory the limit refuses.
     const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
-    if (!asset.ok || !isQwenAssetUrl(asset.url)) {
+    if (!asset.ok || !acceptsUrl(asset.url)) {
       await releaseAsset();
       throw new ImageProviderError(
         "provider_failed",
@@ -1373,7 +1400,7 @@ const generateWithQwen = async (
       );
     }
     const dimensions = readImageDimensions(imageBytes, mimeType);
-    const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+    const [expectedWidth, expectedHeight] = size.split("x").map(Number);
     if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
       throw new ImageProviderError(
         "provider_failed",
@@ -1391,20 +1418,156 @@ const generateWithQwen = async (
       inputTokens: 0,
       thinkingTokens: 0,
       outputTokens: 0,
-      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
+      providerUsage,
       providerRequestId,
       provenance: [...model.provenance],
       outputWidth: dimensions.width,
       outputHeight: dimensions.height,
       requestParams,
     };
-  };
-  try {
-    return await deliver();
   } catch (error) {
     if (error instanceof ImageProviderError) error.afterGeneration = true;
     throw error;
   }
+};
+
+const generateWithDirectRaster = async (
+  provider: DirectRasterProvider,
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
+  const contract = DIRECT_RASTER_MODELS[provider];
+  const sizes: readonly string[] = contract.sizes;
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (model.apiModelId !== contract.apiModelId || input.quality !== "medium" ||
+      !sizes.includes(input.size) || !price || price.outputCostMicroUsd < contract.outputCostMicroUsd ||
+      !model.outputMimeTypes.includes("image/png") || imageDeliveryMimeType(model) !== "image/png") {
+    throw new ImageProviderError("provider_failed", "Unsupported direct image generation option.");
+  }
+  const isSeedream = provider === "byteplus";
+  const apiKey = (isSeedream ? process.env.ARK_API_KEY : process.env.RECRAFT_API_TOKEN)?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+
+  const params = {
+    model: contract.apiModelId,
+    size: input.size,
+    response_format: "b64_json",
+    // On Seedream 5.5, layer decomposition is the one-to-many image mode.
+    ...(isSeedream
+      ? { output_format: "png", background: "opaque", layer_decomposition: false, watermark: false }
+      : { image_format: "png", n: 1 }),
+  };
+  // The audit stores only the prepared photo's dimensions, digest and byte count.
+  const requestParams = { ...params, ...editAuditParams(input.editImage, "generations") };
+  const body = {
+    ...params,
+    prompt: input.prompt,
+    ...(input.editImage ? { image: `data:image/png;base64,${input.editImage.bytes.toString("base64")}` } : {}),
+  };
+  const endpoint = isSeedream
+    ? "https://ark.ap-southeast.bytepluses.com/api/v3/images/generations"
+    : "https://external.api.recraft.ai/v1/images/generations";
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Direct image request failed.", null, null, requestParams);
+  }
+
+  // JSON contains one base64-encoded file. Cap the streamed envelope before parsing it.
+  const maxEncodedLength = 4 * Math.ceil(FAL_MAX_ASSET_BYTES / 3);
+  const payload = await readResponseToBuffer(response, response.ok ? maxEncodedLength + 64 * 1024 : 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  const item = Array.isArray(payload?.data) && payload.data.length === 1 ? payload.data[0] : null;
+  const rawId = response.headers.get("x-request-id") ?? (isSeedream ? null : item?.image_id);
+  const requestId = typeof rawId === "string" && /^[A-Za-z0-9_.:-]{1,180}$/.test(rawId) ? rawId : null;
+  if (!response.ok || payload?.error || item?.error) {
+    const errorBody = item?.error ? item : payload;
+    const phase = /sensitive(content|image)|riskcontrol|content_?moderated/i.test(String(errorBody?.error?.code ?? ""))
+      ? "provider_moderation_rejected" : response.ok || response.status === 402
+        ? "provider_failed" : classifyImageProviderFailure(response.status, errorBody);
+    throw new ImageProviderError(phase, "Direct image provider rejected the request.", response.status, requestId, requestParams);
+  }
+  const b64 = item?.b64_json;
+  const bytes = typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : null;
+  const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, "image/png") : null;
+  if (!bytes || !dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) {
+    const error = new ImageProviderError("provider_failed", "Direct provider returned an unusable image.", response.status, requestId, requestParams);
+    error.afterGeneration = true;
+    throw error;
+  }
+  return {
+    imageBytes: bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
+    providerRequestId: requestId, provenance: [...model.provenance],
+    outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
+    providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
+  };
+};
+
+const generateWithIdeogram = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (model.apiModelId !== IDEOGRAM_MODEL_ID || input.size !== IDEOGRAM_SIZE || !price ||
+      price.outputCostMicroUsd < IDEOGRAM_OUTPUT_COST_MICRO_USD[input.quality]) {
+    throw new ImageProviderError("provider_failed", "Unsupported Ideogram generation option.");
+  }
+  const apiKey = process.env.IDEOGRAM_API_KEY?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Ideogram API key is not configured.");
+
+  const body = {
+    prompt: input.prompt,
+    size: input.size,
+    quality: input.quality,
+    background: "opaque",
+    num_images: 1,
+    magic_prompt: "off",
+    async: false,
+  };
+  const requestParams = auditableRequestParams(body);
+  let response: Response;
+  try {
+    // A lost response can follow a billable generation. Submit only once.
+    response = await fetch("https://api.ideogram.ai/v2/image/generate/ideogram-4-6", {
+      method: "POST",
+      headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Ideogram generation request failed.", null, null, requestParams);
+  }
+
+  // The JSON envelope contains a link, never the image bytes.
+  const payload = await readResponseToBuffer(response, 256 * 1024)
+    .then(bytes => JSON.parse(bytes.toString("utf8")))
+    .catch(() => null);
+  const requestId = typeof payload?.generation_id === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(payload.generation_id)
+    ? payload.generation_id : null;
+  if (!response.ok) {
+    const phase = response.status === 422 ? "provider_moderation_rejected"
+      : response.status === 402 ? "provider_failed" : classifyImageProviderFailure(response.status, payload);
+    throw new ImageProviderError(phase, `Ideogram returned HTTP ${response.status}.`, response.status, requestId, requestParams);
+  }
+  const item = Array.isArray(payload?.data) && payload.data.length === 1 ? payload.data[0] : null;
+  if (item?.is_image_safe === false) {
+    throw new ImageProviderError("provider_moderation_rejected", "Ideogram withheld the image.", response.status, requestId, requestParams);
+  }
+  if (!requestId || item?.is_image_safe !== true || item.resolution !== input.size || !isIdeogramAssetUrl(item.url)) {
+    const error = new ImageProviderError("provider_failed", "Ideogram returned an unusable image.", response.status, requestId, requestParams);
+    error.afterGeneration = true;
+    throw error;
+  }
+  return downloadGeneratedImage({
+    url: item.url, acceptsUrl: isIdeogramAssetUrl, model, size: input.size,
+    providerRequestId: requestId, requestParams, providerUsage: null,
+  });
 };
 
 /**
