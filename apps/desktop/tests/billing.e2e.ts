@@ -15,10 +15,12 @@ const authOrigin = process.env.DESKTOP_E2E_AUTH_ORIGIN;
 type Host = typeof globalThis & {
   billingEnabled: boolean; plan: "Free" | "Pro" | "Max"; requests: Array<{ method: string; path: string; body: unknown }>;
   checkoutUrl: string; usage(): unknown;
+  /** Purchased credits, and how many more usage reads until a late payment adds 500 of them (0: none pending). */
+  purchased: number; landAfterReads: number;
 };
 
 test("Desktop plan screen buys, changes and cancels in the app and decides success from the account", {
-  timeout: 120_000, skip: !authOrigin,
+  timeout: 240_000, skip: !authOrigin,
 }, async () => {
   assert.ok(authOrigin);
   const profile = await mkdtemp(join(tmpdir(), "tomverse-billing-"));
@@ -32,6 +34,8 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
       host.plan = "Free";
       host.requests = [];
       host.checkoutUrl = "https://checkout.stripe.com/c/pay/cs_test_fixture";
+      host.purchased = 0;
+      host.landAfterReads = 0;
       // Stripe is never contacted: every https request from a new session is answered here.
       app.on("session-created", (created) => {
         created.protocol.handle("https", (request) => request.url.startsWith("https://checkout.stripe.com/")
@@ -52,7 +56,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
           : { status: "active", billingInterval: "monthly", currentPeriodEnd: "2026-12-20T00:00:00.000Z", cancelAtPeriodEnd: false },
         usage: { creditsMonth: 37 }, limits: { creditsMonth: 100 },
         balances: { dailyRemainingCredits: 3, dailyResetsAt: "2026-11-26T00:00:00.000Z", planRemainingCredits: 63,
-          planResetsAt: "2026-12-01T00:00:00.000Z", purchasedRemainingCredits: 0, purchasedEarliestExpiry: null },
+          planResetsAt: "2026-12-01T00:00:00.000Z", purchasedRemainingCredits: host.purchased, purchasedEarliestExpiry: null },
       });
       globalThis.fetch = async (url, options) => {
         const target = new URL(String(url));
@@ -78,7 +82,11 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
           }
           const body = options?.body ? JSON.parse(String(options.body)) : undefined;
           host.requests.push({ method, path: target.pathname + target.search, body });
-          if (target.pathname === "/api/user/usage") return Response.json(host.usage());
+          if (target.pathname === "/api/user/usage") {
+            // A payment the server records late: the balance grows only on a later read.
+            if (host.landAfterReads > 0 && --host.landAfterReads === 0) host.purchased += 500;
+            return Response.json(host.usage());
+          }
           if (target.pathname === "/api/billing/config") return Response.json({
             plans: [
               { id: "free", name: "Free", monthlyMessageLimit: 300, displayCurrency: "USD", displayMonthlyPriceMinor: 0, displayAnnualPriceMinor: 0 },
@@ -120,6 +128,8 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     const page = await application.firstWindow();
     const rail = page.getByRole("navigation", { name: "Workspaces" });
     const requests = () => application!.evaluate(() => (globalThis as Host).requests.filter(({ path }) => path !== "/api/user/usage"));
+    const usageReads = () => application!.evaluate(() => (globalThis as Host).requests.filter(({ path }) => path === "/api/user/usage").length);
+    const posts = async (path: string) => (await requests()).filter((request) => request.method === "POST" && request.path === path).length;
     await rail.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByRole("button", { name: "Sign in with your browser", exact: true }).click();
     await expect.poll(() => page.evaluate(async () => (await window.desktop.state()).account.stage)).toBe("connected");
@@ -183,10 +193,64 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     const verification = page.getByTestId("native-billing-verification");
     await expect(verification).toHaveAttribute("data-stage", "unconfirmed", { timeout: 30_000 });
     assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    // Starting the subscription again while it is unconfirmed reads the account first and warns before a second checkout.
+    const checkouts = await posts("/api/billing/checkout");
+    let reads = await usageReads();
+    await page.getByTestId("native-billing-plan-pro").getByRole("button", { name: "Upgrade to Pro" }).click();
+    await page.getByTestId("native-billing-checkout").getByTestId("native-billing-continue").click();
+    await expect(verification).toHaveAttribute("data-stage", "repeat", { timeout: 30_000 });
+    await expect(verification).toContainText("A payment you just made may still be processing.");
+    await expect(verification.getByRole("button", { name: "Start a new payment anyway" })).toBeVisible();
+    assert.ok((await usageReads()) > reads, "the account is read again before the warning");
+    assert.equal(await posts("/api/billing/checkout"), checkouts, "no second checkout without the customer's choice");
     await application.evaluate(() => { (globalThis as Host).plan = "Pro"; });
     await verification.getByRole("button", { name: "Check again" }).click();
     await expect(verification).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
     await expect(verification).toContainText("Pro is now active on your account.");
+    assert.equal(await posts("/api/billing/checkout"), checkouts);
+
+    // A cancel page is not evidence either: a credit pack the server records on a later read ends confirmed.
+    const packs = page.getByTestId("native-billing-credit-packs");
+    const checkoutWindow = page.getByTestId("native-billing-window");
+    const openPack = async () => {
+      await packs.getByRole("button", { name: "Buy", exact: true }).click();
+      await expect(checkoutWindow).toContainText("checkout.stripe.com");
+      await expect.poll(async () => (await checkoutView(null))?.url).toBe("https://checkout.stripe.com/c/pay/cs_test_fixture");
+    };
+    await openPack();
+    reads = await usageReads();
+    await application.evaluate(() => { (globalThis as Host).landAfterReads = 3; });
+    await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
+    await expect(verification).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
+    await expect(verification).toContainText("Credits added");
+    assert.ok((await usageReads()) - reads >= 3, "the account kept being read after the cancel page");
+
+    // A cancel page and an account that never shows the purchase: not confirmed, with a way to check again.
+    await openPack();
+    reads = await usageReads();
+    await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
+    await expect(verification).toHaveAttribute("data-stage", "unconfirmed", { timeout: 30_000 });
+    await expect(verification).toContainText("It looks like you did not finish paying.");
+    await expect(verification).not.toContainText("has not changed");
+    await expect(verification.getByRole("button", { name: "Check again" })).toBeVisible();
+    assert.ok((await usageReads()) - reads >= 5, "every read is made before the screen says it is not confirmed");
+
+    // Buying the same pack again reads the account, warns, and opens a new checkout only on the customer's choice.
+    const packPosts = await posts("/api/billing/credit-packs");
+    reads = await usageReads();
+    await packs.getByRole("button", { name: "Buy", exact: true }).click();
+    await expect(verification).toHaveAttribute("data-stage", "repeat", { timeout: 30_000 });
+    assert.ok((await usageReads()) > reads);
+    assert.equal(await posts("/api/billing/credit-packs"), packPosts);
+    assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    await verification.getByRole("button", { name: "Start a new payment anyway" }).click();
+    await expect(checkoutWindow).toContainText("checkout.stripe.com");
+    assert.equal(await posts("/api/billing/credit-packs"), packPosts + 1);
+    // A window the customer closes is checked the same way.
+    await application.evaluate(() => { (globalThis as Host).landAfterReads = 1; });
+    await checkoutWindow.getByRole("button", { name: "Close checkout window" }).click();
+    await expect(verification).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
+    await expect(verification).toContainText("Credits added");
 
     // A Checkout URL that is not Stripe's is never opened.
     await application.evaluate(() => { (globalThis as Host).checkoutUrl = "https://checkout.stripe.com.example/c/pay/cs_test"; });
@@ -216,8 +280,10 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(refund.getByRole("status")).toHaveText("Refund request received.");
     const writes = (await requests()).filter(({ method }) => method !== "GET")
       .filter(({ path }) => !["/api/billing/checkout", "/api/billing/promotion/validate"].includes(path));
+    const pack = ["POST", "/api/billing/credit-packs", { packId: "starter_500", language: "en", currency: "USD" }];
     assert.deepEqual(writes.map(({ method, path, body }) => [method, path, body]), [
-      ["POST", "/api/billing/credit-packs", { packId: "starter_500", language: "en", currency: "USD" }],
+      pack, pack, pack,
+      pack,
       ["POST", "/api/billing/plan-change/preview", { targetTier: "Max", billingInterval: "monthly" }],
       ["POST", "/api/billing/plan-change/confirm", { requestId: "pcr_fixture", resumeRenewal: true }],
       ["POST", "/api/billing/cancel-subscription", {}],

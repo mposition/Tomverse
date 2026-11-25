@@ -8,6 +8,7 @@
 .billing-notice { display: grid; gap: 6px; margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: var(--raised); font-size: 12px; line-height: 1.55; }
 .billing-notice p { margin: 0; }
 .billing-notice .soft { justify-self: start; }
+.billing-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .billing-segment { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: var(--raised); }
 .billing-segment button { padding: 5px 10px; border-radius: 7px; color: var(--muted); }
 .billing-segment button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 650; }
