@@ -6,6 +6,7 @@ import {
   resolveAccountRecentAuthMinutes,
   resolveRecentAuthMinutes,
 } from "@/lib/adminReauthenticationCore";
+import { resolveAccountAuthenticatedAt } from "@/lib/desktopSettingsSessionCore";
 
 export class AdminReauthenticationRequiredError extends Error {
   constructor() {
@@ -34,11 +35,12 @@ export class AdminReauthenticationRequiredError extends Error {
 // override and timestamp rules but keep their original 30-minute default.
 const hasRecentAuthentication = (
   session: Session | null | undefined,
-  recentAuthMinutes: number
+  recentAuthMinutes: number,
+  authenticatedAt: string | undefined = session?.user?.authenticatedAt
 ) =>
   Boolean(session?.user?.id) &&
   isRecentAdminAuthentication({
-    authenticatedAt: session?.user?.authenticatedAt,
+    authenticatedAt,
     recentAuthMinutes,
     now: new Date(),
   });
@@ -56,7 +58,10 @@ export const hasRecentAccountAuthentication = (
 ) =>
   hasRecentAuthentication(
     session,
-    resolveAccountRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES)
+    resolveAccountRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES),
+    // Account actions also accept a Desktop device's sign-in time; the admin
+    // predicate above does not.
+    resolveAccountAuthenticatedAt(session?.user)
   );
 
 export async function assertRecentAdminAuthentication(session: Session) {
