@@ -11,7 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Coins, X } from "lucide-react";
-import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { useLanguage } from "@/components/LanguageProvider";
 import {
   getAnalyticsAttributionSnapshot,
   trackProductEvent,
@@ -38,6 +38,7 @@ import {
   type BillingErrorCode,
 } from "@/lib/purchaseIntent";
 import { billingErrorMessage, purchaseCtaCopy } from "./purchaseCopy";
+import { creditPackCopy, creditUnit } from "./checkoutCopy";
 import { lockBodyScroll } from "@/components/useBodyScrollLock";
 
 type Pack = {
@@ -59,28 +60,6 @@ type PurchaseAnalyticsContext = {
 /** Analytics error codes are the lower-cased form of the shared billing codes. */
 const analyticsErrorCode = (code: BillingErrorCode) =>
   code.toLowerCase() as Lowercase<BillingErrorCode>;
-
-const copy: Record<Language, { title: string; body: string; notice: string; buy: string; close: string; loading: string; expiry: string; error: string; selected: string }> = {
-  en: { title: "Buy additional credits", body: "One-time credits for extra work this month.", notice: "Purchased credits remain usable after the plan’s daily credit guardrail is reached. They do not change model access, plan features, rate or concurrency limits, provider budgets, or fair-use safeguards.", buy: "Buy", close: "Close", loading: "Loading…", expiry: "Valid for {days} days", error: "Credit packs could not be loaded.", selected: "Selected" },
-  ko: { title: "추가 크레딧 구매", body: "이번 달에만 작업량이 많을 때 사용하는 일회성 크레딧입니다.", notice: "구매 크레딧은 플랜의 일일 크레딧 가드레일을 넘어 사용할 수 있습니다. 모델 접근 권한, 플랜 기능, 분당·동시 요청 제한, 공급자 예산 및 공정사용 안전장치는 변경되지 않습니다.", buy: "구매", close: "닫기", loading: "불러오는 중…", expiry: "{days}일 유효", error: "크레딧 팩을 불러오지 못했습니다.", selected: "선택됨" },
-  zh: { title: "购买额外积分", body: "用于本月额外工作的单次积分。", notice: "达到套餐每日积分保护额度后，已购买积分仍可使用。模型权限、套餐功能、请求频率与并发限制、供应商预算及公平使用保护不会改变。", buy: "购买", close: "关闭", loading: "加载中…", expiry: "有效期 {days} 天", error: "无法加载积分包。", selected: "已选择" },
-  "zh-Hant": { title: "購買額外點數", body: "用於本月額外工作的單次點數。", notice: "達到方案每日點數保護額度後，已購買的點數仍可使用。模型權限、方案功能、請求頻率與並行限制、供應商預算及公平使用保護不會改變。", buy: "購買", close: "關閉", loading: "載入中…", expiry: "有效期 {days} 天", error: "無法載入點數包。", selected: "已選取" },
-  fr: { title: "Acheter des crédits supplémentaires", body: "Crédits ponctuels pour un besoin supplémentaire ce mois-ci.", notice: "Les crédits achetés restent utilisables après la limite quotidienne du forfait. Ils ne modifient ni l’accès aux modèles, ni les fonctions, ni les limites de fréquence et de concurrence, ni les budgets fournisseur ou les protections d’usage équitable.", buy: "Acheter", close: "Fermer", loading: "Chargement…", expiry: "Valable {days} jours", error: "Impossible de charger les packs.", selected: "Sélectionné" },
-  de: { title: "Zusätzliche Credits kaufen", body: "Einmalige Credits für zusätzlichen Bedarf in diesem Monat.", notice: "Gekaufte Credits bleiben nach Erreichen des täglichen Planlimits nutzbar. Modellzugriff, Planfunktionen, Raten- und Parallelitätslimits, Anbieterbudgets und Fair-Use-Schutz bleiben unverändert.", buy: "Kaufen", close: "Schließen", loading: "Laden…", expiry: "{days} Tage gültig", error: "Credit-Pakete konnten nicht geladen werden.", selected: "Ausgewählt" },
-  es: { title: "Comprar créditos adicionales", body: "Créditos de un solo pago para trabajo adicional este mes.", notice: "Los créditos comprados siguen disponibles después del límite diario del plan. No cambian el acceso a modelos, las funciones, los límites de frecuencia o concurrencia, los presupuestos de proveedores ni las protecciones de uso justo.", buy: "Comprar", close: "Cerrar", loading: "Cargando…", expiry: "Válido {days} días", error: "No se pudieron cargar los paquetes.", selected: "Seleccionado" },
-  pt: { title: "Comprar créditos adicionais", body: "Créditos avulsos para trabalho extra neste mês.", notice: "Créditos comprados continuam disponíveis após o limite diário do plano. Eles não alteram acesso a modelos, recursos, limites de taxa ou simultaneidade, orçamentos de provedores nem proteções de uso justo.", buy: "Comprar", close: "Fechar", loading: "Carregando…", expiry: "Válido por {days} dias", error: "Não foi possível carregar os pacotes.", selected: "Selecionado" },
-};
-
-const creditUnit: Record<Language, string> = {
-  en: "credits",
-  ko: "크레딧",
-  zh: "积分",
-  "zh-Hant": "點數",
-  fr: "crédits",
-  de: "Credits",
-  es: "créditos",
-  pt: "créditos",
-};
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -127,7 +106,7 @@ export function CreditPackPurchaseButton({
   testId?: string;
 }) {
   const { lang } = useLanguage();
-  const text = copy[lang];
+  const text = creditPackCopy[lang];
   const ctaText = purchaseCtaCopy[lang] || purchaseCtaCopy.en;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
