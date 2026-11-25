@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID, generateKeyPairSync } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, generateKeyPairSync } from "node:crypto";
 import { after, before, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
@@ -58,7 +58,10 @@ const reset = async () => {
   // test throttled -- which is how a 429 gets mistaken for the behaviour under
   // test.
   await prisma.chatUsageBucket.deleteMany({
-    where: { period: { startsWith: "api-mobile-" } },
+    where: { OR: [
+      { period: { startsWith: "api-mobile-" } }, { period: { startsWith: "api-desktop-" } },
+      { period: { startsWith: "api-email-otp-" } }, { period: "email-otp-challenge-day" },
+    ] },
   });
   const { resetMobileSessionSnapshotsForTesting } = await authorization();
   resetMobileSessionSnapshotsForTesting();
@@ -81,6 +84,144 @@ const issue = async (userId: string) => {
   });
   return result.tokens;
 };
+
+test("Desktop settings credentials only authorize the same active Desktop session", async (t) => {
+  const desktopAuth = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  const settingsEnabled = process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+  const previousSecret = process.env.NEXTAUTH_SECRET;
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  process.env.NEXTAUTH_SECRET = "desktop-settings-local-fixture-secret";
+  t.after(() => {
+    for (const [name, value] of Object.entries({
+      TOMVERSE_DESKTOP_AUTH_ENABLED: desktopAuth,
+      TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED: settingsEnabled,
+      NEXTAUTH_SECRET: previousSecret,
+    })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  const { POST } = await import("@/app/api/auth/desktop/settings-session/route");
+  const requestSettings = (accessToken?: string) => POST(new Request("https://tomverse.test/api/auth/desktop/settings-session", {
+    method: "POST", headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  }));
+  delete process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED;
+  assert.equal((await requestSettings()).status, 503);
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+  assert.equal((await requestSettings()).status, 401);
+  const user = await createUser();
+  const mobile = await issue(user.id);
+  assert.equal((await requestSettings(mobile.accessToken)).status, 401);
+  const { issueMobileSession, logoutMobileSession } = await service();
+  const desktop = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const accepted = await requestSettings(desktop.tokens.accessToken);
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.headers.get("Cache-Control"), "no-store");
+  const { token, expiresAt } = await accepted.json();
+  const { decode } = await import("next-auth/jwt");
+  const decoded = await decode({ token, secret: process.env.NEXTAUTH_SECRET });
+  assert.equal(decoded?.id, user.id);
+  assert.equal(decoded?.authenticatedAt, undefined);
+  assert.equal(decoded?.absoluteExpiresAt, expiresAt);
+  assert.ok(decoded?.desktopSettings);
+  assert.ok(expiresAt > Date.now() && expiresAt <= Date.now() + 300_000);
+  const { authOptions } = await import("@/lib/auth");
+  const session = authOptions.callbacks?.session;
+  assert.ok(session);
+  const current = (claims = decoded) => session({
+    session: { user: { name: user.name, email: user.email, id: user.id }, expires: new Date(expiresAt).toISOString() },
+    token: claims, user: { id: user.id, email: user.email!, emailVerified: null },
+    trigger: "update", newSession: undefined,
+  });
+  const currentId = async (claims = decoded) => {
+    const { user: sessionUser } = await current(claims);
+    return sessionUser && "id" in sessionUser ? sessionUser.id : undefined;
+  };
+  assert.equal(await currentId(), user.id);
+  assert.equal(await currentId({ ...decoded, absoluteExpiresAt: Date.now() - 1 }), undefined);
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "false";
+  assert.equal(await currentId(), undefined);
+  process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
+  await logoutMobileSession({ request: request(), refreshToken: desktop.tokens.refreshToken, client: "desktop" });
+  assert.equal((await requestSettings(desktop.tokens.accessToken)).status, 401);
+  assert.equal(await currentId(), undefined);
+  const second = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const secondResponse = await requestSettings(second.tokens.accessToken);
+  const secondClaims = await decode({ token: (await secondResponse.json()).token, secret: process.env.NEXTAUTH_SECRET });
+  assert.ok(secondClaims?.desktopSettings);
+  assert.equal(await currentId(secondClaims), user.id);
+  await prisma.user.update({ where: { id: user.id }, data: { sessionsRevokedAt: new Date() } });
+  const { invalidateMobileSessionSnapshots } = await authorization();
+  const { invalidateSessionSecuritySnapshot } = await import("@/lib/sessionSecurity");
+  invalidateMobileSessionSnapshots(user.id);
+  invalidateSessionSecuritySnapshot(user.id);
+  assert.equal((await requestSettings(second.tokens.accessToken)).status, 401);
+  assert.equal(await currentId(secondClaims), undefined);
+  const limitedUser = await createUser();
+  const limited = await issueMobileSession({ request: request(), userId: limitedUser.id, platform: "desktop", deviceLabel: "Desktop" });
+  for (let request = 0; request < 15; request += 1) {
+    assert.equal((await requestSettings(limited.tokens.accessToken)).status, 200);
+  }
+  assert.equal((await requestSettings(limited.tokens.accessToken)).status, 429);
+});
+
+test("Desktop email verifies an existing single-use code without accepting browser requests", async (t) => {
+  const settings = {
+    TOMVERSE_DESKTOP_AUTH_ENABLED: process.env.TOMVERSE_DESKTOP_AUTH_ENABLED,
+    TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED: process.env.TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED,
+    EMAIL_AUDIT_HASH_KEY: process.env.EMAIL_AUDIT_HASH_KEY,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+  };
+  t.after(() => {
+    for (const [key, value] of Object.entries(settings)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  delete process.env.TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED;
+  const { POST } = await import("@/app/api/auth/desktop/email/route");
+  const user = await createUser();
+  const code = "482917";
+  assert.ok(user.email);
+  const submit = (proof: string, headers: Record<string, string> = {}) => POST(new Request("https://tomverse.test/api/auth/desktop/email", {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ action: "verify", email: user.email, code: proof, appVersion: "0.1.118" }),
+  }));
+  assert.equal((await submit(code)).status, 503);
+  process.env.TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED = "true";
+  assert.equal((await submit(code, { Origin: "https://tomverse.test" })).status, 403);
+  assert.equal((await submit(code, { Cookie: "next-auth.session-token=ignored" })).status, 403);
+  const digest = (input: string) => createHmac("sha256", process.env.NEXTAUTH_SECRET!).update(input).digest("hex");
+  await prisma.emailLoginAttempt.create({ data: {
+    email: user.email, codeHash: digest(`email-login:code:${user.email}:${code}`),
+    linkTokenHash: digest(`email-login:link:${randomUUID()}`), expiresAt: new Date(Date.now() + 60_000),
+  } });
+  assert.equal((await submit("111111")).status, 401);
+  const accepted = await submit(code);
+  assert.equal(accepted.status, 200);
+  const { verifyMobileAccessTokenString } = await accessToken();
+  const access = (await accepted.json()).accessToken;
+  const verified = verifyMobileAccessTokenString(access, { client: "desktop" });
+  assert.ok(verified.ok);
+  assert.equal(verified.identity.subject, user.id);
+  assert.equal(verifyMobileAccessTokenString(access).ok, false);
+  assert.equal((await submit(code)).status, 401);
+  process.env.EMAIL_AUDIT_HASH_KEY = "local-desktop-email-audit";
+  process.env.RESEND_API_KEY = "local-desktop-email-fixture";
+  const delivery = t.mock.method(globalThis, "fetch", async (url: URL | string | Request) => {
+    const target = new URL(url instanceof Request ? url.url : url);
+    assert.equal(target.origin, "https://api.resend.com");
+    return Response.json({ id: `desktop-email-delivery-${randomUUID()}` });
+  });
+  const receiver = `desktop-request-${randomUUID()}@example.test`;
+  const delivered = await POST(new Request("https://tomverse.test/api/auth/desktop/email", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request", email: receiver }),
+  }));
+  assert.equal(delivered.status, 200);
+  assert.equal(delivery.mock.callCount(), 1);
+  assert.equal(await prisma.emailLoginAttempt.count({ where: { email: receiver } }), 1);
+});
 
 beforeEach(reset);
 after(async () => {
@@ -109,6 +250,521 @@ test("an exchange creates a device, a family and exactly one live rotation", asy
   const { verifyMobileAccessTokenString } = await accessToken();
   const verdict = verifyMobileAccessTokenString(tokens.accessToken);
   assert.equal(verdict.ok, true);
+});
+
+test("Desktop exchanges only the bound browser grant and keeps its credentials out of mobile routes", async () => {
+  const { issueMobileLoginGrant, pkceChallengeFor, consumeMobileLoginGrant } = await import("@/lib/mobileLoginGrant");
+  const exchange = await import("@/app/api/auth/desktop/exchange/route");
+  const desktopSession = await import("@/app/api/auth/desktop/session/route");
+  const { revokeMobileDevice, rotateMobileSession, logoutMobileSession } = await service();
+  const { verifyMobileAccessTokenString } = await accessToken();
+  const user = await createUser();
+  const codeVerifier = randomBytes(32).toString("base64url");
+  const codeChallenge = pkceChallengeFor(codeVerifier);
+  const state = randomBytes(32).toString("base64url");
+  const redirectUri = "http://127.0.0.1:52134/desktop-login/callback";
+  const desktop = { state, redirectUri };
+  const { grant } = await issueMobileLoginGrant({ userId: user.id, codeChallenge, desktop });
+  const expired = await issueMobileLoginGrant({ userId: user.id, codeChallenge, desktop, now: new Date(Date.now() - 61_000) });
+  const phone = await issueMobileLoginGrant({ userId: user.id, codeChallenge });
+  const body = { clientId: "tomverse-desktop", state, redirectUri, codeVerifier, grant };
+  const send = (overrides: Record<string, string> = {}, origin?: string) => exchange.POST(new Request(
+    "https://tomverse.test/api/auth/desktop/exchange", {
+      method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { origin } : {}) },
+      body: JSON.stringify({ ...body, ...overrides }),
+    },
+  ));
+  const session = (token: string) => desktopSession.GET(new Request("https://tomverse.test/api/auth/desktop/session", {
+    headers: { Authorization: `Bearer ${token}` },
+  }));
+  const previous = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  try {
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal((await send()).status, 503);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal((await send({}, "https://tomverse.test")).status, 403);
+    assert.equal((await send({ clientId: "other-client" })).status, 400);
+    assert.equal((await send({ redirectUri: "https://example.test" })).status, 400);
+    assert.equal((await send({ redirectUri: redirectUri.replace("52134", "52135") })).status, 401);
+    assert.equal((await send({ state: randomBytes(32).toString("base64url") })).status, 401);
+    assert.equal((await send({ codeVerifier: randomBytes(32).toString("base64url") })).status, 401);
+    assert.equal((await send({ grant: expired.grant })).status, 401);
+    assert.equal((await send({ grant: phone.grant })).status, 401);
+    assert.equal((await consumeMobileLoginGrant({ grant, codeVerifier })).ok, false);
+    const exchanges = await Promise.all([send(), send()]);
+    assert.deepEqual(exchanges.map((response) => response.status).sort(), [200, 401]);
+    const success = await exchanges.find((response) => response.ok)!.json();
+    const { accessToken: access, refreshToken, deviceId } = success;
+    assert.equal(success.expiresIn, 600);
+    assert.equal(typeof refreshToken, "string");
+    assert.equal(exchanges.find((response) => !response.ok)!.headers.get("cache-control"), "no-store");
+    assert.equal((await send()).status, 401);
+    assert.equal(verifyMobileAccessTokenString(access).ok, false);
+    assert.equal(verifyMobileAccessTokenString(access, { client: "desktop" }).ok, true);
+    const phoneSession = await issue(user.id);
+    assert.equal((await session(phoneSession.accessToken)).status, 401);
+    assert.equal((await rotateMobileSession({ request: request(), refreshToken: phoneSession.refreshToken, client: "desktop" })).ok, false);
+    assert.equal((await rotateMobileSession({ request: request(), refreshToken })).ok, false);
+    await logoutMobileSession({ request: request(), refreshToken });
+    assert.equal((await session(access)).status, 200);
+    const account = await session(access);
+    assert.equal(account.status, 200);
+    assert.deepEqual((await account.json()).account, { id: user.id, name: user.name, email: user.email });
+    await prisma.userSettings.create({ data: { userId: user.id, language: "ko", defaultModel: "gpt-6-luna" } });
+    assert.equal((await (await session(access)).json()).account.language, "ko");
+    assert.equal((await prisma.mobileDevice.findUniqueOrThrow({ where: { id: deviceId } })).platform, "desktop");
+    const family = await prisma.mobileTokenFamily.findFirstOrThrow({ where: { deviceId } });
+    assert.equal(await prisma.mobileRefreshRotation.count({ where: { familyId: family.id } }), 1);
+    assert.equal(await prisma.mobileAuthEvent.count({ where: { deviceId, event: "mobile_auth.exchanged" } }), 1);
+    assert.ok(await prisma.chatUsageBucket.count({ where: { period: { startsWith: "api-desktop-exchange" } } }));
+    await revokeMobileDevice({ userId: user.id, deviceId });
+    assert.equal((await session(access)).status, 401);
+    const inactive = await createUser();
+    await prisma.user.update({ where: { id: inactive.id }, data: { accountStatus: "suspended" } });
+    const inactiveGrant = await issueMobileLoginGrant({ userId: inactive.id, codeChallenge, desktop });
+    assert.equal((await send({ grant: inactiveGrant.grant })).status, 401);
+    assert.equal(await prisma.mobileDevice.count({ where: { userId: inactive.id } }), 0);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    else process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = previous;
+  }
+});
+
+test("Desktop refresh and logout keep server replay detection and device revocation", async () => {
+  const { issueMobileSession } = await service();
+  const refresh = await import("@/app/api/auth/desktop/refresh/route");
+  const logout = await import("@/app/api/auth/desktop/logout/route");
+  const account = await import("@/app/api/auth/desktop/session/route");
+  const user = await createUser();
+  const issueDesktop = () => issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const post = (endpoint: "refresh" | "logout", refreshToken: string, origin?: string) => new Request(
+    `https://tomverse.test/api/auth/desktop/${endpoint}`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { origin } : {}) },
+      body: JSON.stringify({ refreshToken }),
+    });
+  const session = (accessToken: string) => account.GET(new Request("https://tomverse.test/api/auth/desktop/session", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }));
+  const prior = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  try {
+    const issued = (await issueDesktop()).tokens;
+    assert.equal((await refresh.POST(post("refresh", issued.refreshToken, "null"))).status, 403);
+    const replies = await Promise.all([
+      refresh.POST(post("refresh", issued.refreshToken)), refresh.POST(post("refresh", issued.refreshToken)),
+    ]);
+    assert.deepEqual(replies.map((reply) => reply.status).sort(), [200, 401]);
+    const winner = await replies.find((reply) => reply.ok)!.json();
+    assert.equal((await session(winner.accessToken)).status, 401);
+    assert.equal(await prisma.mobileAuthEvent.count({ where: { deviceId: issued.deviceId, event: "mobile_auth.reuse_detected" } }), 1);
+    const active = (await issueDesktop()).tokens;
+    const refreshed = await refresh.POST(post("refresh", active.refreshToken));
+    assert.equal(refreshed.status, 200);
+    const next = await refreshed.json();
+    assert.equal((await session(next.accessToken)).status, 200);
+    assert.equal((await logout.POST(post("logout", next.refreshToken))).status, 204);
+    assert.equal((await session(next.accessToken)).status, 401);
+  } finally {
+    if (prior === undefined) delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    else process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = prior;
+  }
+});
+
+test("Desktop reads its own resources through the exact origin and route allowlist", async () => {
+  const { issueMobileSession } = await service();
+  const { resolveChatRouteSession } = await import("@/lib/chatRouteSession");
+  const conversations = await import("@/app/api/conversations/[conversationId]/route");
+  const history = await import("@/app/api/conversations/route");
+  const search = await import("@/app/api/conversations/search/route");
+  const continuation = await import("@/app/api/conversations/[conversationId]/continuation/route");
+  const chatCreate = await import("@/app/api/products/chat/conversations/route");
+  const artifacts = await import("@/app/api/artifacts/[artifactId]/route");
+  const capabilities = await import("@/app/api/products/chat/capabilities/route");
+  const keys = await import("@/app/api/user/api-keys/route");
+  const user = await createUser();
+  const other = await createUser();
+  const own = await prisma.conversation.create({ data: { userId: user.id, title: "Owned Desktop conversation", selectedModels: "[]", productKey: "chat" } });
+  const locked = await prisma.conversation.create({ data: { userId: user.id, title: "Locked Desktop conversation", selectedModels: "[]", productKey: "chat", password: "locked" } });
+  const foreign = await prisma.conversation.create({ data: { userId: other.id, title: "Other user's conversation", selectedModels: "[]", productKey: "chat" } });
+  const makeArtifact = async (userId: string, conversationId: string) => {
+    const message = await prisma.message.create({ data: { conversationId, role: "assistant", content: "Fixture" } });
+    return prisma.messageArtifact.create({ data: { userId, conversationId, messageId: message.id,
+      format: "csv", filename: "fixture.csv", mediaType: "text/csv", byteSize: 3, objectKey: `desktop-test/${randomUUID()}.csv` } });
+  };
+  const ownArtifact = await makeArtifact(user.id, locked.id);
+  const foreignArtifact = await makeArtifact(other.id, foreign.id);
+  const phrase = "desktop-history-" + randomUUID();
+  await prisma.message.createMany({ data: [own, locked, foreign].map((row) => ({
+    conversationId: row.id, role: "user", content: phrase,
+  })) });
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const mobile = await issueMobileSession({ request: request(), userId: user.id, platform: "ios", deviceLabel: "iPhone" });
+  const read = (path: string, from = "tomverse://desktop", headers: Record<string, string> = {}, method = "GET", payload?: unknown) =>
+    new Request(`https://tomverse.test${path}`, { method, headers: {
+      Authorization: `Bearer ${tokens.accessToken}`, ...(from ? { Origin: from } : {}), ...headers,
+      ...(payload ? { "Content-Type": "application/json" } : {}),
+    }, ...(payload ? { body: JSON.stringify(payload) } : {}) });
+  const conversation = (id: string, from?: string, headers?: Record<string, string>) =>
+    conversations.GET(read(`/api/conversations/${id}`, from, headers), { params: Promise.resolve({ conversationId: id }) });
+  const artifact = (id: string) =>
+    artifacts.GET(read(`/api/artifacts/${id}`), { params: Promise.resolve({ artifactId: id }) });
+  const old = process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+  const oldWrite = process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+  try {
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal((await conversation(own.id)).status, 503);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    for (const origin of ["", "null", "*", "https://elsewhere.test", "tomverse://desktop.evil.test", "tomverse://desktop/", "tomverse://desktop:3000"]) {
+      assert.equal((await conversation(own.id, origin)).ok, false, origin);
+    }
+    const authenticated = await conversation(own.id);
+    assert.equal(authenticated.status, 200);
+    assert.equal((await authenticated.json()).title, own.title);
+    const list = await history.GET(read("/api/conversations"));
+    assert.equal(list.status, 200);
+    const listIds = (await list.json() as Array<{ id: string }>).map((row) => row.id);
+    assert.deepEqual(listIds.sort(), [own.id, locked.id].sort());
+    const searchPath = "/api/conversations/search?q=" + encodeURIComponent(phrase);
+    const matches = await search.GET(read(searchPath));
+    assert.equal(matches.status, 200);
+    assert.deepEqual((await matches.json()).results.map((row: { conversationId: string }) => row.conversationId), [own.id]);
+    assert.equal((await search.GET(read(searchPath, "null"))).ok, false);
+    assert.equal((await history.GET(read("/api/conversations", undefined, { Authorization: `Bearer ${mobile.tokens.accessToken}` }))).status, 401);
+    assert.equal((await conversation(foreign.id, undefined, { "x-tomverse-auth-subject": other.id })).status, 403);
+    assert.equal((await conversation(own.id, undefined, { Cookie: "next-auth.session-token=ambient" })).status, 401);
+    assert.equal((await conversation(locked.id, undefined, { "x-tomverse-conversation-unlocks": "unapproved" })).status, 401);
+    assert.equal((await conversation(locked.id)).status, 423);
+    assert.equal((await artifact(foreignArtifact.id)).status, 404);
+    assert.equal((await artifact(ownArtifact.id)).status, 423);
+    const imported = await prisma.externalImport.create({
+      data: { userId: user.id, provider: "chatgpt", status: "completed", digestVersion: 1, parserVersion: "test" },
+    });
+    const source = await prisma.externalConversation.create({
+      data: {
+        userId: user.id, importId: imported.id, provider: "chatgpt", externalStableId: randomUUID(),
+        title: "Desktop imported original", conversationDigest: randomUUID(), digestVersion: 1,
+        messageCount: 1, contentBytes: BigInt(32), finalized: true,
+      },
+    });
+    const sourceMessage = await prisma.externalMessage.create({
+      data: {
+        userId: user.id, externalConversationId: source.id, externalStableId: randomUUID(), role: "user",
+        content: "Private imported Desktop evidence", contentDigest: randomUUID(), digestVersion: 1, ordinal: 0,
+      },
+    });
+    const continuedReview = await prisma.conversation.create({ data: {
+      userId: user.id, title: "Review with imported history", kind: "chat", selectedModels: "[]", productKey: "review",
+    } });
+    const foreignReview = await prisma.conversation.create({ data: {
+      userId: other.id, title: "Another user's Review", kind: "chat", selectedModels: "[]", productKey: "review",
+    } });
+    await prisma.conversationContinuationBridge.createMany({
+      data: [own, continuedReview].map(({ id: conversationId }) => ({
+        userId: user.id, conversationId, externalConversationId: source.id, provider: "chatgpt",
+        sourceImportedAt: imported.createdAt, sourceConversationDigest: source.conversationDigest,
+        sourceDigestVersion: 1, sourceMessageCount: 1, seedFromOrdinal: 0, seedToOrdinal: 0,
+        seedMessageCount: 1, seedTruncatedMessageCount: 0, seedOmittedMessageCount: 0,
+        contextSeedVersion: "ext-seed-v1", idempotencyKey: randomUUID(),
+      })),
+    });
+    const sourcePage = (id: string) => continuation.GET(read(`/api/conversations/${id}/continuation?offset=end`),
+      { params: Promise.resolve({ conversationId: id }) });
+    assert.equal((await sourcePage(foreign.id)).status, 404);
+    assert.equal((await sourcePage(locked.id)).status, 423);
+    const importedRead = await sourcePage(own.id);
+    assert.equal(importedRead.status, 200);
+    assert.equal((await importedRead.json()).source.messages[0].content, sourceMessage.content);
+    const reviewSource = await sourcePage(continuedReview.id);
+    assert.equal(reviewSource.status, 200, await reviewSource.clone().text());
+    assert.equal((await reviewSource.json()).source.messages[0].content, sourceMessage.content);
+    assert.equal((await sourcePage(foreignReview.id)).status, 404);
+    await prisma.conversation.update({ where: { id: continuedReview.id }, data: { password: "fixture-locked" } });
+    assert.equal((await sourcePage(continuedReview.id)).status, 423);
+    await prisma.conversation.update({ where: { id: continuedReview.id }, data: { password: null } });
+    await prisma.externalConversation.update({ where: { id: source.id }, data: { password: "fixture-locked" } });
+    assert.deepEqual((await (await sourcePage(own.id)).json()).source, { status: "locked" });
+    assert.deepEqual((await (await sourcePage(continuedReview.id)).json()).source, { status: "locked" });
+    const orderBase = Date.now() + 1_000;
+    const longHistory = Array.from({ length: 53 }, (_, index) => ({
+      id: randomUUID(), conversationId: own.id, role: "user", content: "Desktop page " + index,
+      createdAt: new Date(orderBase + index),
+    }));
+    await prisma.message.createMany({ data: longHistory });
+    const pageContext = { params: Promise.resolve({ conversationId: own.id }) };
+    const firstPage = await (await conversation(own.id)).json();
+    assert.equal(firstPage.messages.length, 50);
+    assert.ok(firstPage.messagePage.nextCursor);
+    const lastPage = await (await conversations.GET(read(`/api/conversations/${own.id}?tail=1`), pageContext)).json();
+    assert.deepEqual(lastPage.messages.map((message: { id: string }) => message.id), longHistory.slice(-50).map(({ id }) => id));
+    assert.equal(lastPage.messagePage.nextCursor, null);
+    const nextPage = await (await conversations.GET(
+      read(`/api/conversations/${own.id}?cursor=${firstPage.messagePage.nextCursor}`), pageContext)).json();
+    assert.equal(nextPage.messages.at(-1).id, longHistory.at(-1)!.id);
+    assert.equal((await resolveChatRouteSession(read(`/api/conversations/${own.id}`, undefined, {}, "PATCH"))).response?.status, 401);
+    assert.equal((await resolveChatRouteSession(read(`/api/conversations/${own.id}/messages`))).response?.status, 401);
+    assert.equal((await keys.GET(read("/api/user/api-keys"))).status, 401);
+    assert.equal((await keys.POST(read("/api/user/api-keys", undefined, {}, "POST"))).status, 401);
+    const flags = await capabilities.GET(read("/api/products/chat/capabilities"));
+    assert.equal(flags.status, 200);
+    assert.equal(typeof (await flags.json()).autoSelection.offered, "boolean");
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    const review = await prisma.conversation.create({ data: { userId: user.id, title: "Review fixture", selectedModels: "[]", productKey: "review" } });
+    const rename = (id: string, payload: object, headers: Record<string, string> = {}) =>
+      conversations.PATCH(read(`/api/conversations/${id}`, undefined, headers, "PATCH", payload), { params: Promise.resolve({ conversationId: id }) });
+    const remove = (id: string) =>
+      conversations.DELETE(read(`/api/conversations/${id}`, undefined, {}, "DELETE"), { params: Promise.resolve({ conversationId: id }) });
+    const created = await chatCreate.POST(read("/api/products/chat/conversations", undefined, {}, "POST", { title: "New Desktop Chat" }));
+    assert.equal(created.status, 200, await created.clone().text());
+    const createdId = (await created.json()).id;
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: createdId } })).productKey, "chat");
+    const { POST: saveMessage } = await import("@/app/api/conversations/[conversationId]/messages/route");
+    for (const attachments of [{ attachmentReferences: [] }, { attachmentUploadIds: [] }]) {
+      const saved = await saveMessage(read(`/api/conversations/${createdId}/messages`, undefined, {}, "POST", {
+        messages: [{ clientRequestId: randomUUID(), role: "user", content: "A question without attachments", ...attachments }],
+      }), { params: Promise.resolve({ conversationId: createdId }) });
+      assert.equal(saved.status, 200, await saved.clone().text());
+    }
+    assert.equal((await rename(createdId, { title: "Renamed in Desktop" })).status, 200);
+    assert.equal((await (await conversation(createdId)).json()).title, "Renamed in Desktop");
+    assert.equal((await rename(createdId, { password: "will-not-change" })).status, 400);
+    assert.equal((await rename(createdId, { title: "Ambient cookie" }, { Cookie: "session=ambient" })).status, 401);
+    assert.equal((await rename(foreign.id, { title: "Wrong owner" })).status, 403);
+    assert.equal((await rename(review.id, { title: "Wrong product" })).status, 403);
+    assert.equal((await remove(locked.id)).status, 423);
+    assert.equal((await remove(foreign.id)).status, 403);
+    assert.equal((await remove(review.id)).status, 403);
+    assert.equal((await remove(createdId)).status, 200);
+    assert.equal(await prisma.conversation.findUnique({ where: { id: createdId } }), null);
+  } finally {
+    if (old === undefined) delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    else process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = old;
+    if (oldWrite === undefined) delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    else process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = oldWrite;
+  }
+});
+
+test("Desktop Review and Images require their server switch and keep product and owner boundaries", async () => {
+  const { issueMobileSession } = await service();
+  const review = await import("@/app/api/products/review/conversations/route");
+  const images = await import("@/app/api/images/generations/route");
+  const download = await import("@/app/api/images/generations/[generationId]/download/route");
+  const preflight = await import("@/app/api/chat/preflight/route");
+  const deleteConversation = (await import("@/app/api/conversations/[conversationId]/route")).DELETE;
+  const user = await createUser();
+  const other = await createUser();
+  const foreign = await prisma.conversation.create({
+    data: { userId: other.id, title: "Foreign review", selectedModels: "[]", productKey: "review" },
+  });
+  const ownChat = await prisma.conversation.create({
+    data: { userId: user.id, title: "Own Chat", selectedModels: "[]", productKey: "chat" },
+  });
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const make = (path: string, method = "GET", payload?: object) => new Request("https://tomverse.test" + path, {
+    method,
+    headers: { Authorization: "Bearer " + tokens.accessToken, Origin: "tomverse://desktop", "Content-Type": "application/json" },
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+  });
+  const names = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    const create = () => review.POST(make("/api/products/review/conversations", "POST", { title: "New desktop review" }));
+    assert.equal((await create()).status, 401);
+    assert.equal((await images.GET(make("/api/images/generations?requestKey=not-found"))).status, 401);
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    const created = await create();
+    assert.equal(created.status, 200, await created.clone().text());
+    const id = (await created.json()).id;
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id } })).productKey, "review");
+    assert.equal((await deleteConversation(make(`/api/conversations/${id}`, "DELETE"),
+      { params: Promise.resolve({ conversationId: id }) })).status, 403);
+    for (const conversationId of [foreign.id, ownChat.id]) {
+      const result = await preflight.POST(make("/api/chat/preflight", "POST", {
+        comparisonId: Date.now().toString(), conversationId, modelIds: ["gpt-6-luna", "gpt-5-6-luna"],
+        prompt: "Local fixture", attachments: [],
+      }));
+      assert.equal(result.status, 403);
+    }
+    assert.equal((await images.GET(make("/api/images/generations?requestKey=not-found"))).status, 404);
+    assert.equal((await images.POST(make("/api/images/generations", "POST", { prompt: "" }))).status, 400);
+    const image = await prisma.conversation.create({ data: { userId: user.id, title: "Locked image", selectedModels: "[]",
+      kind: "image", productKey: "studio", password: "locked" } });
+    const key = randomUUID();
+    await prisma.imageGenerationGroup.create({ data: { userId: user.id, conversationId: image.id, groupIdempotencyKey: key } });
+    const generate = (conversationId?: string) => images.POST(make("/api/images/generations", "POST", {
+      prompt: "A local image fixture", size: "1024x1024", quality: "low", idempotencyKey: key, conversationId,
+    }));
+    assert.equal((await generate()).status, 423);
+    assert.equal((await generate(image.id)).status, 423);
+    assert.equal((await generate(foreign.id)).status, 404);
+    assert.equal((await generate(ownChat.id)).status, 409);
+    assert.equal((await images.GET(make(`/api/images/generations?requestKey=${key}`))).status, 423);
+    const absentId = "missing-desktop-image";
+    assert.equal((await download.GET(make(`/api/images/generations/${absentId}/download?preview=1`),
+      { params: Promise.resolve({ generationId: absentId }) })).status, 404);
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("Desktop can write legacy Review conversations only during the configured transition", async () => {
+  const { issueMobileSession } = await service();
+  const conversations = await import("@/app/api/conversations/[conversationId]/route");
+  const messages = await import("@/app/api/conversations/[conversationId]/messages/route");
+  const preflight = await import("@/app/api/chat/preflight/route");
+  const chat = await import("@/app/api/chat/route");
+  const user = await createUser();
+  const other = await createUser();
+  await prisma.user.update({ where: { id: user.id }, data: { plan: "Pro" } });
+  const create = (userId: string, password?: string) => prisma.conversation.create({
+    data: { userId, title: "Legacy Review", kind: "chat", productKey: null, selectedModels: "[]", password },
+  });
+  const own = await create(user.id);
+  const locked = await create(user.id, "locked");
+  const foreign = await create(other.id);
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const make = (path: string, method = "GET", payload?: object) => new Request("https://tomverse.test" + path, {
+    method,
+    headers: { Authorization: "Bearer " + tokens.accessToken, Origin: "tomverse://desktop", "Content-Type": "application/json" },
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
+  });
+  const params = (conversationId: string) => ({ params: Promise.resolve({ conversationId }) });
+  const modelIds = ["gpt-6-luna", "gpt-5-6-luna"];
+  const prompt = "A follow-up to my previous Review";
+  const detail = () => conversations.GET(make("/api/conversations/" + own.id), params(own.id));
+  const configure = (id: string) => conversations.PATCH(make("/api/conversations/" + id, "PATCH",
+    { title: "Legacy Review updated", selectedModels: modelIds, selectionMode: "manual" }), params(id));
+  const append = (id: string) => messages.POST(make("/api/conversations/" + id + "/messages", "POST",
+    { messages: [{ clientRequestId: randomUUID(), role: "user", content: prompt }] }), params(id));
+  const admit = (id: string) => preflight.POST(make("/api/chat/preflight", "POST", {
+    comparisonId: Date.now().toString(), conversationId: id, modelIds, prompt, attachments: [],
+  }));
+  const names = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED",
+    "PRODUCT_KEY_READ_MODE", "PRODUCT_KEY_LEGACY_FALLBACK_EXPIRES_AT", "PRODUCT_KEY_EXPAND_DEPLOYED_AT",
+    "TOMVERSE_REASONING_EFFORT_ENABLED"] as const;
+  const previous = names.map((name) => process.env[name]);
+  const day = 86_400_000;
+  const now = Date.now();
+  try {
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    process.env.PRODUCT_KEY_READ_MODE = "legacy_fallback";
+    process.env.PRODUCT_KEY_EXPAND_DEPLOYED_AT = new Date(now - 2 * day).toISOString();
+    process.env.PRODUCT_KEY_LEGACY_FALLBACK_EXPIRES_AT = new Date(now + day).toISOString();
+    process.env.TOMVERSE_REASONING_EFFORT_ENABLED = "false";
+
+    const writable = await detail();
+    assert.equal(writable.status, 200);
+    assert.equal((await writable.json()).desktopReviewWritable, true);
+    const patched = await configure(own.id);
+    assert.equal(patched.status, 200, await patched.clone().text());
+    const current = await prisma.conversation.findUniqueOrThrow({ where: { id: own.id } });
+    assert.equal(current.title, "Legacy Review updated");
+    assert.deepEqual(JSON.parse(current.selectedModels), modelIds);
+    assert.equal(current.productKey, null);
+
+    const saved = await append(own.id);
+    assert.equal(saved.status, 200, await saved.clone().text());
+    const sourceId = (await saved.json()).messageMappings[0].messageId;
+    assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: sourceId } })).content, prompt);
+    const turn = (conversationId = own.id) => chat.POST(make("/api/chat", "POST", {
+      modelId: modelIds[0], conversationId, sourceUserMessageId: sourceId, assistantMessageId: randomUUID(),
+      messages: [{ id: sourceId, role: "user", content: prompt }], reasoningEffort: "high",
+    }));
+    // An intentionally unavailable request option proves the chat route has
+    // accepted the workspace boundary without contacting a model provider.
+    const refusedOption = await turn();
+    assert.equal(refusedOption.status, 409, await refusedOption.clone().text());
+    assert.equal((await refusedOption.json()).code, "REASONING_EFFORT_UNAVAILABLE");
+    const admitted = await admit(own.id);
+    assert.equal(admitted.status, 200, await admitted.clone().text());
+    assert.ok((await admitted.json()).admissionToken);
+
+    assert.equal((await configure(foreign.id)).status, 403);
+    assert.equal((await append(foreign.id)).status, 403);
+    assert.equal((await admit(foreign.id)).status, 403);
+    assert.equal((await configure(locked.id)).status, 423);
+    assert.equal((await append(locked.id)).status, 423);
+    assert.equal((await admit(locked.id)).status, 423);
+    assert.equal((await turn(locked.id)).status, 423);
+    assert.equal((await conversations.DELETE(make("/api/conversations/" + own.id, "DELETE"), params(own.id))).status, 403);
+    for (const mode of ["strict", "expired", "unconfigured", "disabled"]) {
+      process.env.PRODUCT_KEY_READ_MODE = mode === "strict" ? "strict" : "legacy_fallback";
+      process.env.PRODUCT_KEY_LEGACY_FALLBACK_EXPIRES_AT =
+        mode === "expired" ? new Date(now - day).toISOString() : new Date(now + day).toISOString();
+      if (mode === "unconfigured") delete process.env.PRODUCT_KEY_LEGACY_FALLBACK_EXPIRES_AT;
+      if (mode === "disabled") process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "false";
+      assert.equal((await (await detail()).json()).desktopReviewWritable, false, mode);
+      assert.equal((await configure(own.id)).status, 403, mode);
+      assert.equal((await append(own.id)).status, 403, mode);
+      assert.equal((await admit(own.id)).status, mode === "disabled" ? 401 : 403, mode);
+      const refusedTurn = await turn();
+      assert.equal(refusedTurn.status, 403, mode);
+      assert.equal((await refusedTurn.json()).code, "CONVERSATION_ACCESS_DENIED", mode);
+    }
+    assert.equal(await prisma.message.count({ where: { conversationId: own.id } }), 1);
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name];
+      else process.env[name] = previous[index];
+    });
+  }
+});
+
+test("Desktop binds only an active Code key belonging to the current eligible account", async () => {
+  const { issueMobileSession } = await service();
+  const { generateExternalApiKey } = await import("@/lib/externalApiKeyCore");
+  const { POST } = await import("@/app/api/auth/desktop/code-key/route");
+  const user = await createUser();
+  const other = await createUser();
+  await prisma.user.updateMany({ where: { id: { in: [user.id, other.id] } }, data: { plan: "Pro" } });
+  const seedKey = async (userId: string, options: { expiresAt?: Date; revokedAt?: Date } = {}) => {
+    const generated = generateExternalApiKey();
+    await prisma.externalApiKey.create({ data: { userId, name: "Desktop fixture", keyPrefix: generated.keyPrefix,
+      secretDigest: generated.secretDigest, ...options } });
+    return generated;
+  };
+  const own = await seedKey(user.id);
+  const foreign = await seedKey(other.id);
+  const expired = await seedKey(user.id, { expiresAt: new Date(Date.now() - 10_000) });
+  const revoked = await seedKey(user.id, { revokedAt: new Date() });
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const validate = (key: string, headers: Record<string, string> = {}) => POST(new Request("https://tomverse.test/api/auth/desktop/code-key", {
+    method: "POST", headers: { Authorization: `Bearer ${tokens.accessToken}`, "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ key }),
+  }));
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "EXTERNAL_API_ENABLED", "EXTERNAL_API_ALLOWED_USER_IDS"] as const;
+  const previous = Object.fromEntries(switches.map((name) => [name, process.env[name]]));
+  try {
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.EXTERNAL_API_ALLOWED_USER_IDS = "*";
+    delete process.env.EXTERNAL_API_ENABLED;
+    assert.equal((await validate(own.key)).status, 503);
+    process.env.EXTERNAL_API_ENABLED = "true";
+    for (const key of [foreign.key, expired.key, revoked.key, own.keyPrefix, "arbitrary-clipboard-text"]) {
+      assert.equal((await validate(key)).status, 403);
+    }
+    assert.equal((await validate(own.key, { Origin: "tomverse://desktop" })).status, 403);
+    assert.equal((await validate(own.key, { Cookie: "next-auth.session-token=ambient" })).status, 403);
+    const accepted = await validate(own.key);
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(await accepted.json(), { ok: true, keyPrefix: own.keyPrefix });
+    await prisma.user.update({ where: { id: user.id }, data: { plan: "Free" } });
+    assert.equal((await validate(own.key)).status, 403);
+  } finally {
+    for (const name of switches) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
 });
 
 test("a refresh consumes its token, mints a successor, and links the chain", async () => {
@@ -830,5 +1486,110 @@ test("no audit row carries a token, a digest or a record id", async () => {
   const [recordId, secret] = first.refreshToken.split(".");
   for (const forbidden of [first.refreshToken, first.accessToken, recordId!, secret!]) {
     assert.ok(!serialized.includes(forbidden), "an audit row carried a credential");
+  }
+});
+
+test("Desktop Chat prepares signed memory only for its current saved question and available model", async () => {
+  const { issueMobileSession } = await service();
+  const context = await import("@/app/api/chat/context/route");
+  const { verifyChatContextBundle } = await import("@/lib/chatContextBundleService");
+  const { MEMORY_INJECTION_FLAG_KEY } = await import("@/lib/memoryAccess");
+  const { memoryRetrievalTerms, MEMORY_RETRIEVAL_VERSION } = await import("@/lib/memoryRetrievalTerms");
+  const { prepareMemoryHistoryContext } = await import("@/lib/memoryHistorySnapshot");
+  const user = await createUser();
+  const other = await createUser();
+  const modelId = "gpt-6-luna";
+  const createChat = (userId: string, productKey = "chat", password: string | null = null) =>
+    prisma.conversation.create({ data: { userId, productKey, password, title: "Desktop memory fixture", selectedModels: JSON.stringify([modelId]) } });
+  const own = await createChat(user.id);
+  const foreign = await createChat(other.id);
+  const locked = await createChat(user.id, "chat", "locked");
+  const review = await createChat(user.id, "review");
+  const statement = "The user prefers decaffeinated coffee.";
+  const now = Date.now();
+  const save = (conversationId: string, content: string, offset = 0) =>
+    prisma.message.create({ data: { conversationId, role: "user", content, createdAt: new Date(now + offset) } });
+  const older = await save(own.id, "An earlier question about coffee.", -2_000);
+  const previous = await save(own.id, "Which coffee makers are practical?", -1_000);
+  const saved = await save(own.id, "Recommend a decaffeinated coffee.");
+  const foreignQuestion = await save(foreign.id, "Another account's question.");
+  const { tokens } = await issueMobileSession({ request: request(), userId: user.id, platform: "desktop", deviceLabel: "Desktop" });
+  const mobile = await issue(user.id);
+  const payload = { conversationId: own.id, sourceUserMessageId: saved.id, modelId };
+  const prepare = (body: object, overrides: Record<string, string> = {}, method = "POST") => new Request("https://tomverse.test/api/chat/context", {
+    method, headers: { Authorization: `Bearer ${tokens.accessToken}`, "Content-Type": "application/json",
+      Origin: "tomverse://desktop", ...overrides },
+    ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
+  });
+  const flags = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED",
+    "MEMORY_RELEVANCE_CONTEXT_ENABLED"] as const;
+  const originals = flags.map((key) => process.env[key]);
+  process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+  process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+  process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+  process.env.MEMORY_RELEVANCE_CONTEXT_ENABLED = "true";
+  try {
+    await prisma.appSetting.create({ data: { key: MEMORY_INJECTION_FLAG_KEY, value: "true" } });
+    await prisma.memoryItem.create({ data: { userId: user.id, kind: "preference", statement, status: "active",
+      confidence: 0.9, approvedAt: new Date(), retrievalVersion: MEMORY_RETRIEVAL_VERSION, searchTerms: memoryRetrievalTerms(statement) } });
+    const response = await context.POST(prepare(payload));
+    assert.equal(response.status, 200, await response.clone().text());
+    const body = await response.json();
+    assert.equal(body.memoryUsedCount, 1);
+    const verification = verifyChatContextBundle(body.contextBundle, { subjectKey: user.id, conversationId: own.id, modelId });
+    assert.ok(verification.ok && verification.payload.memoryTokens > 0);
+    assert.ok(!JSON.stringify(verification.payload).includes(statement));
+    assert.equal(verifyChatContextBundle(body.contextBundle, { subjectKey: other.id, conversationId: own.id, modelId }).ok, false);
+    const history = await prepareMemoryHistoryContext({ request: prepare(payload), userId: user.id, conversationId: own.id,
+      query: saved.content, modelIds: [modelId], currentQuestionId: saved.id })?.();
+    assert.deepEqual(history?.history.map(({ id }) => id), [older.id, previous.id]);
+    assert.equal((await context.POST(prepare({ ...payload, prompt: "A renderer-supplied query" }))).status, 400);
+    assert.equal((await context.POST(prepare({ ...payload, conversationId: foreign.id, sourceUserMessageId: foreignQuestion.id }))).status, 403);
+    assert.equal((await context.POST(prepare({ ...payload, conversationId: review.id }))).status, 403);
+    assert.equal((await context.POST(prepare({ ...payload, conversationId: locked.id }))).status, 423);
+    assert.equal((await context.POST(prepare({ ...payload, sourceUserMessageId: older.id }))).status, 409);
+    assert.equal((await context.POST(prepare({ ...payload, modelId: "another-model" }))).status, 409);
+    assert.equal((await context.POST(prepare(payload, { Cookie: "session=ambient" }))).status, 401);
+    assert.equal((await context.POST(prepare(payload, { Authorization: `Bearer ${mobile.accessToken}` }))).status, 401);
+    assert.equal((await context.POST(prepare({ ...payload, previousContextBundle: "fabricated" }))).status, 400);
+    await prisma.conversation.update({ where: { id: own.id }, data: { selectedModels: "[]" } });
+    assert.deepEqual(await (await context.POST(prepare(payload))).json(), { ok: true, contextBundle: null, memoryUsedCount: 0 });
+    const retiredModel = "llama-3-1";
+    const replacementModel = "deepseek-v4-flash";
+    const replacementPayload = { ...payload, modelId: replacementModel };
+    await prisma.conversation.update({ where: { id: own.id }, data: {
+      selectedModels: JSON.stringify(JSON.stringify([retiredModel])), selectionMode: "auto",
+    } });
+    const replacement = await context.POST(prepare(replacementPayload));
+    assert.equal(replacement.status, 200, await replacement.clone().text());
+    const replacementBody = await replacement.json();
+    assert.equal(replacementBody.memoryUsedCount, 1);
+    assert.ok(verifyChatContextBundle(replacementBody.contextBundle,
+      { subjectKey: user.id, conversationId: own.id, modelId: replacementModel }).ok);
+    assert.equal((await context.POST(prepare({ ...payload, modelId: retiredModel }))).status, 409);
+    await prisma.conversation.update({ where: { id: own.id }, data: {
+      disabledPanels: JSON.stringify(JSON.stringify([retiredModel])),
+    } });
+    assert.equal((await context.POST(prepare(replacementPayload))).status, 409);
+    await prisma.conversation.update({ where: { id: own.id }, data: {
+      selectedModels: JSON.stringify([replacementModel]),
+    } });
+    assert.equal((await context.POST(prepare(replacementPayload))).status, 409);
+    await prisma.conversation.update({ where: { id: own.id }, data: {
+      selectedModels: JSON.stringify([modelId]), disabledPanels: "[]", selectionMode: "manual",
+    } });
+    await prisma.userMemorySettings.upsert({ where: { userId: user.id },
+      create: { userId: user.id, masterEnabled: false }, update: { masterEnabled: false } });
+    const stopped = await context.POST(prepare({ ...payload, previousContextBundle: body.contextBundle }));
+    assert.equal(stopped.status, 200);
+    assert.deepEqual(await stopped.json(), { ok: true, contextBundle: null, memoryUsedCount: 0, reason: "account_off" });
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "false";
+    assert.equal((await context.POST(prepare(payload))).status, 401);
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: MEMORY_INJECTION_FLAG_KEY } });
+    flags.forEach((key, index) => {
+      if (originals[index] === undefined) delete process.env[key];
+      else process.env[key] = originals[index];
+    });
   }
 });

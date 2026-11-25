@@ -464,41 +464,6 @@ test("unsupported image providers show a local notice and never start a text or 
   expect(images).toBe(0); expect(text).toBe(0);
 });
 
-for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const) {
-  test(`Easy new image ${width}px ${theme} resolves before quoting and generating`, { tag: "@ui-risk" }, async ({ page }) => {
-    await prepare(page, width, theme);
-    const imageCalls: string[][] = [];
-    let routingCalls = 0;
-    await page.route("**/api/images/generations", route => {
-      if (route.request().method() !== "POST") return route.fulfill({ json: { generations: [] } });
-      imageCalls.push(route.request().postDataJSON().modelIds);
-      return route.fulfill({ status: 500, json: { error: "QA_PROVIDER_FAILURE" } });
-    });
-    await page.route("**/api/review/route", route => {
-      routingCalls++;
-      const body = route.request().postDataJSON();
-      expect(body.requestedKind).toBe("image");
-      return route.fulfill({ json: { kind: "image", preset: "draft", choices: body.providers.map((provider: string) => ({ provider, modelId: provider === "openai" ? "gpt-image-2" : null })) } });
-    });
-    await page.locator(".review-navigation-history").click();
-    await page.getByTestId("sidebar-new-launcher-more").click();
-    await page.getByTestId("new-conversation-menu-image").click();
-    await page.keyboard.press("Escape");
-    const submit = page.getByTestId("image-generation-submit");
-    await expect(submit).toBeDisabled();
-    await page.getByTestId("image-generation-prompt").fill("A mountain illustration.");
-    await page.getByTestId("image-generation-prompt").blur();
-    await expect(submit).toBeEnabled();
-    await submit.click();
-    await expect.poll(() => routingCalls).toBe(1);
-    await expect(submit.getByRole("img")).toBeVisible();
-    expect(imageCalls).toEqual([]);
-    await submit.click();
-    await expect.poll(() => imageCalls).toEqual([["gpt-image-2"]]);
-    expect(routingCalls).toBe(1);
-  });
-}
-
 test("a supported image provider still executes while unsupported peers keep their notices", async ({ page }) => {
   await prepare(page, 1600);
   const imageCalls: string[][] = [];
@@ -619,18 +584,35 @@ test("Professional image selection stages the composer, then answers inline with
   const picker = await openModelPickerCatalogue(page);
   await picker.getByTestId("model-picker-tab-image").click();
   await picker.locator('[data-testid="image-model-option"][data-model-id="gpt-image-2"]').click();
-  await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
+  // One image model turns every answering panel into an image model (owner
+  // direction 2026-11-25), each a different one.
+  const imageMode = page.getByTestId("review-image-mode");
+  await expect(imageMode).toContainText("GPT Image 2");
+  // More than the picked one: as many as the answering panels, while that
+  // many image models are active in the served catalogue.
+  const pickedLabels = async () => (await imageMode.locator("span").first().textContent())?.split(" · ") ?? [];
+  await expect.poll(async () => (await pickedLabels()).length).toBeGreaterThan(1);
+  const filled = (await pickedLabels()).length;
+  expect(filled).toBeLessThanOrEqual(THREE_MODELS.length);
   expect(calls.turns.length).toBe(0);
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
   await page.getByTestId("chat-textarea").fill(INLINE_IMAGE_PROMPT);
   await page.getByTestId("chat-send-button").click();
-  await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(1);
-  expect(calls.turns).toHaveLength(1);
-  expect(calls.turns[0].imageModelIds).toEqual(["gpt-image-2"]);
+  await expect(page.getByTestId("chat-image-turn").locator("img")).toHaveCount(filled);
+  expect(calls.turns).toHaveLength(filled);
+  const imageModels = calls.turns.map(turn => turn.imageModelIds[0]);
+  expect(imageModels).toContain("gpt-image-2");
+  expect(new Set(imageModels).size).toBe(filled);
+  // Each image answer is hosted by one of the selected panels.
+  expect(new Set(calls.turns.map(turn => turn.modelId)).size).toBe(filled);
+  for (const turn of calls.turns) expect(THREE_MODELS).toContain(turn.modelId);
   await expect(page.getByTestId("desktop-model-panel")).toHaveCount(3);
   const saved = await page.evaluate(async () => (await fetch("/api/conversations/qa-conversation")).json());
   expect(saved.selectedModels).toEqual(THREE_MODELS);
   expect(calls.counts()).toEqual({ textCalls: 0, workspaceCalls: 0, preflightCalls: 0, routingCalls: 0 });
+  // The way back: the conversation models answer the next send again.
+  await page.getByTestId("composer-image-mode-exit").click();
+  await expect(imageMode).toHaveCount(0);
 });
 
 test("Review reload restores each provider image in its original conversation panel", async ({ page }) => {

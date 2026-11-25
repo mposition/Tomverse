@@ -36,7 +36,7 @@ mock.module(mod("lib/creditLedger.ts"), { namedExports: {
   reserveAddOnCredits: async (_tx, input) => { w.addOnReserved += input.credits; w.purchased -= input.credits; return [{ lotId: "lot", purchaseId: "purchase", credits: input.credits, fundedCostMicroUsd: input.fundedCostMicroUsd }]; },
   settleAddOnCredits: async (_tx, input) => { w.addOnSettlements.push(input); },
 } });
-mock.module(mod("lib/providerUsageAccounting.ts"), { namedExports: { recordInternalProviderUsage: async input => { w.providerCosts.push(input.estimatedCostMicroUsd); } } });
+mock.module(mod("lib/providerUsageAccounting.ts"), { namedExports: { recordInternalProviderUsage: async input => { assert.equal(input.modelId, w.row.modelId); w.providerCosts.push(input.estimatedCostMicroUsd); } } });
 mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   reserveVoiceBudgets: async ({ subjectKey, seconds, client }) => {
     assert.equal(client, tx);
@@ -54,12 +54,13 @@ test.beforeEach(() => { w = { buckets: { day: 0, month: 0, "provider-cost-day": 
 // Mid-month noon UTC: a test that walks the clock forward never crosses a day or
 // month boundary, whatever the wall clock reads when CI runs it.
 const MID_DAY = Date.parse("2026-10-15T12:00:00Z");
-const input = () => ({ userId: "owner", requestId: "request-1", conversationId: "chat-1", creditsPerMinute: 36, maxSeconds: 60 });
+const input = () => ({ userId: "owner", requestId: "request-1", modelId: "gpt-live-1", conversationId: "chat-1", creditsPerMinute: 36, maxSeconds: 60 });
 
 test("voice spends the same plan wallet and refunds unused duration exactly once", async () => {
   const row = await reserveVoiceConversationCredits(input());
   assert.equal(w.buckets.day, 36); assert.equal(w.buckets.month, 36);
   assert.equal(row.source, "voice_conversation");
+  assert.equal(row.modelId, "gpt-live-1");
   await settleVoiceConversationCredits(row.id, 10);
   assert.equal(w.buckets.day, 6); assert.equal(w.buckets.month, 6);
   assert.equal(w.row.settledCredits, 6); assert.equal(w.row.status, "settled");
@@ -165,7 +166,7 @@ test("voice shares OpenAI cost buckets and a refusal rolls back the wallet", asy
   assert.equal(w.buckets["provider-cost-day"], 12500); assert.equal(w.buckets["provider-cost-month"], 12500);
 });
 
-const continuousInput = () => ({ userId: "owner", requestId: "rolling-1", conversationId: "chat-1", creditsPerMinute: 36 });
+const continuousInput = () => ({ userId: "owner", requestId: "rolling-1", modelId: "gpt-live-1.1", conversationId: "chat-1", creditsPerMinute: 36 });
 const lease = () => { w.row.reservationPayload.webLeaseUntil = new Date(Date.now() + 30_000).toISOString(); };
 
 test("wallet-lock and funding delays do not consume the initial or renewed session window", async t => {

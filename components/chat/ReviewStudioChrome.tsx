@@ -24,7 +24,7 @@ import { useKeyboardInset } from "./useVisualViewport";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 
-const names: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", xai: "xAI", deepseek: "DeepSeek", meta: "Meta", mistral: "Mistral", perplexity: "Perplexity" };
+const names: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", xai: "xAI", deepseek: "DeepSeek", meta: "Meta", mistral: "Mistral", perplexity: "Perplexity", qwen: "Qwen", fal: "fal", bfl: "Black Forest Labs" };
 export const reviewProviderName = (provider: string) => names[provider] ?? provider;
 function Icon({ file }: { file: string }) {
   // The approved Figma assets are local, including their intrinsic dimensions.
@@ -92,7 +92,7 @@ export function ReviewCommandBar({ review, locked = false, view, setView, showMo
   </header>;
 }
 
-function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
+export function WorkspaceUsageButton() {
   const { lang, t } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   const { data: session } = useSession();
@@ -108,6 +108,14 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
   return <>
     <span id={usageDescriptionId} className="sr-only">{usageDescription}</span>
     <button type="button" className="review-credit-button" data-testid="workspace-usage" onClick={() => openAccountSettings("plan")} aria-label={`${usageLabel} · ${c.settings}`} aria-describedby={usageDescriptionId} title={usageDescription}><BarChart3 size={17} aria-hidden="true" /><span>{usageLabel}</span></button>
+  </>;
+}
+
+function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace: WorkspaceAppearanceControls; disabled: boolean; testId: string }) {
+  const { lang } = useLanguage();
+  const c = reviewWorkspaceCopy[lang];
+  return <>
+    <WorkspaceUsageButton />
     <WorkspaceThemeButton />
     <select disabled={disabled} data-testid={testId} aria-label={c.appearance} value={workspace.appearance} onChange={event => workspace.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
   </>;
@@ -210,6 +218,18 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
   const [expanded, setExpanded] = useState(initialExpanded);
   const options = [...new Set(models.filter(model => model.enabled && !model.catalogDeleted && model.publiclyListed !== false && (!canSelectModel || canSelectModel(model.id))).map(model => model.provider))];
   const providers = review.providersConfigured || review.providers.length ? review.providers : [...new Set(selectedModels.map(id => models.find(m => m.id === id)?.provider).filter((p): p is NonNullable<typeof p> => Boolean(p)))];
+  const imageModels = review.mode === "professional" ? review.imageModels ?? [] : [];
+  if (imageModels.length > 0) return <div className="review-participants" data-testid="review-participants" data-image-models="true">
+    <button type="button" data-testid="composer-model-select" className="review-participants-heading" onClick={event => openChatModelPicker(event.currentTarget)} aria-haspopup="dialog">
+      <span>{c.models}</span><span>{imageModels.length} / {review.maxProviders}<ChevronDown size={14} /></span>
+    </button>
+    <div className="review-participant-list">
+      {imageModels.map(model => <button type="button" key={model.id} data-testid="review-image-participant" data-model-id={model.id} disabled={review.pending || review.ready === false} onClick={event => openChatModelPicker(event.currentTarget)}>
+        <ModelLogo provider={model.owner} size="md" /><span><span className="flex min-w-0 items-center gap-1.5"><strong>{model.name}</strong><ImagePlus size={12} aria-hidden="true" /></span><small>{reviewProviderName(model.owner)}</small></span><Check size={14} />
+      </button>)}
+    </div>
+    {review.error && <p role="alert" data-testid="review-routing-error">{review.error}</p>}
+  </div>;
   return <div className="review-participants" data-testid="review-participants">
     <button type="button" data-testid={review.mode === "professional" ? "composer-model-select" : undefined} className="review-participants-heading" onClick={event => review.mode === "easy" ? setExpanded(!expanded) : openChatModelPicker(event.currentTarget)} aria-haspopup={review.mode === "professional" ? "dialog" : undefined} aria-expanded={review.mode === "easy" ? expanded : undefined}>
       <span>{review.mode === "easy" ? c.providers : c.models + effortSuffix}</span><span>{review.mode === "easy" ? providers.length : selectedModels.length} / {review.maxProviders}<ChevronDown size={14} /></span>

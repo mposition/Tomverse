@@ -545,7 +545,22 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | FLUX 3 Image (`flux-3-image`·`flux-3-image-klein`, BFL 직접) | **활성 (기본 켜짐, 2026-11-17)** | 1K 장당 Image $0.048 · 판매가 75크레딧 / Klein $0.009 · 20크레딧 (bfl.ai/pricing 2026-11-16) | 아래 "BFL 직접 어댑터" — 데이터 보관·리전, 첫 실제 생성의 크기·MIME, 한국어 글자 정확도 |
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
-| Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
+| Ideogram 4.6 (`ideogram-4-6`, 직접) | 기본 켜짐 (2026-11-25) | 1024×1024 Low $0.03 / Medium $0.06 / High $0.10 | Draft 50 / Standard 90 / Final 150크레딧 |
+| Seedream 5.5 (`dola-seedream-5-5-261028`, BytePlus 직접) | 기본 켜짐 (2026-11-25) | 정사각·가로·세로 출력 한 장 $0.020, 참조 사진 한 장 $0.008 | Standard 생성·사진 한 장 편집 각각 45크레딧 |
+| Recraft V4 Pro (`recraftv4_pro`, Recraft 직접) | 기본 켜짐 (2026-11-25) | 2048×2048 래스터 출력 한 장 $0.25 | Standard 2K PNG 350크레딧 |
+
+세 공급자의 승인 판매가는 기본 카탈로그에 포함되며, 명시적인 관리자 보류·끄기가 우선한다.
+운영 서버에는 공급자별 키와 일·월 예산이 필요하다. 예산 변수명은
+`IMAGE_PROVIDER_{IDEOGRAM,BYTEPLUS,RECRAFT}_COST_MICROUSD_PER_{DAY,MONTH}`이다.
+
+Seedream 키는 [BytePlus 싱가포르 ModelArk 콘솔](https://ai.byteplus.com/ark/region:ap-southeast-1/apikey)에서
+Tomverse 프로젝트에 발급해 `ARK_API_KEY`로 저장한다. 사진 편집에는 기존 편집 스위치가 적용된다.
+Recraft는 `RECRAFT_API_TOKEN`을 사용한다. 두 API 모두 요청당 한 번 호출하며 반환된 PNG의 원본 크기를 검증한다.
+[BytePlus 가격](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
+
+Ideogram은 서버의 `IDEOGRAM_API_KEY`로 4.6 생성 API에 `quality`를 보내며,
+Tomverse에서는 1024×1024 텍스트 생성 한 장을 제공한다. 결과 파일은 인증 키 없이 내려받는다.
+[Ideogram 4.6 API](https://developer.ideogram.ai/api-reference/images/generate/ideogram-4-6) · [Ideogram 가격](https://ideogram.ai/pricing/)
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
 각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
@@ -1014,15 +1029,15 @@ blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴
 
 **어휘와 변환 계층이 `lib/imageResolution.ts`에 들어갔다.** tier·aspect 정의, 기존 `ImageSize`와의 양방향 매핑, provider별
 요청 변환(OpenAI 픽셀쌍 / xAI `resolution`+`aspect_ratio` / Google
-`imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 판매 가능한
-조합은 `SELLABLE_IMAGE_OPTIONS` 3종 그대로이며, **가격표 key와
-`ImageGeneration.size` 컬럼은 아직 legacy 문자열이다** — 그 둘은 migration과
-새 `pricingVersion`이 함께 움직이는 별도 변경이다.
+`imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 기본 1K 옵션은 `SELLABLE_IMAGE_OPTIONS` 3종이며 실제 판매 가능한
+크기와 가격은 모델별 카탈로그가 결정한다. `ImageGeneration.size`와 가격표는 같은 픽셀쌍을 쓴다.
 
-`legacyImageSizeForOption()`이 2K·4K에 `null`을 돌려주는 것은 표의 빈칸이
-아니라 계약이다. 값을 채워 근처 픽셀쌍으로 매핑하면 1K 가격으로 2K 이미지를
-청구하게 되고, 사용자는 그 차이를 볼 방법이 없다.
+`legacyImageSizeForOption()`은 2K 정사각을 `2048x2048`로 변환한다. 다른 2K 비율과
+4K에는 `null`을 반환한다. 미지원 조합을 비슷한 1K 크기로 바꿔 과금하지 않는다.
 
+**2026-11-25 · Recraft V4 Pro**. 전용 2K 정사각 옵션은 `2048x2048`로 저장하고 1K와 별도 가격을
+검증한다. 새 예약에는 tier·aspectRatio도 보존한다. 다른 공급자의 2K 옵션은 승인 대상에 추가되지 않았다.
+기존 1K 기록과 가격은 그대로 읽으며, 같은 가격·크기를 제공하는 모델만 한 그룹으로 비교할 수 있다.
 
 ## 13. 진입점과 노출 정책 (v2)
 
@@ -1031,12 +1046,27 @@ blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴
 ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두 문서가 어긋나면
 이 정책이 우선한다.
 
-- 진입점은 세 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
-  새 채팅, 펼침 메뉴에 이미지 생성), ② 모바일 **"새로 만들기" bottom
-  sheet**(split-button을 축소하지 않는다), ③ 모델 카탈로그의
-  **`채팅 | 이미지` 분리 탭**. v1의 별도 "새 이미지" 버튼은 대체·제거한다.
-  채팅 컴포저 도구 메뉴에는 이미지 생성 항목을 두지 않으며, 이미지 요청은
-  보내는 순간 기존 LLM 경로에서 자동 판단한다(⑥).
+- **이미지 모드는 없다**(운영자 지시 2026-11-25). 새 이미지 초안을 여는 곳이
+  없다: 사이드바·모바일 드로어 런처의 이미지 항목, 컴포저 도구 메뉴 항목,
+  별도 "새 이미지" 버튼, starter 카드 모두 워크스페이스를 열지 않는다. 진입점은
+  모델 카탈로그의 **`채팅 | 이미지` 분리 탭** 하나이며, 고른 이미지 모델은
+  지금 화면의 대화 안에서 답한다.
+  - **Chat**: 고른 이미지 모델이 선택된 모델이다. 컴포저 모델 버튼이 그 이름을
+    보이고 화면과 초안은 그대로이며, 다음 전송은 같은 대화 안에서 이미지로
+    답한다(⑥의 image-turn 경로). 판정 호출은 후속 수정 프롬프트와 사진 편집
+    여부를 위해 그대로 돌지만, 모델은 고른 것으로 바꾸고 "이미지 아님" 판정도
+    텍스트 답변으로 되돌리지 않는다.
+  - **Review Professional**: 이미지 모델 하나를 고르면 답하는 모든 패널이 이미지
+    모델이 된다. 고른 모델, 다른 패널 공급자의 활성 이미지 모델, 다른 소유사
+    순으로 답하는 패널 수(최대 3)만큼 채운다. 이후 선택은 빼기(마지막 하나는
+    남김)·더하기·한도에서 마지막 교체다. 패널마다 이미지 답변 하나를 맡고,
+    선택한 대화 모델은 그대로 남는다. **Review Easy**는 이미지를 요청할 뿐
+    공급자별 모델은 라우터가 고른다.
+  - **돌아가기**: 컴포저에 고른 모델과 **대화 모델로 돌아가기** 버튼을 보인다.
+    누르거나, 채팅 탭에서 대화 모델을 고르거나, 새 채팅·다른 대화를 열면 대화
+    모델로 돌아가며 초안은 그대로다.
+  - 이미지 워크스페이스는 기록에 이미 있는 이미지 대화를 열 때만 남는다.
+  이미지 요청은 보내는 순간 기존 LLM 경로에서 자동 판단한다(⑥).
 - **⑤ 이미지 요청 인계 제안 칩은 2026-10-20에 LLM 판정(⑥)으로 대체되어
   삭제됐다.** 규칙 기반 분류기(삭제된 `imageIntentSignals`)가 컴포저의 칩과
   서버의 이미지 capability 시스템 블록에서 같은 판정을 하던 구조였고, 이제
@@ -1045,8 +1075,9 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   (`buildImageCapabilitySystemPrompt`는 인계 상태와 파일 도구 가용성만 본다).
   분석 이벤트 이름 `image_intent_suggestion_*`와 `image_intent_*` 속성은 DB
   CHECK 제약이 묶고 있어 스키마에만 남으며 어디서도 발화하지 않는다. 칩을 쓰던
-  `imageHandoffAutoGenerate` 규칙은 **글로 쓴 요청에서 시작한 인계**
-  (`fromImageRequest`, 현재는 Review Easy의 이미지 판정)에만 남는다.
+  `imageHandoffAutoGenerate` 규칙은 **글로 쓴 요청에서 시작한 인계**에만
+  적용됐고, 그 인계는 2026-11-25 이미지 모드와 함께 없어졌다. 아래 규칙은
+  워크스페이스 composer의 체크박스가 남아 있는 동안의 조건으로 유지한다.
   - **확인 없는 generation 제출은 금지**다. 가격·모델 선택은 계속 제출 전에
     표시한다(§3·§11). 예외는 하나 —
     `UserSettings.imageHandoffAutoGenerate`를 켠 계정이며, 그 스위치는

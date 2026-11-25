@@ -68,11 +68,15 @@ type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolea
 const textarea =
   "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 outline-none focus:border-blue-500";
 
+const formSizes = (provider: string) => RUNTIME_IMAGE_SIZES.filter(size =>
+  provider === "ideogram" ? size === "1024x1024" : (size === "2048x2048") === (provider === "recraft")
+);
+
 const emptyForm = (provider = "openai"): ImageModelFormValue => ({
   provider,
   apiModelId: "",
   name: "",
-  sizes: [...RUNTIME_IMAGE_SIZES],
+  sizes: formSizes(provider),
   qualities: [...RUNTIME_IMAGE_QUALITIES],
   sources: "",
 });
@@ -287,7 +291,7 @@ export function AdminModelCatalogPanel() {
     provider: item.provider || "openai",
     apiModelId: item.apiModelId,
     name: item.name,
-    sizes: item.sizes.length ? item.sizes : [...RUNTIME_IMAGE_SIZES],
+    sizes: item.sizes.length ? item.sizes : formSizes(item.provider),
     qualities: item.qualities.length ? item.qualities : [...RUNTIME_IMAGE_QUALITIES],
     sources: "",
   });
@@ -579,9 +583,14 @@ export function AdminModelCatalogPanel() {
             m={m}
             mode={form.mode}
             value={form.value}
-            onChange={(value) => setForm({ ...form, value })}
+            onChange={(value) => {
+              if (value.provider === form.value.provider) return setForm({ ...form, value });
+              const sizes = formSizes(value.provider);
+              const kept = value.sizes.filter(size => sizes.some(supported => supported === size));
+              setForm({ ...form, value: { ...value, sizes: kept.length ? kept : sizes } });
+            }}
             providers={providers}
-            sizes={RUNTIME_IMAGE_SIZES}
+            sizes={formSizes(form.value.provider)}
             qualities={RUNTIME_IMAGE_QUALITIES}
           />
         ) : null}

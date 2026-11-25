@@ -253,6 +253,7 @@ export const ko = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "이미지 생성",
         imageGenerationBackToChat: "채팅으로 돌아가기",
+        imageModeBackToChatModels: "대화 모델로 돌아가기",
         toolsImageGeneration: "이미지 생성",
         toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
         imageGenerationModelLabel: "모델",
@@ -288,7 +289,8 @@ export const ko = {
         imageGenerationOtherModelsLabel: "다른 모델",
         imageGenerationRetryModel: "이 모델만 다시 시도",
         imageGenerationIntroTitle: "설명으로 이미지를 만들어 보세요",
-        imageGenerationIntroBody: "보고 싶은 장면을 설명해 주세요. 요청당 1장이 생성되며 초안·표준·최종 품질과 3가지 크기를 지원합니다.",
+        imageGenerationIntroBody: "보고 싶은 장면을 설명해 주세요. 선택할 수 있는 크기와 품질은 모델마다 다릅니다.",
+        imageGenerationUnavailableOptions: "선택한 크기와 품질을 지원하지 않는 모델이 있습니다. 크기, 품질 또는 모델을 변경해 주세요. 해당 모델: {models}.",
         imageGenerationAiLabel: "AI로 생성된 이미지",
         imageGenerationPromptPlaceholder: "만들고 싶은 이미지를 설명해 주세요...",
         imageGenerationPresetLabel: "품질",

@@ -17,6 +17,7 @@ const reset = () => {
 };
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => w.user ? { user: { id: w.user } } : null } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+mock.module(mod("lib/voiceConversationModelSetting.ts"), { namedExports: { getVoiceConversationModel: async () => w.voiceModel ?? "gpt-live-1.1" } });
 mock.module(mod("lib/chatRouteSession.ts"), { namedExports: { resolveChatRouteSession: async () => ({ session: w.user ? { user: { id: w.user } } : null }) } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   ApiSecurityError: SecurityError, consumeApiRateLimit: async () => {},
@@ -40,7 +41,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   perplexityAsyncJob: { findFirst: async ({ where }) => { w.researchFilter = where; return w.researchAnswer ? { resultText: "Stored research answer" } : null; } },
 } } });
 mock.module(mod("lib/voiceConversationCredits.ts"), { namedExports: {
-  reserveContinuousVoiceCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", reservationPayload: { maxSeconds: 60, closeAt: new Date(Date.now()+(w.initialWindowMs ?? 30_000)).toISOString() } }; },
+  reserveContinuousVoiceCredits: async input => { w.reserved.push(input); if (w.creditError) throw new SecurityError(402, "CREDIT_BALANCE_INSUFFICIENT", "Insufficient"); if (w.budgetError) throw new BudgetError(); return { id: "reservation", modelId: input.modelId, reservationPayload: { maxSeconds: 60, closeAt: new Date(Date.now()+(w.initialWindowMs ?? 30_000)).toISOString() } }; },
   extendVoiceConversationCredits: async () => { if (w.renewError) throw w.renewError; w.renewals = (w.renewals ?? 0) + 1; return { maxSeconds: 60 + w.renewals * 30, closeAt: new Date(Date.now()+45_000).toISOString() }; },
   isVoiceCapacityRefusal: error => ['CREDIT_BALANCE_INSUFFICIENT', 'VOICE_OPERATIONAL_LIMIT_REACHED', 'PROVIDER_BUDGET_EXHAUSTED'].includes(error?.code),
   settleVoiceConversationCredits: settleCredits,
@@ -64,7 +65,7 @@ mock.module(mod("lib/voiceBudgetReservation.ts"), { namedExports: {
   settleVoiceBudgets: async input => w.settlements.push(input.basis),
 } });
 mock.module(mod("lib/voiceConversationProvider.ts"), { namedExports: {
-  createVoiceProviderSession: async (sdp, history, timeoutMs) => { w.providerCalls.push({ sdp, history, timeoutMs }); await w.onProviderCreate?.(); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "malformed-sdp") return { ok: false, rejected: false, sessionId: "live_known" }; if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
+  createVoiceProviderSession: async (modelId, sdp, history, timeoutMs) => { w.providerCalls.push({ modelId, sdp, history, timeoutMs }); await w.onProviderCreate?.(); if (w.provider === "unknown") throw new Error("Network"); if (w.provider === "malformed-sdp") return { ok: false, rejected: false, sessionId: "live_known" }; if (w.provider === "rejected" || w.provider === "server-error") return { ok: false, rejected: w.provider === "rejected" }; return { ok: true, sessionId: "live_test", sdp: "answer" }; },
   attachVoiceProviderSession: () => { const socket = new EventEmitter(); socket.OPEN = 1; socket.readyState = 0; socket.send = value => (w.sent ??= []).push(JSON.parse(value)); socket.close = () => { socket.readyState = 3; socket.emit("close"); }; w.socket = socket; queueMicrotask(() => { socket.readyState = 1; socket.emit("open"); }); return socket; },
   hangupVoiceProviderSession: async id => { w.hangs.push(id); },
   closeVoiceProviderSession: async id => { assert.ok(w.updates.some(update => update.data.providerRequestId === id)); return w.closingSeconds ?? null; },
@@ -173,8 +174,11 @@ test("known refusal refunds the hold, but an unknown start does not retry or inv
 });
 
 test("trusted provider final duration settles once and existing Chat history seeds the session", async () => {
+  w.voiceModel = "gpt-live-2";
   const response = await POST(request(start()));
   assert.equal(response.status, 200);
+  assert.equal(w.reserved[0].modelId, "gpt-live-2");
+  assert.equal(w.providerCalls[0].modelId, "gpt-live-2");
   assert.deepEqual(w.providerCalls[0].history.map(m => m.content), ["Existing question", "Existing answer"]);
   const text = response.text();
   w.socket.emit("message", Buffer.from(JSON.stringify({ type: "session.usage.updated", event_id: "usage-1", usage: { seconds: 10 } })));

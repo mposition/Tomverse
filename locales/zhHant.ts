@@ -276,6 +276,7 @@ export const zhHant = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "圖片生成",
         imageGenerationBackToChat: "返回聊天",
+        imageModeBackToChatModels: "返回對話模型",
         toolsImageGeneration: "圖片生成",
         toolsImageGenerationDescription: "比較多個模型生成的圖片",
         imageGenerationModelLabel: "模型",
@@ -311,7 +312,8 @@ export const zhHant = {
         imageGenerationOtherModelsLabel: "其他模型",
         imageGenerationRetryModel: "僅重試此模型",
         imageGenerationIntroTitle: "以文字描述生成圖片",
-        imageGenerationIntroBody: "描述你想看到的畫面。每次要求生成一張圖片，提供草稿、標準、精細三種品質與三種尺寸。",
+        imageGenerationIntroBody: "描述你想看到的畫面。可選尺寸和品質依模型而異。",
+        imageGenerationUnavailableOptions: "請變更尺寸、品質或模型。以下模型不支援此組合：{models}。",
         imageGenerationAiLabel: "AI 生成的圖片",
         imageGenerationPromptPlaceholder: "描述要生成的圖片...",
         imageGenerationPresetLabel: "品質",

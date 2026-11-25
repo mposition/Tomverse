@@ -1,11 +1,12 @@
 export type StickerRect = { left: number; top: number; width: number; height: number };
 
-function alphaCounts(data: Uint8ClampedArray, width: number, height: number) {
+function alphaCounts(data: Uint8ClampedArray, stride: number, rect: StickerRect) {
+  const { left, top, width, height } = rect;
   const columns = new Uint32Array(width);
   const rows = new Uint32Array(height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      if (data[(y * width + x) * 4 + 3] >= 128) {
+      if (data[((top + y) * stride + left + x) * 4 + 3] >= 128) {
         columns[x]++;
         rows[y]++;
       }
@@ -34,16 +35,34 @@ function transparentSeams(occupancy: Uint32Array, divisions: number) {
 }
 
 export function studioStickerCells(
-  data: Uint8ClampedArray, width: number, height: number, columns: number, rows: number,
+  data: Uint8ClampedArray, width: number, height: number, columns: number, rows: number, count = columns * rows,
 ): StickerRect[] {
-  const counts = alphaCounts(data, width, height);
-  const xs = transparentSeams(counts.columns, columns);
+  const counts = alphaCounts(data, width, { left: 0, top: 0, width, height });
   const ys = transparentSeams(counts.rows, rows);
-  return Array.from({ length: columns * rows }, (_, index) => {
-    const x = index % columns;
-    const y = Math.floor(index / columns);
-    return { left: xs[x], top: ys[y], width: xs[x + 1] - xs[x], height: ys[y + 1] - ys[y] };
+  const rowCuts = ys.slice(0, -1).map((top, row) => transparentSeams(
+    alphaCounts(data, width, { left: 0, top, width, height: ys[row + 1] - top }).columns, columns,
+  ));
+  const cells = (rowCuts: number[][], columnCuts: number[][]) => Array.from({ length: count }, (_, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = rowCuts[row];
+    const y = columnCuts[column];
+    return { left: x[column], top: y[row], width: x[column + 1] - x[column], height: y[row + 1] - y[row] };
   });
+  const byRow = cells(rowCuts, Array(columns).fill(ys));
+  const usableCount = (layout: StickerRect[]) => layout.filter(cell =>
+    !studioStickerCrossesSeam(data, width, height, cell) && studioStickerArt(data, width, cell),
+  ).length;
+  const rowCount = usableCount(byRow);
+  if (rowCount === count || columns <= 1 || rows <= 1) return byRow;
+
+  // A generated sheet may have independent row offsets in each column.
+  const xs = transparentSeams(counts.columns, columns);
+  const columnCuts = xs.slice(0, -1).map((left, column) => transparentSeams(
+    alphaCounts(data, width, { left, top: 0, width: xs[column + 1] - left, height }).rows, rows,
+  ));
+  const byColumn = cells(Array(rows).fill(xs), columnCuts);
+  return usableCount(byColumn) > rowCount ? byColumn : byRow;
 }
 
 export function studioStickerCrossesSeam(
@@ -63,8 +82,11 @@ export function studioStickerCrossesSeam(
     || (bottom < height && crosses(cell.width, i => opaque(cell.left + i, bottom - 1) && opaque(cell.left + i, bottom)));
 }
 
-export function studioStickerBounds(data: Uint8ClampedArray, width: number, height: number): StickerRect | null {
-  const { columns, rows } = alphaCounts(data, width, height);
+export function studioStickerBounds(
+  data: Uint8ClampedArray, stride: number, rect: StickerRect,
+): StickerRect | null {
+  const { width, height } = rect;
+  const { columns, rows } = alphaCounts(data, stride, rect);
   const isOccupied = (oppositeLength: number) => (count: number) => count >= Math.max(2, Math.round(oppositeLength * .025));
   const left = columns.findIndex(isOccupied(height));
   const right = columns.findLastIndex(isOccupied(height));
@@ -72,6 +94,11 @@ export function studioStickerBounds(data: Uint8ClampedArray, width: number, heig
   const bottom = rows.findLastIndex(isOccupied(width));
   if (left === -1 || top === -1) return null;
   return { left, top, width: right - left + 1, height: bottom - top + 1 };
+}
+
+export function studioStickerArt(data: Uint8ClampedArray, stride: number, rect: StickerRect) {
+  const art = studioStickerBounds(data, stride, rect);
+  return art && art.width >= rect.width * .19 && art.height >= rect.height * .19 ? art : null;
 }
 
 export function studioStickerCaptionSlot(

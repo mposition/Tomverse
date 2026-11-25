@@ -6,6 +6,7 @@ import {
 import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 import { z } from "zod";
 import {
     databaseErrorMetadata,
@@ -168,6 +169,15 @@ export async function POST(request: Request) {
             CHAT_MAX_MESSAGE_BODY_BYTES,
             preflightSchema
         );
+        if (request.headers.get("origin") === DESKTOP_APP_ORIGIN) {
+            const review = payload.conversationId && session?.user?.id
+                ? await prisma.conversation.findFirst({ where: { id: payload.conversationId, userId: session.user.id },
+                    select: { kind: true, productKey: true, password: true } }) : null;
+            if (desktopConversationWriteProduct(review) !== "review" || (!desktopAttachmentEnabled() && payload.attachments?.length)) {
+                throw new ChatAccessError(403, "CONVERSATION_ACCESS_DENIED", "A Desktop Review conversation and supported attachments are required.");
+            }
+            if (review?.password != null) return conversationLockedResponse();
+        }
         const uniqueModelIds = Array.from(new Set(payload.modelIds));
         if (payload.previousContextBundle !== undefined && !session?.user?.id) {
             throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");

@@ -61,11 +61,11 @@ import { authorizeMobileSession } from "@/lib/mobileSessionAuthorization";
  * Throws `ApiSecurityError`, which every one of these routes already turns into
  * a 429 with a `Retry-After`.
  */
-export const enforceMobileAuthAdmission = (request: Request) =>
+export const enforceMobileAuthAdmission = (request: Request, client?: "desktop") =>
   consumeApiRateLimit(
     request,
     getAnonymousClientKey(request),
-    "mobile-preauth",
+    client === "desktop" ? "desktop-preauth" : "mobile-preauth",
     MOBILE_AUTH_PRE_AUTH_RATE_LIMIT
   );
 
@@ -138,7 +138,8 @@ export const mobileApiSecurityResponse = (error: unknown): Response | null => {
  * the window D12's bound is about.
  */
 export const requireMobileBearer = async (
-  request: Request
+  request: Request,
+  client?: "desktop"
 ): Promise<{ ok: true; identity: MobileRouteIdentity } | { ok: false; response: Response }> => {
   if (!mobileAuthReady()) {
     // Fail closed and say nothing about which variable is missing. The reason
@@ -151,7 +152,7 @@ export const requireMobileBearer = async (
     return { ok: false, response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };
   }
 
-  const verdict = verifyMobileAccessTokenString(token);
+  const verdict = verifyMobileAccessTokenString(token, { client });
   if (!verdict.ok) {
     return {
       ok: false,

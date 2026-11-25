@@ -17,7 +17,7 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
   const c = mobileReviewCopy(language); const copy = mobileCopy[language];
   const [cap, setCap] = useState<MobileCapabilities | null>(null); const [prompt, setPrompt] = useState(pending?.prompt ?? initial?.prompt ?? "");
   const [selected, setSelected] = useState<string[]>(pending?.modelIds ?? initial?.modelIds ?? []);
-  const [quality, setQuality] = useState<string>(pending?.quality ?? IMAGE_QUALITY_BY_PRESET[initial?.preset ?? "standard"]); const [size, setSize] = useState(pending?.size ?? "1024x1024");
+  const [quality, setQuality] = useState<string>(pending?.quality ?? IMAGE_QUALITY_BY_PRESET[initial?.preset ?? "standard"]); const [preferredSize, setSize] = useState(pending?.size ?? "1024x1024");
   const [consent, setConsent] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [conversationId, setConversationId] = useState(pending ? pending.conversationId : historyId); const [groups, setGroups] = useState<string[]>([]);
   const [unknown, setUnknown] = useState(Boolean(pending));
@@ -34,6 +34,15 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
   }
   useEffect(() => { if (historyId) void Promise.resolve().then(() => history(historyId)).catch(() => setError(c.failed)); }, [historyId]); // eslint-disable-line react-hooks/exhaustive-deps
   const models = cap?.images?.models ?? [];
+  const selectedModels = models.filter(model => selected.includes(model.id));
+  const sizeChoices = Array.from(new Set(models.flatMap(model => model.prices.map(price => price.size))));
+  const commonSizes = sizeChoices.filter(option =>
+    selectedModels.every(model => model.prices.some(price => price.size === option && price.quality === quality))
+  );
+  // A replay must use its recorded dimensions. A new selection can adopt its native square.
+  const size = pending || commonSizes.some(option => option === preferredSize)
+    ? preferredSize : commonSizes[0] ?? preferredSize;
+  const displayedSizes = pending ? [pending.size] : commonSizes.length ? commonSizes : sizeChoices;
   const quote = selected.map(id => { const model = models.find(row => row.id === id); return { model, price: model?.prices.find(price => price.quality === quality && price.size === size) }; });
   const valid = Boolean(cap?.images?.enabled && selected.length && selected.length <= (cap.images.maxModels ?? 1) && quote.every(item => item.model?.pricingVersion && item.price && item.price.credits >= 0));
   function accept(receipt: { conversationId: string; groupId: string }) {
@@ -81,7 +90,7 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
     <label>{c.prompt}<textarea maxLength={8000} value={prompt} disabled={busy || unknown} onChange={event => { setPrompt(event.target.value); setConsent(false); }} /></label>
     <div className="review-model-options">{models.map(model => <label key={model.id}>{model.name}<input type="checkbox" checked={selected.includes(model.id)} disabled={busy || unknown || Boolean(initial) || (!selected.includes(model.id) && selected.length >= (cap?.images?.maxModels ?? 1))} onChange={event => { setSelected(previous => event.target.checked ? [...previous, model.id] : previous.filter(id => id !== model.id)); setConsent(false); }} /></label>)}</div>
     <label>{c.quality}<select value={quality} disabled={busy || unknown} onChange={event => { setQuality(event.target.value); setConsent(false); }}>{["low", "medium", "high"].map(value => <option key={value}>{value}</option>)}</select></label>
-    <label>{c.size}<select value={size} disabled={busy || unknown} onChange={event => { setSize(event.target.value); setConsent(false); }}>{["1024x1024", "1536x1024", "1024x1536"].map(value => <option key={value}>{value}</option>)}</select></label>
+    <label>{c.size}<select value={size} disabled={busy || unknown} onChange={event => { setSize(event.target.value); setConsent(false); }}>{displayedSizes.map(value => <option key={value}>{value}</option>)}</select></label>
     <ul>{quote.map((item, index) => <li key={selected[index]}>{item.model?.name ?? selected[index]} · {item.price?.credits ?? "—"} {c.credits}</li>)}</ul>
     <strong>{quote.reduce((total, item) => total + (item.price?.credits ?? 0), 0)} {c.credits}</strong>
     <label className="switch-field">{c.imageConsent}<input type="checkbox" disabled={busy || !valid} checked={consent} onChange={event => setConsent(event.target.checked)} /></label>

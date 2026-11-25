@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useSession } from "next-auth/react";
+import { readStudioBlob } from "./studioCanvas";
 
 const databaseName = "tomverse-studio-checkout";
 const storeName = "drafts";
@@ -93,8 +94,5 @@ export function useStudioCheckoutDraft<T>(tool: string, restore: (draft: T) => v
 export type StudioDraftImage = string | Blob;
 
 export async function captureStudioDraftImage(source: string): Promise<StudioDraftImage> {
-  if (!source.startsWith("blob:")) return source;
-  const response = await fetch(source);
-  if (!response.ok) throw new Error("Studio draft image is unavailable");
-  return response.blob();
+  return source.startsWith("blob:") ? readStudioBlob(source) : source;
 }

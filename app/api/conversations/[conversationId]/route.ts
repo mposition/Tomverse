@@ -75,6 +75,7 @@ import {
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "@/lib/conversationRename";
 import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
+import { DESKTOP_APP_ORIGIN, desktopConversationWriteProduct, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
@@ -115,6 +116,11 @@ const updateConversationSchema = z
       body.assistantProfileId !== undefined,
     { message: "At least one update is required." }
   );
+const desktopConversationUpdateSchema = z.object({
+    title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH).optional(),
+    selectedModels: z.array(modelSchema).min(1).max(APP_DEFAULTS.maxSelectedModels).optional(),
+    selectionMode: z.enum(SELECTION_MODES).optional(),
+}).strict().refine((body) => Object.keys(body).length > 0);
 const MESSAGE_PAGE_SIZE = 50;
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -194,6 +200,7 @@ export async function GET(
 	
     const searchParams = new URL(req.url).searchParams;
     const cursor = searchParams.get("cursor");
+    const tail = req.headers.get("origin") === DESKTOP_APP_ORIGIN && searchParams.get("tail") === "1" && !cursor;
     const requestedModelId = searchParams.get("modelId");
     // A panel that fills the turns its own model never answered needs every
     // model's answers, and still names itself so the id is validated.
@@ -262,12 +269,13 @@ export async function GET(
             }
           : {}),
       },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: MESSAGE_PAGE_SIZE + 1,
+      orderBy: [{ createdAt: tail ? "desc" : "asc" }, { id: tail ? "desc" : "asc" }],
+      take: tail ? MESSAGE_PAGE_SIZE : MESSAGE_PAGE_SIZE + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       select: PUBLIC_CHAT_MESSAGE_SELECT,
     });
-    const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
+    if (tail) messagePage.reverse();
+    const hasMoreMessages = !tail && messagePage.length > MESSAGE_PAGE_SIZE;
     const pageMessages = (
       hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
     ).map(toPublicChatMessage);
@@ -297,6 +305,8 @@ export async function GET(
         // with the one fact the client is owed.
         continuationBridge: undefined,
         ...(conversation.continuationBridge?.reviewHandoff != null ? { reviewHandoff: true } : {}),
+        ...(req.headers.get("origin") === DESKTOP_APP_ORIGIN && conversation.kind === "chat" && conversation.productKey === null
+          ? { desktopReviewWritable: desktopConversationWriteProduct(conversation) === "review" } : {}),
         surface: conversationSurface({
           hasContinuationBridge: conversation.continuationBridge !== null,
           productKey: conversation.productKey,
@@ -388,10 +398,11 @@ export async function PATCH(
 
         const userId = session.user.id;
         await consumeConversationUpdateLimit(req, userId);
-        const body = await readLimitedJson(
+        const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
+        const body = await readLimitedJson<z.infer<typeof updateConversationSchema>>(
             req,
             16 * 1024,
-            updateConversationSchema
+            desktop ? desktopConversationUpdateSchema : updateConversationSchema
         );
         const params = await context.params;
         const conversationId = params.conversationId;
@@ -405,6 +416,7 @@ export async function PATCH(
             where: { id: conversationId },
             select: {
                 userId: true,
+                kind: true,
                 selectedModels: true,
                 password: true, passwordVersion: true,
                 memoryMode: true,
@@ -431,6 +443,10 @@ export async function PATCH(
         }
         if (existingConv.userId !== userId) {
             return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
+        }
+        const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;
+        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1))) {
+            return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
         }
 
         const userSettings = await prisma.userSettings.findUnique({
@@ -830,7 +846,7 @@ export async function DELETE(req: Request, { params }: Params) {
 
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true, passwordVersion: true }
+          select: { userId: true, productKey: true, kind: true, password: true, passwordVersion: true }
       });
 
       if (!existingConv) {
@@ -839,6 +855,10 @@ export async function DELETE(req: Request, { params }: Params) {
       if (existingConv.userId !== userId) {
           return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
       }
+    if (req.headers.get("origin") === DESKTOP_APP_ORIGIN &&
+        (existingConv.productKey !== "chat" || !desktopTextWriteEnabled("chat") || existingConv.kind !== "chat")) {
+      return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
+    }
     logSecurityAuditEvent("conversation.delete", {
       userId,
       resourceId: conversationId,

@@ -264,6 +264,7 @@ export const fr = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Génération d'images",
         imageGenerationBackToChat: "Retour au chat",
+        imageModeBackToChatModels: "Revenir aux modèles de chat",
         toolsImageGeneration: "Génération d'images",
         toolsImageGenerationDescription: "Comparer les images de plusieurs modèles",
         imageGenerationModelLabel: "Modèles",
@@ -299,7 +300,8 @@ export const fr = {
         imageGenerationOtherModelsLabel: "Autres modèles",
         imageGenerationRetryModel: "Réessayer ce modèle",
         imageGenerationIntroTitle: "Créez une image à partir d'une description",
-        imageGenerationIntroBody: "Décrivez ce que vous voulez voir. Une image par requête, avec les qualités Draft, Standard et Final en trois tailles.",
+        imageGenerationIntroBody: "Décrivez ce que vous voulez voir. Les tailles et les niveaux de qualité dépendent du modèle.",
+        imageGenerationUnavailableOptions: "Changez la taille, la qualité ou le modèle. Ces modèles ne proposent pas cette combinaison : {models}.",
         imageGenerationAiLabel: "Image générée par IA",
         imageGenerationPromptPlaceholder: "Décrivez l'image à créer...",
         imageGenerationPresetLabel: "Qualité",

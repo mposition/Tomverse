@@ -13,6 +13,7 @@ import { isVoiceTranscriptEvent, voiceConversationConfig, voiceDurationCharge, V
 import { reserveContinuousVoiceCredits, extendVoiceConversationCredits, settleVoiceConversationCredits, readVoiceCreditPayload, isVoiceCapacityRefusal } from "@/lib/voiceConversationCredits";
 import { attachVoiceProviderSession, createVoiceProviderSession, hangupVoiceProviderSession, closeVoiceProviderSession } from "@/lib/voiceConversationProvider";
 import { registerVoiceTask, queueVoiceTaskResult, dispatchVoiceTask } from "@/lib/voiceConversationTasks";
+import { getVoiceConversationModel } from "@/lib/voiceConversationModelSetting";
 
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), requestId: z.string().uuid(), conversationId: z.string().min(1).max(120).nullable(), sdp: z.string().min(1).max(64_000) }).strict(),
@@ -102,7 +103,8 @@ export async function POST(request: Request) {
       bytes += size; history.unshift({ role: message.role as "user" | "assistant", content: message.content });
     }
     // Fund the next window, including shutdown exposure, on this same connection.
-    const reservation = await reserveContinuousVoiceCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute });
+    const modelId = await getVoiceConversationModel();
+    const reservation = await reserveContinuousVoiceCredits({ userId, requestId: body.requestId, conversationId: body.conversationId, creditsPerMinute: config.creditsPerMinute, modelId });
     const initialFunding = readVoiceCreditPayload(reservation.reservationPayload);
     let reservedSeconds = initialFunding.maxSeconds;
     let fundedCloseAt = Date.parse(initialFunding.closeAt!);
@@ -121,7 +123,7 @@ export async function POST(request: Request) {
     } } });
     const providerTimeoutMs = startupTimeout();
     if (providerTimeoutMs < 5_000 || request.signal.aborted) return await refuseExpiredStart();
-    try { providerResult = await createVoiceProviderSession(body.sdp, history, providerTimeoutMs); }
+    try { providerResult = await createVoiceProviderSession(reservation.modelId, body.sdp, history, providerTimeoutMs); }
     catch {
       await prisma.chatCreditReservation.update({ where: { id: reservation.id }, data: { lastError: "VOICE_START_OUTCOME_UNKNOWN" } });
       return json("VOICE_START_OUTCOME_UNKNOWN", 502, { reservationId: reservation.id });

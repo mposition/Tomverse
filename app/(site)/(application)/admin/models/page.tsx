@@ -6,6 +6,8 @@ import { AdminModelDiscoveryPanel } from "@/components/admin/AdminModelDiscovery
 import { AdminModelRegistryPanel } from "@/components/admin/AdminModelRegistryPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
+import { VoiceModelSettings } from "@/components/admin/models/VoiceModelSettings";
+import { getVoiceConversationModel } from "@/lib/voiceConversationModelSetting";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminModelsBoardMessages } from "@/lib/adminMessages/modelsBoard";
@@ -22,8 +24,9 @@ const TABS = adminNavItemTabs("models");
 async function DefaultModelsTab() {
   const m = (await getAdminMessages(adminModelsBoardMessages)).defaults;
   let props: Awaited<ReturnType<typeof readPlatformSettingsPanelProps>>;
+  let voiceModel: string;
   try {
-    props = await readPlatformSettingsPanelProps();
+    [props, voiceModel] = await Promise.all([readPlatformSettingsPanelProps(), getVoiceConversationModel()]);
   } catch (error) {
     console.warn({
       event: "admin_default_models_read_failed",
@@ -31,7 +34,10 @@ async function DefaultModelsTab() {
     });
     return <AdminStateBlock kind="error" title={m.loadFailedTitle} detail={m.loadFailedDetail} />;
   }
-  return <PlatformSettingsPanel view="default-models" {...props} />;
+  return <>
+    <PlatformSettingsPanel view="default-models" {...props} />
+    <VoiceModelSettings initialModel={voiceModel} />
+  </>;
 }
 
 /**

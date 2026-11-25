@@ -1,18 +1,18 @@
 import "server-only";
 import WebSocket from "ws";
 import type { Live } from "openai/resources/live";
-import { VOICE_CONVERSATION_INSTRUCTIONS, VOICE_CONVERSATION_MODEL } from "@tomverse/chat-core";
+import { VOICE_CONVERSATION_INSTRUCTIONS } from "@tomverse/chat-core";
 
 const endpoint = "https://api.openai.com/v1/live/sessions";
 const headers = () => ({ Authorization: `Bearer ${process.env.VOICE_CONVERSATION_API_KEY}`, "Content-Type": "application/json" });
 
-export async function createVoiceProviderSession(sdp: string, history: Array<{ role: "user" | "assistant"; content: string }>, timeoutMs = 15_000) {
+export async function createVoiceProviderSession(modelId: string, sdp: string, history: Array<{ role: "user" | "assistant"; content: string }>, timeoutMs = 15_000) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15_000) throw new Error("Invalid voice startup deadline.");
   const response = await fetch(endpoint, {
     method: "POST", headers: headers(), signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       session: {
-        model: VOICE_CONVERSATION_MODEL, instructions: VOICE_CONVERSATION_INSTRUCTIONS,
+        model: modelId, instructions: VOICE_CONVERSATION_INSTRUCTIONS,
         store: false, delegation: { type: "client" },
         input: history.map((m): Live.InitialItem => m.role === "assistant"
           ? { type: "message", role: "assistant", content: [{ type: "output_text", text: m.content }] }

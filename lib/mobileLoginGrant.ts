@@ -31,6 +31,7 @@ import "server-only";
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { desktopGrantBinding, type DesktopGrantContext } from "@/lib/desktopAuthContract";
 
 import { MOBILE_LOGIN_GRANT_TTL_SECONDS } from "@/lib/mobileAuthContract";
 import { mobileOneTimeSecretDigest } from "@/lib/mobileRefreshToken";
@@ -58,6 +59,7 @@ export const isPkceVerifier = (value: unknown): value is string =>
 export const issueMobileLoginGrant = async (input: {
   userId: string;
   codeChallenge: string;
+  desktop?: DesktopGrantContext;
   now?: Date;
 }): Promise<{ grant: string; expiresIn: number }> => {
   const now = input.now ?? new Date();
@@ -67,7 +69,7 @@ export const issueMobileLoginGrant = async (input: {
     data: {
       userId: input.userId,
       secretDigest: mobileOneTimeSecretDigest(secret),
-      clientBindingDigest: mobileOneTimeSecretDigest(input.codeChallenge),
+      clientBindingDigest: mobileOneTimeSecretDigest(input.desktop ? desktopGrantBinding(input.codeChallenge, input.desktop) : input.codeChallenge),
       createdAt: now,
       expiresAt: new Date(now.getTime() + MOBILE_LOGIN_GRANT_TTL_SECONDS * 1000),
     },
@@ -95,6 +97,7 @@ export type MobileLoginGrantConsumption =
 export const consumeMobileLoginGrant = async (input: {
   grant: string;
   codeVerifier: string;
+  desktop?: DesktopGrantContext;
   now?: Date;
 }): Promise<MobileLoginGrantConsumption> => {
   const now = input.now ?? new Date();
@@ -115,8 +118,9 @@ export const consumeMobileLoginGrant = async (input: {
   // the verifier must not be able to learn anything about the grant's state,
   // and must not be able to consume it.
   const expected = Buffer.from(row.clientBindingDigest, "utf8");
+  const challenge = pkceChallengeFor(input.codeVerifier);
   const presented = Buffer.from(
-    mobileOneTimeSecretDigest(pkceChallengeFor(input.codeVerifier)),
+    mobileOneTimeSecretDigest(input.desktop ? desktopGrantBinding(challenge, input.desktop) : challenge),
     "utf8"
   );
   if (

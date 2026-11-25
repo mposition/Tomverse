@@ -281,6 +281,7 @@ export const zh = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "图像生成",
         imageGenerationBackToChat: "返回聊天",
+        imageModeBackToChatModels: "返回对话模型",
         toolsImageGeneration: "图像生成",
         toolsImageGenerationDescription: "比较多个模型生成的图像",
         imageGenerationModelLabel: "模型",
@@ -316,7 +317,8 @@ export const zh = {
         imageGenerationOtherModelsLabel: "其他模型",
         imageGenerationRetryModel: "仅重试该模型",
         imageGenerationIntroTitle: "用文字描述生成图像",
-        imageGenerationIntroBody: "描述你想看到的画面。每次请求生成一张图像，提供草稿、标准、精细三种质量与三种尺寸。",
+        imageGenerationIntroBody: "描述你想看到的画面。可选尺寸和质量取决于模型。",
+        imageGenerationUnavailableOptions: "请更改尺寸、质量或模型。以下模型不支持此组合：{models}。",
         imageGenerationAiLabel: "AI 生成的图像",
         imageGenerationPromptPlaceholder: "描述要生成的图像...",
         imageGenerationPresetLabel: "质量",

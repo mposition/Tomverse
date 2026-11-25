@@ -32,7 +32,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { consumeApiRateLimit } from "@/lib/apiSecurity";
+import { ApiSecurityError, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { mintMobileAccessToken } from "@/lib/mobileAccessToken";
 import {
   MOBILE_AUTH_RATE_LIMITS,
@@ -120,18 +120,21 @@ const record = async (
  * a design that reattached to the wrong account the day two people share a
  * restored backup.
  */
-export const issueMobileSession = async (input: {
+type NativeSessionInput = {
   request: Request;
   userId: string;
   deviceLabel: string;
-  platform: MobileDevicePlatform;
+  platform: MobileDevicePlatform | "desktop";
   appVersion?: string | null;
   now?: Date;
-}): Promise<{ ok: true; tokens: MobileSessionTokens }> => {
+};
+
+export async function issueMobileSession(input: NativeSessionInput): Promise<{ ok: true; tokens: MobileSessionTokens }> {
+  const desktop = input.platform === "desktop";
   await consumeApiRateLimit(
     input.request,
     input.userId,
-    "mobile-exchange",
+    desktop ? "desktop-exchange" : "mobile-exchange",
     MOBILE_AUTH_RATE_LIMITS.exchange
   );
 
@@ -139,6 +142,11 @@ export const issueMobileSession = async (input: {
   const minted = mintMobileRefreshToken();
 
   const { deviceId, familyId } = await prisma.$transaction(async (tx) => {
+    if (desktop) {
+      const active = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "User" WHERE id = ${input.userId} AND "accountStatus" = 'active' FOR SHARE`;
+      if (!active.length) throw new ApiSecurityError(401, "UNAUTHORIZED", "The Desktop account is unavailable.");
+    }
     const device = await tx.mobileDevice.create({
       data: {
         userId: input.userId,
@@ -184,6 +192,7 @@ export const issueMobileSession = async (input: {
     userId: input.userId,
     deviceId,
     familyId,
+    client: desktop ? "desktop" : undefined,
     now,
   });
 
@@ -196,7 +205,7 @@ export const issueMobileSession = async (input: {
       deviceId,
     },
   };
-};
+}
 
 type LoadedRotation = {
   record: MobileRefreshRecord;
@@ -210,6 +219,7 @@ type LoadedRotation = {
     absoluteExpiresAtMs: number;
     revokedAtMs: number | null;
     deviceRevokedAtMs: number | null;
+    devicePlatform: string;
     accountStatus: string;
     reviewUser: { id: string; email: string | null; plan: string; subscriptionStatus: string | null; periodEndMs: number | null };
   } | null;
@@ -235,7 +245,7 @@ const loadRotation = async (recordId: string): Promise<LoadedRotation | null> =>
           lastRotatedAt: true,
           absoluteExpiresAt: true,
           revokedAt: true,
-          device: { select: { revokedAt: true } },
+          device: { select: { revokedAt: true, platform: true } },
           user: { select: { accountStatus: true, email: true, plan: true, subscriptionStatus: true, subscriptionCurrentPeriodEnd: true } },
         },
       },
@@ -263,6 +273,7 @@ const loadRotation = async (recordId: string): Promise<LoadedRotation | null> =>
           absoluteExpiresAtMs: row.family.absoluteExpiresAt.getTime(),
           revokedAtMs: row.family.revokedAt?.getTime() ?? null,
           deviceRevokedAtMs: row.family.device.revokedAt?.getTime() ?? null,
+          devicePlatform: row.family.device.platform,
           accountStatus: row.family.user.accountStatus,
           reviewUser: { id: row.family.userId, email: row.family.user.email, plan: row.family.user.plan,
             subscriptionStatus: row.family.user.subscriptionStatus, periodEndMs: row.family.user.subscriptionCurrentPeriodEnd?.getTime() ?? null },
@@ -327,6 +338,7 @@ const revokeFamily = async (input: {
 export const rotateMobileSession = async (input: {
   request: Request;
   refreshToken: string;
+  client?: "desktop";
   now?: Date;
 }): Promise<{ ok: true; tokens: MobileSessionTokens } | MobileRefusal> => {
   const now = input.now ?? new Date();
@@ -356,7 +368,7 @@ export const rotateMobileSession = async (input: {
         secret: presented.secret,
         storedDigest: loaded?.storedDigest ?? "",
         pepperKid: row.pepperKid,
-      }),
+      }) && (loaded?.family?.devicePlatform === "desktop") === (input.client === "desktop"),
     family: loaded?.family ?? null,
     nowMs: now.getTime(),
     idleWindowMs: IDLE_WINDOW_MS,
@@ -389,7 +401,7 @@ export const rotateMobileSession = async (input: {
   }
 
   const family = decision.family;
-  if (loaded?.family && !mobileStoreReviewSessionAllowed(loaded.family.reviewUser, process.env, now.getTime())) {
+  if (input.client !== "desktop" && loaded?.family && !mobileStoreReviewSessionAllowed(loaded.family.reviewUser, process.env, now.getTime())) {
     await revokeFamily({ familyId: family.familyId, userId: family.userId, deviceId: family.deviceId,
       reason: "logout", event: "mobile_auth.family_revoked", now });
     await record("mobile_auth.refresh_rejected", { userId: family.userId, deviceId: family.deviceId,
@@ -402,7 +414,7 @@ export const rotateMobileSession = async (input: {
   await consumeApiRateLimit(
     input.request,
     family.deviceId,
-    "mobile-refresh",
+    input.client === "desktop" ? "desktop-refresh" : "mobile-refresh",
     MOBILE_AUTH_RATE_LIMITS.refresh
   );
 
@@ -520,6 +532,7 @@ export const rotateMobileSession = async (input: {
     userId: family.userId,
     deviceId: family.deviceId,
     familyId: family.familyId,
+    client: input.client,
     now,
   });
 
@@ -545,6 +558,7 @@ export const rotateMobileSession = async (input: {
 export const logoutMobileSession = async (input: {
   request: Request;
   refreshToken: string;
+  client?: "desktop";
   now?: Date;
 }): Promise<void> => {
   const now = input.now ?? new Date();
@@ -559,7 +573,7 @@ export const logoutMobileSession = async (input: {
         secret: presented.secret,
         storedDigest: loaded?.storedDigest ?? "",
         pepperKid: row.pepperKid,
-      }),
+      }) && (loaded?.family?.devicePlatform === "desktop") === (input.client === "desktop"),
     family: loaded?.family ?? null,
     nowMs: now.getTime(),
     idleWindowMs: IDLE_WINDOW_MS,
@@ -587,7 +601,7 @@ export const logoutMobileSession = async (input: {
   await consumeApiRateLimit(
     input.request,
     family.deviceId,
-    "mobile-logout",
+    input.client === "desktop" ? "desktop-logout" : "mobile-logout",
     MOBILE_AUTH_RATE_LIMITS.logout
   );
   await revokeFamily({

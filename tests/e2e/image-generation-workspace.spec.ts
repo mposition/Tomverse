@@ -344,18 +344,31 @@ const enableImageGenerationFlag = async (page: Page) => {
 const isMobileShell = () =>
   test.info().project.name.startsWith("mobile");
 
-const openNewImageEntry = async (page: Page) => {
+const IMAGE_CONVERSATION_TITLE = "QA image conversation";
+
+/**
+ * Opens an image conversation from the history. There is no new image mode
+ * any more (owner direction 2026-11-25): an image model answers in Chat or
+ * Review, and the workspace remains only for image conversations already
+ * made, so that is how these tests reach its composer.
+ */
+const openImageConversation = async (page: Page) => {
+  await page.unroute("**/api/conversations");
+  await page.route("**/api/conversations", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill(json([{
+      id: "qa-image-conversation", title: IMAGE_CONVERSATION_TITLE, kind: "image", projectId: null,
+      selectedModels: [], disabledPanels: [], webSearchMode: "auto", isLocked: false,
+      shareEnabled: false, shareExpiresAt: null, messageCount: 0,
+    }]));
+  });
+  await page.reload();
   if (isMobileShell()) {
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
   }
-  // The unified launcher: the primary click stays "new chat", so the image
-  // entry lives one caret away rather than in a second stacked button.
-  await page.getByTestId("sidebar-new-launcher-more").click();
-  await page.getByTestId("new-conversation-menu-image").click();
-  if (isMobileShell()) {
-    await expect(page.getByTestId("mobile-sidebar-drawer")).not.toBeVisible();
-  }
+  await page.getByTestId("sidebar-conversation-item").filter({ hasText: IMAGE_CONVERSATION_TITLE }).click();
+  await expect(page.getByTestId("image-generation-prompt")).toBeVisible();
 };
 
 /**
@@ -372,36 +385,18 @@ const openMoreImageModels = async (page: Page) => {
   await expect(page.getByTestId("image-model-picker-panel")).toBeVisible();
 };
 
-test("the entry point does not exist while the flag is off", { tag: "@ui-risk" }, async ({ page }) => {
-  await mockAuthenticatedApi(page);
-  await page.goto("/review");
-  if (isMobileShell()) {
-    await page.getByTestId("mobile-sidebar-open").click();
-    await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
-  }
-  // Flag off: the launcher stays a plain new-chat button with no caret and
-  // no image entry anywhere.
-  await expect(page.getByTestId("sidebar-new-launcher-more")).toHaveCount(0);
-  await expect(page.getByTestId("new-conversation-menu-image")).toHaveCount(0);
-});
-
-test("a Free plan enters the image composer without a subscription", { tag: "@ui-risk" }, async ({
-  page,
-}) => {
+test("the new-conversation launcher has no image entry", { tag: "@ui-risk" }, async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
-  await installImageGenerationApi(page);
   await page.goto("/review");
-
   if (isMobileShell()) {
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
   }
-  await page.getByTestId("sidebar-new-launcher-more").click();
-  await page.getByTestId("new-conversation-menu-image").click();
-
-  await expect(page.getByTestId("image-generation-prompt")).toBeVisible();
-  await expect(page).not.toHaveURL(/\/pricing/);
+  // Even with images on, an image model is picked in the composer's model
+  // picker: the launcher stays a plain new-chat button with no image entry.
+  await expect(page.getByTestId("sidebar-new-launcher-more")).toHaveCount(0);
+  await expect(page.getByTestId("new-conversation-menu-image")).toHaveCount(0);
 });
 
 test("a Pro account generates an image end to end", { tag: "@ui-risk" }, async ({ page }) => {
@@ -411,7 +406,7 @@ test("a Pro account generates an image end to end", { tag: "@ui-risk" }, async (
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await expect(page.getByTestId("image-generation-timeline")).toBeVisible();
 
   // Draft + square: the submit button carries the 15-credit price.
@@ -437,7 +432,7 @@ test("a Pro account generates an image end to end", { tag: "@ui-risk" }, async (
     quality: "low",
   });
   expect(String(api.createBodies[0].idempotencyKey)).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
-  expect(api.createBodies[0]).not.toHaveProperty("conversationId");
+  expect(api.createBodies[0]).toMatchObject({ conversationId: api.conversationId });
 
   // The next 5s poll resolves it; the result renders the provenance label
   // and the image itself from the (mocked) signed URL.
@@ -452,15 +447,6 @@ test("a Pro account generates an image end to end", { tag: "@ui-risk" }, async (
   // idle-but-empty; typing again is what re-arms it.
   await page.getByTestId("image-generation-prompt").fill("another apple");
   await expect(submit).toBeEnabled();
-
-  // The atomically created conversation was adopted into the sidebar.
-  if (!isMobileShell()) {
-    await expect(
-      page
-        .getByTestId("sidebar-conversation-item")
-        .filter({ hasText: "a single red apple" })
-    ).toBeVisible();
-  }
 });
 
 test("saving a generated image downloads a file rather than opening it in a tab", { tag: "@ui-risk" }, async ({
@@ -472,7 +458,7 @@ test("saving a generated image downloads a file rather than opening it in a tab"
   await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await page.getByTestId("image-generation-prompt").fill("a single red apple");
   await page.getByTestId("image-generation-submit").click();
   await expect(page.getByTestId("image-generation-result")).toBeVisible({
@@ -508,7 +494,7 @@ test("the card says how long the original link lasts, before it matters", { tag:
   await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await page.getByTestId("image-generation-prompt").fill("a single red apple");
   await page.getByTestId("image-generation-submit").click();
   await expect(page.getByTestId("image-generation-result")).toBeVisible({
@@ -535,7 +521,7 @@ test("an expired original link answers with a message, not with an error page", 
   api.assetUrlsExpired = true;
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await page.getByTestId("image-generation-prompt").fill("a single red apple");
   await page.getByTestId("image-generation-submit").click();
   await expect(page.getByTestId("image-generation-result")).toBeVisible({
@@ -571,7 +557,7 @@ test("a moderation failure explains itself and shows the refund", { tag: "@ui-ri
   api.nextOutcome = "moderation_failed";
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await page.getByTestId("image-generation-prompt").fill("something the provider declines");
   await page.getByTestId("image-generation-submit").click();
 
@@ -652,7 +638,7 @@ test("an over-limit prompt disables generation before any request", { tag: "@ui-
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   // Far past the 1,000-token cap under the shared estimator.
   await page.getByTestId("image-generation-prompt").fill("apple orchard ".repeat(700));
   await expect(page.getByTestId("image-generation-submit")).toBeDisabled();
@@ -670,10 +656,10 @@ test("the model picker drives the request and the quoted total", { tag: "@ui-ris
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   const picker = page.getByTestId("image-model-picker");
   await expect(picker).toBeVisible();
-  // Five models are enabled and the disclosure threshold is three, so the
+  // The enabled catalogue exceeds the disclosure threshold of three, so the
   // composer is compact: only the selected model is inline, and the others are
   // one toggle away rather than missing.
   await expect(page.getByTestId("image-model-picker-panel")).toHaveCount(0);
@@ -696,6 +682,36 @@ test("the model picker drives the request and the quoted total", { tag: "@ui-ris
   expect(api.createBodies[0].modelIds).toEqual(["gpt-image-2"]);
 });
 
+test("direct image models quote the approved 1K prices and select Recraft's native 2K", { tag: "@ui-risk" }, async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Max" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/review");
+  await openImageConversation(page);
+  await openMoreImageModels(page);
+
+  const ideogram = page.getByTestId("image-model-ideogram-4-6");
+  const seedream = page.getByTestId("image-model-dola-seedream-5-5-261028");
+  const recraft = page.getByTestId("image-model-recraftv4_pro");
+  await ideogram.click();
+  await page.getByTestId("image-model-gpt-image-2").click();
+  await seedream.click();
+  await expect(page.getByTestId("image-total-credits")).toContainText("135");
+
+  await seedream.click();
+  await recraft.click();
+  await page.getByTestId("image-generation-prompt").fill("A book cover");
+  await expect(page.getByTestId("image-generation-submit")).toBeDisabled();
+  await ideogram.click();
+  await expect(recraft).toContainText("350");
+  await expect(page.getByTestId("image-size-2048x2048")).toBeChecked();
+  await page.getByTestId("image-generation-submit").click();
+  await expect.poll(() => api.createBodies[0]).toMatchObject({
+    modelIds: ["recraftv4_pro"], size: "2048x2048", quality: "medium",
+  });
+});
+
 test("two providers can be compared in one request, priced per model and in total", { tag: "@ui-risk" }, async ({ page }) => {
   // The first cross-provider comparison the feature was built for: OpenAI and
   // xAI in one group. Both prices are quoted before submission and the total is
@@ -707,7 +723,7 @@ test("two providers can be compared in one request, priced per model and in tota
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   const openai = page.getByTestId("image-model-gpt-image-2");
   const grok = page.getByTestId("image-model-grok-imagine-image-quality-20260403");
   await expect(openai).toHaveAttribute("aria-pressed", "true");
@@ -742,7 +758,7 @@ test("an option one selected model cannot be priced blocks submission", { tag: "
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-generation-prompt").fill("a red apple");
@@ -758,53 +774,6 @@ test("an option one selected model cannot be priced blocks submission", { tag: "
   await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
 });
 
-test("promoting a draft keeps the composer settings and clears the prompt", { tag: "@ui-risk" }, async ({ page }) => {
-  // The draft becoming the conversation it just created is not a conversation
-  // switch. Remounting there discarded the model selection, quality and size
-  // the user had chosen -- so a two-model comparison silently became a
-  // one-model request on the very next submit.
-  await enableImageGenerationFlag(page);
-  await mockAuthenticatedApi(page);
-  await mockUserUsage(page, { plan: "Pro" });
-  const api = await installImageGenerationApi(page);
-  await page.goto("/review");
-
-  await openNewImageEntry(page);
-  await openMoreImageModels(page);
-  await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
-  await page.getByTestId("image-preset-draft").click();
-  await page.getByTestId("image-size-1536x1024").click();
-  // Draft + landscape has no Grok price, so put it back where both models can
-  // be priced; the point here is that the *choice* survives, not the price.
-  await page.getByTestId("image-preset-standard").click();
-  await page.getByTestId("image-size-1024x1024").click();
-
-  await page.getByTestId("image-generation-prompt").fill("a red apple");
-  await page.getByTestId("image-generation-submit").click();
-  await expect(page.getByTestId("image-generation-result").first()).toBeVisible({
-    timeout: 15_000,
-  });
-
-  // Still two models selected, and the prompt did not come back.
-  await expect(
-    page.getByTestId("image-model-grok-imagine-image-quality-20260403")
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
-  await expect(page.getByTestId("image-generation-prompt")).toHaveValue("");
-
-  // ...and the next request really does carry both.
-  await page.getByTestId("image-generation-prompt").fill("a green pear");
-  await page.getByTestId("image-generation-submit").click();
-  await expect.poll(() => api.createBodies.length).toBe(2);
-  expect(api.createBodies[1].modelIds).toEqual([
-    "gpt-image-2",
-    "grok-imagine-image-quality-20260403",
-  ]);
-});
-
 test("Enter submits on desktop and breaks the line on mobile", { tag: "@ui-risk" }, async ({ page }) => {
   // The shared chat contract, through the shared helper. Ctrl/Cmd+Enter kept
   // working either way -- desktop Enter is the only behaviour this adds.
@@ -814,7 +783,7 @@ test("Enter submits on desktop and breaks the line on mobile", { tag: "@ui-risk"
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   const textarea = page.getByTestId("image-generation-prompt");
   await textarea.fill("a red apple");
   await textarea.press("Enter");
@@ -836,7 +805,7 @@ test("Shift+Enter never submits, on either shell", { tag: "@ui-risk" }, async ({
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   const textarea = page.getByTestId("image-generation-prompt");
   await textarea.fill("a red apple");
   await textarea.press("Shift+Enter");
@@ -959,7 +928,7 @@ test("the timeline polls the group, never one request per model", { tag: "@ui-ri
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await page.getByTestId("image-generation-prompt").fill("a red apple");
   await page.getByTestId("image-generation-submit").click();
 
@@ -986,7 +955,7 @@ test("while a comparison runs the button is the progress, and it is disabled", {
   await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   const submit = page.getByTestId("image-generation-submit");
   await expect(submit).toHaveAttribute("data-generating", "false");
 
@@ -1022,7 +991,7 @@ test("a failed model retries in place while the group keeps its shape", { tag: "
   api.nextOutcome = "moderation_failed";
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await page.getByTestId("image-generation-prompt").fill("something declined");
   await page.getByTestId("image-generation-submit").click();
 
@@ -1036,22 +1005,6 @@ test("a failed model retries in place while the group keeps its shape", { tag: "
   });
   await expect(page.getByTestId("image-generation-entry")).toHaveCount(1);
   await expect(page.getByTestId("image-comparison-card")).toHaveCount(1);
-});
-
-test("a Free plan can open the image entry using its existing credit allowance", { tag: "@ui-risk" }, async ({ page }) => {
-  await enableImageGenerationFlag(page);
-  await mockAuthenticatedApi(page);
-  await installImageGenerationApi(page);
-  await page.goto("/review");
-
-  if (isMobileShell()) {
-    await page.getByTestId("mobile-sidebar-open").click();
-    await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
-  }
-  await page.getByTestId("sidebar-new-launcher-more").click();
-  const entry = page.getByTestId("new-conversation-menu-image");
-  await expect(entry).toBeVisible();
-  await expect(entry).toHaveAttribute("data-locked", "false");
 });
 
 test("the catalogue's image tab is its own list and seeds the picked model", { tag: "@ui-risk" }, async ({
@@ -1175,6 +1128,47 @@ test("the catalogue entry keeps the chat draft when leaving image mode", { tag: 
   );
 });
 
+const pickChatImageModel = async (page: Page, modelId: string) => {
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+  await page.getByTestId("image-model-tab-panel")
+    .locator(`[data-testid="image-model-option"][data-model-id="${modelId}"]`).click();
+};
+
+test("Chat picks an image model like any model and stays on the chat screen", { tag: "@ui-risk" }, async ({ page }) => {
+  // Owner direction 2026-11-25: there is no image mode. The image model is
+  // the selected model; the composer, its draft and the screen stay.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("chat-textarea").fill("a lighthouse at dusk");
+  await pickChatImageModel(page, "gpt-image-2");
+  await expect(page).toHaveURL(/\/chat/);
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("a lighthouse at dusk");
+  await expect(page.getByTestId("composer-model-select")).toContainText("GPT Image 2");
+  await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
+
+  // The image tab shows it as the selection.
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+  const selected = page.locator('[data-testid="image-model-option"][data-model-id="gpt-image-2"]');
+  await expect(selected).toHaveAttribute("aria-pressed", "true");
+  // Picking it again keeps it and closes the picker, like a chat model row.
+  await selected.click();
+  await expect(page.getByTestId("image-model-tab-panel")).toHaveCount(0);
+  await expect(page.getByTestId("composer-model-select")).toContainText("GPT Image 2");
+
+  // Back to the conversation model, with the draft intact.
+  await page.getByTestId("composer-image-mode-exit").click();
+  await expect(page.getByTestId("review-image-mode")).toHaveCount(0);
+  await expect(page.getByTestId("composer-model-select")).not.toContainText("GPT Image 2");
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("a lighthouse at dusk");
+});
+
 /* -------------------------------------------------------------------------- */
 /* The comparison limit: what the composer offers is what admission accepts.  */
 /* -------------------------------------------------------------------------- */
@@ -1210,7 +1204,7 @@ test("at a limit of two, the third model is refused and the reason is specific",
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   const openai = page.getByTestId("image-model-gpt-image-2");
   const grok = page.getByTestId("image-model-grok-imagine-image-quality-20260403");
   const nano = page.getByTestId("image-model-fal-ai/nano-banana-2");
@@ -1279,7 +1273,7 @@ test("at a limit of three, all three providers compare in one request", { tag: "
   const api = await installImageGenerationApi(page);
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-model-fal-ai/nano-banana-2").click();
@@ -1337,7 +1331,7 @@ test("a server refusal a stale composer could not predict names the limit", { ta
   });
   await page.goto("/review");
 
-  await openNewImageEntry(page);
+  await openImageConversation(page);
   await openMoreImageModels(page);
   await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
   await page.getByTestId("image-model-fal-ai/nano-banana-2").click();

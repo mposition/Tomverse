@@ -359,7 +359,7 @@ test("discovery's Black Forest Labs slug reaches the bfl catalogue draft", () =>
   assert.equal(RUNTIME_IMAGE_PROVIDERS.includes("bfl"), true);
   assert.equal(runtimeImageProviderFor("black-forest-labs"), "bfl");
   assert.equal(runtimeImageProviderFor("bfl"), "bfl");
-  assert.equal(runtimeImageProviderFor("ideogram"), null);
+  assert.equal(runtimeImageProviderFor("unknown"), null);
   // New provider research stops proposing a provider Tomverse is now connected to.
   assert.equal(isConnectedProvider("Black Forest Labs", ["bfl"]), true);
   const template = runtimeImageProfileTemplate("bfl", "flux-3-image", { qualities: ["low", "medium", "high"] });

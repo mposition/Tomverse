@@ -8,14 +8,24 @@ import { nativeChatBearerRoute, nativeParityBearerRoute, nativeArtifactRevisionB
 import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import { prisma } from "@/lib/prisma";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { requireDesktopBearer } from "@/lib/desktopAuthServer";
+import { DESKTOP_APP_ORIGIN, desktopReadApiRoute, desktopWriteApiRoute } from "@/lib/desktopReadApiContract";
 
 /** Never fall back to an ambient cookie when an Authorization header is present. */
 export async function resolveChatRouteSession(request: Request): Promise<
   { session: Session | null; response?: never } | { session?: never; response: Response }
 > {
-  if (!request.headers.has("authorization")) return { session: (await getServerSession(authOptions)) ?? null };
   const origin = request.headers.get("origin");
   const path = new URL(request.url).pathname;
+  if (origin === DESKTOP_APP_ORIGIN) {
+    const allowed = desktopReadApiRoute(path, request.method) || desktopWriteApiRoute(path, request.method);
+    if (!allowed || request.headers.has("cookie") ||
+        request.headers.has("x-tomverse-conversation-unlocks")) {
+      return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };
+    }
+    return resolveBearerUser(request, "desktop");
+  }
+  if (!request.headers.has("authorization")) return { session: (await getServerSession(authOptions)) ?? null };
   const parityEnabled = process.env.TOMVERSE_NATIVE_PARITY_ENABLED === "true";
   const workspaceEnabled = process.env.TOMVERSE_NATIVE_WORKSPACE_ENABLED === "true";
   if (nativeWorkspaceBearerRoute(path, request.method, true) && !workspaceEnabled) {
@@ -42,7 +52,13 @@ export async function resolveChatRouteSession(request: Request): Promise<
   if (!enrolled || (origin && !isNativeAppOrigin(origin))) {
     return { response: mobileAuthRefusal(MOBILE_AUTH_ERROR_CODES.tokenInvalid) };
   }
-  const result = await requireMobileBearer(request);
+  return resolveBearerUser(request);
+}
+
+async function resolveBearerUser(request: Request, client?: "desktop"): Promise<
+  { session: Session; response?: never } | { session?: never; response: Response }
+> {
+  const result = client === "desktop" ? await requireDesktopBearer(request) : await requireMobileBearer(request);
   if (!result.ok) return { response: result.response };
   const user = await prisma.user.findUnique({
     where: { id: result.identity.userId }, select: { id: true, name: true, email: true, image: true, accountStatus: true },

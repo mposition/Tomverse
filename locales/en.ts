@@ -254,6 +254,7 @@ export const en = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Image generation",
         imageGenerationBackToChat: "Back to chat",
+        imageModeBackToChatModels: "Back to chat models",
         toolsImageGeneration: "Image generation",
         toolsImageGenerationDescription: "Compare images from several models",
         imageGenerationModelLabel: "Models",
@@ -289,7 +290,8 @@ export const en = {
         imageGenerationOtherModelsLabel: "Other models",
         imageGenerationRetryModel: "Retry this model",
         imageGenerationIntroTitle: "Create an image from a description",
-        imageGenerationIntroBody: "Describe what you want to see. One image per request, with Draft, Standard and Final quality presets in three sizes.",
+        imageGenerationIntroBody: "Describe what you want to see. Each model offers its own sizes and quality settings.",
+        imageGenerationUnavailableOptions: "Choose another size, quality or model. These models do not offer this combination: {models}.",
         imageGenerationAiLabel: "AI-generated image",
         imageGenerationPromptPlaceholder: "Describe the image to create...",
         imageGenerationPresetLabel: "Quality",

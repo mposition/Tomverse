@@ -32,12 +32,13 @@ async function assertSourceAccess(input: SourceAccess) {
     }
 }
 
-async function readSources(input: SourceAccess, anchor?: MemoryHistoryAnchor) {
+async function readSources(input: SourceAccess, anchor?: MemoryHistoryAnchor, currentQuestionId?: string) {
     await assertSourceAccess(input);
     const rows = await prisma.message.findMany({
         where: { conversationId: input.conversationId, conversation: { userId: input.userId },
             role: "user", content: { not: "" },
-            ...(anchor ? { id: { in: anchor.sources.map(source => source.id) } } : {}) },
+            ...(anchor ? { id: { in: anchor.sources.map(source => source.id) } }
+                : currentQuestionId ? { id: { not: currentQuestionId } } : {}) },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 2,
         select: { id: true, content: true },
@@ -57,6 +58,7 @@ async function readSources(input: SourceAccess, anchor?: MemoryHistoryAnchor) {
 export function prepareMemoryHistoryContext(input: {
     request: Request; userId: string; conversationId: string | null;
     query: string; modelIds: string[]; previousContextBundle?: string;
+    currentQuestionId?: string;
 }): (() => Promise<MemorySemanticContext>) | undefined {
     let previous: ContextBundlePayload | undefined;
     let expired = false;
@@ -85,7 +87,7 @@ export function prepareMemoryHistoryContext(input: {
             if (!anchor || anchor.queryDigest !== memoryCurrentQueryDigest(input.query)) return currentOnly;
             return { queryPolicy: "full", history: await readSources(access, anchor) ?? [] };
         }
-        return { queryPolicy: "full", history: await readSources(access) ?? [] };
+        return { queryPolicy: "full", history: await readSources(access, undefined, input.currentQuestionId) ?? [] };
     };
 }
 

@@ -46,6 +46,11 @@ test("an option the catalogue cannot price has no legacy size at all", () => {
   // pixel pair that already means 1K.
   for (const tier of ["0.5k", "2k", "4k"]) {
     for (const aspectRatio of ["1:1", "3:2", "2:3"]) {
+      if (tier === "2k" && aspectRatio === "1:1") {
+        assert.equal(legacyImageSizeForOption({ tier, aspectRatio }), "2048x2048");
+        assert.deepEqual(optionForLegacyImageSize("2048x2048"), { tier, aspectRatio });
+        continue;
+      }
       assert.equal(
         legacyImageSizeForOption({ tier, aspectRatio }),
         null,

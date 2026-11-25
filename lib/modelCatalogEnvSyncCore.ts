@@ -7,7 +7,10 @@
 // discovery tables travel together -- a lower environment with production's
 // registry but its own discovery queue disagrees with itself (work items point
 // at registry rows that are not there, candidates already adopted in
-// production show as new).
+// production show as new). The confirmed image billing terms travel too
+// (2026-11-25): the image judge reads them, so a catalogue row copied without
+// its terms is refused below production (Nano Banana 2.1 and Wan 2.7 were).
+// The measurements behind them stay: their spend is production's provider budget.
 //
 // What the copy never does:
 //   - delete. A row only the lower environment has (a model being tried on
@@ -51,6 +54,12 @@ export type SyncTableSpec = {
   readonly createId: boolean;
   /** Insert missing rows, never update existing ones. */
   readonly appendOnly: boolean;
+  /**
+   * A table added after production's export code: dev runs develop before a
+   * release brings the export along, so an export without it is accepted and
+   * the table is left alone until production sends it.
+   */
+  readonly optionalInExport?: boolean;
 };
 
 const TIMESTAMPS = ["createdAt", "updatedAt"] as const;
@@ -115,6 +124,21 @@ export const MODEL_CATALOG_SYNC_TABLES: readonly SyncTableSpec[] = [
     excluded: ["actorId"],
     createId: true,
     appendOnly: true,
+  },
+  {
+    // Append-only, the latest row per provider model in force: production's
+    // rows keep their createdAt, so a lower environment's own later row still wins.
+    model: "ImageModelBillingTerms",
+    delegate: "imageModelBillingTerms",
+    key: ["id"],
+    fields: ["id", "provider", "apiModelId", "kind", "terms", "sources", "actorEmail", "createdAt"],
+    dateFields: ["createdAt"],
+    jsonFields: ["terms", "sources"],
+    // measurementId points at an ImageBillingMeasurement, which is not copied.
+    excluded: ["actorId", "measurementId"],
+    createId: false,
+    appendOnly: true,
+    optionalInExport: true,
   },
   {
     model: "ProviderModelCatalogEntry",
@@ -256,6 +280,8 @@ export type TablePlan = {
   localOnly: number;
   /** Rows of a model whose prices here differ from production's (see heldPricedModels). Left alone. */
   held: number;
+  /** An optionalInExport table production did not send: nothing planned, local rows not counted. */
+  notExported: boolean;
 };
 
 export type SyncPlan = {
@@ -349,7 +375,9 @@ export const planModelCatalogEnvSync = (source: SyncTables, local: SyncTables): 
       conflicts: 0,
       localOnly: 0,
       held: 0,
+      notExported: !Array.isArray(source[spec.model]),
     };
+    if (plan.notExported) return plan;
     const seen = new Set<string>();
     for (const raw of source[spec.model] ?? []) {
       const row = remap(spec.model, raw);
@@ -422,6 +450,7 @@ export const summarizeSyncPlan = (plan: SyncPlan) => ({
         conflicts: table.conflicts,
         localOnly: table.localOnly,
         held: table.held,
+        ...(table.notExported ? { notExported: true } : {}),
       },
     ])
   ),
@@ -447,6 +476,7 @@ export const validateModelCatalogExport = (value: unknown): ModelCatalogExport =
   if (!tables || typeof tables !== "object") throw new Error("Export has no tables.");
   for (const spec of MODEL_CATALOG_SYNC_TABLES) {
     const rows = (tables as SyncTables)[spec.model];
+    if (rows === undefined && spec.optionalInExport) continue;
     if (!Array.isArray(rows)) throw new Error(`Export has no ${spec.model} rows.`);
     for (const row of rows) {
       if (!row || typeof row !== "object") throw new Error(`${spec.model} has a non-object row.`);

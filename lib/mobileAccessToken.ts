@@ -50,6 +50,8 @@ import {
 } from "@/lib/mobileAccessTokenCore";
 
 type Environment = Record<string, string | undefined>;
+const tokenAudience = (environment: Environment, client?: "desktop") =>
+  mobileTokenAudience(environment) + (client === "desktop" ? "/desktop" : "");
 
 const encodeSegment = (value: Buffer | string) =>
   Buffer.from(value as never).toString("base64url");
@@ -225,6 +227,7 @@ export const mintMobileAccessToken = (
     userId: string;
     deviceId: string;
     familyId: string;
+    client?: "desktop";
     now?: Date;
   },
   environment: Environment = process.env
@@ -253,7 +256,7 @@ export const mintMobileAccessToken = (
   const deploymentId = deploymentIdentifierFrom(environment);
   const claims = encodeJson({
     iss: mobileTokenIssuer(environment),
-    aud: mobileTokenAudience(environment),
+    aud: tokenAudience(environment, input.client),
     sub: input.userId,
     did: input.deviceId,
     fid: input.familyId,
@@ -316,7 +319,7 @@ export const parseCompactJws = (token: string): ParsedCompactJws | null => {
  */
 export const verifyMobileAccessTokenString = (
   token: string,
-  options: { now?: Date; environment?: Environment } = {}
+  options: { now?: Date; environment?: Environment; client?: "desktop" } = {}
 ): MobileAccessTokenVerdict => {
   const environment = options.environment ?? process.env;
   const parsed = parseCompactJws(token);
@@ -326,7 +329,7 @@ export const verifyMobileAccessTokenString = (
   return verifyMobileAccessToken(parsed, {
     ports: verifierPorts(environment, nowMs),
     expectedIssuer: mobileTokenIssuer(environment),
-    expectedAudience: mobileTokenAudience(environment),
+    expectedAudience: tokenAudience(environment, options.client),
     nowSeconds: Math.floor(nowMs / 1000),
   });
 };

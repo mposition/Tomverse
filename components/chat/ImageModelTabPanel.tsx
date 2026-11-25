@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, LockKeyhole } from "lucide-react";
+import { Check, ChevronRight, LockKeyhole } from "lucide-react";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { UsageMeter } from "@/components/credits/UsageMeter";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -52,6 +52,9 @@ const OWNER_LABELS: Record<ImageModelOwner, string> = {
   fal: "fal",
   qwen: "Qwen",
   bfl: "Black Forest Labs",
+  ideogram: "Ideogram",
+  byteplus: "BytePlus",
+  recraft: "Recraft",
 };
 
 /** Same table, for the supplier when it differs from the owner. */
@@ -62,6 +65,9 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
   fal: "fal",
   qwen: "Alibaba Cloud",
   bfl: "Black Forest Labs",
+  ideogram: "Ideogram",
+  byteplus: "BytePlus",
+  recraft: "Recraft",
 };
 
 /**
@@ -69,7 +75,7 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
  * the rest after them in this order. Grouped by owner, not supplier: Nano
  * Banana 2 through fal sits with Google, and its row still names fal.
  */
-const OWNER_DISPLAY_ORDER: readonly ImageModelOwner[] = ["openai", "google", "xai", "qwen", "bfl", "fal"];
+const OWNER_DISPLAY_ORDER: readonly ImageModelOwner[] = ["openai", "google", "xai", "qwen", "bfl", "ideogram", "byteplus", "recraft", "fal"];
 
 /** Enabled models grouped by owner; within a group, the catalogue's own order. */
 export const groupImageModelsByOwner = <T extends Parameters<typeof imageModelBrandParts>[0]>(
@@ -118,6 +124,8 @@ export type ImageModelTabPanelProps = {
    */
   lock: "sign_in" | "upgrade" | null;
   onSelectModel: (modelId: string) => void;
+  /** The image models the composer currently answers with. */
+  selectedModelIds?: readonly string[];
   onLockedClick: (lock: "sign_in" | "upgrade") => void;
   /** 44px rows for touch input, matching the rest of the picker. */
   touchTarget: boolean;
@@ -128,6 +136,7 @@ export type ImageModelTabPanelProps = {
 export function ImageModelTabPanel({
   lock,
   onSelectModel,
+  selectedModelIds = [],
   onLockedClick,
   touchTarget,
   isKeyboardCompact,
@@ -166,6 +175,7 @@ export function ImageModelTabPanel({
               const fromCredits = model.prices.length
                 ? Math.min(...model.prices.map((price) => price.credits))
                 : null;
+              const selected = selectedModelIds.includes(model.id);
               return (
                 <li key={model.id} className="min-w-0">
                   <button
@@ -173,6 +183,7 @@ export function ImageModelTabPanel({
                     data-testid="image-model-option"
                     data-model-id={model.id}
                     data-locked={lock ? "true" : "false"}
+                    aria-pressed={selected}
                     onClick={() => {
                       if (lock) {
                         onLockedClick(lock);
@@ -182,7 +193,9 @@ export function ImageModelTabPanel({
                     }}
                     className={`flex h-full w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
                       touchTarget ? "min-h-14 py-2.5" : "py-2.5"
-                    } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
+                    } ${selected
+                      ? "border-accent-image-500 bg-accent-image-50 dark:border-accent-image-400 dark:bg-accent-image-950"
+                      : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"}`}
                   >
                     {/* Whose model it is, like the chat list: Nano Banana 2 through
                         fal shows Google's mark, and the subtitle names fal. */}
@@ -232,10 +245,11 @@ export function ImageModelTabPanel({
                       {fromCredits !== null && (
                         <UsageMeter credits={fromCredits} kind="image" testId="image-model-credit-badge" />
                       )}
-                      <ChevronRight
-                        className="h-4 w-4 text-zinc-400"
-                        aria-hidden="true"
-                      />
+                      {selected ? (
+                        <Check className="h-4 w-4 text-accent-image-600 dark:text-accent-image-300" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-zinc-400" aria-hidden="true" />
+                      )}
                     </span>
                   </button>
                 </li>
