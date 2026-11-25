@@ -66,6 +66,16 @@ New Tomverse API Agent tasks in a Git project start in their own worktree when G
 
 A worktree keeps the path relative to the repository of the folder you opened. Attachments for an isolated task must exist in the selected commit. After restarting Desktop, open the source folder and select the saved task from history to resume in its worktree. If the worktree is missing or on a different branch, Desktop blocks resumption and undo until the original checkout is available. Saved diffs and command details can still be inspected. Worktree files stay on disk when you delete Desktop task history.
 
+## Reviewing changes
+
+A saved Tomverse API task has a **Review changes** panel under its conversation, also opened by typing `/review` (optionally `/review turn` or `/review branch`) in the instruction box. Choose the scope: uncommitted changes (the working tree against HEAD, with new files), the agent's last turn (from the task's own record), or the branch against its base. The main process computes each diff; the renderer only names a scope and, for a revert, the id of a hunk.
+
+Click a line number to comment on it (Shift-click extends the range). **Add comments to the instruction** writes each comment into the instruction box with its file, lines and the code it is about. **Revert hunk** asks first, then writes through the same recorded edit as an agent patch, so the change appears in the task's list and the usual undo puts it back. It is refused when the file no longer has the hunk where the diff said, and credential files are never shown or sent to a reviewer.
+
+**Run review** sends the diff to one or more models chosen from the Code catalogue. Each reviewer is a read-only Ask run (read tools only) through the same gateway, receipts and request limit as any Code turn; the dialog before it runs states how many models and requests may be used. Findings from all models are merged into one list that names the model behind each, and shown under the line they are about. A finding can be handed back to the agent from the panel.
+
+Git runs with the same restrictions as the worktree code, with external diff and text conversion programs turned off. Desktop ignores global and system Git configuration, so a repository whose files are checked out with CRLF endings by a global `core.autocrlf` setting can show every line as changed.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

@@ -40,6 +40,8 @@ import { CodeExecutionSettings } from "./CodeExecutionSettings";
 import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
+import { ReviewPanel, canReview } from "./ReviewPanel";
+import { REVIEW_OPEN_EVENT, parseReviewCommand } from "../review-contract";
 import { EventEntry, EventLogExport } from "./EventLog";
 import { BlockedPanel, CodeQuotaPanel } from "./BlockedPanel";
 import { NativeUsagePanel, TransmissionPanel } from "./TransmissionPanel";
@@ -125,7 +127,7 @@ function CodePlanAnalysis({ analysis, language }: {
   </li>;
 }
 
-function TaskConversation({ task, models, language, openSettings, engine, onRewound }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode; onRewound?: (text: string) => void }) {
+function TaskConversation({ task, models, language, openSettings, engine, onRewound, insertReview }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode; onRewound?: (text: string) => void; insertReview?: (text: string) => boolean }) {
   const copy = desktopShellCopy[language];
   const native = desktopNativeCopy[language];
   // What happened to the last rewind or fork: kept here, because the message it was started from may be gone after a rewind.
@@ -198,6 +200,7 @@ function TaskConversation({ task, models, language, openSettings, engine, onRewo
       {!continued && apiUsage}
       {hasDiagnostics && task.id && ["completed", "blocked", "failed", "unknown", "stopped"].includes(task.status) && <EventLogExport language={language} />}
     </div>}
+    {insertReview && canReview(task) && <ReviewPanel key={`review-${task.id}`} task={task} models={models} language={language} insert={insertReview} />}
     {engine}
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
@@ -725,8 +728,25 @@ function Desktop() {
     setRequesting(false);
   }
 
+  /** Adds text (review comments, a finding to fix) after what is already typed in the instruction box. */
+  function insertIntoDraft(text: string) {
+    const next = prompt.trimEnd() ? `${prompt.trimEnd()}
+
+${text}` : text;
+    if (next.length > MAX_CODE_PROMPT_CHARACTERS) return false;
+    changeDraft(next);
+    return true;
+  }
+
   async function send(event: FormEvent) {
     event.preventDefault();
+    // /review opens the review panel; it is a command for the app, not an instruction for the agent.
+    const reviewCommand = parseReviewCommand(prompt);
+    if (reviewCommand && task && canReview(task)) {
+      window.dispatchEvent(new CustomEvent(REVIEW_OPEN_EVENT, { detail: reviewCommand }));
+      changeDraft("");
+      return;
+    }
     // One instruction can wait to be sent into the running turn; a second one waits in the queue.
     if (canQueue && task?.pendingFollowUp) {
       await queueDraft();
@@ -973,7 +993,7 @@ function Desktop() {
         }}>
           <div className="content">
             {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined}
+              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined} insertReview={surface === "code" ? insertIntoDraft : undefined}
               engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}

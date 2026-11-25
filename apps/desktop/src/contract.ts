@@ -19,6 +19,7 @@ import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contra
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
+import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
 import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
@@ -418,6 +419,8 @@ export type DesktopApi = {
   moreHistory(): Promise<void>;
   readChange(id: string): Promise<ChangeInspection | null>;
   undoChange(id: string): Promise<UndoChangeResult>;
+  /** The review panel: the diff of a scope, taking one hunk back, and asking other models to review it. */
+  review<Action extends ReviewAction>(input: Extract<ReviewInput, { action: Action }>): Promise<ReviewOutcome<Action>>;
   rewindTurn(taskId: string, turn: number): Promise<RewindTurnResult>;
   forkTurn(taskId: string, turn: number): Promise<ForkTurnResult>;
   readCommand(id: string): Promise<CommandInspection | null>;

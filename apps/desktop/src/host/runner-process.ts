@@ -23,6 +23,7 @@ import { nativePatches, openNativeEdits, verifiedContinuationEdits } from "./nat
 import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
+import { createReviewWorker } from "./review-worker";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -1451,6 +1452,18 @@ function deleteRecordedHistory(command: DeleteRecordedHistory): WorkerEvent {
   }
 }
 
+const reviewWorker = createReviewWorker({
+  open: (command) => openRecordedSession(command),
+  lock: (project) => lockProject(project),
+  busy: () => Boolean(active || recovery),
+  hold: (requestId, abort) => {
+    recovery = { requestId, abort };
+    return () => { if (recovery?.requestId === requestId) recovery = undefined; };
+  },
+  gateway: (connection, signal) => gatewayFor(connection, signal),
+  protectedRoots,
+});
+
 parent.on("message", ({ data }: { data: WorkerCommand }) => {
   if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
     cleanDeletedHistory(data.protectedRoot);
@@ -1486,6 +1499,12 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send(rewindRecorded(data));
   } else if (data.type === "fork-history") {
     send(forkRecorded(data));
+  } else if (data.type === "review-turn-diff") {
+    send(reviewWorker.turnDiff(data));
+  } else if (data.type === "review-revert-hunk") {
+    send(reviewWorker.revertHunk(data));
+  } else if (data.type === "review-run") {
+    void reviewWorker.run(data).then(send);
   } else if (data.type === "delete-history") {
     send(deleteRecordedHistory(data));
   } else if (data.type === "discard-transient") {
