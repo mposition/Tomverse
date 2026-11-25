@@ -1482,11 +1482,11 @@ const generateWithDirectRaster = async (
     // This endpoint derives its shape from the single input; keep the photo
     // intact inside the square that the 2K catalogue option prices.
     const bytes = await sharp(editImage.bytes)
-      .resize(1024, 1024, { fit: "contain", background: "#fff" })
+      .resize(2048, 2048, { fit: "contain", background: "#fff" })
       .png()
       .toBuffer();
     editImage = {
-      bytes, width: 1024, height: 1024, mimeType: "image/png",
+      bytes, width: 2048, height: 2048, mimeType: "image/png",
       sha256: createHash("sha256").update(bytes).digest("hex"),
     };
   }

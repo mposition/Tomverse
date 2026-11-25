@@ -568,9 +568,11 @@ High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
 [Ideogram 4.6 API](https://developer.ideogram.ai/api-reference/images/generate/ideogram-4-6) · [Ideogram 가격](https://ideogram.ai/pricing/)
 
 `IMAGE_RECRAFT_EDIT_ENABLED`가 켜졌을 때는 Recraft V4 Pro의 `imageToImage`에
-사진 한 장을 정사각형에 맞춰 인라인으로 전달하고, `zdr: true`와 `b64_json`을 사용한다.
+사진 한 장의 비율을 유지해 2048×2048 캔버스에 맞춰 인라인으로 전달하고, `zdr: true`와 `b64_json`을 사용한다.
 기존 $0.25·350크레딧 2K Medium 옵션만 허용하고, 반환된 PNG가 2048×2048인지 검사한다.
 사진 편집의 기본값은 꺼짐이며, 활성화 전에 dev 테스트에서 과금 단위와 출력 크기를 확인한다.
+2026-11-25 도형 편집 실측에서 1024×1024 입력은 1024×1024 PNG를, 2048×2048 입력은
+2048×2048 PNG를 반환했다. 공급자는 각각 250단위(US$0.25)를 보고했다.
 [Recraft 편집 API](https://www.recraft.ai/docs/api-reference/tools/image-to-image) · [Recraft 데이터 보존](https://www.recraft.ai/docs/api-reference/zero-data-retention)
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
@@ -1219,7 +1221,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       Wan 2.7·2.7 Pro는 출력 장당 과금한다. BFL FLUX 3·Klein은 1K 생성과 편집의
       가격이 같고 참조 장당 추가 요금이 없다. 활성 모델의 가격과 기존 크레딧 한도가 그대로 적용된다.
     - Nano Banana 2·2 Lite·2.1 직접 편집은 공급자의 모델별 입력 단가와 2,048토큰
-      예산을 쓰며 생성 경로의 실측 출력 한도 또한 적용한다. 2026-11-25 dev의
+      예산을 쓴다. 1K 정사각 Medium 편집의 출력 원가 하한은 각각 67,200·33,600·33,600µUSD다. 2026-11-25 dev의
       공개 사진 편집 실측은 모델별 1,120 이미지 토큰이었다. 사용량을 모달리티별로
       받으면 이미지 토큰을 텍스트와 분리한다. 분리값이 없으면 사진과 프롬프트는
       각각의 예약 한도로 정산한다.

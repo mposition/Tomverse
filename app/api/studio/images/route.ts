@@ -28,6 +28,8 @@ const requestSchema = z.object({
   useCase: useCaseSchema.optional(),
   prompt: z.string().trim().min(1).max(4_000),
   size: sizeSchema,
+  requestedSize: sizeSchema.optional(),
+  squareFallback: z.boolean().optional(),
   uploadId: z.string().trim().min(1).max(100).optional(),
   idempotencyKey: z.uuid(),
   modelId: z.string().min(1).max(120),
@@ -69,6 +71,7 @@ async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useC
       const credits = edit ? imageEditCredits(model, price) : price.credits;
       if (credits) return [{
         modelId: model.id, model: model.name, credits, quality, size: outputSize, pricingVersion: model.pricingVersion, useCase,
+        ...(outputSize !== size ? { requestedSize: size, squareFallback } : {}),
       }];
     }
     return [];
@@ -123,7 +126,7 @@ export async function POST(req: Request) {
     });
     if (receipt) return Response.json({ groupId: receipt.id });
 
-    const quote = await studioQuote(body.size, Boolean(body.uploadId), body.useCase);
+    const quote = await studioQuote(body.requestedSize ?? body.size, Boolean(body.uploadId), body.useCase, body.squareFallback);
     // Open tabs from the previous release only know the versioned Medium
     // quote. Feature-routed submissions always echo the exact quote.
     const legacyMedium = body.useCase === undefined && body.quality === undefined && body.credits === undefined;
