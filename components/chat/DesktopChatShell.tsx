@@ -19,7 +19,7 @@ import { Check, Sparkles, X } from "lucide-react";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { ChatApp } from "@/components/chat/ChatApp";
-import { ChatInput } from "@/components/chat/ChatInput";
+import { ChatInput, type ComposerImageMode } from "@/components/chat/ChatInput";
 import type { AttachmentsChangeHandler } from "@/components/chat/useConversationDrafts";
 import type { AiModel } from "@/lib/models";
 import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
@@ -203,15 +203,11 @@ export type DesktopChatShellProps = {
   /** Authenticated durable Chat may compose its next turn during a response. */
   allowEditingWhileSending: boolean;
   onNewChat: () => void;
-  onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (
-    draftText: string,
-    modelId?: string,
-    options?: { fromImageRequest?: boolean }
-  ) => void;
+  onSelectImageModel?: (modelId: string) => void;
+  composerImageMode?: ComposerImageMode | null;
   imageWorkspace?: React.ReactNode;
   /**
    * The Project workspace pane. Like `imageWorkspace` it replaces the chat
@@ -508,10 +504,10 @@ export function DesktopChatShell({
   blockSubmitWhileVoiceBusy,
   allowEditingWhileSending,
   onNewChat,
-  onNewImage,
   imageLock,
   onLockedImageClick,
-  onStartImageDraft,
+  onSelectImageModel,
+  composerImageMode,
   imageWorkspace,
   projectWorkspace,
   projectComposerBar,
@@ -1015,9 +1011,6 @@ export function DesktopChatShell({
         conversations={conversations}
         currentChatId={currentChatId}
         onNewChat={onNewChat}
-        onNewImage={onNewImage ?? null}
-        imageLock={imageLock ?? null}
-        onLockedImageClick={onLockedImageClick}
         onSelectConversation={onSelectConversation}
         onRename={onRename}
         onDelete={onDelete}
@@ -1674,7 +1667,8 @@ export function DesktopChatShell({
               onOpenDeepResearchSetup={onOpenDeepResearchSetup}
               isDeepResearchPending={isDeepResearchPending}
               onDismissDeepResearchChip={onDismissDeepResearchChip}
-              onStartImageDraft={onStartImageDraft}
+              onSelectImageModel={onSelectImageModel}
+              composerImageMode={composerImageMode}
               imageGenerationLock={imageLock ?? null}
               onLockedImageGenerationClick={onLockedImageClick}
               attachments={attachments}

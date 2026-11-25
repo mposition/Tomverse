@@ -264,6 +264,7 @@ export const es = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Generación de imágenes",
         imageGenerationBackToChat: "Volver al chat",
+        imageModeBackToChatModels: "Volver a modelos de chat",
         toolsImageGeneration: "Generación de imágenes",
         toolsImageGenerationDescription: "Compara imágenes de varios modelos",
         imageGenerationModelLabel: "Modelos",

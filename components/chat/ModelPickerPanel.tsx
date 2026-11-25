@@ -174,6 +174,8 @@ export type ModelPickerPanelProps = {
    * set means the tab is visible and its rows route to sign-in or upgrade.
    */
   onSelectImageModel?: (modelId: string) => void;
+  /** Image models the composer answers with; shown as selected in the image tab. */
+  selectedImageModelIds?: readonly string[];
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
 };
@@ -211,6 +213,7 @@ export function ModelPickerPanel({
   onSelectionModeChange,
   comboFinderSlot,
   onSelectImageModel,
+  selectedImageModelIds,
   imageGenerationLock = null,
   onLockedImageGenerationClick,
 }: ModelPickerPanelProps) {
@@ -723,6 +726,7 @@ export function ModelPickerPanel({
         <ImageModelTabPanel
           lock={imageGenerationLock}
           onSelectModel={(modelId) => onSelectImageModel?.(modelId)}
+          selectedModelIds={selectedImageModelIds}
           onLockedClick={(lock) => onLockedImageGenerationClick?.(lock)}
           touchTarget={touchTarget}
           isKeyboardCompact={isKeyboardCompact}

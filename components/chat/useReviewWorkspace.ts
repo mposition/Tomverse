@@ -24,7 +24,8 @@ export type ReviewWorkspaceControls = {
   unsupportedProviders: string[];
   imageRequest: boolean;
   imagePromptMode: boolean;
-  imageModelLabel?: string;
+  /** Professional image mode: every answering panel is one of these image models. */
+  imageModels?: readonly { id: string; name: string; owner: string }[];
   /** Providers with an active image model; their rows carry an image badge. */
   imageProviders?: readonly string[];
   setImagePromptMode: (value: boolean) => void;

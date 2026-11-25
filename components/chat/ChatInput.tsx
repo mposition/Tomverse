@@ -251,6 +251,14 @@ type ChatInputWebSearchChipViewProps = {
  * stored manual fallback's count, warning tone, or exception disclosure would
  * present that return choice as the active answer model.
  */
+/** Image models picked in the catalogue's image tab, answering the next send. */
+export type ComposerImageMode = {
+  modelIds: readonly string[];
+  labels: readonly string[];
+  /** Back to the conversation model(s); the typed draft stays. */
+  onExit: () => void;
+};
+
 export function ChatInputWebSearchChipView({
   state,
   isAutoMode,
@@ -886,12 +894,13 @@ type ChatInputProps = {
   onOpenDeepResearchSetup?: () => void;
   researchPreview?: ResearchPreviewControls;
   /**
-   * Switches to the image draft, carrying the composer's current text as the
-   * starting prompt. Absent when the image feature flag is off. `modelId` is
-   * set when the user arrived from the catalogue's image tab and therefore
-   * already chose which model to start from.
+   * Picks an image model from the catalogue's image tab. The composer stays
+   * where it is and the next send answers with an image in this conversation;
+   * there is no separate image mode. Absent when the image feature is off.
    */
-  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  onSelectImageModel?: (modelId: string) => void;
+  /** The image models answering the next send, with the way back to chat models. */
+  composerImageMode?: ComposerImageMode | null;
   /**
    * Whether this viewer may record voice input (docs/policy/voice-input.md §3).
    *
@@ -1091,7 +1100,8 @@ export function ChatInput({
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
   researchPreview,
-  onStartImageDraft,
+  onSelectImageModel,
+  composerImageMode = null,
   voiceInputEnabled = false,
   voiceConversationControl,
   onVoiceTranscript,
@@ -3174,6 +3184,8 @@ export function ChatInput({
   const keyboardInset = useKeyboardInset();
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
+  // Chat answers with the picked image model as if it were the selected model.
+  const chatImageModelLabel = !review && composerImageMode ? composerImageMode.labels.join(", ") : null;
   const footerModelPicker = review?.mode !== "easy" && (!isReviewProduct || !showReviewContextPicker || (!isStudio && Boolean(review))) && (
             <button
               ref={modelMenuButtonRef}
@@ -3183,7 +3195,8 @@ export function ChatInput({
                 explicitEffort ? "max-w-[9.5rem] md:max-w-[12rem]" : "max-w-[6.5rem] md:max-w-[8.5rem]"
               }`}
               data-testid="composer-model-select"
-              title={isAutoMode ? `${autoCopy.activeSummary}. ${autoCopy.modeHint}` : activeModelNames.join(", ")}
+              data-image-model={chatImageModelLabel ? "true" : undefined}
+              title={chatImageModelLabel ?? (isAutoMode ? `${autoCopy.activeSummary}. ${autoCopy.modeHint}` : activeModelNames.join(", "))}
               aria-label={
                 isAutoMode
                   ? `${autoPickerLabel}${effortSuffix}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
@@ -3193,7 +3206,9 @@ export function ChatInput({
               aria-controls="chat-input-popover"
               aria-haspopup="dialog"
             >
-              {!isAutoMode && (
+              {chatImageModelLabel ? (
+                <ImagePlus className="h-4 w-4 shrink-0 text-accent-image-600 dark:text-accent-image-300" aria-hidden="true" />
+              ) : !isAutoMode && (
                 activeSelectedModels.length === 1 ? (
                   <span className="max-[240px]:hidden">
                     <ModelLogo
@@ -3217,7 +3232,7 @@ export function ChatInput({
                   </span>
                 )
               )}
-              {!isAutoMode && activeSelectedModels.length === 1 && (
+              {!chatImageModelLabel && !isAutoMode && activeSelectedModels.length === 1 && (
                 <span
                   aria-hidden="true"
                   className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white max-[240px]:flex"
@@ -3231,9 +3246,9 @@ export function ChatInput({
                   isAutoMode ? "" : "max-[240px]:sr-only"
                 }`}
               >
-                {isAutoMode
+                {chatImageModelLabel ?? (isAutoMode
                   ? autoPickerLabel
-                  : explicitEffort && activeModelNames.length === 1 ? activeModelNames[0] : modelsSelectedLabel(activeSelectedModels.length)}
+                  : explicitEffort && activeModelNames.length === 1 ? activeModelNames[0] : modelsSelectedLabel(activeSelectedModels.length))}
               </span>
               {explicitEffort && <span className="shrink-0 max-[240px]:sr-only" data-testid="composer-effort-summary">{effortSuffix}</span>}
               <ComposerChevronDownIcon
@@ -3914,7 +3929,7 @@ export function ChatInput({
             {t("chat.singleModelRequired")}
           </p>
         )}
-        {review?.imagePromptMode && <div data-testid="review-image-mode" className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{review.imageModelLabel ?? t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
+        {(composerImageMode || review?.imagePromptMode) && <div data-testid="review-image-mode" className="my-2 flex min-w-0 items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} className="shrink-0" aria-hidden="true" /><span className="min-w-0 flex-1 truncate">{composerImageMode?.labels.join(" · ") || t("chat.imageGenerationTitle")}</span><button type="button" data-testid="composer-image-mode-exit" className="min-h-11 shrink-0 rounded-full px-3 font-medium hover:bg-accent-image-50 dark:hover:bg-accent-image-950" onClick={() => composerImageMode ? composerImageMode.onExit() : review?.setImagePromptMode(false)}>{t("chat.imageModeBackToChatModels")}</button></div>}
         {review && showProductSwitcher && isStudio && <ReviewModeSwitcher review={review} composer locked={productSwitchDisabled || isSending || draftLocked} />}
         {review && showReviewModelRow && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels} effortSuffix={effortSuffix}
           canSelectModel={id => { const model = AVAILABLE_MODELS.find(m => m.id === id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />}
@@ -4998,13 +5013,14 @@ export function ChatInput({
                         comboFinderSlot={comboFinderSlot}
                         reasoningEffortSlot={reasoningEffortSlot}
                         onSelectImageModel={
-                          onStartImageDraft
+                          onSelectImageModel
                             ? (modelId) => {
                                 closeMenu(false);
-                                onStartImageDraft(value, modelId);
+                                onSelectImageModel(modelId);
                               }
                             : undefined
                         }
+                        selectedImageModelIds={composerImageMode?.modelIds}
                         autoSelectionOffered={
                           // Both halves, because either alone would be a
                           // control that cannot act: no handler means nothing
