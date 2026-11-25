@@ -1591,7 +1591,9 @@ test("Desktop Deep Research requires enrollment and dispatches only once per sig
   assert.equal((await dispatch()).status, 403);
   assert.equal(perplexitySubmitCalls().length, 0);
   process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED = "true";
+  assert.equal((await dispatch({ deepResearchDepth: undefined })).status, 403);
   assert.equal((await dispatch({ assistantMessageId: randomUUID() })).status, 403);
+  assert.equal(perplexitySubmitCalls().length, 0);
   const submitted = await dispatch();
   assert.equal(submitted.status, 200, await submitted.clone().text());
   assert.deepEqual(await submitted.json(), { deepResearchJobId: assistantMessageId, status: "submitted" });

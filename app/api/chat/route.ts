@@ -2463,7 +2463,8 @@ async function handleChatPost(
             // disabled must not be chosen and then refused two lines later by
             // `assertModelRuntimeAvailable`.
             models: runtimeModels.filter(
-                (model) => model.enabled && !model.catalogDeleted
+                (model) => model.enabled && !model.catalogDeleted &&
+                    (!desktop || model.usageClass !== "deep-research")
             ),
             // Confirmed unavailable only. `degraded` stays a candidate and
             // loses tie-breaks instead, and `unknown` -- every model nothing
@@ -3094,6 +3095,9 @@ async function handleChatPost(
             reasoningEffort && modelReasoningEfforts(model).includes(reasoningEffort) ? reasoningEffort : undefined;
         let appliedEffort = appliedEffortFor(dispatchModel);
         const modelConfig = modelWithReasoningEffort(dispatchModel, appliedEffort);
+        if (desktop && (modelConfig.usageClass === "deep-research") !== Boolean(deepResearchDepth)) {
+            return tracedJsonError("The Desktop research selection changed.", "DEEP_RESEARCH_UNAVAILABLE", 403, traceId);
+        }
         if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
