@@ -303,6 +303,21 @@ const DESKTOP_REVIEW_ROUTING = "/api/review/route";
 const DESKTOP_REVIEW_PREFLIGHT = "/api/chat/preflight";
 export const DESKTOP_IMAGE_GENERATIONS = "/api/images/generations";
 
+export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
+export const DESKTOP_CHAT_HISTORY = "/api/conversations";
+export const DESKTOP_CHAT_SEARCH = "/api/conversations/search";
+
+const ownResourceRead = /^\/api\/(?:conversations|artifacts)\/[A-Za-z0-9_-]{1,128}$/;
+
+export function desktopReadApiRoute(path: string, method: string): boolean {
+  return method === "GET" && (path === DESKTOP_CHAT_CAPABILITIES || path === DESKTOP_CHAT_HISTORY ||
+    path === DESKTOP_CHAT_SEARCH || ownResourceRead.test(path) ||
+    /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path) ||
+    (desktopReviewWriteEnabled() && (path === DESKTOP_IMAGE_GENERATIONS ||
+      /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path) ||
+      /^\/api\/images\/(?:groups\/[A-Za-z0-9_-]{1,100}|generations\/[A-Za-z0-9_-]{1,100}\/download)$/.test(path))));
+}
+
 function desktopChatWriteRoute(path: string, method: string): boolean {
   if (path === DESKTOP_CHAT_CREATE || path === DESKTOP_CHAT_TURN) return method === "POST";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/messages$/.test(path)) return method === "POST";

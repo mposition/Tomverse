@@ -7,33 +7,21 @@ import {
 } from "./productKeyReadMode";
 
 import {
-  DESKTOP_IMAGE_GENERATIONS,
   desktopChatWriteEnabled,
   desktopReviewWriteEnabled,
 } from "./nativeBearerGate";
 
 export {
   DESKTOP_APP_ORIGIN,
+  DESKTOP_CHAT_CAPABILITIES,
+  DESKTOP_CHAT_HISTORY,
+  DESKTOP_CHAT_SEARCH,
   desktopAttachmentEnabled,
   desktopChatWriteEnabled,
+  desktopReadApiRoute,
   desktopReviewWriteEnabled,
   desktopWriteApiRoute,
 } from "./nativeBearerGate";
-
-export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
-export const DESKTOP_CHAT_HISTORY = "/api/conversations";
-export const DESKTOP_CHAT_SEARCH = "/api/conversations/search";
-
-const ownResourceRead = /^\/api\/(?:conversations|artifacts)\/[A-Za-z0-9_-]{1,128}$/;
-
-export function desktopReadApiRoute(path: string, method: string): boolean {
-  return method === "GET" && (path === DESKTOP_CHAT_CAPABILITIES || path === DESKTOP_CHAT_HISTORY ||
-    path === DESKTOP_CHAT_SEARCH || ownResourceRead.test(path) ||
-    /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path) ||
-    (desktopReviewWriteEnabled() && (path === DESKTOP_IMAGE_GENERATIONS ||
-      /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path) ||
-      /^\/api\/images\/(?:groups\/[A-Za-z0-9_-]{1,100}|generations\/[A-Za-z0-9_-]{1,100}\/download)$/.test(path))));
-}
 
 export function desktopTextWriteEnabled(product: unknown) {
   return product === "chat" ? desktopChatWriteEnabled() : product === "review" && desktopReviewWriteEnabled();

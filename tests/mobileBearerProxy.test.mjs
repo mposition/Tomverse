@@ -21,7 +21,7 @@ import test from "node:test";
 import { NextRequest } from "next/server";
 
 import { proxy } from "../proxy.ts";
-import { MOBILE_IDENTITY_HEADERS } from "../lib/nativeBearerGate.ts";
+import { DESKTOP_APP_ORIGIN, MOBILE_IDENTITY_HEADERS } from "../lib/nativeBearerGate.ts";
 import { NATIVE_APP_ORIGINS } from "../lib/nativeAppCors.ts";
 
 // A real deployment configuration, so the vectors below can present a token
@@ -37,12 +37,13 @@ process.env.MOBILE_AUTH_TOKEN_AUDIENCE = "tomverse-mobile-api";
 
 const { mintMobileAccessToken } = await import("../lib/mobileAccessToken.ts");
 
-const validBearer = () =>
+const validBearer = (client) =>
   `Bearer ${
     mintMobileAccessToken({
       userId: "user_1",
       deviceId: "device_1",
       familyId: "family_1",
+      client,
     }).token
   }`;
 
@@ -76,6 +77,41 @@ test("enrollment rejects invalid bearers and hostile origins without admitting c
     assert.equal(response.status, 401); assert.equal(response.headers.get("access-control-allow-origin"), null);
     assert.equal((await post({ origin: "https://localhost", authorization: validBearer() }, "https://tomverse.app/api/conversations/other/share")).status, 403);
   } finally { delete process.env.TOMVERSE_NATIVE_CHAT_ENABLED; }
+});
+
+test("Desktop read tokens reach shared routes while native Chat and parity are enabled", async () => {
+  const flags = ["TOMVERSE_NATIVE_CHAT_ENABLED", "TOMVERSE_NATIVE_PARITY_ENABLED"];
+  const originalFlags = flags.map((name) => process.env[name]);
+  for (const name of flags) process.env[name] = "true";
+  try {
+    const desktop = { origin: DESKTOP_APP_ORIGIN, authorization: validBearer("desktop") };
+    const mobile = { origin: NATIVE_APP_ORIGINS[0], authorization: validBearer() };
+    for (const path of [
+      "/api/conversations",
+      "/api/conversations/conversation_1?tail=1",
+      "/api/conversations/search?q=history",
+      "/api/products/chat/capabilities",
+    ]) {
+      const url = "https://tomverse.app" + path;
+      const allowed = await get(desktop, url);
+      assert.equal(allowed.headers.get("x-middleware-next"), "1", path);
+      assert.equal(allowed.headers.get("x-middleware-request-authorization"), desktop.authorization);
+      assert.equal(allowed.headers.get("x-middleware-request-x-tomverse-auth-subject"), null);
+
+      const mobileAllowed = await get(mobile, url);
+      assert.equal(mobileAllowed.headers.get("x-middleware-request-x-tomverse-auth-subject"), "user_1");
+      assert.equal((await get({ ...desktop, authorization: mobile.authorization }, url)).status, 401);
+      assert.equal((await get({ ...desktop, origin: mobile.origin }, url)).status, 401);
+      assert.equal((await get({ ...desktop, cookie: "session=synthetic" }, url)).status, 401);
+      assert.equal((await get({ ...desktop, "x-tomverse-conversation-unlocks": "synthetic" }, url)).status, 401);
+    }
+    assert.equal((await get(desktop, "https://tomverse.app/api/user/account")).status, 401);
+  } finally {
+    flags.forEach((name, index) => {
+      if (originalFlags[index] === undefined) delete process.env[name];
+      else process.env[name] = originalFlags[index];
+    });
+  }
 });
 
 // --- 1. a bearer header never buys anything by existing ------------------
