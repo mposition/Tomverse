@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
@@ -25,6 +26,7 @@ import {
 } from "@/lib/modelCatalogAdmin";
 import { codingDraftFromAnswer } from "@/lib/modelCatalogDraftLlm";
 import { codingModelPage, defaultCodingCapabilitySources } from "@/lib/modelCatalogCore";
+import { requestImageGeneration } from "@/lib/imageGenerationService";
 import { prisma } from "@/lib/prisma";
 
 // The dynamic model catalogue against a real database: a refused enable writes
@@ -1253,4 +1255,49 @@ test("a dedicated row takes coding notes from the operator and from a fill, and 
   assert.deepEqual((await notesOf())?.strengths, ["Parallel tool calls"]);
   assert.deepEqual((await notesOf())?.sources, [page]);
   assert.deepEqual(((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { capabilities: unknown }).capabilities, capabilitiesBefore, "a dedicated row's capabilities are its draft's");
+});
+
+test("a native 2K Recraft reservation uses its own approved price and exact dimensions", async () => {
+  const seed = getImageModel("recraftv4_pro")!;
+  const price = { quality: "medium" as const, size: "2048x2048" as const, credits: 300, outputCostMicroUsd: 250_000 };
+  const day = "IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_DAY";
+  const month = "IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_MONTH";
+  const previous = [process.env[day], process.env[month]];
+  const flag = await prisma.appSetting.findUnique({ where: { key: "feature.imageGenerationEnabled" } });
+  const user = await prisma.user.create({ data: { email: `${randomUUID()}@image-test.local`, plan: "Pro" } });
+  try {
+    process.env[day] = "10000000";
+    process.env[month] = "100000000";
+    await prisma.appSetting.upsert({
+      where: { key: "feature.imageGenerationEnabled" },
+      create: { key: "feature.imageGenerationEnabled", value: "true" }, update: { value: "true" },
+    });
+    assert.ok(seed.priceVerification.verifiedAt);
+    await createImagePriceRevision({
+      modelId: seed.id, session,
+      revision: { pricingVersion: "native-2k-test", prices: [price], verification: { ...seed.priceVerification, verifiedAt: seed.priceVerification.verifiedAt, sources: [...seed.priceVerification.sources] } },
+    });
+    await updateCatalogEntry({ category: "image", modelId: seed.id, patch: { enabled: true }, session });
+    const request = {
+      userId: user.id, modelIds: [seed.id], prompt: "A square cover", quality: price.quality,
+      size: price.size, conversationId: null, idempotencyKey: randomUUID(),
+    };
+    await assert.rejects(requestImageGeneration({ ...request, size: "1024x1024" }), /not supported/);
+    const result = await requestImageGeneration(request);
+    assert.equal(result.status, "pending");
+    const reservation = await prisma.imageCreditReservation.findFirstOrThrow({ where: { userId: user.id } });
+    assert.equal(reservation.provider, "recraft");
+    assert.equal(reservation.size, price.size);
+    assert.equal(reservation.reservedCredits, 300);
+    assert.equal(reservation.reservedCostMicroUsd, 255_000n);
+    assert.deepEqual((reservation.pricingSnapshot as { resolutionOption: unknown }).resolutionOption, { tier: "2k", aspectRatio: "1:1" });
+  } finally {
+    for (const [i, name] of [day, month].entries()) {
+      if (previous[i] === undefined) delete process.env[name];
+      else process.env[name] = previous[i];
+    }
+    if (flag) await prisma.appSetting.update({ where: { key: flag.key }, data: { value: flag.value } });
+    else await prisma.appSetting.deleteMany({ where: { key: "feature.imageGenerationEnabled" } });
+    await prisma.user.delete({ where: { id: user.id } });
+  }
 });

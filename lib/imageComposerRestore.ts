@@ -64,7 +64,7 @@ const isPreset = (value: string): value is ImagePreset =>
 const isQuality = (value: string): value is ImageQuality =>
   value === "low" || value === "medium" || value === "high";
 const isSize = (value: string): value is ImageSize =>
-  value === "1024x1024" || value === "1536x1024" || value === "1024x1536";
+  value === "1024x1024" || value === "1536x1024" || value === "1024x1536" || value === "2048x2048";
 
 /**
  * Derive the composer's starting state from one comparison group.

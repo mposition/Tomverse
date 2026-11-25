@@ -72,6 +72,7 @@ const IMAGE_SIZES: Array<{ size: ImageSize; labelKey: string }> = [
   { size: "1024x1024", labelKey: "chat.imageGenerationSizeSquare" },
   { size: "1536x1024", labelKey: "chat.imageGenerationSizeLandscape" },
   { size: "1024x1536", labelKey: "chat.imageGenerationSizePortrait" },
+  { size: "2048x2048", labelKey: "chat.imageGenerationSizeSquare" },
 ];
 
 const IMAGE_PRESETS: Array<{
@@ -302,7 +303,6 @@ export function ImageGenerationWorkspace({
   const [historyError, setHistoryError] = useState(false);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [preset, setPreset] = useState<ImagePreset>(initialPreset ?? "standard");
-  const [size, setSize] = useState<ImageSize>("1024x1024");
   // Seed ids come from the catalogue's image tab and are bounded by the same
   // limit as everything else: a deployment can lower it between the catalogue
   // render and this mount, and a seed is not more privileged than a restore.
@@ -323,6 +323,11 @@ export function ImageGenerationWorkspace({
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>(
     seedLimitOutcome.modelIds
   );
+  const singleSize = (ids: readonly string[]) => {
+    const sizes = ids.length === 1 ? getImageModel(ids[0])?.sizes : undefined;
+    return sizes?.length === 1 ? sizes[0] : null;
+  };
+  const [size, setSize] = useState<ImageSize>(() => singleSize(seedLimitOutcome.modelIds) ?? "1024x1024");
   // Set when a click or key press was refused for the limit. Persistent --
   // cleared by the next successful selection change, not by a timer -- so the
   // reason stays on screen while the user decides which model to drop.
@@ -734,6 +739,8 @@ export function ImageGenerationWorkspace({
     setRestoreOutcome(null);
     setLimitNotice(false);
     setSelectedModelIds(change.modelIds);
+    const requiredSize = singleSize(change.modelIds);
+    if (requiredSize) setSize(requiredSize);
   };
 
   const handleSubmit = async () => {
@@ -754,6 +761,8 @@ export function ImageGenerationWorkspace({
         preparedPromptRef.current = requestPrompt;
         if (routed.preset !== preset || routed.modelIds.join("\0") !== selectedModelIds.join("\0")) {
           setSelectedModelIds(routed.modelIds);
+          const requiredSize = singleSize(routed.modelIds);
+          if (requiredSize) setSize(requiredSize);
           setPreset(routed.preset);
           // Requote the newly selected model before the existing paid send.
           return;
@@ -1620,7 +1629,7 @@ export function ImageGenerationWorkspace({
               aria-label={t("chat.imageGenerationSizeLabel")}
               className="flex flex-wrap gap-1.5"
             >
-              {IMAGE_SIZES.map((option) => {
+              {IMAGE_SIZES.filter(option => option.size !== "2048x2048" || availableModels.some(model => model.sizes.includes(option.size))).map((option) => {
                 const selected = size === option.size;
                 return (
                   <button
@@ -1640,7 +1649,7 @@ export function ImageGenerationWorkspace({
                         : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
                     }`}
                   >
-                    {t(option.labelKey)}
+                    {t(option.labelKey)}{option.size === "2048x2048" ? " (2K)" : ""}
                   </button>
                 );
               })}

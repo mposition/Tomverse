@@ -755,7 +755,7 @@ test("every registered model resolves to an owner that can be labelled", () => {
   // The label table lives in the component and is typed exhaustively, so this
   // asserts the other half: that no registry entry produces an owner outside
   // the union the table is keyed by.
-  const known = new Set(["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram"]);
+  const known = new Set(["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram", "byteplus", "recraft"]);
   for (const model of IMAGE_MODEL_REGISTRY) {
     const { owner, gateway } = imageModelBrandParts(model);
     assert.ok(known.has(owner), `${model.id} owner ${owner} has no brand label`);

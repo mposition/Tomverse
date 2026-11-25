@@ -1,5 +1,6 @@
 import "server-only";
 
+import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_RENDERING_SPEED, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
@@ -506,7 +507,7 @@ export const generateImageWithProvider = async (input: {
   // ignoring the photo -- so it is refused, as is one whose edit price is held.
   if (
     input.editImage &&
-    !(["openai", "xai", "fal"].includes(model.provider) && imageModelSupportsEdit(model.id))
+    !(["openai", "xai", "fal", "byteplus"].includes(model.provider) && imageModelSupportsEdit(model.id))
   ) {
     throw new ImageProviderError(
       "provider_failed",
@@ -552,6 +553,12 @@ const dispatchImageRequest = async (
   model: ImageModelProfile,
   input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  if (isDirectRasterProvider(model.provider)) {
+    return generateWithDirectRaster(model.provider, model, input);
+  }
+  if (input.size === RECRAFT_SIZE) {
+    throw new ImageProviderError("provider_failed", "No native 2K request for this model.");
+  }
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
@@ -1424,6 +1431,83 @@ const downloadGeneratedImage = async ({
   }
 };
 
+const generateWithDirectRaster = async (
+  provider: DirectRasterProvider,
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
+  const contract = DIRECT_RASTER_MODELS[provider];
+  const sizes: readonly string[] = contract.sizes;
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (model.apiModelId !== contract.apiModelId || input.quality !== "medium" ||
+      !sizes.includes(input.size) || !price || price.outputCostMicroUsd < contract.outputCostMicroUsd ||
+      !model.outputMimeTypes.includes("image/png") || imageDeliveryMimeType(model) !== "image/png") {
+    throw new ImageProviderError("provider_failed", "Unsupported direct image generation option.");
+  }
+  const isSeedream = provider === "byteplus";
+  const apiKey = (isSeedream ? process.env.ARK_API_KEY : process.env.RECRAFT_API_TOKEN)?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+
+  const params = {
+    model: contract.apiModelId,
+    size: input.size,
+    response_format: "b64_json",
+    ...(isSeedream ? { output_format: "png", background: "opaque" } : { image_format: "png", n: 1 }),
+  };
+  // The audit stores only the prepared photo's dimensions, digest and byte count.
+  const requestParams = { ...params, ...editAuditParams(input.editImage) };
+  const body = {
+    ...params,
+    prompt: input.prompt,
+    ...(input.editImage ? { image: `data:image/png;base64,${input.editImage.bytes.toString("base64")}` } : {}),
+  };
+  const endpoint = isSeedream
+    ? "https://ark.ap-southeast.bytepluses.com/api/v3/images/generations"
+    : "https://external.api.recraft.ai/v1/images/generations";
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Direct image request failed.", null, null, requestParams);
+  }
+
+  // JSON contains one base64-encoded file. Cap the streamed envelope before parsing it.
+  const maxEncodedLength = 4 * Math.ceil(FAL_MAX_ASSET_BYTES / 3);
+  const payload = await readResponseToBuffer(response, response.ok ? maxEncodedLength + 64 * 1024 : 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  const item = Array.isArray(payload?.data) && payload.data.length === 1 ? payload.data[0] : null;
+  const rawId = response.headers.get("x-request-id") ?? (isSeedream ? null : item?.image_id);
+  const requestId = typeof rawId === "string" && /^[A-Za-z0-9_.:-]{1,180}$/.test(rawId) ? rawId : null;
+  if (!response.ok || payload?.error || item?.error) {
+    const errorBody = item?.error ? item : payload;
+    const phase = /sensitive(content|image)|riskcontrol|content_?moderated/i.test(String(errorBody?.error?.code ?? ""))
+      ? "provider_moderation_rejected" : response.ok || response.status === 402
+        ? "provider_failed" : classifyImageProviderFailure(response.status, errorBody);
+    throw new ImageProviderError(phase, "Direct image provider rejected the request.", response.status, requestId, requestParams);
+  }
+  const b64 = item?.b64_json;
+  const bytes = typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : null;
+  const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, "image/png") : null;
+  if (!bytes || !dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) {
+    const error = new ImageProviderError("provider_failed", "Direct provider returned an unusable image.", response.status, requestId, requestParams);
+    error.afterGeneration = true;
+    throw error;
+  }
+  return {
+    imageBytes: bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
+    providerRequestId: requestId, provenance: [...model.provenance],
+    outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
+    providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
+  };
+};
+
 const generateWithIdeogram = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
   const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
   if (model.apiModelId !== IDEOGRAM_MODEL_ID || input.size !== IDEOGRAM_SIZE || !price) {
@@ -1463,7 +1547,7 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
     ? payload.generation_id : null;
   if (!response.ok) {
     const phase = response.status === 422 ? "provider_moderation_rejected"
-      : response.status === 402 ? "provider_failed" : classifyImageProviderFailure(response.status, null);
+      : response.status === 402 ? "provider_failed" : classifyImageProviderFailure(response.status, payload);
     throw new ImageProviderError(phase, `Ideogram returned HTTP ${response.status}.`, response.status, requestId, requestParams);
   }
   const item = Array.isArray(payload?.data) && payload.data.length === 1 ? payload.data[0] : null;

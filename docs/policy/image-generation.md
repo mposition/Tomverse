@@ -546,6 +546,16 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
 | Ideogram 4.0 (`ideogram-4`, 직접) | 등록·운영 보류 | 1024×1024 장당 Turbo $0.03 / Default $0.06 / Quality $0.10 ([공식 가격](https://ideogram.ai/pricing/), 2026-11-25) | 판매 크레딧 승인 및 운영 예산 설정 후 활성화 |
+| Seedream 5.5 (`dola-seedream-5-5-261028`, BytePlus 직접) | 등록·운영 보류 | 정사각·가로·세로 출력 한 장 $0.020, 참조 사진 한 장 $0.008 | Standard 생성 및 사진 한 장 편집 |
+| Recraft V4 Pro (`recraftv4_pro`, Recraft 직접) | 등록·운영 보류 | 2048×2048 래스터 출력 한 장 $0.25 | Standard, 원본 PNG 한 장 |
+
+BytePlus 싱가포르 ModelArk의 서버 키는 `ARK_API_KEY`, Recraft의 키는 `RECRAFT_API_TOKEN`이다.
+운영자는 해당 공급자의 `IMAGE_PROVIDER_BYTEPLUS_COST_MICROUSD_PER_DAY`와 `_PER_MONTH`, 또는
+`IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_DAY`와 `_PER_MONTH`에 예산을 설정한다. Admin → Models → Catalog에서
+공식 출력 원가(각각 20,000·250,000µUSD)와 승인된 판매 크레딧을 적용한 뒤 활성화한다.
+Seedream은 편집 스위치가 켜져 있고 선택 옵션의 판매가가 사진 입력 원가까지 충당할 때 한 장 편집을 받는다.
+두 직접 API는 요청당 한 번만 호출하고, 받은 PNG의 실제 크기를 검사해 원본을 저장한다.
+[BytePlus 가격](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
 
 Ideogram 직접 연동은 서버의 `IDEOGRAM_API_KEY`로 [생성 API](https://developer.ideogram.ai/api-reference/images/generate/ideogram-4)를 호출한다.
 Draft·Standard·Final은 각각 Turbo·Default·Quality이며, 1회에 정사각 이미지 1장을 생성한다. 편집은 지원하지 않는다.
@@ -1030,6 +1040,10 @@ blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴
 아니라 계약이다. 값을 채워 근처 픽셀쌍으로 매핑하면 1K 가격으로 2K 이미지를
 청구하게 되고, 사용자는 그 차이를 볼 방법이 없다.
 
+
+**2026-11-25 · Recraft V4 Pro**. 전용 2K 정사각 옵션은 `2048x2048`로 저장하고 1K와 별도 가격을
+검증한다. 새 예약에는 tier·aspectRatio도 보존한다. 다른 공급자의 2K 옵션은 승인 대상에 추가되지 않았다.
+기존 1K 기록과 가격은 그대로 읽으며, 같은 가격·크기를 제공하는 모델만 한 그룹으로 비교할 수 있다.
 
 ## 13. 진입점과 노출 정책 (v2)
 

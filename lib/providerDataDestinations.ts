@@ -488,6 +488,8 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
         recipientEntity: "Ideogram AI, Inc.",
         evidenceRef: "https://ideogram.ai/legal/api-tos/",
     },
+    unproven("byteplus"),
+    unproven("recraft"),
     ready({
         provider: "openai",
         recipientEntity: "OpenAI OpCo, LLC",

@@ -142,9 +142,10 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // privacyNoticeStatus.ts are byte-for-byte the same). Observation only, not
   // an approval; the effective date did not move, nothing is added to
   // APPROVED_AMENDED_DIGESTS and no email is authorized.
+  // 2026-11-25: direct image recipients added as unverified. Observation only.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "0f3fb8cdf9a10347d278d40328fedac94a1299df2c8cf4a2e258561ac34910c9",
+    contentSha256: "4a54fcbffa1f4d448c6b7f38e51768dc421f5cbc9bf37bcef52d98bb2fbda89c",
   },
   // 2026-11-19: terms gain the API-key clause, the app-store billing and
   // non-expiring store credit sentences, and the missing zh clauses.

@@ -10,7 +10,8 @@ import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch } from "@/lib/adminFetch";
-import { formatUsd, QUALITY_ORDER, SIZE_ORDER } from "@/lib/adminModelCatalogFlow";
+import { STANDARD_IMAGE_SIZES } from "@/lib/directRasterModels";
+import { formatUsd, QUALITY_ORDER } from "@/lib/adminModelCatalogFlow";
 import { shouldIssueAdminPoll } from "@/lib/adminPollTick";
 import {
   emptyMeasurementForm,
@@ -271,7 +272,7 @@ export function ImageBillingMeasurePanel({
   };
 
   const setField = (key: keyof MeasurementForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
-  const optionKeys = QUALITY_ORDER.flatMap((quality) => SIZE_ORDER.map((size) => `${quality}|${size}`));
+  const optionKeys = QUALITY_ORDER.flatMap((quality) => STANDARD_IMAGE_SIZES.map((size) => `${quality}|${size}`));
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="model-catalog-measure">

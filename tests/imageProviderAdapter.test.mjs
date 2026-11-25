@@ -115,6 +115,8 @@ test("having an adapter is not what makes a model callable", async () => {
     "gemini-3.1-flash-lite-image",
     "gemini-3-pro-image",
     "ideogram-4",
+    "dola-seedream-5-5-261028",
+    "recraftv4_pro",
   ]) {
     await assert.rejects(
       generateImageWithProvider({
@@ -538,6 +540,82 @@ test("a Google measurement sample is one request, a rate limit included; other p
   }
   assert.equal(calls, 1);
 });
+
+for (const spec of [
+  { provider: "byteplus", id: "dola-seedream-5-5-261028", env: "ARK_API_KEY", unit: 20_000, url: "https://ark.ap-southeast.bytepluses.com/api/v3/images/generations" },
+  { provider: "recraft", id: "recraftv4_pro", env: "RECRAFT_API_TOKEN", unit: 250_000, url: "https://external.api.recraft.ai/v1/images/generations" },
+]) {
+  test(`${spec.provider} serves the exact priced native PNG and submits at most once`, async t => {
+    const seed = IMAGE_MODEL_REGISTRY.find(model => model.id === spec.id);
+    assert.equal(seed.disabledReason, "operational_hold");
+    assert.deepEqual(seed.prices, []);
+    const prices = seed.sizes.map(size => ({ size, quality: "medium", outputCostMicroUsd: spec.unit, credits: 300 }));
+    const request = { prompt: "private brief", modelId: seed.id, quality: "medium", size: seed.sizes[0] };
+    const editImage = { bytes: Buffer.from("private photo"), width: 45, height: 60, mimeType: "image/png", sha256: "a".repeat(64) };
+    const network = t.mock.method(globalThis, "fetch");
+    const sharp = (await import("sharp")).default;
+    const png = async size => {
+      const [width, height] = size.split("x").map(Number);
+      return sharp({ create: { width, height, channels: 3, background: "yellow" } }).png().toBuffer();
+    };
+    setActiveImageModelCatalog([{ ...seed, disabledReason: null, prices }]);
+    try {
+      await withEnv(spec.env, "", () => assert.rejects(generateImageWithProvider(request), /key is not configured/));
+      await withEnv(spec.env, "local-token", async () => {
+        const wrongSize = spec.provider === "recraft" ? "1024x1024" : "2048x2048";
+        await assert.rejects(generateImageWithProvider({ ...request, size: wrongSize }), /Unsupported direct/);
+        await assert.rejects(generateImageWithProvider({ ...request, quality: "high" }), /Unsupported direct/);
+        if (spec.provider === "recraft") {
+          await assert.rejects(generateImageWithProvider({ ...request, editImage }), /cannot edit/);
+        }
+        assert.equal(network.mock.callCount(), 0);
+        for (const size of seed.sizes) {
+          const bytes = await png(size);
+          network.mock.mockImplementation(async (url, init) => {
+            assert.equal(url, spec.url);
+            assert.equal(init.redirect, "error");
+            assert.equal(init.method, "POST");
+            assert.equal(init.headers.Authorization, "Bearer local-token");
+            return Response.json({ data: [{ b64_json: bytes.toString("base64") }] }, { headers: { "x-request-id": "local-job" } });
+          });
+          const result = await generateImageWithProvider({ ...request, size });
+          const common = { model: seed.apiModelId, prompt: request.prompt, size, response_format: "b64_json" };
+          assert.deepEqual(JSON.parse(network.mock.calls.at(-1).arguments[1].body), spec.provider === "recraft" ?
+            { ...common, image_format: "png", n: 1 } : { ...common, output_format: "png", background: "opaque" });
+          assert.deepEqual(result.imageBytes, bytes);
+          assert.equal(`${result.outputWidth}x${result.outputHeight}`, size);
+          assert.equal(result.providerRequestId, "local-job");
+          assert.ok(!Object.hasOwn(result.requestParams, "prompt"));
+        }
+        if (spec.provider === "byteplus") {
+          const result = await generateImageWithProvider({ ...request, size: seed.sizes.at(-1), editImage });
+          const data = JSON.parse(network.mock.calls.at(-1).arguments[1].body);
+          assert.equal(data.image, "data:image/png;base64," + editImage.bytes.toString("base64"));
+          assert.equal(result.requestParams.image.sha256, editImage.sha256);
+          assert.ok(!JSON.stringify(result.requestParams).includes(editImage.bytes.toString("base64")));
+        }
+        const small = await png("64x64");
+        const item = { b64_json: small.toString("base64") };
+        for (const [reply, phase, produced] of [
+          [() => Response.json({ data: [item] }), "provider_failed", true],
+          [() => Response.json({ data: [item, item] }), "provider_failed", true],
+          [() => Response.json({ data: [{ url: "https://invalid.example/file" }] }), "provider_failed", true],
+          [() => Response.json({ data: [item] }, { headers: { "content-length": "30000000" } }), "provider_failed", true],
+          [() => Response.json({ error: { code: "InputImageSensitiveContentDetected" } }, { status: 400 }), "provider_moderation_rejected", false],
+          [() => Response.json({}, { status: 429 }), "provider_rate_limited", false],
+          [() => { throw new Error("connection lost"); }, "provider_failed", false],
+        ]) {
+          network.mock.mockImplementation(reply);
+          const before = network.mock.callCount();
+          await assert.rejects(generateImageWithProvider(request), error => error.failurePhase === phase && error.afterGeneration === produced);
+          assert.equal(network.mock.callCount(), before + 1);
+        }
+      });
+    } finally {
+      resetActiveImageModelCatalog();
+    }
+  });
+}
 
 const ideogramRequest = { modelId: "ideogram-4", prompt: "Grand opening", size: "1024x1024", quality: "medium" };
 const ideogramAsset = "https://ideogram.ai/api/images/ephemeral/sample.png";

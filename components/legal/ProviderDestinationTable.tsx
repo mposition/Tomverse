@@ -21,6 +21,8 @@ const PROVIDER_LABELS: Record<string, string> = {
     fal: "fal",
     bfl: "Black Forest Labs",
     ideogram: "Ideogram",
+    byteplus: "BytePlus",
+    recraft: "Recraft",
 };
 
 function placeName(code: string, t: (key: string) => string): string {

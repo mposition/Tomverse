@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { prisma } from "@/lib/prisma";
+import { CATALOG_IMAGE_SIZES } from "@/lib/directRasterModels";
 import { z } from "zod";
 import {
   apiSecurityResponse,
@@ -41,7 +42,7 @@ import {
 const createGenerationSchema = z
   .object({
     prompt: z.string().trim().min(1).max(8_000),
-    size: z.enum(["1024x1024", "1536x1024", "1024x1536"]),
+    size: z.enum(CATALOG_IMAGE_SIZES),
     quality: z.enum(["low", "medium", "high"]),
     conversationId: z.string().trim().min(1).max(100).optional(),
     idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),

@@ -1,3 +1,4 @@
+import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, isDirectRasterProvider } from "@/lib/directRasterModels";
 import { IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 
 /**
@@ -6,7 +7,7 @@ import { IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
  * other provider needs an adapter first. Dependency-free so the client panels
  * can read the same list the server's profile schema enforces.
  */
-export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram"] as const;
+export const RUNTIME_IMAGE_PROVIDERS = ["openai", "google", "xai", "fal", "qwen", "bfl", "ideogram", "byteplus", "recraft"] as const;
 export type RuntimeImageProvider = (typeof RUNTIME_IMAGE_PROVIDERS)[number];
 
 export const isRuntimeImageProvider = (provider: string): provider is RuntimeImageProvider =>
@@ -21,6 +22,7 @@ export const isRuntimeImageProvider = (provider: string): provider is RuntimeIma
  */
 const RUNTIME_IMAGE_PROVIDER_ALIASES: Readonly<Record<string, RuntimeImageProvider>> = {
   "black-forest-labs": "bfl",
+  bytedance: "byteplus",
 };
 
 /** The runtime provider a discovered model belongs to, or null when none has an adapter. */
@@ -112,6 +114,9 @@ export const runtimeImageProfileTemplate = (
   provenance: [] as string[],
   outputMimeTypes: ["image/png"] as string[],
   ...(provider === "qwen" ? { sizes: [...QWEN_RUNTIME_SIZES] } : {}),
+  ...(isDirectRasterProvider(provider) ? {
+    sizes: [...DIRECT_RASTER_MODELS[provider].sizes], qualities: ["medium"], deliveryMimeType: "image/png",
+  } : {}),
   ...(provider === "ideogram" ? { sizes: [IDEOGRAM_SIZE], outputMimeTypes: ["image/png", "image/jpeg"] } : {}),
   ...(provider === "bfl"
     ? {
@@ -155,5 +160,5 @@ export const IMAGE_USE_CASES = ["text", "detail", "fast", "edit", "layout", "ref
 export type ImageUseCase = (typeof IMAGE_USE_CASES)[number];
 
 /** The sizes and qualities a runtime image profile may list (the profile schema's enums). */
-export const RUNTIME_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536"] as const;
+export const RUNTIME_IMAGE_SIZES = CATALOG_IMAGE_SIZES;
 export const RUNTIME_IMAGE_QUALITIES = ["low", "medium", "high"] as const;

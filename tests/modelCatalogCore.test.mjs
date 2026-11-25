@@ -117,6 +117,22 @@ test("NULL inherits, a hold disables, and an override changes only what it names
   assert.equal(model.pricingVersion, enabledSeed.pricingVersion);
 });
 
+test("direct raster profiles require exact provider terms, supported options and independent budgets", () => {
+  for (const [id, unit] of [["dola-seedream-5-5-261028", 20_000], ["recraftv4_pro", 250_000]]) {
+    const seed = getImageModel(id);
+    const prices = seed.sizes.map(size => ({ size, quality: "medium", outputCostMicroUsd: unit, credits: 300 }));
+    const priced = { ...seed, prices };
+    assert.equal(judge()(seed).admitted, false);
+    assert.deepEqual(judge()(priced), { admitted: true });
+    assert.equal(judge(false)(priced).admitted, false);
+    for (const override of [
+      { apiModelId: "unregistered" }, { qualities: ["low"] },
+      { sizes: [id === "recraftv4_pro" ? "1024x1024" : "2048x2048"] },
+      { prices: [{ ...prices[0], outputCostMicroUsd: unit - 1 }] },
+    ]) assert.equal(judge()({ ...priced, ...override }).admitted, false);
+  }
+});
+
 test("direct Ideogram requires an approved square price and a provider budget before admission", () => {
   const seed = getImageModel("ideogram-4");
   assert.equal(judge()(seed).admitted, false);

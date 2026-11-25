@@ -11,6 +11,7 @@
 // picker renders straight from these profiles.
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
+import { DIRECT_RASTER_MODELS, isDirectRasterProvider, type DirectRasterProvider } from "@/lib/directRasterModels";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import type { ImageUseCase } from "@/lib/runtimeImageProviders";
@@ -30,7 +31,7 @@ import {
  * lookup, provider health and readiness. Keeping the name attached to that
  * meaning is what makes adding a gateway safe -- nothing has to be re-read.
  */
-export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram";
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram" | DirectRasterProvider;
 
 /**
  * Who made the model, which is a different question and is about to stop having
@@ -47,7 +48,7 @@ export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | 
  * current roster, not a relationship, and the two are separate aliases so the
  * next reader has to decide which one they mean.
  */
-export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram";
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl" | "ideogram" | DirectRasterProvider;
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -807,6 +808,30 @@ const IDEOGRAM_4: ImageModelProfile = {
   },
 };
 
+function directRasterProfile(provider: DirectRasterProvider, name: string, useCase: "edit" | "detail", routingNote: string): ImageModelProfile {
+  const contract = DIRECT_RASTER_MODELS[provider];
+  return {
+    id: contract.apiModelId,
+    apiModelId: contract.apiModelId,
+    provider,
+    name,
+    useCase,
+    routingNote,
+    lifecycle: "stable",
+    disabledReason: "operational_hold",
+    disabledNote: "Approve sale credits and configure the direct provider budget before enabling.",
+    sizes: contract.sizes,
+    qualities: ["medium"],
+    prices: [],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+    deliveryMimeType: "image/png",
+    pricingVersion: contract.apiModelId + "-2026-11-25",
+    priceVerification: { verifiedAt: "2026-11-25", sources: [contract.pricing, contract.docs], thinkingCapMicroUsd: 0 },
+  };
+}
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
@@ -817,6 +842,8 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   BFL_FLUX_3_IMAGE,
   BFL_FLUX_3_IMAGE_KLEIN,
   IDEOGRAM_4,
+  directRasterProfile("byteplus", "Seedream 5.5", "edit", "Single-photo edits and affordable square, landscape or portrait generation."),
+  directRasterProfile("recraft", "Recraft V4 Pro", "detail", "Native 2K square raster artwork for final brand and editorial assets."),
 ];
 
 /** The default single selection and the v1 compatibility model. */
@@ -1027,6 +1054,8 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
   // and references "included at no extra charge" (price page, 2026-11-16).
   bfl: "not_billed",
   ideogram: "not_billed",
+  byteplus: "not_billed",
+  recraft: "not_billed",
 };
 
 /**
@@ -1054,6 +1083,7 @@ const imageThinkingTerms = (
   apiModelId: unknown,
   confirmed?: ConfirmedImageBillingTerms | null
 ): ImageThinkingTerms | null => {
+  if (isDirectRasterProvider(provider) && apiModelId !== DIRECT_RASTER_MODELS[provider].apiModelId) return null;
   if (provider === "ideogram" && apiModelId !== IDEOGRAM_MODEL_ID) return null;
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
   const bound = googleImageOutputLimitBound(provider, apiModelId, confirmed);
