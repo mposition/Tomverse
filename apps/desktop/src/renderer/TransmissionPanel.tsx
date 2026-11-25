@@ -8,6 +8,7 @@ import { desktopTaskListCopy } from "../../../../locales/desktopTaskList";
 import { providerClis } from "../code-execution";
 import type { CodeApiUsage, CodeNativeRunEvidence, Task, Transmission } from "../contract";
 import { formatEvidence } from "./evidence-copy";
+import { effortLabel } from "./CodeEngine";
 
 export function TransmissionPanel({ records, usage, taskId, language }: {
   records: Transmission[]; usage: CodeApiUsage; taskId: Task["id"]; language: Language;
@@ -19,8 +20,7 @@ export function TransmissionPanel({ records, usage, taskId, language }: {
   const states: Record<string, string> = {
     intent: copy.intent, headers: copy.headers, complete: copy.complete, interrupted: copy.interrupted, failed: shell.failed,
   };
-  const efforts = { default: shell.defaultEffort, low: shell.lowEffort, high: shell.highEffort };
-  const labelEffort = (effort: keyof typeof efforts) => language === "en" ? effort : efforts[effort];
+  const labelEffort = (effort: string) => language === "en" ? effort : effortLabel(language, effort);
   return <details><summary>{formatEvidence(copy.apiRequests, language, { count: usage.requestCount })}</summary>
     <p>{copy.viaApi}</p>
     <p>{taskId && <>{ids.task} <code>{taskId}</code> · </>}{ids.segment} <code>{records[0]?.segmentId}</code></p>

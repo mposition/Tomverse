@@ -47,6 +47,8 @@ export type CodeWorktree = {
 export type CodeGitWorkspace = { kind: "unavailable" } | {
   kind: "git"; id: string; path: string; branch: string; bases: CodeWorktreeBase[];
 };
+/** "default", or a reasoning level id the coding API's model catalog names for the model (low, high, and any it adds). */
+export const codeEffort = z.string().regex(/^(?:default|[a-z][a-z0-9_-]{0,23})$/);
 export const codeLimitProfile = z.enum(["standard", "extended", "unlimited"]);
 export type CodeLimitProfile = z.infer<typeof codeLimitProfile>;
 export const startInput = z.object({
@@ -55,7 +57,7 @@ export const startInput = z.object({
   prompt: z.string().trim().max(MAX_CODE_PROMPT_CHARACTERS),
   mode: z.enum(["ask", "agent", "plan"]),
   model: z.string().min(1).max(240),
-  effort: z.enum(["default", "low", "high"]),
+  effort: codeEffort,
   executionMode: codeExecutionMode.optional(),
   limits: codeLimitProfile.optional(),
   goal: z.boolean().optional(),
@@ -91,7 +93,7 @@ export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
 export type Decision = z.infer<typeof decisions>;
 export type WebDestination = z.infer<typeof webDestination>;
-export type Model = { id: string; name: string; provider: string; efforts: Array<"low" | "high"> };
+export type Model = { id: string; name: string; provider: string; efforts: string[] };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
 export type Entry = { role: "user" | "assistant"; text: string } | { role: "plan" } | CodeEventEntry;

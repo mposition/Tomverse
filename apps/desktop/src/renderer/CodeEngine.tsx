@@ -1,7 +1,29 @@
 import { useState } from "react";
 import type { Language } from "../../../../lib/language";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { codeLimitProfile, type CodeLimitProfile, type CompactHistoryResult, type Task } from "../contract";
+
+/** A reasoning level for display: the named ones are translated, any other id the catalog reports is shown as it is. */
+export function effortLabel(language: Language, effort: string): string {
+  const shell = desktopShellCopy[language];
+  const engine = desktopCodeEngineCopy[language];
+  switch (effort) {
+    case "default": return shell.defaultEffort;
+    case "low": return shell.lowEffort;
+    case "high": return shell.highEffort;
+    case "minimal": return engine.effortMinimal;
+    case "medium": return engine.effortMedium;
+    case "xhigh": return engine.effortXhigh;
+    case "max": return engine.effortMax;
+    default: return effort;
+  }
+}
+
+/** The levels to offer for a model: default first, then the ones its catalog entry names, and a level already chosen so the choice stays visible. */
+export function effortOptions(offered: readonly string[] | undefined, chosen: string): string[] {
+  return [...new Set(["default", ...(offered ?? []), chosen])];
+}
 
 const storageKey = "tomverse.desktop.codeEngine";
 

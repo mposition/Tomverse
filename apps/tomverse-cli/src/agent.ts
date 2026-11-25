@@ -503,7 +503,7 @@ export class Runner {
     }
 
     assertEffort(effort: Effort) {
-        if (!isEffort(effort)) throw new GatewayError("protocol", "Effort must be low, default, or high.");
+        if (!isEffort(effort)) throw new GatewayError("protocol", "Effort must be default or a level the model offers (see `tomverse models`).");
     }
 
     async runTask(prompt: string, effort: Effort = "default", context?: {

@@ -36,7 +36,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
-import { CodeEngineBar, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
+import { CodeEngineBar, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -84,9 +84,6 @@ const statusLabels = {
   starting: "starting", running: "running", approval: "approval", stopping: "stopping", completed: "completed",
   clarification: "waiting", blocked: "waiting", stopped: "stopped", unknown: "unconfirmed", failed: "failed",
 } as const satisfies Record<Task["status"], keyof ShellCopy>;
-const effortLabels = {
-  default: "defaultEffort", low: "lowEffort", high: "highEffort",
-} as const satisfies Record<StartInput["effort"], keyof ShellCopy>;
 function readLanguage(): Language {
   const saved = localStorage.getItem(languagePreference);
   return isLanguage(saved) ? saved : "en";
@@ -198,8 +195,8 @@ function TaskConversation({ task, models, language, openSettings }: { task: Task
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
       {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language].cliFixture.replace("{cli}", task.execution.cli)}</span>}
       {task.savedLocally === false && <span>{copy.sessionOnly}</span>}
-      {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", copy[effortLabels[task.effort]])}</span>}
-      {task.actual && <span>{copy.appliedEffort.replace("{effort}", copy[effortLabels[task.actual]])}</span>}
+      {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", effortLabel(language, task.effort))}</span>}
+      {task.actual && <span>{copy.appliedEffort.replace("{effort}", effortLabel(language, task.actual))}</span>}
     </footer>
     <AnswerBasis task={task} language={language} />
     <BlockedPanel key={task.id ?? "new"} task={task} language={language} />
@@ -1028,7 +1025,7 @@ function Desktop() {
               {(composerModelId || !catalogUnavailable) && <details className="model-menu">
                 <summary aria-label={copy.modelEffort}><Sparkles size={15} />
                   <span>{composerModelName}
-                    {composerEffort !== "default" && ` · ${copy[effortLabels[composerEffort]]}`}</span><ChevronDown size={14} />
+                    {composerEffort !== "default" && ` · ${effortLabel(language, composerEffort)}`}</span><ChevronDown size={14} />
                 </summary>
                 <div className="model-popover">
                   <label>{copy.model}<select aria-label={copy.model} value={composerModelId} disabled={busy || pausedForInput || !models.length}
@@ -1039,7 +1036,7 @@ function Desktop() {
                   </select></label>
                   <label>{copy.reasoningEffort}<select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
                     onChange={(event) => setEffort(event.currentTarget.value as StartInput["effort"])}>
-                    {Object.entries(effortLabels).map(([value, key]) => <option value={value} key={value}>{copy[key]}</option>)}
+                    {effortOptions(selectedModel?.efforts, composerEffort).map((value) => <option value={value} key={value}>{effortLabel(language, value)}</option>)}
                   </select></label>
                   {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== "smart-adaptive" && !selectedModel.efforts.includes(effort) &&
                     <small>{copy.effortFallback}</small>}

@@ -36,7 +36,7 @@ Usage:
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
-  --effort <level>          Reasoning effort for the next task: low, default, high
+  --effort <level>          Reasoning effort for the next task: default, or a level the model offers (\`tomverse models\`)
   --model <id>              Model from \`tomverse models\` (default: config model)
   --read-only               No file changes or commands: the model can only list, search and read
   --limits <profile>        Limits per task: standard (${DEFAULTS.maxRequests} requests, ${DEFAULTS.timeoutMinutes} minutes), extended (200 requests, 120 minutes),
@@ -94,7 +94,7 @@ const positiveInt = (value: string | undefined, name: string, fallback: number) 
 
 const parseEffort = (value: string | undefined): Effort => {
     if (value === undefined) return "default";
-    if (!isEffort(value)) throw new UsageError("Effort must be low, default, or high.");
+    if (!isEffort(value)) throw new UsageError("Effort must be default or a level the model offers (see `tomverse models`).");
     return value;
 };
 

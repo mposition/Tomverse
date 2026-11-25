@@ -3,6 +3,7 @@ import test from "node:test";
 import { journalContext, journalEngine } from "../src/host/journal-view";
 import { estimateTokens } from "../../tomverse-cli/src/runtime";
 import { startInput } from "../src/contract";
+import { effortLabel, effortOptions } from "../src/renderer/CodeEngine";
 import { desktopCodeEngineCopy } from "../../../locales/desktopCodeEngine";
 import { SUPPORTED_LANGUAGES } from "../../../lib/language";
 
@@ -60,4 +61,21 @@ test("every supported language has the engine strings, with their placeholders",
       assert.ok(copy[key].trim().length > 0, `${language}.${key}`);
     }
   }
+});
+
+test("start input takes any level id the catalog could name, and rejects what is not one", () => {
+  const base = { prompt: "Fix it", mode: "agent", model: "m" } as const;
+  for (const effort of ["default", "low", "medium", "high", "xhigh"]) assert.equal(startInput.parse({ ...base, effort }).effort, effort);
+  for (const effort of ["", "Extra High", "high ", "1high", "x".repeat(40)]) assert.throws(() => startInput.parse({ ...base, effort }), effort);
+});
+
+test("the effort picker offers default and the model's own levels, keeping a level already chosen", () => {
+  assert.deepEqual(effortOptions(undefined, "default"), ["default"]);
+  assert.deepEqual(effortOptions([], "default"), ["default"]);
+  assert.deepEqual(effortOptions(["low", "medium", "high"], "default"), ["default", "low", "medium", "high"]);
+  assert.deepEqual(effortOptions(["low", "high"], "xhigh"), ["default", "low", "high", "xhigh"]);
+  assert.equal(effortLabel("en", "low"), "Low");
+  assert.equal(effortLabel("en", "medium"), "Medium");
+  assert.equal(effortLabel("ko", "xhigh"), "매우 높음");
+  assert.equal(effortLabel("en", "turbo"), "turbo", "an id with no translation is shown as the catalog gives it");
 });

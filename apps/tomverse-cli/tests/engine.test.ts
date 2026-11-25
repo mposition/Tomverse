@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- wire-format fixtures: request bodies are arbitrary JSON */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FakeGateway, toolResultsSinceUser } from "./fakeGateway.js";
+import { DEFAULT_MODELS, FakeGateway, toolResultsSinceUser } from "./fakeGateway.js";
 import { makeRepo, makeRunner, scriptedPrompter } from "./helpers.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, NO_LIMIT, isLimitProfile, resolveLimits } from "../src/runtime.js";
 import { parseGoalVerdict, type Runner } from "../src/agent.js";
@@ -226,6 +226,25 @@ test("a manual compaction of a finished task is one recorded request and keeps t
         assert.match(String(made.journal.state.messages[0]!.content), /^Summary of the earlier part of this session/);
         assert.equal(made.journal.state.messages.at(-1)!.role, "assistant");
         assert.ok(made.journal.state.generations.every((g) => g.closed), "the summary request is settled in the same checkpoint");
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a reasoning level the catalog names beyond low and high is sent as it is, and the applied one is recorded", async () => {
+    const models = DEFAULT_MODELS.map((model) => model.id === "fake-coder"
+        ? { ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "medium", "xhigh"] } } : model);
+    const gateway = await new FakeGateway({ models, script: () => ({ text: "ok" }) }).start();
+    try {
+        const made = await makeRunner(gateway, makeRepo());
+        const model = (await made.client.models()).find((item) => item.id === "fake-coder")!;
+        assert.deepEqual(model.reasoningEfforts, ["low", "medium", "xhigh"]);
+        assert.equal(await made.runner.runTask("Think hard.", "xhigh"), "success");
+        assert.equal(gateway.completions[0]!.body.tomverse_effort, "xhigh");
+        assert.equal(made.journal.state.generations[0]!.appliedEffort, "xhigh");
+        assert.equal(made.journal.state.tasks[0]!.effort, "xhigh");
+        await assert.rejects(made.runner.runTask("Bad level.", "Extra High"), /Effort must be/);
+        assert.equal(gateway.completions.length, 1, "a malformed level is refused before any request");
     } finally {
         await gateway.stop();
     }
