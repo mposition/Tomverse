@@ -89,6 +89,12 @@ const SKIPPED_DIRS = new Set([
 ]);
 
 export type ResolvedPath = { absolute: string; relative: string; exists: boolean };
+export type WorkspaceReference = { path: string; kind: "file" | "folder" };
+
+export function withWorkspaceReferences(prompt: string, references: readonly WorkspaceReference[]) {
+    if (!references.length) return prompt;
+    return `${prompt}\n\nUser-selected project references (workspace-relative path identifiers):\n${JSON.stringify(references)}\nUse normal workspace tools to inspect relevant references.`;
+}
 
 export class Workspace {
     /**
@@ -146,10 +152,24 @@ export class Workspace {
             throw new PathError(`${rel} can hold credentials, so the CLI does not ${purpose === "read" ? "read" : "change"} it. You can open it yourself.`);
         }
         const exists = missing.length === 0;
-        if (exists && purpose === "write" && lstatSync(absolute).isSymbolicLink()) {
+        if (purpose === "write" && (!same(lexical, absolute) || (exists && lstatSync(lexical).isSymbolicLink()))) {
             throw new PathError(`${rel} is a link; the CLI does not write through links.`);
         }
         return { absolute, relative: rel || ".", exists };
+    }
+
+    reference(input: string): WorkspaceReference {
+        const resolved = this.resolve(input, "read");
+        if (!resolved.exists) throw new PathError("The project reference no longer exists.");
+        const stat = statSync(resolved.absolute);
+        if (!stat.isFile() && !stat.isDirectory()) throw new PathError("Choose a project file or folder.");
+        const kind = stat.isDirectory() ? "folder" : "file";
+        const segments = resolved.relative.split("/");
+        if (kind === "file") segments.pop();
+        if (segments.some((segment) => SKIPPED_DIRS.has(segment.toLowerCase()))) {
+            throw new PathError("The project reference is in an excluded folder.");
+        }
+        return { path: resolved.relative, kind };
     }
 
     /** Editor-safe listing: bounded Git subprocess, then a yielding directory walk. */

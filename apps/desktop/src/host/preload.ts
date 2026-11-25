@@ -1,0 +1,126 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type { BrowserState } from "../browser-contract";
+import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
+import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
+import type { DesktopLoginState, LoginApi } from "../login-contract";
+
+const trustedWindow = location.pathname === "/approval";
+if (trustedWindow) {
+  contextBridge.exposeInMainWorld("approvalHost", {
+    approval: () => ipcRenderer.invoke("approval:read"),
+    decide: (input: Parameters<DesktopApi["decide"]>[0]) => ipcRenderer.invoke("approval:decide", input),
+  } satisfies Pick<DesktopApi, "approval" | "decide">);
+} else if (location.pathname === "/login") {
+  contextBridge.exposeInMainWorld("loginHost", {
+    state: () => ipcRenderer.invoke("login:state"),
+    subscribe(listener: (state: DesktopLoginState) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: DesktopLoginState) => listener(state);
+      ipcRenderer.on("login:changed", onState);
+      return () => ipcRenderer.removeListener("login:changed", onState);
+    },
+    provider: (provider: Parameters<LoginApi["provider"]>[0]) => ipcRenderer.invoke("login:provider", provider),
+    email: (input: Parameters<LoginApi["email"]>[0]) => ipcRenderer.invoke("login:email", input),
+    cancel: () => ipcRenderer.invoke("login:cancel"),
+    quit: () => ipcRenderer.invoke("login:quit"),
+  } satisfies LoginApi);
+} else {
+  contextBridge.exposeInMainWorld("desktop", {
+    state: () => ipcRenderer.invoke("desktop:state"),
+    setLanguage: (language: Parameters<DesktopApi["setLanguage"]>[0]) => ipcRenderer.invoke("desktop:language", language),
+    setCodeExecutionPreference: (mode: Parameters<DesktopApi["setCodeExecutionPreference"]>[0]) =>
+      ipcRenderer.invoke("desktop:code-execution-preference", mode),
+    updateCodeFallback: (input: Parameters<DesktopApi["updateCodeFallback"]>[0]) => ipcRenderer.invoke("desktop:update-code-fallback", input),
+    chooseCliPath: (provider?: Parameters<DesktopApi["chooseCliPath"]>[0]) => ipcRenderer.invoke("desktop:choose-cli-path", provider),
+    saveCliPath: (input: Parameters<DesktopApi["saveCliPath"]>[0]) => ipcRenderer.invoke("desktop:save-cli-path", input),
+    removeCliPath: (provider: Parameters<DesktopApi["removeCliPath"]>[0]) => ipcRenderer.invoke("desktop:remove-cli-path", provider),
+    checkCliAccount: (provider: Parameters<DesktopApi["checkCliAccount"]>[0]) => ipcRenderer.invoke("desktop:check-cli-account", provider),
+    openCliAuthGuide: (provider: Parameters<DesktopApi["openCliAuthGuide"]>[0]) => ipcRenderer.invoke("desktop:open-cli-auth-guide", provider),
+    checkCliProtocol: (provider: Parameters<DesktopApi["checkCliProtocol"]>[0]) => ipcRenderer.invoke("desktop:check-cli-protocol", provider),
+    cancelCliCheck: (kind: Parameters<DesktopApi["cancelCliCheck"]>[0]) => ipcRenderer.invoke("desktop:cancel-cli-check", kind),
+    subscribe(listener: (snapshot: Snapshot) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, snapshot: Snapshot) => listener(snapshot);
+      ipcRenderer.on("desktop:changed", onState);
+      return () => ipcRenderer.removeListener("desktop:changed", onState);
+    },
+    armChatLocation: () => ipcRenderer.invoke("desktop:location-arm"),
+    armDictation: () => ipcRenderer.invoke("desktop:dictation-arm"),
+    cancelDictation: (id: string) => ipcRenderer.invoke("desktop:dictation-cancel", id),
+    transcribeDictation: (input: Parameters<DesktopApi["transcribeDictation"]>[0]) => ipcRenderer.invoke("desktop:dictation-transcribe", input),
+    subscribeDictationStop(listener: () => void) {
+      const onStop = () => listener();
+      ipcRenderer.on("desktop:dictation-stop", onStop);
+      return () => ipcRenderer.removeListener("desktop:dictation-stop", onStop);
+    },
+    taskPulls: (command: Parameters<DesktopApi["taskPulls"]>[0]) => ipcRenderer.invoke("desktop:task-pulls", command),
+    codeBrowser: (command: Parameters<DesktopApi["codeBrowser"]>[0]) => ipcRenderer.invoke("desktop:code-browser", command),
+    subscribeCodeBrowser(listener: (state: BrowserState) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: BrowserState) => listener(state);
+      ipcRenderer.on("desktop:code-browser-state", onState);
+      return () => ipcRenderer.removeListener("desktop:code-browser-state", onState);
+    },
+    chooseRoot: () => ipcRenderer.invoke("desktop:choose-root"),
+    retryCodeCatalog: () => ipcRenderer.invoke("desktop:retry-code-catalog"),
+    chooseCodeReferences: (kind: Parameters<DesktopApi["chooseCodeReferences"]>[0]) => ipcRenderer.invoke("desktop:choose-code-references", kind),
+    removeCodeReference: (id: string) => ipcRenderer.invoke("desktop:remove-code-reference", id),
+    newTask: () => ipcRenderer.invoke("desktop:new-task"),
+    confirmHandoff: (input: Parameters<DesktopApi["confirmHandoff"]>[0]) => ipcRenderer.invoke("desktop:confirm-handoff", input),
+    removeHandoff: (id: string) => ipcRenderer.invoke("desktop:remove-handoff", id),
+    start: (input: Parameters<DesktopApi["start"]>[0]) => ipcRenderer.invoke("desktop:start", input),
+    stop: () => ipcRenderer.invoke("desktop:stop"),
+    openHistory: (id: string) => ipcRenderer.invoke("desktop:history", id),
+    deleteHistory: (id: string) => ipcRenderer.invoke("desktop:delete-history", id),
+    moreHistory: () => ipcRenderer.invoke("desktop:more-history"),
+    readChange: (id: string) => ipcRenderer.invoke("desktop:read-change", id),
+    undoChange: (id: string) => ipcRenderer.invoke("desktop:undo-change", id),
+    readCommand: (id: string) => ipcRenderer.invoke("desktop:read-command", id),
+    checkRecovery: (id: string) => ipcRenderer.invoke("desktop:check-recovery", id),
+    resume: (id: string) => ipcRenderer.invoke("desktop:resume", id),
+    followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
+    exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
+    copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),
+    openWeb: (destination: Parameters<DesktopApi["openWeb"]>[0]) => ipcRenderer.invoke("desktop:web", destination),
+    accountSettings: (input: Parameters<DesktopApi["accountSettings"]>[0]) =>
+      ipcRenderer.invoke("desktop:account-settings", input),
+    checkUpdate: () => ipcRenderer.invoke("desktop:check-update"),
+    installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
+    setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>
+      ipcRenderer.invoke("desktop:permission-profile", profile),
+    setCodeNotifications: (enabled: boolean) => ipcRenderer.invoke("desktop:code-notifications", enabled),
+    signIn: () => ipcRenderer.invoke("desktop:sign-in"),
+    signOut: () => ipcRenderer.invoke("desktop:sign-out"),
+    connectCopiedCodeKey: () => ipcRenderer.invoke("desktop:connect-copied-code-key"),
+    cancelSignIn: () => ipcRenderer.invoke("desktop:cancel-sign-in"),
+    pluginInventory: () => ipcRenderer.invoke("desktop:plugin-inventory"),
+    chatHistory: (product?: DesktopTextProduct) => ipcRenderer.invoke("chat:history", product),
+    chatSearch: (query: string, product?: DesktopTextProduct) => ipcRenderer.invoke("chat:search", { query, product }),
+    chatConversation: (input: Parameters<DesktopApi["chatConversation"]>[0]) => ipcRenderer.invoke("chat:conversation", input),
+    chatImportedSource: (input: Parameters<DesktopApi["chatImportedSource"]>[0]) => ipcRenderer.invoke("chat:imported-source", input),
+    openChatContinuation: (id: string) => ipcRenderer.invoke("chat:open-continuation", id),
+    renameChat: (input: Parameters<DesktopApi["renameChat"]>[0]) => ipcRenderer.invoke("chat:rename", input),
+    removeChat: (id: string) => ipcRenderer.invoke("chat:remove", id),
+    chatModels: () => ipcRenderer.invoke("chat:models"),
+    sendChat: (input: Parameters<DesktopApi["sendChat"]>[0]) => ipcRenderer.invoke("chat:send", input),
+    stopChat: () => ipcRenderer.invoke("chat:stop"),
+    subscribeChat(listener: (progress: ChatTurnProgress) => void) {
+      const onProgress = (_event: Electron.IpcRendererEvent, progress: ChatTurnProgress) => listener(progress);
+      ipcRenderer.on("chat:progress", onProgress);
+      return () => ipcRenderer.removeListener("chat:progress", onProgress);
+    },
+    sendReview: (input: Parameters<DesktopApi["sendReview"]>[0]) => ipcRenderer.invoke("review:send", input),
+    subscribeReview(listener: (progress: ReviewTurnProgress) => void) {
+      const onProgress = (_event: Electron.IpcRendererEvent, progress: ReviewTurnProgress) => listener(progress);
+      ipcRenderer.on("review:progress", onProgress);
+      return () => ipcRenderer.removeListener("review:progress", onProgress);
+    },
+    imageConversations: () => ipcRenderer.invoke("image:conversations"),
+    imageHistory: (id: string) => ipcRenderer.invoke("image:history", id),
+    imageGroup: (id: string) => ipcRenderer.invoke("image:group", id),
+    generateImages: (input: Parameters<DesktopApi["generateImages"]>[0]) => ipcRenderer.invoke("image:generate", input),
+    previewImage: (id: string) => ipcRenderer.invoke("image:preview", id),
+    saveImage: (input: Parameters<DesktopApi["saveImage"]>[0]) => ipcRenderer.invoke("image:save", input),
+    saveArtifact: (input: Parameters<DesktopApi["saveArtifact"]>[0]) => ipcRenderer.invoke("artifact:save", input),
+    uploadAttachment: (input: Parameters<DesktopApi["uploadAttachment"]>[0]) => ipcRenderer.invoke("attachment:upload", input),
+    cancelAttachmentUpload: (requestId: string) => ipcRenderer.invoke("attachment:cancel", requestId),
+    discardAttachment: (uploadId: string) => ipcRenderer.invoke("attachment:discard", uploadId),
+  } satisfies Omit<DesktopApi, "approval" | "decide">);
+}

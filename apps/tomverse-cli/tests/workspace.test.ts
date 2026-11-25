@@ -9,6 +9,7 @@ import { planPatch, PatchError } from "../src/patch.js";
 import { renderFileDiff, safeLine, safeText } from "../src/display.js";
 import { tempDir } from "./helpers.js";
 import { readInstructions } from "../src/main.js";
+import { readProjectInstructions } from "../src/runtime.js";
 
 const link = (target: string, path: string) => {
     // A junction needs no privilege on Windows; elsewhere a directory symlink.
@@ -60,6 +61,43 @@ test("Windows device, UNC and alternate-stream paths are refused", { skip: proce
     // The same folder in another letter case is the same folder.
     writeFileSync(join(root, "Case.txt"), "x");
     assert.equal(ws.resolve(join(root.toUpperCase(), "Case.txt"), "read").relative.toLowerCase(), "case.txt");
+});
+
+test("project references accept files and folders while respecting workspace exclusions", () => {
+    const root = tempDir("references");
+    const outside = tempDir("outside");
+    mkdirSync(join(root, "src"));
+    mkdirSync(join(root, "node_modules"));
+    mkdirSync(join(root, "private-data"));
+    writeFileSync(join(root, "src", "main.ts"), "");
+    writeFileSync(join(root, "node_modules", "index.js"), "");
+    writeFileSync(join(root, ".env"), "");
+    link(outside, join(root, "escape"));
+    const workspace = new Workspace(normalizeRoot(root), [join(root, "private-data")]);
+    assert.deepEqual(workspace.reference("."), { path: ".", kind: "folder" });
+    assert.deepEqual(workspace.reference(join(root, "src")), { path: "src", kind: "folder" });
+    assert.deepEqual(workspace.reference(join(root, "src", "main.ts")), { path: "src/main.ts", kind: "file" });
+    for (const path of ["missing", "node_modules", "node_modules/index.js", ".env", "private-data", "escape", outside]) {
+        assert.throws(() => workspace.reference(path), PathError, path);
+    }
+});
+
+test("large project instructions expose a bounded excerpt and a truncation flag", () => {
+    const root = tempDir("instructions");
+    const prefix = "Project guidance.\n";
+    const path = join(root, "AGENTS.md");
+    const workspace = new Workspace(normalizeRoot(root));
+    writeFileSync(path, prefix);
+    assert.deepEqual(readProjectInstructions(workspace), { text: prefix, truncated: false });
+    writeFileSync(path, prefix + "가".repeat(90_000) + "Outside the excerpt.");
+    const result = readProjectInstructions(workspace);
+    assert.equal(result?.truncated, true);
+    assert.ok(result?.text.startsWith(prefix));
+    assert.match(result?.text ?? "", /\[AGENTS\.md continues/);
+    assert.doesNotMatch(result?.text ?? "", /Outside the excerpt/);
+    writeFileSync(path, "a".repeat(31_999) + "😀 outside the excerpt.");
+    const unicode = readProjectInstructions(workspace);
+    assert.equal(unicode?.text.split("\n")[0], "a".repeat(31_999));
 });
 
 test("the workspace cannot be the home folder or a filesystem root", () => {

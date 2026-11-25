@@ -148,6 +148,31 @@ test("a long history is compacted with one request of the same model, keeping to
     );
 });
 
+test("compaction retains archived, current and queued follow-ups in the same task", () =>
+    withGateway((body) => ({ text: /Summarize this session/.test(lastUserText(body)) ? "Summary of the old work." : "Original answer." }), async (gateway) => {
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null });
+        assert.equal(await runner.runTask("Original task"), "success");
+        journal.state.messages.push(
+            { role: "user", content: "Earlier instruction" }, { role: "assistant", content: "Earlier reply" },
+            { role: "user", content: "Current instruction" }, { role: "assistant", content: "Current reply" },
+            { role: "assistant", content: "Additional context" },
+        );
+        const task = journal.state.tasks[0]!;
+        task.followUps = [
+            { text: "Earlier instruction", messageIndex: 2 },
+            { text: "Current instruction", messageIndex: 4 },
+            { text: "Queued instruction" },
+        ];
+        assert.equal(await runner.maybeCompact(true), "compacted");
+        const saved = Journal.read(journal.dir!);
+        assert.deepEqual(saved.tasks[0]?.followUps, [
+            { text: "Earlier instruction", messageIndex: null },
+            { text: "Current instruction", messageIndex: 2 },
+            { text: "Queued instruction" },
+        ]);
+        assert.equal(saved.messages[2]?.content, "Current instruction");
+    }));
+
 test("compaction never cuts between a tool call and its result or approval", () => {
     const messages = [
         { role: "user", content: "a" },

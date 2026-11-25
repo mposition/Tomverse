@@ -5,13 +5,15 @@ import {
     copyFileSync,
     existsSync,
     fsyncSync,
+    lstatSync,
     mkdirSync,
     openSync,
     readFileSync,
     readdirSync,
+    realpathSync,
     renameSync,
     rmSync,
-    statSync,
+    rmdirSync,
     unlinkSync,
     linkSync,
     writeFileSync,
@@ -51,8 +53,10 @@ export type GenerationRecord = {
     httpStatus?: number;
     requestId?: string | null;
     routedModel?: string | null;
+    catalogProvider?: string;
     appliedEffort?: import("./effort.js").Effort;
-    error?: { kind: string; code?: string; message: string };
+    transmission?: import("./transmission.js").RequestTransmission;
+    error?: { kind: string; code?: string; message: string; resetAt?: string };
     receipt?: Receipt | null;
     lookup?: "found" | "not_found";
     lookupAt?: string;
@@ -74,7 +78,12 @@ export type ApprovalRecord = {
     toolName: string;
     inputDigest: string;
     /** What the decision was bound to, checked again right before execution. */
-    binding: { files?: Array<{ path: string; preimage: string | null }>; cwd?: string; program?: string };
+    binding: {
+        files?: Array<{ path: string; preimage: string | null; disk?: import("./patch.js").FileBinding }>;
+        cwd?: string;
+        program?: string;
+        envNames?: string[];
+    };
     decision: "approved" | "denied";
     /** Approved without asking, by an earlier "always" answer in the same process. */
     by?: "remembered_answer";
@@ -91,6 +100,8 @@ export type ToolRecord = {
     state: "started" | "completed" | "failed";
     startedAt: string;
     endedAt?: string;
+    /** Actual spawn plan with environment names and no environment values. */
+    command?: Omit<import("./commands.js").CommandPlan, "shell" | "display">;
     /** The bounded result the model received, so it can be given back without re-running. */
     output?: unknown;
 };
@@ -101,14 +112,15 @@ export type ChangeRecord = {
     path: string;
     kind: "create" | "update" | "delete";
     /** mode: the permission bits before the change (POSIX), restored by undo. */
-    preimage: { sha256: string | null; backup: string | null; mode?: number };
-    postimage: { sha256: string | null };
+    preimage: { sha256: string | null; backup: string | null; mode?: number; identity?: string | null };
+    postimage: { sha256: string | null; backup?: string | null; identity?: string | null };
+    directory?: string;
     state: "writing" | "applied" | "failed" | "undone";
     appliedAt?: string;
     undoneAt?: string;
 };
 
-export type PendingApproval = { approvalId: string; toolCallId: string; toolName: string; input: unknown };
+export type PendingApproval = { approvalId: string; toolCallId: string; toolName: string; input: unknown; blockedDuringAnalysis?: true };
 
 export type SessionStatus =
     | "idle"
@@ -130,6 +142,9 @@ export type SessionState = {
     /** Full API base and non-secret credential identity for embedded hosts. */
     endpointBase?: string;
     keyIdentity?: string;
+    codeContinuation?: { segmentId: string; maximumKeyCreditCap: number };
+    codeMode?: "ask" | "plan" | "agent";
+    codePermission?: "desktop-accept-edits-v1";
     /** The key's public prefix: lookups are scoped to the key that sent a request. */
     keyPrefix: string;
     readOnly: boolean;
@@ -158,6 +173,12 @@ export type SessionState = {
     tasks: Array<{
         effort?: import("./effort.js").Effort;
         prompt: string;
+        references?: import("./workspace.js").WorkspaceReference[];
+        plan?: import("./task-plan.js").TaskPlan;
+        /** Model routing at accepted plan activations, kept outside the plan for older journal readers. */
+        planAssignments?: import("./task-plan.js").TaskPlanAssignments;
+        /** A missing index is queued. A null index was included before compaction. */
+        followUps?: Array<{ text: string; messageIndex?: number | null }>;
         startedAt: string;
         endedAt?: string;
         status?: SessionStatus;
@@ -248,9 +269,10 @@ export class Journal {
     static create(
         home: string | null,
         init: Omit<SessionState, "schemaVersion" | "id" | "createdAt" | "updatedAt" | "usage" | "messages" | "compactions" | "generations" | "approvals" | "tools" | "changes" | "pendingApprovals" | "tasks" | "status">,
-        io: JournalIo = { writeFileAtomic }
+        io: JournalIo = { writeFileAtomic },
+        id = Journal.newId(),
     ) {
-        const id = Journal.newId();
+        if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError("Invalid session id.");
         const state: SessionState = {
             schemaVersion: SESSION_SCHEMA_VERSION,
             id,
@@ -269,9 +291,12 @@ export class Journal {
             status: "idle",
         };
         if (home === null) return new Journal(state, null, io);
-        const dir = join(sessionsDir(home), id);
-        const sessionsCreated = !existsSync(sessionsDir(home));
-        mkdirSync(join(dir, "backups"), { recursive: true, mode: 0o700 });
+        const parent = sessionsDir(home);
+        const dir = join(parent, id);
+        const sessionsCreated = !existsSync(parent);
+        mkdirSync(parent, { recursive: true, mode: 0o700 });
+        mkdirSync(dir, { mode: 0o700 });
+        mkdirSync(join(dir, "backups"), { mode: 0o700 });
         if (process.platform !== "win32") {
             // The sessions folder only when the CLI created it; each session's own folder always.
             if (sessionsCreated) chmodSync(sessionsDir(home), 0o700);
@@ -280,19 +305,35 @@ export class Journal {
         }
         const journal = new Journal(state, dir, io);
         journal.acquireLock();
-        journal.commit();
-        return journal;
+        try {
+            journal.commit();
+            return journal;
+        } catch (error) {
+            journal.release();
+            try {
+                rmdirSync(join(dir, "backups"));
+                rmdirSync(dir);
+            } catch { /* Preserve an existing checkpoint or backup. */ }
+            throw error;
+        }
     }
 
     static open(home: string, id: string, io: JournalIo = { writeFileAtomic }) {
         if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError(`'${id}' is not a session id.`);
         const dir = join(sessionsDir(home), id);
         if (!existsSync(join(dir, "session.json"))) throw new JournalError(`No session ${id}.`);
-        const journal = new Journal(Journal.read(dir), dir, io);
-        journal.acquireLock();
-        // Re-read under the lock: another writer may have just finished.
-        Object.assign(journal.state, Journal.read(dir));
-        return journal;
+        const lock = join(dir, "lock");
+        claimLock(lock, id);
+        try {
+            const state = Journal.read(dir);
+            if (state.id !== id) throw new JournalError(`Session ${id} does not match its checkpoint.`);
+            const journal = new Journal(state, dir, io);
+            journal.lockPath = lock;
+            return journal;
+        } catch (error) {
+            try { unlinkSync(lock); } catch { /* Keep the checkpoint error. */ }
+            throw error;
+        }
     }
 
     /** Reads a checkpoint; falls back to the previous one only to report, never silently. */
@@ -357,9 +398,9 @@ export class Journal {
     /** --no-persist keeps backups in memory: undo works until the process exits. */
     private readonly memoryBackups = new Map<string, Buffer>();
 
-    saveBackup(changeId: string, bytes: Buffer) {
+    saveBackup(changeId: string, bytes: Buffer, image: "pre" | "post" = "pre") {
         if (this.broken) throw this.broken;
-        const name = `${changeId}.pre`;
+        const name = `${changeId}.${image}`;
         if (!this.dir) {
             this.memoryBackups.set(name, Buffer.from(bytes));
             return name;
@@ -373,6 +414,7 @@ export class Journal {
     }
 
     readBackup(name: string) {
+        if (!/^[A-Za-z0-9_-]+\.(pre|post)$/.test(name)) throw new JournalError("Invalid recorded file snapshot.");
         if (!this.dir) return this.memoryBackups.get(name) ?? null;
         return readFileSync(join(this.dir, "backups", name));
     }
@@ -427,15 +469,16 @@ export type SessionSummary = {
     readable: boolean;
 };
 
-export const listSessions = (home: string): SessionSummary[] => {
+export const listSessions = (home: string, include: (state: SessionState) => boolean = () => true): SessionSummary[] => {
     const dir = sessionsDir(home);
     if (!existsSync(dir)) return [];
     const out: SessionSummary[] = [];
     for (const id of readdirSync(dir)) {
         const path = join(dir, id);
-        if (!statSync(path).isDirectory()) continue;
         try {
+            if (!lstatSync(path).isDirectory() || (!existsSync(join(path, "session.json")) && !existsSync(join(path, "session.prev.json")))) continue;
             const state = Journal.read(path);
+            if (state.id !== id || !include(state)) continue;
             out.push({
                 id: state.id,
                 root: state.workspace.root,
@@ -447,6 +490,7 @@ export const listSessions = (home: string): SessionSummary[] => {
                 readable: true,
             });
         } catch {
+            if (!existsSync(path)) continue;
             out.push({ id, root: "?", model: "?", status: "unreadable", requests: 0, updatedAt: "", firstTask: "", readable: false });
         }
     }
@@ -454,13 +498,36 @@ export const listSessions = (home: string): SessionSummary[] => {
 };
 
 /** Deletes a session folder and its backups. The caller has confirmed. */
-export const deleteSession = (home: string, id: string) => {
+export const deleteSession = (home: string, id: string, authorize?: (directory: string) => boolean) => {
     if (!/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/.test(id)) throw new JournalError(`'${id}' is not a session id.`);
-    const dir = join(sessionsDir(home), id);
-    if (!existsSync(dir)) throw new JournalError(`No session ${id}.`);
-    // Held while removing, so no process opens the session meanwhile.
-    claimLock(join(dir, "lock"), id);
-    rmSync(dir, { recursive: true, force: true });
+    const location = sessionsDir(home);
+    if (!existsSync(join(location, id))) throw new JournalError(`No session ${id}.`);
+    const parent = realpathSync(location);
+    const dir = join(parent, id);
+    const original = lstatSync(dir, { bigint: true });
+    const isOriginal = () => {
+        const current = lstatSync(dir, { bigint: true });
+        return current.isDirectory() && current.dev === original.dev && current.ino === original.ino && realpathSync(dir) === dir;
+    };
+    if (!isOriginal()) throw new JournalError(`Session ${id} does not resolve to a local record.`);
+    const lock = join(dir, "lock");
+    claimLock(lock, id);
+    let ownsLock = true;
+    try {
+        if (authorize && !authorize(dir)) throw new JournalError(`Session ${id} could not be verified for deletion.`);
+        const checkpoints = new Set(["session.json", "session.prev.json"]);
+        const entries = readdirSync(dir).filter((name) => name !== "lock");
+        for (const name of [...entries.filter((name) => !checkpoints.has(name)), ...entries.filter((name) => checkpoints.has(name))]) {
+            if (!isOriginal()) throw new JournalError(`Session ${id} changed before deletion.`);
+            rmSync(join(dir, name), { recursive: true });
+        }
+        if (!isOriginal()) throw new JournalError(`Session ${id} changed before deletion finished.`);
+        unlinkSync(lock);
+        ownsLock = false;
+        rmdirSync(dir);
+    } finally {
+        try { if (ownsLock && isOriginal()) unlinkSync(lock); } catch { /* The record may already be gone. */ }
+    }
 };
 
 /**
