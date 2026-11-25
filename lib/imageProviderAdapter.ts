@@ -2,7 +2,9 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
+import {
+  DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_BACKGROUND_REMOVAL, RECRAFT_SIZE, type DirectRasterProvider,
+} from "@/lib/directRasterModels";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
@@ -19,6 +21,7 @@ import {
   imageDeliveryMimeType,
   imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
+  isImagePhotoTool,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import {
@@ -558,6 +561,9 @@ const dispatchImageRequest = async (
   model: ImageModelProfile,
   input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  if (isImagePhotoTool(model.id)) {
+    return removeBackgroundWithRecraft(model, input);
+  }
   if (isDirectRasterProvider(model.provider)) {
     return generateWithDirectRaster(model.provider, model, input);
   }
@@ -1557,6 +1563,85 @@ const generateWithDirectRaster = async (
     outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
     providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
     ...(!isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
+      ? { reportedCostMicroUsd: units * 1000 }
+      : {}),
+  };
+};
+
+/**
+ * Recraft's background remover. The photo is centred on the white square its
+ * one option prices and comes back as a PNG of that square with the background
+ * cleared; the caller takes the photo's own area back out. No prompt is sent:
+ * the user's text never reaches this endpoint. One attempt, because a lost
+ * response can follow a request that was billed.
+ */
+const removeBackgroundWithRecraft = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
+  const contract = RECRAFT_BACKGROUND_REMOVAL;
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (model.id !== contract.modelId || !input.editImage || input.size !== contract.size || !price ||
+      price.outputCostMicroUsd < contract.outputCostMicroUsd) {
+    throw new ImageProviderError("provider_failed", "Unsupported background removal option.");
+  }
+  const apiKey = process.env.RECRAFT_API_TOKEN?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+  const side = Number(contract.size.split("x")[0]);
+  const photo = await sharp(input.editImage.bytes)
+    .resize(side, side, { fit: "contain", background: "#fff" })
+    .flatten({ background: "#fff" })
+    .png()
+    .toBuffer();
+  const params = { response_format: "b64_json", image_format: "png", zdr: true };
+  // The audit stores only the prepared photo's dimensions, digest and byte count.
+  const requestParams = {
+    ...params,
+    ...editAuditParams({
+      bytes: photo, width: side, height: side, mimeType: "image/png",
+      sha256: createHash("sha256").update(photo).digest("hex"),
+    }, "removeBackground"),
+  };
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch("https://external.api.recraft.ai/v1/images/removeBackground", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...params, image_url: `data:image/png;base64,${photo.toString("base64")}` }),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Background removal request failed.", null, null, requestParams);
+  }
+
+  const maxEncodedLength = 4 * Math.ceil(FAL_MAX_ASSET_BYTES / 3);
+  const payload = await readResponseToBuffer(response, response.ok ? maxEncodedLength + 64 * 1024 : 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  const rawId = response.headers.get("x-request-id") ?? payload?.image?.image_id;
+  const requestId = typeof rawId === "string" && /^[A-Za-z0-9_.:-]{1,180}$/.test(rawId) ? rawId : null;
+  if (!response.ok || payload?.error) {
+    const phase = /sensitive(content|image)|riskcontrol|content_?moderated/i.test(String(payload?.error?.code ?? ""))
+      ? "provider_moderation_rejected" : response.ok || response.status === 402
+        ? "provider_failed" : classifyImageProviderFailure(response.status, payload);
+    throw new ImageProviderError(phase, "Background removal was rejected.", response.status, requestId, requestParams);
+  }
+  const b64 = payload?.image?.b64_json;
+  const bytes = typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : null;
+  const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, "image/png") : null;
+  // A cut-out has an alpha channel; a picture without one is the photo unchanged.
+  const cutOut = dimensions && `${dimensions.width}x${dimensions.height}` === input.size &&
+    await sharp(bytes!).metadata().then(meta => meta.hasAlpha === true, () => false);
+  if (!bytes || !dimensions || !cutOut) {
+    const error = new ImageProviderError("provider_failed", "Background removal returned an unusable image.", response.status, requestId, requestParams);
+    error.afterGeneration = true;
+    throw error;
+  }
+  const units = payload?.credits;
+  return {
+    imageBytes: bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
+    providerRequestId: requestId, provenance: [],
+    outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
+    providerUsage: numericUsage({ credits: units }),
+    ...(Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
       ? { reportedCostMicroUsd: units * 1000 }
       : {}),
   };

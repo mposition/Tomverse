@@ -7,10 +7,10 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
-import { CATALOG_IMAGE_SIZES, RECRAFT_API_MODEL, RECRAFT_SIZE } from "@/lib/directRasterModels";
+import { CATALOG_IMAGE_SIZES, RECRAFT_API_MODEL, RECRAFT_BACKGROUND_REMOVAL, RECRAFT_SIZE } from "@/lib/directRasterModels";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import { processImageGenerationGroup, requestImageGeneration } from "@/lib/imageGenerationService";
-import { DEFAULT_IMAGE_MODEL_ID, getImageModelPrice, imageEditCredits, listEnabledImageModels } from "@/lib/imageModelRegistry";
+import { DEFAULT_IMAGE_MODEL_ID, getImageModel, getImageModelPrice, imageEditCredits, listEnabledImageModels } from "@/lib/imageModelRegistry";
 import { resolveActiveImageProviderBudgets } from "@/lib/imageProviderBudget";
 import { MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
@@ -63,6 +63,16 @@ async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useC
   if (edit && !imageEditEnabled()) return null;
   await refreshImageModelCatalog();
   const budgeted = new Set(resolveActiveImageProviderBudgets().filter(row => row.resolved.limits).map(row => row.provider));
+  if (useCase === "transparent-png") {
+    // A cut-out keeps the photo's own pixels, which only the background remover
+    // does: no image generator stands in for it.
+    const tool = getImageModel(RECRAFT_BACKGROUND_REMOVAL.modelId);
+    const price = edit && tool && budgeted.has(tool.provider) ? getImageModelPrice(tool.id, "medium", size) : null;
+    const credits = tool && price ? imageEditCredits(tool, price) : null;
+    return tool && price && credits ? {
+      modelId: tool.id, model: tool.name, credits, quality: price.quality, size, pricingVersion: tool.pricingVersion, useCase,
+    } : null;
+  }
   const models = listEnabledImageModels().filter(model => budgeted.has(model.provider));
   const quotesAt = (outputSize: typeof size) => models.flatMap(model => {
     for (const quality of qualities) {

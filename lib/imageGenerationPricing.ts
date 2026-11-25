@@ -10,7 +10,9 @@
 // Policy: docs/policy/image-generation.md. Numbers here are micro-USD
 // integers, same unit as the rest of the billing code.
 
-import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, RECRAFT_API_MODEL, RECRAFT_SIZE, SEEDREAM_API_MODEL } from "@/lib/directRasterModels";
+import {
+  CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, RECRAFT_API_MODEL, RECRAFT_BACKGROUND_REMOVAL, RECRAFT_SIZE, SEEDREAM_API_MODEL,
+} from "@/lib/directRasterModels";
 import { ALIBABA_SINGLE_PHOTO_EDIT_COST } from "@/lib/qwenImageRequest";
 import { BFL_FLUX3_IMAGE_EDIT_COST } from "@/lib/bflImageRequest";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
@@ -174,6 +176,21 @@ export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
         minimumOutputCostMicroUsd: DIRECT_RASTER_MODELS.recraft.outputCostMicroUsd,
       },
       verification: { verifiedAt: "2026-11-25", source: "https://www.recraft.ai/docs/api-reference/tools/image-to-image" },
+    };
+  }
+  if (modelId === RECRAFT_BACKGROUND_REMOVAL.modelId && process.env.IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED === "true") {
+    // A flat $0.01 (10 API units) per request, read 2026-11-26. The photo is
+    // the whole request: nothing is charged for it beside that price, and no
+    // prompt is sent.
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: 0,
+      inputTokens: null,
+      option: {
+        provider: "recraft", size: RECRAFT_BACKGROUND_REMOVAL.size, quality: "medium",
+        minimumOutputCostMicroUsd: RECRAFT_BACKGROUND_REMOVAL.outputCostMicroUsd,
+      },
+      verification: { verifiedAt: "2026-11-26", source: RECRAFT_BACKGROUND_REMOVAL.pricing },
     };
   }
   if (process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED === "true" && OPENAI_2_6_PHOTO_EDIT_IDS.includes(modelId)) {

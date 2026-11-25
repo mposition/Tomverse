@@ -7,7 +7,7 @@ import { STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, studioArtworkPath as asset
 import { studioPresetName, studioPublicationPresets, type StudioPublicationPreset } from "@/lib/studioPresetLibrary";
 import { STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets, studioPublishingDesign, studioPublishingPrompt, studioSocialFormat } from "@/lib/studioPublishing";
 import { drawStudioPublishingArtwork, renderStudioPublishingArtwork, type StudioPublishingArtwork } from "./studioPublishingArtwork";
-import { applyStudioSubjectMask, makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
+import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
@@ -253,7 +253,8 @@ export function StudioToolEditor({ tool, preset }: {
           category: posterCategory, style: posterStyle,
         });
       case "transparent-png":
-        return "Produce a square grayscale segmentation matte of the foreground subject. Subject pixels are white, background pixels black, and partially transparent edges gray. Do not reproduce the image, move, resize or crop anything. Match the exact original subject boundaries and keep transparent padding black.";
+        // The background remover takes no prompt; this is the request's label.
+        return "Remove the background from the photo.";
       default:
         return "";
     }
@@ -275,7 +276,7 @@ export function StudioToolEditor({ tool, preset }: {
           : makeStudioImageReference(photo) : undefined,
         signal,
       });
-      const output = pngTool ? await applyStudioSubjectMask(photo, generated) : generated;
+      const output = pngTool ? await cropStudioCutout(photo, generated) : generated;
       signal.throwIfAborted();
       urls.release(result);
       setResult(urls.make(output));

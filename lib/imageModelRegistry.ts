@@ -11,7 +11,9 @@
 // picker renders straight from these profiles.
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
-import { DIRECT_RASTER_MODELS, isDirectRasterProvider, type DirectRasterProvider } from "@/lib/directRasterModels";
+import {
+  DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_BACKGROUND_REMOVAL, type DirectRasterProvider,
+} from "@/lib/directRasterModels";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import type { ImageUseCase } from "@/lib/runtimeImageProviders";
@@ -838,6 +840,47 @@ function directRasterProfile(provider: DirectRasterProvider, name: string, useCa
   };
 }
 
+/**
+ * Photo tools that are priced and settled like an image model but generate
+ * nothing. Kept out of IMAGE_MODEL_REGISTRY on purpose: no picker, router,
+ * comparison or catalogue screen lists one. A tool is found by its id alone,
+ * and only an edit of a supplied photo may name it (isImagePhotoTool).
+ *
+ * The background remover: $0.01 per request (Recraft's pricing page, read
+ * 2026-11-26), no prompt and no thinking. Worst case 10,000 + the 5,000 prompt
+ * budget every option carries = 15,000 micro-USD, floor 17; 20 credits is 750
+ * per credit. It edits only while IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED is
+ * "true" (imageEditPricing).
+ */
+export const IMAGE_PHOTO_TOOLS: readonly ImageModelProfile[] = [{
+  id: RECRAFT_BACKGROUND_REMOVAL.modelId,
+  apiModelId: RECRAFT_BACKGROUND_REMOVAL.modelId,
+  provider: "recraft",
+  name: "Recraft Background Remover",
+  lifecycle: "stable",
+  disabledReason: null,
+  sizes: [RECRAFT_BACKGROUND_REMOVAL.size],
+  qualities: ["medium"],
+  prices: [{
+    size: RECRAFT_BACKGROUND_REMOVAL.size, quality: "medium",
+    credits: RECRAFT_BACKGROUND_REMOVAL.credits, outputCostMicroUsd: RECRAFT_BACKGROUND_REMOVAL.outputCostMicroUsd,
+  }],
+  latencyClass: "fast",
+  provenance: [],
+  outputMimeTypes: ["image/png"],
+  deliveryMimeType: "image/png",
+  pricingVersion: RECRAFT_BACKGROUND_REMOVAL.modelId + "-2026-11-26",
+  priceVerification: {
+    verifiedAt: "2026-11-26",
+    sources: [RECRAFT_BACKGROUND_REMOVAL.pricing, RECRAFT_BACKGROUND_REMOVAL.docs],
+    thinkingCapMicroUsd: 0,
+  },
+}];
+
+/** True for a photo tool: a model id that edits a photo and can generate nothing. */
+export const isImagePhotoTool = (modelId: string): boolean =>
+  IMAGE_PHOTO_TOOLS.some((model) => model.id === modelId);
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
@@ -913,15 +956,16 @@ export const listImageModels = () => activeImageModels;
 export const listEnabledImageModels = () =>
   activeImageModels.filter((model) => model.disabledReason === null);
 
+// A photo tool's id is reserved by code: a catalogue row cannot stand in for it or reprice it.
 export const getImageModel = (modelId: string): ImageModelProfile | null =>
-  findImageModel(activeImageModels, modelId);
+  findImageModel(IMAGE_PHOTO_TOOLS, modelId) ?? findImageModel(activeImageModels, modelId);
 
 export const getImageModelPrice = (
   modelId: string,
   quality: string,
   size: string
 ): ImageModelOptionPrice | null =>
-  findImageModelPrice(activeImageModels, modelId, quality, size);
+  findImageModelPrice(isImagePhotoTool(modelId) ? IMAGE_PHOTO_TOOLS : activeImageModels, modelId, quality, size);
 
 /**
  * How a provider bills the thinking of one image request, and so whether the
@@ -1089,7 +1133,8 @@ const imageThinkingTerms = (
   apiModelId: unknown,
   confirmed?: ConfirmedImageBillingTerms | null
 ): ImageThinkingTerms | null => {
-  if (isDirectRasterProvider(provider) && apiModelId !== DIRECT_RASTER_MODELS[provider].apiModelId) return null;
+  if (isDirectRasterProvider(provider) && apiModelId !== DIRECT_RASTER_MODELS[provider].apiModelId &&
+      !(provider === "recraft" && apiModelId === RECRAFT_BACKGROUND_REMOVAL.modelId)) return null;
   if (provider === "ideogram" && apiModelId !== IDEOGRAM_MODEL_ID) return null;
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
   const bound = googleImageOutputLimitBound(provider, apiModelId, confirmed);

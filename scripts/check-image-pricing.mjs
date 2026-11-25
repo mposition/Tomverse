@@ -18,6 +18,7 @@ import {
 } from "../lib/imageGenerationPricing.ts";
 import {
   IMAGE_MODEL_REGISTRY,
+  IMAGE_PHOTO_TOOLS,
   listEnabledImageModels,
   maxImageRequestCostMicroUsd,
   minimumCreditsForImageOption,
@@ -25,6 +26,8 @@ import {
 
 const failures = [];
 const warnings = [];
+// A photo tool is priced and settled like a model, so it is held to the same rules.
+const PRICED_PROFILES = [...IMAGE_MODEL_REGISTRY, ...IMAGE_PHOTO_TOOLS];
 
 const QUALITIES = ["low", "medium", "high"];
 const SIZES = ["1024x1024", "1536x1024", "1024x1536"];
@@ -109,7 +112,7 @@ if (PRICE_VERIFICATION.sources.length === 0) {
 // or above the mathematical minimum; a model whose price could not be read
 // from official documentation must be registered DISABLED rather than priced
 // from memory.
-for (const model of IMAGE_MODEL_REGISTRY) {
+for (const model of PRICED_PROFILES) {
   const label = `${model.provider}/${model.id}`;
   const verification = model.priceVerification;
 
@@ -233,7 +236,7 @@ for (const model of IMAGE_MODEL_REGISTRY) {
 // two *other* models may share one, because a version is what identifies which
 // price list a reservation was frozen against.
 const versionOwners = new Map();
-for (const model of IMAGE_MODEL_REGISTRY) {
+for (const model of PRICED_PROFILES) {
   if (!model.pricingVersion) continue;
   const owners = versionOwners.get(model.pricingVersion) ?? [];
   owners.push(`${model.provider}/${model.id}`);

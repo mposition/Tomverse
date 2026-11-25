@@ -54,6 +54,7 @@ import {
   imageMeasuredOutputLimitBound,
   imageEditCredits,
   imageThinkingBilling,
+  isImagePhotoTool,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
@@ -419,8 +420,10 @@ export const requestImageGeneration = async (
     const price = getImageModelPrice(modelId, input.quality, input.size);
     return { modelId, model, price };
   });
+  // A photo tool has a price row but generates nothing: only an edit may name it.
   const unavailable = targetPlans.filter(
-    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price
+    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price ||
+      (isImagePhotoTool(plan.modelId) && !input.editSource)
   );
   if (unavailable.length > 0) {
     throw new ChatAccessError(

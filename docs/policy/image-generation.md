@@ -575,6 +575,19 @@ High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
 2048×2048 PNG를 반환했다. 공급자는 각각 250단위(US$0.25)를 보고했다.
 [Recraft 편집 API](https://www.recraft.ai/docs/api-reference/tools/image-to-image) · [Recraft 데이터 보존](https://www.recraft.ai/docs/api-reference/zero-data-retention)
 
+**배경 제거는 이미지 생성 모델이 아니라 사진 도구다.** `IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED`가
+켜졌을 때 Recraft의 `removeBackground`에 사진 한 장을 보낸다. 사진은 비율을 유지해 흰색
+1024×1024 정사각형에 맞춰 data URL로 전달하고, `zdr: true`·`b64_json`·`image_format: "png"`를
+쓴다. 프롬프트는 보내지 않는다. 공개 가격은 요청당 US$0.01(API 10단위, 2026-11-26 확인)이고
+판매가는 20크레딧이다: (10,000 + 프롬프트 예산 5,000) / 20 = 750µUSD/크레딧, 하한 17크레딧.
+반환된 PNG가 1024×1024이고 알파 채널이 있을 때만 결과로 받는다.
+이 도구는 `IMAGE_MODEL_REGISTRY`에 넣지 않는다(`IMAGE_PHOTO_TOOLS`). 그래서 Chat의 모델 선택,
+자동 라우팅, 비교, Admin 카탈로그에 나오지 않고, 사진이 없는 요청은 예약 전에 거절한다.
+가격 검사(`check:image-pricing`)는 사진 도구도 함께 본다. 기본값은 꺼짐이며, 켜기 전에 dev에서
+한 번 호출해 응답의 `image.b64_json` 필드, 출력 크기, 보고 단위(10)를 확인한다. 이 세 가지는
+문서로만 확인했고 실측하지 않았다.
+[Recraft 배경 제거 API](https://www.recraft.ai/docs/api-reference/tools/remove-background) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
+
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
 각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
 `worst_case_cost_unbounded`는 `thinkingCapMicroUsd`가 `null`이어야 하며,
@@ -1230,6 +1243,9 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       DB 카탈로그에서 활성 상태이며 크기·작업·비용 조건을 통과한 후보만 고르고, 제출 시 같은 견적을 다시 확인한다.
       실사 이모티콘 팩과 개별 재생성은 비교 검증한 GPT Image 2.6 Sunburst의 1024×1024 Medium 사진 편집을 사용한다.
       이 두 기능은 해당 견적을 제공할 수 있을 때만 생성할 수 있다.
+      투명 PNG(`transparent-png`)는 배경 제거 도구의 견적만 받는다. 이미지 생성 모델은 피사체를
+      다시 그리므로 기능별 우선순위 설정으로도 대신할 수 없고, 도구가 꺼져 있으면 이 기능은 제공하지 않는다.
+      화면은 반환된 정사각형에서 사진 영역만 잘라 내려받게 한다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.

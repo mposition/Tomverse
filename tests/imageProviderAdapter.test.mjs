@@ -892,3 +892,65 @@ test("Recraft V4 Pro edits a square reference with zero data retention and deliv
   }
   assert.equal(network.mock.callCount(), 1);
 });
+
+test("the background remover sends only the padded photo and accepts only a same-size cut-out", async t => {
+  const sharp = (await import("sharp")).default;
+  const { getImageModel, isImagePhotoTool, listImageModels, minimumCreditsForImageOption } =
+    createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
+  const id = "recraft-remove-background";
+  const model = getImageModel(id);
+  const price = model.prices[0];
+  assert.ok(isImagePhotoTool(id));
+  // Never a catalogue row: no picker, router or comparison can list it.
+  assert.ok(!IMAGE_MODEL_REGISTRY.some(row => row.id === id) && !listImageModels().some(row => row.id === id));
+  assert.deepEqual([price.size, price.quality, price.credits, price.outputCostMicroUsd], ["1024x1024", "medium", 20, 10_000]);
+  assert.equal(minimumCreditsForImageOption(model, price), 17);
+
+  const source = await sharp({ create: { width: 640, height: 480, channels: 4, background: { r: 0, g: 0, b: 255, alpha: 0.5 } } }).png().toBuffer();
+  const editImage = { bytes: source, mimeType: "image/png", width: 640, height: 480, sha256: "e".repeat(64) };
+  const request = { modelId: id, quality: "medium", size: "1024x1024", prompt: "private label", editImage };
+  const cutOut = (side, channels = 4) =>
+    sharp({ create: { width: side, height: side, channels, background: { r: 9, g: 9, b: 9, alpha: 0 } } }).png().toBuffer();
+  let answer = async () => ({ credits: 10, image: { image_id: "cut-1", b64_json: (await cutOut(1024)).toString("base64") } });
+  const network = t.mock.method(globalThis, "fetch", async (url, init) => {
+    assert.equal(url, "https://external.api.recraft.ai/v1/images/removeBackground");
+    assert.equal(init.redirect, "error");
+    assert.equal(init.headers.Authorization, "Bearer test-key");
+    const { image_url, ...params } = JSON.parse(init.body);
+    assert.deepEqual(params, { response_format: "b64_json", image_format: "png", zdr: true });
+    const photo = await sharp(Buffer.from(image_url.replace("data:image/png;base64,", ""), "base64")).metadata();
+    assert.deepEqual([photo.width, photo.height, photo.hasAlpha], [1024, 1024, false]);
+    return Response.json(await answer());
+  });
+  const enabled = run => withEnv("IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED", "true", () => withEnv("RECRAFT_API_TOKEN", "test-key", run));
+
+  await withEnv("IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED", "false", async () => {
+    assert.equal(imageEditCredits(model, price), null);
+    await assert.rejects(generateImageWithProvider(request), /cannot edit/);
+  });
+  await enabled(async () => {
+    assert.equal(imageEditCredits(model, price), 20);
+    assert.equal(imageEditCredits(model, { ...price, outputCostMicroUsd: 9_999 }), null);
+    // A tool generates nothing: a request without a photo never reaches the provider.
+    await assert.rejects(generateImageWithProvider({ ...request, editImage: undefined }), /Unsupported background removal/);
+    assert.equal(network.mock.callCount(), 0);
+
+    const result = await generateImageWithProvider(request);
+    assert.deepEqual([result.outputWidth, result.outputHeight, result.mimeType], [1024, 1024, "image/png"]);
+    assert.equal(result.reportedCostMicroUsd, 10_000);
+    assert.equal(result.providerRequestId, "cut-1");
+    assert.deepEqual([result.requestParams.endpoint, result.requestParams.image.width], ["removeBackground", 1024]);
+    const audit = JSON.stringify(result.requestParams);
+    assert.ok(!audit.includes("base64") && !audit.includes(request.prompt));
+
+    // Billed, then refused: another size, or a picture with no alpha channel.
+    for (const bytes of [await cutOut(512), await cutOut(1024, 3)]) {
+      answer = async () => ({ credits: 10, image: { b64_json: bytes.toString("base64") } });
+      await assert.rejects(generateImageWithProvider(request),
+        error => error instanceof ImageProviderError && error.afterGeneration === true);
+    }
+    answer = async () => ({ credits: 10, image: { url: "https://img.recraft.ai/cut.png" } });
+    await assert.rejects(generateImageWithProvider(request), error => error.afterGeneration === true);
+  });
+  assert.equal(network.mock.callCount(), 4);
+});

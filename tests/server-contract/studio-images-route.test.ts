@@ -266,6 +266,31 @@ test("real sticker packs and individual edits require the verified square Sunbur
   assert.equal(reservations.length, 3);
 });
 
+test("a transparent PNG is quoted on the background remover alone, and only while it is switched on", async context => {
+  context.after(() => {
+    delete process.env.IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED;
+    delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES;
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  // A route preference cannot put an image generator in the remover's place.
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "transparent-png": ["gpt-image-2"] });
+  const request = new Request(base + "?size=1024x1024&edit=true&useCase=transparent-png");
+  assert.equal((await GET(request)).status, 503);
+  process.env.IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED = "true";
+  const quote = await (await GET(request)).json();
+  assert.deepEqual([quote.modelId, quote.size, quote.quality, quote.credits, quote.useCase],
+    ["recraft-remove-background", "1024x1024", "medium", 20, "transparent-png"]);
+  assert.equal((await GET(new Request(request.url.replace("edit=true", "edit=false")))).status, 503);
+  assert.equal((await GET(new Request(request.url.replace("1024x1024", "1536x1024")))).status, 503);
+  // No other feature is offered the tool.
+  assert.notEqual((await (await GET(quoteRequest())).json()).modelId, quote.modelId);
+  assert.equal((await post({ ...quotedSubmission(quote), credits: 19 })).status, 409);
+  assert.equal((await post(quotedSubmission(quote))).status, 202);
+  assert.deepEqual(reservations.map(row => row.modelIds), [["recraft-remove-background"]]);
+  process.env.IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED = "false";
+  assert.equal((await post({ ...quotedSubmission(quote), idempotencyKey: randomUUID() })).status, 409);
+});
+
 test("Studio reserves exactly the quoted model, quality, size and credit amount", async context => {
   const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
   context.after(() => {
