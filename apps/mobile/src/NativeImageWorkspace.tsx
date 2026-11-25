@@ -4,6 +4,7 @@ import { mobileReviewCopy } from "../../../locales/mobileReview";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatTransport, MobileCapabilities } from "./chatTransport";
 import { ImageTurn } from "./ImageTurn";
+import { ProviderMark } from "./ModelChoices";
 import { Sheet } from "./Sheet";
 
 export function NativeImageWorkspace({ transport, language, owner, initial, historyId, onClose, onBusy, onCreated }: {
@@ -88,7 +89,23 @@ export function NativeImageWorkspace({ transport, language, owner, initial, hist
     <p>{c.imageHint}</p>{initial?.unsupported && <p className="notice">{c.unsupported}</p>}{error && <p role="alert" className="notice error">{error}</p>}
     {!cap?.images?.enabled && <p role="status">{c.unavailable}</p>}
     <label>{c.prompt}<textarea maxLength={8000} value={prompt} disabled={busy || unknown} onChange={event => { setPrompt(event.target.value); setConsent(false); }} /></label>
-    <div className="review-model-options">{models.map(model => <label key={model.id}>{model.name}<input type="checkbox" checked={selected.includes(model.id)} disabled={busy || unknown || Boolean(initial) || (!selected.includes(model.id) && selected.length >= (cap?.images?.maxModels ?? 1))} onChange={event => { setSelected(previous => event.target.checked ? [...previous, model.id] : previous.filter(id => id !== model.id)); setConsent(false); }} /></label>)}</div>
+    <div className="review-model-options">
+      {models.map(model => (
+        <label key={model.id}>
+          <span className="native-image-model-name"><ProviderMark provider={model.provider} />{model.name}</span>
+          <input
+            type="checkbox"
+            checked={selected.includes(model.id)}
+            disabled={busy || unknown || Boolean(initial) || (!selected.includes(model.id) && selected.length >= (cap?.images?.maxModels ?? 1))}
+            onChange={event => {
+              const checked = event.target.checked;
+              setSelected(previous => checked ? [...previous, model.id] : previous.filter(id => id !== model.id));
+              setConsent(false);
+            }}
+          />
+        </label>
+      ))}
+    </div>
     <label>{c.quality}<select value={quality} disabled={busy || unknown} onChange={event => { setQuality(event.target.value); setConsent(false); }}>{["low", "medium", "high"].map(value => <option key={value}>{value}</option>)}</select></label>
     <label>{c.size}<select value={size} disabled={busy || unknown} onChange={event => { setSize(event.target.value); setConsent(false); }}>{displayedSizes.map(value => <option key={value}>{value}</option>)}</select></label>
     <ul>{quote.map((item, index) => <li key={selected[index]}>{item.model?.name ?? selected[index]} · {item.price?.credits ?? "—"} {c.credits}</li>)}</ul>
