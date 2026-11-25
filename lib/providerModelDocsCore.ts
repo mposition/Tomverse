@@ -451,13 +451,39 @@ const tableAfter = (markdown: string, start: number) => {
   return { header: rows[0], body: rows.slice(2) };
 };
 
-/** Read only model identities here. Each model's own Live endpoint and tariff are verified separately. */
-export function listedOpenAiLiveModels(markdown: string): string[] | null {
+// Read on 2026-11-25. These exact OpenAI notices cover named text models or
+// Ultrafast text processing only. This acknowledgement is scoped to Live.
+const reviewedNonVoicePricingNotices = new Set([
+  "For GPT-6.2 Astra and GPT-6.2 Sol, Ultrafast costs 3 times the Standard rate through February 28, 2027, and 6 times the Standard rate starting March 1, 2027 (Pacific time).",
+  "GPT-5.6 Sol’s promotional pricing is available until November 30, 2026.",
+  "GPT-6 Astra for Law, GPT-6.2 Astra for Law, GPT-6 Rosalind, GPT-6.2 Astra Healthcare, GPT-6.2 Sol Healthcare, GPT-6 Astra Healthcare, and GPT-6.1 Sol Healthcare promotional pricing is available at least through December 31, 2026.",
+]);
+
+export function openAiLiveModelsAtPublishedRate(markdown: string, microUsdPerMinute: number): string[] | null {
+  const notices = promotionNotices("openai", markdown);
+  if (notices.unacknowledged.some(sentence => !reviewedNonVoicePricingNotices.has(sentence))) return null;
   const heading = /^(?:#{1,6} )?GPT-Live(?: sessions)?[ \t]*\r?$/im.exec(markdown);
   if (!heading) return null;
-  const table = tableAfter(markdown, heading.index + heading[0].length);
-  if (!table || !["Model|Active rate|Standby rate", "Model|Price per minute"].includes(table.header.join("|"))) return null;
-  return [...new Set(table.body.map(([id]) => id).filter(id => /^gpt-live-\d[\da-z.-]{0,99}$/.test(id)))];
+  // Both editions put the table immediately after its caption. The older one
+  // precedes that caption with a linked description of GPT-Live sessions.
+  const blocks = markdown.slice(heading.index + heading[0].length).trimStart().split(/\r?\n\s*\r?\n/);
+  if (blocks[0]?.startsWith("[GPT-Live ")) blocks.shift();
+  if (blocks[0]?.trim() === "### Pricing Table data") blocks.shift();
+  if (!blocks[0]?.startsWith("|")) return null;
+  const table = tableAfter(blocks[0], 0);
+  if (!table?.body.length) return null;
+  const columns = table.header.join("|");
+  const legacy = columns === "Model|Price per minute";
+  if (!legacy && columns !== "Model|Active rate|Standby rate") return null;
+  const candidates = new Set<string>();
+  for (const [id, price] of table.body) {
+    if (!/^gpt-live-\d[\da-z.-]{0,99}$/.test(id) || notices.promoted.has(id)) continue;
+    const amount = legacy ? price : price?.match(/^(\$[\d.]+)\s*\/\s*minute$/i)?.[1];
+    const rate = amount ? dollars(amount, "plain") : null;
+    if (rate === null) return null;
+    if (rate * 1_000_000 === microUsdPerMinute) candidates.add(id);
+  }
+  return [...candidates];
 }
 
 /** The text of one `##`/`###` section, up to the next heading of the same or higher level. */
@@ -470,7 +496,7 @@ const section = (markdown: string, heading: RegExp) => {
   return next === -1 ? rest : rest.slice(0, next);
 };
 
-/** Prices on the shared pricing page may be promotional. Use only the model's own documented rate. */
+/** Confirm the shared tariff independently on the exact model's Live endpoint. */
 export function openAiLiveMinuteRate(markdown: string, id: string): number | null {
   const notices = promotionNotices("openai", markdown);
   if (notices.unacknowledged.length || notices.promoted.has(id)) return null;
