@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element -- Electron bundles local renderer assets with Vite. */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {

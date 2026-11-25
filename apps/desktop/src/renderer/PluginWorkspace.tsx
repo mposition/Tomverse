@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element -- Electron bundles local renderer assets with Vite. */
 import { useEffect, useState } from "react";
 import { ExternalLink, Puzzle } from "lucide-react";
 import type { Language } from "../../../../lib/language";

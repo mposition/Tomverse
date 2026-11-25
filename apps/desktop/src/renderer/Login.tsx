@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element -- Vite bundles the Electron login assets. */
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, Mail, X } from "lucide-react";
 import { isValidLoginEmail, MAX_LOGIN_EMAIL_LENGTH } from "../../../../lib/emailValidation";

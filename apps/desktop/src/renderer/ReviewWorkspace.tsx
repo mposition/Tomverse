@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element -- Vite bundles the local provider logos. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, Check, ChevronDown, CodeXml, FileText, ImagePlus, Sparkles, Square } from "lucide-react";
 import { reviewWorkspaceCopy } from "../../../../lib/reviewWorkspaceCopy";
