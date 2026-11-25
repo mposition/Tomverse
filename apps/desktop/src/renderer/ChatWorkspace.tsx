@@ -37,6 +37,7 @@ import { AnswerModel, ChatMarkdown, CopyAnswer, UserMessageContent } from "./Cha
 export { ChatMarkdown } from "./ChatTranscript";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
+import { AnswerExtras } from "./AnswerExtras";
 import { HandoffDraft } from "./WorkspaceHandoff";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { readDesktopDraft, writeDesktopDraft } from "./draft-store";
@@ -968,6 +969,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
                       <ChatMarkdown content={message.content} language={language} />}</div>
                 {message.role === "user" && <SavedAttachments message={message} language={language} />}
                 <GeneratedFiles artifacts={message.artifacts} language={language} />
+                <AnswerExtras message={message} conversationId={chat.conversation?.id} language={language} product="chat" />
                 {message.searchMetadata?.reasoningEffort && <small className="chat-effort">
                   {message.searchMetadata.reasoningEffort.applied && `${copy.reasoningEffort} · ${effortLabels[message.searchMetadata.reasoningEffort.applied]}`}
                   {message.searchMetadata.reasoningEffort.requested !== message.searchMetadata.reasoningEffort.applied &&

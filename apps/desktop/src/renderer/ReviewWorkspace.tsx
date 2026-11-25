@@ -17,6 +17,7 @@ import { ChatMarkdown, ImportedSource, type useChatHistory } from "./ChatWorkspa
 import { DraftDictation } from "./DraftDictation";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
+import { AnswerExtras } from "./AnswerExtras";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
@@ -232,6 +233,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
               <ChatMarkdown content={answer.content} />
             </>}
             <GeneratedFiles artifacts={answer.artifacts} language={language} />
+            <AnswerExtras message={answer} conversationId={history.conversation?.id} language={language} product="review" />
             {answer.searchMetadata?.reasoningEffort?.applied &&
               <small className="chat-effort">{common.reasoningEffort} · {effortNames[answer.searchMetadata.reasoningEffort.applied]}
                 {answer.searchMetadata.reasoningEffort.requested !== answer.searchMetadata.reasoningEffort.applied &&

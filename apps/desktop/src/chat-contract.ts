@@ -5,6 +5,7 @@ import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
 import type { AiModel } from "../../../lib/models";
 import { attachmentRead, attachmentUploadIds } from "./attachment-contract";
+import { sanitizeWebSearchCitations } from "../../../lib/webSearchCitations";
 import { ARTIFACT_LIMITS, isSupportedArtifactFormat, parseChatStreamArtifacts } from "../../../lib/generatedArtifactCore";
 
 export const chatId = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
@@ -91,6 +92,9 @@ export const chatMessage = z.object({
   memoryUsedCount: z.int().positive().nullish().catch(undefined),
   searchMetadata: z.object({
     reasoningEffort: z.object({ requested: chatEffort, applied: chatEffort.optional() }).optional(),
+    // Web search sources: only http(s) URLs survive the shared sanitizer, so the renderer never sees another scheme.
+    citations: z.unknown().optional().transform((value) => Array.isArray(value)
+      ? sanitizeWebSearchCitations(value.filter((entry) => entry && typeof entry === "object")).slice(0, 50) : []),
   }).nullish(),
   attachments: z.array(attachmentRead).optional(),
   artifacts: z.unknown().optional().transform((value) => parseChatStreamArtifacts(value) ?? []),
