@@ -1279,12 +1279,23 @@ test("a native 2K Recraft reservation uses its own approved price and exact dime
       size: price.size, conversationId: null, idempotencyKey: randomUUID(),
     };
     await assert.rejects(requestImageGeneration({ ...request, size: "1024x1024" }), /not supported/);
+    // The approved 350-credit option exceeds the built-in Pro daily allowance of 300.
+    await assert.rejects(requestImageGeneration(request), { code: "PLAN_DAILY_CREDIT_LIMIT_REACHED" });
+    await prisma.creditLot.create({
+      data: {
+        userId: user.id, source: "credit_pack", originalCredits: 50, remainingCredits: 50,
+        originalFundedCostMicroUsd: BigInt(75_000), remainingFundedCostMicroUsd: BigInt(75_000),
+        status: "active", expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      },
+    });
     const result = await requestImageGeneration(request);
     assert.equal(result.status, "pending");
     const reservation = await prisma.imageCreditReservation.findFirstOrThrow({ where: { userId: user.id } });
     assert.equal(reservation.provider, "recraft");
     assert.equal(reservation.size, price.size);
     assert.equal(reservation.reservedCredits, price.credits);
+    assert.equal(reservation.planReservedCredits, 300);
+    assert.equal(reservation.addOnReservedCredits, 50);
     assert.equal(reservation.reservedCostMicroUsd, BigInt(255_000));
     assert.deepEqual((reservation.pricingSnapshot as { resolutionOption: unknown }).resolutionOption, { tier: "2k", aspectRatio: "1:1" });
   } finally {
