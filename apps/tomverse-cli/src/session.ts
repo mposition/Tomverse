@@ -42,7 +42,7 @@ export const SESSION_SCHEMA_VERSION = 1;
 
 export type GenerationRecord = {
     seq: number;
-    purpose: "agent" | "compact";
+    purpose: "agent" | "compact" | "goal";
     idempotencyKey: string;
     /**
      * intent: recorded, maybe sent, no answer seen (unknown until looked up).
@@ -156,7 +156,14 @@ export type SessionState = {
         contextWindowTokens: number;
         maxOutputTokens: number;
     };
-    limits: { maxRequests: number; timeoutMs: number; commandTimeoutMs: number };
+    /** profile: the named limit set the numbers came from; absent on sessions written before profiles existed (standard). */
+    limits: { maxRequests: number; timeoutMs: number; commandTimeoutMs: number; profile?: "standard" | "extended" | "unlimited" };
+    /**
+     * Goal mode, chosen when the session started: after the model says it is
+     * done, one more request asks whether the goal is verified, and an unmet
+     * goal continues on its own, at most `maxContinuations` times in a row.
+     */
+    goal?: { maxContinuations: number };
     usage: { requests: number; activeMs: number };
     messages: ModelMessage[];
     compactions: Array<{ at: string; requestSeq: number; replacedMessages: number }>;
@@ -179,6 +186,11 @@ export type SessionState = {
         planAssignments?: import("./task-plan.js").TaskPlanAssignments;
         /** A missing index is queued. A null index was included before compaction. */
         followUps?: Array<{ text: string; messageIndex?: number | null }>;
+        /** Messages held for after the model finishes: the first one becomes a follow-up when it does. */
+        queued?: Array<{ id: string; text: string }>;
+        /** Automatic continuations goal mode has made in this task, and what each check said. */
+        goalContinuations?: number;
+        goalChecks?: Array<{ at: string; met: boolean; summary: string; next?: string; continuation: number }>;
         startedAt: string;
         endedAt?: string;
         status?: SessionStatus;

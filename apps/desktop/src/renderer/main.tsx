@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
@@ -14,6 +14,7 @@ import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } 
 import { isLanguage, type Language } from "../../../../lib/language";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopCliAccountCopy } from "../../../../locales/desktopCliAccount";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopCodeExecutionCopy } from "../../../../locales/desktopCodeExecution";
 import { desktopCodeContinuationCopy } from "../../../../locales/desktopCodeQuota";
 import { desktopControlsCopy } from "../../../../locales/desktopControls";
@@ -36,6 +37,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
+import { CodeEngineBar, QueuePanel, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -84,9 +86,6 @@ const statusLabels = {
   starting: "starting", running: "running", approval: "approval", stopping: "stopping", completed: "completed",
   clarification: "waiting", blocked: "waiting", stopped: "stopped", unknown: "unconfirmed", failed: "failed",
 } as const satisfies Record<Task["status"], keyof ShellCopy>;
-const effortLabels = {
-  default: "defaultEffort", low: "lowEffort", high: "highEffort",
-} as const satisfies Record<StartInput["effort"], keyof ShellCopy>;
 function readLanguage(): Language {
   const saved = localStorage.getItem(languagePreference);
   return isLanguage(saved) ? saved : "en";
@@ -125,7 +124,7 @@ function CodePlanAnalysis({ analysis, language }: {
   </li>;
 }
 
-function TaskConversation({ task, models, language, openSettings }: { task: Task; models: Model[]; language: Language; openSettings: () => void }) {
+function TaskConversation({ task, models, language, openSettings, engine }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode }) {
   const copy = desktopShellCopy[language];
   const native = desktopNativeCopy[language];
   const continuation = task.continuation;
@@ -193,13 +192,14 @@ function TaskConversation({ task, models, language, openSettings }: { task: Task
       {!continued && apiUsage}
       {hasDiagnostics && task.id && ["completed", "blocked", "failed", "unknown", "stopped"].includes(task.status) && <EventLogExport language={language} />}
     </div>}
+    {engine}
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
       {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language].cliFixture.replace("{cli}", task.execution.cli)}</span>}
       {task.savedLocally === false && <span>{copy.sessionOnly}</span>}
-      {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", copy[effortLabels[task.effort]])}</span>}
-      {task.actual && <span>{copy.appliedEffort.replace("{effort}", copy[effortLabels[task.actual]])}</span>}
+      {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", effortLabel(language, task.effort))}</span>}
+      {task.actual && <span>{copy.appliedEffort.replace("{effort}", effortLabel(language, task.actual))}</span>}
     </footer>
     <AnswerBasis task={task} language={language} />
     <BlockedPanel key={task.id ?? "new"} task={task} language={language} />
@@ -285,6 +285,11 @@ function Desktop() {
   const [codeReferences, setCodeReferences] = useState<CodeReference[]>([]);
   const [mode, setMode] = useState<StartInput["mode"]>("agent");
   const [effort, setEffort] = useState<StartInput["effort"]>("default");
+  const [engine, setEngine] = useState<CodeEnginePreference>(readCodeEnginePreference);
+  function changeEngine(value: CodeEnginePreference) {
+    setEngine(value);
+    writeCodeEnginePreference(value);
+  }
   const [modelId, setModelId] = useState("");
   const [notice, setNotice] = useState<ShellNotice | null>(null);
   const [handoffNotice, setHandoffNotice] = useState<HandoffNotice | null>(null);
@@ -562,6 +567,9 @@ function Desktop() {
   const canFollowUp = followUpTarget && (snapshot?.busy ? task?.status === "running" :
     pausedByQuota ? task.canResumeAfterQuota : waitingForAnswer && task.canAnswerClarification) &&
     !task?.pendingFollowUp && !codeHandoff && !codeReferences.length;
+  const queueTarget = task?.id && snapshot?.busy && (task.status === "running" || task.status === "approval") &&
+    task.execution?.executionMode === "tomverse_api" && !codeHandoff && !codeReferences.length ? task.id : undefined;
+  const canQueue = !!queueTarget && online && !requesting && !!prompt.trim();
   const codeGit = codeMode === "agent" && codeRoute.executionMode === "tomverse_api" ? snapshot?.codeGitWorkspace : undefined;
   const workspaceKey = JSON.stringify([snapshot?.draftNamespace, codeGit?.kind === "git" ? codeGit.id : codeGit?.kind]);
   const workspaceChoice: CodeWorktreeChoice | undefined = !codeGit ? undefined
@@ -698,8 +706,26 @@ function Desktop() {
     menu?.querySelector("summary")?.focus();
   }
 
+  async function queueDraft() {
+    if (!queueTarget || !canQueue) return;
+    const submitted = prompt;
+    const namespace = previousNamespace.current;
+    setRequesting(true);
+    nearBottom.current = true;
+    await act(async () => {
+      if (!await window.desktop.queueMessage(queueTarget, { kind: "add", text: submitted })) throw new Error("The message was not queued.");
+      if (previousNamespace.current === namespace && composer.current?.value === submitted) changeDraft("");
+    });
+    setRequesting(false);
+  }
+
   async function send(event: FormEvent) {
     event.preventDefault();
+    // One instruction can wait to be sent into the running turn; a second one waits in the queue.
+    if (canQueue && task?.pendingFollowUp) {
+      await queueDraft();
+      return;
+    }
     if (!canSendCode) return;
     if (canFollowUp && followUpTarget) {
       const submitted = prompt;
@@ -722,6 +748,8 @@ function Desktop() {
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
+        ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
+        ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       setSaveHistory(true);
@@ -939,7 +967,8 @@ function Desktop() {
         }}>
           <div className="content">
             {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} /> : <section className="welcome">
+              language={language} openSettings={() => openSettings("execution")}
+              engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
                 onClick={(event) => void openCodeProject(event.currentTarget)}>
@@ -951,6 +980,7 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
+          {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>
@@ -1022,7 +1052,7 @@ function Desktop() {
               {(composerModelId || !catalogUnavailable) && <details className="model-menu">
                 <summary aria-label={copy.modelEffort}><Sparkles size={15} />
                   <span>{composerModelName}
-                    {composerEffort !== "default" && ` · ${copy[effortLabels[composerEffort]]}`}</span><ChevronDown size={14} />
+                    {composerEffort !== "default" && ` · ${effortLabel(language, composerEffort)}`}</span><ChevronDown size={14} />
                 </summary>
                 <div className="model-popover">
                   <label>{copy.model}<select aria-label={copy.model} value={composerModelId} disabled={busy || pausedForInput || !models.length}
@@ -1033,7 +1063,7 @@ function Desktop() {
                   </select></label>
                   <label>{copy.reasoningEffort}<select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
                     onChange={(event) => setEffort(event.currentTarget.value as StartInput["effort"])}>
-                    {Object.entries(effortLabels).map(([value, key]) => <option value={value} key={value}>{copy[key]}</option>)}
+                    {effortOptions(selectedModel?.efforts, composerEffort).map((value) => <option value={value} key={value}>{effortLabel(language, value)}</option>)}
                   </select></label>
                   {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== "smart-adaptive" && !selectedModel.efforts.includes(effort) &&
                     <small>{copy.effortFallback}</small>}
@@ -1043,8 +1073,11 @@ function Desktop() {
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
               {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftLocation location={codeAskLocation} language={language}
                 draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} deviceLocation={false} />}
+              {queueTarget && <button className="soft" type="button" disabled={!canQueue} onClick={() => void queueDraft()}>
+                {desktopCodeEngineCopy[language].queueAdd}</button>}
               <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
-                disabled={!canSendCode}><ArrowUp size={19} /></button>
+                title={queueTarget ? desktopCodeEngineCopy[language].sendNow : undefined}
+                disabled={!canSendCode && !(canQueue && !!task?.pendingFollowUp)}><ArrowUp size={19} /></button>
               {snapshot?.busy && <button className="icon stop" type="button" aria-label={copy.stopCode} onClick={() => void act(() => window.desktop.stop())}><Square size={15} /></button>}
             </div>
           </form>
@@ -1085,7 +1118,8 @@ function Desktop() {
             provider={cliSettingsProvider}
             goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable} />
           : settingsView === "execution" ? <CodeExecutionSettings key={snapshot?.codeFallback?.scope ?? "disconnected"}
-            snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act} />
+            snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act}
+            engine={engine} changeEngine={changeEngine} />
           : <section className="execution-settings settings">
           <h2 id={settingsView === "account" ? "desktop-account" : undefined} tabIndex={-1}>{settingsTitle}</h2>
           {settingsView === "permissions" && <div className="desktop-setting-section">

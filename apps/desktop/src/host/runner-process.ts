@@ -2,17 +2,17 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, DEFAULTS, Gateway, Journal, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, readProjectInstructions,
-  reconcile, renderChange, resolveEndpoint, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, readProjectInstructions,
+  reconcile, renderChange, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
-import { asProposedCodePlan, sessionId as taskIdSchema, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
+import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
 import { canAnswerClarification, canContinueApiQuota, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
-  journalChecks, journalCommand, journalApiUsage, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
+  journalChecks, journalCommand, journalApiUsage, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
 import type { Connection, RecordedSession, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { desktopCodeNotice } from "./desktop-notice";
@@ -35,6 +35,7 @@ type ActiveRun = {
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
+  queueOperation?: (operation: QueueOperation) => boolean;
   approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
 };
 let active: ActiveRun | undefined;
@@ -270,7 +271,7 @@ async function executeCodexFixture(command: Extract<WorkerCommand, { type: "star
     const result = await runCodexFixture(command.fixture, { project: command.project, prompt: inputPrompt,
       mode: command.mode, clientVersion: command.clientVersion, signal: control.abort.signal, patchTool: patches?.tool,
       protectedRoots: protectedRoots(command.protectedRoot), connectionKey: command.connectionKey,
-      effort: task.effort === "default" ? undefined : task.effort,
+      effort: task.effort === "low" || task.effort === "high" ? task.effort : undefined,
       verifyDestination: command.apiSource && true, verifySource: beforeTurn,
       history: command.history && { home: join(command.history.directory, "profile"), previous: previousTurn },
     }, (observation) => {
@@ -613,7 +614,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
   const control: ActiveRun = { runId: command.runId, cancelled: false, abort: new AbortController() };
   active = control;
   if (!resuming) transient = undefined;
-  const publish = () => send({ type: "task", runId: command.runId, task });
+  const publish = () => {
+    if (journal) Object.assign(task, journalEngine(journal.state, command.connection.key));
+    send({ type: "task", runId: command.runId, task });
+  };
   const addEvent = (event: string | ReturnType<typeof desktopCodeNotice>) => {
     const entry = typeof event === "string" ? { role: "event" as const, text: event } : event;
     task.entries.push({ ...entry, text: clean(entry.text).slice(0, 1_200) });
@@ -749,7 +753,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         readOnly: command.input.mode !== "agent",
         codeMode: command.input.mode,
         codePermission,
-        limits: { maxRequests: DEFAULTS.maxRequests, timeoutMs: DEFAULTS.timeoutMinutes * 60_000, commandTimeoutMs: DEFAULTS.commandTimeoutSeconds * 1000 },
+        limits: resolveLimits(command.input.limits),
+        ...(command.input.goal && command.input.mode === "agent" ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
         ...(continuation && { sessionId: continuation.taskId, codeContinuation: {
           segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap,
         } }),
@@ -799,8 +804,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           return;
         }
+        if ((event.type === "goal_check" || event.type === "queued_follow_up_started") && journal) publish();
         if (event.type === "response" && journal) {
           Object.assign(task, journalApiUsage(journal.state, command.connection.key));
+          task.context = journalContext(journal.state);
           task.actual = task.transmission.findLast((record) => record.purpose === "agent")?.appliedEffort;
           publish();
         }
@@ -877,6 +884,16 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       publish();
       return true;
     };
+    control.queueOperation = (operation) => {
+      if (control.cancelled || ("text" in operation && hasCredential(operation.text, command.connection.key))) return false;
+      assertProjectRoot(command.project);
+      const done = operation.kind === "add" ? runner.enqueue(operation.text) !== null
+        : operation.kind === "edit" ? runner.editQueued(operation.itemId, operation.text)
+        : operation.kind === "remove" ? runner.removeQueued(operation.itemId)
+        : runner.moveQueued(operation.itemId, operation.direction);
+      if (done) publish();
+      return done;
+    };
     if (resuming) {
       await control.runner.loop(resumedInstruction && { text: resumedInstruction.text, confirmed: () => {
         resumedInstructionSaved = true;
@@ -910,6 +927,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       : task.status === "unknown" ? "runUnknown" : control.cancelled ? "runStoppedEarly" : "runtimeFailed"));
   } finally {
     control.queueFollowUp = undefined;
+    control.queueOperation = undefined;
     clearTimeout(streamTimer);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {
@@ -919,7 +937,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       }
       task.changes = journalChanges(journal.state);
       task.checks = journalChecks(journal.state);
-      Object.assign(task, journalApiUsage(journal.state, command.connection.key));
+      Object.assign(task, journalApiUsage(journal.state, command.connection.key), journalEngine(journal.state, command.connection.key));
+      task.context = journalContext(journal.state);
       task.actual = task.transmission.findLast((record) => record.purpose === "agent")?.appliedEffort;
       task.plan = journalPlan(journal.state, command.connection.key);
       task.pendingFollowUp = journalPendingFollowUp(journal.state, command.connection.key);
@@ -1068,6 +1087,48 @@ async function checkRecovery(command: Extract<WorkerCommand, { type: "check-reco
     } };
   } catch (error) {
     return { ...reply, recovery: { status: error instanceof SessionLockedError ? "locked" : "unavailable" } };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+    recovery = undefined;
+  }
+}
+
+/** One model request that replaces the earlier part of a saved task's history with a summary. Nothing runs and no file is touched. */
+async function compactRecorded(command: Extract<WorkerCommand, { type: "compact-history" }>): Promise<WorkerEvent> {
+  const reply = { type: "history-compacted", requestId: command.requestId } as const;
+  if (active || recovery) return { ...reply, result: "unavailable" };
+  const abort = new AbortController();
+  recovery = { requestId: command.requestId, abort };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  try {
+    unlockProject = lockProject(command.project);
+    const key = command.connection.key;
+    const endpoint = resolveEndpoint({ endpoint: command.connection.endpoint, allowInsecureLocalhost: true }, {});
+    if (endpoint.base !== command.scope.base || sha256(key) !== command.scope.keyIdentity) return { ...reply, result: "unavailable" };
+    journal = openRecordedSession(command);
+    if (!journal || journal.broken || journal.state.codeContinuation || journal.state.pendingApprovals.length ||
+        journalStatus(journal.state) === "unknown" || !journal.persisted) return { ...reply, result: "unavailable" };
+    const gateway = gatewayFor(command.connection, abort.signal);
+    validateSession(journal, gateway.endpoint, gateway.keyPrefix);
+    const catalog = await gateway.models();
+    abort.signal.throwIfAborted();
+    assertProjectRoot(command.project);
+    const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+    const mode = journal.state.codeMode ?? (journal.state.readOnly ? "ask" : "agent");
+    const runner = new Runner({
+      gateway, journal, workspace, catalog, productName: "Tomverse Code", commandEnv: [], instructions: null, prompter: null,
+      output: { json: false, info: () => undefined, stream: () => undefined, event: () => undefined },
+      assertAllowed: () => assertProjectRoot(command.project), redactText: (text) => cleanText(text, key), captureTransmission: true,
+      taskPlan: mode === "ask" ? undefined : mode,
+    });
+    const outcome = await runner.maybeCompact(true, 180_000);
+    if (journal.broken) throw journal.broken;
+    await sessionCost(gatewayFor(command.connection, AbortSignal.any([abort.signal, AbortSignal.timeout(3_000)])), journal, catalog).catch(() => undefined);
+    return { ...reply, result: outcome === "compacted" ? "compacted" : outcome === "skipped" ? "nothing" : "failed" };
+  } catch (error) {
+    return { ...reply, result: error instanceof SessionLockedError ? "unavailable" : journal?.broken ? "failed" : "unavailable" };
   } finally {
     journal?.release();
     unlockProject?.();
@@ -1296,6 +1357,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send({ type: "command-detail", requestId: data.requestId, inspection: readRecorded(data, (journal) => journalCommand(journal.state, data.recordId)) });
   } else if (data.type === "check-recovery" || (DESKTOP_FIXTURE_ALLOWED && data.type === "check-native-recovery")) {
     void checkRecovery(data).then(send);
+  } else if (data.type === "compact-history") {
+    void compactRecorded(data).then(send);
   } else if (data.type === "cancel-recovery") {
     if (recovery?.requestId === data.requestId) recovery.abort.abort();
   } else if (data.type === "undo-change") {
@@ -1318,6 +1381,11 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     void executeStructuredFixture(data);
   } else if (data.type === "follow-up") {
     void followUp(data);
+  } else if (data.type === "queue") {
+    let ok = false;
+    try { ok = active?.runId === data.runId && active.queueOperation?.(data.operation) === true; }
+    catch { /* A changed root or unwritable checkpoint cannot accept the change. */ }
+    send({ type: "queue-result", runId: data.runId, requestId: data.requestId, ok });
   } else if (data.type === "stop" && active?.runId === data.runId) {
     active.cancelled = true;
     active.abort.abort();

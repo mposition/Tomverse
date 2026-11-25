@@ -48,14 +48,20 @@ export type CodeWorktree = {
 export type CodeGitWorkspace = { kind: "unavailable" } | {
   kind: "git"; id: string; path: string; branch: string; bases: CodeWorktreeBase[];
 };
+/** "default", or a reasoning level id the coding API's model catalog names for the model (low, high, and any it adds). */
+export const codeEffort = z.string().regex(/^(?:default|[a-z][a-z0-9_-]{0,23})$/);
+export const codeLimitProfile = z.enum(["standard", "extended", "unlimited"]);
+export type CodeLimitProfile = z.infer<typeof codeLimitProfile>;
 export const startInput = z.object({
   pluginConnectionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
   workspace: codeWorktreeChoice.optional(),
   prompt: z.string().trim().max(MAX_CODE_PROMPT_CHARACTERS),
   mode: z.enum(["ask", "agent", "plan"]),
   model: z.string().min(1).max(240),
-  effort: z.enum(["default", "low", "high"]),
+  effort: codeEffort,
   executionMode: codeExecutionMode.optional(),
+  limits: codeLimitProfile.optional(),
+  goal: z.boolean().optional(),
   permissionProfile: codePermissionProfile.optional(),
   saveHistory: z.boolean().optional(),
   handoffId: z.uuid().optional(),
@@ -78,6 +84,17 @@ export const workspaceHandoffInput = z.discriminatedUnion("target", [
   z.object({ target: z.literal("code"), excerpt: handoffExcerpt }).strict(),
   z.object({ target: z.literal("chat"), excerpt: handoffExcerpt, sourceTaskId: sessionId }).strict(),
 ]);
+const queueItemId = z.string().regex(/^q-[0-9a-f]{8}$/);
+const queueText = z.string().trim().min(1).max(MAX_CODE_PROMPT_CHARACTERS);
+/** What the person can do with the messages held for after the current turn. */
+export const queueOperation = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add"), text: queueText }).strict(),
+  z.object({ kind: z.literal("edit"), itemId: queueItemId, text: queueText }).strict(),
+  z.object({ kind: z.literal("remove"), itemId: queueItemId }).strict(),
+  z.object({ kind: z.literal("move"), itemId: queueItemId, direction: z.union([z.literal(-1), z.literal(1)]) }).strict(),
+]);
+export const queueInput = z.object({ id: z.string().regex(/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/), operation: queueOperation }).strict();
+export type QueueOperation = z.infer<typeof queueOperation>;
 export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
@@ -88,7 +105,7 @@ export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
 export type Decision = z.infer<typeof decisions>;
 export type WebDestination = z.infer<typeof webDestination>;
-export type Model = { id: string; name: string; provider: string; efforts: Array<"low" | "high"> };
+export type Model = { id: string; name: string; provider: string; efforts: string[] };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
 export type Entry = { role: "user" | "assistant"; text: string } | { role: "plan" } | CodeEventEntry;
@@ -126,6 +143,7 @@ export function asProposedCodePlan(plan: CodeTaskPlan): CodeTaskPlan {
 }
 export type Change = { id: string; path: string; kind: string; current: string };
 export type ChangeInspection = { text: string | null; current: string; canUndo: boolean };
+export type CompactHistoryResult = "compacted" | "nothing" | "failed" | "unavailable";
 export type UndoChangeResult = "undone" | "cancelled" | "conflict" | "unavailable" | "unconfirmed";
 export type DeleteHistoryResult = "deleted" | "cancelled" | "locked" | "unavailable" | "unconfirmed";
 export type CodeNativeRecoverySummary = { turn: "running" | "completed" | "stopped" | "failed" | "unconfirmed"; passed: number; failed: number; unconfirmed: number };
@@ -194,6 +212,10 @@ export type Transmission = {
     listedPathCount?: number; truncatedListingCount?: number;
     fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number };
 };
+export type CodeGoalState = {
+  maxContinuations: number; continuations: number;
+  last?: { met: boolean; summary: string; next?: string };
+};
 export type CodeApiUsage = { requestCount: number; settled: number; held: number; unknown: number };
 export type Task = {
   id: string | null;
@@ -223,6 +245,13 @@ export type Task = {
   canResumeAfterQuota?: boolean;
   canAnswerClarification?: boolean;
   pendingFollowUp?: string;
+  /** Messages held for after the model finishes, in the order they will run. */
+  queued?: Array<{ id: string; text: string }>;
+  /** The saved limit profile when it is not the standard one. */
+  limits?: Exclude<CodeLimitProfile, "standard">;
+  goal?: CodeGoalState;
+  /** An estimate of the conversation the next request would carry, against the model's context window. */
+  context?: { tokens: number; window: number };
   unreadable?: true;
   savedLocally?: boolean;
   readOnly?: boolean;
@@ -334,9 +363,11 @@ export type DesktopApi = {
   start(input: StartInput): Promise<void>;
   resume(id: string): Promise<boolean>;
   followUp(id: FollowUpTarget, text: string): Promise<boolean>;
+  queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;
+  compactTask(id: string): Promise<CompactHistoryResult>;
   moreHistory(): Promise<void>;
   readChange(id: string): Promise<ChangeInspection | null>;
   undoChange(id: string): Promise<UndoChangeResult>;

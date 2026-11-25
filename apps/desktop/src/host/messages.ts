@@ -1,4 +1,4 @@
-import type { ApprovalRequest, Change, ChangeInspection, CodeNativeAssignment, CommandInspection, Decision, DeleteHistoryResult, Model, RecoveryResult, StartInput, Task, UndoChangeResult } from "../contract";
+import type { ApprovalRequest, Change, CompactHistoryResult, ChangeInspection, CodeNativeAssignment, CommandInspection, Decision, DeleteHistoryResult, Model, QueueOperation, RecoveryResult, StartInput, Task, UndoChangeResult } from "../contract";
 import type { WorkspaceReference } from "../../../tomverse-cli/src/runtime";
 import type { ProjectRoot } from "./project-root";
 import type { HistoryScope } from "./history-scope";
@@ -33,12 +33,14 @@ export type WorkerCommand =
   | { type: "browser-snapshot-result"; runId: string; requestId: string; text: string | null }
   | { type: "answer"; runId: string; decision: Decision }
   | { type: "follow-up"; runId: string; requestId: string; text: string }
+  | { type: "queue"; runId: string; requestId: string; operation: QueueOperation }
   | { type: "stop"; runId: string }
   | (RecordedItem & { type: "read-change" })
   | { type: "read-native-change"; requestId: string; taskId: string; recordId: string; directory: string; project: ProjectRoot;
     provider: NativeFixtureProvider }
   | (RecordedItem & { type: "read-command" })
   | (RecordedSession & { type: "check-recovery"; connection: Connection })
+  | (RecordedSession & { type: "compact-history"; connection: Connection; protectedRoot: string })
   | { type: "check-native-recovery"; requestId: string; directory: string; sessionId: string;
     segmentId?: string; session: CodeNativeAssignment; project: ProjectRoot;
     provider: "openai" | "anthropic"; fixture: CliFixtureInput; clientVersion: string }
@@ -58,9 +60,11 @@ export type WorkerEvent =
   | { type: "browser-snapshot"; runId: string; requestId: string }
   | { type: "approval"; runId: string; request: ApprovalRequest }
   | { type: "follow-up-queued"; runId: string; requestId: string; queued: boolean }
+  | { type: "queue-result"; runId: string; requestId: string; ok: boolean }
   | { type: "finished"; runId: string; task: Task }
   | { type: "change-diff"; requestId: string; inspection: ChangeInspection | null }
   | { type: "recovery-detail"; requestId: string; recovery: RecoveryResult; evidence?: Pick<Task, "changes" | "checks" | "transmission" | "apiUsage" | "actual"> }
   | { type: "command-detail"; requestId: string; inspection: CommandInspection | null }
   | { type: "history-deleted"; requestId: string; result: DeleteHistoryResult }
-  | { type: "change-undone"; requestId: string; result: UndoChangeResult; changes?: Change[] };
+  | { type: "change-undone"; requestId: string; result: UndoChangeResult; changes?: Change[] }
+  | { type: "history-compacted"; requestId: string; result: CompactHistoryResult };

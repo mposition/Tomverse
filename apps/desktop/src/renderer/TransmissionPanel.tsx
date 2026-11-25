@@ -1,4 +1,5 @@
 import type { Language } from "../../../../lib/language";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopEvidenceCopy } from "../../../../locales/desktopEvidence";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopCodeQuotaCopy } from "../../../../locales/desktopCodeQuota";
@@ -7,6 +8,7 @@ import { desktopTaskListCopy } from "../../../../locales/desktopTaskList";
 import { providerClis } from "../code-execution";
 import type { CodeApiUsage, CodeNativeRunEvidence, Task, Transmission } from "../contract";
 import { formatEvidence } from "./evidence-copy";
+import { effortLabel } from "./CodeEngine";
 
 export function TransmissionPanel({ records, usage, taskId, language }: {
   records: Transmission[]; usage: CodeApiUsage; taskId: Task["id"]; language: Language;
@@ -18,15 +20,14 @@ export function TransmissionPanel({ records, usage, taskId, language }: {
   const states: Record<string, string> = {
     intent: copy.intent, headers: copy.headers, complete: copy.complete, interrupted: copy.interrupted, failed: shell.failed,
   };
-  const efforts = { default: shell.defaultEffort, low: shell.lowEffort, high: shell.highEffort };
-  const labelEffort = (effort: keyof typeof efforts) => language === "en" ? effort : efforts[effort];
+  const labelEffort = (effort: string) => language === "en" ? effort : effortLabel(language, effort);
   return <details><summary>{formatEvidence(copy.apiRequests, language, { count: usage.requestCount })}</summary>
     <p>{copy.viaApi}</p>
     <p>{taskId && <>{ids.task} <code>{taskId}</code> · </>}{ids.segment} <code>{records[0]?.segmentId}</code></p>
     <p>{formatEvidence(copy.creditSummary, language, usage)}</p>
     {usage.requestCount > records.length && <p>{formatEvidence(desktopCodeUsageCopy(language).recentRequests, language, { count: records.length })}</p>}
     <ul>{records.map((record) => <li key={record.seq}>
-      {formatEvidence(copy.request, language, { count: record.seq })} · {record.purpose === "compact" ? copy.compact : copy.codeTurn}
+      {formatEvidence(copy.request, language, { count: record.seq })} · {record.purpose === "compact" ? copy.compact : record.purpose === "goal" ? desktopCodeEngineCopy[language].goalRequest : copy.codeTurn}
       {` · ${Object.hasOwn(states, record.state) ? states[record.state] : record.state}`}
       {record.contents?.model && ` · ${formatEvidence(copy.requestedModel, language, { model: record.contents.model })}`}
       {record.model && ` · ${formatEvidence(copy.reportedModel, language, { model: record.model })}`}

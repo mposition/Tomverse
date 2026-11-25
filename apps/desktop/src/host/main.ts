@@ -22,8 +22,8 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, followUpInput, sessionId, startInput, webDestination, workspaceHandoffInput,
-  type ApprovalRequest, type CodeReference, type DeleteHistoryResult,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, followUpInput, queueInput, sessionId, startInput, webDestination, workspaceHandoffInput,
+  type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
   type NativeFixtureProvider,
@@ -39,7 +39,7 @@ import {
   type ChatTurnInput, type ChatTurnProgress, type ChatTurnResult, type DesktopTextProduct,
   type ReviewTurnInput, type ReviewTurnProgress, type ReviewTurnResult, type SaveArtifactInput,
 } from "../chat-contract";
-import { canAnswerClarification, canResumeJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
+import { canAnswerClarification, canResumeJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
 import { codeDiagnostics } from "./code-diagnostics";
 import { cliFixtureInput, qwenFixtureInput, zCodeFixtureInput } from "./cli-fixture-input";
 import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeHistory, matchesNativeContinuation, readNativeCheckpoint, readNativeHistory,
@@ -168,11 +168,12 @@ let worker: Electron.UtilityProcess | null = null;
 let runId: string | null = null;
 let discardedRunId: string | null = null;
 let pendingFollowUp: { requestId: string; resolve: (queued: boolean) => void } | null = null;
+let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null = null;
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
-type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" }>;
-type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" }>;
+type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" }>;
+type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" }>;
 let pendingInspection: { id: string; type: InspectionCommand["type"]; settle: (event: InspectionEvent | null) => void } | null = null;
 let pendingMutation: { id: string; settle: (event: MutationEvent | null) => void } | null = null;
 let confirmingMutation = false;
@@ -942,6 +943,13 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
+  if (event.type === "queue-result") {
+    if (pendingQueue?.requestId === event.requestId) {
+      pendingQueue.resolve(event.ok && event.runId === runId && event.runId !== discardedRunId);
+      pendingQueue = null;
+    }
+    return;
+  }
   if (event.type === "follow-up-queued") {
     if (pendingFollowUp?.requestId === event.requestId) {
       pendingFollowUp.resolve(event.queued && event.runId === runId && event.runId !== discardedRunId);
@@ -953,7 +961,7 @@ function onWorkerMessage(event: WorkerEvent) {
     if (pendingInspection?.id === event.requestId) pendingInspection.settle(event);
     return;
   }
-  if (event.type === "change-undone" || event.type === "history-deleted") {
+  if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted") {
     if (pendingMutation?.id === event.requestId) pendingMutation.settle(event);
     return;
   }
@@ -973,6 +981,8 @@ function onWorkerMessage(event: WorkerEvent) {
     } else if (event.type === "finished") {
       pendingFollowUp?.resolve(false);
       pendingFollowUp = null;
+      pendingQueue?.resolve(false);
+      pendingQueue = null;
       if (discarded) discardTransientTask(event.task);
       const reverse = pendingCliContinuation;
       pendingCliContinuation = undefined;
@@ -1180,6 +1190,8 @@ function bootWorker() {
     worker = null;
     pendingFollowUp?.resolve(false);
     pendingFollowUp = null;
+    pendingQueue?.resolve(false);
+    pendingQueue = null;
     pendingInspection?.settle(null);
     pendingMutation?.settle(null);
     pending = null;
@@ -1428,6 +1440,7 @@ function readTaskHistory(id: string, apiOnly = false): Task | null {
     canResumeAfterQuota: available && record.storage === record.scope.home && canResumeQuotaJournal(saved),
     canAnswerClarification: available && record.storage === record.scope.home && canAnswerClarification(saved),
     pendingFollowUp: journalPendingFollowUp(saved, key),
+    ...journalEngine(saved, key), context: journalContext(saved),
   };
   if (apiOnly || record.worktree) return task;
   if (DESKTOP_FIXTURE_ALLOWED && saved.codeContinuation) {
@@ -1655,7 +1668,7 @@ async function checkSelectedRecovery(taskId: string): Promise<RecoveryResult> {
   return recovery ?? { status: "unavailable" };
 }
 
-function runRecordedMutation<T>(runtime: Electron.UtilityProcess, command: MutationRequest, receive: (event: MutationEvent | null) => T) {
+function runRecordedMutation<T>(runtime: Electron.UtilityProcess, command: MutationRequest, receive: (event: MutationEvent | null) => T, timeoutMs = 15_000) {
   const id = command.requestId;
   return new Promise<T | "unconfirmed" | "unavailable">((resolve) => {
     const timer = setTimeout(() => {
@@ -1664,7 +1677,7 @@ function runRecordedMutation<T>(runtime: Electron.UtilityProcess, command: Mutat
       if (pendingMutation?.id === id && worker === runtime) {
         try { runtime.kill(); } catch { /* The operation may still be running. */ }
       }
-    }, 15_000);
+    }, timeoutMs);
     pendingMutation = { id, settle: (event) => {
       clearTimeout(timer);
       pendingMutation = null;
@@ -1715,6 +1728,29 @@ async function undoSelectedChange(changeId: string): Promise<UndoChangeResult> {
   } finally {
     confirmingMutation = false;
   }
+}
+
+/** Summarizes the earlier part of a saved, idle Tomverse API task: one paid request the person asked for. */
+async function compactSelectedTask(taskId: string): Promise<CompactHistoryResult> {
+  const task = state.task;
+  const record = selectedRecord();
+  const connection = codeConnection();
+  const runtime = worker;
+  if (!record || !connection || !runtime || task?.id !== taskId || task.savedLocally === false || task.execution?.executionMode !== "tomverse_api" ||
+      task.continuation || task.cliContinuation || record.storage !== record.scope.home || record.worktree?.unavailable ||
+      state.busy || pendingMutation || recoveryCheckPending() || confirmingMutation || choosing || signingOut || closing || suspended ||
+      state.update.stage === "installing") return "unavailable";
+  const sourceProject = projectRoot;
+  const { scope } = record;
+  assertProjectRoot(record.project);
+  const result = await runRecordedMutation(runtime, { type: "compact-history", requestId: randomUUID(), ...record, connection,
+    protectedRoot: app.getPath("userData") }, (event) => event?.type === "history-compacted" ? event.result : "failed" as const, 200_000);
+  if (result === "unconfirmed") return "failed";
+  if (state.task?.id === taskId && projectRoot === sourceProject && currentHistoryScope()?.home === scope.home && !state.busy) {
+    const updated = readTaskHistory(taskId);
+    if (updated) { state.task = updated; broadcast(); }
+  }
+  return result;
 }
 
 async function deleteSelectedHistory(taskId: string): Promise<DeleteHistoryResult> {
@@ -2978,6 +3014,30 @@ function registerIpc() {
       }
     });
   });
+  main("desktop:queue", (value) => {
+    const { id, operation } = queueInput.parse(value);
+    const task = state.task;
+    const connection = codeConnection();
+    const activeRunId = runId;
+    if (!worker || !connection || !projectRoot || !activeRunId || activeRunId === discardedRunId || !state.busy ||
+        task?.id !== id || task.execution?.executionMode !== "tomverse_api" || (task.status !== "running" && task.status !== "approval") ||
+        pendingQueue || suspended || closing || signingOut || ("text" in operation && hasCredential(operation.text, connection.key))) return false;
+    assertProjectRoot(projectRoot);
+    if (task.worktree) {
+      const scope = currentHistoryScope();
+      const activeWorktree = scope && readManagedWorktree(managedWorktreeHome(scope), task.root);
+      if (!activeWorktree || activeWorktree.info.unavailable) return false;
+    }
+    return new Promise<boolean>((resolve) => {
+      const requestId = randomUUID();
+      pendingQueue = { requestId, resolve };
+      try { send({ type: "queue", runId: activeRunId, requestId, operation }); }
+      catch {
+        pendingQueue = null;
+        resolve(false);
+      }
+    });
+  });
   main("desktop:resume", (value) => {
     const session = sessionId.parse(value);
     const task = state.task;
@@ -3048,6 +3108,7 @@ function registerIpc() {
       ? readSelectedRecord({ type: "read-command", recordId: id }, (event) => event.type === "command-detail" ? event.inspection : null) : null;
   });
   main("desktop:check-recovery", (id) => checkSelectedRecovery(sessionId.parse(id)));
+  main("desktop:compact-task", (id) => compactSelectedTask(sessionId.parse(id)));
   main("desktop:undo-change", (id) => undoSelectedChange(z.string().min(1).max(128).parse(id)));
   main("desktop:export-diagnostics", exportDiagnostics);
   main("desktop:copy-diagnostics", copyDiagnostics);

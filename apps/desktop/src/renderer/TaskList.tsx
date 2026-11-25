@@ -3,6 +3,7 @@ import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopTaskListCopy } from "../../../../locales/desktopTaskList";
 import type { CodeApiModelObservation, CodeTaskPlan, Model, RunStatus, Task } from "../contract";
 import { providerClis } from "../code-execution";
+import { effortLabel } from "./CodeEngine";
 import lightCheck from "./task-list-icons/light-check.svg?no-inline";
 import lightCircle from "./task-list-icons/light-circle.svg?no-inline";
 import darkCheck from "./task-list-icons/dark-check.svg?no-inline";
@@ -35,7 +36,6 @@ export function TaskList({ plan, run, taskId, effort, models, language, pendingN
   const modelName = (id: string) => models.find((model) => model.id === id)?.name ?? id;
   const modelLabel = (assignment: Assignment) =>
     "threadId" in assignment ? assignment.model : modelName(assignment.model);
-  const levels = { default: shell.defaultEffort, low: shell.lowEffort, high: shell.highEffort };
   const sources = { api_header: copy.apiHeader, api_receipt: copy.apiReceipt,
     codex_reroute: "Codex model/rerouted", claude_assistant: "Claude Code assistant" };
   const execution = (assignment: Assignment | undefined, record?: CodeApiModelObservation) => {
@@ -47,7 +47,7 @@ export function TaskList({ plan, run, taskId, effort, models, language, pendingN
         : "requestSeq" in assignment && ` · #${assignment.requestSeq}`} · </>}
       {reported ? <>{copy.actualModel} {"previousModel" in reported && reported.previousModel && `${reported.previousModel} → `}
         {native ? reported.model : modelName(reported.model)} ({sources[reported.source]})</> : copy.unknownModel}
-      {record?.appliedEffort ? ` · ${shell.appliedEffort.replace("{effort}", levels[record.appliedEffort])}` : ` · ${copy.effortUnknown}`}
+      {record?.appliedEffort ? ` · ${shell.appliedEffort.replace("{effort}", effortLabel(language, record.appliedEffort))}` : ` · ${copy.effortUnknown}`}
     </>;
   };
   const progress = copy.progress.replace("{done}", plan.items.filter((row) => row.complete).length.toLocaleString(language))
@@ -92,7 +92,7 @@ export function TaskList({ plan, run, taskId, effort, models, language, pendingN
             <ul className="code-task-list-evidence">
               <li>{taskId && <>{copy.task} <code>{taskId}</code> · </>}
                 {segmentId && <>{copy.segment} <code>{segmentId}</code>{effort && " · "}</>}
-                {effort && shell.requestedEffort.replace("{effort}", levels[effort])}</li>
+                {effort && shell.requestedEffort.replace("{effort}", effortLabel(language, effort))}</li>
               {nativeAssignment && (!latest || nativeAssignment.reportedModel?.model !== lastReported?.model) &&
                 <li>{execution(nativeAssignment)}</li>}
               {apiAssignment && <li>{execution(apiAssignment.assignment, apiAssignment)}</li>}
