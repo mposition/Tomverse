@@ -17,10 +17,12 @@ import { ChatMarkdown, ImportedSource, type useChatHistory } from "./ChatWorkspa
 import { DraftDictation } from "./DraftDictation";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
+import { AnswerExtras } from "./AnswerExtras";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
 import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
+import { DesktopCompareSummary } from "./DesktopCompareSummary";
 import type { ImageCapability } from "../images-contract";
 
 type Message = ChatConversation["messages"][number];
@@ -232,6 +234,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
               <ChatMarkdown content={answer.content} />
             </>}
             <GeneratedFiles artifacts={answer.artifacts} language={language} />
+            <AnswerExtras message={answer} conversationId={history.conversation?.id} language={language} product="review" />
             {answer.searchMetadata?.reasoningEffort?.applied &&
               <small className="chat-effort">{common.reasoningEffort} · {effortNames[answer.searchMetadata.reasoningEffort.applied]}
                 {answer.searchMetadata.reasoningEffort.requested !== answer.searchMetadata.reasoningEffort.applied &&
@@ -330,6 +333,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           : <button className="send" type="submit" aria-label={copy.send}
             disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading}><ArrowUp size={18} /></button>}
       </div>
+      {id && !history.selected?.isLocked && <DesktopCompareSummary key={`${history.account ?? ""}:${id}:${latest?.answers.map((answer) => answer.id).join(",")}`} language={language}
+        conversationId={id} ready={online && !run.running && !history.writing && completedModels.size >= 2} />}
       {analysisEnabled && <DesktopReviewAnalysis key={`${history.account ?? ""}:${id ?? "new"}`} language={language}
         conversationId={id} scope={JSON.stringify([latest?.question.id, latest?.answers.map(({ id }) => id)])}
         ready={online && !run.running && !history.writing && completedModels.size >= 2} />}

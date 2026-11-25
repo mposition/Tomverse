@@ -98,6 +98,8 @@ if (trustedWindow) {
       ipcRenderer.on("desktop:billing-window", onState);
       return () => ipcRenderer.removeListener("desktop:billing-window", onState);
     },
+    chatExtras: (input: Parameters<DesktopApi["chatExtras"]>[0]) => ipcRenderer.invoke("desktop:chat-extras", input),
+    exportReviewAnalysis: (input: Parameters<DesktopApi["exportReviewAnalysis"]>[0]) => ipcRenderer.invoke("desktop:review-export", input),
     checkUpdate: () => ipcRenderer.invoke("desktop:check-update"),
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>

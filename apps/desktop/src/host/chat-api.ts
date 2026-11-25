@@ -14,6 +14,7 @@ import { createChatLivenessWatchdog } from "../../../../lib/chatStreamLiveness";
 import { consumeChatStream } from "../../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../../lib/chatRequestLimits";
 import { parseChatStreamTrailer } from "../../../../lib/webSearchStreamTrailer";
+import { readChatImageTurnRequest } from "../../../../lib/chatImageTurnCore";
 import { askReviewRoute } from "../../../../lib/reviewRoutingClient";
 import { detectImageMimeType } from "../../../../lib/imageDimensions";
 import { IMAGE_ORIGINAL_MAX_READ_BYTES } from "../../../../lib/imageGenerationStateCore";
@@ -421,6 +422,11 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
             response.headers.get("content-type")?.includes("application/json")) {
           const receipt = z.object({ deepResearchJobId: z.literal(assistantId), status: z.literal("submitted") }).parse(await response.json());
           return { deepResearch: receipt.status, appliedReasoningEffort: undefined };
+        }
+        if (!input.review && response.ok && response.headers.get("x-chat-response-mode") === "image-turn") {
+          // The server's Auto judgement found an image request and stopped before charging anything.
+          const decision = readChatImageTurnRequest(((await response.json().catch(() => null)) as { imageTurn?: unknown } | null)?.imageTurn);
+          if (decision) return { imageTurn: decision, appliedReasoningEffort: undefined };
         }
         if (!response.ok || !response.body || response.headers.get("content-type")?.includes("application/json") || input.deepResearchDepth) {
           await response.body?.cancel().catch(() => {});

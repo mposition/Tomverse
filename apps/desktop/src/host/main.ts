@@ -17,6 +17,7 @@ import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
 import { AccountDataRefusal } from "./account-data-refusal";
 import { desktopAccountDataInput } from "../account-data-contract";
+import { reviewExportFile, runChatExtras } from "./chat-extras";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { createBillingApi } from "./billing-api";
@@ -2467,6 +2468,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let failed = false;
     let contextChanged = false;
     let researchSubmitted = false;
+    let imageOffer: ChatTurnResult["imageOffer"];
     let lastProgressAt = 0;
     let lastMcpProgress: ChatTurnProgress["mcpProgress"];
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
@@ -2508,6 +2510,9 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           publish({ modelId: id });
         });
         researchSubmitted = Boolean(result && "deepResearch" in result);
+        if (result && "imageTurn" in result && result.imageTurn && sourceId) {
+          imageOffer = { conversationId: id, sourceUserMessageId: sourceId, assistantMessageId: assistantId, modelId: input.modelId, request: result.imageTurn };
+        }
         applied = result?.appliedReasoningEffort;
         if (applied) publish({ applied });
       } catch (error) {
@@ -2527,6 +2532,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           : answer || partial ? "partial" : contextChanged ? "failed"
             : streamStarted ? "unconfirmed" : failed ? "failed" : "unconfirmed";
       return { conversation, status, partial: answer ? "" : partial, modelId, applied, savedQuestion: Boolean(sourceId),
+        ...(imageOffer && !answer ? { imageOffer } : {}),
         ...(contextChanged && status === "failed" ? { contextChanged: true } : {}) };
     } finally {
       if (chatTurn === turn) chatTurn = null;
@@ -3222,6 +3228,8 @@ function registerIpc() {
   main("desktop:account-settings", accountSettings);
   main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
   main("desktop:billing", billing);
+  main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
+  main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());

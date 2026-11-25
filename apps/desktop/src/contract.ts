@@ -11,6 +11,7 @@ import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState } from "./browser-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
+import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
@@ -386,6 +387,8 @@ export type DesktopApi = {
   accountData(input: DesktopAccountDataInput): Promise<DesktopAccountDataResult>;
   billing<Action extends BillingAction>(input: Extract<DesktopBillingInput, { action: Action }>): Promise<BillingResult<Action>>;
   subscribeBillingWindow(listener: (state: BillingWindowState) => void): () => void;
+  chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
+  exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
   checkUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   setCodeNotifications(enabled: boolean): Promise<void>;
