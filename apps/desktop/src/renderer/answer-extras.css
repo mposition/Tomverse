@@ -5,3 +5,12 @@
 .answer-sources li > a, .answer-sources li > span:not(.answer-source-number) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .answer-sources small { flex: none; color: var(--muted); font-size: 11px; }
 .answer-source-number { flex: none; color: var(--muted); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.answer-feedback { margin-top: 10px; }
+.answer-feedback form { display: grid; gap: 6px; max-width: 520px; }
+.answer-feedback textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.answer-feedback small { color: var(--muted); font-size: 12px; }
+.answer-feedback .answer-feedback-error { color: var(--text); font-weight: 650; }
+.answer-feedback-open { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; }
+.answer-feedback-open:hover { color: var(--text); background: var(--raised); }
+.answer-feedback-email { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.answer-feedback-actions { display: flex; gap: 8px; }

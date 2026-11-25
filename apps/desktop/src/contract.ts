@@ -10,6 +10,7 @@ import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState } from "./browser-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
+import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
@@ -379,6 +380,7 @@ export type DesktopApi = {
   accountSettings<Action extends AccountSettingsAction>(
     input: Extract<DesktopAccountSettingsInput, { action: Action }>,
   ): Promise<AccountSettingsResult<Action>>;
+  chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
   checkUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   setCodeNotifications(enabled: boolean): Promise<void>;

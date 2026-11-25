@@ -1,6 +1,7 @@
 import type { Language } from "../../../../lib/language";
 import { sourceRows } from "../answer-sources";
 import type { ChatConversation } from "../chat-contract";
+import { AnswerFeedback } from "./AnswerFeedback";
 import { webLocales } from "./answer-locales";
 import { openLink } from "./WebViewer";
 import "./answer-extras.css";
@@ -25,7 +26,12 @@ function SearchCitations({ citations, language }: { citations: NonNullable<Messa
 }
 
 /** What sits under a saved answer: its web sources and the way to report a problem with it. */
-export function AnswerExtras({ message, language }: { message: Message; conversationId?: string; language: Language; product?: "chat" | "review" }) {
+export function AnswerExtras({ message, language, product = "chat" }: { message: Message; conversationId?: string; language: Language; product?: "chat" | "review" }) {
   if (message.role !== "assistant") return null;
-  return <SearchCitations citations={message.searchMetadata?.citations ?? []} language={language} />;
+  const reportable = !message.imageTurn && (message.status === undefined || message.status === "normal" || message.status === "incomplete") &&
+    Boolean(message.content.trim());
+  return <>
+    <SearchCitations citations={message.searchMetadata?.citations ?? []} language={language} />
+    {reportable && <AnswerFeedback product={product} messageId={message.id} modelId={message.modelId} language={language} />}
+  </>;
 }

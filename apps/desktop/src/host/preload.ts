@@ -90,6 +90,7 @@ if (trustedWindow) {
     openWeb: (destination: Parameters<DesktopApi["openWeb"]>[0]) => ipcRenderer.invoke("desktop:web", destination),
     accountSettings: (input: Parameters<DesktopApi["accountSettings"]>[0]) =>
       ipcRenderer.invoke("desktop:account-settings", input),
+    chatExtras: (input: Parameters<DesktopApi["chatExtras"]>[0]) => ipcRenderer.invoke("desktop:chat-extras", input),
     checkUpdate: () => ipcRenderer.invoke("desktop:check-update"),
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>
