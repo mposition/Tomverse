@@ -111,6 +111,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await application.evaluate(async ({ shell, clipboard, dialog }, { origin, chat, exportPath }) => {
       const host = globalThis as typeof globalThis & {
         clips?: number; sent?: number; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
+        pauseTranscript?: boolean; finishTranscript?: () => void; lockFromAnotherDevice?: () => void;
       };
       host.importRequests = [];
       host.pinWrites = [];
@@ -134,6 +135,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       let projectId: string | null = null;
       let shareEnabled = false;
       let isLocked = false;
+      host.lockFromAnotherDevice = () => { isLocked = true; shareEnabled = true; };
       const keySummary = { id: "test-key", name: "Fixture key", keyPrefix: "tv_test", state: "active",
         creditCap: 400, committedCredits: 0, expiresAt: null };
       const preferences = { theme: "dark", language: "en", timeZone: "Australia/Brisbane",
@@ -404,16 +406,25 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         if (target.pathname === "/api/conversations") return Response.json([{ ...chat, ...pinState, projectId, shareEnabled, isLocked }, {
           ...chat, id: "older-shared-chat", title: "An older shared chat", updatedAt: "2025-01-01T09:00:00Z",
           shareEnabled: true, selectedModels: ["gpt-5-4-mini"],
+        }, {
+          ...chat, id: "continued-test-chat", title: "Chat with a locked original", surface: "continuation", sourceState: "locked",
         }]);
-        if (target.pathname === `/api/conversations/${chat.id}`) return Response.json({ ...chat, messages: Array.from({ length: 48 }, (_, index) => ({
+        if (target.pathname === `/api/conversations/${chat.id}`) {
+          const response = Response.json({ ...chat, messages: Array.from({ length: 48 }, (_, index) => ({
           id: `message-${index + 1}`, role: index % 2 === 0 ? "user" : "assistant", status: "normal",
           content: `Saved transcript message ${index + 1}.` + (index === 47 ? "\n\n```python\nfor i in range(3):\n    print(i)\n```"
             : index === 46 ? "\n\nfor i in range(5):\n    print(i)" : ""),
           modelId: index === 47 ? "gpt-6-luna" : undefined, artifacts: [],
         })),
           responseAttempts: [{ assistantMessageId: "message-48", actualModelId: "gpt-5-4-mini", provider: "openai" }],
-          messagePage: { nextCursor: null }, selectionMode: "manual", selectedModels: [], autoSelection: { offered: false },
-        });
+            messagePage: { nextCursor: null }, selectionMode: "auto", selectedModels: [], autoSelection: { offered: true },
+          });
+          if (host.pauseTranscript) {
+            host.pauseTranscript = false;
+            await new Promise<void>(resolve => { host.finishTranscript = resolve; });
+          }
+          return response;
+        }
         return Response.json({}, { status: 404 });
       };
     }, { origin: authOrigin, chat: conversation, exportPath });
@@ -454,6 +465,11 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await modelFilter.click();
     await expect(older).toBeVisible();
     await page.getByRole("button", { name: /Organizer tools/ }).click();
+    const continuationMenu = page.getByLabel("Conversation actions · Chat with a locked original", { exact: true });
+    await continuationMenu.click();
+    await expect(page.getByRole("button", { name: "Share", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Download with the original (.txt)", exact: true })).toBeDisabled();
+    await continuationMenu.click();
     await page.getByRole("button", { name: "New chat", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Chat message", exact: true })).toBeFocused();
     await chat.click();
@@ -480,7 +496,12 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await chatMenu.getByRole("button", { name: "Lock Chat", exact: true }).click();
     await expect(page.locator(".long-thread")).toHaveCount(0);
     await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
-    await chatMenu.getByLabel(/This chat is locked/).fill("FixturePass!");
+    const unlockInput = chatMenu.getByLabel(/This chat is locked/);
+    await unlockInput.fill("WrongPass!");
+    await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
+    await expect(chatMenu.getByRole("alert")).toBeVisible();
+    await expect(page.locator(".long-thread")).toHaveCount(0);
+    await unlockInput.fill("FixturePass!");
     await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
     await expect(page.locator(".long-thread").getByRole("listitem")).toHaveCount(48);
     await page.getByRole("button", { name: "Pin chat", exact: true }).click();
@@ -517,6 +538,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(chat).toBeVisible();
     await expect(older).toBeVisible();
     const transcript = page.locator(".long-thread");
+    await expect(page.locator(".chat-auto-banner")).toContainText("Smart Adaptive");
     await expect(transcript.getByRole("listitem")).toHaveCount(48);
     await expect(transcript.getByRole("listitem").last()).toHaveCSS("content-visibility", "auto");
     await expect(transcript.getByText("Saved transcript message 48.", { exact: true })).toBeVisible();
@@ -716,6 +738,17 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(page.getByText("Sent by the desktop test.", { exact: true })).toBeVisible();
     await expect(page.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
     assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 1);
+    await application.evaluate(() => { (globalThis as typeof globalThis & { pauseTranscript?: boolean }).pauseTranscript = true; });
+    await chat.click();
+    await expect.poll(() => application!.evaluate(() =>
+      typeof (globalThis as typeof globalThis & { finishTranscript?: () => void }).finishTranscript)).toBe("function");
+    await application.evaluate(() => (globalThis as typeof globalThis & { lockFromAnotherDevice?: () => void }).lockFromAnotherDevice?.());
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Choose Unlock in the conversation menu and enter its password.")).toBeVisible();
+    await application.evaluate(() => (globalThis as typeof globalThis & { finishTranscript?: () => void }).finishTranscript?.());
+    await actions.click();
+    await expect(chatMenu.getByRole("button", { name: "Stop sharing", exact: true })).toBeDisabled();
+    await expect(page.locator(".long-thread")).toHaveCount(0);
     await application.evaluate(() => { (globalThis as typeof globalThis & { readOnly?: boolean }).readOnly = true; });
     await page.evaluate(() => window.desktop.signOut());
     await page.evaluate(() => window.desktop.signIn());

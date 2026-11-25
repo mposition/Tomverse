@@ -86,6 +86,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const sendingId = useRef<string | null>(null);
   const wasConnected = useRef(false);
   const openVersion = useRef(0);
+  const historyVersion = useRef(0);
+  const changingConversation = useRef(false);
   const listQuery = product === "chat" || searching ? query.trim() : "";
   const result = searchResult?.query === listQuery ? searchResult : null;
   const selectedRow = selected && (rows.find(row => row.id === selected.id) ?? selected);
@@ -115,6 +117,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     wasConnected.current = false;
     reconcilePinStore("desktop-signed-out");
     openVersion.current++;
+    historyVersion.current++;
     setRows([]);
     setProjects(undefined);
     setSearchResult(null);
@@ -125,6 +128,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setConversation(null);
     setOpening(false);
     setWriting(false);
+    changingConversation.current = false;
     setSending(false);
     draftScope.current = "new";
     draftAccount.current = undefined;
@@ -138,15 +142,23 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     if (!active) return;
     wasConnected.current = true;
     let current = true;
+    const version = historyVersion.current;
     void window.desktop.chatHistory(product).then((items) => {
-      if (!current) return;
+      if (!current || version !== historyVersion.current) return;
       if (account) {
         reconcilePinStore(account);
         observeServerPins(items);
       }
       setRows(items);
       setListStatus("ready");
-    }, () => { if (current) setListStatus("failed"); });
+      if (items.some(row => row.id === draftScope.current && row.isLocked)) {
+        openVersion.current++;
+        setConversation(null);
+        setLive(null);
+        setOpening(false);
+        setNotice("unlockConversation");
+      }
+    }, () => { if (current && version === historyVersion.current) setListStatus("failed"); });
     return () => { current = false; };
   }, [account, active, product, refresh]);
   useEffect(() => {
@@ -293,15 +305,31 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     }
   }
 
-  function updateConversationActions(id: string, changes: Pick<ChatHistoryRow, "isLocked" | "shareEnabled">, selection?: number) {
+  function updateConversationActions(target: ChatHistoryRow, changes: Pick<ChatHistoryRow, "isLocked" | "shareEnabled">) {
+    const { id } = target;
+    historyVersion.current++;
     setRows(items => items.map(row => row.id === id ? { ...row, ...changes } : row));
     setSelected(row => row?.id === id ? { ...row, ...changes } : row);
-    if (changes.isLocked) setConversation(current => current?.id === id ? null : current);
-    if (selectedRow?.id === id && selection === openVersion.current &&
-      changes.isLocked !== undefined && changes.isLocked !== selectedRow.isLocked) {
-      void open({ ...selectedRow, ...changes });
+    if (draftScope.current === id && changes.isLocked !== undefined) {
+      void open({ ...target, ...changes });
     }
     setRefresh(value => value + 1);
+  }
+
+  async function withConversationWrite(operation: () => Promise<void>) {
+    if (changingConversation.current || writing || sendingId.current) return false;
+    changingConversation.current = true;
+    setWriting(true);
+    const owner = draftAccount.current;
+    try {
+      await operation();
+      return true;
+    } finally {
+      if (draftAccount.current === owner) {
+        changingConversation.current = false;
+        setWriting(false);
+      }
+    }
   }
 
   function applyConversation(saved: ChatConversation) {
@@ -321,7 +349,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   }
 
   async function send(input: Omit<ChatTurnInput, "requestId" | "conversationId" | "prompt">) {
-    if (writing || sendingId.current || (!draft.trim() && !input.attachmentUploadIds?.length && !input.handoffId) || (selected && !conversation)) return false;
+    if (writing || changingConversation.current || sendingId.current || selectedRow?.isLocked ||
+      (!draft.trim() && !input.attachmentUploadIds?.length && !input.handoffId) || (selected && !conversation)) return false;
     const requestId = crypto.randomUUID();
     const previous = conversation;
     sendingId.current = requestId;
@@ -353,12 +382,11 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   return { account, rows: rows.map(row => pins[row.id] === undefined ? row : { ...row, pinned: pins[row.id] }),
     hits: result?.hits ?? [], query, setQuery, searching, setSearching, listStatus, searchFailed: result?.failed === true, listQuery,
     selected: selectedRow && { ...selectedRow, pinned: selectedPinned ?? undefined },
-    conversation, language,
+    conversation: selectedRow?.isLocked ? null : conversation, language,
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
     opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject, updateConversationActions,
-    selectionVersion: () => openVersion.current,
-    draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
-    sending, send, live, reload: () => setRefresh((value) => value + 1) };
+    withConversationWrite, draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
+    sending, send, live: selectedRow?.isLocked ? null : live, reload: () => setRefresh((value) => value + 1) };
 }
 
 type History = ReturnType<typeof useChatHistory>;
@@ -548,7 +576,6 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
   const [exportError, setExportError] = useState(false);
   const [confirming, setConfirming] = useState<"share" | "revoke" | "lock">();
   const [password, setPassword] = useState("");
-  const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
   const menu = useRef<HTMLDetailsElement>(null);
@@ -558,8 +585,15 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
   const help = chatHelpCopy[language];
   const handoff = reviewHandoffCopy[language === "zh-Hant" ? "zhHant" : language];
   const selected = row ?? chat.selected;
+  const mayShowShareUrl = Boolean(selected?.shareEnabled && !selected.isLocked);
+  useEffect(() => {
+    if (!mayShowShareUrl) queueMicrotask(() => setShareUrl(""));
+  }, [mayShowShareUrl]);
   if (!selected) return null;
   const target = selected;
+  const actionBusy = chat.writing || chat.sending;
+  const blockedShare = selected.isLocked || selected.surface === "continuation";
+  const blockedSource = selected.sourceState === "locked" || selected.sourceState === "deleted";
   function download(includeSource: boolean) {
     setExporting(true);
     setExportError(false);
@@ -567,31 +601,30 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
       .catch(() => setExportError(true)).finally(() => setExporting(false));
   }
   async function runConversationAction() {
-    if (!confirming || actionBusy) return;
-    setActionBusy(true);
+    if (!confirming || actionBusy || (confirming !== "lock" && blockedShare)) return;
     setActionError(false);
-    const selection = chat.selectionVersion();
     try {
-      if (confirming === "lock") {
-        const result = await window.desktop.accountSettings<"changeConversationLock">({ action: "changeConversationLock", id: target.id,
-          values: target.isLocked ? { password: null, currentPassword: password } : { password } });
-        chat.updateConversationActions(target.id, result, selection);
-      } else if (confirming === "share") {
-        const { url } = await window.desktop.accountSettings<"shareConversation">({ action: "shareConversation", id: target.id });
-        chat.updateConversationActions(target.id, { shareEnabled: true });
-        setShareUrl(url);
-        await window.desktop.copyChatText(url).catch(() => {});
-      } else {
-        await window.desktop.accountSettings<"revokeConversationShare">({ action: "revokeConversationShare", id: target.id });
-        chat.updateConversationActions(target.id, { shareEnabled: false });
-        setShareUrl("");
-      }
-      setConfirming(undefined);
+      const applied = await chat.withConversationWrite(async () => {
+        if (confirming === "lock") {
+          const result = await window.desktop.accountSettings<"changeConversationLock">({ action: "changeConversationLock", id: target.id,
+            values: target.isLocked ? { password: null, currentPassword: password } : { password } });
+          chat.updateConversationActions(target, result);
+        } else if (confirming === "share") {
+          const { url } = await window.desktop.accountSettings<"shareConversation">({ action: "shareConversation", id: target.id });
+          chat.updateConversationActions(target, { shareEnabled: true });
+          if (menu.current?.open) setShareUrl(url);
+          await window.desktop.copyChatText(url).catch(() => {});
+        } else {
+          await window.desktop.accountSettings<"revokeConversationShare">({ action: "revokeConversationShare", id: target.id });
+          chat.updateConversationActions(target, { shareEnabled: false });
+          setShareUrl("");
+        }
+      });
+      if (applied) setConfirming(undefined);
     } catch {
       setActionError(true);
       chat.reload();
     } finally {
-      setActionBusy(false);
       setPassword("");
     }
   }
@@ -607,6 +640,7 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
         setConfirming(undefined);
         setPassword("");
         setDraft(null);
+        setShareUrl("");
       }
     }}
     onBlur={event => {
@@ -635,7 +669,7 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
         </label>}
         {actionError && <p role="alert" className="chat-menu-confirmation">{desktopShellCopy[language].actionFailed}</p>}
         <button className="soft" type="button" disabled={actionBusy} onClick={() => setConfirming(undefined)}>{handoff.cancel}</button>
-        <button className="primary" type="submit" disabled={actionBusy}>
+        <button className="primary" type="submit" disabled={actionBusy || (confirming !== "lock" && blockedShare)}>
           {confirming === "share" ? help.shareDialogConfirm : confirming === "revoke" ? sidebar.revokeShare : selected.isLocked ? sidebar.unlock : sidebar.lock}
         </button>
       </form> : draft === null ? <>
@@ -656,23 +690,26 @@ export function ChatConversationActions({ chat, row, canModify = true }: { chat:
         </label>}
         {projectError && <p role="alert">{desktopShellCopy[language].actionFailed}</p>}
         {selected.kind === "chat" && <>
-          <button type="button" disabled={selected.isLocked || selected.surface === "continuation" || chat.sending || actionBusy}
+          <button type="button" disabled={blockedShare || actionBusy}
             title={selected.surface === "continuation" ? sidebar.shareContinuationUnavailable : selected.isLocked ? sidebar.shareLocked : undefined}
             onClick={() => prepareAction("share")}>
             <Share2 size={15} aria-hidden="true" />{selected.shareEnabled ? sidebar.refreshShare : sidebar.share}
           </button>
-          {selected.shareEnabled && <button type="button" disabled={actionBusy} onClick={() => prepareAction("revoke")}>
+          {selected.shareEnabled && <button type="button" disabled={blockedShare || actionBusy}
+            title={selected.isLocked ? sidebar.shareLocked : undefined} onClick={() => prepareAction("revoke")}>
             <Link2Off size={15} aria-hidden="true" />{sidebar.revokeShare}
           </button>}
-          {shareUrl && <div className="chat-menu-share-url">
+          {mayShowShareUrl && shareUrl && <div className="chat-menu-share-url">
             <input className="history-search" value={shareUrl} readOnly aria-label={sidebar.share} />
             <CopyAnswer content={shareUrl} language={language} />
           </div>}
           {selected.surface === "continuation" && <button type="button"
-            disabled={exporting || selected.isLocked || selected.sourceState === "deleted"} onClick={() => download(true)}>
+            disabled={exporting || selected.isLocked || blockedSource || actionBusy}
+            title={selected.sourceState === "locked" ? sidebar.downloadSourceLocked : selected.sourceState === "deleted" ? sidebar.downloadSourceDeleted : undefined}
+            onClick={() => download(true)}>
             <Download size={15} aria-hidden="true" />{sidebar.downloadWithSourceTxt}
           </button>}
-          <button type="button" disabled={exporting || selected.isLocked} onClick={() => download(false)}>
+          <button type="button" disabled={exporting || selected.isLocked || actionBusy} onClick={() => download(false)}>
             <Download size={15} aria-hidden="true" />{selected.surface === "continuation" ? sidebar.downloadContinuationOnlyTxt : sidebar.downloadTxt}
           </button>
         </>}
@@ -861,7 +898,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
       {chat.opening && !chat.conversation && <p role="status">{copy.loadingConversation}</p>}
       {chat.notice && <p className="notice" role="status">{chat.notice}</p>}
       {chat.conversation?.surface === "continuation" && <ImportedSource key={chat.conversation.id} id={chat.conversation.id} language={language} />}
-      {(chat.conversation || chat.sending || live) && <>
+      {!chat.selected?.isLocked && (chat.conversation || chat.sending || live) && <>
         <ol className={currentMessages.length > 40 ? "thread chat-thread long-thread" : "thread chat-thread"} aria-label={copy.transcript}>
           {currentMessages.map((message) => {
             const review = message.role === "assistant" && message.status === "normal"

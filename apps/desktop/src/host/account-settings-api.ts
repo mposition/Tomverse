@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { EXTERNAL_IMPORT_PARSER_VERSION } from "../../../../lib/externalImportAdapters";
 import {
@@ -125,7 +126,7 @@ export function createAccountSettingsApi(
 ) {
   let saved: z.infer<typeof settingsCredential> | undefined;
   let renewal: Promise<z.infer<typeof settingsCredential>> | undefined;
-  const signal = () => AbortSignal.any([accountSignal, AbortSignal.timeout(12_000)]);
+  const signal = (timeout = 12_000) => AbortSignal.any([accountSignal, AbortSignal.timeout(timeout)]);
   accountSignal.addEventListener("abort", () => { saved = undefined; }, { once: true });
 
   async function credential() {
@@ -149,7 +150,7 @@ export function createAccountSettingsApi(
     return renewal;
   }
 
-  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json") {
+  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number) {
     const session = await credential();
     const cookie = origin.startsWith("https:") ? "__Secure-next-auth.session-token" : "next-auth.session-token";
     return transport(new URL(path, origin), {
@@ -158,7 +159,7 @@ export function createAccountSettingsApi(
         Cookie: cookie + "=" + session.token, Origin: origin, Accept: accept,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
-      redirect: "error", cache: "no-store", signal: signal(),
+      redirect: "error", cache: "no-store", signal: signal(timeout),
     });
   }
 
@@ -191,12 +192,22 @@ export function createAccountSettingsApi(
   }
   async function exportConversation(id: string, includeSource: boolean) {
     const path = `/api/conversations/${encodeURIComponent(id)}/export${includeSource ? "?include=source" : ""}`;
-    const res = await send({ path }, "text/plain");
+    const res = await send({ path }, "text/plain", 120_000);
     if (!res.ok || !res.body || res.headers.get("content-type")?.split(";")[0] !== "text/plain") {
       if (res.status === 401) saved = undefined;
       await res.body?.cancel().catch(() => {});
       throw new Error("Tomverse could not download the conversation.");
     }
+    const maxBytes = 128 * 1024 * 1024;
+    const advertisedLength = res.headers.get("x-export-bytes");
+    const advertisedHash = res.headers.get("x-export-sha256")?.toLowerCase();
+    const verify = includeSource || advertisedLength !== null || advertisedHash !== undefined;
+    const expectedLength = advertisedLength && /^[1-9]\d*$/.test(advertisedLength) ? Number(advertisedLength) : 0;
+    if (verify && (!expectedLength || expectedLength > maxBytes || !advertisedHash || !/^[a-f0-9]{64}$/.test(advertisedHash))) {
+      await res.body.cancel().catch(() => {});
+      throw new Error("The conversation export verification headers are invalid.");
+    }
+    const hash = verify ? createHash("sha256") : null;
     const chunks: Uint8Array[] = [];
     const reader = res.body.getReader();
     let length = 0;
@@ -205,16 +216,20 @@ export function createAccountSettingsApi(
         const { done, value } = await reader.read();
         if (done) break;
         length += value.byteLength;
-        if (length > 128 * 1024 * 1024) {
+        if (length > (verify ? expectedLength : maxBytes)) {
           await reader.cancel().catch(() => {});
           throw new Error("The conversation export is too large.");
         }
+        hash?.update(value);
         chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
     accountSignal.throwIfAborted();
+    if (hash && (length !== expectedLength || hash.digest("hex") !== advertisedHash)) {
+      throw new Error("The conversation export did not pass verification.");
+    }
     return Buffer.concat(chunks, length);
   }
   return Object.assign(request, { exportConversation });

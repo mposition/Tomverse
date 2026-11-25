@@ -1,7 +1,7 @@
 import type { Language } from "../lib/language";
 
 const en = {
-  unlockConversation: "Unlock this conversation in Tomverse on the web.",
+  unlockConversation: "Choose Unlock in the conversation menu and enter its password.",
   conversationLoadFailure: "Could not load this conversation.",
   messagesLoadFailure: "Could not load more messages.",
   renameUnconfirmed: "Could not confirm the rename. Check the conversation history.",
@@ -66,7 +66,7 @@ const en = {
 export const desktopChatCopy: Record<Language, typeof en> = {
   en,
   ko: {
-    unlockConversation: "웹 Tomverse에서 이 대화의 잠금을 해제하세요.",
+    unlockConversation: "대화 메뉴에서 잠금 해제를 선택하고 비밀번호를 입력하세요.",
     conversationLoadFailure: "대화를 불러오지 못했습니다.",
     messagesLoadFailure: "메시지를 더 불러오지 못했습니다.",
     renameUnconfirmed: "이름 변경을 확인하지 못했습니다. 대화 기록을 확인하세요.",
@@ -128,7 +128,7 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     send: "Chat 메시지 보내기",
   },
   zh: {
-    unlockConversation: "请在网页版 Tomverse 中解锁此对话。",
+    unlockConversation: "请在对话菜单中选择解锁并输入密码。",
     conversationLoadFailure: "无法加载此对话。",
     messagesLoadFailure: "无法加载更多消息。",
     renameUnconfirmed: "无法确认重命名。请检查对话历史记录。",
@@ -190,7 +190,7 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     send: "发送 Chat 消息",
   },
   "zh-Hant": {
-    unlockConversation: "請在網頁版 Tomverse 中解鎖此對話。",
+    unlockConversation: "請在對話選單中選擇解鎖並輸入密碼。",
     conversationLoadFailure: "無法載入此對話。",
     messagesLoadFailure: "無法載入更多訊息。",
     renameUnconfirmed: "無法確認重新命名。請檢查對話記錄。",
@@ -252,7 +252,7 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     send: "傳送 Chat 訊息",
   },
   fr: {
-    unlockConversation: "Déverrouillez cette conversation dans Tomverse sur le web.",
+    unlockConversation: "Dans le menu de la conversation, choisissez Déverrouiller et saisissez le mot de passe.",
     conversationLoadFailure: "Impossible de charger cette conversation.",
     messagesLoadFailure: "Impossible de charger d’autres messages.",
     renameUnconfirmed: "Le changement de nom n’a pas pu être confirmé. Vérifiez l’historique.",
@@ -314,7 +314,7 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     send: "Envoyer le message Chat",
   },
   de: {
-    unlockConversation: "Entsperre dieses Gespräch in Tomverse im Web.",
+    unlockConversation: "Wähle im Gesprächsmenü Entsperren und gib das Passwort ein.",
     conversationLoadFailure: "Dieses Gespräch konnte nicht geladen werden.",
     messagesLoadFailure: "Weitere Nachrichten konnten nicht geladen werden.",
     renameUnconfirmed: "Die Umbenennung konnte nicht bestätigt werden. Prüfe den Gesprächsverlauf.",
@@ -376,7 +376,7 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     send: "Chat-Nachricht senden",
   },
   es: {
-    unlockConversation: "Desbloquea esta conversación en Tomverse en la web.",
+    unlockConversation: "Elige Desbloquear en el menú de la conversación e introduce la contraseña.",
     conversationLoadFailure: "No se pudo cargar esta conversación.",
     messagesLoadFailure: "No se pudieron cargar más mensajes.",
     renameUnconfirmed: "No se pudo confirmar el cambio de nombre. Revisa el historial.",
@@ -438,7 +438,7 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     send: "Enviar mensaje de Chat",
   },
   pt: {
-    unlockConversation: "Desbloqueie esta conversa no Tomverse na web.",
+    unlockConversation: "Escolha Desbloquear no menu da conversa e introduza a palavra-passe.",
     conversationLoadFailure: "Não foi possível carregar esta conversa.",
     messagesLoadFailure: "Não foi possível carregar mais mensagens.",
     renameUnconfirmed: "Não foi possível confirmar a alteração do nome. Consulte o histórico.",

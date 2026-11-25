@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createAccountSettingsApi } from "../src/host/account-settings-api";
 import { desktopAccountSettingsInput } from "../src/account-settings-contract";
 
@@ -45,4 +46,24 @@ test("the settings IPC refuses arbitrary routes and rejects an invalid resource 
   assert.equal(desktopAccountSettingsInput.safeParse({ action: "preferences", path: "https://other.example" }).success, false);
   assert.equal(desktopAccountSettingsInput.safeParse({ action: "revokeKey", id: "../users" }).success, false);
   assert.equal(desktopAccountSettingsInput.safeParse({ action: "savePreferences", changes: { plan: "Max" } }).success, false);
+});
+
+test("a conversation export with original messages requires complete verified bytes", async () => {
+  const content = "Original and continued conversations.\n";
+  const digest = createHash("sha256").update(content).digest("hex");
+  const headers: Record<string, string> = { "content-type": "text/plain", "x-export-sha256": digest, "x-export-bytes": String(content.length) };
+  const transport: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/api/auth/desktop/settings-session") {
+      return Response.json({ token: fixtureCookie, expiresAt: Date.now() + 300_000 });
+    }
+    assert.equal(url.href, origin + "/api/conversations/test-conversation/export?include=source");
+    return new Response(content, { headers });
+  };
+  const settings = createAccountSettingsApi(origin, async () => "fixture-desktop", new AbortController().signal, transport);
+  assert.equal((await settings.exportConversation("test-conversation", true)).toString("utf8"), content);
+  headers["x-export-sha256"] = "0".repeat(64);
+  await assert.rejects(settings.exportConversation("test-conversation", true), /verification/);
+  delete headers["x-export-bytes"];
+  await assert.rejects(settings.exportConversation("test-conversation", true), /verification headers/);
 });
