@@ -612,3 +612,21 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
   .primary, .soft, .icon { border: 1px solid ButtonText; }
   .rail-tool[aria-pressed="true"], .projects li button[aria-current] { border: 2px solid Highlight; }
 }
+
+.research-icon { color: #a064ed; }
+.desktop-research-dialog { width: min(460px, 92vw); padding: 0; }
+.desktop-research-dialog > div { padding: 18px; }
+.desktop-research-dialog header h2 { display: flex; align-items: center; gap: 10px; }
+.desktop-research-dialog header svg { color: #a064ed; }
+.desktop-research-dialog .desktop-research-summary, .desktop-research-dialog dl { background: var(--raised); border-radius: 9px; padding: 10px; }
+.desktop-research-summary { display: grid; gap: 3px; margin-top: 12px; }
+.desktop-research-dialog fieldset { display: grid; gap: 6px; border: 0; padding: 0; margin: 12px 0 0; }
+.desktop-research-dialog legend { font-weight: 650; margin-bottom: 6px; }
+.desktop-research-dialog fieldset button { border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; text-align: start; }
+.desktop-research-dialog fieldset button[aria-pressed="true"] { border-color: #a064ed; background: var(--raised); }
+.desktop-research-dialog fieldset button small { margin: 3px 0 0; }
+.desktop-research-dialog dl { display: grid; gap: 6px; margin: 12px 0; }
+.desktop-research-dialog dl div, .desktop-research-dialog footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.desktop-research-dialog dd { margin: 0; font-weight: 650; }
+.desktop-research-dialog dd svg { width: 14px; height: 14px; vertical-align: middle; margin-inline-end: 4px; }
+.desktop-research-dialog footer button { flex: 1; }

@@ -6,6 +6,8 @@ import {
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
   desktopComposerToolsEnabled,
+  desktopDeepResearchEnabled,
+  desktopDriveEnabled,
   desktopWriteApiRoute,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
@@ -49,6 +51,35 @@ test("Desktop analysis and composer tools require their own enrollment", () => {
     delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
     assert.equal(desktopWriteApiRoute(analysis, "GET"), false);
     assert.equal(desktopComposerToolsEnabled(), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop Drive and Deep Research are opt-in and retain the existing attachment and Chat gates", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED",
+    "TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED", "TOMVERSE_DESKTOP_GOOGLE_DRIVE_ENABLED", "TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const status = "/api/chat/deep-research/status";
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of switches.slice(0, 3)) process.env[key] = "true";
+    assert.equal(desktopDriveEnabled(), false);
+    assert.equal(desktopDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+    for (const key of switches.slice(3)) process.env[key] = "true";
+    assert.equal(desktopDriveEnabled(), true);
+    assert.equal(desktopWriteApiRoute(status, "POST"), true);
+    assert.equal(desktopWriteApiRoute(status, "GET"), false);
+    assert.equal(desktopWriteApiRoute("/api/chat/research/runs", "POST"), false);
+    delete process.env.TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED;
+    assert.equal(desktopDriveEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), true);
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];

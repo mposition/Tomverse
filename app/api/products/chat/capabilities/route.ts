@@ -3,6 +3,9 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
+import { desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
+import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled, desktopReviewAnalysisEnabled, desktopComposerToolsEnabled } from "@/lib/desktopReadApiContract";
 import {
@@ -72,6 +75,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopReviewAnalysis: desktopReviewAnalysisEnabled(), desktopComposerTools: desktopComposerToolsEnabled(),
     desktopSearchReadiness: resolveWebSearchBackendReadiness(),
     desktopAttachments,
+    desktopGoogleDrive: desktopAttachments && desktopDriveEnabled() && Boolean(readGooglePickerConfig()),
+    desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };

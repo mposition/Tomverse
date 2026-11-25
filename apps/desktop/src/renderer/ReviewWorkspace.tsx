@@ -5,6 +5,7 @@ import { workspaceWelcomeCopy } from "../../../../locales/workspaceWelcome";
 import openaiLogo from "../../../../public/model-icons/chatgpt.png?no-inline";
 import anthropicLogo from "../../../../public/model-icons/claude.png?no-inline";
 import googleLogo from "../../../../public/model-icons/gemini.png?no-inline";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { canUseModelWithPlan } from "../../../../lib/models";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopReviewCopy } from "../../../../locales/desktopReview";
@@ -130,7 +131,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   useEffect(() => {
     let active = true;
     void window.desktop.chatModels().then((available) => {
-      if (active) setModels(available);
+      if (active) setModels(available.filter(({ id }) => id !== DEEP_RESEARCH_MODEL_ID));
     }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -284,7 +285,10 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           }
         }} />
       <div className="composer-actions">
-        {attachments.enabled && <ComposerTools language={language}><AttachmentPicker draft={attachments} busy={run.running} tool /></ComposerTools>}
+        {attachments.enabled && <ComposerTools language={language} disabled={run.running || attachments.uploading}
+          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}>
+          <AttachmentPicker draft={attachments} busy={run.running} tool />
+        </ComposerTools>}
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
           disabled={run.running || attachments.uploading} draft={history.draft} setDraft={history.setDraft} />}
         <span className="spacer"/>

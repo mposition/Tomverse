@@ -10,8 +10,8 @@ const require = createRequire(import.meta.url);
 const authOrigin = process.env.DESKTOP_E2E_AUTH_ORIGIN;
 const artifacts = process.env.TOMVERSE_DESKTOP_PARITY_QA;
 
-test("Desktop opens the shared model picker, dismisses menus, renders saved images and opens Review analysis", {
-  timeout: 75_000, skip: !authOrigin || !artifacts,
+test("Desktop opens the shared model picker, dismisses menus, renders saved images and opens Review analysis, attaches Drive files and finishes a Deep Research job", {
+  timeout: 95_000, skip: !authOrigin || !artifacts,
 }, async () => {
   assert.ok(authOrigin && artifacts);
   const profile = await mkdtemp(join(artifacts, "parity-profile-"));
@@ -21,15 +21,47 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
   try {
     await app.evaluate(async ({ shell }, origin) => {
       const fetchNetwork = globalThis.fetch;
+      let driveOpens = 0;
       shell.openExternal = async (href) => {
         const url = new URL(href);
-        if (url.origin !== origin || url.pathname !== "/auth/desktop") throw Error("Unexpected external URL");
+        if (url.origin !== origin) throw Error("Unexpected external origin");
+        if (url.pathname === "/auth/desktop/drive-picker") {
+          const request = new URLSearchParams(url.hash.slice(1));
+          const state = request.get("state")!;
+          const callback = new URL(`http://127.0.0.1:${request.get("port")}/desktop-drive/callback`);
+          callback.searchParams.set("state", state);
+          if (driveOpens++ > 0) {
+            const algorithm = { name: "ECDH", namedCurve: "P-256" };
+            const pair = await crypto.subtle.generateKey(algorithm, false, ["deriveKey"]);
+            const peer = await crypto.subtle.importKey("raw", new Uint8Array(Buffer.from(request.get("key")!, "base64url")), algorithm, false, []);
+            const key = await crypto.subtle.deriveKey({ name: "ECDH", public: peer }, pair.privateKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const selection = { accessToken: "synthetic-google-token", files: [
+              { id: "fake-drive-doc", name: "Notebook", mimeType: "application/vnd.google-apps.document" },
+            ] };
+            const payload = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(state) },
+              key, new TextEncoder().encode(JSON.stringify(selection)));
+            callback.searchParams.set("key", Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64url"));
+            callback.searchParams.set("iv", Buffer.from(iv).toString("base64url"));
+            callback.searchParams.set("payload", Buffer.from(payload).toString("base64url"));
+          }
+          if (!(await fetchNetwork(callback)).ok) throw Error("Drive callback fixture failed");
+          return;
+        }
+        if (url.pathname !== "/auth/desktop") throw Error("Unexpected external URL");
         const callback = new URL(url.searchParams.get("redirect_uri")!);
         callback.search = new URLSearchParams({ state: url.searchParams.get("state")!, grant: "a".repeat(43) }).toString();
         if (!(await fetchNetwork(callback)).ok) throw Error("Sign-in fixture failed");
       };
       const chat = { id: "chat-fixture", title: "A saved image", kind: "chat", productKey: "chat", surface: "chat", selectedModels: ["gpt-6-luna"] };
       const review = { id: "review-fixture", title: "Two saved answers", kind: "chat", productKey: "review", surface: "workspace", selectedModels: ["gpt-6-luna", "gemini-flash-lite"] };
+      const researchModel = "perplexity/sonar-deep-research";
+      const research = { ...chat, id: "research-fixture", title: "A research conversation" };
+      const researchMessages: Array<Record<string, unknown>> = [];
+      let reportId = "";
+      let sourceId = "";
+      let submitted = 0;
+      let polls = 0;
       const [questionId, firstId, secondId] = ["1", "2", "3"].map((id) => `00000000-0000-4000-8000-${id.padStart(12, "0")}`);
       const preview = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9nO9sAAAAASUVORK5CYII=", "base64");
       const result = { id: "analysis-fixture", responseMap: [
@@ -51,19 +83,57 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
           case "/api/auth/desktop/exchange": return Response.json({ ok: true, accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresIn: 600 });
           case "/api/auth/desktop/session": return Response.json({ ok: true, account: { id: "parity-account", name: "Parity Fixture", email: null } });
           case "/api/products/chat/capabilities": return Response.json({ autoSelection: { offered: true }, desktopWrite: true, desktopAttachments: true,
-            desktopReview: { easy: false, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true, desktopSearchReadiness: { brave: true },
+            desktopReview: { easy: false, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true, desktopGoogleDrive: true, desktopDeepResearch: true, desktopSearchReadiness: { brave: true },
             desktopImages: { maxModels: 2, models: [{ id: "gpt-image-2", name: "GPT Image 2", provider: "openai", pricingVersion: "fixture",
               prices: [{ size: "1024x1024", quality: "medium", credits: 15 }] },
             { id: "recraftv4_pro", name: "Recraft V4 Pro", provider: "recraft", pricingVersion: "fixture-2k",
               prices: [{ size: "2048x2048", quality: "high", credits: 350 }] }] } });
           case "/api/models/catalog": return Response.json({ models: [
             { id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", usageClass: "standard" },
+            { id: researchModel, name: "Perplexity Sonar Deep Research", provider: "perplexity", usageClass: "deep-research" },
             { id: "gemini-flash-lite", name: "Gemini Flash-Lite", provider: "google", usageClass: "premium-reasoning" },
             { id: "research-fixture", name: "Research model", provider: "perplexity", usageClass: "research" },
             { id: "deep-research-fixture", name: "Deep research model", provider: "perplexity", usageClass: "deep-research" },
             { id: "unrecognized-fixture", name: "Unrecognized model", provider: "openai", usageClass: "unknown-usage-class" },
           ].map((model) => ({ ...model, minimumPlan: "Free", enabled: true, status: "enabled" })) });
-          case "/api/conversations": return Response.json([chat, review]);
+          case "/api/conversations": return Response.json([chat, review, research]);
+          case `/api/conversations/${research.id}`: {
+            if (method === "PATCH") {
+              research.selectedModels = JSON.parse(String(init?.body)).selectedModels;
+              return Response.json({ id: research.id });
+            }
+            return Response.json({ ...research, messagePage: { nextCursor: null }, selectionMode: "manual",
+              autoSelection: { offered: false }, messages: researchMessages });
+          }
+          case `/api/conversations/${research.id}/messages`: {
+            const [question] = JSON.parse(String(init?.body)).messages;
+            if (question.attachmentUploadIds?.[0] !== "synthetic-drive-upload") return Response.json({}, { status: 400 });
+            sourceId = "00000000-0000-4000-8000-000000000123";
+            researchMessages.push({ id: sourceId, role: "user", content: question.content, status: "normal", attachments: [
+              { id: "drive-file", attachmentId: "drive-file", name: "Notebook.txt", mediaType: "text/plain", size: 64, kind: "text" },
+            ] });
+            return Response.json({ messageMappings: [{ requestId: question.clientRequestId, messageId: sourceId }] });
+          }
+          case "/api/chat": {
+            const body = JSON.parse(String(init?.body));
+            if (method === "PUT" && body.action === "google-drive-import" && body.fileId === "fake-drive-doc" && body.accessToken === "synthetic-google-token") {
+              return Response.json({ uploadId: "synthetic-drive-upload", name: "Notebook.txt", mediaType: "text/plain", size: 64, kind: "text" });
+            }
+            if (method !== "POST" || body.deepResearchDepth !== "deep" || body.modelId !== researchModel ||
+                body.sourceUserMessageId !== sourceId || body.reasoningEffort || body.messages[0]?.attachments?.[0]?.attachmentId !== "drive-file" || submitted++) {
+              return Response.json({}, { status: 400 });
+            }
+            reportId = body.assistantMessageId;
+            researchMessages.push({ id: reportId, role: "assistant", content: "", modelId: researchModel, status: "pending", pendingJobId: "fixture-job" });
+            return Response.json({ deepResearchJobId: reportId, status: "submitted" }, { headers: { "X-Chat-Response-Mode": "async-job" } });
+          }
+          case "/api/chat/deep-research/status": {
+            if (JSON.parse(String(init?.body)).assistantMessageId !== reportId) return Response.json({}, { status: 404 });
+            if (++polls === 1) return Response.json({ status: "in_progress" });
+            const content = "Research report with a [reference](https://example.test/source).";
+            Object.assign(researchMessages[1], { status: "normal", pendingJobId: null, content });
+            return Response.json({ status: "completed", content });
+          }
           case `/api/conversations/${chat.id}`: return Response.json({ ...chat, messagePage: { nextCursor: null }, selectionMode: "auto", autoSelection: { offered: true }, messages: [
             { id: questionId, role: "user", content: "Create a tiny image", status: "normal" },
             { id: firstId, role: "assistant", content: "[Image generated] Create a tiny image", status: "normal", imageTurn: { groupId: "image-group", modelIds: ["gpt-image-2"] } },
@@ -183,6 +253,33 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
     await page.getByRole("button", { name: "View analysis" }).click();
     await expect(dialog).toBeVisible();
     assert.equal(await app.evaluate(() => (globalThis as typeof globalThis & { runs: number }).runs), 1);
+    await page.keyboard.press("Escape");
+    await page.getByRole("navigation", { name: "Workspaces" }).getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("button", { name: "A research conversation", exact: true }).click();
+    const draft = page.locator("#chat-draft-input");
+    await draft.fill("Investigate the sources in the attached note.");
+    const drive = () => tools.getByRole("button", { name: /Attach from Google Drive/ });
+    await tools.locator("summary").click();
+    await drive().click();
+    await expect(page.locator(".attachment-progress")).toHaveCount(0);
+    await expect(page.locator(".attachment-draft")).toHaveCount(0);
+    await tools.locator("summary").click();
+    await drive().click();
+    await expect(page.locator(".attachment-draft")).toContainText("Notebook.txt");
+    await tools.locator("summary").click();
+    await tools.getByRole("button", { name: /^Deep Research/ }).click();
+    const researchSetup = page.getByRole("dialog", { name: "Start Deep Research" });
+    await expect(researchSetup).toBeVisible();
+    await researchSetup.getByRole("button", { name: /^Deep The most thorough/ }).click();
+    await page.screenshot({ path: join(artifacts, "deep-research-setup.png") });
+    await researchSetup.getByRole("button", { name: "Start research", exact: true }).click();
+    await expect(page.getByText("Searching sources…")).toBeVisible();
+    await expect(page.locator(".chat-thread .entry--assistant").last()).toContainText("Research report with a reference.", { timeout: 15_000 });
+    await expect(page.locator(".saved-attachments")).toContainText("Notebook.txt");
+    await expect(page.locator(".attachment-draft")).toHaveCount(0);
+    await page.getByRole("button", { name: "A research conversation", exact: true }).click();
+    await expect(page.locator(".chat-thread .entry--assistant").last()).toContainText("Research report with a reference.");
+    await page.screenshot({ path: join(artifacts, "deep-research-result.png") });
   } finally {
     await app.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

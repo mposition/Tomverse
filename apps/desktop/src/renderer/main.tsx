@@ -466,7 +466,7 @@ function Desktop() {
     ? () => openSettings("imports") : undefined;
   const chatActive = workspace === "chat" && account?.stage === "connected";
   const nativeChat = !settingsView && chatActive;
-  const chat = useChatHistory(chatActive, "chat", accountDraft, language);
+  const chat = useChatHistory(chatActive, "chat", accountDraft, language, snapshot?.capabilities?.deepResearch);
   const reviewActive = workspace === "review" && account?.stage === "connected";
   const nativeReview = !settingsView && reviewActive;
   const codeAskLocation = useChatDraftLocation(JSON.stringify([codeDraft, snapshot?.draftNamespace, task?.id]));
@@ -503,9 +503,9 @@ function Desktop() {
     setImagesOpen(false);
   }
   const chatAttachments = useAttachmentDraft(chat.selected?.id ?? "new",
-    snapshot?.capabilities?.attachments === true && snapshot.capabilities.chatWrite, language);
+    snapshot?.capabilities?.attachments === true && snapshot.capabilities.chatWrite, language, snapshot?.capabilities?.googleDrive);
   const reviewAttachments = useAttachmentDraft(review.selected?.id ?? "new",
-    snapshot?.capabilities?.attachments === true && Boolean(snapshot.capabilities.review), language);
+    snapshot?.capabilities?.attachments === true && Boolean(snapshot.capabilities.review), language, snapshot?.capabilities?.googleDrive);
   const imageCapability = snapshot?.capabilities?.images ?? null;
   const imagesActive = imagesOpen && !!imageCapability && (chatActive || reviewActive);
   const nativeImages = !settingsView && imagesActive;
@@ -1063,7 +1063,7 @@ function Desktop() {
         autoOffered={snapshot?.capabilities?.autoSelection === true} preferredModelId={accountModels?.[0]}
         plan={(usage?.account === accountDraft ? usage?.plan : undefined) ?? snapshot?.capabilities?.review?.plan ?? "Free"}
         imageCapability={imageCapability} onModelImage={openImageModel}
-        composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
+        deepResearch={snapshot?.capabilities?.deepResearch} composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}

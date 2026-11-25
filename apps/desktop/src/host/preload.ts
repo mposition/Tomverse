@@ -123,6 +123,8 @@ if (trustedWindow) {
     previewImage: (id: string) => ipcRenderer.invoke("image:preview", id),
     saveImage: (input: Parameters<DesktopApi["saveImage"]>[0]) => ipcRenderer.invoke("image:save", input),
     saveArtifact: (input: Parameters<DesktopApi["saveArtifact"]>[0]) => ipcRenderer.invoke("artifact:save", input),
+    importDriveAttachments: (input: Parameters<DesktopApi["importDriveAttachments"]>[0]) => ipcRenderer.invoke("attachment:drive", input),
+    checkDeepResearch: (id: string) => ipcRenderer.invoke("chat:research-status", id),
     uploadAttachment: (input: Parameters<DesktopApi["uploadAttachment"]>[0]) => ipcRenderer.invoke("attachment:upload", input),
     cancelAttachmentUpload: (requestId: string) => ipcRenderer.invoke("attachment:cancel", requestId),
     discardAttachment: (uploadId: string) => ipcRenderer.invoke("attachment:discard", uploadId),

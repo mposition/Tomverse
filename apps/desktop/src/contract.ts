@@ -281,6 +281,7 @@ export type Snapshot = {
   account: AccountState;
   capabilities: {
     autoSelection: boolean; chatWrite: boolean; chatImport: boolean; chatStarters: ChatStarter[];
+    googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
   } | null;
@@ -376,6 +377,8 @@ export type DesktopApi = {
   saveImage(input: { id: string; modelId: string }): Promise<boolean>;
   saveArtifact(input: SaveArtifactInput): Promise<boolean>;
   pluginInventory(): Promise<DesktopPluginInventory>;
+  importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
+  checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;
   uploadAttachment(input: AttachmentBytesInput): Promise<AttachmentUpload>;
   cancelAttachmentUpload(requestId: string): Promise<void>;
   discardAttachment(uploadId: string): Promise<void>;

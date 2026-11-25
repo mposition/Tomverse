@@ -1,3 +1,6 @@
+import { selectDriveFiles } from "./drive-picker";
+import { desktopResearchAnswerId } from "../../../../lib/desktopResearchAnswerId";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { readGithubPull } from "./github-pr-read";
@@ -63,7 +66,7 @@ import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { imageRequest } from "../images-contract";
 import { imageDownloadExtension, imageDownloadFilename } from "../../../../lib/imageAssetDownload";
 import { IMAGE_QUALITY_BY_PRESET } from "../../../../lib/imageGenerationPricing";
-import { attachmentBytesInput, type AttachmentBytesInput, type AttachmentUpload } from "../attachment-contract";
+import { attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentUpload, type DriveImportInput } from "../attachment-contract";
 import { CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../../lib/chatAttachmentLimits";
 import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib/generatedArtifactCore";
 import { settingsSectionHref } from "../../../../lib/settingsNavigation";
@@ -2105,6 +2108,60 @@ async function uploadAttachment(input: AttachmentBytesInput) {
   }
 }
 
+async function importDriveAttachments(input: DriveImportInput) {
+  if (!state.capabilities?.attachments || !state.capabilities.googleDrive || !browserSession || signingOut ||
+      closing || attachmentTransfer || chatWriting || state.update.stage === "installing") {
+    throw new Error("Google Drive attachments are unavailable.");
+  }
+  const accountSignal = chatSession.signal;
+  const transfer = { requestId: input.requestId, controller: new AbortController() };
+  const signal = AbortSignal.any([accountSignal, transfer.controller.signal]);
+  const files: AttachmentUpload[] = [];
+  attachmentTransfer = transfer;
+  try {
+    const selection = await selectDriveFiles({
+      origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, language: state.language ?? "en", slots: input.slots, signal,
+      openExternal: (url) => shell.openExternal(url),
+    });
+    signal.throwIfAborted();
+    if (!selection) return { files, incomplete: false };
+    const active = browserSession;
+    if (!active) throw new Error("The Desktop account changed.");
+    if (active.expiresAt <= Date.now() + 60_000) await renewBrowserSession(active);
+    signal.throwIfAborted();
+    let remaining = input.remainingBytes;
+    let incomplete = false;
+    return await withChatAccount(async (api) => {
+      for (const file of selection.files) {
+        try {
+          signal.throwIfAborted();
+          const receipt = await api.importDriveAttachment(file, selection.accessToken, signal);
+          if (signal.aborted || receipt.size > remaining) {
+            await api.discardAttachment(receipt.uploadId).catch(() => {});
+            incomplete = true;
+            continue;
+          }
+          remaining -= receipt.size;
+          attachmentReceipts.set(receipt.uploadId, receipt);
+          files.push(receipt);
+        } catch {
+          incomplete = true;
+          if (signal.aborted) break;
+        }
+      }
+      if (signal.aborted) {
+        for (const receipt of files.splice(0)) {
+          attachmentReceipts.delete(receipt.uploadId);
+          await api.discardAttachment(receipt.uploadId).catch(() => {});
+        }
+      }
+      return { files, incomplete };
+    }, "attachments");
+  } finally {
+    if (attachmentTransfer === transfer) attachmentTransfer = null;
+  }
+}
+
 async function removeChat(id: string) {
   return withChatAccount(async (api) => {
     const owner = browserSession?.accountId;
@@ -2244,6 +2301,12 @@ async function accountSettings(value: unknown) {
 
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
+  if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
+    if (!state.capabilities?.deepResearch || !draft.deepResearchDepth || draft.modelId !== DEEP_RESEARCH_MODEL_ID ||
+        draft.selectionMode !== "manual" || !draft.prompt.trim() || handoffId) {
+      throw new Error("Deep Research is unavailable for this draft.");
+    }
+  }
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
   if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
   const attachments = resolveStagedAttachments(draft.attachmentUploadIds);
@@ -2255,7 +2318,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     chatTurn = turn;
     const signal = turn.signal;
     const accountSignal = chatSession.signal;
-    const assistantId = randomUUID();
+    let assistantId: string = randomUUID();
     let id = input.conversationId;
     let sourceId: string | undefined;
     let partial = "";
@@ -2264,6 +2327,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let streamStarted = false;
     let failed = false;
     let contextChanged = false;
+    let researchSubmitted = false;
     let lastProgressAt = 0;
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
       if (!id || !window || window.isDestroyed() || window.webContents.isDestroyed() || window !== mainWindow ||
@@ -2281,6 +2345,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         }
         publish({});
         sourceId = await api.saveQuestion(id, input, signal);
+        if (input.deepResearchDepth) assistantId = desktopResearchAnswerId(id, sourceId);
         if (handoffId) removeWorkspaceHandoff(handoffId);
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);
         publish({ savedPrompt: input.prompt });
@@ -2298,6 +2363,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           modelId = id;
           publish({ modelId: id });
         });
+        researchSubmitted = Boolean(result && "deepResearch" in result);
         applied = result?.appliedReasoningEffort;
         if (applied) publish({ applied });
       } catch (error) {
@@ -2310,7 +2376,10 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         : null;
       const answer = conversation?.messages.find((message) => message.id === assistantId);
       const status = answer?.status === "normal" ? "saved"
-        : signal.aborted ? "stopped"
+        : input.deepResearchDepth && (answer?.status === "pending" || researchSubmitted && !answer) ? "researching"
+          : signal.aborted ? "stopped"
+          : input.deepResearchDepth && answer?.status === "error" ? "failed"
+          : input.deepResearchDepth && answer?.status === "incomplete" ? "unconfirmed"
           : answer || partial ? "partial" : contextChanged ? "failed"
             : streamStarted ? "unconfirmed" : failed ? "failed" : "unconfirmed";
       return { conversation, status, partial: answer ? "" : partial, modelId, applied, savedQuestion: Boolean(sourceId),
@@ -3022,6 +3091,10 @@ function registerIpc() {
   });
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
+  main("chat:research-status", (value) => {
+    if (!state.capabilities?.deepResearch) throw new Error("Deep Research is unavailable.");
+    return withChatAccount((api) => api.checkDeepResearch(chatId.parse(value)));
+  });
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));
   main("review:analysis-setup", (value) => {
     if (!state.capabilities?.reviewAnalysis) throw new Error("Review analysis is unavailable.");
@@ -3031,6 +3104,7 @@ function registerIpc() {
     if (!state.capabilities?.reviewAnalysis) throw new Error("Review analysis is unavailable.");
     return withChatAccount((api) => api.runReviewAnalysis(reviewAnalysisRequest.parse(value)), "review");
   });
+  main("attachment:drive", (value) => importDriveAttachments(driveImportInput.parse(value)));
   main("attachment:upload", (value) => uploadAttachment(attachmentBytesInput.parse(value)));
   main("attachment:cancel", (value) => {
     if (attachmentTransfer?.requestId === z.uuid().parse(value)) attachmentTransfer.controller.abort();

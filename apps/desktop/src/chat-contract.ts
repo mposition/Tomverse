@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEEP_RESEARCH_DEPTHS } from "../../../lib/deepResearchModel";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
@@ -25,6 +26,8 @@ export const composerOptions = z.object({
   assistantProfileId: chatId.nullable().optional(),
 }).strict();
 export type ComposerOptions = z.infer<typeof composerOptions>;
+export const deepResearchDepth = z.enum(DEEP_RESEARCH_DEPTHS);
+export type DeepResearchDepth = z.infer<typeof deepResearchDepth>;
 export const chatTurnInput = z.object({
   requestId: z.uuid(),
   conversationId: chatId.optional(),
@@ -36,6 +39,7 @@ export const chatTurnInput = z.object({
   handoffId: z.uuid().optional(),
   currentLocation: z.unknown().transform((value) => parseChatLocation(value)).optional(),
   tools: composerOptions.optional(),
+  deepResearchDepth: deepResearchDepth.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length || input.handoffId));
 export const reviewCapability = z.object({
   easy: z.boolean(), modelLimit: z.number().int().positive(), plan: z.enum(["Free", "Pro", "Max"]),
@@ -83,6 +87,7 @@ export type SaveArtifactInput = z.infer<typeof saveArtifactInput>;
 
 export const chatMessage = z.object({
   id: chatId, role: z.string(), content: z.string(), status: z.string().optional(), modelId: z.string().nullish(), createdAt: z.string().optional(),
+  pendingJobId: z.string().nullish(),
   memoryUsedCount: z.int().positive().nullish().catch(undefined),
   searchMetadata: z.object({
     reasoningEffort: z.object({ requested: chatEffort, applied: chatEffort.optional() }).optional(),
@@ -138,7 +143,7 @@ export type ChatTurnProgress = {
 export type ChatTurnResult = {
   conversation: ChatConversation | null;
   savedQuestion: boolean;
-  status: "saved" | "partial" | "stopped" | "failed" | "unconfirmed";
+  status: "saved" | "researching" | "partial" | "stopped" | "failed" | "unconfirmed";
   partial: string;
   modelId?: string;
   applied?: z.infer<typeof chatEffort>;
@@ -156,7 +161,7 @@ export type ReviewImageOffer = {
 export type ReviewTurnResult = {
   conversation: ChatConversation | null;
   savedQuestion: boolean;
-  status: ChatTurnResult["status"];
+  status: Exclude<ChatTurnResult["status"], "researching">;
   partial: Array<{ modelId: string; text: string }>;
   imageOffer?: ReviewImageOffer;
 };

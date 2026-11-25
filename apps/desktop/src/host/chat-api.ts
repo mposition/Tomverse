@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
+import type { DriveSelection } from "../../../../lib/desktopDrivePickerContract";
 import type { ComparisonReview, ReviewSetup } from "../../../../packages/chat-core/src/review";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { DESKTOP_LIVE_ORIGIN } from "../../../../lib/desktopAuthContract";
 import {
   DESKTOP_APP_ORIGIN, DESKTOP_CHAT_CONTEXT, DESKTOP_CHAT_CREATE, DESKTOP_CHAT_HISTORY, DESKTOP_CHAT_SEARCH, DESKTOP_CHAT_TURN,
-  DESKTOP_IMAGE_GENERATIONS, DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_REVIEW_ROUTING,
+  DESKTOP_DEEP_RESEARCH_STATUS, DESKTOP_IMAGE_GENERATIONS, DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_REVIEW_ROUTING,
 } from "../../../../lib/nativeBearerGate";
 import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "../../../../lib/chatWorkspaceEntry";
 import { getModel, isPubliclySelectableModel, MODEL_USAGE_CLASSES, type AiProvider } from "../../../../lib/models";
@@ -64,7 +66,7 @@ const uploadPreparation = z.object({
   uploadHeaders: z.object({ "Content-Type": z.string() }).strict(),
 });
 const matchesProduct = (product: DesktopTextProduct) => product === "review" ? isDesktopReview : isDesktopChat;
-type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort"> & {
+type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort" | "deepResearchDepth"> & {
   review?: true;
   currentLocation?: ChatTurnInput["currentLocation"];
   admission?: { admissionToken: string; contextBundle?: string | null };
@@ -255,6 +257,17 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       // Once storage confirms the bytes, finish registration so a cancelled draft can discard its receipt.
       return request(DESKTOP_CHAT_TURN, attachmentUpload, "PATCH", { key: preparation.key, ...metadata });
     },
+    async importDriveAttachment(file: DriveSelection["files"][number], accessToken: string, turn: AbortSignal) {
+      return request(DESKTOP_CHAT_TURN, attachmentUpload, "PUT", {
+        action: "google-drive-import", fileId: file.id, name: file.name, mediaType: file.mimeType, accessToken,
+      }, { turn, timeout: 60_000 });
+    },
+    async checkDeepResearch(assistantMessageId: string) {
+      return request(DESKTOP_DEEP_RESEARCH_STATUS, z.object({
+        status: z.enum(["submitted", "in_progress", "completed", "failed"]),
+        content: z.string().max(100_128).optional(),
+      }), "POST", { assistantMessageId });
+    },
     async discardAttachment(uploadId: string) {
       const response = await send(DESKTOP_CHAT_TURN, "DELETE", { uploadId },
         { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
@@ -372,7 +385,8 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           return null;
         }
       };
-      const contextBundle = input.review ? input.admission?.contextBundle : await prepare();
+      // The existing research endpoint is asynchronous and processes the saved transcript itself.
+      const contextBundle = input.review ? input.admission?.contextBundle : input.deepResearchDepth ? null : await prepare();
       const timeout = new AbortController();
       const watchdog = createChatLivenessWatchdog({ onExpire: () => timeout.abort() });
       try {
@@ -384,7 +398,8 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
             messages, modelId, webSearchMode: current.webSearchMode,
             ...(input.admission ? { admissionToken: input.admission.admissionToken } : {}),
             ...(bundle ? { contextBundle: bundle } : {}),
-            ...(input.effort === "default" ? {} : { reasoningEffort: input.effort }),
+            ...(input.deepResearchDepth ? { deepResearchDepth: input.deepResearchDepth }
+              : input.effort === "default" ? {} : { reasoningEffort: input.effort }),
           }, { signal: AbortSignal.any([turnSignal(turn), timeout.signal]) });
         };
         let response = await stream(contextBundle);
@@ -399,7 +414,12 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           }
         }
         watchdog.noteHeaders();
-        if (!response.ok || !response.body || response.headers.get("content-type")?.includes("application/json")) {
+        if (input.deepResearchDepth && modelId === DEEP_RESEARCH_MODEL_ID && response.ok &&
+            response.headers.get("content-type")?.includes("application/json")) {
+          const receipt = z.object({ deepResearchJobId: z.literal(assistantId), status: z.literal("submitted") }).parse(await response.json());
+          return { deepResearch: receipt.status, appliedReasoningEffort: undefined };
+        }
+        if (!response.ok || !response.body || response.headers.get("content-type")?.includes("application/json") || input.deepResearchDepth) {
           await response.body?.cancel().catch(() => {});
           throw new Error("Tomverse could not start this Chat response.");
         }

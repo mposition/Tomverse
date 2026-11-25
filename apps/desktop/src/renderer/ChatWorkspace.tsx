@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, CodeXml, Download, Ellipsis, FileSpreadsheet, FileText, Folder, FolderInput, ImagePlus, Link2Off, Lock, Paperclip, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Square, Trash2, Unlock } from "lucide-react";
 import { autoRoutingCopy } from "../../../../lib/autoRoutingCopy";
 import { chatHelpCopy } from "../../../../components/chat/chatHelpCopy";
@@ -9,12 +9,14 @@ import { CONVERSATION_TITLE_MAX_LENGTH, renameDecision } from "../../../../lib/c
 import { chatStarterCatalogFor } from "../../../../lib/chatStarterCatalog";
 import { starterSeedMayWrite, type StarterSeedMemory } from "../../../../lib/chatStarterSeed";
 import type { Language } from "../../../../lib/language";
-import { canUseModelWithPlan, getModel, type ModelTier } from "../../../../lib/models";
+import { canUseModelWithPlan, getModel, getWeightedUsageCredits, type ModelTier } from "../../../../lib/models";
 import type { ImageCapability } from "../images-contract";
+import { DEEP_RESEARCH_MODEL_ID, estimateDeepResearchInputTokens } from "../../../../lib/deepResearchModel";
+import { DesktopResearchSetup } from "./DesktopResearchSetup";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
-import type { ComposerOptions } from "../chat-contract";
+import type { ComposerOptions, DeepResearchDepth } from "../chat-contract";
 import { de } from "../../../../locales/de";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
@@ -46,7 +48,7 @@ import type {
 
 type ChatNotice = keyof typeof desktopChatCopy.en | "contextChanged";
 const statusNotice = {
-  saved: null, partial: "partial", stopped: "stopped", failed: "failed", unconfirmed: "unconfirmed",
+  saved: null, researching: null, partial: "partial", stopped: "stopped", failed: "failed", unconfirmed: "unconfirmed",
 } as const satisfies Record<ChatTurnResult["status"], ChatNotice | null>;
 const chatStarters = chatStarterCatalogFor("chat");
 const starterIcons = new Map([
@@ -68,7 +70,7 @@ function mergeChatMessages(previous: ChatConversation["messages"], incoming: Cha
     (first.createdAt ?? "").localeCompare(second.createdAt ?? "") || first.id.localeCompare(second.id));
 }
 
-export function useChatHistory(active: boolean, product: DesktopTextProduct, account: string | undefined, language: Language) {
+export function useChatHistory(active: boolean, product: DesktopTextProduct, account: string | undefined, language: Language, deepResearch = false) {
   const [rows, setRows] = useState<ChatHistoryRow[]>([]);
   const pins = useSyncExternalStore(subscribePinStore, getPinOverrides, getServerPinOverrides);
   const [projects, setProjects] = useState<AccountSettingsResult<"projects">["projects"]>();
@@ -96,6 +98,37 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const result = searchResult?.query === listQuery ? searchResult : null;
   const selectedRow = selected && (rows.find(row => row.id === selected.id) ?? selected);
   const selectedPinned = selectedRow && (pins[selectedRow.id] ?? selectedRow.pinned);
+  const researchConversationId = conversation?.id;
+  const pendingResearch = conversation?.messages.filter((message) =>
+    message.role === "assistant" && message.status === "pending" &&
+    message.modelId === DEEP_RESEARCH_MODEL_ID && message.pendingJobId).map(({ id }) => id).join(",");
+
+  useEffect(() => {
+    if (!active || !account || !deepResearch || !researchConversationId || !pendingResearch || selectedRow?.isLocked) return;
+    const ids = pendingResearch.split(",");
+    let current = 0;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      const id = ids[current++ % ids.length];
+      try {
+        const outcome = await window.desktop.checkDeepResearch(id);
+        if (alive && (outcome.status === "completed" || outcome.status === "failed")) {
+          setConversation((previous) => {
+            if (!previous || previous.id !== researchConversationId) return previous;
+            return { ...previous, messages: previous.messages.map((message) => {
+              if (message.id !== id || message.status !== "pending") return message;
+              return { ...message, pendingJobId: null, status: outcome.status === "completed" ? "normal" : "error",
+                content: outcome.content || chatCopy[language].responseError };
+            }) };
+          });
+        }
+      } catch { /* The server owns the run; try again on the next status check. */ }
+      if (alive) timer = setTimeout(() => void poll(), 8000);
+    }
+    void poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [account, active, deepResearch, language, pendingResearch, researchConversationId, selectedRow?.isLocked]);
 
   function setDraft(value: string) {
     setDraftValue(value);
@@ -786,7 +819,7 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
 }
 
 export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture,
-  plan, imageCapability, onModelImage, composerTools, searchReadiness }: {
+  plan, imageCapability, onModelImage, composerTools, searchReadiness, deepResearch }: {
   chat: History; chatWrite: boolean; autoOffered: boolean; onImport?: () => void; onCompare?: (prompt: string, continuationId?: string) => void; starters?: ChatStarter[];
   preferredModelId?: string;
   attachments: DesktopAttachmentDraft;
@@ -794,7 +827,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   handoff?: WorkspaceHandoff;
   deviceFixture: boolean;
   plan: ModelTier; imageCapability: ImageCapability | null; onModelImage(modelId: string, prompt: string): void;
-  composerTools?: boolean; searchReadiness?: { brave: boolean };
+  composerTools?: boolean; searchReadiness?: { brave: boolean }; deepResearch?: boolean;
 }) {
   const { language } = chat;
   const copy = desktopChatCopy[language];
@@ -803,6 +836,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const starterCopy = workspaceWelcomeCopy[language].starter;
   const [models, setModels] = useState<ChatModel[]>([]);
   const [modelError, setModelError] = useState(false);
+  const [researchSetup, setResearchSetup] = useState<string>();
   const [picker, setPicker] = useState<{ id: string; mode: "auto" | "manual"; conversation?: string }>();
   const [effort, setEffort] = useState<ChatTurnInput["effort"]>("default");
   const activeId = chat.selected?.id;
@@ -814,7 +848,9 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const availableAuto = chat.conversation?.autoSelection.offered ?? (!activeId && autoOffered);
   const autoCopy = autoRoutingCopy[language];
   const currentPicker = picker?.conversation === activeId ? picker : undefined;
-  const eligible = models.filter((model) => canUseModelWithPlan(plan, model));
+  const textModels = models.filter(({ id }) => id !== DEEP_RESEARCH_MODEL_ID);
+  const researchModel = deepResearch ? models.find(({ id }) => id === DEEP_RESEARCH_MODEL_ID) : undefined;
+  const eligible = textModels.filter((model) => canUseModelWithPlan(plan, model));
   const selectedModel = eligible.find(({ id }) => id === (currentPicker?.id ?? chat.conversation?.selectedModels[0] ?? (!activeId ? preferredModelId : undefined)))
     ?? eligible.find(({ id }) => id === "gpt-6-luna") ?? eligible[0];
   const mode = availableAuto ? currentPicker?.mode ?? chat.conversation?.selectionMode ?? "auto" : "manual";
@@ -844,13 +880,16 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     if (scroll.current && nearBottom.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat.live, chat.conversation]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.sending || chat.writing) return;
+  async function send(depth?: DeepResearchDepth) {
+    const model = depth ? researchModel : selectedModel;
+    if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) ||
+        chat.sending || chat.writing || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
     const attachmentUploadIds = await attachments.prepare();
     if (!attachmentUploadIds) return;
-    const saved = await chat.send({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? effort : "default", attachmentUploadIds,
-      handoffId: draftExcerpt?.id, currentLocation: location.current(), tools: composerTools ? toolChanges : undefined });
+    const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
+      effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
+      ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation: location.current() }),
+      tools: composerTools ? toolChanges : undefined });
     location.remove();
     if (saved) { attachments.clear(); setToolDraft(undefined); }
   }
@@ -915,11 +954,14 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             return <li className={`entry entry--${message.role}`} key={message.id}>
               {message.role === "assistant" && !message.imageTurn && <AnswerModel {...(actualModels.get(message.id) ?? { id: message.modelId })} />}
               <div className="chat-message-bubble">
-                {message.role === "assistant" && !message.imageTurn && <CopyAnswer content={message.content} language={language} />}
+                {message.role === "assistant" && message.content && !message.imageTurn && <CopyAnswer content={message.content} language={language} />}
                 <div data-handoff-content="chat">{message.role === "user"
                   ? <UserMessageContent content={message.content} language={language} /> : message.imageTurn
                     ? <SavedImageTurn key={message.imageTurn.groupId} turn={message.imageTurn} language={language} capability={imageCapability} />
-                    : <ChatMarkdown content={message.content} language={language} />}</div>
+                    : message.modelId === DEEP_RESEARCH_MODEL_ID && !message.content ?
+                      <p role="status">{message.status === "pending" ? chatCopy[language].deepResearchSearchingStatus
+                        : message.status === "error" ? chatCopy[language].responseError : copy.unconfirmed}</p> :
+                      <ChatMarkdown content={message.content} language={language} />}</div>
                 {message.role === "user" && <SavedAttachments message={message} language={language} />}
                 <GeneratedFiles artifacts={message.artifacts} language={language} />
                 {message.searchMetadata?.reasoningEffort && <small className="chat-effort">
@@ -960,7 +1002,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     {showComposer && <div className="composer-slot chat-composer-slot">
       {!chatWrite && <p className="chat-compose-notice" role="status">{copy.sendUnavailable}</p>}
       {modelError && <p className="notice" role="alert">{copy.modelsUnavailable}</p>}
-      <form className="composer chat-composer" onSubmit={submit} aria-label={copy.composer}>
+      <form className="composer chat-composer" onSubmit={(event) => { event.preventDefault(); void send(); }} aria-label={copy.composer}>
         {draftExcerpt && <HandoffDraft handoff={draftExcerpt} busy={chat.sending} language={language} />}
         <AttachmentDraftStatus draft={attachments} busy={chat.sending} />
         <textarea ref={composer} id="chat-draft-input" aria-label={copy.message} value={chat.draft} disabled={chat.sending || attachments.uploading}
@@ -977,6 +1019,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           }} />
         <div className="composer-actions">
           <ComposerTools language={language} key={toolsScope} disabled={chat.sending || chat.writing || attachments.uploading}
+            onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
+            onResearch={online && researchModel && !draftExcerpt ? () => setResearchSetup(toolsScope) : undefined}
             options={composerTools ? { webSearchMode: chat.conversation?.webSearchMode, memoryMode: chat.conversation?.memoryMode,
               assistantProfileId: chat.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
             setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
@@ -986,7 +1030,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           </ComposerTools>
           <span className="spacer" />
           <DesktopModelPicker key={activeId ?? "new"} account={chat.account} language={language} label={copy.modelEffort}
-            models={models} choices={selectedModel ? [selectedModel.id] : []} limit={1} singleModel plan={plan} disabled={chat.sending || chat.writing}
+            models={textModels} choices={selectedModel ? [selectedModel.id] : []} limit={1} singleModel plan={plan} disabled={chat.sending || chat.writing}
             mode={mode} autoOffered={availableAuto} imageCapability={imageCapability} onImage={(id) => onModelImage(id, chat.draft)}
             searchReadiness={searchReadiness} hasImageAttachments={attachments.files.some(({ mediaType }) => mediaType.startsWith("image/"))}
             onModeChange={(next) => { if (selectedModel) setPicker({ id: selectedModel.id, mode: next, conversation: activeId }); }}
@@ -1008,5 +1052,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
         </div>
       </form>
     </div>}
+    {showComposer && researchModel && researchSetup === toolsScope && <DesktopResearchSetup language={language}
+      model={researchModel.name} credits={getWeightedUsageCredits(researchModel, estimateDeepResearchInputTokens(chat.draft))}
+      locked={!canUseModelWithPlan(plan, researchModel)}
+      ready={Boolean(chat.draft.trim()) && online && !chat.sending && !chat.writing && !attachments.uploading}
+      onClose={() => setResearchSetup(undefined)} onStart={(depth) => { setResearchSetup(undefined); void send(depth); }} />}
   </div>;
 }

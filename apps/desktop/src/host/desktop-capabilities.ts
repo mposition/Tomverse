@@ -17,6 +17,8 @@ const capabilities = z.object({
   desktopReview: reviewCapability.optional(),
   desktopImages: imageCapability.optional().catch(undefined),
   desktopAttachments: z.boolean().optional(),
+  desktopGoogleDrive: z.boolean().optional(),
+  desktopDeepResearch: z.boolean().optional(),
   desktopPlugins: z.boolean().optional(),
   desktopCodeMcp: z.boolean().optional(),
 });
@@ -40,5 +42,6 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     searchReadiness: data.desktopSearchReadiness,
     chatImport: data.desktopImport === true, chatStarters: data.desktopStarters ?? [],
     review: data.desktopReview ?? null, images: data.desktopImages ?? null, attachments: data.desktopAttachments === true,
+    googleDrive: data.desktopGoogleDrive === true, deepResearch: data.desktopDeepResearch === true,
     plugins: data.desktopPlugins === true, codeMcp: data.desktopCodeMcp === true };
 }
