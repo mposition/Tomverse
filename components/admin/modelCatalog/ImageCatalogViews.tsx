@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
+import { AdminProviderMark } from "@/components/admin/ui/AdminProviderMark";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminStepper } from "@/components/admin/ui/AdminStepper";
 import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
@@ -98,6 +99,15 @@ export function ImageFlowStepper({
   );
 }
 
+function ImageModelName({ item }: { item: ImageCatalogItem }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      {item.provider && <AdminProviderMark provider={item.provider} size={20} />}
+      {item.name}
+    </span>
+  );
+}
+
 const subtitle = (m: CatalogMessages, item: ImageCatalogItem) =>
   [item.id, item.provider, item.source === "code" ? m.sourceCode : m.sourceCatalog].filter(Boolean).join(" · ");
 
@@ -134,7 +144,7 @@ export function ImageCatalogList({
       header: m.model,
       render: ({ item }) => (
         <div className="min-w-0">
-          <div className="font-bold text-zinc-100">{item.name}</div>
+          <div className="font-bold text-zinc-100"><ImageModelName item={item} /></div>
           <div className="truncate font-mono text-xs text-zinc-500">{subtitle(m, item)}</div>
         </div>
       ),
@@ -209,7 +219,7 @@ export function ImageCatalogList({
               >
                 <div className="flex min-w-0 flex-1 flex-col gap-2">
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                    <span className="font-bold text-zinc-100">{item.name}</span>
+                    <span className="font-bold text-zinc-100"><ImageModelName item={item} /></span>
                     <span className="truncate font-mono text-xs text-zinc-500">{subtitle(m, item)}</span>
                   </div>
                   <ImageFlowStepper m={m} stage={stage} />
@@ -264,7 +274,7 @@ export function ImageCatalogList({
           columns={columns}
           rows={settled}
           rowKey={({ item }) => item.id}
-          cardTitle={({ item }) => item.name}
+          cardTitle={({ item }) => <ImageModelName item={item} />}
           emptyState={<p className="text-sm text-zinc-400">{m.noImageModels}</p>}
         />
       </section>
@@ -517,7 +527,7 @@ export function ImageModelDetail({
           {m.backToList}
         </button>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-bold text-zinc-100">{item.name}</h2>
+          <h2 className="text-xl font-bold text-zinc-100"><ImageModelName item={item} /></h2>
           {renaming === null ? (
             <button
               type="button"

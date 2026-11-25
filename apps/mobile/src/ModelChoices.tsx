@@ -15,6 +15,9 @@ import qwen from "../../../public/model-icons/qwen.png";
 import zhipu from "../../../public/model-icons/zhipu.png";
 import perplexity from "../../../public/model-icons/perplexity.png";
 import groq from "../../../public/model-icons/llama.png";
+import ideogram from "../../../public/model-icons/ideogram.svg";
+import byteplus from "../../../public/model-icons/byteplus.png";
+import recraft from "../../../public/model-icons/recraft.png";
 import "./modelSelection.css";
 
 const providerBrands: Record<string, { name: string; image: string }> = {
@@ -22,6 +25,9 @@ const providerBrands: Record<string, { name: string; image: string }> = {
   deepseek: { name: "DeepSeek", image: deepseek }, xai: { name: "xAI", image: xai }, moonshot: { name: "Moonshot", image: moonshot },
   mistral: { name: "Mistral", image: mistral }, qwen: { name: "Qwen", image: qwen }, zhipu: { name: "Zhipu", image: zhipu },
   perplexity: { name: "Perplexity", image: perplexity }, groq: { name: "Groq", image: groq },
+  ideogram: { name: "Ideogram", image: ideogram },
+  byteplus: { name: "BytePlus", image: byteplus },
+  recraft: { name: "Recraft", image: recraft },
 };
 export const providerName = (provider: string) => providerBrands[provider.toLowerCase()]?.name ?? provider;
 export function ProviderMark({ provider }: { provider: string }) {
