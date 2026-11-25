@@ -354,6 +354,17 @@ export function desktopDeepResearchEnabled() {
   return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED === "true";
 }
 
+/**
+ * Desktop's in-app plan and payment screens. A display switch only: Desktop
+ * calls the same billing routes as the web through the account settings
+ * session, so it stays off unless that session is enabled too.
+ */
+export function desktopBillingEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_BILLING_ENABLED === "true";
+}
+
 export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && desktopChatWriteEnabled();
