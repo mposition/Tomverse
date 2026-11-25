@@ -1416,7 +1416,7 @@ export const resolveImageCatalog = (input: {
     if (row?.holdReason || row?.enabled === false) {
       disabledReason = "operational_hold";
     } else {
-      const wouldServe = row?.enabled === true || disabledReason === null || (base.enableWhenPriced && Boolean(revision));
+      const wouldServe = row?.enabled === true || disabledReason === null;
       // The code seed as committed is checked by check:image-pricing. Anything
       // an operator added -- a row, a price revision, a whole model -- is
       // judged here before it can serve, so a revision priced below the floor
@@ -1432,7 +1432,7 @@ export const resolveImageCatalog = (input: {
     // A hold reason is an operator note: it stays on the admin surface and is
     // not sent to browsers as the model's public disabledNote.
     resolved.push({
-      model: { ...model, disabledReason, ...(disabledReason === null && model.enableWhenPriced ? { disabledNote: undefined } : {}) },
+      model: { ...model, disabledReason },
       order: row?.sortOrder ?? order,
     });
   }

@@ -114,9 +114,6 @@ test("having an adapter is not what makes a model callable", async () => {
   for (const modelId of [
     "gemini-3.1-flash-lite-image",
     "gemini-3-pro-image",
-    "ideogram-4",
-    "dola-seedream-5-5-261028",
-    "recraftv4_pro",
   ]) {
     await assert.rejects(
       generateImageWithProvider({
@@ -547,9 +544,9 @@ for (const spec of [
 ]) {
   test(`${spec.provider} serves the exact priced native PNG and submits at most once`, async t => {
     const seed = IMAGE_MODEL_REGISTRY.find(model => model.id === spec.id);
-    assert.equal(seed.disabledReason, "operational_hold");
-    assert.deepEqual(seed.prices, []);
-    const prices = seed.sizes.map(size => ({ size, quality: "medium", outputCostMicroUsd: spec.unit, credits: 300 }));
+    assert.equal(seed.disabledReason, null);
+    assert.ok(seed.prices.every(price => price.credits === (spec.provider === "byteplus" ? 45 : 350)));
+    assert.ok(seed.prices.every(price => price.outputCostMicroUsd === spec.unit));
     const request = { prompt: "private brief", modelId: seed.id, quality: "medium", size: seed.sizes[0] };
     const editImage = { bytes: Buffer.from("private photo"), width: 45, height: 60, mimeType: "image/png", sha256: "a".repeat(64) };
     const network = t.mock.method(globalThis, "fetch");
@@ -558,7 +555,7 @@ for (const spec of [
       const [width, height] = size.split("x").map(Number);
       return sharp({ create: { width, height, channels: 3, background: "yellow" } }).png().toBuffer();
     };
-    setActiveImageModelCatalog([{ ...seed, disabledReason: null, prices }]);
+    setActiveImageModelCatalog([seed]);
     try {
       await withEnv(spec.env, "", () => assert.rejects(generateImageWithProvider(request), /key is not configured/));
       await withEnv(spec.env, "local-token", async () => {
@@ -617,24 +614,11 @@ for (const spec of [
   });
 }
 
-const ideogramRequest = { modelId: "ideogram-4", prompt: "Grand opening", size: "1024x1024", quality: "medium" };
+const ideogramRequest = { modelId: "ideogram-4-6", prompt: "Grand opening", size: "1024x1024", quality: "medium" };
 const ideogramAsset = "https://ideogram.ai/api/images/ephemeral/sample.png";
 const ideogramItem = { is_image_safe: true, resolution: "1024x1024", url: ideogramAsset };
 
-async function withPricedIdeogram(run) {
-  const seed = IMAGE_MODEL_REGISTRY.find(model => model.id === ideogramRequest.modelId);
-  assert.equal(seed.disabledReason, "operational_hold");
-  assert.deepEqual(seed.prices, []);
-  setActiveImageModelCatalog([{
-    ...seed, disabledReason: null,
-    prices: seed.qualities.map(quality => ({ quality, size: ideogramRequest.size, credits: 200, outputCostMicroUsd: 100_000 })),
-  }]);
-  try {
-    await withEnv("IDEOGRAM_API_KEY", "ideogram-test-key", run);
-  } finally {
-    resetActiveImageModelCatalog();
-  }
-}
+const withPricedIdeogram = run => withEnv("IDEOGRAM_API_KEY", "ideogram-test-key", run);
 
 test("direct Ideogram sends one priced generation per tier, then downloads a verified image without the key", async t => {
   const sharp = (await import("sharp")).default;
@@ -647,18 +631,18 @@ test("direct Ideogram sends one priced generation per tier, then downloads a ver
       Object.defineProperty(asset, "url", { value: url });
       return asset;
     }
-    assert.equal(url, "https://api.ideogram.ai/v2/image/generate/ideogram-4");
+    assert.equal(url, "https://api.ideogram.ai/v2/image/generate/ideogram-4-6");
     assert.equal(init.headers["Api-Key"], "ideogram-test-key");
     assert.equal(init.method, "POST");
     assert.equal(init.redirect, "error");
     return Response.json({ generation_id: "sample-1", data: [ideogramItem] });
   });
   await withPricedIdeogram(async () => {
-    for (const [quality, speed] of [["low", "turbo"], ["medium", "default"], ["high", "quality"]]) {
+    for (const quality of ["low", "medium", "high"]) {
       const result = await generateImageWithProvider({ ...ideogramRequest, quality });
       const sent = JSON.parse(network.mock.calls.at(-2).arguments[1].body);
       assert.deepEqual(sent, {
-        prompt: ideogramRequest.prompt, resolution: "1024x1024", rendering_speed: speed,
+        prompt: ideogramRequest.prompt, size: "1024x1024", quality, background: "opaque",
         magic_prompt: "off", async: false, num_images: 1,
       });
       assert.equal(result.providerRequestId, "sample-1");
@@ -667,6 +651,16 @@ test("direct Ideogram sends one priced generation per tier, then downloads a ver
       assert.equal(result.outputHeight, 1024);
       assert.equal(result.mimeType, "image/png");
       assert.ok(!Object.hasOwn(result.requestParams, "prompt"));
+    }
+    const seed = IMAGE_MODEL_REGISTRY.find(model => model.id === ideogramRequest.modelId);
+    assert.deepEqual(seed.prices.map(price => price.credits), [50, 90, 150]);
+    setActiveImageModelCatalog([{ ...seed, prices: seed.prices.map(price => ({
+      ...price, outputCostMicroUsd: price.outputCostMicroUsd - 1,
+    })) }]);
+    try {
+      await assert.rejects(generateImageWithProvider(ideogramRequest), /Unsupported Ideogram/);
+    } finally {
+      resetActiveImageModelCatalog();
     }
     await assert.rejects(generateImageWithProvider({ ...ideogramRequest, size: "1536x1024" }), /Unsupported Ideogram/);
     await assert.rejects(generateImageWithProvider({ ...ideogramRequest, editImage: { bytes } }), /cannot edit/);

@@ -12,7 +12,7 @@
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, type DirectRasterProvider } from "@/lib/directRasterModels";
-import { IDEOGRAM_MODEL_ID, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import type { ImageUseCase } from "@/lib/runtimeImageProviders";
 import {
@@ -116,8 +116,6 @@ export type ImageModelProfile = {
   shortName?: string;
   lifecycle: ImageModelLifecycle;
   disabledReason: ImageModelDisabledReason | null;
-  /** Owner-enabled seed awaiting its first operator-approved sale price. */
-  enableWhenPriced?: boolean;
   sizes: readonly ImageSize[];
   qualities: readonly ImageQuality[];
   prices: readonly ImageModelOptionPrice[];
@@ -786,27 +784,29 @@ const BFL_FLUX_3_IMAGE_KLEIN: ImageModelProfile = {
   },
 };
 
-const IDEOGRAM_4: ImageModelProfile = {
+const IDEOGRAM_46: ImageModelProfile = {
   id: IDEOGRAM_MODEL_ID,
   provider: "ideogram",
   apiModelId: IDEOGRAM_MODEL_ID,
-  name: "Ideogram 4.0",
+  name: "Ideogram 4.6",
   lifecycle: "stable",
-  disabledReason: "operational_hold",
-  enableWhenPriced: true,
-  disabledNote: "Enabled by default when an approved sale price and provider budget are available.",
+  disabledReason: null,
   sizes: [IDEOGRAM_SIZE],
   qualities: ["low", "medium", "high"],
-  prices: [],
+  prices: (["low", "medium", "high"] as const).map(quality => ({
+    quality, size: IDEOGRAM_SIZE,
+    credits: { low: 50, medium: 90, high: 150 }[quality],
+    outputCostMicroUsd: IDEOGRAM_OUTPUT_COST_MICRO_USD[quality],
+  })),
   latencyClass: "balanced",
   useCase: "layout",
   routingNote: "Posters, lettering and compositions with a specified text layout.",
   provenance: [],
   outputMimeTypes: ["image/png", "image/jpeg"],
-  pricingVersion: "ideogram-4-2026-11-25",
+  pricingVersion: "ideogram-4-6-2026-11-25",
   priceVerification: {
     verifiedAt: "2026-11-25",
-    sources: ["https://ideogram.ai/pricing/", "https://developer.ideogram.ai/api-reference/images/generate/ideogram-4"],
+    sources: ["https://ideogram.ai/pricing/", "https://developer.ideogram.ai/api-reference/images/generate/ideogram-4-6"],
     thinkingCapMicroUsd: 0,
   },
 };
@@ -821,12 +821,12 @@ function directRasterProfile(provider: DirectRasterProvider, name: string, useCa
     useCase,
     routingNote,
     lifecycle: "stable",
-    disabledReason: "operational_hold",
-    enableWhenPriced: true,
-    disabledNote: "Enabled by default when an approved sale price and provider budget are available.",
+    disabledReason: null,
     sizes: contract.sizes,
     qualities: ["medium"],
-    prices: [],
+    prices: contract.sizes.map(size => ({
+      size, quality: "medium", credits: contract.credits, outputCostMicroUsd: contract.outputCostMicroUsd,
+    })),
     latencyClass: "balanced",
     provenance: [],
     outputMimeTypes: ["image/png"],
@@ -845,7 +845,7 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   FAL_NANO_BANANA_2,
   BFL_FLUX_3_IMAGE,
   BFL_FLUX_3_IMAGE_KLEIN,
-  IDEOGRAM_4,
+  IDEOGRAM_46,
   directRasterProfile("byteplus", "Seedream 5.5", "edit", "Single-photo edits and affordable square, landscape or portrait generation."),
   directRasterProfile("recraft", "Recraft V4 Pro", "detail", "Native 2K square raster artwork for final brand and editorial assets."),
 ];

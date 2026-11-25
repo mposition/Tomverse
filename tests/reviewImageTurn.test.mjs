@@ -58,11 +58,14 @@ const disable = (ids) => IMAGE_MODEL_REGISTRY.map(model =>
   ids.includes(model.id) ? { ...model, disabledReason: "operational_hold" } : model);
 
 test("image providers come from the active catalogue, not a fixed list", () => {
-  const active = IMAGE_MODEL_REGISTRY.filter(model => model.disabledReason === null);
+  // Review compares at 1K square. A native-2K-only catalogue entry belongs
+  // in the Image workspace and cannot supply the 1K comparison.
+  const active = IMAGE_MODEL_REGISTRY.filter(model => model.disabledReason === null &&
+    model.prices.some(price => price.size === "1024x1024"));
   assert.ok(active.length > 0, "the seed catalogue has an active image model");
   const providers = reviewImageProviders(IMAGE_MODEL_REGISTRY);
   for (const model of active) assert.ok(providers.includes(imageModelOwner(model)), model.id);
-  for (const model of IMAGE_MODEL_REGISTRY.filter(item => item.disabledReason !== null)) {
+  for (const model of IMAGE_MODEL_REGISTRY.filter(item => !active.includes(item))) {
     if (!active.some(item => imageModelOwner(item) === imageModelOwner(model))) {
       assert.ok(!providers.includes(imageModelOwner(model)), model.id);
     }

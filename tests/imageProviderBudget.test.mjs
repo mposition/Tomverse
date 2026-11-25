@@ -162,6 +162,12 @@ test("only providers with an enabled model are required to have a budget", () =>
       IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_MONTH: "50000000",
       IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY: "12000000",
       IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_MONTH: "50000000",
+      IMAGE_PROVIDER_IDEOGRAM_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_IDEOGRAM_COST_MICROUSD_PER_MONTH: "50000000",
+      IMAGE_PROVIDER_BYTEPLUS_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_BYTEPLUS_COST_MICROUSD_PER_MONTH: "50000000",
+      IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_MONTH: "50000000",
     },
     { production: true }
   );
@@ -174,7 +180,7 @@ test("only providers with an enabled model are required to have a budget", () =>
   // still add up -- just against a pool with no money in it.
   assert.deepEqual(
     resolved.map((entry) => entry.provider),
-    ["openai", "xai", "fal", "bfl"]
+    ["openai", "xai", "fal", "bfl", "ideogram", "byteplus", "recraft"]
   );
   for (const entry of resolved) assert.ok(entry.resolved.limits, entry.provider);
 });

@@ -9,6 +9,7 @@ export const DIRECT_RASTER_MODELS = {
   byteplus: {
     apiModelId: SEEDREAM_API_MODEL,
     sizes: STANDARD_IMAGE_SIZES,
+    credits: 45,
     outputCostMicroUsd: 20_000,
     pricing: "https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing",
     docs: "https://docs.byteplus.com/en/docs/ModelArk/seedream-5-5",
@@ -16,6 +17,7 @@ export const DIRECT_RASTER_MODELS = {
   recraft: {
     apiModelId: RECRAFT_API_MODEL,
     sizes: [RECRAFT_SIZE],
+    credits: 350,
     outputCostMicroUsd: 250_000,
     pricing: "https://www.recraft.ai/docs/api-reference/pricing",
     docs: "https://www.recraft.ai/docs/api-reference/models/recraft-v4",

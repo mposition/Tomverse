@@ -1259,7 +1259,7 @@ test("a dedicated row takes coding notes from the operator and from a fill, and 
 
 test("a native 2K Recraft reservation uses its own approved price and exact dimensions", async () => {
   const seed = getImageModel("recraftv4_pro")!;
-  const price = { quality: "medium" as const, size: "2048x2048" as const, credits: 300, outputCostMicroUsd: 250_000 };
+  const price = { quality: "medium" as const, size: "2048x2048" as const, credits: 350, outputCostMicroUsd: 250_000 };
   const day = "IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_DAY";
   const month = "IMAGE_PROVIDER_RECRAFT_COST_MICROUSD_PER_MONTH";
   const previous = [process.env[day], process.env[month]];
@@ -1271,11 +1271,6 @@ test("a native 2K Recraft reservation uses its own approved price and exact dime
     await prisma.appSetting.upsert({
       where: { key: "feature.imageGenerationEnabled" },
       create: { key: "feature.imageGenerationEnabled", value: "true" }, update: { value: "true" },
-    });
-    assert.ok(seed.priceVerification.verifiedAt);
-    await createImagePriceRevision({
-      modelId: seed.id, session,
-      revision: { pricingVersion: "native-2k-test", prices: [price], verification: { ...seed.priceVerification, verifiedAt: seed.priceVerification.verifiedAt, sources: [...seed.priceVerification.sources] } },
     });
     await refreshImageModelCatalog({ force: true });
     assert.equal(getImageModel(seed.id)?.disabledReason, null);
@@ -1289,7 +1284,7 @@ test("a native 2K Recraft reservation uses its own approved price and exact dime
     const reservation = await prisma.imageCreditReservation.findFirstOrThrow({ where: { userId: user.id } });
     assert.equal(reservation.provider, "recraft");
     assert.equal(reservation.size, price.size);
-    assert.equal(reservation.reservedCredits, 300);
+    assert.equal(reservation.reservedCredits, price.credits);
     assert.equal(reservation.reservedCostMicroUsd, BigInt(255_000));
     assert.deepEqual((reservation.pricingSnapshot as { resolutionOption: unknown }).resolutionOption, { tier: "2k", aspectRatio: "1:1" });
   } finally {

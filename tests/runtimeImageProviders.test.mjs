@@ -18,7 +18,7 @@ test("only providers with an image adapter can be added at runtime", () => {
   // The profile schema enforces the same list the panels show.
   const unknown = imageFullProfileSchema.safeParse(runtimeImageProfileTemplate("unknown", "example"));
   assert.equal(unknown.success, false);
-  const ideogram = imageFullProfileSchema.parse(runtimeImageProfileTemplate("ideogram", "ideogram-4"));
+  const ideogram = imageFullProfileSchema.parse(runtimeImageProfileTemplate("ideogram", "ideogram-4-6"));
   assert.deepEqual(ideogram.sizes, ["1024x1024"]);
 });
 

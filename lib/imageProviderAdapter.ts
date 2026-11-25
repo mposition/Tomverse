@@ -1,7 +1,7 @@
 import "server-only";
 
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
-import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_RENDERING_SPEED, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
   IMAGE_GENERATION_MODEL_ID,
@@ -1519,8 +1519,9 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
 
   const body = {
     prompt: input.prompt,
-    resolution: input.size,
-    rendering_speed: IDEOGRAM_RENDERING_SPEED[input.quality],
+    size: input.size,
+    quality: input.quality,
+    background: "opaque",
     num_images: 1,
     magic_prompt: "off",
     async: false,
@@ -1529,7 +1530,7 @@ const generateWithIdeogram = async (model: ImageModelProfile, input: ImageReques
   let response: Response;
   try {
     // A lost response can follow a billable generation. Submit only once.
-    response = await fetch("https://api.ideogram.ai/v2/image/generate/ideogram-4", {
+    response = await fetch("https://api.ideogram.ai/v2/image/generate/ideogram-4-6", {
       method: "POST",
       headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
       body: JSON.stringify(body),

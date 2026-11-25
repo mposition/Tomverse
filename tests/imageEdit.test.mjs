@@ -70,6 +70,7 @@ test("each edit price is the measured one", () => {
   }
   const seedream = getImageModel("dola-seedream-5-5-261028");
   const option = { quality: "medium", size: "1024x1024", outputCostMicroUsd: 20_000, credits: 37 };
+  for (const price of seedream.prices) assert.equal(imageEditCredits(seedream, price), 45);
   assert.equal(imageEditPricing(seedream.id).inputBudgetMicroUsd, 8_000);
   assert.equal(maxImageEditRequestCostMicroUsd(seedream, option), 33_000);
   assert.equal(imageEditCredits(seedream, option), 37);

@@ -124,10 +124,10 @@ test("targets that disagree about options restore no options at all", () => {
   ]);
 });
 
-test("when the native 2K model is held the fallback opens with its own defaults", () => {
+test("when the native 2K model is unavailable the fallback opens with its own defaults", () => {
   const restore = deriveImageComposerRestore({
     groupId: "group-1",
-    targets: [target("recraftv4_pro", { generations: [attempt("recraftv4_pro-1", 1, { size: "2048x2048" })] })],
+    targets: [target("retired-2k-model", { generations: [attempt("retired-2k-model-1", 1, { size: "2048x2048" })] })],
   });
   assert.deepEqual(restore.modelIds, ["gpt-image-2"]);
   assert.equal(restore.size, null);
