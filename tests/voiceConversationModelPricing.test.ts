@@ -15,6 +15,11 @@ test("both generations of OpenAI's pricing table supply the same tariff only ins
   assert.equal(openAiLiveModelsAtPublishedRate(before, 50_000), null);
   assert.equal(openAiLiveModelsAtPublishedRate("GPT-Live\n\nOther models\n\n" + live, 50_000), null);
   assert.equal(openAiLiveModelsAtPublishedRate(pricing + "\n\nA new introductory rate applies.", 50_000), null);
+  const reviewed = "GPT-5.6 Sol’s promotional pricing is available until November 30, 2026.";
+  assert.deepEqual(openAiLiveModelsAtPublishedRate(pricing + "\n\n" + reviewed, 50_000), ["gpt-live-1.1"]);
+  assert.equal(openAiLiveModelsAtPublishedRate(pricing + "\n\n" + reviewed.replace("until", "through"), 50_000), null);
+  assert.equal(openAiLiveModelsAtPublishedRate(pricing + "\n| gpt-live-1.1 | $0.08 / minute | $0.02 / minute |", 50_000), null);
+  assert.equal(openAiLiveModelsAtPublishedRate(pricing + "\n| gpt-live-2 | $0.05 / minute |", 50_000), null);
 });
 
 test("the exact model's non-promotional active-minute tariff and supported Live endpoint determine eligibility", () => {

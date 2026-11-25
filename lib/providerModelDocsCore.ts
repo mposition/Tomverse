@@ -475,15 +475,20 @@ export function openAiLiveModelsAtPublishedRate(markdown: string, microUsdPerMin
   const columns = table.header.join("|");
   const legacy = columns === "Model|Price per minute";
   if (!legacy && columns !== "Model|Active rate|Standby rate") return null;
-  const candidates = new Set<string>();
-  for (const [id, price] of table.body) {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const row of table.body) {
+    if (row.length !== table.header.length) return null;
+    const [id, price] = row;
     if (!/^gpt-live-\d[\da-z.-]{0,99}$/.test(id) || notices.promoted.has(id)) continue;
+    if (seen.has(id)) return null;
+    seen.add(id);
     const amount = legacy ? price : price?.match(/^(\$[\d.]+)\s*\/\s*minute$/i)?.[1];
     const rate = amount ? dollars(amount, "plain") : null;
     if (rate === null) return null;
-    if (rate * 1_000_000 === microUsdPerMinute) candidates.add(id);
+    if (rate * 1_000_000 === microUsdPerMinute) candidates.push(id);
   }
-  return [...candidates];
+  return candidates;
 }
 
 /** The text of one `##`/`###` section, up to the next heading of the same or higher level. */
