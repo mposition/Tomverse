@@ -25,6 +25,9 @@ export type CliConfig = {
     commandEnv?: string[];
     /** Notes the agent keeps about a project for later tasks. On unless set to false; when off nothing is read or written. */
     memory?: boolean;
+    /** MCP servers and hooks (mcp.json, hooks.json and the folder's own files). On unless set to false. */
+    mcp?: boolean;
+    hooks?: boolean;
     /** Folders the user has said the CLI may work in (real paths). */
     trustedRoots?: string[];
 };
@@ -63,6 +66,8 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): CliConfig => {
     if (typeof value.model === "string") config.model = value.model;
     if (Array.isArray(value.commandEnv)) config.commandEnv = value.commandEnv.filter((v): v is string => typeof v === "string");
     if (typeof value.memory === "boolean") config.memory = value.memory;
+    if (typeof value.mcp === "boolean") config.mcp = value.mcp;
+    if (typeof value.hooks === "boolean") config.hooks = value.hooks;
     if (Array.isArray(value.trustedRoots)) config.trustedRoots = value.trustedRoots.filter((v): v is string => typeof v === "string");
     return config;
 };

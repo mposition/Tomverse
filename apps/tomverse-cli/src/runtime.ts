@@ -215,3 +215,16 @@ export function hasUnconfirmedToolOutcome(tool: SessionState["tools"][number]): 
     const result = tool.output as { processTreeChecked?: boolean; residualProcesses?: number[] } | undefined;
     return tool.state === "started" || result?.processTreeChecked === false || Boolean(result?.residualProcesses?.length);
 }
+
+// MCP servers and hooks (see extensions.ts): Desktop lists them, asks the person about the project's own, and starts them for a task.
+export { startLocalExtensions } from "./extensions.js";
+export type { LocalExtensionSetup } from "./extensions.js";
+export { loadMcpServers, describeMcpServer, userMcpFile, projectMcpFile } from "./mcp-config.js";
+export type { McpServerDef } from "./mcp-config.js";
+export type { McpServerStatus, McpState } from "./mcp-client.js";
+export { McpManager } from "./mcp-client.js";
+export { loadHooks, HOOK_EVENTS } from "./hooks.js";
+export type { HookDef, HookEvent } from "./hooks.js";
+export { openProjectTrust, mcpGate, hookGate } from "./project-trust.js";
+export type { ProjectTrust } from "./project-trust.js";
+export { tomverseHome } from "./config.js";

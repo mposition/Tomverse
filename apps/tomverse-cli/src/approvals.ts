@@ -1,7 +1,7 @@
 import type { ApprovalView } from "./agent.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
-export type RememberedRule = "file_edits" | "same_command" | "web_host";
+export type RememberedRule = "file_edits" | "same_command" | "web_host" | "mcp_tool";
 
 /**
  * "Yes, and don't ask again" answers the person gave at the terminal, for the
@@ -24,6 +24,12 @@ export class ApprovalMemory {
     private readonly fileEdits = new Set<string>();
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
+    /** MCP tools answered "always": one tool of one server, for that exact server definition. */
+    private readonly mcpTools = new Set<string>();
+
+    private static mcpKey(view: ApprovalView) {
+        return view.mcp ? JSON.stringify([view.mcp.server, view.mcp.tool, view.mcp.definition]) : null;
+    }
 
     private static commandKey(view: ApprovalView) {
         const c = view.command;
@@ -38,6 +44,7 @@ export class ApprovalMemory {
     /** Whether "always" can be offered for this request. */
     canRemember(view: ApprovalView) {
         if (view.error) return false;
+        if (view.mcp) return true;
         if (view.web) return true;
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
         return Boolean(view.command);
@@ -45,6 +52,7 @@ export class ApprovalMemory {
 
     match(view: ApprovalView): RememberedRule | null {
         if (view.error) return null;
+        if (view.mcp) return this.mcpTools.has(ApprovalMemory.mcpKey(view)!) ? "mcp_tool" : null;
         if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
         const key = ApprovalMemory.commandKey(view);
@@ -53,6 +61,10 @@ export class ApprovalMemory {
 
     remember(view: ApprovalView): RememberedRule | null {
         if (!this.canRemember(view)) return null;
+        if (view.mcp) {
+            this.mcpTools.add(ApprovalMemory.mcpKey(view)!);
+            return "mcp_tool";
+        }
         if (view.web) {
             this.webHosts.add(view.web.host);
             return "web_host";
@@ -70,10 +82,12 @@ export class ApprovalMemory {
             ...[...this.fileEdits].map((root) => `file edits in ${root} (creating and changing files; deleting is still asked)`),
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
+            ...[...this.mcpTools].map((key) => { const [server, tool] = JSON.parse(key) as string[]; return `MCP tool ${server}: ${tool}`; }),
         ];
     }
 
     clear() {
+        this.mcpTools.clear();
         this.fileEdits.clear();
         this.commands.clear();
         this.webHosts.clear();

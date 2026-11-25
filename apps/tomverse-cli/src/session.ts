@@ -89,13 +89,15 @@ export type ApprovalRecord = {
         background?: boolean;
         /** The web page request was approved for this site. */
         host?: string;
+        /** The MCP tool call was approved for this server definition (its hash); a changed definition is not run. */
+        mcp?: { server: string; tool: string; definition: string };
     };
     decision: "approved" | "denied";
     /** Approved without asking, by an earlier "always" answer in the same process. */
     by?: "remembered_answer";
-    rule?: "file_edits" | "same_command" | "web_host";
+    rule?: "file_edits" | "same_command" | "web_host" | "mcp_tool";
     /** This answer was "always" for the rest of that process. */
-    remember?: "file_edits" | "same_command" | "web_host";
+    remember?: "file_edits" | "same_command" | "web_host" | "mcp_tool";
     decidedAt: string;
 };
 

@@ -129,7 +129,7 @@ export const planCommandCall = (ctx: Pick<ToolContext, "workspace" | "commandTim
  * nothing) unless the user approved this tool call with this input, and the
  * call has not started before. Records the start durably before returning ok.
  */
-const gate = (ctx: ToolContext, toolName: string, toolCallId: string, input: unknown) => {
+export const gate = (ctx: ToolContext, toolName: string, toolCallId: string, input: unknown) => {
     if (ctx.journal.broken) return { ok: false as const, result: { status: "error", error: "The session journal cannot be written; nothing was run." } };
     const digest = canonicalDigest(input);
     const previous = ctx.journal.state.tools.find((t) => t.toolCallId === toolCallId);
@@ -154,7 +154,7 @@ const gate = (ctx: ToolContext, toolName: string, toolCallId: string, input: unk
     return { ok: true as const, digest, approval };
 };
 
-const startTool = (ctx: ToolContext, toolName: string, toolCallId: string, digest: string, plan?: CommandPlan) => {
+export const startTool = (ctx: ToolContext, toolName: string, toolCallId: string, digest: string, plan?: CommandPlan) => {
     const redact = (text: string) => ctx.redactText?.(text) ?? text;
     const command = plan ? { mode: plan.mode, file: redact(plan.file), args: plan.args.map(redact), cwd: redact(plan.cwd),
         envNames: plan.envNames, timeoutMs: plan.timeoutMs } : undefined;
@@ -162,7 +162,7 @@ const startTool = (ctx: ToolContext, toolName: string, toolCallId: string, diges
     ctx.journal.commit();
 };
 
-const endTool = (ctx: ToolContext, toolCallId: string, state: "completed" | "failed", output: unknown) => {
+export const endTool = (ctx: ToolContext, toolCallId: string, state: "completed" | "failed", output: unknown) => {
     const record = ctx.journal.state.tools.find((t) => t.toolCallId === toolCallId);
     if (record) {
         record.state = state;
