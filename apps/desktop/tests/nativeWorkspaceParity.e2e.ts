@@ -77,7 +77,7 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
             targets: [{ targetId: "target-1", currentGenerationId: "generated-image" }], generations: [{ generationId: "generated-image", groupId: "image-group",
               targetId: "target-1", modelId: "gpt-image-2", attemptNumber: 1, prompt: "Create a tiny image", status: "succeeded",
               createdAt: new Date().toISOString(), refunded: false, publicErrorCode: null }] });
-          case "/api/images/generations/generated-image/download": return new Response(new Uint8Array(preview), { headers: { "content-type": "image/png", "content-length": String(preview.length) } });
+          case "/api/images/generations/generated-image/download": return new Response(new Uint8Array(preview), { headers: { "content-type": "image/png" } });
           case `/api/conversations/${review.id}/comparison-reviews`: {
             if (method === "POST") {
               const body = JSON.parse(String(init?.body));

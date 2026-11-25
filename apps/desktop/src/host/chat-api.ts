@@ -74,26 +74,28 @@ class DesktopApiError extends Error {
 }
 export class DesktopChatContextChanged extends Error {}
 
-async function readBinaryBody(response: Response, size: number) {
+async function readBinaryBody(response: Response, limit: number, expectedSize: number | null = limit) {
   const reader = response.body!.getReader();
-  const bytes = new Uint8Array(size);
+  const bytes = expectedSize === null ? null : new Uint8Array(expectedSize);
+  const chunks: Uint8Array[] = [];
   let offset = 0;
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      if (offset + value.byteLength > size) {
+      if (offset + value.byteLength > limit) {
         void reader.cancel().catch(() => {});
         throw new Error("The downloaded size did not match the response.");
       }
-      bytes.set(value, offset);
+      if (bytes) bytes.set(value, offset);
+      else chunks.push(value);
       offset += value.byteLength;
     }
   } finally {
     reader.releaseLock();
   }
-  if (offset !== size) throw new Error("Tomverse did not return a complete file.");
-  return bytes;
+  if (!offset || (expectedSize !== null && offset !== expectedSize)) throw new Error("Tomverse did not return a complete file.");
+  return bytes ?? Buffer.concat(chunks, offset);
 }
 
 export function desktopChatApi(token: string, signal: AbortSignal, origin = DESKTOP_LIVE_ORIGIN) {
@@ -194,15 +196,17 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       const operation = AbortSignal.any([signal, AbortSignal.timeout(20_000)]);
       const response = await send(DESKTOP_IMAGE_GENERATIONS + "/" + encodeURIComponent(id) + "/download" + (preview ? "?preview=1" : ""),
         "GET", undefined, { signal: operation });
-      const size = Number(response.headers.get("content-length"));
-      if (!response.ok || !response.body || !Number.isSafeInteger(size) || size < 1 || size > IMAGE_ORIGINAL_MAX_READ_BYTES) {
+      const length = response.headers.get("content-length");
+      const encoding = response.headers.get("content-encoding");
+      const size = length !== null && (!encoding || encoding === "identity") ? Number(length) : null;
+      if (!response.ok || !response.body || (size !== null && (!Number.isSafeInteger(size) || size < 1 || size > IMAGE_ORIGINAL_MAX_READ_BYTES))) {
         await response.body?.cancel().catch(() => {});
         if (response.status === 401) throw new DesktopSessionRefused();
         throw new Error("The generated image is unavailable.");
       }
-      const bytes = await readBinaryBody(response, size);
-      const mimeType = detectImageMimeType(Buffer.from(bytes.buffer));
-      if (!mimeType || mimeType !== response.headers.get("content-type")) {
+      const bytes = await readBinaryBody(response, size ?? IMAGE_ORIGINAL_MAX_READ_BYTES, size);
+      const mimeType = detectImageMimeType(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+      if (!mimeType || mimeType !== response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase()) {
         throw new Error("Tomverse did not return a complete image.");
       }
       return { mimeType, bytes };
