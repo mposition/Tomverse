@@ -8,6 +8,7 @@ import type { CodeCliContinuation, CodeContinuation } from "../code-fallback";
 import type { DesktopMcpAction, DesktopMcpReply } from "../../../../lib/desktopCodeMcpContract";
 import type { CliFixtureInput } from "./cli-fixture-input";
 import type { TerminalReadReply } from "../../../tomverse-cli/src/terminal-read";
+import type { ReviewDiff, ReviewFile, ReviewHunk, ReviewModelResult, ReviewScope } from "../review-contract";
 
 export type Connection = { endpoint: string; key: string };
 export type RecordedSession = { requestId: string; storage: string | null; sessionId: string; project: ProjectRoot;
@@ -59,7 +60,11 @@ export type WorkerCommand =
   | (RecordedItem & { type: "undo-change" })
   | (RecordedSession & { type: "plan-rewind"; turn: number })
   | (RecordedSession & { type: "rewind-history"; turn: number; mode: CodeRewindMode })
-  | (RecordedSession & { type: "fork-history"; turn: number });
+  | (RecordedSession & { type: "fork-history"; turn: number })
+  | (RecordedSession & { type: "review-turn-diff"; protectedRoot: string })
+  | (RecordedSession & { type: "review-revert-hunk"; protectedRoot: string; path: string; status: ReviewFile["status"]; hunk: ReviewHunk })
+  | { type: "review-run"; requestId: string; project: ProjectRoot; connection: Connection; protectedRoot: string; scope: ReviewScope;
+    diffText: string; truncated: boolean; models: Array<{ id: string; name: string }> };
 
 export type WorkerEvent =
   | { type: "catalog"; requestId: string; models: Model[] }
@@ -82,4 +87,7 @@ export type WorkerEvent =
   | { type: "history-compacted"; requestId: string; result: CompactHistoryResult }
   | { type: "rewind-planned"; requestId: string; plan: CodeRewindPlan | null }
   | { type: "history-rewound"; requestId: string; result: "rewound" | "unavailable" | "unconfirmed"; text?: string; undone: number; conflicts: number }
-  | { type: "history-forked"; requestId: string; result: "forked" | "unavailable" | "unconfirmed"; id?: string };
+  | { type: "history-forked"; requestId: string; result: "forked" | "unavailable" | "unconfirmed"; id?: string }
+  | { type: "review-turn"; requestId: string; diff: ReviewDiff | null; reason?: "no-turn" | "failed" }
+  | { type: "review-reverted"; requestId: string; result: "reverted" | "stale" | "unavailable" | "unconfirmed"; changes?: Change[] }
+  | { type: "review-finished"; requestId: string; status: "done" | "cancelled" | "unavailable"; results: ReviewModelResult[] };

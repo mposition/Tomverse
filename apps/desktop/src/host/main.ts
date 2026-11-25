@@ -75,6 +75,7 @@ import { createTerminalApi } from "./terminal-api";
 import { createTerminalLaunch } from "./terminal-session";
 import { terminalEnv } from "./terminal-env";
 import { codeMemoryView } from "./code-memory";
+import { createReviewActions, type ReviewTarget } from "./review-host";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -201,8 +202,8 @@ let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
-type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" }>;
-type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" }>;
+type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" | "review-turn" | "review-reverted" | "review-finished" }>;
+type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" | "review-turn-diff" | "review-revert-hunk" | "review-run" }>;
 let pendingInspection: { id: string; type: InspectionCommand["type"]; settle: (event: InspectionEvent | null) => void } | null = null;
 let pendingMutation: { id: string; settle: (event: MutationEvent | null) => void } | null = null;
 let confirmingMutation = false;
@@ -1028,7 +1029,8 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted" ||
-      event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked") {
+      event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked" ||
+      event.type === "review-turn" || event.type === "review-reverted" || event.type === "review-finished") {
     if (pendingMutation?.id === event.requestId) pendingMutation.settle(event);
     return;
   }
@@ -1799,6 +1801,24 @@ async function undoSelectedChange(changeId: string): Promise<UndoChangeResult> {
   } finally {
     confirmingMutation = false;
   }
+}
+
+/** The saved Tomverse API task the review panel is for: its record, and where a worktree was started from. */
+function reviewTarget(): ReviewTarget | null {
+  const task = state.task;
+  const record = selectedRecord();
+  if (!task?.id || !record || record.sessionId !== task.id || task.savedLocally === false || record.storage === null || task.unreadable ||
+      task.execution?.executionMode !== "tomverse_api" || task.continuation || task.cliContinuation) return null;
+  const worktree = "worktree" in record ? record.worktree : undefined;
+  try { assertProjectRoot(record.project); } catch { return null; }
+  if (worktree?.unavailable) return null;
+  const { storage, scope, project, sourceProject, sessionId } = record;
+  return { taskId: task.id, record: { storage, scope, project, sourceProject, sessionId }, ...(worktree ? { worktreeBase: worktree.base } : {}) };
+}
+
+function reviewReady() {
+  return !!worker && !!mainWindow && !mainWindow.isDestroyed() && !state.busy && !pendingMutation && !recoveryCheckPending() && !confirmingMutation &&
+    !choosing && !signingOut && !closing && !suspended && state.update.stage !== "installing";
 }
 
 /** Whether a saved task can be taken back or forked right now, and the record it lives in. */
@@ -3501,6 +3521,22 @@ function registerIpc() {
   main("desktop:check-recovery", (id) => checkSelectedRecovery(sessionId.parse(id)));
   main("desktop:compact-task", (id) => compactSelectedTask(sessionId.parse(id)));
   main("desktop:undo-change", (id) => undoSelectedChange(z.string().min(1).max(128).parse(id)));
+  main("desktop:review", createReviewActions({
+    target: reviewTarget, ready: reviewReady, models: () => state.models, connection: codeConnection, protectedRoot: () => app.getPath("userData"),
+    language: () => state.language ?? "en",
+    request: async (command, timeoutMs) => worker ? (await runRecordedMutation(worker, command, (event) => event, timeoutMs)) ?? "unavailable" : "unavailable",
+    confirm: async ({ title, message, detail, accept, cancel }) => {
+      const owner = mainWindow;
+      if (!owner || owner.isDestroyed()) return false;
+      confirmingMutation = true;
+      try {
+        const { response } = await dialog.showMessageBox(owner, { type: "warning", title, message, detail, buttons: [cancel, accept], defaultId: 0, cancelId: 0, noLink: true });
+        return response === 1;
+      } finally { confirmingMutation = false; }
+    },
+    cancel: (requestId) => { try { send({ type: "cancel-recovery", requestId }); } catch { /* The worker may have exited. */ } },
+    afterRevert: (taskId, changes) => { if (state.task?.id === taskId) { state.task.changes = changes; broadcast(); } },
+  }));
   main("desktop:rewind-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return rewindSelectedTurn(id, turn); });
   main("desktop:fork-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return forkSelectedTurn(id, turn); });
   main("desktop:export-diagnostics", exportDiagnostics);
