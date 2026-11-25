@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ComparisonReview, ReviewSetup } from "../../../../packages/chat-core/src/review";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { DESKTOP_LIVE_ORIGIN } from "../../../../lib/desktopAuthContract";
 import {
@@ -6,7 +7,7 @@ import {
   DESKTOP_IMAGE_GENERATIONS, DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_REVIEW_ROUTING,
 } from "../../../../lib/nativeBearerGate";
 import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "../../../../lib/chatWorkspaceEntry";
-import { isPubliclySelectableModel } from "../../../../lib/models";
+import { getModel, isPubliclySelectableModel, MODEL_USAGE_CREDIT_WEIGHTS, type AiProvider, type ModelUsageClass } from "../../../../lib/models";
 import { createChatLivenessWatchdog } from "../../../../lib/chatStreamLiveness";
 import { consumeChatStream } from "../../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../../lib/chatRequestLimits";
@@ -20,8 +21,9 @@ import { formatByMediaType, resolveChatAttachmentFormat } from "../../../../lib/
 import { attachmentUpload, type AttachmentBytesInput, type AttachmentUpload } from "../attachment-contract";
 import {
   chatConversation, chatHistoryHit, chatHistoryRow, chatId, chatImportedSource, isDesktopChat, isDesktopReview,
-  type ChatConversation, type ChatRenameInput, type ChatPageInput, type ChatSourceInput, type ChatTurnInput, type DesktopTextProduct, type ReviewTurnInput, type SaveArtifactInput,
+  type ChatConversation, type ChatModel, type ChatRenameInput, type ChatPageInput, type ChatSourceInput, type ChatTurnInput, type DesktopTextProduct, type ReviewTurnInput, type SaveArtifactInput,
 } from "../chat-contract";
+import type { ReviewAnalysisRequest } from "../chat-contract";
 import { VOICE_TRANSCRIPT_MAX_CHARACTERS } from "../../../../lib/voiceInputFormats";
 import type { DictationClip, DictationReply } from "../dictation-contract";
 import { desktopMcpReply, type DesktopMcpAction } from "../../../../lib/desktopCodeMcpContract";
@@ -36,9 +38,24 @@ const catalog = z.object({
     publiclyListed: z.boolean().optional(), enabled: z.boolean(),
     status: z.enum(["enabled", "limited", "disabled", "coming-soon"]), catalogDeleted: z.boolean().optional(),
     reasoningEfforts: z.array(z.enum(["low", "high"])).optional(),
+    icon: z.string().optional(), bestFor: z.string().optional(), userVisibleNote: z.string().optional(),
+    usageClass: z.custom<ModelUsageClass>((value) => typeof value === "string" && Object.hasOwn(MODEL_USAGE_CREDIT_WEIGHTS, value)).optional(),
+    creditWeight: z.number().nonnegative().optional(), reasoning: z.enum(["none", "low", "medium", "high"]).optional(),
+    inputCapabilities: z.object({ image: z.boolean(), nativePdf: z.boolean() }).optional(),
+    webSearchOverride: z.enum(["off", "app-managed"]).optional(),
   })),
 });
 const questionReceipt = z.object({ messageMappings: z.array(z.object({ requestId: z.uuid(), messageId: chatId })) });
+const reviewAnalysis = z.custom<ComparisonReview>((value) => {
+  const review = value as Partial<ComparisonReview> | null;
+  const result = review?.result?.primary?.result;
+  return typeof review?.id === "string" && Array.isArray(review.responseMap) &&
+    Boolean(result && Array.isArray(result.differences) && Array.isArray(result.consensus) && Array.isArray(result.modelAssessments));
+});
+const reviewSetup = z.object({ available: z.boolean(), reason: z.string().optional(), storedReview: reviewAnalysis.optional(),
+  promptMessageId: z.uuid().optional(), assistantMessageIds: z.array(z.uuid()).max(3).optional(),
+  source: z.object({ question: z.string(), responses: z.array(z.object({ messageId: z.string(), content: z.string() })).max(3) }).optional(),
+}) satisfies z.ZodType<ReviewSetup>;
 const reviewAdmission = z.object({ ok: z.literal(true), admissionToken: z.string().min(1), contextBundle: z.string().nullish() });
 const chatContext = z.object({ ok: z.literal(true), contextBundle: z.string().min(1).max(8192).nullable() });
 const staleChatContext = z.object({ code: z.literal("CHAT_CONTEXT_BUNDLE_STALE"),
@@ -95,9 +112,9 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
   }
 
   async function request<T>(path: string, schema: z.ZodType<T>, method = "GET", body?: object, options: {
-    turn?: AbortSignal; headers?: Record<string, string>; publicRead?: boolean;
+    turn?: AbortSignal; headers?: Record<string, string>; publicRead?: boolean; timeout?: number;
   } = {}): Promise<T> {
-    const response = await send(path, method, body, { ...options, signal: AbortSignal.any([turnSignal(options.turn), AbortSignal.timeout(15_000)]) });
+    const response = await send(path, method, body, { ...options, signal: AbortSignal.any([turnSignal(options.turn), AbortSignal.timeout(options.timeout ?? 15_000)]) });
     if (response.ok) return schema.parse(await response.json());
     if (response.status === 409 && method === "POST" && path === DESKTOP_IMAGE_GENERATIONS) {
       const detail = z.object({ code: z.literal("IMAGE_PRICE_CHANGED") }).safeParse(await response.json().catch(() => null));
@@ -244,13 +261,25 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     async importedSource({ id, offset }: ChatSourceInput) {
       return request(pathFor(id) + "/continuation?offset=" + (offset ?? "end") + "&limit=50", chatImportedSource);
     },
-    async models() {
+    async models(): Promise<ChatModel[]> {
       const { models } = await request("/api/models/catalog", catalog, "GET", undefined, { publicRead: true });
-      return models.filter(isPubliclySelectableModel).map(({ id, name, provider, minimumPlan, reasoningEfforts }) =>
-        ({ id, name, provider, minimumPlan, reasoningEfforts }));
+      return models.filter(isPubliclySelectableModel).map((model) => {
+        const seed = getModel(model.id);
+        return { ...model, provider: model.provider as AiProvider, apiModel: model.id,
+          icon: model.icon ?? seed?.icon ?? "", bestFor: model.bestFor ?? seed?.bestFor ?? "",
+          usageClass: model.usageClass ?? seed?.usageClass ?? "standard" };
+      });
     },
     async rename({ id, title }: ChatRenameInput) {
       return request(pathFor(id), z.object({ title: z.string() }), "PATCH", { title });
+    },
+    prepareReviewAnalysis(id: string): Promise<ReviewSetup> {
+      return request(pathFor(id) + "/comparison-reviews?reviewMode=balanced&includeSynthesis=false", reviewSetup);
+    },
+    runReviewAnalysis({ conversationId, ...input }: ReviewAnalysisRequest): Promise<ComparisonReview> {
+      return request(pathFor(conversationId) + "/comparison-reviews", reviewAnalysis, "POST", {
+        ...input, reviewMode: "balanced", includeSynthesis: false,
+      }, { timeout: 180_000 });
     },
     async remove(id: string) {
       await request(pathFor(id), z.object({ success: z.literal(true) }), "DELETE");
@@ -262,10 +291,12 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     },
     async configure(current: ChatConversation, input: ChatTurnInput, turn: AbortSignal) {
       const savedModels = current.storedSelectedModels ?? current.selectedModels;
-      if (current.selectionMode !== input.selectionMode ||
-          (input.selectionMode === "manual" && savedModels[0] !== input.modelId)) {
+      const changed = current.selectionMode !== input.selectionMode ||
+          (input.selectionMode === "manual" && savedModels[0] !== input.modelId);
+      if (changed || (input.tools && Object.keys(input.tools).length)) {
         await request(pathFor(current.id), z.object({ id: chatId }), "PATCH", {
-          selectionMode: input.selectionMode, ...(input.selectionMode === "manual" ? { selectedModels: [input.modelId] } : {}),
+          ...(changed ? { selectionMode: input.selectionMode, ...(input.selectionMode === "manual" ? { selectedModels: [input.modelId] } : {}) } : {}),
+          ...input.tools,
         }, { turn });
       }
     },

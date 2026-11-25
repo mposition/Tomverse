@@ -9,6 +9,9 @@ import { imageCapability } from "../images-contract";
 const capabilities = z.object({
   autoSelection: z.object({ offered: z.boolean() }),
   desktopWrite: z.boolean().optional(),
+  desktopReviewAnalysis: z.boolean().optional(),
+  desktopComposerTools: z.boolean().optional(),
+  desktopSearchReadiness: z.object({ brave: z.boolean() }).optional(),
   desktopImport: z.boolean().optional(),
   desktopStarters: z.array(z.object({ id: z.string(), label: z.string(), outcome: z.string(), seed: z.string() })).max(CHAT_STARTER_MAX_VISIBLE).optional(),
   desktopReview: reviewCapability.optional(),
@@ -33,6 +36,8 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
   }
   const data = capabilities.parse(await response.json());
   return { autoSelection: data.autoSelection.offered, chatWrite: data.desktopWrite === true,
+    reviewAnalysis: data.desktopReviewAnalysis === true, composerTools: data.desktopComposerTools === true,
+    searchReadiness: data.desktopSearchReadiness,
     chatImport: data.desktopImport === true, chatStarters: data.desktopStarters ?? [],
     review: data.desktopReview ?? null, images: data.desktopImages ?? null, attachments: data.desktopAttachments === true,
     plugins: data.desktopPlugins === true, codeMcp: data.desktopCodeMcp === true };

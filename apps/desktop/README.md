@@ -93,6 +93,8 @@ The script signs the new MSIX with the Local Dev key in the Windows current-user
 
 When creating a channel, the first run exports the public `Tomverse-Desktop-Local-Dev.cer` and stops if it is untrusted. Import that certificate into **Local Computer → Trusted People** with an administrator account, then rerun the build. Open `Tomverse-Desktop-Local-Dev.appinstaller` once on the test PC to enroll the app. After publishing a higher version, close and reopen **Tomverse Desktop Local Dev** to pick up the update.
 
+The Dev server advertises two additional capabilities after their server switches are enabled. `TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED` enables Chat's conversation-scoped web search, assistant and memory controls alongside Desktop Chat writes. `TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED` adds the answer-analysis dialog for two or more saved text answers alongside Desktop Review writes. The analysis uses the existing `GET` and `POST /api/conversations/{conversationId}/comparison-reviews` and keeps its server-side ownership and credit checks.
+
 ### Release builds
 
 Release builds can embed a deployment-controlled HTTPS origin through `TOMVERSE_DESKTOP_UPDATE_ORIGIN` at build time. The feed endpoint is `/desktop/updates/{platform}/{arch}/{currentVersion}`. The packaged Windows path requires a signed, directly installed MSIX. Windows App Installer manages updates for packages installed through an App Installer manifest. The macOS path uses Electron’s native updater with a signed app and JSON feed. Linux updates follow the supported distribution package path.

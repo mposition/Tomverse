@@ -45,7 +45,7 @@ import { VerificationPanel } from "./VerificationPanel";
 import { TaskList } from "./TaskList";
 import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
-import { ChatConversationActions, ChatHistory, ChatHistorySearch, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
+import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
@@ -511,16 +511,29 @@ function Desktop() {
   const nativeImages = !settingsView && imagesActive;
   const images = useImageWorkspace(imagesActive, language);
   const chatRail = nativeChat && !nativeImages;
-  const historyWidth = chatRail ? chatHistoryWidth : defaultHistoryWidth;
-  const setHistoryWidth = chatRail ? setChatHistoryWidth : setDefaultHistoryWidth;
-  const [usage, setUsage] = useState<{ account: string; value: number | null }>();
+  const textHistory = (nativeChat || nativeReview) && !nativeImages;
+  const historyWidth = textHistory ? chatHistoryWidth : defaultHistoryWidth;
+  const setHistoryWidth = textHistory ? setChatHistoryWidth : setDefaultHistoryWidth;
+  useEffect(() => {
+    function dismissMenus(event: globalThis.PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.chat-conversation-actions[open], details.model-menu[open]")) {
+        if (!menu.contains(target)) menu.open = false;
+      }
+    }
+    document.addEventListener("pointerdown", dismissMenus, true);
+    return () => document.removeEventListener("pointerdown", dismissMenus, true);
+  }, []);
+  const [usage, setUsage] = useState<{ account: string; value: number | null; plan?: "Free" | "Pro" | "Max" }>();
   const usageLabel = sidebarCopy[language].currentUsage;
   const usageValue = usage?.account === accountDraft ? usage?.value : null;
   useEffect(() => {
     if (!accountDraft || settingsView || chat.sending || reviewRun.running || images.sending) return;
     let current = true;
-    const refresh = () => void window.desktop.accountSettings<"usage">({ action: "usage" }).then(({ usage, limits }) => {
-      if (current) setUsage({ account: accountDraft, value: usage && limits ? usagePercent(usage.creditsMonth, limits.creditsMonth) : null });
+    const refresh = () => void window.desktop.accountSettings<"usage">({ action: "usage" }).then(({ usage, limits, plan }) => {
+      if (current) setUsage({ account: accountDraft, value: usage && limits ? usagePercent(usage.creditsMonth, limits.creditsMonth) : null,
+        plan: plan === "Free" || plan === "Pro" || plan === "Max" ? plan : undefined });
     }, () => { if (current) setUsage({ account: accountDraft, value: null }); });
     refresh();
     window.addEventListener("focus", refresh);
@@ -529,6 +542,10 @@ function Desktop() {
   function openImageStarter(prompt: string) {
     setImagesOpen(true);
     if (!images.prompt && !images.sending) void images.open().then(() => images.setPrompt(prompt));
+  }
+  function openImageModel(modelId: string, prompt: string) {
+    setImagesOpen(true);
+    images.offerImages({ prompt, models: [modelId], quality: "medium", unavailable: [] });
   }
   const handoff = snapshot?.handoff;
   const codeHandoff = handoff?.target === "code" ? handoff : undefined;
@@ -764,7 +781,7 @@ function Desktop() {
           </button>}
       </div>
     </nav>
-    {historyOpen && <aside id="desktop-history" className={chatRail ? "history history--chat" : "history"} aria-label={copy.history}
+    {historyOpen && <aside id="desktop-history" className={textHistory ? "history history--chat" : "history"} aria-label={copy.history}
       onBlur={(event) => {
         const next = event.relatedTarget;
         if (next && next !== historyToggle.current && !event.currentTarget.contains(next) && matchMedia(compactHistoryQuery).matches) {
@@ -780,14 +797,13 @@ function Desktop() {
       }}>
       <div className="history-header">
         <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>
-          {chatRail ? <><img src={logo} alt="" /><TomverseWordmark /></> : names[surface]}
+          {textHistory ? <><img src={logo} alt="" />{chatRail ? <TomverseWordmark /> : names.review}</> : names[surface]}
         </h1>
         {surface === "code" && <button ref={historySearchToggle} className="icon" type="button" aria-label={copy.searchHistory} aria-expanded={searchOpen}
           aria-controls={searchOpen ? "code-history-filter" : undefined}
           onClick={() => searchOpen ? closeCodeHistorySearch() : setSearchOpen(true)}><Search size={18} /></button>}
-        {chatRail && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
+        {textHistory && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
           onClick={() => void act(() => window.desktop.openWeb("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
-        {nativeReview && !nativeImages && <ChatHistorySearch chat={review} />}
       </div>
       {nativeImages && <ImageHistoryList workspace={images} onClose={() => setImagesOpen(false)} />}
       {chatRail && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading} canModify={snapshot?.capabilities?.chatWrite === true}
@@ -1045,12 +1061,17 @@ function Desktop() {
           <button className="soft" type="button" onClick={() => setReviewReference("")}>{reviewHandoff.cancel}</button>
         </div>}<ChatWorkspace chat={chat} chatWrite={snapshot?.capabilities?.chatWrite === true}
         autoOffered={snapshot?.capabilities?.autoSelection === true} preferredModelId={accountModels?.[0]}
+        plan={(usage?.account === accountDraft ? usage?.plan : undefined) ?? snapshot?.capabilities?.review?.plan ?? "Free"}
+        imageCapability={imageCapability} onModelImage={openImageModel}
+        composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
         deviceFixture={snapshot?.deviceFixtureAvailable === true}
         handoff={handoff?.target === "chat" ? handoff : undefined} /></> : nativeReview ? <ReviewWorkspace history={review}
           capability={snapshot?.capabilities?.review ?? null} run={reviewRun} preferredModelIds={accountModels}
+          analysisEnabled={snapshot?.capabilities?.reviewAnalysis} searchReadiness={snapshot?.capabilities?.searchReadiness}
+          imageCapability={imageCapability} onModelImage={openImageModel}
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.deviceFixtureAvailable === true}
           onImageStarter={imageCapability ? openImageStarter : undefined}

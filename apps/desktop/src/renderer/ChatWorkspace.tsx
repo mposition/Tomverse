@@ -9,7 +9,12 @@ import { CONVERSATION_TITLE_MAX_LENGTH, renameDecision } from "../../../../lib/c
 import { chatStarterCatalogFor } from "../../../../lib/chatStarterCatalog";
 import { starterSeedMayWrite, type StarterSeedMemory } from "../../../../lib/chatStarterSeed";
 import type { Language } from "../../../../lib/language";
-import { getModel } from "../../../../lib/models";
+import { canUseModelWithPlan, getModel, type ModelTier } from "../../../../lib/models";
+import type { ImageCapability } from "../images-contract";
+import { DesktopModelPicker } from "./DesktopModelPicker";
+import { SavedImageTurn } from "./ImageWorkspace";
+import { ComposerTools } from "./ComposerTools";
+import type { ComposerOptions } from "../chat-contract";
 import { de } from "../../../../locales/de";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
@@ -70,7 +75,6 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const [projectRefresh, setProjectRefresh] = useState(0);
   const [searchResult, setSearchResult] = useState<{ query: string; hits: ChatHistoryHit[]; failed: boolean } | null>(null);
   const [query, setQuery] = useState("");
-  const [searching, setSearching] = useState(false);
   const [listStatus, setListStatus] = useState<"loading" | "ready" | "failed">("loading");
   const [selected, setSelected] = useState<ChatHistoryRow | null>(null);
   const [conversation, setConversation] = useState<ChatConversation | null>(null);
@@ -88,7 +92,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   const openVersion = useRef(0);
   const historyVersion = useRef(0);
   const changingConversation = useRef<symbol | undefined>(undefined);
-  const listQuery = product === "chat" || searching ? query.trim() : "";
+  const listQuery = query.trim();
   const result = searchResult?.query === listQuery ? searchResult : null;
   const selectedRow = selected && (rows.find(row => row.id === selected.id) ?? selected);
   const selectedPinned = selectedRow && (pins[selectedRow.id] ?? selectedRow.pinned);
@@ -123,7 +127,6 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setSearchResult(null);
     setListStatus("loading");
     setQuery("");
-    setSearching(false);
     setSelected(null);
     setConversation(null);
     setOpening(false);
@@ -382,7 +385,7 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
   }
 
   return { account, rows: rows.map(row => pins[row.id] === undefined ? row : { ...row, pinned: pins[row.id] }),
-    hits: result?.hits ?? [], query, setQuery, searching, setSearching, listStatus, searchFailed: result?.failed === true, listQuery,
+    hits: result?.hits ?? [], query, setQuery, listStatus, searchFailed: result?.failed === true, listQuery,
     selected: selectedRow && { ...selectedRow, pinned: selectedPinned ?? undefined },
     conversation: selectedRow?.isLocked ? null : conversation, language,
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
@@ -392,11 +395,6 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
 }
 
 type History = ReturnType<typeof useChatHistory>;
-
-export function ChatHistorySearch({ chat }: { chat: History }) {
-  return <button type="button" className="icon" aria-label={desktopChatCopy[chat.language].searchConversations} aria-expanded={chat.searching}
-    onClick={() => chat.setSearching(!chat.searching)}><Search size={18} /></button>;
-}
 
 export function ChatHistory({ chat, product = "chat", busy = false, canModify = false, onImages, onImport }: {
   chat: History; product?: DesktopTextProduct; busy?: boolean; canModify?: boolean; onImages?: () => void; onImport?: () => void;
@@ -438,7 +436,7 @@ export function ChatHistory({ chat, product = "chat", busy = false, canModify = 
       {!snippet && (row.selectedModels?.length ?? 0) > 1 && <span className="chat-history-badge">
         {sidebar.modelCount.replace("{count}", String(row.selectedModels?.length))}</span>}
       {snippet && <small>{snippet}</small>}
-    </button>{product === "chat" && <ChatConversationActions chat={chat} row={row} canModify={canModify} />}</>;
+    </button><ChatConversationActions chat={chat} row={row} canModify={product === "chat" && canModify} /></>;
   }
   function group(title: string, rows: ChatHistoryRow[]) {
     if (!rows.length) return null;
@@ -464,12 +462,12 @@ export function ChatHistory({ chat, product = "chat", busy = false, canModify = 
     {onImport && <button type="button" className="chat-history-import" onClick={onImport}>
       <Folder size={15} aria-hidden="true" /> {importedLabel[language]}
     </button>}
-    {(product === "chat" || chat.searching) && <label className="chat-history-search">
+    <label className="chat-history-search">
       <Search size={15} aria-hidden="true" />
-      <input type="search" autoFocus={product === "review"} className="history-search" aria-label={copy.searchHistory}
+      <input type="search" className="history-search" aria-label={copy.searchHistory}
         placeholder={sidebar.searchPlaceholder} value={chat.query} maxLength={80} onChange={(event) => chat.setQuery(event.currentTarget.value)} />
-    </label>}
-    {(product === "chat" || chat.rows.length > 0) && <div className="chat-organizer">
+    </label>
+    <div className="chat-organizer">
       <button type="button" className="chat-organizer-toggle" aria-expanded={expanded} aria-controls={`${product}-history-filters`}
         onClick={() => setExpanded(!expanded)}>
         <SlidersHorizontal size={16} aria-hidden="true" />
@@ -481,7 +479,7 @@ export function ChatHistory({ chat, product = "chat", busy = false, canModify = 
         {modelFilters.length > 0 && <div role="group" aria-label={sidebar.modelFilterTitle}>{modelFilters.map(filterButton)}</div>}
         {product === "chat" && chat.projects && <ConversationProjects chat={chat} active={projectId} select={setProjectFilter} />}
       </div>
-    </div>}
+    </div>
     <div className="projects chat-history">
       {chat.listStatus === "loading" && !chat.rows.length && <p role="status">{copy.loadingConversations}</p>}
       {chat.listStatus === "failed" && <button className="soft" type="button" onClick={chat.reload}>{copy.retryHistory}</button>}
@@ -787,13 +785,16 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
   </section>;
 }
 
-export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture }: {
+export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture,
+  plan, imageCapability, onModelImage, composerTools, searchReadiness }: {
   chat: History; chatWrite: boolean; autoOffered: boolean; onImport?: () => void; onCompare?: (prompt: string, continuationId?: string) => void; starters?: ChatStarter[];
   preferredModelId?: string;
   attachments: DesktopAttachmentDraft;
   online: boolean;
   handoff?: WorkspaceHandoff;
   deviceFixture: boolean;
+  plan: ModelTier; imageCapability: ImageCapability | null; onModelImage(modelId: string, prompt: string): void;
+  composerTools?: boolean; searchReadiness?: { brave: boolean };
 }) {
   const { language } = chat;
   const copy = desktopChatCopy[language];
@@ -805,13 +806,17 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const [picker, setPicker] = useState<{ id: string; mode: "auto" | "manual"; conversation?: string }>();
   const [effort, setEffort] = useState<ChatTurnInput["effort"]>("default");
   const activeId = chat.selected?.id;
+  const toolsScope = `${chat.account ?? ""}:${activeId ?? "new"}`;
+  const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
+  const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
   const location = useChatDraftLocation((chat.account ?? "") + ":" + (activeId ?? "new"));
   const draftExcerpt = activeId ? undefined : handoff;
   const availableAuto = chat.conversation?.autoSelection.offered ?? (!activeId && autoOffered);
   const autoCopy = autoRoutingCopy[language];
   const currentPicker = picker?.conversation === activeId ? picker : undefined;
-  const selectedModel = models.find(({ id }) => id === (currentPicker?.id ?? chat.conversation?.selectedModels[0] ?? (!activeId ? preferredModelId : undefined)))
-    ?? models.find(({ id }) => id === "gpt-6-luna") ?? models[0];
+  const eligible = models.filter((model) => canUseModelWithPlan(plan, model));
+  const selectedModel = eligible.find(({ id }) => id === (currentPicker?.id ?? chat.conversation?.selectedModels[0] ?? (!activeId ? preferredModelId : undefined)))
+    ?? eligible.find(({ id }) => id === "gpt-6-luna") ?? eligible[0];
   const mode = availableAuto ? currentPicker?.mode ?? chat.conversation?.selectionMode ?? "auto" : "manual";
   const effortEnabled = models.some((model) => model.reasoningEfforts !== undefined);
   const scroll = useRef<HTMLDivElement>(null);
@@ -845,9 +850,9 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     const attachmentUploadIds = await attachments.prepare();
     if (!attachmentUploadIds) return;
     const saved = await chat.send({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? effort : "default", attachmentUploadIds,
-      handoffId: draftExcerpt?.id, currentLocation: location.current() });
+      handoffId: draftExcerpt?.id, currentLocation: location.current(), tools: composerTools ? toolChanges : undefined });
     location.remove();
-    if (saved) attachments.clear();
+    if (saved) { attachments.clear(); setToolDraft(undefined); }
   }
 
   const live = chat.live;
@@ -908,11 +913,13 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             const review = message.role === "assistant" && message.status === "normal"
               ? reviewSeedFromChat(currentMessages, message.id, copy.earlierQuestions) : null;
             return <li className={`entry entry--${message.role}`} key={message.id}>
-              {message.role === "assistant" && <AnswerModel {...(actualModels.get(message.id) ?? { id: message.modelId })} />}
+              {message.role === "assistant" && !message.imageTurn && <AnswerModel {...(actualModels.get(message.id) ?? { id: message.modelId })} />}
               <div className="chat-message-bubble">
-                {message.role === "assistant" && <CopyAnswer content={message.content} language={language} />}
+                {message.role === "assistant" && !message.imageTurn && <CopyAnswer content={message.content} language={language} />}
                 <div data-handoff-content="chat">{message.role === "user"
-                  ? <UserMessageContent content={message.content} language={language} /> : <ChatMarkdown content={message.content} language={language} />}</div>
+                  ? <UserMessageContent content={message.content} language={language} /> : message.imageTurn
+                    ? <SavedImageTurn key={message.imageTurn.groupId} turn={message.imageTurn} language={language} capability={imageCapability} />
+                    : <ChatMarkdown content={message.content} language={language} />}</div>
                 {message.role === "user" && <SavedAttachments message={message} language={language} />}
                 <GeneratedFiles artifacts={message.artifacts} language={language} />
                 {message.searchMetadata?.reasoningEffort && <small className="chat-effort">
@@ -969,31 +976,29 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             }
           }} />
         <div className="composer-actions">
-          <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" />
-          <ChatDraftLocation location={location} language={language} draft={chat.draft} setDraft={chat.setDraft}
-            deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
+          <ComposerTools language={language} key={toolsScope} disabled={chat.sending || chat.writing || attachments.uploading}
+            options={composerTools ? { webSearchMode: chat.conversation?.webSearchMode, memoryMode: chat.conversation?.memoryMode,
+              assistantProfileId: chat.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
+            setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
+            <ChatDraftLocation location={location} language={language} draft={chat.draft} setDraft={chat.setDraft}
+              tool deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
+            <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" tool />
+          </ComposerTools>
           <span className="spacer" />
-          <details className="model-menu">
-            <summary aria-label={copy.modelEffort}>
-              {mode === "auto" && <Sparkles size={15} />}
-              {mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
-              {effortEnabled && effort !== "default" && ` · ${effortLabels[effort]}`} <ChevronDown size={15} />
-            </summary>
-            <div className="model-popover">
-              <label>{shellCopy.model} <select aria-label={shellCopy.model} value={mode === "auto" ? "" : selectedModel?.id ?? ""} disabled={chat.sending || !selectedModel}
-                onChange={(event) => setPicker({
-                  id: event.currentTarget.value || selectedModel!.id,
-                  mode: event.currentTarget.value ? "manual" : "auto", conversation: activeId,
-                })}>
-                {availableAuto && <option value="">{autoCopy.label}</option>}
-                {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-              </select></label>
-              {effortEnabled && <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={effort} disabled={chat.sending}
+          <DesktopModelPicker key={activeId ?? "new"} account={chat.account} language={language} label={copy.modelEffort}
+            models={models} choices={selectedModel ? [selectedModel.id] : []} limit={1} singleModel plan={plan} disabled={chat.sending || chat.writing}
+            mode={mode} autoOffered={availableAuto} imageCapability={imageCapability} onImage={(id) => onModelImage(id, chat.draft)}
+            searchReadiness={searchReadiness} hasImageAttachments={attachments.files.some(({ mediaType }) => mediaType.startsWith("image/"))}
+            onModeChange={(next) => { if (selectedModel) setPicker({ id: selectedModel.id, mode: next, conversation: activeId }); }}
+            onChoose={([id]) => { if (id) setPicker({ id, mode: "manual", conversation: activeId }); }}
+            effort={effortEnabled && <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={effort} disabled={chat.sending}
                 onChange={(event) => setEffort(event.currentTarget.value as ChatTurnInput["effort"])}>
                 {(["low", "default", "high"] as const).map((value) => <option key={value} value={value}>{effortLabels[value]}</option>)}
-              </select></label>}
-            </div>
-          </details>
+              </select></label>}>
+            {mode === "auto" && <Sparkles size={15} />}
+            {mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
+            {effortEnabled && effort !== "default" && ` · ${effortLabels[effort]}`}
+          </DesktopModelPicker>
           {deviceFixture && <DraftDictation language={language} scope={"chat:" + (activeId ?? "new")}
             disabled={chat.sending || attachments.uploading} draft={chat.draft} setDraft={chat.setDraft} />}
           {chat.sending

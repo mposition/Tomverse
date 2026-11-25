@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Download, Plus } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { desktopImagesCopy } from "../../../../locales/desktopImages";
-import type { ChatHistoryRow, ReviewImageOffer } from "../chat-contract";
-import type { ImageCapability, ImageGeneration, ImageRequest } from "../images-contract";
+import type { ChatConversation, ChatHistoryRow, ReviewImageOffer } from "../chat-contract";
+import type { ImageCapability, ImageGeneration, ImageGroup, ImageRequest } from "../images-contract";
+import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
 
 const activeImage = (image: ImageGeneration) => ["pending", "processing", "settling"].includes(image.status);
 const sizeLabels = { "1024x1024": "square", "1536x1024": "landscape", "1024x1536": "portrait" } as const;
@@ -207,6 +208,38 @@ function ImageResult({ image, name, language }: { image: ImageGeneration; name: 
     </button>}
     {notice && <p className="notice" role="status">{copy[notice]}</p>}
   </li>;
+}
+
+export function SavedImageTurn({ turn, language, capability }: {
+  turn: NonNullable<ChatConversation["messages"][number]["imageTurn"]>;
+  language: Language;
+  capability?: ImageCapability | null;
+}) {
+  const [group, setGroup] = useState<ImageGroup>();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function read() {
+      try {
+        const result = await window.desktop.imageGroup(turn.groupId);
+        if (!active) return;
+        setGroup(result);
+        if (result.generations.some(activeImage)) timer = setTimeout(read, 4000);
+      } catch {
+        if (active) setFailed(true);
+      }
+    }
+    void read();
+    return () => { active = false; clearTimeout(timer); };
+  }, [turn.groupId]);
+  const copy = desktopImagesCopy[language];
+  if (failed) return <p role="status">{copy.previewFailed}</p>;
+  if (!group) return <p role="status">{copy.generating}</p>;
+  const current = new Set(group.targets.map(({ currentGenerationId }) => currentGenerationId));
+  const results = group.generations.filter((image) => current.has(image.generationId) && turn.modelIds.includes(image.modelId));
+  return <ul className="chat-image-results">{results.map((image) => <ImageResult key={image.generationId} image={image} language={language}
+    name={capability?.models.find(({ id }) => id === image.modelId)?.name ?? IMAGE_MODEL_REGISTRY.find(({ id }) => id === image.modelId)?.name ?? image.modelId} />)}</ul>;
 }
 
 export function ImageWorkspace({ workspace, capability }: { workspace: Workspace; capability: ImageCapability | null }) {

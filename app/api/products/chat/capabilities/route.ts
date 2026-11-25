@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled, desktopReviewAnalysisEnabled, desktopComposerToolsEnabled } from "@/lib/desktopReadApiContract";
 import {
   getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
@@ -69,6 +69,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];
   }) : [];
   return { desktopWrite, desktopImport: importEnabled && continuationEnabled, desktopStarters: starters,
+    desktopReviewAnalysis: desktopReviewAnalysisEnabled(), desktopComposerTools: desktopComposerToolsEnabled(),
+    desktopSearchReadiness: resolveWebSearchBackendReadiness(),
     desktopAttachments,
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),

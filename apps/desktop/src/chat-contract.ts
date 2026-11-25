@@ -2,11 +2,16 @@ import { z } from "zod";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
-import type { ModelMinimumPlan } from "../../../lib/models";
+import type { AiModel } from "../../../lib/models";
 import { attachmentRead, attachmentUploadIds } from "./attachment-contract";
 import { ARTIFACT_LIMITS, isSupportedArtifactFormat, parseChatStreamArtifacts } from "../../../lib/generatedArtifactCore";
 
 export const chatId = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
+export const reviewAnalysisRequest = z.object({
+  conversationId: chatId, promptMessageId: z.uuid(),
+  assistantMessageIds: z.array(z.uuid()).min(2).max(3).refine((ids) => new Set(ids).size === ids.length),
+}).strict();
+export type ReviewAnalysisRequest = z.infer<typeof reviewAnalysisRequest>;
 export const desktopTextProduct = z.enum(["chat", "review"]);
 export const chatSearch = z.string().trim().min(2).max(80);
 export const chatHistorySearchInput = z.object({ query: chatSearch, product: desktopTextProduct.optional() }).strict();
@@ -14,6 +19,12 @@ export const chatPageInput = z.object({ id: chatId, cursor: chatId.optional(), p
 export const chatSourceInput = z.object({ id: chatId, offset: z.number().int().nonnegative().optional() }).strict();
 export const chatRenameInput = z.object({ id: chatId, title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH) }).strict();
 export const chatEffort = z.enum(["low", "default", "high"]);
+export const composerOptions = z.object({
+  webSearchMode: z.enum(["off", "always"]).optional(),
+  memoryMode: z.enum(["inherit", "on", "off"]).optional(),
+  assistantProfileId: chatId.nullable().optional(),
+}).strict();
+export type ComposerOptions = z.infer<typeof composerOptions>;
 export const chatTurnInput = z.object({
   requestId: z.uuid(),
   conversationId: chatId.optional(),
@@ -24,6 +35,7 @@ export const chatTurnInput = z.object({
   attachmentUploadIds,
   handoffId: z.uuid().optional(),
   currentLocation: z.unknown().transform((value) => parseChatLocation(value)).optional(),
+  tools: composerOptions.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length || input.handoffId));
 export const reviewCapability = z.object({
   easy: z.boolean(), modelLimit: z.number().int().positive(), plan: z.enum(["Free", "Pro", "Max"]),
@@ -77,6 +89,7 @@ export const chatMessage = z.object({
   }).nullish(),
   attachments: z.array(attachmentRead).optional(),
   artifacts: z.unknown().optional().transform((value) => parseChatStreamArtifacts(value) ?? []),
+  imageTurn: z.object({ groupId: chatId, modelIds: z.array(z.string()) }).optional(),
 });
 export const chatConversation = chatHistoryRow.extend({
   desktopReviewWritable: z.boolean().optional(),
@@ -90,6 +103,8 @@ export const chatConversation = chatHistoryRow.extend({
   storedSelectedModels: z.array(z.string()).optional(),
   autoSelection: z.object({ offered: z.boolean() }),
   webSearchMode: z.enum(["off", "always"]).catch("off"),
+  memoryMode: composerOptions.shape.memoryMode.catch(undefined),
+  assistantProfile: z.object({ profileId: chatId, name: z.string() }).nullish(),
 });
 
 export type ChatHistoryRow = z.infer<typeof chatHistoryRow>;
@@ -110,13 +125,7 @@ export type ChatSourceInput = z.infer<typeof chatSourceInput>;
 export type ChatImportedSource = z.infer<typeof chatImportedSource>;
 export type ChatRenameInput = z.infer<typeof chatRenameInput>;
 export type ChatTurnInput = z.infer<typeof chatTurnInput>;
-export type ChatModel = {
-  id: string;
-  name: string;
-  provider: string;
-  minimumPlan: ModelMinimumPlan;
-  reasoningEfforts?: Array<"low" | "high">;
-};
+export type ChatModel = AiModel;
 export type ChatStarter = { id: string; label: string; outcome: string; seed: string };
 export type ChatTurnProgress = {
   requestId: string;

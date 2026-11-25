@@ -109,6 +109,8 @@ if (trustedWindow) {
       return () => ipcRenderer.removeListener("chat:progress", onProgress);
     },
     sendReview: (input: Parameters<DesktopApi["sendReview"]>[0]) => ipcRenderer.invoke("review:send", input),
+    prepareReviewAnalysis: (id: string) => ipcRenderer.invoke("review:analysis-setup", id),
+    runReviewAnalysis: (input) => ipcRenderer.invoke("review:analysis-run", input),
     subscribeReview(listener: (progress: ReviewTurnProgress) => void) {
       const onProgress = (_event: Electron.IpcRendererEvent, progress: ReviewTurnProgress) => listener(progress);
       ipcRenderer.on("review:progress", onProgress);

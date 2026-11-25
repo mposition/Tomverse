@@ -5,6 +5,8 @@ import {
   INTERNAL_AUTH_HEADER_PREFIX,
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
+  desktopComposerToolsEnabled,
+  desktopWriteApiRoute,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
   nativeParityBearerRoute,
@@ -24,6 +26,36 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
  */
 
 const REGISTERED = "/api/conversations";
+
+test("Desktop analysis and composer tools require their own enrollment", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED",
+    "TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED", "TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const analysis = "/api/conversations/review-1/comparison-reviews";
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of switches.slice(0, 3)) process.env[key] = "true";
+    assert.equal(desktopWriteApiRoute(analysis, "GET"), false);
+    assert.equal(desktopWriteApiRoute(analysis, "POST"), false);
+    assert.equal(desktopComposerToolsEnabled(), false);
+    for (const key of switches.slice(3)) process.env[key] = "true";
+    assert.equal(desktopWriteApiRoute(analysis, "GET"), true);
+    assert.equal(desktopWriteApiRoute(analysis, "POST"), true);
+    assert.equal(desktopWriteApiRoute(analysis, "PATCH"), false);
+    assert.equal(desktopWriteApiRoute(analysis + "/verify-item", "POST"), false);
+    assert.equal(desktopWriteApiRoute("/api/conversations/%2Freview/comparison-reviews", "POST"), false);
+    assert.equal(desktopComposerToolsEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopWriteApiRoute(analysis, "GET"), false);
+    assert.equal(desktopComposerToolsEnabled(), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
 
 test("generated-file Native enrollment fails closed without a resolved switch and permits only versions and input cleanup", () => {
   for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {

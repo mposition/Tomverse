@@ -333,6 +333,14 @@ export function desktopReviewWriteEnabled() {
   return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED === "true";
 }
 
+export function desktopReviewAnalysisEnabled() {
+  return desktopReviewWriteEnabled() && process.env.TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED === "true";
+}
+
+export function desktopComposerToolsEnabled() {
+  return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED === "true";
+}
+
 export function desktopAttachmentEnabled() {
   return (desktopChatWriteEnabled() || desktopReviewWriteEnabled()) && process.env.TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED === "true";
 }
@@ -342,6 +350,9 @@ export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
   if (desktopChatWriteEnabled() && desktopChatWriteRoute(path, method)) return true;
   if (!desktopReviewWriteEnabled()) return false;
+  if (desktopReviewAnalysisEnabled() && /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews$/.test(path)) {
+    return method === "GET" || method === "POST";
+  }
   if (path === DESKTOP_CHAT_CREATE || method === "DELETE") return false;
   return desktopChatWriteRoute(path, method) || (method === "POST" &&
     [DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_ROUTING, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_IMAGE_GENERATIONS].includes(path));

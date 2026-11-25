@@ -31,7 +31,7 @@ import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPat
 import { probeIsolatedClaudeAccount } from "./claude-account";
 import { probeIsolatedAcpAccount, probeIsolatedCliProtocol, probeIsolatedCodexAccount } from "./cli-protocol";
 import {
-  chatId, chatHistorySearchInput, chatPageInput, chatRenameInput, chatSourceInput, chatTurnInput, desktopTextProduct, reviewTurnInput, saveArtifactInput,
+  chatId, chatHistorySearchInput, chatPageInput, chatRenameInput, chatSourceInput, chatTurnInput, desktopTextProduct, reviewAnalysisRequest, reviewTurnInput, saveArtifactInput,
   type ChatTurnInput, type ChatTurnProgress, type ChatTurnResult, type DesktopTextProduct,
   type ReviewTurnInput, type ReviewTurnProgress, type ReviewTurnResult, type SaveArtifactInput,
 } from "../chat-contract";
@@ -2245,6 +2245,7 @@ async function accountSettings(value: unknown) {
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
+  if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
   const attachments = resolveStagedAttachments(draft.attachmentUploadIds);
   return withChatAccount(async (api) => {
     const input = { ...draft, prompt: withHandoffExcerpt("chat", draft.prompt, handoffId),
@@ -2272,7 +2273,12 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     try {
       try {
         if (id) await api.configure(await api.conversation({ id }, true, signal), input, signal);
-        else id = await api.create(input, signal);
+        else {
+          id = await api.create(input, signal);
+          if (input.tools && Object.keys(input.tools).length) {
+            await api.configure(await api.conversation({ id }, true, signal), input, signal);
+          }
+        }
         publish({});
         sourceId = await api.saveQuestion(id, input, signal);
         if (handoffId) removeWorkspaceHandoff(handoffId);
@@ -3017,6 +3023,14 @@ function registerIpc() {
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));
+  main("review:analysis-setup", (value) => {
+    if (!state.capabilities?.reviewAnalysis) throw new Error("Review analysis is unavailable.");
+    return withChatAccount((api) => api.prepareReviewAnalysis(chatId.parse(value)), "review");
+  });
+  main("review:analysis-run", (value) => {
+    if (!state.capabilities?.reviewAnalysis) throw new Error("Review analysis is unavailable.");
+    return withChatAccount((api) => api.runReviewAnalysis(reviewAnalysisRequest.parse(value)), "review");
+  });
   main("attachment:upload", (value) => uploadAttachment(attachmentBytesInput.parse(value)));
   main("attachment:cancel", (value) => {
     if (attachmentTransfer?.requestId === z.uuid().parse(value)) attachmentTransfer.controller.abort();

@@ -579,6 +579,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       }), [1, 0]);
       await message.fill("A draft for the selected conversation");
       const location = page.getByRole("button", { name: "Use current location", exact: true });
+      await page.locator(".composer-tools summary").click();
       await page.evaluate(`Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
         configurable: true, value: (_success, failure) => failure({ code: 1 }),
       })`);
@@ -603,6 +604,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       await expect(removeLocation).toHaveCount(0);
     } else {
       await expect(page.getByRole("button", { name: "Record voice input" })).toHaveCount(0);
+      await page.locator(".composer-tools summary").click();
       await page.getByRole("button", { name: "Add a place", exact: true }).click();
       const placeDialog = page.getByRole("dialog", { name: "Add a place", exact: true });
       await expect(placeDialog.getByRole("button", { name: "Attach current location" })).toHaveCount(0);

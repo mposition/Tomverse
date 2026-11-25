@@ -116,10 +116,17 @@ const updateConversationSchema = z
       body.assistantProfileId !== undefined,
     { message: "At least one update is required." }
   );
-const desktopConversationUpdateSchema = z.object({
+const desktopConversationUpdateFields = {
     title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH).optional(),
     selectedModels: z.array(modelSchema).min(1).max(APP_DEFAULTS.maxSelectedModels).optional(),
     selectionMode: z.enum(SELECTION_MODES).optional(),
+};
+const desktopConversationUpdateSchema = z.strictObject(desktopConversationUpdateFields).refine((body) => Object.keys(body).length > 0);
+const desktopChatComposerUpdateSchema = z.object({
+    ...desktopConversationUpdateFields,
+    webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
+    memoryMode: z.enum(CONVERSATION_MEMORY_MODES).optional(),
+    assistantProfileId: z.string().trim().min(1).max(100).nullable().optional(),
 }).strict().refine((body) => Object.keys(body).length > 0);
 const MESSAGE_PAGE_SIZE = 50;
 
@@ -402,7 +409,8 @@ export async function PATCH(
         const body = await readLimitedJson<z.infer<typeof updateConversationSchema>>(
             req,
             16 * 1024,
-            desktop ? desktopConversationUpdateSchema : updateConversationSchema
+            desktop ? process.env.TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED === "true"
+                ? desktopChatComposerUpdateSchema : desktopConversationUpdateSchema : updateConversationSchema
         );
         const params = await context.params;
         const conversationId = params.conversationId;
@@ -445,7 +453,9 @@ export async function PATCH(
             return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
         }
         const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;
-        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1))) {
+        const hasComposerOptions = body.webSearchMode !== undefined || body.memoryMode !== undefined || body.assistantProfileId !== undefined;
+        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1) ||
+            (hasComposerOptions && desktopProduct !== "chat"))) {
             return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
         }
 

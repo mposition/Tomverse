@@ -126,7 +126,7 @@ export function useAttachmentDraft(scope: string, enabled: boolean, language: La
 
 export type DesktopAttachmentDraft = ReturnType<typeof useAttachmentDraft>;
 
-export function AttachmentPicker({ draft, busy = false, id }: { draft: DesktopAttachmentDraft; busy?: boolean; id?: string }) {
+export function AttachmentPicker({ draft, busy = false, id, tool = false }: { draft: DesktopAttachmentDraft; busy?: boolean; id?: string; tool?: boolean }) {
   const picker = useRef<HTMLInputElement>(null);
   if (!draft.enabled) return null;
   return <>
@@ -135,8 +135,13 @@ export function AttachmentPicker({ draft, busy = false, id }: { draft: DesktopAt
         if (event.currentTarget.files) draft.add(event.currentTarget.files);
         event.currentTarget.value = "";
       }} />
-    <button className="icon" type="button" aria-label={desktopShellCopy[draft.language].attachFiles} disabled={busy || draft.uploading}
-      onClick={() => picker.current?.click()}><Paperclip size={17} /></button>
+    <button className={tool ? "composer-tool-row" : "icon"} type="button" aria-label={desktopShellCopy[draft.language].attachFiles} disabled={busy || draft.uploading}
+      onClick={(event) => {
+        picker.current?.click();
+        const menu = event.currentTarget.closest("details");
+        if (menu && tool) menu.open = false;
+      }}>{tool ? <><span className="composer-tool-icon"><Paperclip size={17} /></span>
+        <strong>{desktopShellCopy[draft.language].attachFiles}</strong></> : <Paperclip size={17} />}</button>
   </>;
 }
 

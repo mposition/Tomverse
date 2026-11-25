@@ -1,8 +1,9 @@
 import { z } from "zod";
+import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
 import type {
   ChatConversation, ChatHistoryHit, ChatHistoryRow, ChatImportedSource, ChatModel, ChatPageInput, ChatRenameInput, ChatSourceInput, ChatStarter,
-  ChatTurnInput, ChatTurnProgress, ChatTurnResult, DesktopTextProduct, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
+  ChatTurnInput, ChatTurnProgress, ChatTurnResult, DesktopTextProduct, ReviewAnalysisRequest, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
 } from "./chat-contract";
 import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, ImageHistory, ImageRequest } from "./images-contract";
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
@@ -280,6 +281,7 @@ export type Snapshot = {
   account: AccountState;
   capabilities: {
     autoSelection: boolean; chatWrite: boolean; chatImport: boolean; chatStarters: ChatStarter[];
+    reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
   } | null;
   codeKey: CodeKeyState;
@@ -357,6 +359,8 @@ export type DesktopApi = {
   renameChat(input: ChatRenameInput): Promise<{ title: string }>;
   removeChat(id: string): Promise<boolean>;
   chatModels(): Promise<ChatModel[]>;
+  prepareReviewAnalysis(id: string): Promise<ReviewSetup>;
+  runReviewAnalysis(input: ReviewAnalysisRequest): Promise<ComparisonReview>;
   copyChatText(text: string): Promise<void>;
   exportChat(input: { id: string; title: string; includeSource: boolean }): Promise<boolean>;
   sendChat(input: ChatTurnInput): Promise<ChatTurnResult>;
