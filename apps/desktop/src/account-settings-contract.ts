@@ -181,7 +181,7 @@ const keySummary = z.object({
 
 const loginMethod = z.discriminatedUnion("type", [
   z.object({ type: z.literal("oauth"), provider: label, linked: z.boolean() }),
-  z.object({ type: z.literal("email"), enabled: z.boolean() }),
+  z.object({ type: z.literal("email"), enabled: z.boolean(), address: z.string().max(320).optional() }),
 ]);
 
 const extractionRun = z.object({
@@ -196,7 +196,7 @@ const exportHistoryEntry = z.object({
 export const desktopAccountSettingsOutput = {
   preferences: accountPreferences,
   savePreferences: z.object({ success: z.literal(true) }),
-  loginMethods: z.object({ methods: z.array(loginMethod) }),
+  loginMethods: z.object({ methods: z.array(loginMethod), canRemove: z.boolean().optional() }),
   email: emailSettings,
   saveEmail: emailSettings,
   memory: memoryPreferences.strip(),

@@ -45,8 +45,7 @@ type Copy = {
   emailLoginVerify: string;
   removeLoginMethod: string;
   removeLoginMethodPrompt: string;
-  connectInBrowser: string;
-  connectInBrowserHelp: string;
+  oauthLinkUnavailable: string;
   keyUsage: string;
   keyUsageCredits: string;
   connectionTitle: string;
@@ -99,8 +98,7 @@ const copy = {
     emailLoginVerify: "Verify",
     removeLoginMethod: "Remove",
     removeLoginMethodPrompt: "Remove this sign-in method?",
-    connectInBrowser: "Connect in the browser",
-    connectInBrowserHelp: "Google and Microsoft are connected on the web, then you return here.",
+    oauthLinkUnavailable: "Connecting Google or Microsoft is not available in Desktop yet.",
     keyUsage: "Usage",
     keyUsageCredits: "{credits} credits used",
     connectionTitle: "Connection addresses",
@@ -151,8 +149,7 @@ const copy = {
     emailLoginVerify: "확인",
     removeLoginMethod: "해제",
     removeLoginMethodPrompt: "이 로그인 방식을 해제할까요?",
-    connectInBrowser: "브라우저에서 연결",
-    connectInBrowserHelp: "Google과 Microsoft는 웹에서 연결한 뒤 이곳으로 돌아옵니다.",
+    oauthLinkUnavailable: "Google·Microsoft 연결은 아직 Desktop에서 지원하지 않습니다.",
     keyUsage: "사용량",
     keyUsageCredits: "{credits} 크레딧 사용",
     connectionTitle: "접속 주소",
@@ -203,8 +200,7 @@ const copy = {
     emailLoginVerify: "验证",
     removeLoginMethod: "移除",
     removeLoginMethodPrompt: "移除这种登录方式？",
-    connectInBrowser: "在浏览器中连接",
-    connectInBrowserHelp: "Google 和 Microsoft 需在网页上连接，完成后返回此处。",
+    oauthLinkUnavailable: "桌面版暂不支持连接 Google 或 Microsoft。",
     keyUsage: "用量",
     keyUsageCredits: "已使用 {credits} 积分",
     connectionTitle: "连接地址",
@@ -255,8 +251,7 @@ const copy = {
     emailLoginVerify: "驗證",
     removeLoginMethod: "移除",
     removeLoginMethodPrompt: "要移除這種登入方式嗎？",
-    connectInBrowser: "在瀏覽器中連結",
-    connectInBrowserHelp: "Google 與 Microsoft 需在網頁上連結，完成後回到這裡。",
+    oauthLinkUnavailable: "桌面版暫不支援連結 Google 或 Microsoft。",
     keyUsage: "用量",
     keyUsageCredits: "已使用 {credits} 點數",
     connectionTitle: "連線位址",
@@ -307,8 +302,7 @@ const copy = {
     emailLoginVerify: "Vérifier",
     removeLoginMethod: "Retirer",
     removeLoginMethodPrompt: "Retirer cette méthode de connexion ?",
-    connectInBrowser: "Connecter dans le navigateur",
-    connectInBrowserHelp: "Google et Microsoft se connectent sur le web, puis vous revenez ici.",
+    oauthLinkUnavailable: "La connexion de Google ou Microsoft n’est pas encore disponible dans l’application.",
     keyUsage: "Utilisation",
     keyUsageCredits: "{credits} crédits utilisés",
     connectionTitle: "Adresses de connexion",
@@ -359,8 +353,7 @@ const copy = {
     emailLoginVerify: "Bestätigen",
     removeLoginMethod: "Entfernen",
     removeLoginMethodPrompt: "Diese Anmeldemethode entfernen?",
-    connectInBrowser: "Im Browser verbinden",
-    connectInBrowserHelp: "Google und Microsoft werden im Web verbunden, danach kehren Sie hierher zurück.",
+    oauthLinkUnavailable: "Google oder Microsoft zu verbinden ist in der Desktop-App noch nicht möglich.",
     keyUsage: "Nutzung",
     keyUsageCredits: "{credits} Credits verbraucht",
     connectionTitle: "Verbindungsadressen",
@@ -411,8 +404,7 @@ const copy = {
     emailLoginVerify: "Verificar",
     removeLoginMethod: "Quitar",
     removeLoginMethodPrompt: "¿Quitar este método de inicio de sesión?",
-    connectInBrowser: "Conectar en el navegador",
-    connectInBrowserHelp: "Google y Microsoft se conectan en la web y luego vuelves aquí.",
+    oauthLinkUnavailable: "Conectar Google o Microsoft aún no está disponible en la app de escritorio.",
     keyUsage: "Uso",
     keyUsageCredits: "{credits} créditos usados",
     connectionTitle: "Direcciones de conexión",
@@ -463,8 +455,7 @@ const copy = {
     emailLoginVerify: "Verificar",
     removeLoginMethod: "Remover",
     removeLoginMethodPrompt: "Remover este método de login?",
-    connectInBrowser: "Conectar no navegador",
-    connectInBrowserHelp: "Google e Microsoft são conectados na web e depois você volta aqui.",
+    oauthLinkUnavailable: "Conectar Google ou Microsoft ainda não está disponível no app de desktop.",
     keyUsage: "Uso",
     keyUsageCredits: "{credits} créditos usados",
     connectionTitle: "Endereços de conexão",

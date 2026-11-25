@@ -32,6 +32,7 @@ type Session = Pick<AccountSettingsApi, "send" | "forget">;
 export function refusalStatus(status: number): AccountDataStatus {
   if (status === 428) return "reauth";
   if (status === 423) return "locked";
+  if (status === 409) return "blocked";
   if (status === 403) return "notIncluded";
   if (status === 404 || status === 501 || status === 503) return "unavailable";
   return "failed";
@@ -69,7 +70,7 @@ export const mediaType = (res: Response) => res.headers.get("content-type")?.spl
 export function createAccountDataApi(options: {
   settings: Session;
   save: AccountDataSave;
-  /** Called after the server accepted an account deletion; signs this Desktop out. */
+  /** Called after the server ended every session (account deletion, login method removal); signs this Desktop out. */
   afterAccountDeleted: () => Promise<void>;
   language: () => string;
   origin?: string;
@@ -192,6 +193,23 @@ export function createAccountDataApi(options: {
     return { status: "deleted" as const };
   }
 
+  async function requestEmailLogin() {
+    await call({ path: "/api/user/login-methods/email/request", method: "POST" });
+    return { status: "ready" as const };
+  }
+
+  async function verifyEmailLogin(code: string) {
+    await call({ path: "/api/user/login-methods/email/verify", method: "POST", body: { code } });
+    return { status: "saved" as const };
+  }
+
+  async function removeLoginMethod(method: string) {
+    await call({ path: "/api/user/login-methods", method: "DELETE", body: { method } });
+    // The server revokes every session of the account, including this Desktop device.
+    await options.afterAccountDeleted();
+    return { status: "deleted" as const };
+  }
+
   async function deleteAccount(confirmationText: string) {
     const res = await call({ path: "/api/user/account", method: "DELETE", body: { confirm: true, confirmationText } });
     z.object({ success: z.literal(true) }).passthrough().parse(await res.json());
@@ -212,6 +230,9 @@ export function createAccountDataApi(options: {
           case "deleteAllConversations": return deleteAllConversations();
           case "deleteAccount": return deleteAccount(input.confirmation);
           case "saveMemories": return saveMemories();
+          case "requestEmailLogin": return requestEmailLogin();
+          case "verifyEmailLogin": return verifyEmailLogin(input.code);
+          case "removeLoginMethod": return removeLoginMethod(input.method);
           case "saveAssistant": return assistants.savePackage(input.id, input.name);
           case "uploadKnowledge": return assistants.uploadKnowledge(input.id);
           case "deleteAllMemories": return deleteAllMemories(input.confirmation);

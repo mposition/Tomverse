@@ -13,6 +13,7 @@ import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
 import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
 import { AssistantExtras } from "./AssistantExtras";
+import { LoginMethods } from "./LoginMethodsSettings";
 import { ModelFinderPanel, ReviewProviderDefaults } from "./AiSettingsExtras";
 import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
 import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
@@ -23,7 +24,6 @@ const loadPreferences = () => window.desktop.accountSettings<"preferences">({ ac
 const loadEmail = () => window.desktop.accountSettings<"email">({ action: "email" });
 const loadMemory = () => window.desktop.accountSettings<"memory">({ action: "memory" });
 const loadAssistants = () => window.desktop.accountSettings<"assistants">({ action: "assistants" });
-const loadLoginMethods = () => window.desktop.accountSettings<"loginMethods">({ action: "loginMethods" });
 const loadKeys = () => window.desktop.accountSettings<"keys">({ action: "keys" });
 const loadUsage = () => window.desktop.accountSettings<"usage">({ action: "usage" });
 const loadImportCapacity = () => window.desktop.accountSettings<"importCapacity">({ action: "importCapacity" });
@@ -110,19 +110,6 @@ function Preferences({ language, onApply }: Common & { onApply(settings: Account
     </div>
     <ActionStatus language={language} failed={failed} />
   </form>;
-}
-
-function LoginMethods({ language }: Common) {
-  const state = useSettingsRead(loadLoginMethods);
-  const copy = dictionaries[language].auth;
-  if (!state.data) return <ReadStatus language={language} failed={state.failed} retry={state.reload} />;
-  const providers: Record<string, string> = { apple: "Apple", google: "Google", "azure-ad": "Microsoft" };
-  return <div data-testid="native-account-login-methods">
-    {state.data.methods.map(method => <AccountSettingRow key={method.type === "email" ? "email" : method.provider}
-      label={method.type === "email" ? copy.emailLoginEmailInputLabel : providers[method.provider] ?? method.provider}>
-      <span>{(method.type === "email" ? method.enabled : method.linked) ? "✓" : "—"}</span>
-    </AccountSettingRow>)}
-  </div>;
 }
 
 function EmailNotifications({ language }: Common) {

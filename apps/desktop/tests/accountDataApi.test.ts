@@ -141,3 +141,41 @@ test("the export history is read through the settings contract", async () => {
   }] });
   assert.equal(parsed.requests[0].byteLength, 2048);
 });
+
+test("login methods: email code, removal that ends every session, and refusals", async () => {
+  const requests: string[] = [];
+  const { api, calls, signedOut } = setup((url, init) => {
+    requests.push((init?.method ?? "GET") + " " + url.pathname);
+    if (url.pathname.endsWith("/email/verify")) return JSON.parse(String(init?.body)).code === "123456"
+      ? Response.json({ ok: true }) : Response.json({ ok: false, code: "EMAIL_CODE_INVALID" }, { status: 400 });
+    if (url.pathname.endsWith("/email/request")) return Response.json({ ok: true });
+    const method = JSON.parse(String(init?.body)).method;
+    return method === "email" ? Response.json({ error: "At least one login method is required." }, { status: 409 })
+      : method === "azure-ad" ? Response.json({ code: "ACCOUNT_REAUTHENTICATION_REQUIRED" }, { status: 428 })
+        : Response.json({ success: true, changed: true });
+  });
+  assert.deepEqual(await api.handle({ action: "requestEmailLogin" }), { status: "ready" });
+  assert.deepEqual(await api.handle({ action: "verifyEmailLogin", code: "000000" }), { status: "failed", code: "EMAIL_CODE_INVALID" });
+  assert.deepEqual(await api.handle({ action: "verifyEmailLogin", code: "123456" }), { status: "saved" });
+  assert.deepEqual(await api.handle({ action: "removeLoginMethod", method: "email" }), { status: "blocked" });
+  assert.deepEqual(await api.handle({ action: "removeLoginMethod", method: "azure-ad" }), { status: "reauth", code: "ACCOUNT_REAUTHENTICATION_REQUIRED" });
+  assert.equal(signedOut(), 0);
+  assert.deepEqual(await api.handle({ action: "removeLoginMethod", method: "google" }), { status: "deleted" });
+  assert.equal(signedOut(), 1, "removing a method signs this Desktop out with the rest");
+  assert.deepEqual(requests.slice(-1), ["DELETE /api/user/login-methods"]);
+  assert.deepEqual(JSON.parse(String(calls.at(-1)?.init?.body)), { method: "google" });
+  for (const bad of [{ action: "verifyEmailLogin", code: "12345" }, { action: "verifyEmailLogin", code: "abcdef" },
+    { action: "removeLoginMethod", method: "apple" }, { action: "requestEmailLogin", email: "x@y.z" }]) {
+    assert.equal(desktopAccountDataInput.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("the login method list keeps the address and whether one can be removed", async () => {
+  const { desktopAccountSettingsOutput } = await import("../src/account-settings-contract");
+  const parsed = desktopAccountSettingsOutput.loginMethods.parse({ canRemove: true, methods: [
+    { type: "oauth", provider: "google", linked: true }, { type: "email", address: "a@example.com", enabled: false },
+  ] });
+  assert.equal(parsed.canRemove, true);
+  assert.deepEqual(parsed.methods[1], { type: "email", address: "a@example.com", enabled: false });
+  assert.ok(desktopAccountSettingsOutput.loginMethods.safeParse({ methods: [{ type: "oauth", provider: "google", linked: true }] }).success);
+});

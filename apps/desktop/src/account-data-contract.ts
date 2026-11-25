@@ -19,6 +19,10 @@ export const desktopAccountDataInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("deleteAllConversations"), confirmation: z.literal(DELETE_ALL_CHATS_PHRASE) }).strict(),
   z.object({ action: z.literal("deleteAccount"), confirmation: z.literal(DELETE_ACCOUNT_PHRASE) }).strict(),
   z.object({ action: z.literal("saveMemories") }).strict(),
+  // Login methods: the email code is sent to the signed-in address; removal ends every session.
+  z.object({ action: z.literal("requestEmailLogin") }).strict(),
+  z.object({ action: z.literal("verifyEmailLogin"), code: z.string().regex(/^d{6}$/) }).strict(),
+  z.object({ action: z.literal("removeLoginMethod"), method: z.enum(["google", "azure-ad", "email"]) }).strict(),
   z.object({ action: z.literal("saveAssistant"), id: accountId, name: z.string().max(200) }).strict(),
   z.object({ action: z.literal("uploadKnowledge"), id: accountId }).strict(),
   z.object({ action: z.literal("deleteAllMemories"), confirmation: z.literal(DELETE_ALL_MEMORIES_PHRASE) }).strict(),
@@ -26,7 +30,7 @@ export const desktopAccountDataInput = z.discriminatedUnion("action", [
 
 export const accountDataStatus = z.enum([
   "ready", "saved", "uploaded", "cancelled", "deleted", "expired",
-  "reauth", "locked", "notIncluded", "unavailable", "failed",
+  "reauth", "blocked", "locked", "notIncluded", "unavailable", "failed",
 ]);
 
 export const desktopAccountDataResult = z.object({
