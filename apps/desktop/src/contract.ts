@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
 import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
+import type { AssistantImportAction, AssistantImportInput, AssistantImportResult } from "./assistant-import-contract";
 import type {
   ChatConversation, ChatHistoryHit, ChatHistoryRow, ChatImportedSource, ChatModel, ChatPageInput, ChatRenameInput, ChatSourceInput, ChatStarter,
   ChatTurnInput, ChatTurnProgress, ChatTurnResult, DesktopTextProduct, ReviewAnalysisRequest, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
@@ -385,6 +386,7 @@ export type DesktopApi = {
     input: Extract<DesktopAccountSettingsInput, { action: Action }>,
   ): Promise<AccountSettingsResult<Action>>;
   accountData(input: DesktopAccountDataInput): Promise<DesktopAccountDataResult>;
+  assistantImport<Action extends AssistantImportAction>(input: Extract<AssistantImportInput, { action: Action }>): Promise<AssistantImportResult<Action>>;
   billing<Action extends BillingAction>(input: Extract<DesktopBillingInput, { action: Action }>): Promise<BillingResult<Action>>;
   subscribeBillingWindow(listener: (state: BillingWindowState) => void): () => void;
   chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;

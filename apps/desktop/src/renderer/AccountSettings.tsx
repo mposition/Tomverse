@@ -13,6 +13,7 @@ import type { ChatModel } from "../chat-contract";
 import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
 import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
 import { AssistantExtras } from "./AssistantExtras";
+import { AssistantPackageImportEntry, AssistantPackageImportPanel } from "./AssistantPackageImport";
 import { LoginMethods } from "./LoginMethodsSettings";
 import { DeveloperOverview, KeyUsage } from "./DeveloperExtras";
 import { ModelFinderPanel, ReviewProviderDefaults } from "./AiSettingsExtras";
@@ -332,8 +333,10 @@ function Assistants({ language }: Common) {
   const [instructions, setInstructions] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [importing, setImporting] = useState(false);
   const copy = dictionaries[language].assistantProfiles;
   if (editing) return <AssistantEditor id={editing} language={language} close={() => { setEditing(undefined); state.reload(); }} />;
+  if (importing) return <AssistantPackageImportPanel language={language} close={() => { setImporting(false); state.reload(); }} />;
   if (!state.data) return <ReadStatus language={language} failed={state.failed} retry={state.reload} />;
   return <div data-testid="native-account-assistants">
     {state.data.profiles.map(profile => <AccountSettingRow key={profile.id} label={profile.name}
@@ -341,6 +344,7 @@ function Assistants({ language }: Common) {
       <button className="soft" type="button" disabled={busy} aria-label={copy.editTitle + " · " + profile.name}
         onClick={() => setEditing(profile.id)}>{copy.editTitle}</button>
     </AccountSettingRow>)}
+    <AssistantPackageImportEntry language={language} onOpen={() => setImporting(true)} />
     <form className="desktop-setting-section account-settings-form" onSubmit={event => {
       event.preventDefault();
       if (!name.trim() || !instructions.trim() || busy) return;
