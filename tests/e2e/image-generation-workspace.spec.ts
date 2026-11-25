@@ -673,7 +673,7 @@ test("the model picker drives the request and the quoted total", { tag: "@ui-ris
   await openNewImageEntry(page);
   const picker = page.getByTestId("image-model-picker");
   await expect(picker).toBeVisible();
-  // Five models are enabled and the disclosure threshold is three, so the
+  // The enabled catalogue exceeds the disclosure threshold of three, so the
   // composer is compact: only the selected model is inline, and the others are
   // one toggle away rather than missing.
   await expect(page.getByTestId("image-model-picker-panel")).toHaveCount(0);
@@ -694,6 +694,36 @@ test("the model picker drives the request and the quoted total", { tag: "@ui-ris
   await expect(page.getByTestId("image-generation-progress").first()).toBeVisible();
   expect(api.createBodies).toHaveLength(1);
   expect(api.createBodies[0].modelIds).toEqual(["gpt-image-2"]);
+});
+
+test("direct image models quote the approved 1K prices and select Recraft's native 2K", { tag: "@ui-risk" }, async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Max" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/review");
+  await openNewImageEntry(page);
+  await openMoreImageModels(page);
+
+  const ideogram = page.getByTestId("image-model-ideogram-4-6");
+  const seedream = page.getByTestId("image-model-dola-seedream-5-5-261028");
+  const recraft = page.getByTestId("image-model-recraftv4_pro");
+  await ideogram.click();
+  await page.getByTestId("image-model-gpt-image-2").click();
+  await seedream.click();
+  await expect(page.getByTestId("image-total-credits")).toContainText("135");
+
+  await seedream.click();
+  await recraft.click();
+  await page.getByTestId("image-generation-prompt").fill("A book cover");
+  await expect(page.getByTestId("image-generation-submit")).toBeDisabled();
+  await ideogram.click();
+  await expect(recraft).toContainText("350");
+  await expect(page.getByTestId("image-size-2048x2048")).toBeChecked();
+  await page.getByTestId("image-generation-submit").click();
+  await expect.poll(() => api.createBodies[0]).toMatchObject({
+    modelIds: ["recraftv4_pro"], size: "2048x2048", quality: "medium",
+  });
 });
 
 test("two providers can be compared in one request, priced per model and in total", { tag: "@ui-risk" }, async ({ page }) => {
