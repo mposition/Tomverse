@@ -164,6 +164,7 @@ test("login methods: email code, removal that ends every session, and refusals",
   assert.equal(signedOut(), 1, "removing a method signs this Desktop out with the rest");
   assert.deepEqual(requests.slice(-1), ["DELETE /api/user/login-methods"]);
   assert.deepEqual(JSON.parse(String(calls.at(-1)?.init?.body)), { method: "google" });
+  assert.equal(desktopAccountDataInput.safeParse({ action: "verifyEmailLogin", code: "123456" }).success, true);
   for (const bad of [{ action: "verifyEmailLogin", code: "12345" }, { action: "verifyEmailLogin", code: "abcdef" },
     { action: "removeLoginMethod", method: "apple" }, { action: "requestEmailLogin", email: "x@y.z" }]) {
     assert.equal(desktopAccountDataInput.safeParse(bad).success, false, JSON.stringify(bad));

@@ -21,7 +21,7 @@ export const desktopAccountDataInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("saveMemories") }).strict(),
   // Login methods: the email code is sent to the signed-in address; removal ends every session.
   z.object({ action: z.literal("requestEmailLogin") }).strict(),
-  z.object({ action: z.literal("verifyEmailLogin"), code: z.string().regex(/^d{6}$/) }).strict(),
+  z.object({ action: z.literal("verifyEmailLogin"), code: z.string().regex(/^[0-9]{6}$/) }).strict(),
   z.object({ action: z.literal("removeLoginMethod"), method: z.enum(["google", "azure-ad", "email"]) }).strict(),
   z.object({ action: z.literal("saveAssistant"), id: accountId, name: z.string().max(200) }).strict(),
   z.object({ action: z.literal("uploadKnowledge"), id: accountId }).strict(),
