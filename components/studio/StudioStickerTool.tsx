@@ -39,8 +39,7 @@ const koreanPhotoSample: Sticker[] = photoSampleCaptions.map((caption, index) =>
   source: "/studio/stickers-real-ko/" + String(index + 1).padStart(2, "0") + ".png", caption, language: "ko", composed: "opaque",
 }));
 const characterSample: Sticker[] = STUDIO_STICKER_KEYS.map((_, i) => ({ source: "/studio/sticker-" + (i + 1) + ".png" }));
-const sheetSize = "1536x1024";
-const singleSize = "1024x1024";
+const stickerSize = "1024x1024";
 function StudioStickerPreview({ source, caption, composed, language }: Sticker & { caption: string; language: Language }) {
   const [rendered, setRendered] = useState<{ source: string; caption: string; language: Language; url: string }>();
   useEffect(() => {
@@ -91,16 +90,15 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   const pendingCaption = captions.length < STUDIO_STICKER_LIMIT ? captionDraft.trim() : "";
   const captionEntries = [...captions, ...(pendingCaption ? [{ text: pendingCaption }] : [])];
   const words = captionEntries.map(({ text }) => text);
-  const outputSize = style === "real" || words.length <= 1 ? singleSize : sheetSize;
   const packUseCase = style === "real" ? "real-sticker-pack" : "character-sticker-pack";
   const stickerUseCase = style === "real" ? "real-sticker" : "character-sticker";
-  const sheetQuote = useStudioImageQuote(outputSize, true, words.length > 0,
-    outputSize === sheetSize ? singleSize : undefined, words.length > 1 ? packUseCase : stickerUseCase);
+  const sheetQuote = useStudioImageQuote(stickerSize, true, words.length > 0, undefined,
+    words.length > 1 ? packUseCase : stickerUseCase);
   const [sample, setSample] = useState(true);
   const [replacement, setReplacement] = useState<Replacement | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [replacementError, setReplacementError] = useState<string | null>(null);
-  const singleQuote = useStudioImageQuote(singleSize, true, Boolean(replacement), undefined,
+  const singleQuote = useStudioImageQuote(stickerSize, true, Boolean(replacement), undefined,
     sourceStyle === "real" ? "real-sticker" : "character-sticker");
   const checkoutDraft = useStudioCheckoutDraft<StickerCheckoutDraft>("stickers", saved => {
     const restoreSource = (source: StudioDraftImage) => typeof source === "string" ? source : urls.make(source);
@@ -381,7 +379,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
           </div>
         </div>
         <StudioGenerateButton label={words.length ? copy.generatePack.replace("{count}", String(words.length)) : copy.generate} busy={busy} disabled={!sheetQuote.quote || !words.length} onClick={createPack} />
-        <StudioQuoteHint {...sheetQuote} showModel={false} />
+        <StudioQuoteHint error={sheetQuote.error} />
         <StudioStatus status={status} />
       </section>
       <section className={styles.panel}>
@@ -432,7 +430,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
           <StudioGenerateButton label={copy.regenerate} busy={regenerating}
             disabled={!singleQuote.quote || !replacement.caption.trim()} onClick={() => void createSticker()} />
         </div>
-        <StudioQuoteHint {...singleQuote} showModel={false} />
+        <StudioQuoteHint error={singleQuote.error} />
         {replacementError && <StudioStatus status={{ error: true, text: replacementError }} />}
         <div className={styles.compare}>
           <figure><figcaption>{copy.currentImage}</figcaption>{stickers[replacement.index].source

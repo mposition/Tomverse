@@ -4,11 +4,15 @@ import { studioCopy } from "@/locales/studio";
 import { STUDIO_STICKER_KEYS, studioStickerLayout } from "./studioTools";
 
 export type StudioStickerFaceStyle = "real" | "character";
+type StickerAction = string | Record<StudioStickerFaceStyle, string>;
 
 const DEFAULT_STICKER_ACTIONS = {
   stickerDefault01: "Winking close-up, foreshortened thumbs-up filling the foreground.",
   stickerDefault02: "Limp over a chair back, cheek squashed on the rail, both arms dangling.",
-  stickerDefault03: "Crescent eyes peek over a bouquet as wide as the shoulders.",
+  stickerDefault03: {
+    real: "Warm, open-eyed smile. Present a shoulder-wide bouquet below the chin, with the nose, lips and jaw in view.",
+    character: "Crescent eyes peek over a bouquet as wide as the shoulders.",
+  },
   stickerDefault04: "Head tilted back mid-cheer, oversized red megaphone aimed diagonally out.",
   stickerDefault05: "Head thrown back in laughter, one hand on the belly.",
   stickerDefault06: "Knowing nod and fingertip tapping the temple.",
@@ -22,14 +26,23 @@ const DEFAULT_STICKER_ACTIONS = {
   stickerDefault14: "Raised eyebrow, leaning close for a doubtful double take.",
   stickerDefault15: "Calm smile with one open reassuring hand.",
   stickerDefault16: "Full-body curl with tucked knees around a huge pillow, relaxed sleeping face.",
-  stickerDefault17: "Extreme close-up, eyes wide, jaw dropped and palms on cheeks.",
-  stickerDefault18: "Broad goofy grin, playful finger guns foreshortened toward the lens.",
+  stickerDefault17: {
+    real: "Startled pause, brow lifted and lips parted; palms jump up beside the face. Keep the portrait's eyelid contour and chin length.",
+    character: "Extreme close-up, eyes wide, jaw dropped and palms on cheeks.",
+  },
+  stickerDefault18: {
+    real: "Mischievous smile with eyes looking straight at camera and natural cheek creases. Punch both finger guns toward the lens.",
+    character: "Broad goofy grin, playful finger guns foreshortened toward the lens.",
+  },
   stickerDefault19: "Arriving at a doorstep, holding up keys in relief.",
   stickerDefault20: "Over-the-shoulder wave, body already mid-stride.",
-} satisfies Record<(typeof STUDIO_STICKER_KEYS)[number], string>;
+} satisfies Record<(typeof STUDIO_STICKER_KEYS)[number], StickerAction>;
 
 const EXTRA_STICKER_ACTIONS = [
-  [["사랑해", "Love you!", "我爱你", "我愛你"], "Tender grin peeking over a huge red felt heart hugged tightly; paint the caption in cream across the heart."],
+  [["사랑해", "Love you!", "我爱你", "我愛你"], {
+    real: "Hug a huge red felt heart against the chest, its top below the chin. Tender smile; paint the caption in cream across the heart.",
+    character: "Tender grin peeking over a huge red felt heart hugged tightly; paint the caption in cream across the heart.",
+  }],
   [["대박!", "Wow!"], "Jaw drops, both hands fly open, coral reaction burst."],
   [["괜찮아", "No worries"], "Cheek and arms pressing into a huge teal cushion; sweep the cream caption across its fabric."],
   [["보고 싶어", "Miss you"], "Longing gaze reaching toward a small photo frame held close."],
@@ -42,7 +55,7 @@ const EXTRA_STICKER_ACTIONS = [
   [["안녕!"], "Warm forward wave with smiling crescent eyes."],
 ] as const;
 
-const stickerActionByCaption = new Map<string, string>();
+const stickerActionByCaption = new Map<string, StickerAction>();
 
 for (const copy of Object.values(studioCopy)) {
   for (const key of STUDIO_STICKER_KEYS) stickerActionByCaption.set(copy[key], DEFAULT_STICKER_ACTIONS[key]);
@@ -56,14 +69,18 @@ export function studioStickerBrief(style: StudioStickerFaceStyle, captions: read
   const layout = captions.length === 1 ? "Make one finished chat sticker."
     : `Make exactly ${captions.length} finished stickers in a regular ${columns}-column by ${rows}-row grid, in reading order. Leave unused trailing cells blank.`;
   const identity = style === "real"
-    ? "Photograph the same actor as the left portrait: preserve the face shape, eyes, hair, complexion and eyewear. Keep lifelike skin, fabric and consistent wardrobe. Direct peak comedy reactions, mixing extreme close-ups, foreshortened gestures, huge tactile props and full-body motion."
+    ? [
+      "Photograph the person in the left portrait in every cell. Match their brow and eyelid shapes, eye spacing, nose width and tip, lip contour, jaw, hairline, complexion and eyewear. Keep their natural facial proportions through every expression.",
+      "Let brows, lids and lips move naturally. Push the comedy into hands near the lens, big tactile props and body language; keep the face at a natural portrait perspective. For each pose below, frame the face prominently, front or three-quarter, with features clear of props. For running or waving away, turn the face back toward camera. Keep lifelike skin, fabric and consistent wardrobe.",
+    ].join(" ")
     : "Draw expressive chibi stickers of the person in the left portrait. Preserve their distinctive face, hair, complexion and eyewear; vary poses, camera distance and props.";
   const lettering = "Use the right-side lettering specimens as your art direction: match the thick silhouette of each stroke, rounded chisel tips, lively tilt and open counters. Hand-letter each requested caption exactly once in its own script, preserving spelling, spaces and punctuation. Only the requested words may appear. For a short caption, draw the letters roughly a quarter of the cell height; the strokes should read at chat size. Compose type and action together. Change its position from cell to cell: arch above a pillow, tuck it beside a hand or wrap light cream letters across a large dark prop as in the red fabric specimen. Set free-standing words in deep plum, petrol teal or burnt orange, with an occasional gesture-led underline. Avoid stock fonts, generic corner labels, boxes and thick outlines.";
   const finish = "Use a flat warm ivory (#FFF6E9) sheet, including every cell edge. Fill each cell closely with an independent composition. Keep the entire caption, figure and accent marks inside a thin clear gutter. No grid lines or labels.";
   const intro = [layout, identity, lettering, finish].join("\n");
   const words = captions.map(caption => caption.trim());
   const cues = words.map(word => {
-    const action = stickerActionByCaption.get(word);
+    const cue = stickerActionByCaption.get(word);
+    const action = typeof cue === "string" ? cue : cue?.[style];
     return JSON.stringify(word) + (action ? " — " + action : "");
   });
   const rowList = (entries: string[]) => Array.from({ length: rows }, (_, i) =>

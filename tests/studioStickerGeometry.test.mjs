@@ -38,6 +38,19 @@ test("Known poses still carry the exact word the model must letter", () => {
   for (const caption of captions) assert.equal(prompt.split(JSON.stringify(caption)).length - 1, 1);
 });
 
+test("photo poses keep faces visible while character poses retain their illustrated reactions", () => {
+  for (const captions of [["고마워", "헉!", "좋아!"], ["Thanks", "Oh!", "Love it!"], ["谢谢", "哇！", "太喜欢了！"]]) {
+    const photo = studioStickerBrief("real", captions).prompt;
+    const character = studioStickerBrief("character", captions).prompt;
+    assert.match(photo, /bouquet below the chin/);
+    assert.match(photo, /eyelid contour/);
+    assert.match(photo, /eyes looking straight at camera/);
+    assert.match(character, /Crescent eyes peek over a bouquet/);
+    assert.match(character, /Broad goofy grin/);
+    for (const word of captions) assert.ok(photo.includes(JSON.stringify(word)));
+  }
+});
+
 test("Dense multilingual packs preserve every spelling within the image prompt limit", () => {
   for (const word of ["의견을모아서결정한뒤에다시연락할게요!", "龜".repeat(30)]) {
     const captions = Array.from({ length: 20 }, (_, i) => word + (i + 1));
