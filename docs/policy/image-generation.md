@@ -559,8 +559,19 @@ Recraft는 `RECRAFT_API_TOKEN`을 사용한다. 두 API 모두 요청당 한 번
 [BytePlus 가격](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
 
 Ideogram은 서버의 `IDEOGRAM_API_KEY`로 4.6 생성 API에 `quality`를 보내며,
-Tomverse에서는 1024×1024 텍스트 생성 한 장을 제공한다. 결과 파일은 인증 키 없이 내려받는다.
+1024×1024 텍스트 생성 한 장을 제공한다. `IMAGE_IDEOGRAM_EDIT_ENABLED`가 켜졌을 때는
+같은 API에 참조 사진 한 장을 multipart로 보내 1K Medium 편집을 제공한다.
+공개 가격은 Medium 생성·편집 모두 $0.06이므로 기존 90크레딧을 유지한다.
+High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
+결과 파일은 인증 키 없이 내려받는다. 사진 편집의 기본값은 꺼짐이며, 공급자 계정의
+입력 사진 보존 조건을 확인한 다음 활성화한다.
 [Ideogram 4.6 API](https://developer.ideogram.ai/api-reference/images/generate/ideogram-4-6) · [Ideogram 가격](https://ideogram.ai/pricing/)
+
+`IMAGE_RECRAFT_EDIT_ENABLED`가 켜졌을 때는 Recraft V4 Pro의 `imageToImage`에
+사진 한 장을 정사각형에 맞춰 인라인으로 전달하고, `zdr: true`와 `b64_json`을 사용한다.
+기존 $0.25·350크레딧 2K Medium 옵션만 허용하고, 반환된 PNG가 2048×2048인지 검사한다.
+사진 편집의 기본값은 꺼짐이며, 활성화 전에 dev 테스트에서 과금 단위와 출력 크기를 확인한다.
+[Recraft 편집 API](https://www.recraft.ai/docs/api-reference/tools/image-to-image) · [Recraft 데이터 보존](https://www.recraft.ai/docs/api-reference/zero-data-retention)
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
 각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
@@ -901,8 +912,11 @@ Alibaba Cloud Model Studio International(싱가포르) 동기 endpoint
   `.aliyuncs.com`에는 `-internal` 내부망 endpoint와 본토·홍콩 리전도 있다) redirect는
   따르지 않는다. 본문은 선언 길이와 무관하게 읽는 동안 16 MiB로 제한하고, 파일의 MIME이
   프로필 저장 허용 목록에 있고 헤더가 1024×1024여야 저장한다.
-- **생성만이다.** 편집은 `IMAGE_EDIT_PRICING`의 승인된 할증(3.0은 입력 이미지 장당
-  $0.003)이 없어 adapter가 거절한다.
+- `IMAGE_ALIBABA_EDIT_ENABLED`가 켜져 있으면 Qwen Image 3.0·Pro와 Wan 2.7·Pro는
+  1K 정사각 사진 편집을 지원한다. Qwen Image 3.0은 입력 사진당 $0.003을 예약한다.
+  Wan 2.7 편집 API는 `prompt_extend`를 지원하지 않으며, 요청은 `enable_sequential: false`,
+  `n: 1`로 고정한다. 두 모델의 싱가포르 편집은 출력 장당 과금이다.
+  [Wan 편집 API](https://www.alibabacloud.com/help/en/model-studio/wan-image-edit)
 
 **미확인 — 활성화 전에 유료 smoke로 확인한다.** API 레퍼런스의 결과 URL 예시는 3.0·2.1 모두
 `dashscope-result-sz.oss-cn-shenzhen.aliyuncs.com`, 즉 **중국 본토 버킷**이고, 싱가포르
@@ -941,7 +955,8 @@ Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 �
 - 요청 고정: `resolution: "1k"`, `aspect_ratio: "1:1"`(기본 `auto`는 프롬프트가 모양을
   고른다), `safety_tolerance: 2`. FLUX 3 Image는 `grounding: false`(기본 true는 프롬프트를
   웹·이미지 검색에 보낸다)와 `version: "latest"`(현재 유일한 값), Klein은
-  `output_format: "png"`. `seed`·`images`·`user`는 보내지 않는다.
+  `output_format: "png"`. `seed`와 `user`는 보내지 않는다. 편집 요청만 `images`에
+  인라인 사진 한 장을 보내며, 생성과 같은 출력 가격을 사용한다.
 - 가격표: 해상도 등급별 장당 과금이고 "prompts are included at no extra charge"이며 거절·
   실패·moderation으로 보류된 출력은 과금하지 않는다. 그래서
   `IMAGE_PROVIDER_THINKING_BILLING.bfl = "not_billed"`이고 최악 원가는 출력가 + 프롬프트
@@ -957,7 +972,7 @@ Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 �
 - 파일은 프로필 저장 허용 MIME(기본 JPEG·PNG), 16 MiB 이하, 1024×1024여야 저장한다.
   BFL이 응답에 주는 `cost`·`output_mp`는 `providerUsage`에 기록만 하고 가격 계산에 쓰지
   않는다.
-- **생성만이다.** 편집은 승인된 할증이 없어 adapter가 거절한다.
+- 사진 편집은 `IMAGE_BFL_EDIT_ENABLED`로 제어하며, 공급자 예산과 기존 크레딧 한도를 적용한다.
 
 **개인정보 고지.** 켜는 diff에서 `lib/providerDataDestinations.ts`에 BFL 행을 넣었다
 (같은 이유로 그동안 빠져 있던 fal 행도). 행의 provider 타입이 채팅 공급자만 받던 것을
@@ -1162,10 +1177,17 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     팔지 않으면(Grok Imagine, Nano Banana 2는 1K 정사각만 판다) 정사각으로 편집한다.
     실행기는 사진을 EXIF 방향대로 세우고 1024px 안으로 줄여 PNG로 만든 뒤 모델의 편집
     요청으로 보낸다: OpenAI `/v1/images/edits`(multipart), xAI `/v1/images/edits`(data URL),
-    fal `fal-ai/nano-banana-2/edit`(`image_urls` data URI, 생성과 같은 가격 필드). 감사
-    기록에는 사진의 형식·크기·sha256만 남고 바이트는 남지 않는다. 사용자 파일은 지우거나
-    고치지 않는다. Google 직접 호출은 생성 자체가 `worst_case_cost_unbounded`로 막혀 있어
-    편집 adapter를 두지 않는다. 같은 Google 모델은 fal의 Nano Banana 2로 편집한다.
+    fal `fal-ai/nano-banana-2/edit`(`image_urls` data URI), Seedream 5.5(참조 사진 한 장),
+    Alibaba Qwen Image 3.0·3.0 Pro·Wan 2.7·2.7 Pro(싱가포르 동기 API),
+    BFL FLUX 3·Klein(인라인 base64 한 장)을 지원한다. Alibaba와 BFL 경로는 1K 정사각이며
+    각각 `IMAGE_ALIBABA_EDIT_ENABLED`와 `IMAGE_BFL_EDIT_ENABLED`로 제어한다. 둘 다 기본 꺼짐이다.
+    감사 기록에는 사진의 형식·크기·sha256만 남고 바이트는 남지 않는다. 사용자 파일은 그대로 보존한다.
+    Nano Banana 2·2 Lite·2.1 직접 편집은 `IMAGE_GOOGLE_EDIT_ENABLED`가 켜졌을 때만
+    1K 정사각형 한 장을 요청하고, Interactions 요청에 `store: false`를 설정한다.
+    GPT Image 2.6 Flare·Sunburst는 `IMAGE_OPENAI_2_6_EDIT_ENABLED`가 켜졌을 때만
+    실측한 1K 정사각형 Medium 옵션으로 편집한다. 기본 꺼짐이다.
+    Ideogram 4.6과 Recraft V4 Pro는 위 공급자별 설정과 Medium 옵션을 따르며,
+    Recraft는 단독 모델 편집과 Studio의 명시적 기능 라우팅에서 2K 정사각형을 선택한다.
   - **편집 가격은 모델별이다**(`lib/imageGenerationPricing.ts`의 편집 가격 표). 각 모델은
     가산 크레딧, 입력 사진 예산, 토큰 과금이면 단가와 최대 토큰, 그리고 근거
     (`verification`)를 가진다. 근거가 없거나, 토큰 과금 모델의 실측 최댓값이 예산을 넘으면
@@ -1176,6 +1198,11 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       32×32 픽셀당 1토큰이었다. 정산은 예약 snapshot의 단가로 보고된 이미지 입력 토큰을
       계산하고, 사용량이 없으면 사진 예산 전체로 정산하며, 예산을 넘으면
       `image_edit_input_over_budget`을 남긴다.
+    - GPT Image 2.6 Flare·Sunburst: 2026-11-25 dev 자격증명으로 1024×1024 PNG
+      한 장씩 편집했으며 두 응답 모두 사진 입력 1,024토큰, 이미지 출력 1,449토큰을 보고했다.
+      공개 이미지 입력 단가 US$8/M, 사진 예산 1,152토큰을 적용하면
+      (43,470 출력 + 5,000 프롬프트 + 9,216 사진) / 65 = 887.5µUSD/크레딧이다.
+      기존 판매가를 사용하며 실측한 provider·API 모델·크기·품질과 출력 원가 하한을 확인한다.
     - Nano Banana 2(fal): fal 가격 API가 2026-10-29 생성과 편집 엔드포인트 모두 출력 1장당
       US$0.08로 답했고, 모델 페이지에 입력 사진 요금이 없다. 그래서 가산 0, 사진 예산 0이다.
       2026-10-29 운영자 승인 실측에서 1024×768 사진을 data URI로 보내 fal CDN의 1024×1024
@@ -1188,6 +1215,17 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     - xAI·fal 실측은 `node --import tsx scripts/measure-image-edit-providers.mjs --confirm-paid`
       (유료 약 US$0.25 이하, 운영자 승인 필요). 실측은 adapter와 같은 요청 빌더를 쓴다.
       2026-10-29 실행의 실제 지출은 약 US$0.20(xAI 2장 US$0.12, fal 1장 US$0.082)이다.
+    - Alibaba Qwen Image 3.0·3.0 Pro는 입력 사진당 US$0.003을 예산에 더한다.
+      Wan 2.7·2.7 Pro는 출력 장당 과금한다. BFL FLUX 3·Klein은 1K 생성과 편집의
+      가격이 같고 참조 장당 추가 요금이 없다. 활성 모델의 가격과 기존 크레딧 한도가 그대로 적용된다.
+    - Nano Banana 2·2 Lite·2.1 직접 편집은 공급자의 모델별 입력 단가와 2,048토큰
+      예산을 쓰며 생성 경로의 실측 출력 한도 또한 적용한다. 2026-11-25 dev의
+      공개 사진 편집 실측은 모델별 1,120 이미지 토큰이었다. 사용량을 모달리티별로
+      받으면 이미지 토큰을 텍스트와 분리한다. 분리값이 없으면 사진과 프롬프트는
+      각각의 예약 한도로 정산한다.
+    - Studio는 기능 키(예: `real-sticker-pack`, `live-action-character`, `poster`)로 모델을 고른다.
+      `STUDIO_IMAGE_ROUTE_PREFERENCES`는 기능별로 검증한 모델 ID를 우선순위 순서로 나열하는 JSON이다.
+      DB 카탈로그에서 활성 상태이며 크기·작업·비용 조건을 통과한 후보만 고르고, 제출 시 같은 견적을 다시 확인한다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.

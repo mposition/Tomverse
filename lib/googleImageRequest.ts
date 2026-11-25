@@ -88,6 +88,7 @@ export const buildGoogleImageRequest = (input: {
    * still what gets recorded -- this is a request, not an assumption.
    */
   deliveryMimeType: string;
+  referencePngBase64?: string;
 }): Record<string, unknown> | null => {
   if (!input.maxOutputTokens || input.maxOutputTokens <= 0) return null;
   if (!MIME_ALLOWLIST.has(input.deliveryMimeType)) return null;
@@ -96,7 +97,11 @@ export const buildGoogleImageRequest = (input: {
   const mapped = googleRequestForOption(option);
   return {
     model: input.apiModelId,
-    input: input.prompt,
+    input: input.referencePngBase64 ? [
+      { type: "text", text: input.prompt },
+      { type: "image", mime_type: "image/png", data: input.referencePngBase64 },
+    ] : input.prompt,
+    ...(input.referencePngBase64 ? { store: false } : {}),
     // Exactly the four keys the Interactions API reference defines, and no
     // others. A fifth one -- `delivery: "inline"` -- used to sit here with a
     // comment explaining why inline bytes were preferable to a fetchable
@@ -308,6 +313,15 @@ export const googleNonImageBillableTokens = (payload: unknown): number | null =>
     0
   );
   return output - Math.min(image, output) + finiteCount(usage.total_thought_tokens);
+};
+
+export const googleBilledPhotoInputTokens = (payload: unknown): number | null => {
+  const usage = (payload as { usage?: { input_tokens_by_modality?: unknown } } | null)?.usage;
+  const entries = usage?.input_tokens_by_modality;
+  if (!Array.isArray(entries)) return null;
+  const photoRows = entries.filter(row => row?.modality === "image" &&
+    Number.isSafeInteger(row.tokens) && row.tokens >= 0);
+  return photoRows.length > 0 ? photoRows.reduce((sum, row) => sum + row.tokens, 0) : null;
 };
 
 /**

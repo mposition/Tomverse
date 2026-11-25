@@ -46,6 +46,13 @@ test("catalogue-parametrised lookups resolve against the given list, not module 
   );
 });
 
+test("Nano Banana 2.1 requests JPEG even from a legacy PNG catalog row", () => {
+  const seed = getImageModel("gemini-3.1-flash-image");
+  const legacy = { ...seed, outputMimeTypes: ["image/png"], deliveryMimeType: "image/png" };
+  assert.equal(imageDeliveryMimeType(legacy), "image/png");
+  assert.equal(imageDeliveryMimeType({ ...legacy, apiModelId: "gemini-nano-banana-2.1" }), "image/jpeg");
+});
+
 test("client components never write the module-global image catalogue", () => {
   for (const file of [
     "../app/(site)/(application)/chat/ChatPageClient.tsx",

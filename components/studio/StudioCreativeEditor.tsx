@@ -78,7 +78,9 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
   const [story, setStory] = useState(false);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
-  const imageQuote = useStudioImageQuote("1024x1024", true, character);
+  const photoreal = "photoreal" in preset;
+  const imageQuote = useStudioImageQuote("1024x1024", true, character, undefined,
+    photoreal ? "live-action-character" : "stylized-character");
   const checkout = useStudioCheckoutDraft<CreativeDraft>(id, saved => {
     urls.release(photo);
     urls.release(result);
@@ -119,7 +121,6 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
       try {
         if (character) {
           if (!imageQuote.quote) return;
-          const photoreal = "photoreal" in preset;
           const identity = "Cast the person in the reference as this character. Preserve their recognizable face shape, facial features, skin tone and hairline.";
           const look = photoreal ? [
             "Photograph one live-action scene from scratch, with a candid three-quarter pose, an in-scene eyeline and a natural expression. The reference establishes identity; do not copy its front-facing pose, expression, crop, original lighting or pixels.",

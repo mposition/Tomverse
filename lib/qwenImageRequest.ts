@@ -11,9 +11,8 @@ import type { ImageSize } from "@/lib/imageGenerationPricing";
 // revision, and the judge still refuses it while
 // IMAGE_PROVIDER_QWEN_COST_MICROUSD_PER_{DAY,MONTH} are unset in production.
 //
-// Generation only. An edit needs an approved surcharge in IMAGE_EDIT_PRICING
-// (qwen-image-3.0 bills each input image, $0.003 at 1K) and the adapter's edit
-// allowlist, and neither is decided.
+// Photo editing shares the synchronous endpoint and sends at most one
+// reference. The catalogue still applies the separate edit cost check.
 //
 // Unverified, and the reason the paid smoke is part of enabling this rather
 // than a formality: where Alibaba keeps the generated file. The reference's
@@ -35,6 +34,13 @@ import type { ImageSize } from "@/lib/imageGenerationPricing";
 export const QWEN_IMAGE_GENERATION_URL =
   "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
 
+export const ALIBABA_SINGLE_PHOTO_EDIT_COST = {
+  "qwen-image-3.0": { input: 3_000, output: 30_000 },
+  "qwen-image-3.0-pro": { input: 3_000, output: 40_000 },
+  "wan2.7-image": { input: 0, output: 30_000 },
+  "wan2.7-image-pro": { input: 0, output: 75_000 },
+} as const;
+
 /**
  * The one size this integration sends. `width*height`, not `widthxheight`, and
  * always stated: qwen-image-2.0 defaults to 2048 on a side, and an omitted size
@@ -49,6 +55,7 @@ export type QwenImageRequestInput = {
   /** The only field that carries user text. */
   prompt: string;
   size: ImageSize;
+  reference?: string;
 };
 
 /**
@@ -56,7 +63,7 @@ export type QwenImageRequestInput = {
  * sending a resolution the credits were not computed against.
  *
  * - `n: 1`: the price is per image and the API accepts up to 6.
- * - `prompt_extend: false`: its default is true, which rewrites the prompt
+ * - `prompt_extend: false` on Qwen Image: its default is true, which rewrites the prompt
  *   with a model we did not choose. It also keeps thinking off, since the
  *   reference says `enable_thinking` "Requires prompt_extend=true".
  *   Thinking is not billed separately either way (`not_billed` in
@@ -71,12 +78,21 @@ export const buildQwenImageRequest = (
 ): Record<string, unknown> | null => {
   const size = SIZE_BY_IMAGE_SIZE[input.size];
   if (!size) return null;
+  if (input.reference && !Object.hasOwn(ALIBABA_SINGLE_PHOTO_EDIT_COST, input.apiModelId)) return null;
+  const content = [
+    ...(input.reference ? [{ image: input.reference }] : []),
+    { text: input.prompt },
+  ];
+  // The Wan 2.7 edit API does not support prompt_extend. The published
+  // Singapore price is per output image, including a single-reference edit.
+  // https://www.alibabacloud.com/help/en/model-studio/wan-image-edit
+  const wanEdit = input.reference && input.apiModelId.startsWith("wan2.7-");
   return {
     model: input.apiModelId,
     // `input` is one of the adapter's prompt field names, so the audit view of
     // this body drops the whole field and keeps `model` and `parameters`.
-    input: { messages: [{ role: "user", content: [{ text: input.prompt }] }] },
-    parameters: { size, n: 1, watermark: false, prompt_extend: false },
+    input: { messages: [{ role: "user", content }] },
+    parameters: { size, n: 1, watermark: false, ...(wanEdit ? { enable_sequential: false } : { prompt_extend: false }) },
   };
 };
 
@@ -152,11 +168,10 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
  *
  * More than one choice or image fails closed rather than taking the first: the
  * price is for one image. Where `usage` reports a count it has to agree --
- * `image_count` (2.1 series) or `output_image_count` (3.0 series) of exactly 1,
- * and no `input_image_count` above 0, because 3.0 bills each input image and a
- * text-only request priced without one must not settle as though it were.
+ * `image_count` (2.1 series) or `output_image_count` (3.0 series) of exactly 1.
+ * On Qwen 3.0 the separately billed input count must match the request.
  */
-export const parseQwenImageResponse = (payload: unknown): { url: string } | null => {
+export const parseQwenImageResponse = (payload: unknown, expectedInputImages = 0): { url: string } | null => {
   const output = asRecord(asRecord(payload)?.output);
   const choices = output?.choices;
   if (!Array.isArray(choices) || choices.length !== 1) return null;
@@ -176,7 +191,7 @@ export const parseQwenImageResponse = (payload: unknown): { url: string } | null
     for (const key of ["image_count", "output_image_count"]) {
       if (key in usage && usage[key] !== 1) return null;
     }
-    if ("input_image_count" in usage && usage.input_image_count !== 0) return null;
+    if ("input_image_count" in usage && usage.input_image_count !== expectedInputImages) return null;
   }
   return { url };
 };
