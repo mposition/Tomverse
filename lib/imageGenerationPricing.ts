@@ -10,7 +10,10 @@
 // Policy: docs/policy/image-generation.md. Numbers here are micro-USD
 // integers, same unit as the rest of the billing code.
 
-import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, SEEDREAM_API_MODEL } from "@/lib/directRasterModels";
+import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, RECRAFT_API_MODEL, RECRAFT_SIZE, SEEDREAM_API_MODEL } from "@/lib/directRasterModels";
+import { ALIBABA_SINGLE_PHOTO_EDIT_COST } from "@/lib/qwenImageRequest";
+import { BFL_FLUX3_IMAGE_EDIT_COST } from "@/lib/bflImageRequest";
+import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 
 export const IMAGE_GENERATION_MODEL_ID = "gpt-image-2";
 
@@ -46,6 +49,12 @@ export const IMAGE_PROMPT_BUDGET_MICRO_USD = Math.ceil(
 export const IMAGE_EDIT_INPUT_MAX_EDGE_PX = 1_024;
 
 export type ImageEditPricing = {
+  option?: {
+    provider: "qwen" | "bfl" | "google" | "openai" | "ideogram" | "recraft";
+    size: ImageSize;
+    quality?: ImageQuality;
+    minimumOutputCostMicroUsd?: number;
+  };
   /** Credits added to the option's own price for an edit. */
   surchargeCredits: number;
   /** Worst-case provider cost of the photo as input, micro-USD. */
@@ -67,6 +76,17 @@ export type ImageEditPricing = {
     measuredMaxTokens?: number;
   } | null;
 };
+
+const GOOGLE_PHOTO_INPUT_RATE = {
+  "gemini-3.1-flash-image": 0.50,
+  "gemini-3.1-flash-lite-image": 0.25,
+  "gemini-nano-banana-2.1": 1.50,
+} as const;
+
+const OPENAI_2_6_PHOTO_EDIT_IDS: readonly string[] = [
+  "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst",
+];
 
 const IMAGE_EDIT_PRICING: Readonly<Record<string, ImageEditPricing>> = {
   // One reference is a fixed $0.008. The approved option must carry the
@@ -131,6 +151,92 @@ const IMAGE_EDIT_PRICING: Readonly<Record<string, ImageEditPricing>> = {
 
 /** A model's edit pricing, or null when it cannot edit (yet). */
 export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
+  if (modelId === IDEOGRAM_MODEL_ID && process.env.IMAGE_IDEOGRAM_EDIT_ENABLED === "true") {
+    // The 1K Medium request with one source costs $0.06, the same as
+    // generation. High has a separate edit rate and is outside this option.
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: 0,
+      inputTokens: null,
+      option: { provider: "ideogram", size: IDEOGRAM_SIZE, quality: "medium", minimumOutputCostMicroUsd: IDEOGRAM_OUTPUT_COST_MICRO_USD.medium },
+      verification: { verifiedAt: "2026-11-25", source: "https://ideogram.ai/models/4.6/#api" },
+    };
+  }
+  if (modelId === RECRAFT_API_MODEL && process.env.IMAGE_RECRAFT_EDIT_ENABLED === "true") {
+    // The image-to-image docs link the V4 rates directly. One square input,
+    // one Pro 2K raster, no style creation or extra image output.
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: 0,
+      inputTokens: null,
+      option: {
+        provider: "recraft", size: RECRAFT_SIZE, quality: "medium",
+        minimumOutputCostMicroUsd: DIRECT_RASTER_MODELS.recraft.outputCostMicroUsd,
+      },
+      verification: { verifiedAt: "2026-11-25", source: "https://www.recraft.ai/docs/api-reference/tools/image-to-image" },
+    };
+  }
+  if (process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED === "true" && OPENAI_2_6_PHOTO_EDIT_IDS.includes(modelId)) {
+    // Each model billed 1,024 image-input tokens and 1,449 image-output tokens
+    // for a 1,024-square PNG edit on 2026-11-25. Preserve the approved output
+    // price and keep the original 65-credit option below its cost ceiling:
+    // 43,470 output + 5,000 prompt + 1,152 * 8 photo = 57,686 micro-USD.
+    const maxTokens = 1_152;
+    const usdPerMillionTokens = 8;
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: maxTokens * usdPerMillionTokens,
+      inputTokens: { maxTokens, usdPerMillionTokens },
+      option: { provider: "openai", size: "1024x1024", quality: "medium", minimumOutputCostMicroUsd: 43_470 },
+      verification: {
+        verifiedAt: "2026-11-25",
+        source: "https://developers.openai.com/api/docs/pricing",
+        measuredMaxTokens: 1_024,
+      },
+    };
+  }
+  if (process.env.IMAGE_ALIBABA_EDIT_ENABLED === "true" && Object.hasOwn(ALIBABA_SINGLE_PHOTO_EDIT_COST, modelId)) {
+    const cost = ALIBABA_SINGLE_PHOTO_EDIT_COST[modelId as keyof typeof ALIBABA_SINGLE_PHOTO_EDIT_COST];
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: cost.input,
+      inputTokens: null,
+      option: { provider: "qwen", size: "1024x1024", minimumOutputCostMicroUsd: cost.output },
+      verification: { verifiedAt: "2026-11-25", source: "https://www.alibabacloud.com/help/en/model-studio/model-pricing" },
+    };
+  }
+  if (process.env.IMAGE_BFL_EDIT_ENABLED === "true" && Object.hasOwn(BFL_FLUX3_IMAGE_EDIT_COST, modelId)) {
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: 0,
+      inputTokens: null,
+      option: {
+        provider: "bfl", size: "1024x1024",
+        minimumOutputCostMicroUsd: BFL_FLUX3_IMAGE_EDIT_COST[modelId as keyof typeof BFL_FLUX3_IMAGE_EDIT_COST],
+      },
+      verification: { verifiedAt: "2026-11-25", source: "https://bfl.ai/pricing?category=flux+3+image" },
+    };
+  }
+  if (process.env.IMAGE_GOOGLE_EDIT_ENABLED === "true" && Object.hasOwn(GOOGLE_PHOTO_INPUT_RATE, modelId)) {
+    const rate = GOOGLE_PHOTO_INPUT_RATE[modelId as keyof typeof GOOGLE_PHOTO_INPUT_RATE];
+    // The actual Interactions edits of a public Studio PNG on 2026-11-25
+    // reported 1,120 image tokens, above the preview countTokens estimate.
+    // Reserve 2,048 for one reference fitted inside 1,024 px and keep the
+    // model's existing measured output bound. Google publishes the direct
+    // input rates below; gateway pricing does not apply to these calls.
+    const maxTokens = 2_048;
+    return {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: Math.ceil(maxTokens * rate),
+      inputTokens: { maxTokens, usdPerMillionTokens: rate },
+      option: { provider: "google", size: "1024x1024" },
+      verification: {
+        verifiedAt: "2026-11-25",
+        source: "https://ai.google.dev/gemini-api/docs/pricing",
+        measuredMaxTokens: 1_120,
+      },
+    };
+  }
   const pricing = Object.hasOwn(IMAGE_EDIT_PRICING, modelId) ? IMAGE_EDIT_PRICING[modelId] : null;
   if (!pricing?.verification) return null;
   const { inputTokens, verification } = pricing;

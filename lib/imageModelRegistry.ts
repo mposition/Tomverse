@@ -703,7 +703,9 @@ export const imageComposerModelLayout = (
  * as the first one did, for a reason already fixed.
  */
 export const imageDeliveryMimeType = (model: ImageModelProfile): string =>
-  model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png";
+  model.provider === "google" && model.apiModelId === "gemini-nano-banana-2.1"
+    ? "image/jpeg"
+    : model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png";
 
 /** The composer's visual label for a model; identity stays `name`. */
 export const imageModelChipLabel = (model: ImageModelProfile): string =>
@@ -1202,6 +1204,9 @@ export const maxImageEditRequestCostMicroUsd = (
   price: ImageModelOptionPrice
 ): number | null => {
   const edit = imageEditPricing(model.id);
+  if (edit?.option && (model.provider !== edit.option.provider || model.apiModelId !== model.id ||
+      price.size !== edit.option.size || (edit.option.quality && price.quality !== edit.option.quality) ||
+      price.outputCostMicroUsd < (edit.option.minimumOutputCostMicroUsd ?? 0))) return null;
   const generation = maxImageRequestCostMicroUsd(model, price);
   return generation === null || edit === null ? null : generation + edit.inputBudgetMicroUsd;
 };

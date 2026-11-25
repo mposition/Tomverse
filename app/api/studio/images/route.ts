@@ -7,26 +7,35 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
+import { CATALOG_IMAGE_SIZES, RECRAFT_API_MODEL, RECRAFT_SIZE } from "@/lib/directRasterModels";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import { processImageGenerationGroup, requestImageGeneration } from "@/lib/imageGenerationService";
 import { DEFAULT_IMAGE_MODEL_ID, getImageModelPrice, imageEditCredits, listEnabledImageModels } from "@/lib/imageModelRegistry";
+import { resolveActiveImageProviderBudgets } from "@/lib/imageProviderBudget";
 import { MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
 import { studioAvailable } from "@/lib/studioAvailability";
 import { bindStudioImageUpload } from "@/lib/studioImageReference";
+import { STUDIO_IMAGE_USE_CASES, type StudioImageUseCase } from "@/lib/studioTools";
 
-const sizeSchema = z.enum(["1024x1024", "1536x1024", "1024x1536"]);
+const sizeSchema = z.enum(CATALOG_IMAGE_SIZES);
+const useCaseSchema = z.enum(STUDIO_IMAGE_USE_CASES);
+const routePreferencesSchema = z.record(z.string(), z.unknown());
+const modelOrderSchema = z.array(z.string().min(1));
+const qualities = ["medium", "high", "low"] as const;
 const requestSchema = z.object({
+  useCase: useCaseSchema.optional(),
   prompt: z.string().trim().min(1).max(4_000),
   size: sizeSchema,
   uploadId: z.string().trim().min(1).max(100).optional(),
   idempotencyKey: z.uuid(),
   modelId: z.string().min(1).max(120),
   pricingVersion: z.string().min(1).max(120),
+  quality: z.enum(qualities).optional(),
+  credits: z.number().int().positive().optional(),
 }).strict();
 
-const quality = "medium";
 const unavailable = () => Response.json({ code: "STUDIO_GENERATION_UNAVAILABLE" }, { status: 503 });
 const authenticated = async (req: Request) => {
   const auth = await resolveChatRouteSession(req);
@@ -37,16 +46,47 @@ const authenticated = async (req: Request) => {
 };
 const studioImagesEnabled = () => studioAvailable() && process.env.STUDIO_IMAGE_GENERATION_ENABLED === "true";
 
-async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean) {
+function studioModelPreference(useCase?: StudioImageUseCase): string[] {
+  const config = process.env.STUDIO_IMAGE_ROUTE_PREFERENCES;
+  if (!useCase || !config) return [];
+  try {
+    const routes = routePreferencesSchema.safeParse(JSON.parse(config)).data;
+    return modelOrderSchema.safeParse(routes?.[useCase]).data ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useCase?: StudioImageUseCase, squareFallback = false) {
   if (edit && !imageEditEnabled()) return null;
   await refreshImageModelCatalog();
-  const eligible = listEnabledImageModels().flatMap(model => {
-    const price = getImageModelPrice(model.id, quality, size);
-    if (!price) return [];
-    const credits = edit ? imageEditCredits(model, price) : price.credits;
-    return credits ? [{ modelId: model.id, model: model.name, credits, pricingVersion: model.pricingVersion }] : [];
+  const budgeted = new Set(resolveActiveImageProviderBudgets().filter(row => row.resolved.limits).map(row => row.provider));
+  const models = listEnabledImageModels().filter(model => budgeted.has(model.provider));
+  const quotesAt = (outputSize: typeof size) => models.flatMap(model => {
+    for (const quality of qualities) {
+      const price = getImageModelPrice(model.id, quality, outputSize);
+      if (!price) continue;
+      const credits = edit ? imageEditCredits(model, price) : price.credits;
+      if (credits) return [{
+        modelId: model.id, model: model.name, credits, quality, size: outputSize, pricingVersion: model.pricingVersion, useCase,
+      }];
+    }
+    return [];
   });
-  return eligible.find(option => option.modelId === DEFAULT_IMAGE_MODEL_ID) ?? eligible[0] ?? null;
+  const quotes = quotesAt(size);
+  const squareQuotes = squareFallback && size !== "1024x1024" ? quotesAt("1024x1024") : [];
+  for (const id of studioModelPreference(useCase)) {
+    const preferred = quotes.find(quote => quote.modelId === id) ?? squareQuotes.find(quote => quote.modelId === id);
+    if (preferred) return preferred;
+    if (id === RECRAFT_API_MODEL && size !== RECRAFT_SIZE) {
+      const native = quotesAt(RECRAFT_SIZE).find(quote => quote.modelId === id);
+      if (native) return native;
+    }
+  }
+  // Without a verified feature preference, keep the requested shape if it is available.
+  const compatible = quotes.length > 0 ? quotes : squareQuotes;
+  return compatible.find(quote => quote.modelId === DEFAULT_IMAGE_MODEL_ID) ??
+    compatible.find(quote => quote.quality === "medium") ?? compatible[0] ?? null;
 }
 
 export async function GET(req: Request) {
@@ -58,7 +98,11 @@ export async function GET(req: Request) {
     const params = new URL(req.url).searchParams;
     const size = sizeSchema.safeParse(params.get("size"));
     if (!size.success) return Response.json({ code: "IMAGE_OPTION_NOT_SUPPORTED" }, { status: 400 });
-    const quote = await studioQuote(size.data, params.get("edit") === "true");
+    const useCase = useCaseSchema.optional().safeParse(params.get("useCase") ?? undefined);
+    if (!useCase.success) return Response.json({ code: "STUDIO_USE_CASE_NOT_SUPPORTED" }, { status: 400 });
+    const quote = await studioQuote(
+      size.data, params.get("edit") === "true", useCase.data, params.get("squareFallback") === "true",
+    );
     return quote ? Response.json(quote, { headers: { "Cache-Control": "no-store" } }) : unavailable();
   } catch (error) {
     return apiSecurityResponse(error) ?? unavailable();
@@ -79,15 +123,20 @@ export async function POST(req: Request) {
     });
     if (receipt) return Response.json({ groupId: receipt.id });
 
-    const quote = await studioQuote(body.size, Boolean(body.uploadId));
-    if (!quote || quote.modelId !== body.modelId || quote.pricingVersion !== body.pricingVersion) {
+    const quote = await studioQuote(body.size, Boolean(body.uploadId), body.useCase);
+    // Open tabs from the previous release only know the versioned Medium
+    // quote. Feature-routed submissions always echo the exact quote.
+    const legacyMedium = body.useCase === undefined && body.quality === undefined && body.credits === undefined;
+    if (!quote || quote.modelId !== body.modelId || quote.pricingVersion !== body.pricingVersion ||
+        quote.size !== body.size ||
+        (legacyMedium ? quote.quality !== "medium" : quote.quality !== body.quality || quote.credits !== body.credits)) {
       return Response.json({ code: "STUDIO_QUOTE_CHANGED" }, { status: 409 });
     }
     const { uploadId } = body;
     const result = await requestImageGeneration({
       userId: user.id,
       prompt: body.prompt,
-      quality,
+      quality: quote.quality,
       size: body.size,
       idempotencyKey: body.idempotencyKey,
       modelIds: [body.modelId],

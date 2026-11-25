@@ -8,13 +8,9 @@ import type { ImageSize } from "@/lib/imageGenerationPricing";
 //   https://docs.bfl.ai/api_integration/integration_guidelines
 //   https://bfl.ai/pricing
 //
-// Default off. No BFL model is in the code seed (lib/imageModelRegistry.ts);
-// one exists only once an operator adds a runtime catalogue profile and a price
-// revision, and the judge still refuses it while
-// IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_{DAY,MONTH} are unset in production.
-//
-// Generation only: an edit needs an approved surcharge and the adapter's edit
-// allowlist, and neither is decided.
+// The seeded FLUX 3 models need a provider budget to run in production.
+// Single-photo edits use the same per-image price and are opt-in through
+// IMAGE_BFL_EDIT_ENABLED.
 //
 // The API is asynchronous. A POST submits a task and answers with an id and a
 // `polling_url`; the result is read from that URL until it says `Ready`, and
@@ -40,6 +36,11 @@ export const BFL_API_KEY_HEADER = "x-key";
  * build no request rather than be sent a guess.
  */
 export const BFL_FLUX3_IMAGE_MODELS = ["flux-3-image", "flux-3-image-klein"] as const;
+export const BFL_FLUX3_IMAGE_EDIT_COST = {
+  "flux-3-image": 48_000,
+  "flux-3-image-klein": 9_000,
+} as const;
+
 export type BflFlux3ImageModel = (typeof BFL_FLUX3_IMAGE_MODELS)[number];
 
 export const isBflFlux3ImageModel = (apiModelId: unknown): apiModelId is BflFlux3ImageModel =>
@@ -97,6 +98,7 @@ export type BflImageRequestInput = {
   /** The only field that carries user text. */
   prompt: string;
   size: ImageSize;
+  referenceBase64?: string;
 };
 
 /**
@@ -112,8 +114,7 @@ export type BflImageRequestInput = {
  *   tag can be pinned here once BFL publishes one.
  * - `output_format: "png"` (Klein): FLUX 3 Image has no such field, so its
  *   type is read from the delivered file, never assumed.
- * - No `seed`, no `images`, no `user`: nothing that identifies the user leaves
- *   Tomverse, and a reference image would be an edit.
+ * - A photo edit sends one inline reference. The user identifier stays local.
  */
 export const buildBflImageRequest = (
   input: BflImageRequestInput
@@ -126,6 +127,7 @@ export const buildBflImageRequest = (
     aspect_ratio: tier.aspect_ratio,
     resolution: tier.resolution,
     safety_tolerance: BFL_SAFETY_TOLERANCE,
+    ...(input.referenceBase64 ? { images: [input.referenceBase64] } : {}),
   };
   if (input.apiModelId === "flux-3-image") {
     return { ...common, grounding: false, version: "latest" };
