@@ -68,7 +68,9 @@ type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolea
 const textarea =
   "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 p-2 font-mono text-xs text-zinc-200 outline-none focus:border-blue-500";
 
-const formSizes = (provider: string) => RUNTIME_IMAGE_SIZES.filter(size => (size === "2048x2048") === (provider === "recraft"));
+const formSizes = (provider: string) => RUNTIME_IMAGE_SIZES.filter(size =>
+  provider === "ideogram" ? size === "1024x1024" : (size === "2048x2048") === (provider === "recraft")
+);
 
 const emptyForm = (provider = "openai"): ImageModelFormValue => ({
   provider,

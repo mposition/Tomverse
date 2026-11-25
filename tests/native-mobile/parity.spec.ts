@@ -87,7 +87,7 @@ test("historical generated images renew an expired signed URL without exposing s
 test("image quotes require fresh consent after a price change and never run automatically", async ({ page }) => {
   await page.route("**/src/main.tsx", async route => {
     const response = await route.fetch(); const source = await response.text();
-    const injection = `let capReads=0; transport.mobileCapabilities=async()=>{capReads++;return {reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:3,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:window.priceChanged?"v2":"v1",prices:[{quality:"medium",size:"1024x1024",credits:window.priceChanged?12:10}]}]}};};
+    const injection = `let capReads=0; transport.mobileCapabilities=async()=>{capReads++;return {reviewEasy:true,assistants:false,maxModels:3,plan:"Max",images:{enabled:true,maxModels:3,models:[{id:"synthetic-image",name:"Synthetic image model",provider:"openai",pricingVersion:window.priceChanged?"v2":"v1",prices:[{quality:"medium",size:"2048x2048",credits:window.priceChanged?12:10}]}]}};};
       transport.routeReview=async()=>({kind:"image",preset:"standard",choices:[{provider:"openai",modelId:"synthetic-image"}]});
       transport.generateImages=async()=>{window.imageRuns=(window.imageRuns||0)+1;return {groupId:"group",conversationId:"image-chat"};};
       transport.imageGroup=async()=>({status:"failed",targets:[],generations:[]});`;
@@ -98,6 +98,7 @@ test("image quotes require fresh consent after a price change and never run auto
   await page.getByRole("textbox").fill("Synthetic image prompt");
   await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
   await page.getByLabel("이미지 설명").fill("Synthetic prompt");
+  await expect(page.getByRole("combobox", { name: "크기" })).toHaveValue("2048x2048");
   expect(await page.evaluate(() => (window as unknown as { imageRuns?: number }).imageRuns ?? 0)).toBe(0);
   const consent = page.getByRole("checkbox", { name: /선택한 모델과 표시된 크레딧/ }); await consent.check(); await page.evaluate(() => { (window as unknown as { priceChanged: boolean }).priceChanged = true; }); await page.getByRole("button", { name: "이미지 생성", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("모델 또는 가격이 변경되었습니다"); await expect(consent).not.toBeChecked();

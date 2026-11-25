@@ -145,7 +145,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // 2026-11-25: direct image recipients added as unverified. Observation only.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "4a54fcbffa1f4d448c6b7f38e51768dc421f5cbc9bf37bcef52d98bb2fbda89c",
+    contentSha256: "970d219363f3bbc3b0ed7f128e4c7f477225f5aacc0dd06fd2a914c00a405b44",
   },
   // 2026-11-19: terms gain the API-key clause, the app-store billing and
   // non-expiring store credit sentences, and the missing zh clauses.

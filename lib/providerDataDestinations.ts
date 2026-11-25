@@ -488,8 +488,16 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
         recipientEntity: "Ideogram AI, Inc.",
         evidenceRef: "https://ideogram.ai/legal/api-tos/",
     },
-    unproven("byteplus"),
-    unproven("recraft"),
+    {
+        ...unproven("byteplus"),
+        recipientEntity: "BytePlus Pte. Ltd. or the affiliate designated in the service agreement",
+        evidenceRef: "https://docs.byteplus.com/en/docs/legal/docs-customer-agreement",
+    },
+    {
+        ...unproven("recraft"),
+        recipientEntity: "Recraft Inc.",
+        evidenceRef: "https://www.recraft.ai/legal/developer-terms",
+    },
     ready({
         provider: "openai",
         recipientEntity: "OpenAI OpCo, LLC",
