@@ -1356,6 +1356,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The devices the person signed in on: the name they gave each one, whether it is an iPhone or an Android, the app version, when it was registered, when it was last used and whether it has been removed. Withheld: the server-issued device id, which is the value a live refresh token is bound to. Nothing else about the device is collected -- no model name, OS build, advertising identifier, IDFV or ANDROID_ID -- so what is missing from this export is mostly missing from the database.",
   },
   {
+    domain: "desktopRemoteDevice",
+    publicName: "desktop_remote_devices",
+    prismaModel: "DesktopRemoteDevice",
+    state: "excluded",
+    exclusionReason:
+      "The latest report one signed-in PC sent about its own Code tasks: task titles, states, a few progress lines and the summary of the request on its screen. It is a short-lived mirror of what is on the person's own PC, replaced on every report, removed when it expires or when the feature is turned off there, and deleted with the account.",
+  },
+  {
+    domain: "desktopRemoteCommand",
+    publicName: "desktop_remote_commands",
+    prismaModel: "DesktopRemoteCommand",
+    state: "excluded",
+    exclusionReason:
+      "One answer, stop or follow-up the person sent from the web to their own PC, kept until the PC has picked it up and reported what it did, then swept on expiry and deleted with the account. The task it acted on lives on the person's own PC.",
+  },
+  {
     domain: "mobileTokenFamily",
     publicName: "mobile_sessions",
     prismaModel: "MobileTokenFamily",

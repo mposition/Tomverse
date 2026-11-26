@@ -4276,6 +4276,43 @@ domains:
       The `id` is a server-issued random value, so it identifies the device to
       Tomverse and to nothing else.
 
+  - domain: desktopRemoteDevice
+    prismaModel: DesktopRemoteDevice
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      The latest redacted report one signed-in PC sent about its Code tasks
+      (docs/ops/desktop-remote-control.md): task titles, states, a few progress
+      lines and the summary of the request on its screen. Never file contents,
+      diffs, command output or environment values. One row per device, replaced
+      on every report and removed when it expires, when the person turns the
+      feature off on that PC, or when the device's sign-in is revoked; an
+      account deletion removes it through MobileDevice. Excluded from the
+      export because it is a short-lived copy of state that lives on the
+      person's own PC.
+
+  - domain: desktopRemoteCommand
+    prismaModel: DesktopRemoteCommand
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      One answer, stop or follow-up the person sent from a signed-in web
+      session to their own PC, kept until the PC has picked it up and reported
+      what it did with it, then swept on expiry. Removed with its
+      DesktopRemoteDevice row, so an account deletion removes it through the
+      same cascade. The person's action is also written to the admin audit
+      chain, which has its own row in this registry.
+
   - domain: externalApiKey
     prismaModel: ExternalApiKey
     userLinkageRole: subject

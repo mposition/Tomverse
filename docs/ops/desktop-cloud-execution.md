@@ -80,4 +80,4 @@ Turning these on makes a reservation hold the person's real credits (refundable 
 
 ## Verification that ran locally
 
-`apps/desktop`: `tests/managedCodeClient.test.ts`, `managedCodeSession.test.ts`, `managedCodeContract.test.ts` (fake server that checks requests against the server's own `codeManagedRequestSchema`) and `tests/managedCode.e2e.ts`. Root: `tests/desktopManagedCodeSwitch.test.mjs`. No paid call was made; nothing here contacted a real server.
+`apps/desktop/tests/managedCodeClient.test.ts`, `managedCodeSession.test.ts` and `managedCodeContract.test.ts` in the same folder (fake server that checks requests against the server's own `codeManagedRequestSchema`) and `apps/desktop/tests/managedCode.e2e.ts`. Root: `tests/desktopManagedCodeSwitch.test.mjs`. No paid call was made; nothing here contacted a real server.
