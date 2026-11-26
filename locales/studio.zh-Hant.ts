@@ -16,7 +16,6 @@ export const studioLocale = {
   "apply": "套用",
   "generationUnavailable": "暫時無法生成。",
   "signInToGenerate": "登入後即可生成。",
-  "generationCredits": "{credits} 點數",
   "packCaptions": "貼圖文字",
   "firstScene": "生成第一個場景",
   "nextScene": "生成下一個場景",

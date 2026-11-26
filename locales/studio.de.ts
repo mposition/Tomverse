@@ -16,7 +16,6 @@ export const studioLocale = {
   "apply": "Übernehmen",
   "generationUnavailable": "Die Generierung ist derzeit nicht verfügbar.",
   "signInToGenerate": "Melde dich an, um Inhalte zu erstellen.",
-  "generationCredits": "{credits} Credits",
   "packCaptions": "Stickertexte",
   "firstScene": "Erste Szene generieren",
   "nextScene": "Nächste Szene generieren",
