@@ -7067,6 +7067,7 @@ model MobileDevice {
 
   user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   families MobileTokenFamily[]
+  remoteControl DesktopRemoteDevice?
 
   @@index([userId, lastSeenAt])
   @@index([userId, revokedAt])
@@ -7200,6 +7201,62 @@ model MobileAuthEvent {
   @@index([userId, occurredAt])
   @@index([event, occurredAt])
   @@index([occurredAt])
+}
+
+/// A Tomverse Desktop that lets the account's other signed-in devices see its running Code tasks and answer its
+/// approval requests (docs/ops/desktop-remote-control.md). Written only by that device's own Desktop bearer. It
+/// lives a few minutes after the PC's last report, is deleted when the PC turns remote control off, and goes with
+/// the device (and so with the account). Never shown once the device's token family is revoked.
+model DesktopRemoteDevice {
+  deviceId  String   @id
+  /// The device's account, copied from the bearer; equal to `MobileDevice.userId`.
+  userId    String
+  /// The token family that wrote the latest report. A revoked family hides the row and it is deleted.
+  familyId  String
+  /// The PC's redacted report (lib/desktopRemoteControlContract.ts): task titles, states, a few progress lines and
+  /// the summary of the request on its screen. Never file contents, diffs, command output or environment values.
+  snapshot  Json
+  revision  Int      @default(1)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @db.Timestamptz(3)
+  expiresAt DateTime @db.Timestamptz(3)
+
+  device   MobileDevice           @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  commands DesktopRemoteCommand[]
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+/// One answer, stop or follow-up a signed-in web session sent to a PC. The PC picks it up once, decides whether it
+/// still applies, and reports the result; the server never applies it. The person's action is in the admin audit
+/// chain under the same id.
+model DesktopRemoteCommand {
+  id             String    @id
+  deviceId       String
+  userId         String
+  /// approval, stop or follow_up; a CHECK allows nothing else.
+  kind           String
+  taskKey        String
+  approvalId     String?
+  approvalDigest String?
+  /// once or deny, for an approval only; a CHECK allows nothing else.
+  decision       String?
+  text           String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// Handed to the PC only before this.
+  expiresAt      DateTime  @db.Timestamptz(3)
+  deliveredAt    DateTime? @db.Timestamptz(3)
+  /// applied or refused, as the PC reported it; a CHECK allows nothing else.
+  result         String?
+  resultReason   String?
+  resultAt       DateTime? @db.Timestamptz(3)
+
+  device DesktopRemoteDevice @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@unique([deviceId, approvalId])
+  @@index([deviceId, deliveredAt, expiresAt])
+  @@index([createdAt])
 }
 
 // --- Prompt Refiner shadow reservation authority --------------------------

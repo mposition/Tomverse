@@ -15,6 +15,7 @@ import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
 import { CodeSandboxSettings } from "./CodeSandboxSettings";
 import { PluginsPanel } from "./PluginsPanel";
 import { CodeBrowserSettings } from "./CodeBrowserSettings";
+import { RemoteControlSettings } from "./RemoteControlSettings";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -213,6 +214,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
     </fieldset>}
     <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
     <CodeSandboxSettings language={language} />
+    <RemoteControlSettings language={language} />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}
   </section>;
 }

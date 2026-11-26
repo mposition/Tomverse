@@ -1053,6 +1053,10 @@ run(
     // strict single use true under a real race, and D8's contract that a
     // replay's revocation commits even though the caller is refused.
     "tests/integration/mobile-auth-service.db.test.ts",
+    // Desktop remote control: one account never reaches another's PC, an
+    // answer is recorded once for the reported request and handed over once,
+    // and reports expire and are deleted.
+    "tests/integration/desktop-remote-control.db.test.ts",
     // MCP ownership, one-use write approvals, OAuth and additive migration
     // behavior against the dedicated test DB and synthetic loopback server.
     "tests/integration/mcp-connector.db.test.ts",

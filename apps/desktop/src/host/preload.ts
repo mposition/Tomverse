@@ -123,6 +123,7 @@ if (trustedWindow) {
     startParallel: (input: Parameters<DesktopApi["startParallel"]>[0]) => ipcRenderer.invoke("desktop:start-parallel", input),
     parallel: (command: Parameters<DesktopApi["parallel"]>[0]) => ipcRenderer.invoke("desktop:parallel", command),
     schedules: (command: Parameters<DesktopApi["schedules"]>[0]) => ipcRenderer.invoke("desktop:schedules", command),
+    remoteControl: (command: Parameters<DesktopApi["remoteControl"]>[0]) => ipcRenderer.invoke("desktop:remote-control", command),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),

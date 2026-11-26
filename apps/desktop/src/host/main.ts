@@ -119,6 +119,8 @@ import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import { desktopNativeCopy } from "../../../../locales/desktopNative";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import { createRemoteControl } from "./remote-control";
+import { desktopRemoteCopy } from "../../../../locales/desktopRemote";
 
 const origin = DESKTOP_APP_ORIGIN;
 const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA"
@@ -3193,6 +3195,7 @@ async function signOut() {
   renewal?.controller.abort();
   state.account = { stage: "signing-out" };
   broadcast();
+  await remoteControl.signingOut(active.accessToken);
   try {
     await sessionVault().clear();
     clearTimeout(sessionExpiry);
@@ -3381,6 +3384,49 @@ const parallel = createParallelHost({
       modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
       sandbox: scheduleSandboxFacts,
     }, item, run, lanes, approvalWaitMs),
+  },
+});
+
+/** The window's follow-up handler, bound in registerIpc: a remote follow-up passes exactly the checks of one typed here. */
+let followUpTask: ((value: unknown) => unknown) | undefined;
+
+// Control of this PC from the account's other devices (host/remote-control.ts): off by default, per account. The
+// approval card stays the one on this screen and `answer` stays the only way to answer it.
+const remoteControl = createRemoteControl({
+  userData: app.getPath("userData"),
+  account: () => {
+    const active = browserSession;
+    if (!active || state.account.stage !== "connected" || signingOut || closing || suspended) return null;
+    const accountId = active.accountId;
+    return { accountId, origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, key: codeConnection()?.key, authorize: async () => {
+      if (signingOut || closing || browserSession?.accountId !== accountId) throw new Error("The Desktop account changed.");
+      if (browserSession.expiresAt <= Date.now() + 30_000) await renewBrowserSession(browserSession);
+      if (signingOut || closing || browserSession?.accountId !== accountId) throw new Error("The Desktop account changed.");
+      return browserSession.accessToken;
+    } };
+  },
+  tasks: () => parallel.parallelView().rows.filter((row) => row.state !== "done").map((row) => {
+    const task = row.kind === "foreground" ? state.task : parallel.lanes.task(row.key);
+    return { key: row.key, kind: row.kind, title: row.title, status: row.status, task, canStop: row.canStop,
+      canFollowUp: row.kind === "foreground" && row.key === runId && task?.status === "running" &&
+        task.execution?.executionMode === "tomverse_api" && sessionId.safeParse(task.id).success && !task.pendingFollowUp };
+  }),
+  card: () => {
+    const request = pending;
+    if (!request || !approvalWindow) return null;
+    const key = parallel.lanes.approvalKey(request.id) ?? (runId && runId !== discardedRunId ? runId : null);
+    return key ? { request, taskKey: key } : null;
+  },
+  answer,
+  stop: (key) => parallel.command({ action: "stop", key }),
+  followUp: async (key, text) => {
+    const task = state.task;
+    if (key !== runId || !task?.id || !followUpTask) return false;
+    return (await followUpTask({ id: task.id, text })) === true;
+  },
+  confirmEnable: () => {
+    const copy = desktopRemoteCopy[state.language ?? "en"];
+    return confirmNative({ title: copy.confirmTitle, message: copy.confirmMessage, detail: copy.sentToServer, accept: copy.confirmAccept, cancel: copy.confirmCancel });
   },
 });
 
@@ -3642,6 +3688,7 @@ function registerIpc() {
   main("desktop:start-parallel", (value) => startTask(value, true));
   main("desktop:parallel", (value) => parallel.command(value));
   main("desktop:schedules", (value) => parallel.schedules(value));
+  main("desktop:remote-control", (value) => remoteControl.command(value));
   main("desktop:permissions", (value) => {
     if (signingOut || closing) return { ok: false, error: "The app is closing." };
     const result = permissionHost.run(permissionCommand.parse(value));
@@ -3663,7 +3710,7 @@ function registerIpc() {
     return true;
   });
   main("desktop:stop", stop);
-  main("desktop:follow-up", (value) => {
+  main("desktop:follow-up", followUpTask = (value) => {
     const { id, text } = followUpInput.parse(value);
     const task = state.task;
     if (typeof id === "string" && task?.status === "clarification") return answerCodeClarification(id, text);
@@ -4119,6 +4166,7 @@ else {
     renewal?.controller.abort();
     terminalHost.closeAllSync();
     parallel.shutdown();
+    remoteControl.shutdown();
     browserSession = null;
     linkedCode = null;
     clearTimeout(sessionExpiry);
@@ -4187,6 +4235,7 @@ else {
     registerIpc();
     bootWorker();
     parallel.start();
+    remoteControl.start();
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) await restoreBrowserSession();
     accountWindowsReady = true;
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) syncAccountWindow();
