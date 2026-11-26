@@ -847,7 +847,8 @@ export function ModelPickerPanel({
         </p>
       )}
 
-      {showCatalogue ? <Suspense fallback={
+      {showCatalogue ? (
+        <Suspense fallback={
         <div data-testid="model-catalogue-loading" className="flex min-h-32 flex-1 items-center justify-center px-4 py-8 text-xs text-zinc-400">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
         </div>
@@ -878,7 +879,8 @@ export function ModelPickerPanel({
             void selectModel(model, trigger);
           }}
         />
-      </Suspense> : (
+        </Suspense>
+      ) : (
         <div
           data-testid="model-picker-scroll-region"
           className={

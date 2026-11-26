@@ -13,7 +13,7 @@ import { appUrl } from "@/lib/accountEmails";
 import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
 import { addressProofForSignIn } from "@/lib/emailPreferenceCore";
 import { authorizeMobileSession } from "@/lib/mobileSessionAuthorization";
-import { desktopRecentAuthEnabled, readDesktopAuthenticatedAt } from "@/lib/desktopSettingsSessionCore";
+import { desktopRecentAuthEnabled, readDesktopAuthenticatedAt } from "@/lib/adminAuthCore";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers

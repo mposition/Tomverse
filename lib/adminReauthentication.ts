@@ -6,7 +6,7 @@ import {
   resolveAccountRecentAuthMinutes,
   resolveRecentAuthMinutes,
 } from "@/lib/adminReauthenticationCore";
-import { resolveAccountAuthenticatedAt } from "@/lib/desktopSettingsSessionCore";
+import { resolveAccountAuthenticatedAt } from "@/lib/adminAuthCore";
 
 export class AdminReauthenticationRequiredError extends Error {
   constructor() {

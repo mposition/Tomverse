@@ -14,11 +14,9 @@
  * `desktopAuthenticatedAt` through `resolveAccountAuthenticatedAt`.
  */
 
-const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-
-/** Default off: with it unset the settings session carries no claim at all. */
-export const desktopRecentAuthEnabled = (env: Record<string, string | undefined> = process.env) =>
-  env.TOMVERSE_DESKTOP_RECENT_AUTH_ENABLED === "true";
+// These three live in lib/adminAuthCore.ts: lib/auth.ts and lib/adminReauthentication.ts are inside the Prompt Refiner's
+// pinned runtime source closure, and importing this file from them would add a file to that sealed list.
+export { desktopRecentAuthEnabled, readDesktopAuthenticatedAt, resolveAccountAuthenticatedAt } from "./adminAuthCore";
 
 export type DesktopSettingsClaim = {
   family: string;
@@ -42,22 +40,6 @@ export function buildDesktopSettingsClaim(input: {
   }
   return claim;
 }
-
-/** What the session callback may expose: a canonical timestamp, and only while the switch is on. */
-export function readDesktopAuthenticatedAt(
-  claim: { authenticatedAt?: unknown } | null | undefined,
-  enabled: boolean,
-): string | undefined {
-  if (!enabled || !claim) return undefined;
-  const value = claim.authenticatedAt;
-  if (typeof value !== "string" || !CANONICAL_ISO.test(value) || !Number.isFinite(Date.parse(value))) return undefined;
-  return value;
-}
-
-/** The sign-in time an account-sensitive action checks: the web's, else a Desktop device's. */
-export const resolveAccountAuthenticatedAt = (
-  user: { authenticatedAt?: string | null; desktopAuthenticatedAt?: string | null } | null | undefined,
-) => user?.authenticatedAt || user?.desktopAuthenticatedAt || undefined;
 
 type FamilyReader = {
   mobileTokenFamily: {
