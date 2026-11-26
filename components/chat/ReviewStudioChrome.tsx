@@ -23,9 +23,9 @@ import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import { useKeyboardInset } from "./useVisualViewport";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
+import { reviewProviderName } from "@/lib/reviewProviderName";
 
-const names: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google", xai: "xAI", deepseek: "DeepSeek", meta: "Meta", mistral: "Mistral", perplexity: "Perplexity", qwen: "Qwen", fal: "fal", bfl: "Black Forest Labs" };
-export const reviewProviderName = (provider: string) => names[provider] ?? provider;
+export { reviewProviderName };
 function Icon({ file }: { file: string }) {
   // The approved Figma assets are local, including their intrinsic dimensions.
   return <Image loading="eager" unoptimized width={22} height={22} src={`/review-studio/${file}.svg`} alt="" aria-hidden="true" />;

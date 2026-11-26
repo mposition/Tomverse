@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ArrowUp, Check, ChevronDown, CodeXml, FileText, Globe2, ImagePlus, Sparkles, Square } from "lucide-react";
+import { ArrowRight, ArrowUp, Check, CodeXml, FileText, Globe2, ImagePlus, Sparkles, Square } from "lucide-react";
 import { reviewWorkspaceCopy } from "../../../../lib/reviewWorkspaceCopy";
 import { workspaceWelcomeCopy } from "../../../../locales/workspaceWelcome";
 import openaiLogo from "../../../../public/model-icons/chatgpt.png?no-inline";
@@ -7,10 +7,11 @@ import anthropicLogo from "../../../../public/model-icons/claude.png?no-inline";
 import googleLogo from "../../../../public/model-icons/gemini.png?no-inline";
 import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { canUseModelWithPlan } from "../../../../lib/models";
+import { getModelBrand } from "../../../../lib/modelBranding";
+import { reviewProviderName } from "../../../../lib/reviewProviderName";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopReviewCopy } from "../../../../locales/desktopReview";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
-import { mobileReviewModeLabel } from "../../../../locales/mobileSelection";
 import { reviewHandoffCopy } from "../../../../locales/reviewHandoff";
 import type { ChatConversation, ChatModel, ReviewCapability, ReviewImageOffer, ReviewTurnInput, ReviewTurnResult } from "../chat-contract";
 import { ChatMarkdown, ImportedSource, type useChatHistory } from "./ChatWorkspace";
@@ -24,6 +25,15 @@ import { ComposerTools } from "./ComposerTools";
 import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
 import { DesktopCompareSummary } from "./DesktopCompareSummary";
 import type { ImageCapability } from "../images-contract";
+
+const brandIcons = import.meta.glob<string>("../../../../public/model-icons/*.png", { eager: true, import: "default", query: "?url&no-inline" });
+
+/** The provider's logo as the web model picker shows it, or its short mark where there is no image. */
+function BrandMark({ provider }: { provider: string }) {
+  const brand = getModelBrand(provider);
+  const source = brand.image && brandIcons[`../../../../public${brand.image}`];
+  return <span className="review-chip-logo" aria-hidden="true">{source ? <img src={source} alt="" draggable={false} /> : brand.mark}</span>;
+}
 
 type Message = ChatConversation["messages"][number];
 type ReviewTurn = { question: Message; answers: Message[] };
@@ -143,12 +153,12 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const eligible = useMemo(() => models.filter((model) => capability && canUseModelWithPlan(capability.plan, model)), [models, capability]);
   const providerIds = [...new Set(eligible.map((model) => model.provider))];
   const id = history.selected?.id;
-  const options = mode === "easy" ? providerIds.map((provider) => ({ id: provider, name: provider })) : eligible;
   const storedModelIds = history.conversation?.selectedModels ?? (!id ? preferredModelIds ?? [] : []);
   const selected = picked && picked.conversationId === id && picked.mode === mode ? picked.choices : mode === "easy"
     ? [...new Set(eligible.filter((model) => storedModelIds.includes(model.id)).map((model) => model.provider))]
     : storedModelIds.filter((modelId) => eligible.some((model) => model.id === modelId));
-  const choices = selected.slice(0, Math.min(3, capability?.modelLimit ?? 0));
+  const limit = Math.min(3, capability?.modelLimit ?? 0);
+  const choices = selected.slice(0, limit);
   const levels = mode === "professional" && choices.length
     ? (["low", "high"] as const).filter((level) =>
       choices.every((modelId) => eligible.find((model) => model.id === modelId)?.reasoningEfforts?.includes(level)))
@@ -279,6 +289,38 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
       if (await run.send(mode, choices, actualEffort, attachmentUploadIds)) attachments.clear();
     }}>
       <AttachmentDraftStatus draft={attachments} busy={run.running} />
+      <div className="review-setup">
+        {capability.easy && <div className="review-mode-toggle" role="group" aria-label={copy.mode}>
+          {(["easy", "professional"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value}
+            disabled={run.running} onClick={() => setModeChoice(value)}>{welcome[value]}</button>)}
+        </div>}
+        {mode === "easy" ? <div className="review-participants" role="group" aria-label={welcome.providers}>
+          <span className="review-participants-label">{welcome.providers} <b>{choices.length} / {limit}</b></span>
+          {providerIds.map((provider) => {
+            const on = choices.includes(provider);
+            return <button type="button" key={provider} className="review-chip" aria-pressed={on} title={welcome.automatic}
+              disabled={run.running || (on ? choices.length <= 1 : limit !== 1 && choices.length >= limit)}
+              onClick={() => setPicked({ conversationId: id, mode, choices: on ? choices.filter((choice) => choice !== provider)
+                : limit === 1 ? [provider] : [...choices, provider] })}>
+              <BrandMark provider={provider} /><span>{reviewProviderName(provider)}</span>{on && <Check size={14} aria-hidden="true" />}
+            </button>;
+          })}
+        </div> : <DesktopModelPicker key={id ?? "new"} account={history.account} language={language} label={copy.picker}
+          models={models} choices={choices} limit={limit} plan={capability.plan}
+          disabled={run.running || history.writing} onChoose={(choices) => setPicked({ conversationId: id, mode, choices })}
+          imageCapability={imageCapability} onImage={(modelId) => onModelImage(modelId, history.draft)}
+          searchReadiness={searchReadiness} hasImageAttachments={attachments.files.some(({ mediaType }) => mediaType.startsWith("image/"))}
+          effort={levels.length > 0 && <label>{common.reasoningEffort} <select aria-label={common.reasoningEffort} value={actualEffort} disabled={run.running}
+            onChange={(event) => setEffort(event.currentTarget.value as Effort)}><option value="default">{effortNames.default}</option>
+            {levels.map((level) => <option value={level} key={level}>{effortNames[level]}</option>)}
+          </select></label>}>
+          <span className="review-participants-label">{welcome.models}{actualEffort !== "default" && ` · ${effortNames[actualEffort]}`} <b>{choices.length} / {limit}</b></span>
+          {choices.map((modelId) => <span className="review-chip" key={modelId}>
+            <BrandMark provider={eligible.find((model) => model.id === modelId)?.provider ?? ""} /><span>{byId.get(modelId) ?? modelId}</span>
+          </span>)}
+          {!choices.length && <span className="review-chip review-chip--empty">{welcome.choose}</span>}
+        </DesktopModelPicker>}
+      </div>
       <textarea id="review-draft-input" aria-label={copy.question} placeholder={copy.ask} value={history.draft}
         disabled={run.running || attachments.uploading} onPaste={attachments.onPaste}
         onChange={(event) => history.setDraft(event.currentTarget.value)} onKeyDown={(event) => {
@@ -295,39 +337,6 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
           disabled={run.running || attachments.uploading} draft={history.draft} setDraft={history.setDraft} />}
         <span className="spacer"/>
-        {capability.easy && <label className="desktop-review-mode" title={copy.mode}><select aria-label={copy.mode} value={mode} disabled={run.running}
-          onChange={(event) => setModeChoice(event.currentTarget.value as ReviewMode)}>
-          <option value="easy">{mobileReviewModeLabel(language, "easy")}</option>
-          <option value="professional">{mobileReviewModeLabel(language, "professional")}</option>
-        </select></label>}
-        {mode === "professional" ? <DesktopModelPicker key={id ?? "new"} account={history.account} language={language} label={copy.picker}
-          models={models} choices={choices} limit={Math.min(3, capability.modelLimit)} plan={capability.plan}
-          disabled={run.running || history.writing} onChoose={(choices) => setPicked({ conversationId: id, mode, choices })}
-          imageCapability={imageCapability} onImage={(modelId) => onModelImage(modelId, history.draft)}
-          searchReadiness={searchReadiness} hasImageAttachments={attachments.files.some(({ mediaType }) => mediaType.startsWith("image/"))}
-          effort={levels.length > 0 && <label>{common.reasoningEffort} <select aria-label={common.reasoningEffort} value={actualEffort} disabled={run.running}
-            onChange={(event) => setEffort(event.currentTarget.value as Effort)}><option value="default">{effortNames.default}</option>
-            {levels.map((level) => <option value={level} key={level}>{effortNames[level]}</option>)}
-          </select></label>}>
-          {copy.models} · {choices.length}
-        </DesktopModelPicker> : <details className="model-menu">
-          <summary aria-label={copy.picker}>
-            {mobileReviewModeLabel(language, mode)}
-            {actualEffort !== "default" && ` · ${effortNames[actualEffort]}`} <ChevronDown size={15} />
-          </summary>
-          <div className="model-popover review-picker">
-            <fieldset disabled={run.running}>
-              <legend>{mode === "easy" ? copy.providers : copy.models}</legend>
-              {options.map((option) => <label key={option.id}>
-                <input type="checkbox" checked={choices.includes(option.id)}
-                  disabled={!choices.includes(option.id) && choices.length >= Math.min(3, capability.modelLimit)}
-                  onChange={(event) => setPicked({ conversationId: id, mode, choices: event.currentTarget.checked
-                    ? [...choices, option.id] : choices.filter((choice) => choice !== option.id) })} />
-                {option.name}
-              </label>)}
-            </fieldset>
-          </div>
-        </details>}
         {run.running
           ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={16} /></button>
           : <button className="send" type="submit" aria-label={copy.send}

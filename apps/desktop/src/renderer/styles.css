@@ -270,10 +270,6 @@ pre, code { font-family: var(--font-code); }
 .review-answer pre { margin: 10px 0; padding: 10px; background: var(--canvas); border-radius: 8px; }
 .image-result img { display: block; max-width: 100%; min-width: 0; height: auto; border-radius: 10px; margin-bottom: 12px; }
 .image-result .soft { margin-top: 4px; }
-.review-picker { min-width: 238px; }
-.review-picker fieldset { min-width: 0; max-height: 220px; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }
-.review-picker fieldset label { display: flex; align-items: start; gap: 6px; padding: 4px 0; }
-.review-picker fieldset input { margin: 2px 2px 0 0; }
 .review-reference { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 20px; background: var(--surface); }
 .review-reference p { flex: 1; }
 .handoff-draft { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: 12px; }
@@ -347,7 +343,6 @@ pre, code { font-family: var(--font-code); }
 .desktop-review-starter-footer { display: grid; justify-items: center; gap: 14px; margin-top: 28px; }
 .desktop-review-starter-footer p { font-size: 12px; color: var(--muted); text-align: center; }
 .desktop-review-starter-footer button { display: inline-flex; align-items: center; gap: 6px; }
-.desktop-review-mode select { border-radius: 8px; border: 1px solid var(--line); background: var(--surface); padding: 6px 8px; }
 .chat-image-results { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .chat-image-results .image-result { max-width: min(460px, 100%); width: 100%; border: 0; padding: 0; }
 .chat-image-results img { max-height: 520px; object-fit: contain; object-position: left; }
@@ -678,3 +673,24 @@ summary.code-task-list-row:hover .code-task-list-title { text-decoration: underl
 .code-queue li form { display: flex; flex: 1; flex-wrap: wrap; gap: 6px; }
 .code-queue li textarea { flex: 1 1 100%; min-height: 56px; resize: vertical; }
 .code-queue-actions { display: inline-flex; flex: none; gap: 2px; }
+
+/* Review composer: the Easy / Professional switch and the participating providers or models, as the web Review shows them. */
+.review-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-bottom: 10px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.review-mode-toggle { flex: none; display: inline-flex; padding: 3px; border-radius: 999px; background: var(--raised); }
+.review-mode-toggle button { min-height: 30px; padding: 4px 14px; border-radius: 999px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.review-mode-toggle button[aria-pressed="true"] { background: var(--action); color: #fff; font-weight: 600; }
+.review-mode-toggle button:disabled { opacity: .55; cursor: wait; }
+.review-participants, .review-setup .desktop-model-trigger { min-width: 0; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.review-setup .desktop-model-trigger { min-height: 36px; padding: 2px 6px; text-align: left; }
+.review-participants-label { flex: none; margin-right: 2px; color: var(--muted); font-size: 12px; }
+.review-participants-label b { margin-left: 4px; font-weight: 600; color: var(--text); }
+.review-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; max-width: 100%; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); font-size: 12.5px; }
+.review-chip > span:not(.review-chip-logo) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-chip > svg { flex: none; color: var(--action); }
+button.review-chip[aria-pressed="true"] { border-color: var(--action); box-shadow: inset 0 0 0 1px var(--action); }
+button.review-chip[aria-pressed="false"] { opacity: .6; }
+button.review-chip:disabled { cursor: not-allowed; }
+button.review-chip[aria-pressed="false"]:hover:not(:disabled) { opacity: 1; }
+.review-chip--empty { padding-inline: 10px; color: var(--muted); }
+.review-chip-logo { flex: none; width: 22px; height: 22px; display: grid; place-items: center; overflow: hidden; border-radius: 999px; background: #fff; color: #3f3f46; font-size: 8px; font-weight: 700; }
+.review-chip-logo img { width: 15px; height: 15px; object-fit: contain; }
