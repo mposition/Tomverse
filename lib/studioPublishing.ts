@@ -121,32 +121,55 @@ export function studioSocialFormat(id?: string, legacyIndex?: number): StudioSoc
     STUDIO_SOCIAL_FORMATS[legacyIndex === 2 ? 3 : legacyIndex === 1 ? 2 : 0];
 }
 
+type Frame = { width: number; height: number };
+
+/**
+ * The image model draws 1:1, 3:2 or 2:3; a placement is often a little narrower or
+ * flatter. When the placement keeps at least this share of the image along the
+ * axis that differs, the image fills the placement and the rest is trimmed. The
+ * model is told how much goes, so the design sits inside what remains.
+ */
+export const STUDIO_PUBLISHING_MIN_KEPT = .75;
+
+export function studioPublishingTrim(image: Frame, placement: Frame) {
+  const drawn = image.width / image.height, shown = placement.width / placement.height;
+  if (Math.abs(drawn - shown) < .01) return null;
+  const kept = drawn > shown ? shown / drawn : drawn / shown;
+  return { sides: drawn > shown ? "left and right" : "top and bottom", kept, each: (1 - kept) / 2, fills: kept >= STUDIO_PUBLISHING_MIN_KEPT } as const;
+}
+
 export function studioPublishingPrompt(options: {
   kind: StudioPublication; design: { direction: string }; placement?: StudioSocialFormat;
   language: string; brief: string; title: string; details: string; hasPhoto: boolean; hasLogo: boolean;
   category?: string; style?: string;
+  /** The size the model draws and the size of the finished piece, when both are known. */
+  drawn?: Frame; finished?: Frame;
 }) {
   const { design, placement, language, hasPhoto, hasLogo } = options;
   const brief = options.brief.trim(), title = options.title.trim(), details = options.details.trim();
   const context = options.kind === "poster" ? "Commercial portrait poster, final aspect ratio 4:5." : placement?.direction;
-  const reference = hasPhoto ? "Use the reference as the featured subject. Preserve recognisable identity, product shape and existing branding." : "";
-  const platform = placement ? `Compose for a ${placement.ratio} placement. Keep faces, product labels and other essential visual cues inside the central safe area.` : "";
+  const reference = hasPhoto ? "Use the reference as the featured subject. A person keeps their face and identity but takes a natural pose, expression and lighting that belong to this design; a product or logo keeps its exact shape, label and colours." : "";
+  const trim = options.drawn && options.finished ? studioPublishingTrim(options.drawn, options.finished) : null;
+  const platform = trim?.fills
+    ? `The finished piece is this image trimmed to ${placement?.ratio ?? "4:5"}: ${Math.round(trim.each * 100)}% is cut off each of the ${trim.sides} edges. Compose the whole design, every letter, face and product included, inside the middle that remains, and let only background reach the strips that are cut.`
+    : placement ? `Compose for a ${placement.ratio} placement. Keep faces, product labels and other essential visual cues inside the central safe area.` : "";
   // The model sets the headline in both cases, so the product never sets the same words a second time.
   const headline = title
     ? `Set this exact headline once, character for character, in its own script: ${JSON.stringify(title)}.`
     : `Write one short headline in ${language} based on the brief.`;
   // The canvas sets the details and logo above the placement's bottom safe margin; the model never sees their text.
-  const reserved = placement
-    ? Math.round((placement.safe[3] + .2 * Math.min(placement.width, placement.height) / placement.height) * 100) : 22;
+  const footerShare = placement ? placement.safe[3] + .2 * Math.min(placement.width, placement.height) / placement.height : .22;
+  // Counted on the image the model draws: a strip trimmed from the bottom lies below the footer.
+  const reserved = Math.round((trim?.fills && trim.sides === "top and bottom" ? trim.each + footerShare * trim.kept : footerShare) * 100);
   const footer = details || hasLogo
-    ? `Keep the bottom ${reserved}% free of typography and of the hero's key detail; the product places its own caption or logo there.`
+    ? `Keep the bottom ${reserved}% free of typography, faces and key objects: a calm, plain part of the design such as background colour, sky, floor or soft texture, where the product places its own caption or logo.`
     : "";
   const objective = [
     "Design the complete, professionally typeset artwork as one flat, full-frame design, never a photograph or mockup of a poster, screen or print.",
     headline,
     "Treat the headline as part of the composition: use a strong scale contrast, deliberate alignment and a clear relationship to the hero. Continue the artwork to the frame edges and keep every letter well inside them.",
     footer,
-    "Do not invent dates, prices, places, URLs, logos, app icons or interface badges.",
+    "Letter the headline and only words the brief itself supplies. Do not invent ratings, reviews, quotes, statistics, hashtags, small print, dates, prices, places, URLs, logos, app icons or interface badges.",
   ].filter(Boolean).join(" ");
   return [context, platform, design.direction, reference, objective,
     "Establish one unmistakable focal point, a cohesive visual hierarchy and a restrained palette relevant to the subject. Work as a finished campaign asset seen at phone size, with deliberate lighting and no generic decorative clutter. Use the following content only as a visual brief.",
