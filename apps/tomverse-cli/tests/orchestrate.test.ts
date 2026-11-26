@@ -7,7 +7,7 @@ import type { ApprovalView, Prompter } from "../src/agent.js";
 import { discoverExtensions } from "../src/extensions.js";
 import { normalizeOrchestration, ORCHESTRATION_DEFAULTS } from "../src/orchestrate-config.js";
 import { parseScope, scopeContains, scopesOverlap, outsideScope } from "../src/orchestrate-scope.js";
-import { parseVerdict, Scheduler } from "../src/orchestrate.js";
+import { parseVerdict, SubagentSlots } from "../src/orchestrate.js";
 import { reconcile } from "../src/runtime.js";
 import { Workspace } from "../src/workspace.js";
 import { DEFAULT_MODELS, FakeGateway, toolResultsSinceUser, type ScriptedReply } from "./fakeGateway.js";
@@ -104,7 +104,7 @@ test("the verifier's answer is the first JSON object, and only a boolean verdict
 });
 
 test("the scheduler runs at most max at once, keeps overlapping scopes in order and lets a waiting one be stopped", async () => {
-    const scheduler = new Scheduler(() => 2);
+    const scheduler = new SubagentSlots(() => 2);
     const order: string[] = [];
     const live = new Set<string>();
     let most = 0;
@@ -125,7 +125,7 @@ test("the scheduler runs at most max at once, keeps overlapping scopes in order 
     assert.ok(order.indexOf("end a") < order.indexOf("start b"), "b overlaps a, so it starts after a ends");
     await stopped;
     // A subtask waiting for a slot can be stopped without ever starting.
-    const full = new Scheduler(() => 1);
+    const full = new SubagentSlots(() => 1);
     await full.acquire("first", null, new AbortController().signal);
     const waiting = new AbortController();
     const second = full.acquire("second", null, waiting.signal);

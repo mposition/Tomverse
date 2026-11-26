@@ -106,7 +106,7 @@ const VERIFIER_PROMPT = [
 const trimmed = (text: string, chars: number) => (text.length > chars ? `${text.slice(0, chars)} …[${text.length - chars} characters omitted]` : text);
 
 /** Runs at most `max` subtasks at once; workers with overlapping scopes keep the order they were given in. */
-export class Scheduler {
+export class SubagentSlots {
     private readonly active = new Map<string, readonly string[] | null>();
     private readonly queue: Array<{ id: string; scope: readonly string[] | null; start: () => void }> = [];
 
@@ -200,7 +200,7 @@ const STATUS_OF: Record<SubtaskRecord["state"], SubtaskResult["status"]> = {
 };
 
 export class Orchestrator {
-    private readonly scheduler: Scheduler;
+    private readonly slots: SubagentSlots;
     private readonly controllers = new Map<string, AbortController>();
     private readonly pools = new Set<Pool>();
     /** The newest report of each subtask, trimmed for the main agent's context. */
@@ -211,7 +211,7 @@ export class Orchestrator {
     private subtasks = 0;
 
     constructor(private readonly host: SubagentHost, private readonly limits: OrchestrationLimits, private readonly port: RunPort) {
-        this.scheduler = new Scheduler(() => limits.maxSubagents);
+        this.slots = new SubagentSlots(() => limits.maxSubagents);
     }
 
     newTask() {
@@ -387,7 +387,7 @@ export class Orchestrator {
         const stopped = () => (own.signal.aborted ? "Stopped by the user." : "The task was stopped.");
         try {
             try {
-                await this.scheduler.acquire(spec.id, spec.kind === "worker" ? spec.scope ?? null : null, signal);
+                await this.slots.acquire(spec.id, spec.kind === "worker" ? spec.scope ?? null : null, signal);
             } catch {
                 this.finish(spec, "cancelled", stopped());
                 return;
@@ -397,7 +397,7 @@ export class Orchestrator {
                 this.host.output.info(`  · subtask ${spec.id} "${spec.record.title}" started`);
                 await this.work(spec, toolCallId, signal, stopped);
             } finally {
-                this.scheduler.release(spec.id);
+                this.slots.release(spec.id);
             }
         } catch (error) {
             if (host.journal.broken) throw host.journal.broken;
