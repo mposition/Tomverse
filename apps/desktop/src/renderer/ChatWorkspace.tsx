@@ -32,7 +32,7 @@ import { workspaceWelcomeCopy } from "../../../../locales/workspaceWelcome";
 import { zh } from "../../../../locales/zh";
 import { zhHant } from "../../../../locales/zhHant";
 import { reviewSeedFromChat } from "../../../../lib/chatReviewHandoff";
-import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
+import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
 import { DraftDictation } from "./DraftDictation";
 import { ImportedSourceUnlock } from "./ImportedSourceUnlock";
 import { AnswerModel, ChatMarkdown, CopyAnswer, UserMessageContent } from "./ChatTranscript";
@@ -473,8 +473,8 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
 
 type History = ReturnType<typeof useChatHistory>;
 
-export function ChatHistory({ chat, product = "chat", busy = false, canModify = false, onImages, onImport }: {
-  chat: History; product?: DesktopTextProduct; busy?: boolean; canModify?: boolean; onImages?: () => void; onImport?: () => void;
+export function ChatHistory({ chat, product = "chat", busy = false, canModify = false, onImport }: {
+  chat: History; product?: DesktopTextProduct; busy?: boolean; canModify?: boolean; onImport?: () => void;
 }) {
   const { language } = chat;
   const copy = desktopChatCopy[language];
@@ -533,8 +533,6 @@ export function ChatHistory({ chat, product = "chat", busy = false, canModify = 
         onClick={() => void chat.open(null).then(() => requestAnimationFrame(() => {
           document.getElementById(`${product}-draft-input`)?.focus();
         }))}><Plus size={14} /> {product === "review" ? copy.newReview : mobileCopy[language].newChat}</button>
-      {onImages && <button className="soft chat-new-image" type="button"
-        aria-label={copy.imageWorkspace} title={copy.imageWorkspace} onClick={onImages}><ImagePlus size={16} aria-hidden="true" /></button>}
     </div>
     {onImport && <button type="button" className="chat-history-import" onClick={onImport}>
       <Folder size={15} aria-hidden="true" /> {importedLabel[language]}
@@ -874,7 +872,7 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
   </section>;
 }
 
-export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture,
+export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture, deviceLocation,
   plan, imageCapability, onModelImage, composerTools, searchReadiness, deepResearch, connectors, onManageConnectors }: {
   chat: History; chatWrite: boolean; autoOffered: boolean; onImport?: () => void; onCompare?: (prompt: string, continuationId?: string) => void; starters?: ChatStarter[];
   preferredModelId?: string;
@@ -882,6 +880,8 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   online: boolean;
   handoff?: WorkspaceHandoff;
   deviceFixture: boolean;
+  /** The host can read the device position for a message the person switched "Current location" on for. */
+  deviceLocation: boolean;
   plan: ModelTier; imageCapability: ImageCapability | null; onModelImage(modelId: string, prompt: string): void;
   composerTools?: boolean; searchReadiness?: { brave: boolean }; deepResearch?: boolean;
   /** The server offers plugins to Desktop; without it the composer shows no plugin control. */
@@ -908,7 +908,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   }) : undefined, [connectors]);
   const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
   const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
-  const location = useChatDraftLocation((chat.account ?? "") + ":" + (activeId ?? "new"));
+  const location = useChatLocation(deviceLocation && chat.account ? chat.account : null);
   const draftExcerpt = activeId ? undefined : handoff;
   const availableAuto = chat.conversation?.autoSelection.offered ?? (!activeId && autoOffered);
   const autoCopy = autoRoutingCopy[language];
@@ -952,15 +952,16 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   async function send(depth?: DeepResearchDepth) {
     const model = depth ? researchModel : selectedModel;
     if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) ||
-        chat.sending || chat.writing || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
+        chat.sending || chat.writing || location.state.pending || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
     const attachmentUploadIds = await attachments.prepare();
     if (!attachmentUploadIds) return;
+    // A fresh fix for this message only; a failed read continues without a location.
+    const currentLocation = depth ? undefined : await location.read();
     const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
       effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
-      ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation: location.current(),
+      ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation,
         ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
       tools: composerTools ? toolChanges : undefined });
-    location.remove();
     if (saved) { attachments.clear(); setToolDraft(undefined); }
   }
 
@@ -1088,6 +1089,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
       <form className="composer chat-composer" onSubmit={(event) => { event.preventDefault(); void send(); }} aria-label={copy.composer}>
         {draftExcerpt && <HandoffDraft handoff={draftExcerpt} busy={chat.sending} language={language} />}
         <AttachmentDraftStatus draft={attachments} busy={chat.sending} />
+        <ChatLocationStatus location={location} language={language} />
         <textarea ref={composer} id="chat-draft-input" aria-label={copy.message} value={chat.draft} disabled={chat.sending || attachments.uploading}
           onPaste={attachments.onPaste}
           placeholder={activeId ? copy.followUp : copy.ask}
@@ -1104,13 +1106,12 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           <ComposerTools language={language} key={toolsScope} disabled={chat.sending || chat.writing || attachments.uploading}
             onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
             onResearch={online && researchModel && !draftExcerpt ? () => setResearchSetup(toolsScope) : undefined}
+            researchTools={research.tools}
             options={composerTools ? { webSearchMode: chat.conversation?.webSearchMode, memoryMode: chat.conversation?.memoryMode,
               assistantProfileId: chat.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
             setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
-            <ChatDraftLocation location={location} language={language} draft={chat.draft} setDraft={chat.setDraft}
-              tool deviceLocation={deviceFixture} disabled={chat.sending || attachments.uploading} />
+            {deviceLocation && <ChatLocationTool location={location} disabled={chat.sending || chat.writing || attachments.uploading} />}
             <AttachmentPicker draft={attachments} busy={chat.sending} id="chat-starter-attach" tool />
-            {research.tools}
           </ComposerTools>
           {connectors && <ChatConnectorPicker key={"connectors:" + toolsScope} language={language} conversationId={activeId}
             disabled={chat.sending || chat.writing} onManage={onManageConnectors ?? (() => {})} />}

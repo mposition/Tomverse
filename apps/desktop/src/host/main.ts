@@ -502,6 +502,7 @@ function broadcast() {
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.deviceFixtureAvailable = accountPermissionsFixture();
+  state.chatLocationAvailable = chatLocationAllowed();
   if (!state.deviceFixtureAvailable) stopDictation(true);
   refreshCodeFallbackSettings();
   state.draftNamespace = workspaceNamespace();
@@ -2953,7 +2954,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const attachments = resolveStagedAttachments(draft.attachmentUploadIds);
   return withChatAccount(async (api) => {
     const input = { ...draft, prompt: withHandoffExcerpt("chat", draft.prompt, handoffId),
-      currentLocation: accountPermissionsFixture() ? draft.currentLocation : undefined };
+      currentLocation: chatLocationAllowed() ? draft.currentLocation : undefined };
     const window = mainWindow;
     const turn = new AbortController();
     chatTurn = turn;
@@ -3069,7 +3070,10 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
       try {
         let current = id ? await api.conversation({ id, product: "review" }, true, signal) : null;
         let modelIds = input.choices;
-        if (input.mode === "easy") {
+        const only = input.onlyModelId;
+        // A follow-up for one model goes to a saved Review that already holds that model; nothing else about the Review changes.
+        if (only && !current?.selectedModels.includes(only)) throw new Error("The model is not part of this Review.");
+        if (!only && input.mode === "easy") {
           const context = current?.messages.filter((message) => message.role === "user").slice(-2)
             .map((message) => message.content).join("\n") ?? "";
           const decision = await api.routeReview(input, context, signal, attachments);
@@ -3094,11 +3098,11 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
         }
         if (!id) {
           id = await api.createReview(modelIds, input.prompt, signal);
-        } else if (current) {
+        } else if (current && !only) {
           await api.configureReview(current, modelIds, signal);
         }
         current = await api.conversation({ id, product: "review" }, true, signal);
-        if (current.selectedModels.length !== modelIds.length || !modelIds.every((modelId) => current!.selectedModels.includes(modelId))) {
+        if (!only && current.selectedModels.length !== modelIds.length || !modelIds.every((modelId) => current!.selectedModels.includes(modelId))) {
           throw new Error("Tomverse did not confirm the selected Review models.");
         }
         const admission = modelIds.length > 1 ? await api.admitReview(current, input, modelIds, signal, attachments) : undefined;
@@ -3546,8 +3550,13 @@ function accountPermissionsFixture() {
 
 let geolocationGrant: { session: AbortSignal; expiry: number } | undefined;
 
+/** Chat may read the device position for a signed-in account. It is not a fixture-only device permission like dictation. */
+function chatLocationAllowed() {
+  return Boolean(browserSession) && state.account.stage === "connected" && !suspended && !signingOut && !closing;
+}
+
 function mayRequestChatLocation(contents: Electron.WebContents | null) {
-  return Boolean(accountPermissionsFixture() && geolocationGrant && !geolocationGrant.session.aborted &&
+  return Boolean(chatLocationAllowed() && geolocationGrant && !geolocationGrant.session.aborted &&
     Date.now() < geolocationGrant.expiry && mainWindow && !mainWindow.isDestroyed() &&
     contents === mainWindow.webContents && contents.getURL() === shellUrl);
 }
@@ -3603,7 +3612,7 @@ function registerIpc() {
   main("desktop:code-computer", (value) => computer.host.command(value));
   main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
-    if (!accountPermissionsFixture()) return false;
+    if (!chatLocationAllowed()) return false;
     geolocationGrant = { session: chatSession.signal, expiry: Date.now() + 12_000 };
     return true;
   });

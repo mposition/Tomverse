@@ -122,11 +122,14 @@ export async function verifyReviewAndImages(application: ElectronApplication, de
     }, { origin: context.origin, imageFile, image: fixtureImage, imageModel: imageFixture, pixel });
 
     await desktop.getByRole("button", { name: "Review", exact: true }).click();
-    await desktop.getByLabel("Review mode and models").click();
-    await desktop.getByRole("combobox", { name: "Mode" }).selectOption("professional");
-    await desktop.getByRole("checkbox", { name: "GPT 6 Luna", exact: true }).check();
-    await desktop.getByRole("checkbox", { name: "GPT-5.6 Luna", exact: true }).check();
-    await desktop.getByLabel("Review mode and models").click();
+    await desktop.getByRole("button", { name: "Professional", exact: true }).click();
+    await desktop.getByRole("button", { name: "Review mode and models", exact: true }).click();
+    const picker = desktop.getByRole("dialog", { name: "Review mode and models" });
+    await picker.getByRole("button", { name: /All models/ }).click();
+    for (const name of ["GPT 6 Luna", "GPT-5.6 Luna"]) {
+      await picker.getByTestId("model-option").filter({ has: desktop.getByText(name, { exact: true }) }).click();
+    }
+    await picker.getByTestId("model-picker-done").click();
     await desktop.getByRole("textbox", { name: "Review question" }).fill(question);
     await desktop.getByRole("button", { name: "Send Review question" }).click();
     await expect(desktop.getByText("Response from gpt-6-luna", { exact: true })).toBeVisible();
@@ -154,13 +157,12 @@ export async function verifyReviewAndImages(application: ElectronApplication, de
     await desktop.getByRole("button", { name: "Image workspace", exact: true }).click();
     await expect(desktop.getByRole("heading", { name: "Generate and compare images" })).toBeVisible();
     await desktop.getByRole("button", { name: "Review", exact: true }).click();
-    await desktop.getByRole("button", { name: question, exact: true }).click();
+    await desktop.getByRole("button", { name: question }).click();
     await expect(desktop.getByText("Saved response from gpt-5-6-luna", { exact: true })).toBeVisible();
     await desktop.getByRole("button", { name: "New review", exact: true }).click();
-    await desktop.getByLabel("Review mode and models").click();
-    await desktop.getByRole("combobox", { name: "Mode" }).selectOption("easy");
-    await desktop.getByRole("checkbox", { name: "openai", exact: true }).check();
-    await desktop.getByLabel("Review mode and models").click();
+    await desktop.getByRole("button", { name: "Easy", exact: true }).click();
+    const openai = desktop.locator(".review-participants").getByRole("button", { name: "OpenAI", exact: true });
+    if ((await openai.getAttribute("aria-pressed")) !== "true") await openai.click();
     await desktop.getByRole("textbox", { name: "Review question" }).fill(imagePrompt);
     await desktop.getByRole("button", { name: "Send Review question" }).click();
     await desktop.getByRole("button", { name: "Review image options" }).click();

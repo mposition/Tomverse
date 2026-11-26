@@ -36,6 +36,10 @@ const en = {
   send: "Send Review question",
   referencePrompt: "Add the Review reference to your Chat draft?",
   addToDraft: "Add to draft",
+  column: "Answers from {model}",
+  moveHint: "Alt + Left / Right moves the selected model.",
+  moved: "{model} moved to position {position} of {count}.",
+  analysisActions: "Compare the answers",
 };
 
 export const desktopReviewCopy: Record<Language, typeof en> = {
@@ -76,6 +80,10 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "Review 질문 보내기",
     referencePrompt: "Review 참고 내용을 Chat 초안에 추가할까요?",
     addToDraft: "초안에 추가",
+    column: "{model}의 답변",
+    moveHint: "Alt + ← / → 로 선택한 모델을 옮길 수 있습니다.",
+    moved: "{model}을(를) {count}개 중 {position}번째로 옮겼습니다.",
+    analysisActions: "답변 비교",
   },
   zh: {
     partial: "一个或多个回答提前结束。",
@@ -113,6 +121,10 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "发送 Review 问题",
     referencePrompt: "将 Review 参考内容添加到 Chat 草稿？",
     addToDraft: "添加到草稿",
+    column: "{model} 的回答",
+    moveHint: "按 Alt + 左/右 方向键移动所选模型。",
+    moved: "已将 {model} 移到第 {position} 位（共 {count} 个）。",
+    analysisActions: "比较回答",
   },
   "zh-Hant": {
     partial: "一個或多個回答提前結束。",
@@ -150,6 +162,10 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "傳送 Review 問題",
     referencePrompt: "將 Review 參考資料加入 Chat 草稿？",
     addToDraft: "加入草稿",
+    column: "{model} 的回答",
+    moveHint: "按 Alt + 左/右方向鍵移動所選模型。",
+    moved: "已將 {model} 移到第 {position} 位（共 {count} 個）。",
+    analysisActions: "比較回答",
   },
   fr: {
     partial: "Une ou plusieurs réponses se sont interrompues.",
@@ -187,6 +203,10 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "Envoyer la question Review",
     referencePrompt: "Ajouter la référence Review à votre brouillon Chat ?",
     addToDraft: "Ajouter au brouillon",
+    column: "Réponses de {model}",
+    moveHint: "Alt + Gauche / Droite déplace le modèle sélectionné.",
+    moved: "{model} déplacé en position {position} sur {count}.",
+    analysisActions: "Comparer les réponses",
   },
   de: {
     partial: "Mindestens eine Antwort endete vorzeitig.",
@@ -224,6 +244,10 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "Review-Frage senden",
     referencePrompt: "Review-Referenz zum Chat-Entwurf hinzufügen?",
     addToDraft: "Zum Entwurf hinzufügen",
+    column: "Antworten von {model}",
+    moveHint: "Alt + Links / Rechts verschiebt das ausgewählte Modell.",
+    moved: "{model} auf Position {position} von {count} verschoben.",
+    analysisActions: "Antworten vergleichen",
   },
   es: {
     partial: "Una o más respuestas terminaron antes de tiempo.",
@@ -261,6 +285,10 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "Enviar pregunta de Review",
     referencePrompt: "¿Añadir la referencia de Review a tu borrador de Chat?",
     addToDraft: "Añadir al borrador",
+    column: "Respuestas de {model}",
+    moveHint: "Alt + Izquierda / Derecha mueve el modelo seleccionado.",
+    moved: "{model} movido a la posición {position} de {count}.",
+    analysisActions: "Comparar las respuestas",
   },
   pt: {
     partial: "Uma ou mais respostas terminaram antes do previsto.",
@@ -298,5 +326,9 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     send: "Enviar pergunta da Review",
     referencePrompt: "Adicionar a referência da Review ao rascunho de Chat?",
     addToDraft: "Adicionar ao rascunho",
+    column: "Respostas de {model}",
+    moveHint: "Alt + Esquerda / Direita move o modelo selecionado.",
+    moved: "{model} movido para a posição {position} de {count}.",
+    analysisActions: "Comparar as respostas",
   },
 };

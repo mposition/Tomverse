@@ -360,6 +360,8 @@ export type Snapshot = {
   /** The agent's browser tools (the browser_* tools) are on: the person's switch, or a test fixture that turned them on. */
   codeBrowserAgent?: boolean;
   deviceFixtureAvailable?: boolean;
+  /** A signed-in account can switch "Current location" on in Chat; the host reads the position only for a message sent while it is on. */
+  chatLocationAvailable?: boolean;
   root: string | null;
   project: string | null;
   draftNamespace: string | null;

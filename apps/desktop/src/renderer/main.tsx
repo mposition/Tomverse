@@ -7,7 +7,6 @@ import {
 import "@tomverse/ui-tokens/tokens.css";
 import "@tomverse/ui-tokens/wordmark.css";
 import logo from "../../../../public/tomverse-logo.png";
-import { TomverseWordmark } from "../../../../components/chat/TomverseWordmark";
 import { usagePercent } from "../../../../components/chat/UsagePercentGauge";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
@@ -31,7 +30,7 @@ import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CH
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation } from "./DraftDictation";
-import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
+import { ChatDraftPlace } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
 import { GitPanel } from "./GitPanel";
 import { GitApprovalSection } from "./GitApproval";
@@ -308,6 +307,8 @@ function Desktop() {
     chat: "Chat", review: "Review", code: "Tomverse Code", plugins: copy.plugins, settings: common.settings,
   };
   const [historyOpen, setHistoryOpen] = useState(() => !matchMedia(compactHistoryQuery).matches);
+  // The Plugins menu is rendered by ConnectorWorkspace (it owns the tab and selection state) into this slot of the second lane.
+  const [pluginsLane, setPluginsLane] = useState<HTMLElement | null>(null);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [reviewReference, setReviewReference] = useState("");
   const [defaultHistoryWidth, setDefaultHistoryWidth] = useState(252);
@@ -514,7 +515,6 @@ function Desktop() {
   const chat = useChatHistory(chatActive, "chat", accountDraft, language, snapshot?.capabilities?.deepResearch);
   const reviewActive = workspace === "review" && account?.stage === "connected";
   const nativeReview = !settingsView && reviewActive;
-  const codeAskLocation = useChatDraftLocation(JSON.stringify([codeDraft, snapshot?.draftNamespace, task?.id]));
   const review = useChatHistory(reviewActive, "review", accountDraft, language);
   async function openImportedConversation(id: string, product: "chat" | "review" = "chat") {
     const history = product === "chat" ? chat : review;
@@ -891,17 +891,16 @@ ${text}` : text;
       }}>
       <div className="history-header">
         <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>
-          {chatRail ? <><img src={logo} alt="" /><TomverseWordmark /></> : names[surface]}
+          {names[surface]}
         </h1>
         {surface === "code" && <button ref={historySearchToggle} className="icon" type="button" aria-label={copy.searchHistory} aria-expanded={searchOpen}
           aria-controls={searchOpen ? "code-history-filter" : undefined}
           onClick={() => searchOpen ? closeCodeHistorySearch() : setSearchOpen(true)}><Search size={18} /></button>}
-        {textHistory && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
-          onClick={() => void act(() => openDocs("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
       </div>
+      {surface === "plugins" && <div ref={setPluginsLane} className="desktop-plugins-slot" />}
       {nativeImages && <ImageHistoryList workspace={images} onClose={() => setImagesOpen(false)} />}
       {chatRail && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading} canModify={snapshot?.capabilities?.chatWrite === true}
-        onImages={imageCapability ? () => setImagesOpen(true) : undefined} onImport={openImportedConversations} />}
+        onImport={openImportedConversations} />}
       {nativeReview && !nativeImages && <ChatHistory key={`review:${accountDraft}`} chat={review} product="review" busy={reviewRun.running || reviewAttachments.uploading} />}
       {settingsView && <div className="settings-navigation">
         <nav aria-label="Tomverse">
@@ -1155,8 +1154,8 @@ ${text}` : text;
               </details>}
               {snapshot?.deviceFixtureAvailable && snapshot.draftNamespace && <DraftDictation language={language} disabled={busy}
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
-              {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftLocation location={codeAskLocation} language={language}
-                draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} deviceLocation={false} />}
+              {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftPlace language={language}
+                draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} />}
               {queueTarget && <button className="soft" type="button" disabled={!canQueue} onClick={() => void queueDraft()}>
                 {desktopCodeEngineCopy[language].queueAdd}</button>}
               <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
@@ -1191,7 +1190,7 @@ ${text}` : text;
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
-        deviceFixture={snapshot?.deviceFixtureAvailable === true}
+        deviceFixture={snapshot?.deviceFixtureAvailable === true} deviceLocation={snapshot?.chatLocationAvailable === true}
         handoff={handoff?.target === "chat" ? handoff : undefined} /></> : nativeReview ? <ReviewWorkspace history={review}
           capability={snapshot?.capabilities?.review ?? null} run={reviewRun} preferredModelIds={accountModels}
           analysisEnabled={snapshot?.capabilities?.reviewAnalysis} searchReadiness={snapshot?.capabilities?.searchReadiness}
@@ -1276,7 +1275,7 @@ ${text}` : text;
             </button>
           </section>}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
-          ? <ConnectorWorkspace key={account.label} language={language} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
+          ? <ConnectorWorkspace key={account.label} language={language} lane={historyOpen ? pluginsLane : null} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
           <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>
             : surface !== "chat" && <p>{copy.unavailable}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}

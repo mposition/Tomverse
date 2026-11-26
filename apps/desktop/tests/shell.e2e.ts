@@ -494,7 +494,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       .toMatchObject({ stage: "connected", label: "Settings Fixture" });
     await expect(rail.locator(".rail-footer button")).toHaveText(["Help", "Settings", "S"]);
     await rail.getByRole("button", { name: "Chat", exact: true }).click();
-    await expect(page.getByTestId("tomverse-wordmark")).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "History", exact: true }).getByRole("heading", { name: "Chat", exact: true })).toBeVisible();
     await expect(page.getByRole("searchbox", { name: "Search conversation history" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Imported chats", exact: true })).toBeVisible();
     await expect(page.locator("[data-starter-id]")).toHaveCount(6);
@@ -634,41 +634,37 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         const host = globalThis as typeof globalThis & { clips?: number; sent?: number };
         return [host.clips ?? 0, host.sent ?? 0];
       }), [1, 0]);
-      await message.fill("A draft for the selected conversation");
-      const location = page.getByRole("button", { name: "Use current location", exact: true });
-      await page.locator(".composer-tools summary").click();
-      await page.evaluate(`Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
-        configurable: true, value: (_success, failure) => failure({ code: 1 }),
-      })`);
-      await location.click();
-      const locationDialog = page.getByRole("dialog", { name: "Use current location", exact: true });
-      await locationDialog.getByRole("button", { name: "Attach current location" }).click();
-      await expect(locationDialog.getByRole("alert")).toHaveText("Location permission was denied.");
-      await locationDialog.getByRole("button", { name: "Enter a place manually" }).click();
-      await locationDialog.getByRole("textbox", { name: "City or area" }).fill("Brisbane");
-      await locationDialog.getByRole("button", { name: "Add place to draft" }).click();
-      await expect(message).toHaveValue("A draft for the selected conversation\n\nMy location: Brisbane");
-      await page.evaluate(`Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
-        configurable: true, value: (success) => success({
-          coords: { latitude: -27.46551, longitude: 153.025879, accuracy: 23 }, timestamp: Date.now(),
-        }),
-      })`);
-      await location.click();
-      await locationDialog.getByRole("button", { name: "Attach current location" }).click();
-      const removeLocation = page.getByRole("button", { name: "Remove location" });
-      await expect(removeLocation).toBeVisible();
-      await removeLocation.click();
-      await expect(removeLocation).toHaveCount(0);
     } else {
       await expect(page.getByRole("button", { name: "Record voice input" })).toHaveCount(0);
-      await page.locator(".composer-tools summary").click();
-      await page.getByRole("button", { name: "Add a place", exact: true }).click();
-      const placeDialog = page.getByRole("dialog", { name: "Add a place", exact: true });
-      await expect(placeDialog.getByRole("button", { name: "Attach current location" })).toHaveCount(0);
-      await placeDialog.getByRole("textbox", { name: "City or area" }).fill("Brisbane");
-      await placeDialog.getByRole("button", { name: "Add place to draft" }).click();
-      await expect(message).toHaveValue("A draft for the selected conversation\n\nMy location: Brisbane");
     }
+    // "Current location" is a switch in the "+" menu, as on the web. A denied read leaves it off and says why.
+    await message.fill("A draft for the selected conversation");
+    await page.locator(".composer-tools summary").click();
+    await expect(page.getByRole("button", { name: "Add a place" })).toHaveCount(0);
+    const location = page.getByRole("switch", { name: "Current location", exact: true });
+    await expect(location).not.toBeChecked();
+    await expect(location).toContainText("Off");
+    await expect(location).toContainText("No background tracking.");
+    await page.evaluate(`Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
+      configurable: true, value: (_success, failure) => failure({ code: 1 }),
+    })`);
+    await location.click();
+    await expect(location).not.toBeChecked();
+    await expect(location).toContainText("Location permission denied.");
+    await page.evaluate(`Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
+      configurable: true, value: (success) => success({
+        coords: { latitude: -27.46551, longitude: 153.025879, accuracy: 23 }, timestamp: Date.now(),
+      }),
+    })`);
+    await location.click();
+    await expect(location).toBeChecked();
+    await expect(location).toContainText("On");
+    await page.keyboard.press("Escape");
+    const locationStatus = page.getByTestId("chat-location-status");
+    await expect(locationStatus).toContainText("Current location on");
+    await locationStatus.getByRole("button", { name: "Turn off current location" }).click();
+    await expect(locationStatus).toHaveCount(0);
+    await expect(message).toHaveValue("A draft for the selected conversation");
     await message.fill("A draft for the selected conversation");
     await settings.click();
     await expect(page.getByTestId("native-account-login-methods")).toContainText("Google");
@@ -792,6 +788,29 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(connected).toHaveCount(0);
     await expect(custom).toBeVisible();
     await plugins.getByRole("searchbox", { name: "Search plugins" }).fill("");
+    // The menu lives in the second lane, as on the web: tabs and "My connections" are outside the body region.
+    const lane = page.getByTestId("desktop-connectors-lane");
+    await expect(lane.getByRole("button", { name: "All plugins", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(plugins.getByRole("button", { name: "All plugins", exact: true })).toHaveCount(0);
+    await expect(lane.getByTestId("desktop-connector-mine")).toHaveText(["GitHub"]);
+    // The category filter uses the web's catalogue: GitHub is Development, Google Drive is Work & communication, a custom server has none.
+    const category = plugins.getByRole("combobox", { name: "Category" });
+    const drive = plugins.getByRole("listitem").filter({ hasText: "Google Drive" });
+    await category.selectOption({ label: "Development" });
+    await expect(connected).toBeVisible();
+    await expect(custom).toHaveCount(0);
+    await expect(drive).toHaveCount(0);
+    await category.selectOption({ label: "Work & communication" });
+    await expect(connected).toHaveCount(0);
+    await expect(drive).toBeVisible();
+    await category.selectOption({ label: "All categories" });
+    await expect(custom).toBeVisible();
+    await lane.getByRole("button", { name: "Connected", exact: true }).click();
+    await expect(lane.getByRole("button", { name: "Connected", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(connected).toBeVisible();
+    await expect(drive).toHaveCount(0);
+    await lane.getByRole("button", { name: "All plugins", exact: true }).click();
+    await expect(drive).toBeVisible();
     await connected.getByRole("button", { name: "Manage access", exact: true }).click();
     const detail = plugins.getByTestId("desktop-connector-detail");
     await expect(detail.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
@@ -818,6 +837,18 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect.poll(signIn).toBe(0);
     await expect(plugins.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
     await expect(plugins.getByTestId("desktop-connector-detail")).toContainText("Linear");
+    // A connection in the lane opens its management area; with the lane hidden the tabs move into the body.
+    await expect(lane.getByTestId("desktop-connector-mine")).toHaveText(["GitHub", "Linear"]);
+    await lane.getByTestId("desktop-connector-mine").first().click();
+    await expect(plugins.getByTestId("desktop-connector-detail")).toContainText("GitHub");
+    await expect(lane.getByTestId("desktop-connector-mine").first()).toHaveAttribute("aria-current", "true");
+    await page.getByRole("button", { name: "Hide history", exact: true }).click();
+    await expect(lane).toHaveCount(0);
+    await plugins.getByRole("button", { name: "Connected", exact: true }).click();
+    await expect(plugins.getByRole("button", { name: "Connected", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await plugins.getByRole("button", { name: "All plugins", exact: true }).click();
+    await page.getByRole("button", { name: "Show history", exact: true }).click();
+    await expect(page.getByTestId("desktop-connectors-lane").getByRole("button", { name: "All plugins", exact: true })).toHaveAttribute("aria-current", "page");
     assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { oauthCallbacks?: string[] }).oauthCallbacks),
       ["?state=" + "S".repeat(43) + "&code=provider-code"]);
     await rail.getByRole("button", { name: "Chat", exact: true }).click();

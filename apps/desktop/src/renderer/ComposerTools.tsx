@@ -7,6 +7,8 @@ import type { ComposerOptions } from "../chat-contract";
 type Props = {
   children: ReactNode; options?: ComposerOptions; setOptions?: (patch: ComposerOptions) => void; disabled?: boolean;
   onDrive?: () => void; driveFull?: boolean; onResearch?: () => void;
+  /** Rows that sit just above Deep Research, as on the web: Research Preview and the Deep Research engine. */
+  researchTools?: ReactNode;
 };
 
 export function ComposerTools({ language, ...props }: Props & { language: Language }) {
@@ -15,7 +17,7 @@ export function ComposerTools({ language, ...props }: Props & { language: Langua
   </LanguageProvider>;
 }
 
-function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull, onResearch }: Props) {
+function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull, onResearch, researchTools }: Props) {
   const { t } = useLanguage();
   const trigger = useRef<HTMLElement>(null);
   const [profiles, setProfiles] = useState<Array<{ id: string; name: string }>>();
@@ -42,9 +44,11 @@ function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull
         <span><strong>{t("chat.attachGoogleDrive")}</strong><small>{t("chat.googleDriveDescription")}</small></span>
       </button>}
       {options && <><button className="composer-tool-row" type="button" role="switch" aria-checked={webSearch}
+        aria-labelledby="tools-web-search-label" aria-describedby="tools-web-search-description" data-testid="tools-web-search-row"
         disabled={disabled} onClick={() => setOptions?.({ webSearchMode: webSearch ? "off" : "always" })}>
         <span className="composer-tool-icon"><Globe2 size={18} /></span>
-        <span><strong>{t("chat.toolsWebSearch")}</strong><small>{t(webSearch ? "chat.toolsWebSearchOnDescription" : "chat.toolsWebSearchOffDescription")}</small></span>
+        <span><strong id="tools-web-search-label">{t("chat.toolsWebSearch")}</strong>
+          <small id="tools-web-search-description">{t(webSearch ? "chat.toolsWebSearchOnDescription" : "chat.toolsWebSearchOffDescription")}</small></span>
         <span className="composer-tool-switch" />
       </button>
       <div className="composer-tool-secondary">
@@ -70,6 +74,7 @@ function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull
           </span>
         </label>
       </div></>}
+      {researchTools}
       {onResearch && <div className="composer-tool-secondary"><button type="button" className="composer-tool-row"
         disabled={disabled} onClick={(event) => choose(event, onResearch)}>
         <span className="composer-tool-icon research-icon"><Microscope size={18} /></span>
