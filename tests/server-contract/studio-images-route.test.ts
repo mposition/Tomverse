@@ -21,6 +21,7 @@ let receipt: { id: string } | null = null;
 let globalGate = true;
 const reservations: GenerationInput[] = [];
 const attachments: BindInput[] = [];
+const requests: Array<{ conversationId: string; prompt: string }> = [];
 const receipts: unknown[] = [];
 const scheduled: Array<() => Promise<unknown>> = [];
 const dispatched: string[][] = [];
@@ -56,6 +57,7 @@ mock.module("next/server", {
 mock.module(url("lib/studioImageReference.ts"), {
   namedExports: {
     bindStudioImageUpload: async (_tx: unknown, input: BindInput) => { attachments.push(input); return "owned-attachment"; },
+    recordStudioRequest: async (_tx: unknown, conversationId: string, prompt: string) => { requests.push({ conversationId, prompt }); return { id: "request" }; },
   },
 });
 mock.module(url("lib/imageGenerationService.ts"), {
@@ -65,6 +67,7 @@ mock.module(url("lib/imageGenerationService.ts"), {
       if (input.editSource && "bindAttachment" in input.editSource) {
         await input.editSource.bindAttachment({} as never, "studio-image-conversation");
       }
+      await input.onReserved?.({} as never, "studio-image-conversation");
       // One generation per requested model, as the service answers.
       const targets = (input.modelIds ?? ["default"]).map((modelId, index) => ({
         targetId: "target-" + index, modelId, provider: "test", status: "pending", reservedCredits: 1,
@@ -109,6 +112,7 @@ beforeEach(() => {
   receipt = null;
   reservations.length = 0;
   attachments.length = 0;
+  requests.length = 0;
   receipts.length = 0;
   scheduled.length = 0;
   dispatched.length = 0;
@@ -167,6 +171,21 @@ test("a fresh quoted edit binds the authenticated upload through the transaction
   assert.deepEqual(dispatched, [["studio-image"]]);
   assert.equal((await post({ ...body, attachmentId: "must-not-be-trusted" })).status, 400);
   assert.equal(reservations.length, 1);
+});
+
+test("a run without a photo records its request, so every Studio run is told apart from an image conversation", async () => {
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  const quote = await (await GET(new Request(base + "?size=1024x1024&useCase=poster"))).json();
+  const accepted = await post({ ...quotedSubmission(quote), uploadId: undefined, prompt: "Design a poster" });
+  assert.equal(accepted.status, 202);
+  assert.equal(reservations[0].editSource, undefined);
+  assert.deepEqual(requests, [{ conversationId: "studio-image-conversation", prompt: "Design a poster" }]);
+  assert.deepEqual(attachments, []);
+  // With a photo the binding writes the request itself: one message, not two.
+  await post(quotedSubmission(await (await GET(quoteRequest())).json()));
+  assert.equal(reservations[1].onReserved, undefined);
+  assert.equal(attachments.length, 1);
+  assert.equal(requests.length, 1);
 });
 
 test("an open tab can still submit its versioned Medium quote", async () => {
