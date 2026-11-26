@@ -528,7 +528,9 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   되고, Stripe가 매번 같은 이유로 거부하는 요청(`StripeInvalidRequestError`)이면 운영 사고
   `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올리고 그 이벤트는 넘깁니다. 어떤
   순서든 재개의 결과는 `customer.subscription.updated`로 돌아오므로 해지가 최종 상태가
-  됩니다.
+  됩니다. 확인과 Stripe 쓰기는 계정 행을 잠근(`SELECT … FOR UPDATE`) 트랜잭션 안에서
+  합니다. 계정 복원은 그 행을 고치므로 정리가 끝날 때까지 기다리고, 복원 뒤 고객이 다시
+  켠 갱신을 늦은 정리가 끄는 일이 없습니다.
 - Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
 - 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
 
@@ -545,8 +547,9 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 - **견적 선점.** confirm은 Stripe를 부르기 전에 견적 행을 `confirmedAt` 조건부 기록
   (`status = 'previewed' AND confirmedAt IS NULL`)으로 선점합니다. 같은 견적의 두 번째
   confirm은 Stripe까지 가지 않고, 이미 예약됐으면 그 예약을, 아니면
-  `PLAN_CHANGE_ALREADY_PENDING`을 받습니다. 판정이 거부되면 선점한 견적은 `failed`가 되어
-  재시도는 새 견적부터 합니다.
+  `PLAN_CHANGE_ALREADY_PENDING`을 받습니다. Stripe 전에 멈추면(구독 조회 실패, 구독 없음,
+  판정 거부) 선점한 견적은 `failed`가 되어, 재시도는 "진행 중"에 막히지 않고 새 견적부터
+  합니다.
 - **기록되지 않은 schedule은 남기지 않습니다.** schedule을 붙인 뒤 기록(행 이동 + 메일
   outbox 트랜잭션)이 실패하면, 행을 다시 읽어 그 schedule이 기록되지 않았음을 확인한 뒤
   **release**합니다. 기록되지 않은 schedule은 보여 줄 수도 취소할 수도 없는 채로 기간 말에

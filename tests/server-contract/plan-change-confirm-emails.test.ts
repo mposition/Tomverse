@@ -30,6 +30,7 @@ const world = {
   scheduleCreates: 0,
   releases: [] as string[],
   failEnqueue: false,
+  failRetrieve: false,
   subscription: {} as Record<string, unknown>,
 };
 
@@ -39,6 +40,7 @@ const reset = () => {
   world.scheduleCreates = 0;
   world.releases = [];
   world.failEnqueue = false;
+  world.failRetrieve = false;
   world.subscription = {
     id: "sub_1",
     status: "active",
@@ -136,7 +138,12 @@ mock.module(mod("lib/stripe.ts"), {
   namedExports: {
     isStripeConfigured: () => true,
     getStripe: () => ({
-      subscriptions: { retrieve: async () => structuredClone(world.subscription) },
+      subscriptions: {
+        retrieve: async () => {
+          if (world.failRetrieve) throw new Error("stripe unavailable");
+          return structuredClone(world.subscription);
+        },
+      },
       prices: { list: async () => ({ data: [price("pro")] }) },
       subscriptionSchedules: {
         create: async () => {
@@ -261,4 +268,19 @@ test("an upgrade's email is committed when it settles, and a redelivery sends no
   assert.deepEqual(await settlePlanChangesForSubscription(subscription, "invoice.paid"), { settled: "applied" });
   assert.deepEqual(await settlePlanChangesForSubscription(subscription, "invoice.paid"), { settled: null });
   assert.deepEqual(world.emails, [{ templateKey: "plan_change_upgraded", inTransaction: true, referenceId: "pcr_up" }]);
+});
+
+test("a quote claimed by a confirm that stops before Stripe is spent, not left in flight", async () => {
+  reset();
+  await quoteDowngrade();
+  world.failRetrieve = true;
+  const { confirmPlanChange } = await load();
+  await assert.rejects(confirmPlanChange({ userId: "user_1", requestId: "pcr_1" }));
+  assert.equal(world.rows.get("pcr_1")!.status, "failed");
+  assert.equal(world.scheduleCreates, 0);
+  // The retry is told the quote is spent, not that it is "already being confirmed".
+  world.failRetrieve = false;
+  const retry = await confirmPlanChange({ userId: "user_1", requestId: "pcr_1" });
+  assert.notEqual((retry as { code?: string }).code, "PLAN_CHANGE_ALREADY_PENDING");
+  assert.equal(world.scheduleCreates, 0);
 });

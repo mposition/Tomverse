@@ -645,8 +645,25 @@ export async function confirmPlanChange({
     );
   }
 
-  const context = await loadContext(userId);
-  if ("ok" in context) return context;
+  // A claimed quote that stops before Stripe is spent, never left claimed: a
+  // claimed-but-idle quote would answer every retry with "already being
+  // confirmed". The retry starts from a new preview.
+  const spend = (failureCode: string) =>
+    prisma.planChangeRequest.updateMany({
+      where: { id: stored.id, status: "previewed" },
+      data: { status: "failed", failureCode },
+    });
+  let context: Awaited<ReturnType<typeof loadContext>>;
+  try {
+    context = await loadContext(userId);
+  } catch (error) {
+    await spend("context_unavailable").catch(() => {});
+    throw error;
+  }
+  if ("ok" in context) {
+    await spend(context.code);
+    return context;
+  }
 
   const targetTier: PlanChangeTier = stored.toTier === "Max" ? "Max" : "Pro";
   const targetInterval: PlanChangeInterval =

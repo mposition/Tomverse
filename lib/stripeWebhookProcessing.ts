@@ -239,16 +239,31 @@ async function keepDeletionCancellation(
 ) {
   if (subscription.cancel_at_period_end) return;
   if (!RENEWING_STATUSES.has(subscription.status)) return;
-  const pendingDeletion = await prisma.user.findFirst({
-    where: { stripeSubscriptionId: subscription.id, accountStatus: "pending_deletion" },
-    select: { id: true },
-  });
-  if (!pendingDeletion) return;
+  let pendingDeletion: { id: string } | null = null;
   try {
-    await getStripe().subscriptions.update(subscription.id, {
-      cancel_at_period_end: true,
-    });
+    // The account row stays locked across the Stripe write. Restoring the
+    // account updates that row, so a restore (and the customer's own renewal
+    // resume after it) waits for this write instead of being undone by it; a
+    // restore that committed first means the row no longer matches and this
+    // writes nothing.
+    await prisma.$transaction(
+      async (tx) => {
+        const rows = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "User"
+          WHERE "stripeSubscriptionId" = ${subscription.id}
+            AND "accountStatus" = 'pending_deletion'
+          FOR UPDATE`;
+        pendingDeletion = rows[0] ?? null;
+        if (!pendingDeletion) return;
+        await getStripe().subscriptions.update(subscription.id, {
+          cancel_at_period_end: true,
+        });
+      },
+      { timeout: 20_000 }
+    );
+    if (!pendingDeletion) return;
   } catch (error) {
+    if (!pendingDeletion) throw error;
     // A refusal Stripe will repeat on every redelivery (an invalid request,
     // e.g. a schedule-managed subscription) is a person's job, not a reason to
     // fail every event for this subscription for days. Anything else throws
@@ -263,14 +278,14 @@ async function keepDeletionCancellation(
       severity: "error",
       context: {
         component: "stripe-webhook",
-        userId: pendingDeletion.id,
+        userId: (pendingDeletion as { id: string }).id,
         subscriptionId: subscription.id,
       },
     }).catch(() => {});
     return;
   }
   console.warn("billing.subscription.deletion_cancellation_restored", {
-    userId: pendingDeletion.id,
+    userId: (pendingDeletion as { id: string } | null)?.id,
     subscriptionId: subscription.id,
   });
 }

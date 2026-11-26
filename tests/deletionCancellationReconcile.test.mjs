@@ -15,8 +15,10 @@ test("every subscription resync runs the deletion reconciler once", () => {
   const webhook = readFileSync("lib/stripeWebhookProcessing.ts", "utf8");
   assert.equal(count(webhook, "async function keepDeletionCancellation("), 1);
   assert.equal(count(webhook, "await keepDeletionCancellation("), 1);
-  // It re-cancels, and reports what Stripe will keep refusing.
-  assert.equal(count(webhook, 'accountStatus: "pending_deletion"'), 1);
+  // It re-cancels with the account row locked, so a restore (and the
+  // customer's renewal resume after it) waits for it instead of being undone.
+  const reconciler = webhook.slice(webhook.indexOf("async function keepDeletionCancellation("));
+  assert.equal(count(reconciler.slice(0, reconciler.indexOf("export type BillingResyncOutcome")), "FOR UPDATE"), 1);
   assert.ok(count(webhook, "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED") >= 1);
 });
 
