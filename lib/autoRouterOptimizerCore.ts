@@ -1574,7 +1574,8 @@ export type OptimizerCycleDeps = {
     candidatesFor: (text: string) => AutoLlmRouterCandidate[];
     /** The report and the proposal, as the generator's raw structured output. */
     generate: (message: string) => Promise<OptimizerCallResult<unknown>>;
-    route: (guidance: string, decision: OptimizerDecision) => Promise<OptimizerCallResult<string>>;
+    /** The replayed pick; `reason` is the router's own sentence for it, kept for the generator. */
+    route: (guidance: string, decision: OptimizerDecision) => Promise<OptimizerCallResult<string> & { reason?: string | null }>;
     /** The picked model answers the message itself, with the same context as the router. */
     answer: (modelId: string, turn: OptimizerAnswerTurn) => Promise<OptimizerCallResult<string>>;
     judge: (message: string) => Promise<OptimizerCallResult<JudgeWinner>>;
@@ -1870,13 +1871,24 @@ export async function runOptimizerCycle(
     // A synthetic training message has no pick yet: the current guidance's
     // pick is replayed, so the generator sees what the router does today. The
     // holdout is not read by any paid evaluation call until guidance is frozen.
+    // The replay's reason is kept with its pick: without it every synthetic
+    // training decision reached the generator with a null reason.
+    const trainReasons = new Map<string, string | null>();
     const trainPicks = await pool(
         train.map(decision => async () => decision.synthetic
-            ? call("route", () => deps.route(input.incumbentGuidance, decision), identity({ caseId: decision.id, arm: "train_baseline_guidance" })) : decision.pickedModelId),
+            ? call("route", async () => {
+                const routed = await deps.route(input.incumbentGuidance, decision);
+                trainReasons.set(decision.id, routed.reason ?? null);
+                return routed;
+            }, identity({ caseId: decision.id, arm: "train_baseline_guidance" })) : decision.pickedModelId),
         AUTO_ROUTER_OPTIMIZER_CONCURRENCY
     );
     if (spend.exhausted()) return finish(spend.closedReason(), null, []);
-    const trained = train.map((decision, index) => ({ ...decision, pickedModelId: trainPicks[index] ?? null }));
+    const trained = train.map((decision, index) => ({
+        ...decision,
+        pickedModelId: trainPicks[index] ?? null,
+        reason: decision.synthetic && trainPicks[index] ? trainReasons.get(decision.id) ?? null : decision.reason,
+    }));
 
     // One call reads the evidence and returns the report and the proposal.
     const output = await call("generate", () =>
