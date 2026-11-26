@@ -188,3 +188,22 @@ test("a host that does not answer, or answers with something unexpected, is repo
         await gateway.stop();
     }
 });
+
+test("the tool descriptions and the page note say what the host allows: local only by default, public sites when the person allowed them", async () => {
+    for (const web of [false, true]) {
+        const gateway = await new FakeGateway({ script: script([{ name: "browser_navigate", args: { url: PAGE } }, { name: "browser_read", args: {} }]) }).start();
+        try {
+            const { runner } = await makeRunner(gateway, makeRepo(), { runner: { browserAgent: fakeHost(), browserWeb: web } });
+            assert.equal(await runner.runTask("Look."), "success");
+            const tools = gateway.completions[0]!.body.tools as any[];
+            const navigate = tools.find((entry) => entry.function.name === "browser_navigate").function.description as string;
+            assert.equal(/public https site/.test(navigate), web);
+            assert.equal(/Needs no approval\./.test(navigate), !web);
+            assert.match(toolMessages(gateway), web ? /untrusted data from a website/ : /untrusted data from a local site/);
+            const system = JSON.stringify(gateway.completions[0]!.body.messages[0]);
+            assert.equal(/public https site the user approves/.test(system), web);
+        } finally {
+            await gateway.stop();
+        }
+    }
+});
