@@ -87,7 +87,7 @@ export function keyInput(key: string): { ctrl: boolean; shift: boolean; vk: numb
  */
 export function isUserIntervention(reason: string, frontBefore: boolean): boolean {
   switch (reason) {
-    case "cursor-moved": case "moved": case "minimized": case "focus-lost": return true;
+    case "cursor-moved": case "moved": case "minimized": case "focus-lost": case "user-input": return true;
     case "not-front": return frontBefore;
     default: return false;
   }
@@ -95,7 +95,7 @@ export function isUserIntervention(reason: string, frontBefore: boolean): boolea
 
 const INTERRUPTION: Record<string, string> = {
   "cursor-moved": "the mouse pointer was moved away", moved: "the window moved", minimized: "the window was minimized", "not-front": "the window left the front",
-  "focus-lost": "the window lost the focus", covered: "another window came over it", "covered-point": "another window came over the point",
+  "focus-lost": "the window lost the focus", "user-input": "the user used the mouse or keyboard", covered: "another window came over it", "covered-point": "another window came over the point",
   resized: "the window changed size", gone: "the window was closed", "input-failed": "Windows stopped accepting the input",
 };
 

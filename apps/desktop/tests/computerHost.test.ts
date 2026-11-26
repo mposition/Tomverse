@@ -481,3 +481,31 @@ test("a request that ends while input may be going out tells the agent part of i
   assert.match(looked, /could not be completed/);
   assert.doesNotMatch(looked, /already have been done/);
 });
+
+test("a screenshot does not move the baseline: what the person did before it still stops the next action", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  // The person types in the window, and the agent then looks again before it acts.
+  r.tick(2_000);
+  r.backend.state.idleMs = 300;
+  await r.ask({ tool: "screenshot" });
+  r.tick(200);
+  r.backend.state.idleMs = 500;
+  let sent = false;
+  r.backend.act = async () => { sent = true; return { performed: true }; };
+  assert.match(errorOf(await r.ask(CLICK)), /used the mouse or keyboard/);
+  assert.equal(sent, false);
+  assert.equal(r.host.state().control, "stopped");
+});
+
+test("input of the person between two parts of an action stops the agent and says how much went out", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.backend.act = async () => ({ performed: false, reason: "user-input", typed: 32 });
+  const reply = await r.ask({ tool: "type", window: FIXTURE_WINDOW.id, text: "x".repeat(80) });
+  assert.match(errorOf(reply), /used the mouse or keyboard/);
+  assert.match(errorOf(reply), /32/);
+  assert.equal(r.host.state().control, "stopped");
+});

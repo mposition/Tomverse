@@ -72,7 +72,7 @@ export const remoteReadTools = (ctx: ToolContext, remote: RemoteWorkspace): Tool
             },
         }),
         search_text: tool({
-            description: "Search file contents in the remote project (grep on that machine). Literal by default; regex: true for an extended regular expression.",
+            description: "Search file contents in the remote project (grep on that machine). Literal by default; regex: true for an extended regular expression. Letter case is ignored unless caseSensitive is true.",
             inputSchema: z.object({ pattern: z.string(), path: z.string().optional(), regex: z.boolean().optional(), caseSensitive: z.boolean().optional(), maxResults: z.number().optional() }),
             execute: async (input) => {
                 try {

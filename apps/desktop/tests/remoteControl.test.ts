@@ -385,3 +385,18 @@ test("stop and follow-up reach only a running task that can take them", async (t
   const acks = (s.syncs().at(-1)!.body as { acks: Array<{ result: string; reason?: string }> }).acks;
   assert.deepEqual(acks.map((ack) => ack.reason ?? ack.result), ["applied", "not_open", "applied", "unavailable"]);
 });
+
+test("a line is cut on a whole character and never carries half of a surrogate pair", async () => {
+  const { remoteText } = await import("../src/host/remote-control");
+  const face = String.fromCodePoint(0x1f600);
+  const wellFormed = (value: string) => Array.from(value).every((char) => char.length === 2 || char.charCodeAt(0) < 0xd800 || char.charCodeAt(0) > 0xdfff);
+  // The cut would fall between the two halves of the face.
+  const cut = remoteText("a".repeat(8) + face + "tail of the title", undefined, 10);
+  assert.ok(cut.length <= 10 && wellFormed(cut), JSON.stringify(cut));
+  assert.equal(cut, "a".repeat(8) + cut.at(-1));
+  // A whole face that fits is kept.
+  assert.equal(remoteText("ok " + face, undefined, 10), "ok " + face);
+  // Half a pair that was already in the text does not leave the PC.
+  assert.ok(wellFormed(remoteText("broken " + face.slice(0, 1) + " title", undefined, 40)));
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(remoteText("x".repeat(9) + face, undefined, 10))));
+});

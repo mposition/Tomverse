@@ -94,8 +94,8 @@ export function createComputerHost(deps: ComputerHostDeps) {
   async function execute(request: ComputerAgentRequest, chosen: ComputerSelection, signal: AbortSignal, self: AbortController, phase: { sending: boolean }): Promise<ComputerAgentReply> {
     const os = getBackend()!;
     const target = ref(chosen);
+    // A picture sends no input, so it leaves the baseline alone: what the person did before it still stops the next action.
     if (request.tool === "screenshot") {
-      baseline = deps.now();
       const result = await os.capture(target, COMPUTER_IMAGE_EDGE);
       signal.throwIfAborted();
       if ("gone" in result) { lost(self); return fail("The window was closed. Ask the user to choose a window again."); }

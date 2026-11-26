@@ -162,3 +162,16 @@ test("the Windows backend hands the partial counts of an answer to the host", as
     assert.deepEqual(await backend.act(WINDOW, SIZE, { kind: "type", text: "x".repeat(40) }, 0), { performed: false, reason: "focus-lost", typed: 32 });
   } finally { backend.dispose(); }
 });
+
+test("between the parts of one action the script looks for input that is not its own", () => {
+  const helper = WINDOWS_COMPUTER_SCRIPT.slice(WINDOWS_COMPUTER_SCRIPT.indexOf("static bool OtherInputSince("), WINDOWS_COMPUTER_SCRIPT.indexOf("static Dictionary<string, object> Act("));
+  assert.match(helper, /GetLastInputInfo\(ref i\)/);
+  assert.match(helper, /i\.dwTime - sentAt/);
+  const typing = actSection.slice(actSection.indexOf('kind == "type"'), actSection.indexOf('Unknown input kind'));
+  const check = typing.indexOf('if (sent > 0 && OtherInputSince(sentAt)) { d["performed"] = false; d["reason"] = "user-input"; d["typed"] = sent; return d; }');
+  assert.ok(check > 0 && check < typing.indexOf("Send(batch.ToArray())"), "a batch is checked before it is sent");
+  assert.match(typing, /Send\(batch\.ToArray\(\)\); sentAt = \(uint\)Environment\.TickCount;/);
+  const click = actSection.slice(actSection.indexOf('kind == "click"'), actSection.indexOf('kind == "key"'));
+  assert.match(click, /if \(why == null && i > 0 && OtherInputSince\(sentAt\)\) why = "user-input";/);
+  assert.match(click, /if \(why == null && done > 0 && OtherInputSince\(sentAt\)\) why = "user-input";/);
+});

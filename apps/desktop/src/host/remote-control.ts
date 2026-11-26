@@ -100,12 +100,31 @@ const SECRET_SHAPES: Array<[RegExp, string]> = [
   [/\b([A-Za-z_-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[A-Za-z_-]*)(\s*[:=]\s*|\s+)("[^"]*"|'[^']*'|[^\s"'&;]+)/gi, "$1$2[removed]"],
 ];
 
+/**
+ * Cuts to the limit on a whole character, and replaces half of a surrogate pair: PostgreSQL refuses a report that holds
+ * one, and the PC's sync would then fail for as long as the title or line is in it.
+ */
+function wholeText(value: string, max: number): string {
+  const chars = Array.from(value, (char) => {
+    const code = char.length === 1 ? char.charCodeAt(0) : 0;
+    return code >= 0xd800 && code <= 0xdfff ? "?" : char;
+  });
+  const whole = chars.join("");
+  if (whole.length <= max) return whole;
+  let kept = "";
+  for (const char of chars) {
+    if (kept.length + char.length > max - 1) break;
+    kept += char;
+  }
+  return kept + "…";
+}
+
 /** One line as it may leave the PC: redacted, on one line, and cut to `max` characters. */
 export function remoteText(text: string, key: string | undefined, max: number): string {
   let value = cleanText(text, key);
   for (const [shape, replacement] of SECRET_SHAPES) value = value.replace(shape, replacement);
   value = value.replace(/\s+/g, " ").trim();
-  return value.length > max ? value.slice(0, max - 1) + "…" : value;
+  return wholeText(value, max);
 }
 
 const shownWhole = (text: string, key: string | undefined, max: number) =>
