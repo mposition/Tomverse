@@ -36,24 +36,48 @@ export const reviewRequestText = (view: ApprovalView, userRequest: string) => {
     const action: Record<string, unknown> = { tool: view.toolName };
     if (view.explanation) action.agentExplanation = clip(view.explanation, 600);
     if (view.patch) {
-        action.files = view.patch.slice(0, 12).map((edit) => ({
+        action.files = view.patch.slice(0, REVIEW_LIMITS.files).map((edit) => ({
             path: edit.path,
             action: edit.action,
-            ...(edit.action === "create" ? { newContent: clip(edit.afterText ?? "", 1500) } : edit.action === "update"
-                ? { before: clip(edit.beforeText ?? "", 1200), after: clip(edit.afterText ?? "", 1200) } : {}),
+            ...(edit.action === "create" ? { newContent: clip(edit.afterText ?? "", REVIEW_LIMITS.fileChars) } : edit.action === "update"
+                ? { before: clip(edit.beforeText ?? "", REVIEW_LIMITS.fileChars), after: clip(edit.afterText ?? "", REVIEW_LIMITS.fileChars) } : {}),
         }));
-        if (view.patch.length > 12) action.moreFiles = view.patch.length - 12;
+        if (view.patch.length > REVIEW_LIMITS.files) action.moreFiles = view.patch.length - REVIEW_LIMITS.files;
     } else if (view.command) {
-        action.command = { display: clip(view.command.display, 2000), shell: view.command.mode === "shell", folder: view.command.cwd, background: view.command.background === true };
+        action.command = { display: clip(view.command.display, REVIEW_LIMITS.commandChars), shell: view.command.mode === "shell", folder: view.command.cwd, background: view.command.background === true };
     } else if (view.web) {
         action.web = { url: view.web.url };
     } else if (view.browser) {
         action.browser = { action: view.browser.action, site: view.browser.origin, page: view.browser.url, element: view.browser.selector,
-            ...(view.browser.text !== undefined ? { text: clip(view.browser.text, 1000) } : {}), ...(view.browser.submit ? { pressesEnter: true } : {}) };
+            ...(view.browser.text !== undefined ? { text: clip(view.browser.text, REVIEW_LIMITS.inputChars) } : {}), ...(view.browser.submit ? { pressesEnter: true } : {}) };
     } else {
-        action.input = clip(JSON.stringify(view.input ?? null) ?? "null", 2000);
+        action.input = clip(JSON.stringify(view.input ?? null) ?? "null", REVIEW_LIMITS.inputChars);
     }
     return JSON.stringify({ workFolder: view.root ?? null, userRequest: clip(userRequest, 3000), proposedAction: action });
+};
+
+/** How much of an action a review request carries. An action larger than this is not reviewed at all (see reviewShowsAll). */
+export const REVIEW_LIMITS = { files: 12, fileChars: 12_000, totalChars: 48_000, commandChars: 4_000, inputChars: 4_000 } as const;
+
+/**
+ * Whether the review request shows the whole action. The answer is applied to all of it, so an action the reviewer
+ * would see only in part (a thirteenth file, the end of a long file, a long command) is not sent: a person decides it.
+ */
+export const reviewShowsAll = (view: ApprovalView): boolean => {
+    if (view.patch) {
+        if (view.patch.length > REVIEW_LIMITS.files) return false;
+        let total = 0;
+        for (const edit of view.patch) {
+            const sizes = edit.action === "create" ? [edit.afterText?.length ?? 0] : edit.action === "update" ? [edit.beforeText?.length ?? 0, edit.afterText?.length ?? 0] : [];
+            if (sizes.some((size) => size > REVIEW_LIMITS.fileChars)) return false;
+            total += sizes.reduce((sum, size) => sum + size, 0);
+        }
+        return total <= REVIEW_LIMITS.totalChars;
+    }
+    if (view.command) return view.command.display.length <= REVIEW_LIMITS.commandChars;
+    if (view.web) return true;
+    if (view.browser) return (view.browser.text?.length ?? 0) <= REVIEW_LIMITS.inputChars;
+    return (JSON.stringify(view.input ?? null) ?? "null").length <= REVIEW_LIMITS.inputChars;
 };
 
 /** The answer, or null when it is not exactly one valid answer object (a code fence around it is tolerated). */
@@ -93,6 +117,8 @@ export class AutoReviewer {
     }
 
     async review(view: ApprovalView, context: { review: ReviewCall; userRequest: string }): Promise<ReviewOutcome> {
+        // No request is made for an action the reviewer could not see whole.
+        if (!reviewShowsAll(view)) return { kind: "ask", reason: "the action is too large to be shown to the reviewer whole" };
         let text: string;
         try {
             text = await context.review(REVIEW_SYSTEM, reviewRequestText(view, context.userRequest));

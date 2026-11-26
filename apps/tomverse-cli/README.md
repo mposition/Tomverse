@@ -371,7 +371,7 @@ asks, an allow rule skips the question except where noted).
 | File change (`apply_patch`) | refuse | person | review | allow |
 | Command (`run_command`) | refuse | person | review | allow |
 | Web page (`web_fetch`) | person | person | person | person (a rule naming the host skips it) |
-| Click or typing in the browser tab | refuse | person | review | allow |
+| Click or typing in the browser tab | refuse | person | person | person |
 | MCP tool (`mcp__server__tool`) | refuse | person | person | person (a rule naming the tool or server skips it) |
 | `commit_changes`, `publish_changes` (Desktop) | refuse before the host is asked | the host's card | the host's card | the host's card |
 | A subagent worker's change or command | refuse | person | review | allow |

@@ -66,8 +66,8 @@ test("decision matrix, requests that ask: each mode against patch, command, web,
     const expected: Record<PermissionMode, Record<string, string>> = {
         read_only: { patch: "deny", command: "deny", web: "human", browser: "deny", mcp: "deny" },
         ask: { patch: "human", command: "human", web: "human", browser: "human", mcp: "human" },
-        auto_review: { patch: "review", command: "review", web: "human", browser: "review", mcp: "human" },
-        allow_all: { patch: "allow", command: "allow", web: "human", browser: "allow", mcp: "human" },
+        auto_review: { patch: "review", command: "review", web: "human", browser: "human", mcp: "human" },
+        allow_all: { patch: "allow", command: "allow", web: "human", browser: "human", mcp: "human" },
     };
     for (const mode of PERMISSION_MODES) {
         assert.equal(kindOf(patchView(), mode), expected[mode]!.patch, `${mode} patch`);
@@ -235,13 +235,13 @@ const browserScript = (calls: Array<{ name: string; args: Record<string, unknown
     return done < calls.length ? { toolCalls: [calls[done]!] } : { text: "Done." };
 };
 
-test("browser clicks and typing: read-only refuses, ask asks a person, auto review asks the reviewer, allow-all runs", async () => {
+test("browser clicks and typing: read-only refuses, and every other mode asks a person, never a reviewer and never the mode", async () => {
     const calls = [{ name: "browser_navigate", args: { url: PAGE } }, { name: "browser_click", args: { selector: "#add" } }];
     const expected: Record<PermissionMode, { clicked: boolean; people: number; reviews: number; source: string | undefined; decision: string }> = {
         read_only: { clicked: false, people: 0, reviews: 0, source: "mode", decision: "denied" },
         ask: { clicked: true, people: 1, reviews: 0, source: undefined, decision: "approved" },
-        auto_review: { clicked: true, people: 0, reviews: 1, source: "auto_review", decision: "approved" },
-        allow_all: { clicked: true, people: 0, reviews: 0, source: "mode", decision: "approved" },
+        auto_review: { clicked: true, people: 1, reviews: 0, source: undefined, decision: "approved" },
+        allow_all: { clicked: true, people: 1, reviews: 0, source: undefined, decision: "approved" },
     };
     for (const mode of PERMISSION_MODES) {
         const gateway = await new FakeGateway({ script: browserScript(calls) }).start();
@@ -406,7 +406,7 @@ test("hooks: a PreToolUse hook runs once for a browser click, and can block it a
         const gateway = await new FakeGateway({ script: browserScript([{ name: "browser_navigate", args: { url: PAGE } }, { name: "browser_click", args: { selector: "#add" } }]) }).start();
         try {
             const hostSeen: BrowserAgentRequest[] = [];
-            const { runner } = await makeRunner(gateway, root, { prompter: nobody, runner: { lifecycleHooks: ext.hooks, browserAgent: fakeBrowser(hostSeen), permissions: gateFor("allow_all") } });
+            const { runner } = await makeRunner(gateway, root, { prompter: asking(true, []), runner: { lifecycleHooks: ext.hooks, browserAgent: fakeBrowser(hostSeen), permissions: gateFor("allow_all") } });
             assert.equal(await runner.runTask("Press."), "success");
             assert.equal(hostSeen.some((request) => request.tool === "click"), true);
             assert.deepEqual(readFileSync(log, "utf8").split("\n").filter(Boolean), ["browser_click"], "one hook run for one click");

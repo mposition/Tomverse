@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ApprovalView } from "../src/agent.js";
 import { ApprovalMemory } from "../src/approvals.js";
-import { parseReviewAnswer, reviewRequestText } from "../src/approval-review.js";
+import { AutoReviewer, REVIEW_LIMITS, parseReviewAnswer, reviewRequestText, reviewShowsAll } from "../src/approval-review.js";
 import {
     PERMISSION_MODES, PermissionGate, checkBoundaries, evaluate, ruleForApproval, ruleProblem, tokenize,
     type PermissionMode, type PermissionRule, type ScopedRule,
@@ -392,4 +392,26 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
         "docker compose up -d", "docker compose -f x.yml ps", "docker-compose logs web", "docker ps",
     ];
     for (const line of plain) assert.equal(egress(line), undefined, line);
+});
+
+test("auto review is not asked about an action it would see only in part: a person decides it", async () => {
+    const edit = (path: string, after: string) => ({ path, action: "update", absolute: abs(path), beforeText: "old", afterText: after }) as any;
+    const view = (edits: unknown[]): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolName: "apply_patch", input: {}, root: ROOT, patch: edits as any });
+    const small = view([edit("src/a.ts", "new")]);
+    const manyFiles = view(Array.from({ length: REVIEW_LIMITS.files + 1 }, (_, i) => edit(`src/f${i}.ts`, "x")));
+    const longFile = view([edit("src/a.ts", "x".repeat(REVIEW_LIMITS.fileChars + 1))]);
+    const longTotal = view(Array.from({ length: 6 }, (_, i) => edit(`src/f${i}.ts`, "x".repeat(REVIEW_LIMITS.fileChars))));
+    assert.equal(reviewShowsAll(small), true);
+    for (const partial of [manyFiles, longFile, longTotal]) assert.equal(reviewShowsAll(partial), false);
+    assert.equal(reviewShowsAll(shellView("x".repeat(REVIEW_LIMITS.commandChars + 1))), false);
+    // What is sent for an action that fits is all of it: nothing is cut.
+    assert.equal(reviewRequestText(small, "do it").includes("more characters not shown"), false);
+
+    let asked = 0;
+    const reviewer = new AutoReviewer();
+    const context = { review: async () => { asked += 1; return '{"verdict":"allow","reason":"fits the request"}'; }, userRequest: "do it" };
+    for (const partial of [manyFiles, longFile, longTotal]) assert.equal((await reviewer.review(partial, context)).kind, "ask");
+    assert.equal(asked, 0, "no request is made for an action that cannot be shown whole");
+    assert.equal((await reviewer.review(small, context)).kind, "allow");
+    assert.equal(asked, 1);
 });

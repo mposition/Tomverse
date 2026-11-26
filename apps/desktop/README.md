@@ -74,7 +74,7 @@ A worktree keeps the path relative to the repository of the folder you opened. A
 |---|---|---|---|---|
 | File change, command | refused | approval window | a model request judges it | runs |
 | Web page | approval window | approval window | approval window | approval window (a rule naming the site skips it) |
-| Browser click or typing | refused | approval window | a model request judges it | runs |
+| Browser click or typing | refused | approval window | approval window | approval window |
 | MCP tool | refused | approval window | approval window | approval window (a rule naming the tool or server skips it) |
 | Agent commit | refused before the card opens | commit card | commit card | commit card |
 | Agent push and pull request | refused before the card opens | push card | push card | push card |

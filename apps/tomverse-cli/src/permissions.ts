@@ -540,6 +540,9 @@ export const evaluate = (view: ApprovalView, options: EvaluateOptions): Verdict 
     // An MCP tool is another program that may send anything it is given out of this computer: like a web host, only a rule
     // that names the tool (or its server) lets it run without a person, whatever the mode.
     if (subject.kind === "mcp") return { kind: "human", reason: "An MCP tool runs without asking only when a permission rule names it.", policy: note("boundary", "mcp_tool") };
+    // A click or typing on a page does whatever the page's own code does with it, a request to another service included,
+    // and nothing here can read that. A person answers it in every mode; their "Allow for this run" covers the same site.
+    if (subject.kind === "browser") return { kind: "human", reason: "A click or typing in the browser tab is always approved by a person.", policy: note("boundary", "browser_action") };
     if (mode === "allow_all") return { kind: "allow", policy: note("mode", "allow_all") };
     if (mode === "auto_review") return { kind: "review", policy: note("auto_review", "reviewing") };
     return { kind: "human", reason: "Ask mode.", policy: note("mode", mode) };
