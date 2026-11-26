@@ -40,7 +40,6 @@ export const studioLocale = {
   "posterMobile": "포스터·피드·스토리",
   "samplePack": "예시가 포함된 이모티콘 20종",
   "exampleEventDetails": "8월 15일 · 제주 애월",
-  "backgroundArtwork": "배경 이미지",
   "changeImage": "이미지 변경",
   "changePhoto": "사진 변경",
   "invalidImage": "12MB 이하의 PNG, JPEG 또는 WebP 이미지를 선택해 주세요.",
