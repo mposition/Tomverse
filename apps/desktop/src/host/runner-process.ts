@@ -31,9 +31,14 @@ import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
+import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
+import { RemoteError } from "../../../tomverse-cli/src/remote-target.js";
+import { setRemoteShadowBase } from "./remote-project";
+import { inspectRemoteChange, openRemoteWorkspace, RemoteRunError, undoRemoteChange } from "./remote-worker";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
+setRemoteShadowBase(process.env.TOMVERSE_DESKTOP_REMOTE_PROJECTS);
 type PluginRequest = Extract<WorkerEvent, { type: "code-plugin" }>;
 type PluginResponse = Extract<WorkerCommand, { type: "code-plugin-result" }>;
 import { readAgentGitSwitch } from "./git-agent-switch";
@@ -569,6 +574,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
   return {
     id: randomUUID(),
     root: clean(view.root ?? ""),
+    ...(view.remote ? { remote: { target: clean(view.remote.target), folder: clean(view.remote.folder) } } : {}),
     tool: view.toolName,
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
@@ -833,6 +839,19 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     if (execution.executionMode !== "tomverse_api") throw new Error("The selected Code execution route is unavailable.");
     if (!continuation) task.execution = execution;
     const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+    // A project on another machine: connect first, so a task never starts against a machine it cannot reach.
+    let remote: RemoteWorkspace | undefined;
+    if (command.project.remote) {
+      if (command.type === "start" && command.input.orchestrate) throw new Error("Orchestration is not available in a remote project.");
+      try {
+        remote = await openRemoteWorkspace(command.project, { fixtureAllowed: DESKTOP_FIXTURE_ALLOWED, signal: control.abort.signal });
+      } catch (error) {
+        addEvent(desktopCodeNotice(error instanceof RemoteRunError ? error.notice : "remoteUnavailable"));
+        if (error instanceof RemoteError) addEvent(error.message);
+        throw error;
+      }
+      remote.onLost(() => { addEvent(desktopCodeNotice("remoteLost")); publish(); });
+    }
     const savedReferences = resuming ? checkpoint?.tasks.at(-1)?.references ?? [] : command.references;
     const references = validateReferences(workspace, savedReferences, command.connection.key);
     task.references = references;
@@ -876,7 +895,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     task.canRewind = undefined;
     task.pendingFollowUp = journalPendingFollowUp(journal.state, command.connection.key);
     assertAllowed();
-    const instructions = continuation || savedCap !== undefined ? null : readProjectInstructions(workspace);
+    const instructions = continuation || savedCap !== undefined ? null : remote ? await remote.readInstructions(control.abort.signal) : readProjectInstructions(workspace);
     if (instructions?.truncated) addEvent(desktopCodeNotice("instructionClipped"));
     publish();
     const permissionEnv: NodeJS.ProcessEnv = permissionSetting ? { TOMVERSE_HOME: permissionSetting.home } : {};
@@ -965,20 +984,22 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       }
     }
     // The folder commands may write is the one the agent works in: for a task in a managed worktree, that worktree.
-    sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
+    // Commands of a remote project run on the other machine, outside this computer's sandbox: none is started for them.
+    sandbox = remote ? null : await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
     if (sandbox && !sandbox.enforcement.available) addEvent(desktopCodeNotice("sandboxUnavailable"));
     control.runner = new Runner({
-      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), sandboxed: sandbox?.enforcement.available === true, permissions,
+      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: remote ? undefined : composeLaunch(sandbox?.launch, codeProcessLaunch), sandboxed: sandbox?.enforcement.available === true, permissions,
+      ...(remote ? { remote } : {}),
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
       ...(extensions ? { mcp: extensions.mcp, lifecycleHooks: extensions.hooks } : {}),
-      backgroundCommands: true,
+      backgroundCommands: !remote,
       images: true,
       subagents: true,
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
-      nestedInstructions: !continuation && savedCap === undefined,
+      nestedInstructions: !remote && !continuation && savedCap === undefined,
       // Skills and agent definitions are folder contents like the instruction files: a capped continuation sends none of them.
       // Installed plugins are read from the same Tomverse folder the settings screens use (the worker's own environment has no TOMVERSE_HOME).
       extensions: !continuation && savedCap === undefined ? discoverForRuntime(workspace.root) : undefined,
@@ -986,7 +1007,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
-      git: !usesCodePlugin && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
+      git: !usesCodePlugin && !remote && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
       // The main process decides which host tools a run gets (the person's settings) and checks every request again; a run that
       // resumes gets the same tools as one that starts.
       browserSnapshot: command.browserSnapshot ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
@@ -1330,6 +1351,47 @@ function readRecordedChange(journal: Journal, id: string, { undoAvailable = true
   return { current, text, canUndo: checkoutAvailable && undoAvailable && journalStatus(journal.state) !== "unknown" && canUndoChange(journal, change) };
 }
 
+/** A change of a task in a remote project: where it stands is asked of the remote machine. */
+async function readRemoteRecorded(command: Extract<WorkerCommand, { type: "read-change" }>): Promise<WorkerEvent> {
+  const reply = { type: "change-diff", requestId: command.requestId } as const;
+  if (active) return { ...reply, inspection: null };
+  let journal: Journal | undefined;
+  try {
+    journal = openRecordedSession(command, command.sourceProject ?? command.project);
+    if (!journal) return { ...reply, inspection: null };
+    return { ...reply, inspection: await inspectRemoteChange(journal, command.recordId, command.project, {
+      clean: (text) => cleanText(text), unknown: journalStatus(journal.state) === "unknown", fixtureAllowed: DESKTOP_FIXTURE_ALLOWED,
+    }) };
+  } catch {
+    return { ...reply, inspection: null };
+  } finally {
+    journal?.release();
+  }
+}
+
+/** Puts one change of a remote task back on the remote machine. */
+async function undoRemoteRecorded(command: Extract<WorkerCommand, { type: "undo-change" }>): Promise<WorkerEvent> {
+  const reply = { type: "change-undone", requestId: command.requestId } as const;
+  if (active || recovery) return { ...reply, result: "unavailable" };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  let undoStarted = false;
+  try {
+    unlockProject = lockProject(command.project);
+    journal = openRecordedSession(command);
+    if (!journal || journalStatus(journal.state) === "unknown") return { ...reply, result: "unavailable" };
+    assertProjectRoot(command.project);
+    undoStarted = true;
+    const outcome = await undoRemoteChange(journal, command.recordId, command.project, { fixtureAllowed: DESKTOP_FIXTURE_ALLOWED });
+    return outcome === "undone" ? { ...reply, result: "undone", changes: journalChanges(journal.state) } : { ...reply, result: outcome };
+  } catch {
+    return { ...reply, result: undoStarted ? "unconfirmed" : "unavailable" };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+  }
+}
+
 function undoRecordedChange(command: Extract<WorkerCommand, { type: "undo-change" }>): WorkerEvent {
   const reply = { type: "change-undone", requestId: command.requestId } as const;
   if (active || recovery) return { ...reply, result: "unavailable" };
@@ -1369,7 +1431,9 @@ function planRecordedRewind(command: Extract<WorkerCommand, { type: "plan-rewind
     const plan = planRewind(journal, command.turn, true);
     return { ...reply, plan: {
       text: cleanText(plan.text), conversationAvailable: plan.conversationAvailable, ...(plan.blocked ? { blocked: true as const } : {}),
-      files: plan.files.slice(0, 40).map((file) => ({ path: cleanText(file.path), kind: file.kind, outcome: file.outcome, ...(file.reason ? { reason: cleanText(file.reason) } : {}) })),
+      files: plan.files.slice(0, 40).map((file) => command.project.remote
+        ? { path: cleanText(file.path), kind: file.kind, outcome: "conflict" as const, reason: "Files of a remote project are put back one change at a time from the change list." }
+        : { path: cleanText(file.path), kind: file.kind, outcome: file.outcome, ...(file.reason ? { reason: cleanText(file.reason) } : {}) }),
       commands: plan.commands.slice(0, 20).map((entry) => cleanText(entry.display)),
     } };
   } catch {
@@ -1384,6 +1448,8 @@ function planRecordedRewind(command: Extract<WorkerCommand, { type: "plan-rewind
 function rewindRecorded(command: Extract<WorkerCommand, { type: "rewind-history" }>): WorkerEvent {
   const reply = { type: "history-rewound", requestId: command.requestId, undone: 0, conflicts: 0 } as const;
   if (active || recovery) return { ...reply, result: "unavailable" };
+  // Files of a remote project are put back one change at a time from the change list; only the conversation can be cut here.
+  if (command.project.remote && command.mode !== "conversation") return { ...reply, result: "unavailable" };
   let journal: Journal | undefined;
   let unlockProject: (() => void) | undefined;
   let started = false;
@@ -1605,6 +1671,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     permissionSetting = { mode: data.mode, home: data.home };
   } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
     cleanDeletedHistory(data.protectedRoot);
+  } else if (data.type === "read-change" && data.project.remote) {
+    void readRemoteRecorded(data).then(send);
   } else if (data.type === "read-change") {
     let checkoutAvailable = false;
     try { assertProjectRoot(data.project); checkoutAvailable = true; } catch { /* Only saved snapshots are available. */ }
@@ -1629,6 +1697,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     void compactRecorded(data).then(send);
   } else if (data.type === "cancel-recovery") {
     if (recovery?.requestId === data.requestId) recovery.abort.abort();
+  } else if (data.type === "undo-change" && data.project.remote) {
+    void undoRemoteRecorded(data).then(send);
   } else if (data.type === "undo-change") {
     send(undoRecordedChange(data));
   } else if (data.type === "plan-rewind") {

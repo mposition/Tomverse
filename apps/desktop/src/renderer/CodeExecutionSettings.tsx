@@ -13,6 +13,7 @@ import type { CodeEnginePreference } from "./CodeEngine";
 import { CodeExtensionsSettings } from "./CodeExtensions";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
 import { CodeSandboxSettings } from "./CodeSandboxSettings";
+import { RemoteProjectPanel } from "./RemoteProject";
 import { PluginsPanel } from "./PluginsPanel";
 import { CodeBrowserSettings } from "./CodeBrowserSettings";
 
@@ -213,6 +214,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
     </fieldset>}
     <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
     <CodeSandboxSettings language={language} />
+    <RemoteProjectPanel language={language} withSwitch />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}
   </section>;
 }

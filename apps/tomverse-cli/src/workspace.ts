@@ -83,7 +83,7 @@ export const isSecretPath = (relativePath: string) => {
 };
 
 /** Generated or vendored folders that listing and search skip. */
-const SKIPPED_DIRS = new Set([
+export const SKIPPED_DIRS = new Set([
     "node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "coverage", ".cache",
     "__pycache__", ".venv", "venv", ".tox", ".gradle", ".idea", ".turbo", ".parcel-cache", ".tomverse",
 ]);

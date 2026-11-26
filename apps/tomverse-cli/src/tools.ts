@@ -12,6 +12,8 @@ import { canonicalDigest, JournalError, sha256, type Journal } from "./session.j
 import { PathError, type Workspace } from "./workspace.js";
 import type { MemoryResult } from "./memory.js";
 import { classifyWebUrl, fetchWebPage, frameWebContent, WebError, type HostResolver, type WebTransport } from "./web.js";
+import type { RemoteWorkspace } from "./remote-workspace.js";
+import { remoteReadTools, remoteWriteTools } from "./remote-tools.js";
 
 /**
  * The tools the model can call. list_files, search_text and read_file only
@@ -34,6 +36,8 @@ export type ToolContext = {
     /** Bytes one read_file call returns at most, sized to the model's window. */
     readByteLimit: number;
     workspace: Workspace;
+    /** A project on another machine: the file and command tools work there (remote-tools.ts) and never on this computer's disk. */
+    remote?: RemoteWorkspace;
     journal: Journal;
     commandTimeoutMs: number;
     commandEnv: string[];
@@ -244,7 +248,13 @@ export const readFileTool = (ctx: Pick<ToolContext, "workspace" | "readByteLimit
     const stat = statSync(resolved.absolute);
     if (!stat.isFile()) return { status: "error", error: `${resolved.relative} is not a file.` };
     if (stat.size > 8 * 1024 * 1024) return { status: "error", error: `${resolved.relative} is ${stat.size} bytes; too large to read. Search it instead.` };
-    const bytes = readFileSync(resolved.absolute);
+    return readTextResult(ctx, resolved.relative, readFileSync(resolved.absolute), input);
+};
+
+/** The model's view of a file already read: lines, limits, line endings and the file's digest. The same for a local and a remote file. */
+export const readTextResult = (ctx: Pick<ToolContext, "readByteLimit" | "redactText">, path: string, bytes: Buffer,
+    input: { startLine?: number; endLine?: number }) => {
+    const resolved = { relative: path };
     if (bytes.subarray(0, 8192).includes(0)) return { status: "error", error: `${resolved.relative} looks binary.` };
     const text = bytes.toString("utf8").replace(/^\uFEFF/, "");
     const lines = text.split(/\r?\n/);
@@ -530,6 +540,7 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             },
         });
     }
+    if (ctx.remote) Object.assign(tools, remoteReadTools(ctx, ctx.remote));
     if (readOnly) return tools;
     tools.apply_patch = tool({
         description:
@@ -737,6 +748,7 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             })(),
         });
     }
+    if (ctx.remote) Object.assign(tools, remoteWriteTools(ctx, ctx.remote));
     return tools;
 };
 

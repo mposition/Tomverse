@@ -42,6 +42,7 @@ import { ApprovalBrowser } from "./ApprovalBrowser";
 import { appendElementComments } from "../element-comment";
 import { useAgentBrowserReveal } from "./useAgentBrowserReveal";
 import { CodeTerminal } from "./CodeTerminal";
+import { RemoteApprovalNote, RemoteProjectPicker, RemoteProjectStatus } from "./RemoteProject";
 import { desktopTerminalCopy } from "../../../../locales/desktopTerminal";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
@@ -702,9 +703,9 @@ function Desktop() {
   }
 
   // /review is the one command the composer handles itself, and only where it works: a saved task whose changes can be reviewed.
-  const slashBuiltins = useMemo<SlashItem[]>(() => task && canReview(task) ? [{
+  const slashBuiltins = useMemo<SlashItem[]>(() => task && !snapshot?.remote && canReview(task) ? [{
     name: "review", kind: "builtin", argumentHint: "[turn|branch]", description: desktopCodeExtensionsCopy[language].slashReviewDescription,
-  }] : [], [task, language]);
+  }] : [], [task, language, snapshot?.remote]);
   const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus(), builtins: slashBuiltins });
 
   function changeSaveHistory(value: boolean) {
@@ -997,7 +998,7 @@ ${text}` : text;
           {canShowTerminal && <button className="icon" type="button" aria-label={desktopTerminalCopy[language].title}
             aria-expanded={terminalOpen} aria-controls={terminalOpen ? "code-terminal-panel" : undefined}
             onClick={() => setTerminalPanel(!terminalOpen)}><SquareTerminal size={18} /></button>}
-          {surface === "code" && snapshot?.project && snapshot.draftNamespace && !busy &&
+          {surface === "code" && snapshot?.project && !snapshot.remote && snapshot.draftNamespace && !busy &&
             <GitPanel key={"git:" + snapshot.draftNamespace + (task?.id ?? "new")} language={language} onVisibilityChange={setGithubDialogOpen} disabled={Boolean(busy)}
               models={snapshot.models ?? []} defaultModelId={selectedModel?.id} />}
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
@@ -1035,14 +1036,15 @@ ${text}` : text;
         }}>
           <div className="content">
             {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined} insertReview={surface === "code" ? insertIntoDraft : undefined}
+              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined} insertReview={surface === "code" && !snapshot?.remote ? insertIntoDraft : undefined}
               engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
                 onClick={(event) => void openCodeProject(event.currentTarget)}>
                 <Folder size={19} /> {snapshot?.project ?? copy.openFolder} <ChevronDown size={14} /></button>
-                {snapshot?.project && <span>{copy.localProject}</span>}
+                {snapshot?.project && !snapshot.remote && <span>{copy.localProject}</span>}
               </div>
+              {snapshot?.remoteEnabled && <RemoteProjectPicker language={language} disabled={Boolean(busy)} />}
             </section>}
           </div>
         </div>
@@ -1056,6 +1058,7 @@ ${text}` : text;
           {task && surface === "code" && <SubagentPanel task={task} language={language} />}
           {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
+          {snapshot?.remote && <RemoteProjectStatus language={language} remote={snapshot.remote} />}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>
             {needsCodeProject && <span>{codeStatus}</span>}
@@ -1102,7 +1105,7 @@ ${text}` : text;
               <PromptAttachmentChips scope={attachmentScope} language={language} disabled={Boolean(busy)} />
             </div>
             <div className="composer-actions">
-              {snapshot?.draftNamespace && <details className="model-menu code-attach-menu">
+              {snapshot?.draftNamespace && !snapshot.remote && <details className="model-menu code-attach-menu">
                 <summary className="icon" aria-label={copy.attachReferences}><Plus size={18} /></summary>
                 <div className="model-popover">
                   <button className="soft" type="button" disabled={busy || pausedForInput || codeReferences.length >= MAX_CODE_REFERENCES}
@@ -1311,6 +1314,7 @@ function Approval() {
         <br />{desktopParallelCopy[language].approvalFolder}: <code>{request.task.folder}</code>
       </p>}
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
+      {request.remote && <RemoteApprovalNote language={language} remote={request.remote} />}
       {request.explanation && <p>{request.explanation}</p>}
       {request.origin && <ApprovalOrigin origin={request.origin} language={language} />}
       {request.web && <section aria-label={engineCopy.approvalWebHeading}>
