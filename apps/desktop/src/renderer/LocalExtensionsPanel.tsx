@@ -32,8 +32,11 @@ export function LocalExtensionsPanel({ language }: { language: Language }) {
   }, []);
   useEffect(() => {
     alive.current = true;
-    window.desktop.localExtensions({ type: "list" }).then((next) => { if (alive.current) setView(next); }, () => { if (alive.current) setFailed(true); });
-    return () => { alive.current = false; };
+    const load = () => window.desktop.localExtensions({ type: "list" }).then((next) => { if (alive.current) setView(next); }, () => { if (alive.current) setFailed(true); });
+    void load();
+    // A plugin was installed, updated, removed or switched: its hooks and servers come or go.
+    window.addEventListener("tomverse-plugins-changed", load);
+    return () => { alive.current = false; window.removeEventListener("tomverse-plugins-changed", load); };
   }, []);
 
   const stateLabel = (state: LocalMcpServer["state"] | LocalHook["state"]) => state === "ready" ? copy.stateReady
@@ -57,7 +60,7 @@ export function LocalExtensionsPanel({ language }: { language: Language }) {
       <ul aria-label={copy.mcpHeading}>
         {view.mcp.map((server) => <li key={`${server.id}-${server.hash}`} data-testid="local-mcp-server">
           <div className="local-extension-summary">
-            <strong>{server.name}</strong> · <span>{server.scope === "project" ? copy.scopeProject : copy.scopeUser}</span> · <span role="status">{stateLabel(server.state)}</span>
+            <strong>{server.name}</strong> · <span>{server.plugin ? copy.scopePlugin.replace("{plugin}", server.plugin) : server.scope === "project" ? copy.scopeProject : copy.scopeUser}</span> · <span role="status">{stateLabel(server.state)}</span>
             <p><code>{server.summary}</code></p>
             {server.state === "pending_approval" && <p className="desktop-connector-help">{copy.approveNote}</p>}
             {checkText(server.id) && <p role="status" className="desktop-connector-help">{checkText(server.id)}</p>}
@@ -78,7 +81,7 @@ export function LocalExtensionsPanel({ language }: { language: Language }) {
       <ul aria-label={copy.hooksHeading}>
         {view.hooks.map((hook) => <li key={hook.hash} data-testid="local-hook">
           <div className="local-extension-summary">
-            <strong>{hook.event}{hook.matcher ? ` [${hook.matcher}]` : ""}</strong> · <span>{hook.scope === "project" ? copy.scopeProject : copy.scopeUser}</span> · <span role="status">{stateLabel(hook.state)}</span>
+            <strong>{hook.event}{hook.matcher ? ` [${hook.matcher}]` : ""}</strong> · <span>{hook.plugin ? copy.scopePlugin.replace("{plugin}", hook.plugin) : hook.scope === "project" ? copy.scopeProject : copy.scopeUser}</span> · <span role="status">{stateLabel(hook.state)}</span>
             <p><code>{hook.command}</code></p>
             <p className="desktop-connector-help">{hook.source}</p>
             {hook.state === "pending_approval" && <p className="desktop-connector-help">{copy.approveNote}</p>}

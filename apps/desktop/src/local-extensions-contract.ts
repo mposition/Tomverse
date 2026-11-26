@@ -30,6 +30,8 @@ export type LocalMcpServer = {
   summary: string;
   hash: string;
   state: "ready" | "pending_approval" | "disabled" | "unsupported";
+  /** The plugin it came from (its scope is "project": it waits for approval like a project's own). */
+  plugin?: string;
 };
 
 export type LocalHook = {
@@ -41,6 +43,7 @@ export type LocalHook = {
   /** The file name the hook came from, never its folder. */
   source: string;
   state: "active" | "pending_approval" | "disabled";
+  plugin?: string;
 };
 
 export type LocalExtensionsView = {

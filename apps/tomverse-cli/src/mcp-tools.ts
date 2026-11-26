@@ -15,7 +15,7 @@ export const createMcpTools = (manager: McpManager, ctx: ToolContext): ToolSet =
     const clean = (text: string) => ctx.redactText?.(text) ?? text;
     for (const info of manager.tools()) {
         tools[info.name] = tool({
-            description: `Tool "${info.tool}" of the MCP server "${info.server}" (${info.scope === "project" ? "from this project's .mcp.json" : "set up by the user"}). The user approves each call. ${info.description}`.slice(0, 1800),
+            description: `Tool "${info.tool}" of the MCP server "${info.server}" (${info.plugin ? `from the plugin ${info.plugin}, approved by the user` : info.scope === "project" ? "from this project's .mcp.json" : "set up by the user"}). The user approves each call. ${info.description}`.slice(0, 1800),
             inputSchema: jsonSchema(info.inputSchema),
             execute: async (input, { toolCallId }) => {
                 const decision = gate(ctx, info.name, toolCallId, input);

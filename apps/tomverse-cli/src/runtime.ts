@@ -238,3 +238,16 @@ export type { HookDef, HookEvent } from "./hooks.js";
 export { openProjectTrust, mcpGate, hookGate } from "./project-trust.js";
 export type { ProjectTrust as ExtensionTrust } from "./project-trust.js";
 export { tomverseHome } from "./config.js";
+
+// Plugins (see plugin-manager.ts): Desktop lists, installs, updates and removes them; the main process confirms what was shown.
+export { PluginError } from "./plugin-fs.js";
+export { stagePlugin, commitStaged, discardStaged, removePlugin, listInstalledPlugins } from "./plugin-manager.js";
+export type { StagedPlugin, StageResult, InstalledPlugin, PluginRequest } from "./plugin-manager.js";
+export type { PluginInspection, PluginDiff, HookSummary, McpSummary } from "./plugin-inspect.js";
+export { addMarketplace, refreshMarketplace, removeMarketplace, listMarketplaces, classifyMarketplaceInput } from "./plugin-marketplace.js";
+export type { Catalog, CatalogEntry, MarketplaceListing, MarketplaceInput } from "./plugin-marketplace.js";
+export { setPluginEnabled, setPluginEnabledIn, pluginApproved } from "./plugin-store.js";
+export { forgetPluginTrust } from "./project-trust.js";
+export { readPluginState, rootKey as pluginFolderKey } from "./plugin-store.js";
+export { readMarketplace } from "./plugin-marketplace.js";
+export { maskUrl } from "./plugin-git.js";

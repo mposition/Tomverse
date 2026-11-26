@@ -40,6 +40,8 @@ export type McpToolInfo = {
     inputSchema: Record<string, unknown>;
     scope: McpServerDef["scope"];
     hash: string;
+    /** The plugin the server came from, when it came from one. */
+    plugin?: string;
 };
 
 export type McpCallResult = { isError: boolean; text: string; truncated: boolean };
@@ -188,7 +190,7 @@ export class McpManager {
                 this.byTool.set(name, { connection: c, tool: tool.name });
                 const schema = tool.inputSchema && typeof tool.inputSchema === "object" ? { ...(tool.inputSchema as Record<string, unknown>) } : {};
                 return {
-                    name, server: c.def.id, tool: tool.name, scope: c.def.scope, hash: c.def.hash,
+                    name, server: c.def.id, tool: tool.name, scope: c.def.scope, hash: c.def.hash, ...(c.def.plugin ? { plugin: c.def.plugin } : {}),
                     description: short(`${tool.description ?? ""}`, 1500),
                     inputSchema: { ...schema, type: "object", properties: (schema.properties as Record<string, unknown> | undefined) ?? {} },
                 };

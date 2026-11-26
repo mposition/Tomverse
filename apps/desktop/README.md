@@ -109,6 +109,10 @@ The Tomverse API agent uses MCP servers and hooks defined in files (formats, tru
 
 Settings > Execution and limits > Command sandbox limits what the commands Code runs can change: `workspace-write` (the project folder and a temporary folder), `read-only`, or `off` (the default), with an editable list of sites a command may reach through a filtering proxy. The screen shows what the current operating system really enforces. Windows limits writes only; its network list is advisory. The method, its limits and what it changes on disk are in `docs/ops/desktop-sandbox.md`. The sandbox applies to the Tomverse API path and is read again when each task starts.
 
+## Plugins
+
+**Settings > Execution and limits > Plugins** installs, updates and removes plugins and adds marketplaces (formats, trust and limits: `apps/tomverse-cli/README.md`, "Plugins and marketplaces"). The window sends typed commands only (`plugins-contract.ts`); the folder to install from is chosen in a dialog the main process opens, and only the id of a preview the main process made can be confirmed. An install or update shows a **preview first**: counts, names, and every hook and MCP server command in full (an update also what is added, removed or changed); nothing is installed until **Install**/**Update**. A download from a git address asks in a native dialog first, naming the address. A plugin's hooks and servers appear in "MCP servers and hooks on this computer" with the plugin as their origin and wait for **Approve** (bound to the digest of the plugin's files). Each plugin can be switched off for everything or for the open project.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.
