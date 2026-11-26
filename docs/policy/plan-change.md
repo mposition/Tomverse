@@ -191,6 +191,7 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
   - `customer.subscription.updated`
   - `customer.subscription.pending_update_expired`
   - `subscription_schedule.*`
+  - `invoice.created` (갱신 인보이스만 봅니다 — 10절의 삭제 예약 계정 차단)
 - 자동 billing resync와 **관리자 수동 재동기화** 경로를 제공합니다.
 
 이 보강 없이 플랜 변경을 열면, 결제는 성공했는데 권한이 되돌아가거나 그 반대인
@@ -537,8 +538,25 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   설정 › 플랜에서 해지 예약을 보고 자동 갱신을 다시 켤 수 있습니다. 돈이 잘못 나가는 쪽의
   잔여 위험은 없습니다. 반대 방향 하나 — 응답 없이 끝난 **갱신 재개** 요청이 정리보다 늦게
   적용되는 경우 — 도 그 변경의 `customer.subscription.updated`가 오면 웹훅의 잠금 정리가 다시
-  해지합니다. 남는 창은 Stripe의 늦은 적용과 그 웹훅 처리 사이에 결제기간이 끝나는 경우뿐이며
-  (수 초), 수용합니다. 그 결제는 7일 유예 끝의 영구 삭제나 환불 절차로 정리합니다.
+  해지합니다.
+- **갱신 인보이스 단계의 마지막 차단 (2026-11-27, 운영자 "더 막아 주세요").** 위의 늦은
+  적용과 그 웹훅 처리 사이에 결제기간이 끝나 갱신이 일어나도 청구되지 않습니다. Stripe는
+  갱신 인보이스를 약 1시간 draft로 두고, `invoice.created` 전달이 실패하는 동안 확정을
+  최대 72시간 미룹니다. 웹훅은 `billing_reason: subscription_cycle`인 `invoice.created`마다
+  `stopDeletionPendingRenewal()`(같은 파일, 같은 행 잠금)을 부릅니다.
+  - 계정이 `pending_deletion`이면 구독을 즉시 해지합니다(`prorate: false`,
+    `invoice_now: false`). 해지는 그 구독의 draft · open 인보이스의 자동 청구를 끕니다.
+    구독 인보이스는 삭제할 수 없으므로 이것이 청구를 막는 방법입니다. 떠나려는 계정이라
+    새 기간을 줄 이유가 없고, 유예 끝의 영구 삭제도 어차피 즉시 해지합니다.
+  - 복원이 먼저 커밋됐으면 행이 맞지 않아 갱신은 그대로 진행됩니다.
+  - 실패는 throw → 500 → 재전송이고, 그동안 인보이스는 청구되지 않은 draft로 남습니다.
+    Stripe가 매번 거부할 요청이면 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`도 올립니다.
+  - 그 인보이스가 이미 draft를 벗어났으면(72시간 뒤 강제 확정 등) 운영 사고
+    `ACCOUNT_DELETION_RENEWAL_FINALIZED`를 올립니다. 이미 결제됐으면 해지하지 않고
+    환불 여부를 사람에게 남깁니다.
+  - 다른 인보이스는 바로 통과시킵니다(실패하면 그 인보이스의 확정이 늦어지므로).
+  - **운영 설정 필요:** Stripe 웹훅 endpoint가 `invoice.created`를 구독해야 이 차단이
+    동작합니다(test 모드에서 먼저, 그 다음 live). endpoint 이벤트 추가는 운영자 몫입니다.
 - Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
 - 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
 

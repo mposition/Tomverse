@@ -69,3 +69,79 @@ export async function keepDeletionCancellation(
     { timeout: TRANSACTION_TIMEOUT_MS }
   );
 }
+
+export type DeletionRenewalOutcome = {
+  /** The account was scheduled for deletion when the row lock was taken. */
+  pendingDeletion: boolean;
+  /** This call ended the subscription, so its renewal invoice is never collected. */
+  cancelled: boolean;
+  /** The renewal invoice had already left draft before this call saw it. */
+  invoiceFinalized: boolean;
+};
+
+/**
+ * The last line behind {@link keepDeletionCancellation}: an account scheduled
+ * for deletion whose subscription renewed anyway (a renewal resume Stripe
+ * applied late, then the period ended before its webhook re-cancelled) is never
+ * charged for that renewal (docs/policy/plan-change.md section 10).
+ *
+ * Driven by `invoice.created` for a `subscription_cycle` invoice. Stripe keeps
+ * a renewal invoice in draft for about an hour and holds its finalization (up
+ * to 72 hours) while that webhook fails, so a failure here throws and the
+ * charge waits for the redelivery. Ending the subscription turns off automatic
+ * collection on its draft and open invoices; a subscription invoice cannot be
+ * deleted, so that is what stops the charge.
+ *
+ * Same row lock as above: a restore committed first means the row no longer
+ * matches and the renewal goes ahead, which is what a restored account wants.
+ */
+export async function stopDeletionPendingRenewal({
+  subscriptionId,
+  invoiceId,
+}: {
+  subscriptionId: string;
+  invoiceId: string;
+}): Promise<DeletionRenewalOutcome> {
+  return prisma.$transaction(
+    async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "User"
+        WHERE "stripeSubscriptionId" = ${subscriptionId}
+          AND "accountStatus" = 'pending_deletion'
+        FOR UPDATE`;
+      if (rows.length === 0) {
+        return { pendingDeletion: false, cancelled: false, invoiceFinalized: false };
+      }
+
+      const stripe = getStripe();
+      const invoice = await stripe.invoices.retrieve(invoiceId, {}, {
+        timeout: STRIPE_REQUEST_TIMEOUT_MS,
+      });
+      const invoiceFinalized = invoice.status !== "draft";
+      // A renewal that was already paid is a refund for a person to decide,
+      // not something to cancel over: ending the subscription now would take
+      // the period the customer just paid for and still leave the charge.
+      if (invoice.status === "paid") {
+        return { pendingDeletion: true, cancelled: false, invoiceFinalized };
+      }
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, {
+        timeout: STRIPE_REQUEST_TIMEOUT_MS,
+      });
+      if (subscription.status === "canceled") {
+        return { pendingDeletion: true, cancelled: false, invoiceFinalized };
+      }
+      await stripe.subscriptions.cancel(
+        subscriptionId,
+        { prorate: false, invoice_now: false },
+        { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+      );
+      console.warn("billing.subscription.deletion_renewal_stopped", {
+        userId: rows[0]!.id,
+        subscriptionId,
+        invoiceId,
+      });
+      return { pendingDeletion: true, cancelled: true, invoiceFinalized };
+    },
+    { timeout: TRANSACTION_TIMEOUT_MS }
+  );
+}

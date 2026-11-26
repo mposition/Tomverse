@@ -14,9 +14,19 @@ const count = (source, needle) => source.split(needle).length - 1;
 test("one locked reconciler turns a deletion's cancellation back on", () => {
   const reconciler = readFileSync("lib/deletionCancellation.ts", "utf8");
   // The account row is locked across the check and the Stripe write, so a
-  // restore (and the customer's renewal resume after it) waits for it.
-  assert.equal(count(reconciler, "FOR UPDATE`;"), 1);
+  // restore (and the customer's renewal resume after it) waits for it. The
+  // renewal-invoice stop takes the same lock.
+  assert.equal(count(reconciler, "FOR UPDATE`;"), 2);
   assert.equal(count(reconciler, "cancel_at_period_end: true"), 1);
+  assert.equal(count(reconciler, "stripe.subscriptions.cancel("), 1);
+});
+
+test("a renewal invoice of an account pending deletion is stopped from invoice.created", () => {
+  const webhook = readFileSync("lib/stripeWebhookProcessing.ts", "utf8");
+  assert.equal(count(webhook, 'case "invoice.created":'), 1);
+  assert.equal(count(webhook, "await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });"), 1);
+  // Only renewals: Stripe holds any invoice's finalization while this event fails.
+  assert.equal(count(webhook, 'invoice.billing_reason !== "subscription_cycle"'), 1);
 });
 
 test("the webhook, the deletion flow and the resume route all go through it", () => {

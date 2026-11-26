@@ -18,7 +18,10 @@ import { promotionRiskIdentifierCutoff } from "@/lib/billingPromotionCore";
 import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { getStripe } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
-import { keepDeletionCancellation } from "@/lib/deletionCancellation";
+import {
+  keepDeletionCancellation,
+  stopDeletionPendingRenewal,
+} from "@/lib/deletionCancellation";
 import {
   analyticsAttributionFromMetadata,
   recordProductAnalyticsEvent,
@@ -250,6 +253,52 @@ async function reconcileDeletionCancellation(
       error,
       severity: "error",
       context: { component: "stripe-webhook", subscriptionId: subscription.id },
+    }).catch(() => {});
+  }
+}
+
+/**
+ * A renewal invoice for an account scheduled for deletion is never collected
+ * (lib/deletionCancellation.ts `stopDeletionPendingRenewal`). Only
+ * `subscription_cycle` invoices are looked at; every other invoice returns at
+ * once, because Stripe holds an invoice's finalization while its
+ * `invoice.created` delivery fails.
+ *
+ * A failure throws: the route answers 500, Stripe redelivers, and the renewal
+ * stays an uncharged draft meanwhile. A renewal that had already been paid,
+ * and a refusal Stripe will repeat on every redelivery, are reported for a
+ * person as well.
+ */
+async function handleRenewalInvoiceCreated(invoice: Stripe.Invoice) {
+  if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) return;
+  const subscriptionId = subscriptionIdFromEventObject("invoice.created", invoice);
+  if (!subscriptionId) return;
+  let outcome;
+  try {
+    outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
+  } catch (error) {
+    if ((error as { type?: unknown })?.type === "StripeInvalidRequestError") {
+      await reportOperationalIncident({
+        code: "ACCOUNT_DELETION_RENEWAL_STOP_FAILED",
+        title: "A renewal invoice of an account scheduled for deletion could not be stopped",
+        error,
+        severity: "error",
+        context: { component: "stripe-webhook", subscriptionId, invoiceId: invoice.id },
+      }).catch(() => {});
+    }
+    throw error;
+  }
+  if (outcome.pendingDeletion && outcome.invoiceFinalized) {
+    await reportOperationalIncident({
+      code: "ACCOUNT_DELETION_RENEWAL_FINALIZED",
+      title: "An account scheduled for deletion has a renewal invoice that was already finalized",
+      severity: "error",
+      context: {
+        component: "stripe-webhook",
+        subscriptionId,
+        invoiceId: invoice.id,
+        subscriptionCancelled: outcome.cancelled,
+      },
     }).catch(() => {});
   }
 }
@@ -1054,6 +1103,9 @@ export async function processStripeEvent(event: Stripe.Event) {
         event.data.object as Stripe.Subscription,
         new Date()
       );
+      break;
+    case "invoice.created":
+      await handleRenewalInvoiceCreated(event.data.object as Stripe.Invoice);
       break;
     default:
       // Everything that means "this subscription may have moved" -- including
