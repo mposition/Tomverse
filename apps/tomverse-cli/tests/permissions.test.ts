@@ -351,10 +351,27 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
         // Quoting forms and globs that still spell the word for the shell, and a program name hidden behind a wrapper.
         "git $'push' origin main", "git $\"push\"", "gi$''t push", "env gi$''t push", "/usr/bin/gi? push", "git pus[h] origin", "git {push,} origin",
         "git fetch-pack x", "git up",
+        // A line continued over a line break, and a new name for a command.
+        "gi\\\nt push", "git pu\\\nsh origin", "alias g=git; g push", "function g { git @args }; g push", "Set-Alias g git; g push", "g() { git \"$@\"; }; g push",
+        ". ./deploy-env.sh",
     ];
     for (const line of hidden) {
         assert.equal(egress(line), "egress_command", line);
         for (const mode of ["auto_review", "allow_all"] as const) assert.equal(kindOf(shellView(line), mode, [rule("allow", "run_command", "git")]), "human", line);
+    }
+    // A shell started from an argument list is handed a line too, and that line is read the same way.
+    for (const argv of [
+        ["bash", "-c", "git p''ush"], ["sh", "-c", "git pu\"\"sh origin main"], ["cmd", "/c", "git pu^sh"], ["powershell", "-Command", "git pu`sh"],
+        ["env", "bash", "-c", "git $'push'"], ["sudo", "sh", "-c", "$tool push"], ["bash", "-c", "cd x; git up"], ["pwsh", "-enc", "ZwBpAHQA"],
+        // Without a shell the words are literal, and a subcommand that is not known to stay local (a repository alias) still asks.
+        ["git", "up"], ["env", "git", "up"],
+    ]) {
+        const view = argvView(...argv);
+        assert.equal(checkBoundaries(view)?.code, "egress_command", argv.join(" "));
+        for (const mode of ["auto_review", "allow_all"] as const) assert.equal(kindOf(view, mode, [rule("allow", "run_command", "bash"), rule("allow", "run_command", "sh")]), "human", argv.join(" "));
+    }
+    for (const argv of [["bash", "-c", "npm test"], ["bash", "build.sh"], ["sh", "-c", "git status"]]) {
+        assert.equal(checkBoundaries(argvView(...argv))?.code, undefined, argv.join(" "));
     }
     // Ordinary lines with variables, quotes and paths are not caught: a variable after a local subcommand is only its argument.
     const plain = [

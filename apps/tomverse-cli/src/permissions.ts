@@ -139,11 +139,22 @@ const subjectOf = (view: ApprovalView): Subject => {
         // Words of every part of the line: what a deny or ask rule and the egress check read. A shell line is read twice,
         // once with quotes as spaces and once with quotes and escape characters removed, because a shell joins what they
         // split: empty quotes, a backslash, a caret or a backtick inside `push` all still run `push`.
-        const shellParts = plan.mode === "argv" ? [] : text.split(/[;&|\n\r]+/);
+        // An argument list that starts a shell (`bash -c "..."`, `cmd /c ...`, `env sh -c ...`) hands it a line to run:
+        // what follows the shell is read as shell lines, exactly as a line typed for a shell is.
+        const list = given ?? [plan.file, ...plan.args];
+        const shellAt = plan.mode === "argv" ? list.findIndex((word) => SHELL_PROGRAMS.has(programName(word))) : -1;
+        // A line a shell continues over a line break (a backslash, a backtick or a caret before the break) is one line.
+        const shellLine = (line: string) => line.replace(/[\\`^]\r?\n/g, "").split(/[;&|\n\r]+/);
+        const shellParts = plan.mode === "argv"
+            // An argument list is one part as it stands. With a shell in it, the shell's own words are that part (so an
+            // encoded command is read with it) and each argument after the shell is a line for it.
+            ? (shellAt < 0 ? [list.join(" ")] : [shellLine(list.slice(shellAt).join(" "))[0]!, ...list.slice(shellAt + 1).flatMap(shellLine)])
+            : shellLine(text);
         const wordsOf = (line: string) => line.split(/\s+/).filter(Boolean);
+        const readTwice = (part: string) => [wordsOf(part.replace(/["'`()]/g, " ")), wordsOf(joinedWords(part))];
         const parts = plan.mode === "argv"
-            ? [wordsOf(text.replace(/["'`()]/g, " "))]
-            : shellParts.flatMap((part) => [wordsOf(part.replace(/["'`()]/g, " ")), wordsOf(joinedWords(part))]);
+            ? [wordsOf(text.replace(/["'`()]/g, " ")), ...(shellAt < 0 ? [] : shellParts.flatMap(readTwice))]
+            : shellParts.flatMap(readTwice);
         const broad = parts.flatMap((words) => {
             const first = words[0];
             return first ? [words, [programName(first), ...words.slice(1)]] : [];
@@ -304,7 +315,9 @@ const egressReason = (subject: Extract<Subject, { kind: "command" }>) => {
 /** Programs that send something out only with a particular subcommand: their arguments decide. */
 const SUBCOMMAND_PROGRAMS = new Set(EGRESS_COMMANDS.map((command) => command[0]!));
 /** Words that run the text they are given as a command. */
-const TEXT_RUNNERS = new Set(["eval", "iex", "invoke-expression"]);
+const TEXT_RUNNERS = new Set(["eval", "iex", "invoke-expression", "source", "."]);
+/** Words that make a new command name in the shell: after them a plain word may run anything. */
+const NAME_DEFINERS = new Set(["alias", "function", "doskey", "set-alias", "new-alias", "sal", "nal"]);
 /** Words that start another command from their own arguments: what follows them is a command line again. */
 const COMMAND_WRAPPERS = new Set([
     "env", "command", "builtin", "exec", "sudo", "doas", "nohup", "time", "nice", "timeout", "stdbuf", "setsid", "xargs", "call", "busybox",
@@ -378,6 +391,7 @@ const unreadableReason = (subject: Extract<Subject, { kind: "command" }>) => {
             const name = words[head]!;
             if (!PLAIN_WORD.test(tokens[head]!)) return "The program it starts is not written as a plain name, so what it runs cannot be read from the text.";
             if (TEXT_RUNNERS.has(name)) return `It uses ${name} to run text as a command, so what it sends cannot be read from the text.`;
+            if (NAME_DEFINERS.has(name)) return `It uses ${name} to give a command another name, so what later words run cannot be read from the text.`;
             if (SHELL_PROGRAMS.has(name) && ENCODED_COMMAND.test(raw)) return `It starts ${name} on an encoded command, so what it sends cannot be read from the text.`;
             if (COMMAND_WRAPPERS.has(name) && tokens.slice(head + 1).some((token) => !PLAIN_WORD.test(token))) {
                 return `It uses ${name} to start a command from text a shell changes when it runs, so what it sends cannot be read from the text.`;
