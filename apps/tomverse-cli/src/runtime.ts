@@ -18,6 +18,12 @@ export type { WorkspaceReference } from "./workspace.js";
 export { resolveEndpoint, DEFAULT_ENDPOINT } from "./config.js";
 export type { Endpoint } from "./config.js";
 export { ApprovalMemory } from "./approvals.js";
+export { PermissionGate, PERMISSION_MODES, DEFAULT_PERMISSION_MODE, isPermissionMode, checkBoundaries, evaluate, ruleProblem, describeRule, ruleForApproval, RULE_TOOLS } from "./permissions.js";
+export type { PermissionMode, PermissionRule, ScopedRule, RuleEffect, RuleScope, Boundary, BoundaryCode, PolicyNote, GateResult } from "./permissions.js";
+export { PermissionRuleStore, RuleFileError } from "./permission-rules.js";
+export type { ProjectTrust } from "./permission-rules.js";
+export { browserAgentReply, browserAgentRequest, elementPickId } from "./browser-tools.js";
+export type { BrowserAgentReply, BrowserAgentRequest, BrowserApproval } from "./browser-tools.js";
 export { viewChange, viewChanges, renderChange, undoChange, canUndoChange, UndoError } from "./changes.js";
 export { safeText, safeLine } from "./display.js";
 export type { Output } from "./display.js";
@@ -26,9 +32,11 @@ export { currentDigest } from "./patch.js";
 export type { PlannedEdit } from "./patch.js";
 export { estimateTokens } from "./agent.js";
 export { SUBAGENT_LIMITS } from "./subagent.js";
+export { ORCHESTRATION_BOUNDS, ORCHESTRATION_DEFAULTS, describeOrchestration, normalizeOrchestration } from "./orchestrate-config.js";
+export type { OrchestrationLimits } from "./orchestrate-config.js";
 export { RewindError, forkSession, historyBlockReason, listTurns, planRewind, rewindSession } from "./rewind.js";
 export type { RewindCommand, RewindFile, RewindMode, RewindOutcome, RewindPlan, RewindTurn } from "./rewind.js";
-export type { SubagentRecord, CheckpointRecord, RewindRecord } from "./session.js";
+export type { SubagentRecord, SubtaskRecord, CheckpointRecord, RewindRecord } from "./session.js";
 export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
 
 /**
@@ -69,6 +77,7 @@ export const createSession = (
         readOnly: boolean;
         limits: SessionState["limits"];
         goal?: SessionState["goal"];
+        orchestrate?: SessionState["orchestrate"];
         sessionId?: string;
         codeContinuation?: SessionState["codeContinuation"];
         codeMode?: SessionState["codeMode"];
@@ -97,6 +106,7 @@ export const createSession = (
             },
             limits: options.limits,
             ...(options.goal ? { goal: options.goal } : {}),
+            ...(options.orchestrate ? { orchestrate: options.orchestrate } : {}),
         },
         io,
         options.sessionId,
@@ -178,6 +188,10 @@ export const sessionCost = async (gateway: Gateway, journal: Journal, catalog?: 
 };
 
 export { readProjectInstructions, readInstructions, NestedInstructions } from "./instructions.js";
+export { discoverExtensions, expandInvocation, slashEntries, ExtensionError } from "./extensions.js";
+export type { ExtensionRegistry, SlashEntry, Invocation } from "./extensions.js";
+export { collectImport, applyImport } from "./extension-import.js";
+export type { ImportItem, ImportResult } from "./extension-import.js";
 
 /**
  * After a crash: what the journal says was under way. A write whose end was
@@ -203,6 +217,12 @@ export const reconcile = (journal: Journal) => {
         record.endedAt ??= new Date().toISOString();
         notes.push(`Subagent ${record.id} (${record.kind}: ${record.task.slice(0, 80)}) was running when the CLI stopped; what it did is not known.`);
     }
+    for (const record of (journal.state.subtasks ?? []).filter((r) => r.state === "queued" || r.state === "running" || r.state === "verifying")) {
+        record.state = "failed";
+        record.reason ??= "The CLI stopped while this subtask was under way.";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Subtask ${record.id} (${record.title.slice(0, 80)}) was under way when the CLI stopped; its result is not known.`);
+    }
     for (const tool of journal.state.tools.filter((t) => t.state === "started")) {
         notes.push(`${tool.toolName} (${tool.toolCallId}) had started and its outcome is unknown; it was not run again.`);
     }
@@ -215,3 +235,29 @@ export function hasUnconfirmedToolOutcome(tool: SessionState["tools"][number]): 
     const result = tool.output as { processTreeChecked?: boolean; residualProcesses?: number[] } | undefined;
     return tool.state === "started" || result?.processTreeChecked === false || Boolean(result?.residualProcesses?.length);
 }
+
+// MCP servers and hooks (see extensions.ts): Desktop lists them, asks the person about the project's own, and starts them for a task.
+export { startLocalExtensions } from "./local-extensions.js";
+export type { LocalExtensionSetup } from "./local-extensions.js";
+export { loadMcpServers, describeMcpServer, userMcpFile, projectMcpFile } from "./mcp-config.js";
+export type { McpServerDef } from "./mcp-config.js";
+export type { McpServerStatus, McpState } from "./mcp-client.js";
+export { McpManager } from "./mcp-client.js";
+export { loadHooks, HOOK_EVENTS } from "./hooks.js";
+export type { HookDef, HookEvent } from "./hooks.js";
+export { openProjectTrust, mcpGate, hookGate } from "./project-trust.js";
+export type { ProjectTrust as ExtensionTrust } from "./project-trust.js";
+export { tomverseHome } from "./config.js";
+
+// Plugins (see plugin-manager.ts): Desktop lists, installs, updates and removes them; the main process confirms what was shown.
+export { PluginError } from "./plugin-fs.js";
+export { stagePlugin, commitStaged, discardStaged, removePlugin, listInstalledPlugins } from "./plugin-manager.js";
+export type { StagedPlugin, StageResult, InstalledPlugin, PluginRequest } from "./plugin-manager.js";
+export type { PluginInspection, PluginDiff, HookSummary, McpSummary } from "./plugin-inspect.js";
+export { addMarketplace, refreshMarketplace, removeMarketplace, listMarketplaces, classifyMarketplaceInput } from "./plugin-marketplace.js";
+export type { Catalog, CatalogEntry, MarketplaceListing, MarketplaceInput } from "./plugin-marketplace.js";
+export { setPluginEnabled, setPluginEnabledIn, pluginApproved } from "./plugin-store.js";
+export { forgetPluginTrust } from "./project-trust.js";
+export { readPluginState, rootKey as pluginFolderKey } from "./plugin-store.js";
+export { readMarketplace } from "./plugin-marketplace.js";
+export { maskUrl } from "./plugin-git.js";

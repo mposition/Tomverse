@@ -2,12 +2,15 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
-  type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
+  startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
+import { tomverseHome } from "../../../tomverse-cli/src/config.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
+import type { TerminalReadReply, TerminalReadRequest } from "../../../tomverse-cli/src/terminal-read.js";
+import { discoverForRuntime, slashPromptFor } from "./code-extensions";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
@@ -23,25 +26,38 @@ import { nativePatches, openNativeEdits, verifiedContinuationEdits } from "./nat
 import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
+import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
+import { createReviewWorker } from "./review-worker";
+import { createGitDraftWorker } from "./git-draft-worker";
+import { startCodeSandbox } from "./code-sandbox";
+import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 type PluginRequest = Extract<WorkerEvent, { type: "code-plugin" }>;
 type PluginResponse = Extract<WorkerCommand, { type: "code-plugin-result" }>;
+import { readAgentGitSwitch } from "./git-agent-switch";
+import type { GitToolAction } from "../../../tomverse-cli/src/git-tools.js";
+import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
 type ActiveRun = {
   runId: string;
   cancelled: boolean;
   abort: AbortController;
   runner?: Runner;
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
+  browserAgent?: Map<string, (reply: unknown) => void>;
+  terminalRead?: { requestId: string; settle: (reply: TerminalReadReply | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
+  gitRequest?: { requestId: string; settle: (result: AgentGitResult | null) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
   queueOperation?: (operation: QueueOperation) => boolean;
   /** Sends the task to the window again (a background command printed something or ended). */
   refresh?: () => void;
-  approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
+  approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void; /** The subtask or subagent that asked, when one did. */ origin?: string };
 };
 let active: ActiveRun | undefined;
+/** What the main process last said: the permission mode and where the user's rules are. Ask until it says otherwise. */
+let permissionSetting: { mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string } | undefined;
 let recovery: { requestId: string; abort: AbortController } | undefined;
 let transient: { journal: Journal; scopeHome: string } | undefined;
 const send = (event: WorkerEvent) => parent.postMessage(event);
@@ -557,11 +573,16 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
     ...(view.web ? { web: { url: clean(view.web.url), host: clean(view.web.host) } } : {}),
+    ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
+      selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
+      ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
+    ...(view.mcp ? { mcp: { server: clean(view.mcp.server), tool: clean(view.mcp.tool), scope: view.mcp.scope, args: clean(JSON.stringify(view.input, null, 2) ?? "").slice(0, 4_000) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
       ...(command.background ? { background: true } : {}),
     },
+    ...(view.origin ? { origin: { id: clean(view.origin.id), title: clean(view.origin.title).slice(0, 120) } } : {}),
     files: view.patch?.map((edit) => ({
       path: clean(edit.path), action: edit.action, eol: edit.eol, bom: edit.bom, preimage: edit.preimage,
       postimage: edit.postimage, before: edit.beforeText === null ? null : clean(edit.beforeText),
@@ -584,6 +605,62 @@ function requestBrowserSnapshot(control: ActiveRun, signal: AbortSignal) {
     stop.addEventListener("abort", aborted, { once: true });
     control.browserSnapshot = { requestId, settle };
     send({ type: "browser-snapshot", runId: control.runId, requestId });
+  });
+}
+
+/** One request of the agent's browser tools; the main process answers it (or refuses it) and the runner never touches the page. */
+function requestBrowserAgent(control: ActiveRun, request: BrowserAgentRequest, signal: AbortSignal) {
+  return new Promise<unknown>((resolve) => {
+    // The main process has its own, shorter limits and answers first; these only end a request nobody answers.
+    const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(request.tool === "navigate" ? 40_000 : 30_000)]);
+    if (stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const pending = control.browserAgent ??= new Map();
+    const settle = (reply: unknown) => {
+      stop.removeEventListener("abort", aborted);
+      pending.delete(requestId);
+      resolve(reply);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    pending.set(requestId, settle);
+    send({ type: "browser-agent", runId: control.runId, requestId, request });
+  });
+}
+
+function requestTerminalRead(control: ActiveRun, request: TerminalReadRequest, signal: AbortSignal) {
+  return new Promise<TerminalReadReply | null>((resolve) => {
+    const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(6_000)]);
+    if (control.terminalRead || stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const settle = (reply: TerminalReadReply | null) => {
+      stop.removeEventListener("abort", aborted);
+      control.terminalRead = undefined;
+      resolve(reply);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    control.terminalRead = { requestId, settle };
+    send({ type: "terminal-read", runId: control.runId, requestId, lines: request.lines,
+      ...(request.terminal === undefined ? {} : { terminal: request.terminal }) });
+  });
+}
+
+/** Asks the main process to commit or push. It opens an approval card the agent cannot answer; no time limit, since a person answers it. */
+function requestGitAction(control: ActiveRun, action: GitToolAction, signal: AbortSignal) {
+  return new Promise<AgentGitResult | null>((resolve) => {
+    const stop = AbortSignal.any([signal, control.abort.signal]);
+    if (control.gitRequest || stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const settle = (result: AgentGitResult | null) => {
+      stop.removeEventListener("abort", aborted);
+      control.gitRequest = undefined;
+      resolve(result);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    control.gitRequest = { requestId, settle };
+    send({ type: "git-action", runId: control.runId, requestId, action: action as AgentGitAction });
   });
 }
 
@@ -649,11 +726,13 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     if (task.entries.length > 96) task.entries.splice(1, 1);
   };
   let journal: ReturnType<typeof createSession> | undefined;
+  let extensions: LocalExtensionSetup | undefined;
   let recorded: Journal | undefined;
   let unlockProject: (() => void) | undefined;
   let sourceLock: string | undefined;
   let sourceEdits: Journal | undefined;
   let continuationPrompt: string | undefined;
+  let sandbox: SandboxRuntime | null = null;
   let resumedInstructionSaved = false;
   let catalog: CatalogModel[] | undefined;
   let partial = "";
@@ -780,6 +859,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         codePermission,
         limits: resolveLimits(command.input.limits),
         ...(command.input.goal && command.input.mode === "agent" ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
+        ...(command.input.orchestrate ? { orchestrate: normalizeOrchestration() } : {}),
         ...(continuation && { sessionId: continuation.taskId, codeContinuation: {
           segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap,
         } }),
@@ -799,7 +879,18 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     const instructions = continuation || savedCap !== undefined ? null : readProjectInstructions(workspace);
     if (instructions?.truncated) addEvent(desktopCodeNotice("instructionClipped"));
     publish();
+    const permissionEnv: NodeJS.ProcessEnv = permissionSetting ? { TOMVERSE_HOME: permissionSetting.home } : {};
+    // A managed worktree is a new folder: the project allow rules the person confirmed for the project it was made from cover it too,
+    // as long as the rules in the worktree are exactly the ones that were confirmed.
+    const rulesFor = () => new PermissionRuleStore({ root: workspace.root, env: permissionEnv, trustRoot: command.sourceProject?.path ?? null });
+    // "Allow for this run" is remembered for this run only, as the button says. Rules that last are written by the person
+    // in Settings > Task permissions, never as a side effect of an approval card.
     const memory = new ApprovalMemory();
+    const permissions = new PermissionGate({
+      mode: () => permissionSetting?.mode ?? "ask",
+      rules: () => rulesFor().effective(),
+      protectedDirs: [tomverseHome(permissionEnv), ...protectedRoots(command.protectedRoot)],
+    });
     const output: Output = {
       json: false,
       info: (text) => { addEvent(text); publish(); },
@@ -820,6 +911,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         if (event.type === "follow_up_included" && typeof event.text === "string") {
           task.pendingFollowUp = undefined;
           task.entries.push({ role: "user", text: clean(event.text) });
+          if (typeof event.notice === "string") addEvent(event.notice);
           if (task.entries.length > 96) task.entries.splice(1, 1);
           publish();
         }
@@ -830,6 +922,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           return;
         }
+        if (event.type === "subtask_updated" || event.type === "orchestration") control.refresh?.();
         if ((event.type === "goal_check" || event.type === "queued_follow_up_started" || event.type === "subagent_started" || event.type === "subagent_finished") && journal) publish();
         if (event.type === "response" && journal) {
           Object.assign(task, journalApiUsage(journal.state, command.connection.key));
@@ -858,30 +951,57 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       },
     };
     const mode = journal.state.codeMode ?? (journal.state.readOnly ? journal.state.tasks.at(-1)?.plan ? "plan" : "ask" : "agent");
+    if (!usesCodePlugin) {
+      // The person's own MCP servers and hooks, and the project's once approved in Settings; a failing one is reported, never fatal.
+      extensions = await startLocalExtensions({
+        root: workspace.root, sessionId: () => journal!.state.id, home: process.env.TOMVERSE_DESKTOP_EXTENSIONS_HOME,
+        claudeDir: process.env.TOMVERSE_DESKTOP_CLAUDE_DIR, signal: control.abort.signal, startupTimeoutMs: 15_000,
+        connectServers: !journal.state.readOnly && mode !== "plan",
+      }).catch(() => undefined);
+      assertAllowed();
+      for (const server of extensions?.mcp.status() ?? []) {
+        if (server.state === "pending_approval") addEvent(`MCP server ${server.id} is waiting for your approval in Settings.`);
+        else if (server.state === "failed" || server.state === "needs_auth") addEvent(`MCP server ${server.id} is not available: ${server.detail ?? server.state}`);
+      }
+    }
+    // The folder commands may write is the one the agent works in: for a task in a managed worktree, that worktree.
+    sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
+    if (sandbox && !sandbox.enforcement.available) addEvent(desktopCodeNotice("sandboxUnavailable"));
     control.runner = new Runner({
-      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch,
+      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), sandboxed: sandbox?.enforcement.available === true, permissions,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
+      ...(extensions ? { mcp: extensions.mcp, lifecycleHooks: extensions.hooks } : {}),
       backgroundCommands: true,
       images: true,
       subagents: true,
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
       nestedInstructions: !continuation && savedCap === undefined,
+      // Skills and agent definitions are folder contents like the instruction files: a capped continuation sends none of them.
+      // Installed plugins are read from the same Tomverse folder the settings screens use (the worker's own environment has no TOMVERSE_HOME).
+      extensions: !continuation && savedCap === undefined ? discoverForRuntime(workspace.root) : undefined,
       memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
-      browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
-        /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
-        ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
+      git: !usesCodePlugin && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
+      // The main process decides which host tools a run gets (the person's settings) and checks every request again; a run that
+      // resumes gets the same tools as one that starts.
+      browserSnapshot: command.browserSnapshot ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
+      browserAgent: command.browserAgent ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
+      terminalRead: command.terminalRead ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
+      expandFollowUp: continuation || savedCap !== undefined ? undefined : (text) => {
+        const slash = slashPromptFor(workspace.root, text);
+        return slash ? { prompt: slash.prompt, notice: slash.notice } : null;
+      },
       prompter: {
         confirm: async () => false,
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -899,7 +1019,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           task.status = "approval";
           publish();
           const action = await new Promise<Decision["action"]>((settle) => {
-            control.approval = { id: request.id, canRemember: request.canRemember, settle };
+            control.approval = { id: request.id, canRemember: request.canRemember, settle, ...(view.origin ? { origin: view.origin.id } : {}) };
             send({ type: "approval", runId: command.runId, request });
           });
           control.approval = undefined;
@@ -935,13 +1055,17 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         send({ type: "follow-up-queued", runId: command.runId, requestId: resumedInstruction.requestId, queued: true });
       } });
     } else {
+      // `/name arguments` of a skill or command stands for its text; the task still shows what the person typed.
+      const slash = continuation ? null : slashPromptFor(workspace.root, command.input.prompt);
+      if (slash) { addEvent(slash.notice); publish(); }
+      const requested = slash?.prompt ?? command.input.prompt;
       const prompt = continuationPrompt ?? (command.input.mode === "plan"
-        ? `Review this request using read-only tools. Return the objective, evidence, assumptions, intended changes, verification and completion criteria as a public plan. Do not make changes.\n\n${command.input.prompt}`
-        : command.input.prompt);
+        ? `Review this request using read-only tools. Return the objective, evidence, assumptions, intended changes, verification and completion criteria as a public plan. Do not make changes.\n\n${requested}`
+        : requested);
       if (sourceEdits) verifiedContinuationEdits(sourceEdits);
-      await control.runner.runTask(prompt, command.input.effort, continuation || references.length
+      await control.runner.runTask(prompt, command.input.effort, continuation || references.length || slash
         ? { visiblePrompt: command.input.prompt, references } : undefined);
-      if (!continuation && command.input.mode === "plan" && !references.length) {
+      if (!continuation && command.input.mode === "plan" && !references.length && !slash) {
         const first = journal.state.messages.find((message) => message.role === "user");
         if (first && first.content === prompt) first.content = command.input.prompt;
         const record = journal.state.tasks[0];
@@ -968,6 +1092,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     clearTimeout(streamTimer);
     // Whatever way the task ended, nothing it started may keep running.
     await control.runner?.stopBackground("task_ended").catch(() => undefined);
+    await extensions?.close().catch(() => undefined);
+    await sandbox?.close().catch(() => undefined);
     task.background = backgroundView(control.runner, clean);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {
@@ -1451,8 +1577,33 @@ function deleteRecordedHistory(command: DeleteRecordedHistory): WorkerEvent {
   }
 }
 
+const reviewWorker = createReviewWorker({
+  open: (command) => openRecordedSession(command),
+  lock: (project) => lockProject(project),
+  busy: () => Boolean(active || recovery),
+  hold: (requestId, abort) => {
+    recovery = { requestId, abort };
+    return () => { if (recovery?.requestId === requestId) recovery = undefined; };
+  },
+  gateway: (connection, signal) => gatewayFor(connection, signal),
+  protectedRoots,
+});
+
+const gitDraftWorker = createGitDraftWorker({
+  lock: (project) => lockProject(project),
+  busy: () => Boolean(active || recovery),
+  hold: (requestId, abort) => {
+    recovery = { requestId, abort };
+    return () => { if (recovery?.requestId === requestId) recovery = undefined; };
+  },
+  gateway: (connection, signal) => gatewayFor(connection, signal),
+  protectedRoots,
+});
+
 parent.on("message", ({ data }: { data: WorkerCommand }) => {
-  if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
+  if (data.type === "permissions") {
+    permissionSetting = { mode: data.mode, home: data.home };
+  } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
     cleanDeletedHistory(data.protectedRoot);
   } else if (data.type === "read-change") {
     let checkoutAvailable = false;
@@ -1486,6 +1637,14 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send(rewindRecorded(data));
   } else if (data.type === "fork-history") {
     send(forkRecorded(data));
+  } else if (data.type === "review-turn-diff") {
+    send(reviewWorker.turnDiff(data));
+  } else if (data.type === "review-revert-hunk") {
+    send(reviewWorker.revertHunk(data));
+  } else if (data.type === "review-run") {
+    void reviewWorker.run(data).then(send);
+  } else if (data.type === "git-draft") {
+    void gitDraftWorker.run(data).then(send);
   } else if (data.type === "delete-history") {
     send(deleteRecordedHistory(data));
   } else if (data.type === "discard-transient") {
@@ -1512,6 +1671,15 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
   } else if (data.type === "stop-background" && active?.runId === data.runId) {
     const runner = active.runner;
     if (runner && /^bg-[0-9a-f]{6}$/.test(data.handle)) void runner.background.stop(data.handle).then(() => active?.refresh?.(), () => undefined);
+  } else if (data.type === "stop-subagent" && active?.runId === data.runId) {
+    // One subtask, or all of them; a question one of them is waiting on is answered "no" so the card does not stay up for a stopped subtask.
+    const runner = active.runner;
+    if (runner && (data.subtask === undefined || /^st-[0-9a-f]{6}$/.test(data.subtask))) {
+      runner.stopSubagents(data.subtask);
+      const asking = active.approval?.origin;
+      if (asking && (data.subtask === undefined || asking === data.subtask)) active.approval?.settle("deny");
+      active.refresh?.();
+    }
   } else if (data.type === "stop" && active?.runId === data.runId) {
     active.cancelled = true;
     active.abort.abort();
@@ -1519,8 +1687,14 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     active.approval?.settle("deny");
   } else if (data.type === "code-plugin-result" && active?.runId === data.runId) {
     if (active.pluginRequest?.requestId === data.requestId) active.pluginRequest.settle(data.result);
+  } else if (data.type === "git-action-result" && active?.runId === data.runId) {
+    if (active.gitRequest?.requestId === data.requestId) active.gitRequest.settle(data.result);
   } else if (data.type === "browser-snapshot-result" && active?.runId === data.runId) {
     if (active.browserSnapshot?.requestId === data.requestId) active.browserSnapshot.settle(data.text);
+  } else if (data.type === "browser-agent-result" && active?.runId === data.runId) {
+    active.browserAgent?.get(data.requestId)?.(data.reply);
+  } else if (data.type === "terminal-read-result" && active?.runId === data.runId) {
+    if (active.terminalRead?.requestId === data.requestId) active.terminalRead.settle(data.reply);
   } else if (data.type === "answer" && active?.runId === data.runId) {
     const approval = active.approval;
     if (!approval || approval.id !== data.decision.id || (data.decision.action === "run" && !approval.canRemember)) return;

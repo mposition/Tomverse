@@ -1,7 +1,8 @@
+import { existsSync } from "node:fs";
 import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { flipFuses, FuseVersion, FuseV1Options } from "@electron/fuses";
 import { packager } from "@electron/packager";
@@ -45,6 +46,24 @@ try {
     desktopName: platform === "linux" ? `${appId}.desktop` : undefined,
   }));
   await cp(host, join(app, "dist", "host"), { recursive: true });
+  // node-pty is a native module: the host bundle leaves it external, and its files are unpacked from the archive so the
+  // operating system can load them. It has no Linux binary; the terminal then runs on pipes instead.
+  const pty = dirname(require.resolve("node-pty/package.json"));
+  const ptyPrebuild = `${platform}-${arch}`;
+  const bundlesPty = existsSync(join(pty, "prebuilds", ptyPrebuild));
+  if (bundlesPty) {
+    await cp(pty, join(app, "node_modules", "node-pty"), {
+      recursive: true,
+      filter: (path) => {
+        const entry = relative(pty, path).replaceAll("\\", "/");
+        if (!entry) return true;
+        if (/\.(?:pdb|map)$|\.test\.js$/.test(entry)) return false;
+        const [top, prebuild] = entry.split("/");
+        if (top === "prebuilds") return !prebuild || prebuild === ptyPrebuild;
+        return ["package.json", "LICENSE", "lib"].includes(top);
+      },
+    });
+  }
   await cp("dist/renderer", join(app, "dist", "renderer"), {
     recursive: true, filter: (path) => basename(path) !== "renderer-notices.md",
   });
@@ -53,6 +72,7 @@ try {
     "Third-party software bundled in Tomverse Desktop.",
     "Desktop host and Code runtime",
     await readFile(`${host}-notices.txt`, "utf8"),
+    ...(bundlesPty ? ["Terminal (node-pty)", await readFile(join(pty, "LICENSE"), "utf8")] : []),
     "Desktop interface",
     await readFile("dist/renderer/renderer-notices.md", "utf8"),
     "Roboto wordmark font",
@@ -71,7 +91,7 @@ try {
     await writeFile(targetIcon, Buffer.concat([header, image]));
   }
   const bundles = await packager({
-    dir: app, out, platform, arch, asar: true, prune: false, name,
+    dir: app, out, platform, arch, asar: bundlesPty ? { unpackDir: "node_modules/node-pty" } : true, prune: false, name,
     appBundleId: appId, executableName: name,
     electronVersion,
     tmpdir: windowsStaging ? stage : undefined,

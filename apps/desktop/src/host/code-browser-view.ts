@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { session, WebContentsView, type BrowserWindow } from "electron";
 import { loopbackBrowserUrl, type BrowserCommand, type BrowserState } from "../browser-contract";
+import { createBrowserDriver } from "./code-browser-driver";
 
 export function createCodeBrowserView(owner: BrowserWindow, origin: string, tab: string, changed: (state: BrowserState) => void) {
   const isolated = session.fromPartition("tomverse-code-browser-" + randomUUID(), { cache: false });
@@ -13,13 +14,18 @@ export function createCodeBrowserView(owner: BrowserWindow, origin: string, tab:
   let closed = false;
   let url = "";
   let failed = false;
+  const current = (): BrowserState => ({
+    tab, url, failed, loading: webContents.isLoadingMainFrame(),
+    back: webContents.navigationHistory.canGoBack(), forward: webContents.navigationHistory.canGoForward(),
+  });
   const update = () => {
     if (closed || webContents.isDestroyed()) return;
-    changed({
-      tab, url, failed, loading: webContents.isLoadingMainFrame(),
-      back: webContents.navigationHistory.canGoBack(), forward: webContents.navigationHistory.canGoForward(),
-    });
+    changed(current());
   };
+  // What the agent and the element picker use: the page, its console and its own DevTools session; the panel decides the size.
+  const driver = createBrowserDriver(webContents, tab, {
+    size: () => view.getVisible() ? view.getBounds() : { width: 0, height: 0 }, failed: () => failed,
+  });
   const contentId = webContents.id;
   isolated.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (request, callback) => {
     callback({ cancel: closed || request.webContentsId !== contentId || !loopbackBrowserUrl(request.url, origin) });
@@ -53,6 +59,8 @@ export function createCodeBrowserView(owner: BrowserWindow, origin: string, tab:
 
   return {
     origin,
+    driver,
+    current: () => closed || webContents.isDestroyed() ? null : current(),
     async load(target: string) {
       if (closed || webContents.isDestroyed() || !loopbackBrowserUrl(target, origin)) return;
       url = target;
@@ -102,6 +110,7 @@ export function createCodeBrowserView(owner: BrowserWindow, origin: string, tab:
     },
     close() {
       closed = true;
+      driver.dispose();
       if (!owner.isDestroyed()) owner.contentView.removeChildView(view);
       if (!webContents.isDestroyed()) webContents.close({ waitForBeforeUnload: false });
       void isolated.clearStorageData().catch(() => {});

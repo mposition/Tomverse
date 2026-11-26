@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, realpathSync, rmdirSync, writeFileSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { gitEnv, type WorkspaceReference } from "../../../tomverse-cli/src/workspace.js";
@@ -8,6 +8,7 @@ import { same } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codeWorktreeBase, codeWorktreeCommit, type CodeWorktree, type CodeWorktreeBase } from "../contract";
 import { assertProjectRoot, bindProjectRoot, inProjectFolder, type ProjectRoot } from "./project-root";
+import { resolveProgram } from "./tool-process";
 
 const exec = promisify(execFile);
 const gitOptions = [
@@ -45,21 +46,10 @@ function repoFolder(path: string): string | undefined {
 }
 
 function resolveGit(repo: string) {
-  const env: NodeJS.ProcessEnv = gitEnv();
-  const executable = process.platform === "win32" ? "git.exe" : "git";
-  // Use an absolute executable so Windows does not search the selected project.
-  for (const key of Object.keys(env)) {
-    if (key.toLowerCase() !== "path") continue;
-    for (const entry of (env[key] ?? "").split(delimiter)) {
-      const folder = entry.replace(/^"(.*)"$/, "$1");
-      if (!isAbsolute(folder)) continue;
-      try {
-        const path = realpathSync(join(folder, executable));
-        if (!inProjectFolder(repo, path) && lstatSync(path).isFile()) return path;
-      } catch { /* Try the next configured PATH entry. */ }
-    }
-  }
-  throw new Error("Git is unavailable.");
+  // An absolute executable, so Windows does not search the selected project.
+  const path = resolveProgram("git", gitEnv(), repo);
+  if (!path) throw new Error("Git is unavailable.");
+  return path;
 }
 
 async function git(project: Pick<GitProject, "executable" | "root">, args: string[], timeout = 5_000) {

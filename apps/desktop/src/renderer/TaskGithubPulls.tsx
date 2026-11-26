@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { GitPullRequest, X } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { mobileCopy } from "../../../../locales/mobile";
+import { desktopGitCopy } from "../../../../locales/desktopGit";
 import { githubPullUrl, type PullEvidence, type PullLink } from "../github-pr-contract";
+import { PullRequestView } from "./PullRequestView";
 
 const copy = {
   en: {
     title: "Linked GitHub pull requests", url: "Public GitHub pull request URL", environment: "Target environment",
-    add: "Link and check", refresh: "Check again", open: "Open on GitHub", invalid: "Enter a valid GitHub pull request URL.",
+    add: "Link and check", refresh: "Check again", invalid: "Enter a valid GitHub pull request URL.",
     error: "The pull request could not be saved.", stale: "Status needs a fresh check", checked: "Checked",
     unknown: "Check evidence unavailable", unavailable: "Pull request unavailable or moved", pending: "Required checks pending",
     closed: "Closed without merge", failed: "Current commit has failing checks", conflict: "Merge conflict",
@@ -16,7 +18,7 @@ const copy = {
   },
   ko: {
     title: "연결된 GitHub PR", url: "공개 GitHub PR URL", environment: "대상 환경",
-    add: "연결 및 확인", refresh: "다시 확인", open: "GitHub에서 보기", invalid: "올바른 GitHub PR 주소를 입력하세요.",
+    add: "연결 및 확인", refresh: "다시 확인", invalid: "올바른 GitHub PR 주소를 입력하세요.",
     error: "PR 연결을 저장하지 못했습니다.", stale: "상태를 다시 확인해야 합니다", checked: "확인 시각",
     unknown: "검사 근거 없음", unavailable: "PR을 찾을 수 없거나 이동됨", pending: "필수 검사 대기",
     closed: "병합 없이 닫힘", failed: "현재 커밋의 검사 실패", conflict: "병합 충돌",
@@ -26,7 +28,9 @@ const copy = {
 };
 const evidenceLifetime = 120_000;
 
-export function TaskGithubPulls({ language, onVisibilityChange }: { language: Language; onVisibilityChange: (open: boolean) => void }) {
+export function TaskGithubPulls({ language, onVisibilityChange, scope }: { language: Language; onVisibilityChange: (open: boolean) => void; scope: string }) {
+  const git = desktopGitCopy[language];
+  const [expanded, setExpanded] = useState<string | null>(null);
   const text = language === "ko" ? copy.ko : copy.en;
   const common = mobileCopy[language];
   const dialog = useRef<HTMLDialogElement>(null);
@@ -50,7 +54,8 @@ export function TaskGithubPulls({ language, onVisibilityChange }: { language: La
     try {
       const rows = await window.desktop.taskPulls({ type: "read", link });
       if (!rows.length) throw new Error("Task changed");
-      setNow(Date.now());
+      // The rows were just read, so the newest check time is the present; the clock above keeps it moving.
+      setNow((current) => Math.max(current, ...rows.map((row) => row.checkedAt)));
       setRows(rows);
     } catch { setError(text.error); }
     finally { setPending(false); }
@@ -76,12 +81,12 @@ export function TaskGithubPulls({ language, onVisibilityChange }: { language: La
             {row.merge && <> → <code title={row.merge}>{row.merge.slice(0, 12)}</code></>}
           </small>
           <div className="task-github-actions">
-            <button type="button" className="soft" onClick={() => {
-              void window.desktop.taskPulls({ type: "open", link: { url: row.url, environment: row.environment } }).catch(() => setError(text.error));
-            }}>{text.open}</button>
+            <button type="button" className="soft" aria-expanded={expanded === row.url}
+              onClick={() => setExpanded(expanded === row.url ? null : row.url)}>{expanded === row.url ? git.prHideDetails : git.prDetails}</button>
             <button type="button" className="soft" disabled={pending}
               onClick={() => void read({ url: row.url, environment: row.environment })}>{text.refresh}</button>
           </div>
+          {expanded === row.url && <PullRequestView link={{ url: row.url, environment: row.environment }} language={language} scope={scope} />}
         </li>;
       })}</ul>
       <form onSubmit={(event) => {

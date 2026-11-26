@@ -42,7 +42,7 @@ export const SESSION_SCHEMA_VERSION = 1;
 
 export type GenerationRecord = {
     seq: number;
-    purpose: "agent" | "compact" | "goal" | "subagent";
+    purpose: "agent" | "compact" | "goal" | "subagent" | "review";
     /** The subagent run this request was made for (purpose "subagent"). */
     subagentId?: string;
     idempotencyKey: string;
@@ -89,13 +89,17 @@ export type ApprovalRecord = {
         background?: boolean;
         /** The web page request was approved for this site. */
         host?: string;
+        /** The MCP tool call was approved for this server definition (its hash); a changed definition is not run. */
+        mcp?: { server: string; tool: string; definition: string };
     };
     decision: "approved" | "denied";
-    /** Approved without asking, by an earlier "always" answer in the same process. */
-    by?: "remembered_answer";
-    rule?: "file_edits" | "same_command" | "web_host";
+    /** Decided without asking: by an earlier "always" answer in the same process, or by the permission mode and rules. */
+    by?: "remembered_answer" | "permission_policy";
+    /** What the permission policy decided on (a boundary, a rule, the mode, or an auto review), for either answer. */
+    policy?: import("./permissions.js").PolicyNote;
+    rule?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool";
     /** This answer was "always" for the rest of that process. */
-    remember?: "file_edits" | "same_command" | "web_host";
+    remember?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool";
     decidedAt: string;
 };
 
@@ -139,6 +143,40 @@ export type SubagentRecord = {
     filesChanged?: string[];
     /** The model has been told how it ended after a resume. */
     acknowledged?: boolean;
+    /** Orchestration: the subtask this run belongs to, what it did for it (work or verification) and which attempt it was. */
+    subtask?: string;
+    role?: "work" | "verify";
+    attempt?: number;
+};
+
+/**
+ * One subtask of an orchestrated delegate call (orchestrate.ts): what it was for, which files it could change, how its result was
+ * checked, and how it ended. Its runs are `subagents` records that name it in `subtask`.
+ */
+export type SubtaskRecord = {
+    id: string;
+    toolCallId: string;
+    title: string;
+    kind: "explore" | "worker";
+    agent?: string;
+    /** The write scope a worker declared (workspace-relative files or folders). */
+    paths?: string[];
+    /** The completion criteria the result is checked against. */
+    criteria?: string;
+    /** The check command the subtask declared, as shown to the person. */
+    check?: string;
+    state: "queued" | "running" | "verifying" | "success" | "failed" | "rejected" | "cancelled";
+    reason?: string;
+    attempts: number;
+    requests: number;
+    /** The newest thing the subtask did, one line. Kept in memory between commits. */
+    activity?: string;
+    runIds: string[];
+    filesChanged?: string[];
+    verification?: { state: "passed" | "failed" | "unverified" | "skipped"; reason: string; check?: "passed" | "failed" | "denied" | "error" | "not_run" };
+    startedAt: string;
+    endedAt?: string;
+    epoch: string;
 };
 
 /**
@@ -242,6 +280,8 @@ export type SessionState = {
      * goal continues on its own, at most `maxContinuations` times in a row.
      */
     goal?: { maxContinuations: number };
+    /** Subagent orchestration, chosen when the session started (orchestrate-config.ts). Absent: delegate works as it always did. */
+    orchestrate?: { maxSubagents: number; maxRequests: number };
     usage: { requests: number; activeMs: number };
     messages: ModelMessage[];
     compactions: Array<{ at: string; requestSeq: number; replacedMessages: number }>;
@@ -251,6 +291,7 @@ export type SessionState = {
     changes: ChangeRecord[];
     background?: BackgroundRecord[];
     subagents?: SubagentRecord[];
+    subtasks?: SubtaskRecord[];
     /** One entry per user message, in order. Absent on sessions saved before checkpoints existed (they cannot be rewound or forked). */
     checkpoints?: CheckpointRecord[];
     rewinds?: RewindRecord[];
