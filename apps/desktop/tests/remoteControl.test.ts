@@ -400,3 +400,25 @@ test("a line is cut on a whole character and never carries half of a surrogate p
   assert.ok(wellFormed(remoteText("broken " + face.slice(0, 1) + " title", undefined, 40)));
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(remoteText("x".repeat(9) + face, undefined, 10))));
 });
+
+test("every request to the server carries a number higher than the last, and a refused one counts on from the server's", async (t) => {
+  const s = setup();
+  t.after(s.done);
+  await s.enable();
+  s.setTasks([s.running()]);
+  await s.step();
+  const first = (s.syncs().at(-1)!.body as { seq: number }).seq;
+  assert.ok(Number.isSafeInteger(first) && first > 0);
+  // The server holds a higher number from this PC: the next report goes out above it.
+  s.replies.push({ status: 409, body: { ok: false, code: "STALE_SYNC", seq: first + 5_000_000 } });
+  s.setTasks([s.running({ title: "Another title" })]);
+  await s.step(REMOTE_SLOW_POLL_MS);
+  await s.step(1_500);
+  const later = (s.syncs().at(-1)!.body as { seq: number }).seq;
+  assert.ok(later > first + 5_000_000, `${later} follows the server's number`);
+  // Turning off sends a number above every report, so the server can refuse one that arrives after it.
+  await s.control.command({ action: "set", enabled: false });
+  const off = s.calls.at(-1)!;
+  assert.equal(off.method, "DELETE");
+  assert.ok((off.body as { seq: number }).seq > later);
+});

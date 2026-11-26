@@ -281,6 +281,9 @@ export function createRemoteControl(deps: RemoteControlDeps) {
   /** The sync on the wire now. Turning off and signing out wait for it, so it cannot write the report back after the delete. */
   let running: Promise<void> | null = null;
   let cancelSync: AbortController | null = null;
+  /** The number of the last request to the server. Each is higher than the last, so the server can tell a late one. */
+  let lastSeq = 0;
+  const nextSeq = () => { lastSeq = Math.max(lastSeq + 1, Math.floor(clock())); return lastSeq; };
   let acks: DesktopRemoteAck[] = [];
   const seen = new Set<string>();
   const answered = new Set<string>();
@@ -317,7 +320,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
 
   async function withdraw(account: RemoteAccount, timeoutMs = 3_000) {
     try {
-      const response = await request(account, "DELETE", undefined, timeoutMs);
+      const response = await request(account, "DELETE", { seq: nextSeq() }, timeoutMs);
       await response.body?.cancel().catch(() => {});
     } catch { /* The server deletes the report when it expires, and hides it once the device signs out. */ }
   }
@@ -367,11 +370,18 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     const cancel = new AbortController();
     cancelSync = cancel;
     try {
-      const response = await request(account, "POST", { snapshot, acks: sending }, 10_000, cancel.signal);
+      const response = await request(account, "POST", { seq: nextSeq(), snapshot, acks: sending }, 10_000, cancel.signal);
       if (run !== generation) { await response.body?.cancel().catch(() => {}); return; }
       if (!response.ok) {
-        const detail = await response.json().catch(() => null) as { code?: unknown } | null;
+        const detail = await response.json().catch(() => null) as { code?: unknown; seq?: unknown } | null;
         acks.unshift(...sending);
+        if (response.status === 409 && detail?.code === "STALE_SYNC" && typeof detail.seq === "number" && Number.isSafeInteger(detail.seq)) {
+          // The server holds a higher number from this PC (its clock went back): the next request counts on from there.
+          lastSeq = Math.max(lastSeq, detail.seq);
+          lastSent = null;
+          nextAt = clock() + REMOTE_MIN_GAP_MS;
+          return;
+        }
         if (response.status === 503 && detail?.code === "NOT_AVAILABLE") {
           status = "unavailable";
           pausedUntil = clock() + REMOTE_UNAVAILABLE_MS;

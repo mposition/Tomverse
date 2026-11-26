@@ -101,10 +101,18 @@ const snapshot = (overrides: { remote?: boolean; approval?: null; digest?: strin
   },
 });
 
+// The PC numbers its requests; each helper call takes the next number unless the test names one.
+let seq = Date.now();
 const syncAs = (token: string, body: object, headers: Record<string, string> = {}) =>
   sync.POST(new Request("https://tomverse.test/api/desktop/remote/sync", {
-    method: "POST", body: JSON.stringify(body),
+    method: "POST", body: JSON.stringify({ seq: ++seq, ...body }),
     headers: { "Content-Type": "application/json", Origin: "tomverse://desktop", Authorization: `Bearer ${token}`, ...headers },
+  }));
+
+const withdrawAs = (token: string, body: object = {}) =>
+  sync.DELETE(new Request("https://tomverse.test/api/desktop/remote/sync", {
+    method: "DELETE", body: JSON.stringify({ seq: ++seq, ...body }),
+    headers: { "Content-Type": "application/json", Origin: "tomverse://desktop", Authorization: `Bearer ${token}` },
   }));
 
 const listAs = (session: Session | null, headers: Record<string, string> = {}) => {
@@ -326,14 +334,37 @@ test("reports expire and are deleted; turning off and signing the PC out remove 
   assert.deepEqual((await (await listAs(session)).json()).devices, []);
   assert.deepEqual(await count(), { devices: 0, commands: 0 });
 
-  // Turning remote control off on the PC deletes its report and the answers waiting for it.
+  // Turning remote control off on the PC removes its report and the answers waiting for it. What stays for two minutes
+  // is an empty, hidden marker with the number of that request: a sync the PC sent before it, which arrives after it, is
+  // refused and puts nothing back.
+  const sentEarlier = ++seq;
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  // A report that is not newer than the last one taken changes nothing, also while remote control is on.
+  const outOfOrder = await syncAs(pc.token, { seq: sentEarlier, snapshot: snapshot({ approval: null }), acks: [] });
+  assert.equal(outOfOrder.status, 409);
+  assert.equal((await (await listAs(session)).json()).devices[0].snapshot.approval.id, APPROVAL);
   await commandAs(session, answer(pc.deviceId, { approvalId: APPROVAL }));
-  const withdrawn = await sync.DELETE(new Request("https://tomverse.test/api/desktop/remote/sync", {
+  const withdrawn = await withdrawAs(pc.token);
+  assert.equal(withdrawn.status, 204);
+  const withdrawnSeq = seq;
+  assert.deepEqual(await count(), { devices: 1, commands: 0 });
+  assert.deepEqual((await (await listAs(session)).json()).devices, []);
+  const late = await syncAs(pc.token, { seq: withdrawnSeq - 1, snapshot: snapshot(), acks: [] });
+  assert.equal(late.status, 409);
+  const refusal = await late.json();
+  assert.equal(refusal.code, "STALE_SYNC");
+  assert.equal(refusal.seq, withdrawnSeq);
+  assert.deepEqual((await (await listAs(session)).json()).devices, []);
+  assert.equal((await commandAs(session, answer(pc.deviceId))).status, 404);
+  // The marker outlives the screen's read and maintenance while it is fresh, and goes after two minutes.
+  assert.deepEqual(await purge(), { commands: 0, devices: 0 });
+  await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "withdrawnAt" = now() - interval '3 minutes'`;
+  assert.deepEqual(await purge(), { commands: 0, devices: 1 });
+  // A withdrawal without a number is refused and changes nothing.
+  const unnumbered = await sync.DELETE(new Request("https://tomverse.test/api/desktop/remote/sync", {
     method: "DELETE", headers: { Origin: "tomverse://desktop", Authorization: `Bearer ${pc.token}` },
   }));
-  assert.equal(withdrawn.status, 204);
-  assert.deepEqual(await count(), { devices: 0, commands: 0 });
+  assert.equal(unnumbered.status, 400);
 
   // Signing the PC out revokes its token family: the report is no longer shown and is deleted, and nothing can be sent to it.
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });

@@ -9,6 +9,7 @@ import {
   DESKTOP_REMOTE_COMMAND_TTL_MS,
   DESKTOP_REMOTE_LIMITS,
   DESKTOP_REMOTE_SNAPSHOT_TTL_MS,
+  DESKTOP_REMOTE_WITHDRAWN_MS,
   checkDesktopRemoteCommand,
   desktopRemoteCommand,
   desktopRemoteSnapshot,
@@ -46,7 +47,9 @@ type DeliveredRow = {
 
 /**
  * The PC's sync: replaces its report, records what it did with the answers it last received, and hands it the
- * answers that are waiting, each once. Returns null when the account is not active.
+ * answers that are waiting, each once. Returns null when the account is not active. A report whose number is not
+ * higher than the last one taken from this PC, or than its withdrawal, is not taken: it was sent earlier and arrived
+ * late. The answer then says so, with the number the server holds.
  */
 export async function syncDesktopRemote(identity: DesktopIdentity, body: DesktopRemoteSyncRequest) {
   const snapshot = JSON.stringify(body.snapshot);
@@ -57,14 +60,19 @@ export async function syncDesktopRemote(identity: DesktopIdentity, body: Desktop
     if (!active.length) return null;
     const written = await tx.$executeRaw`
       INSERT INTO "DesktopRemoteDevice" ("deviceId", "userId", "familyId", "snapshot", "revision", "createdAt", "updatedAt", "expiresAt")
-      VALUES (${identity.deviceId}, ${identity.userId}, ${identity.familyId}, ${snapshot}::jsonb, 1, now(), now(),
+      VALUES (${identity.deviceId}, ${identity.userId}, ${identity.familyId}, ${snapshot}::jsonb, ${body.seq}::bigint, now(), now(),
         now() + (${DESKTOP_REMOTE_SNAPSHOT_TTL_MS}::integer * interval '1 millisecond'))
       ON CONFLICT ("deviceId") DO UPDATE SET
-        "familyId" = EXCLUDED."familyId", "snapshot" = EXCLUDED."snapshot", "revision" = "DesktopRemoteDevice"."revision" + 1,
-        "updatedAt" = now(), "expiresAt" = EXCLUDED."expiresAt"
-      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId}
+        "familyId" = EXCLUDED."familyId", "snapshot" = EXCLUDED."snapshot", "revision" = EXCLUDED."revision",
+        "updatedAt" = now(), "expiresAt" = EXCLUDED."expiresAt", "withdrawnAt" = NULL
+      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId} AND EXCLUDED."revision" > "DesktopRemoteDevice"."revision"
     `;
-    if (written !== 1) return null;
+    if (written !== 1) {
+      const held = await tx.$queryRaw<Array<{ seq: string }>>`
+        SELECT "revision"::text AS "seq" FROM "DesktopRemoteDevice" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+      `;
+      return held[0] ? { stale: true as const, seq: Number(held[0].seq) } : null;
+    }
     for (const ack of body.acks) {
       await tx.$executeRaw`
         UPDATE "DesktopRemoteCommand" SET "result" = ${ack.result}, "resultReason" = ${ack.result === "refused" ? ack.reason ?? null : null},
@@ -103,15 +111,29 @@ export async function syncDesktopRemote(identity: DesktopIdentity, body: Desktop
       });
       if (command.success) commands.push(command.data);
     }
-    return { deviceId: identity.deviceId, commands };
+    return { stale: false as const, deviceId: identity.deviceId, commands };
   });
 }
 
-/** The PC turned remote control off (or is signing out): its report and every answer waiting for it go now. */
-export async function withdrawDesktopRemote(identity: Pick<DesktopIdentity, "userId" | "deviceId">) {
-  return prisma.$executeRaw`
-    DELETE FROM "DesktopRemoteDevice" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
-  `;
+/**
+ * The PC turned remote control off (or is signing out): its report and every answer waiting for it go now. What stays
+ * for a short while is an empty, hidden marker with the number of this request, so that a sync the PC sent before it
+ * and that arrives after it is refused instead of putting the report back.
+ */
+export async function withdrawDesktopRemote(identity: DesktopIdentity, seq: number) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      DELETE FROM "DesktopRemoteCommand" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+    `;
+    return tx.$executeRaw`
+      INSERT INTO "DesktopRemoteDevice" ("deviceId", "userId", "familyId", "snapshot", "revision", "createdAt", "updatedAt", "expiresAt", "withdrawnAt")
+      VALUES (${identity.deviceId}, ${identity.userId}, ${identity.familyId}, '{"tasks":[],"approval":null}'::jsonb, ${seq}::bigint, now(), now(), now(), now())
+      ON CONFLICT ("deviceId") DO UPDATE SET
+        "snapshot" = EXCLUDED."snapshot", "revision" = GREATEST("DesktopRemoteDevice"."revision", EXCLUDED."revision"),
+        "updatedAt" = now(), "expiresAt" = now(), "withdrawnAt" = now()
+      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId}
+    `;
+  });
 }
 
 type DeviceRow = { deviceId: string; label: string; snapshot: unknown; updatedMs: number };
@@ -137,7 +159,7 @@ export async function listDesktopRemoteDevices(userId: string): Promise<DesktopR
       WHERE d."id" = r."deviceId" AND d."userId" = r."userId" AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
         AND f."id" = r."familyId" AND f."userId" = r."userId" AND f."revokedAt" IS NULL
         AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
-    ) OR (r."expiresAt" <= now() AND NOT EXISTS (
+    ) OR (r."expiresAt" <= now() AND NOT (r."withdrawnAt" IS NOT NULL AND r."withdrawnAt" > now() - (${DESKTOP_REMOTE_WITHDRAWN_MS}::integer * interval '1 millisecond')) AND NOT EXISTS (
       SELECT 1 FROM "DesktopRemoteCommand" c
       WHERE c."deviceId" = r."deviceId" AND c."approvalId" = r."snapshot"->'approval'->>'id'
     )))
@@ -282,7 +304,7 @@ export async function purgeDesktopRemoteControl() {
   `;
   const devices = await prisma.$executeRaw`
     DELETE FROM "DesktopRemoteDevice" AS r
-    WHERE r."expiresAt" <= now() AND NOT (EXISTS (
+    WHERE r."expiresAt" <= now() AND NOT (r."withdrawnAt" IS NOT NULL AND r."withdrawnAt" > now() - (${DESKTOP_REMOTE_WITHDRAWN_MS}::integer * interval '1 millisecond')) AND NOT (EXISTS (
       SELECT 1 FROM "DesktopRemoteCommand" c
       WHERE c."deviceId" = r."deviceId" AND c."approvalId" = r."snapshot"->'approval'->>'id'
     ) AND EXISTS (

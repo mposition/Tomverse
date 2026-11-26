@@ -13,6 +13,11 @@
 --                         server never applies it. Deleted 15 minutes after
 --                         it was made, and with its device.
 --
+-- "revision" is the number the PC gave the request that wrote the row; a
+-- request whose number is not higher changes nothing. When the PC turns remote
+-- control off, its row becomes an empty marker ("withdrawnAt") kept for two
+-- minutes, so a report it sent earlier and that arrives later is refused.
+--
 -- One exception to both periods: the answer to an approval request is kept
 -- for as long as the PC's report still shows that request, and so is that
 -- report after it expires (hidden, and unable to receive anything), until
@@ -35,10 +40,11 @@ CREATE TABLE "DesktopRemoteDevice" (
     "userId" TEXT NOT NULL,
     "familyId" TEXT NOT NULL,
     "snapshot" JSONB NOT NULL,
-    "revision" INTEGER NOT NULL DEFAULT 1,
+    "revision" BIGINT NOT NULL,
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(3) NOT NULL,
     "expiresAt" TIMESTAMPTZ(3) NOT NULL,
+    "withdrawnAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "DesktopRemoteDevice_pkey" PRIMARY KEY ("deviceId"),
     -- The route validates a 24 KiB body; this is the backstop for any other writer.

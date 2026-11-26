@@ -7216,10 +7216,13 @@ model DesktopRemoteDevice {
   /// The PC's redacted report (lib/desktopRemoteControlContract.ts): task titles, states, a few progress lines and
   /// the summary of the request on its screen. Never file contents, diffs, command output or environment values.
   snapshot  Json
-  revision  Int      @default(1)
+  /// The number of the PC's request that wrote this row. A request with a number that is not higher changes nothing.
+  revision  BigInt
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @db.Timestamptz(3)
   expiresAt DateTime @db.Timestamptz(3)
+  /// Set when the PC turned remote control off: the row is then an empty, hidden marker kept for two minutes.
+  withdrawnAt DateTime? @db.Timestamptz(3)
 
   device   MobileDevice           @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   commands DesktopRemoteCommand[]

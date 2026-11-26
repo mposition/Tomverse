@@ -4292,7 +4292,10 @@ domains:
       diffs, command output or environment values. One row per device, replaced
       on every report and removed when it expires, when the person turns the
       feature off on that PC, or when the device's sign-in is revoked; an
-      account deletion removes it through MobileDevice. One expired row is
+      account deletion removes it through MobileDevice. After the feature is
+      turned off an empty row stays for two minutes, holding no title or line,
+      only the number of that request, so a report sent earlier and arriving
+      later is refused. One expired row is
       kept, hidden, until the device's sign-in ends: the report of a request
       that already has an answer, so the request cannot be answered twice.
       Not part of the account export (owner decision 2026-11-26): the lasting

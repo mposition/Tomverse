@@ -33,6 +33,12 @@ export const DESKTOP_REMOTE_LIMITS = {
 
 /** A Desktop's report stays this long after its last sync; a PC that stops reporting leaves the list. */
 export const DESKTOP_REMOTE_SNAPSHOT_TTL_MS = 3 * 60_000;
+/**
+ * After the PC turned remote control off, the server keeps an empty marker of that for this long, with the number of the
+ * request that did it. A sync the PC had sent before, which reaches the server later, carries a lower number and is
+ * refused, so it cannot put the report back. Longer than any request of the PC can stay on the wire.
+ */
+export const DESKTOP_REMOTE_WITHDRAWN_MS = 2 * 60_000;
 /** A remote answer is handed to the PC only within this window and is never applied after it. */
 export const DESKTOP_REMOTE_COMMAND_TTL_MS = 2 * 60_000;
 /** Answer rows are kept this long after they were made, so the phone can show what became of them, then deleted. */
@@ -121,7 +127,18 @@ export const desktopRemoteAck = z.object({
 }).strict();
 
 /** `POST /api/desktop/remote/sync`, from the PC: what it runs now, and what it did with the answers it last received. */
+/**
+ * The PC numbers its requests, each higher than the last (its clock in milliseconds, or one more than the last number).
+ * The server takes a report only when its number is higher than the last it took from that PC, and than the PC's
+ * withdrawal.
+ */
+export const desktopRemoteSeq = z.int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+/** `DELETE /api/desktop/remote/sync`: the PC turned remote control off, or is signing out. */
+export const desktopRemoteWithdrawRequest = z.object({ seq: desktopRemoteSeq }).strict();
+
 export const desktopRemoteSyncRequest = z.object({
+  seq: desktopRemoteSeq,
   snapshot: desktopRemoteSnapshot,
   acks: z.array(desktopRemoteAck).max(DESKTOP_REMOTE_LIMITS.acks),
 }).strict();
