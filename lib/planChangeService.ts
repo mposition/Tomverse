@@ -28,6 +28,7 @@
  * subscription re-read from Stripe.
  */
 
+import type { Prisma } from "@prisma/client";
 import type Stripe from "stripe";
 import { getBillingPlans, getBillingPlanByTier } from "@/lib/billingConfig";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
@@ -371,11 +372,12 @@ async function pendingRequest(userId: string) {
 /**
  * Queue the confirmation for a change that has just taken one step.
  *
- * Called only from the single write that moved the row (a confirm that turned
- * `previewed` into `pending`, or a settlement whose conditional update matched),
- * which is what makes it once per change: the standard lane does not dedupe by
- * reference. A failure to queue is logged, never thrown -- the change itself
- * has already happened at Stripe and must not be reported as failed.
+ * Written in the same transaction as the conditional update that moved the row
+ * (a confirm that turned `previewed` into `pending`, or a settlement whose
+ * update matched), so the state change and its outbox row commit together or
+ * not at all (docs/policy/email-notifications.md: the record and the email
+ * about it commit together). That single write is also what makes it once per
+ * change -- the standard lane does not dedupe by reference.
  */
 async function enqueuePlanChangeConfirmation({
   templateKey,
@@ -385,6 +387,7 @@ async function enqueuePlanChangeConfirmation({
   toTier,
   billingInterval,
   effectiveAt,
+  tx,
 }: {
   templateKey:
     | typeof PLAN_CHANGE_UPGRADED_TEMPLATE
@@ -395,33 +398,28 @@ async function enqueuePlanChangeConfirmation({
   toTier: string;
   billingInterval: string;
   effectiveAt: Date | null;
+  tx: Prisma.TransactionClient;
 }) {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { email: true, settings: { select: { language: true } } },
-    });
-    if (!user) return;
-    await enqueueStandardEmail({
-      templateKey,
-      emailAddress: user.email,
-      userId,
-      language: user.settings?.language,
-      payload: {
-        fromPlan: fromTier,
-        toPlan: toTier,
-        billingInterval,
-        effectiveAt: effectiveAt ? effectiveAt.toISOString() : null,
-      },
-      referenceType: "PlanChangeRequest",
-      referenceId: requestId,
-    });
-  } catch (error) {
-    console.error("Plan change confirmation email enqueue failed.", {
-      requestId,
-      errorName: error instanceof Error ? error.name : "UnknownError",
-    });
-  }
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: { email: true, settings: { select: { language: true } } },
+  });
+  if (!user) return;
+  await enqueueStandardEmail({
+    tx,
+    templateKey,
+    emailAddress: user.email,
+    userId,
+    language: user.settings?.language,
+    payload: {
+      fromPlan: fromTier,
+      toPlan: toTier,
+      billingInterval,
+      effectiveAt: effectiveAt ? effectiveAt.toISOString() : null,
+    },
+    referenceType: "PlanChangeRequest",
+    referenceId: requestId,
+  });
 }
 
 async function loadAccount(userId: string) {
@@ -710,16 +708,35 @@ export async function confirmPlanChange({
     // quote both reach here (Stripe's idempotency key gives them the same
     // schedule), but only one of them moves the row, and only that one may
     // queue the confirmation email.
-    const moved = await prisma.planChangeRequest.updateMany({
-      where: { id: stored.id, status: "previewed" },
-      data: {
-        status: "pending",
-        pendingForUserId: userId,
-        confirmedAt: new Date(),
-        stripeScheduleId: scheduleId,
-        appliesAt: decision.plan.effectiveAt,
-        renewalDecision: decision.plan.renewal,
-      },
+    // The downgrade is decided now (the schedule is attached), so this is the
+    // moment to confirm it -- in the same transaction as the row moving. An
+    // upgrade is confirmed at settlement instead, because it only happens once
+    // its invoice is paid.
+    const moved = await prisma.$transaction(async (tx) => {
+      const result = await tx.planChangeRequest.updateMany({
+        where: { id: stored.id, status: "previewed" },
+        data: {
+          status: "pending",
+          pendingForUserId: userId,
+          confirmedAt: new Date(),
+          stripeScheduleId: scheduleId,
+          appliesAt: decision.plan.effectiveAt,
+          renewalDecision: decision.plan.renewal,
+        },
+      });
+      if (result.count === 1) {
+        await enqueuePlanChangeConfirmation({
+          tx,
+          templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+          userId,
+          requestId: stored.id,
+          fromTier: decision.plan.fromTier,
+          toTier: decision.plan.toTier,
+          billingInterval: decision.plan.interval,
+          effectiveAt: decision.plan.effectiveAt,
+        });
+      }
+      return result;
     });
     const updated = await prisma.planChangeRequest.findUniqueOrThrow({
       where: { id: stored.id },
@@ -746,25 +763,13 @@ export async function confirmPlanChange({
           severity: "error",
           context: { component: "plan-change", requestId: stored.id, scheduleId },
         }).catch(() => {});
-        throw releaseError;
+        // The customer's answer is the same either way: this quote is spent.
       }
       return fail(
         "PLAN_CHANGE_PREVIEW_EXPIRED",
         "The quote was confirmed twice at once; request a new one."
       );
     }
-    // The downgrade is decided now (the schedule is attached), so this is the
-    // moment to confirm it. An upgrade is confirmed at settlement instead,
-    // because it only happens once its invoice is paid.
-    await enqueuePlanChangeConfirmation({
-      templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
-      userId,
-      requestId: stored.id,
-      fromTier: decision.plan.fromTier,
-      toTier: decision.plan.toTier,
-      billingInterval: decision.plan.interval,
-      effectiveAt: decision.plan.effectiveAt,
-    });
     return { ok: true, reservation: viewOf(updated) };
   } catch (error) {
     // The change did not start. Leave the row confirmable-from-scratch rather
@@ -1019,19 +1024,22 @@ export async function settlePlanChangesForSubscription(
     });
     if (!transition.applied) continue;
 
-    const applied = await prisma.planChangeRequest.updateMany({
-      where: { id: row.id, status: "pending" },
-      data: {
-        status: next,
-        pendingForUserId: null,
-        settledAt: new Date(),
-        ...(next === "failed" ? { failureCode: "pending_update_discarded" } : {}),
-      },
-    });
-    if (applied.count > 0) {
-      settled = next;
-      if (next === "applied" && row.execution === "immediate_upgrade") {
+    // One transaction: the row settling and its confirmation email commit
+    // together. A failure throws out of the webhook, which is redelivered and
+    // finds the row still pending.
+    const applied = await prisma.$transaction(async (tx) => {
+      const result = await tx.planChangeRequest.updateMany({
+        where: { id: row.id, status: "pending" },
+        data: {
+          status: next,
+          pendingForUserId: null,
+          settledAt: new Date(),
+          ...(next === "failed" ? { failureCode: "pending_update_discarded" } : {}),
+        },
+      });
+      if (result.count > 0 && next === "applied" && row.execution === "immediate_upgrade") {
         await enqueuePlanChangeConfirmation({
+          tx,
           templateKey: PLAN_CHANGE_UPGRADED_TEMPLATE,
           userId: row.userId,
           requestId: row.id,
@@ -1041,7 +1049,9 @@ export async function settlePlanChangesForSubscription(
           effectiveAt: periodEndOf(subscription),
         });
       }
-    }
+      return result;
+    });
+    if (applied.count > 0) settled = next;
   }
 
   return { settled };

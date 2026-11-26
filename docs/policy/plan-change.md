@@ -491,10 +491,11 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   | `plan_change_upgraded` | 업그레이드 정산이 `pending → applied`로 바뀐 그 조건부 update 한 번(=청구서 결제 후). 현재 결제기간 종료일을 적습니다(해지 예약이 유지된 구독은 갱신되지 않으므로 "갱신일"이라 쓰지 않음) |
   | `plan_change_downgrade_scheduled` | confirm이 schedule을 붙이고 `previewed → pending`으로 바꾼 직후. 적용일과 취소 방법을 적습니다 |
 
-  표준 메일 lane은 reference로 중복을 거르지 않으므로, "변경 한 건에 한 통"은 행을
-  옮긴 단 한 번의 쓰기 뒤에만 enqueue하는 것으로 지킵니다. 웹훅 재전달은 조건부
-  update가 0건이라 메일을 다시 넣지 않습니다. enqueue 실패는 로그만 남기고 변경을
-  실패로 보고하지 않습니다(이미 Stripe에서 일어난 일). 검증:
+  메일 outbox 행은 **행을 옮긴 조건부 update와 같은 트랜잭션**에 씁니다. 그래서 둘은
+  함께 커밋되거나 함께 사라집니다. 정산에서 트랜잭션이 실패하면 웹훅이 500으로 끝나고,
+  재전달 때 행이 여전히 `pending`이라 다시 시도됩니다. 표준 메일 lane은 reference로
+  중복을 거르지 않으므로 "변경 한 건에 한 통"은 그 조건부 update가 맞았을 때만 쓰는
+  것으로 지킵니다. 재전달이나 동시 확정에서 update가 0건이면 메일도 없습니다. 검증:
   `tests/planChangeEmails.test.mjs`.
 
 ## 10. 자동 갱신 다시 켜기 (2026-11-26)

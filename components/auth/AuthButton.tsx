@@ -2420,7 +2420,7 @@ export function AuthButton({
                         </div>
 
                         <div className="border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
-                            {activeSettingsTab === "plan" && mobileUpgradePlan ? (
+                            {activeSettingsTab === "plan" && (mobileUpgradePlan || planChangeTier) ? (
                                 <div className="flex w-full flex-col gap-2 sm:hidden">
                                     {planChangeTier ? (
                                         <button
@@ -2436,7 +2436,7 @@ export function AuthButton({
                                             <CreditCard className="h-4 w-4" />
                                             {planChangeLabel}
                                         </button>
-                                    ) : <UpgradeInterestButton
+                                    ) : mobileUpgradePlan ? <UpgradeInterestButton
                                         plan={mobileUpgradePlan}
                                         trigger="account"
                                         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
@@ -2449,7 +2449,7 @@ export function AuthButton({
                                         {mobileUpgradePlan === "Max"
                                             ? t("billing.joinMaxWaitlist")
                                             : t("billing.joinProWaitlist")}
-                                    </UpgradeInterestButton>}
+                                    </UpgradeInterestButton> : null}
                                     <button
                                         type="button"
                                         onClick={handleSaveSettings}
@@ -2462,7 +2462,7 @@ export function AuthButton({
                             ) : null}
                             <div
                                 className={`justify-end gap-2 ${
-                                    activeSettingsTab === "plan" && mobileUpgradePlan
+                                    activeSettingsTab === "plan" && (mobileUpgradePlan || planChangeTier)
                                         ? "hidden sm:flex"
                                         : "flex"
                                 }`}

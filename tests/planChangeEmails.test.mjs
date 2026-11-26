@@ -114,7 +114,9 @@ test("each confirmation has exactly one place that queues it", () => {
   assert.equal(count("await enqueuePlanChangeConfirmation({"), 2);
   assert.equal(count("templateKey: PLAN_CHANGE_UPGRADED_TEMPLATE,"), 1);
   assert.equal(count("templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,"), 1);
-  // Both are gated on a conditional update having matched.
-  assert.equal(count("if (moved.count !== 1)"), 1);
-  assert.equal(count("if (applied.count > 0) {"), 1);
+  // Both are written in the same transaction as the conditional update that
+  // moved the row, and only when it matched.
+  assert.equal(count("tx,\n          templateKey: PLAN_CHANGE_"), 2);
+  assert.equal(count("if (result.count === 1) {"), 1);
+  assert.equal(count('if (result.count > 0 && next === "applied" && row.execution === "immediate_upgrade") {'), 1);
 });
