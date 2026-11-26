@@ -50,10 +50,14 @@ mock.module(mod("lib/stripe.ts"), {
   namedExports: {
     getStripe: () => ({
       invoices: {
-        retrieve: async () => ({ id: "in_1", status: state.invoiceStatus }),
+        retrieve: async (id: string) => ({ id, status: id === "in_open" ? "open" : state.invoiceStatus }),
         // Auto-paginating list: the renewal sits behind a full page of manual drafts.
-        list: () =>
+        list: ({ status }: { status: string }) =>
           (async function* () {
+            if (status === "open") {
+              yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
+              return;
+            }
             for (let i = 0; i < 100; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
             yield { id: "in_1", status: "draft", billing_reason: "subscription_cycle" };
           })(),
@@ -135,8 +139,10 @@ test("a Stripe failure throws so the webhook answers 500 and the draft waits for
 test("the deletion flow stops a renewal drafted before pending_deletion was committed", async () => {
   reset();
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  assert.equal(await stopDeletionPendingDraftRenewals("sub_1"), 1);
-  // Only the renewal is looked at; other drafts are not reasons to cancel.
+  // The draft renewal ends the subscription; the open one is found too and
+  // counted for a person, even though there is nothing left to cancel.
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
+  // Only renewals are looked at; other invoices are not reasons to cancel.
   assert.equal(state.cancels.length, 1);
-  assert.equal(state.locked, 1);
+  assert.equal(state.locked, 2);
 });

@@ -23,6 +23,8 @@ const state: {
   deletionAfterRead: boolean;
   /** A deletion committed right after the reconciler found the account active. */
   deletionAfterReconcile: boolean;
+  /** A restore committed right after the reconciler found the account pending deletion. */
+  restoreAfterReconcile: boolean;
   failResume: boolean;
   failRestore: boolean;
   writes: boolean[];
@@ -35,6 +37,7 @@ const state: {
   deletionDuringWrite: false,
   deletionAfterRead: false,
   deletionAfterReconcile: false,
+  restoreAfterReconcile: false,
   failResume: false,
   failRestore: false,
   writes: [],
@@ -50,6 +53,7 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     deletionDuringWrite: false,
     deletionAfterRead: false,
     deletionAfterReconcile: false,
+    restoreAfterReconcile: false,
     failResume: false,
     failRestore: false,
     writes: [],
@@ -91,6 +95,13 @@ mock.module(mod("lib/deletionCancellation.ts"), {
         return { pendingDeletion: false, cancelled: false };
       }
       if (state.failRestore) throw new Error("stripe down");
+      if (state.restoreAfterReconcile && state.account) {
+        // Reconciled under the lock, then the account is restored before the route writes.
+        if (!state.subscription.cancel_at_period_end) state.writes.push(true);
+        state.subscription.cancel_at_period_end = true;
+        state.account.accountStatus = "active";
+        return { pendingDeletion: true, cancelled: true };
+      }
       if (state.subscription.cancel_at_period_end) return { pendingDeletion: true, cancelled: false };
       state.writes.push(true);
       state.subscription.cancel_at_period_end = true;
@@ -107,8 +118,11 @@ mock.module(mod("lib/prisma.ts"), {
           state.accountUpdates.push(data);
           return {};
         },
-        updateMany: async ({ where, data }: { where: { accountStatus?: { not?: string } }; data: Record<string, unknown> }) => {
-          if (where.accountStatus?.not && state.account?.accountStatus === where.accountStatus.not) return { count: 0 };
+        updateMany: async ({ where, data }: { where: { accountStatus?: string | { not?: string } }; data: Record<string, unknown> }) => {
+          const wanted = where.accountStatus;
+          const current = state.account?.accountStatus;
+          const matches = typeof wanted === "string" ? current === wanted : !(wanted?.not && current === wanted.not);
+          if (!matches) return { count: 0 };
           state.accountUpdates.push(data);
           return { count: 1 };
         },
@@ -238,5 +252,12 @@ test("a resume answer never overwrites the flag of a deletion committed after th
   const { status, body } = await call();
   assert.equal(status, 409);
   assert.equal(body.code, "ACCOUNT_DELETION_PENDING");
+  assert.deepEqual(state.accountUpdates, []);
+});
+
+test("a restore committed after the reconcile is not overwritten with the deletion's flag", async () => {
+  reset({ deletionDuringWrite: true, restoreAfterReconcile: true });
+  const { status } = await call();
+  assert.equal(status, 409);
   assert.deepEqual(state.accountUpdates, []);
 });

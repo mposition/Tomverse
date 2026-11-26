@@ -136,7 +136,20 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
     // so it is never collected (docs/policy/plan-change.md section 10). Not
     // fatal for the same reason; a person checks the draft at Stripe.
     try {
-      await stopDeletionPendingDraftRenewals(user.stripeSubscriptionId);
+      const renewals = await stopDeletionPendingDraftRenewals(user.stripeSubscriptionId);
+      if (renewals.finalized > 0) {
+        await reportOperationalIncident({
+          code: "ACCOUNT_DELETION_RENEWAL_FINALIZED",
+          title: "Account deletion: a renewal invoice was already finalized; collection was stopped",
+          severity: "error",
+          context: {
+            component: "account-deletion",
+            userId: user.id,
+            subscriptionId: user.stripeSubscriptionId,
+            finalized: renewals.finalized,
+          },
+        }).catch(() => {});
+      }
     } catch (error) {
       await reportOperationalIncident({
         code: "ACCOUNT_DELETION_RENEWAL_STOP_FAILED",

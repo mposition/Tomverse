@@ -324,8 +324,10 @@ export async function DELETE(req: Request) {
     }
 
     if (await restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")) {
-      await prisma.user.update({
-        where: { id: user.id },
+      // Only while still pending deletion: a restore (and the customer's own
+      // resume after it) committed since the reconcile is newer than this.
+      await prisma.user.updateMany({
+        where: { id: user.id, accountStatus: "pending_deletion" },
         data: { subscriptionCancelAtPeriodEnd: true, subscriptionStatus: subscription.status },
       });
       return NextResponse.json(

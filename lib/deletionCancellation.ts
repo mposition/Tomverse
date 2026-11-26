@@ -91,22 +91,32 @@ export async function keepDeletionCancellation(
 /**
  * Run by the deletion flow once pending_deletion is committed. A renewal
  * invoice created before that commit had its `invoice.created` handled while
- * the account was still active, so nothing stopped it; the drafts still open on
- * the subscription are looked up now and stopped the same way. One created
- * after the commit is stopped by its own webhook. Returns how many were stopped.
+ * the account was still active, so nothing stopped it. The subscription's
+ * uncollected renewals -- still draft, or already finalized (`open`) and
+ * waiting on payment -- are looked up now and stopped the same way. One created
+ * after the commit is stopped by its own webhook.
+ *
+ * `finalized` counts the renewals found already open: collection on them is
+ * stopped too, but a person checks them (an open invoice can be paid by hand).
  */
-export async function stopDeletionPendingDraftRenewals(subscriptionId: string): Promise<number> {
+export async function stopDeletionPendingDraftRenewals(
+  subscriptionId: string
+): Promise<{ stopped: number; finalized: number }> {
   let stopped = 0;
-  // Every page: manual drafts on the subscription must not hide an older renewal.
-  for await (const invoice of getStripe().invoices.list(
-    { subscription: subscriptionId, status: "draft", limit: 100 },
-    { timeout: STRIPE_REQUEST_TIMEOUT_MS }
-  )) {
-    if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
-    const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
-    if (outcome.cancelled) stopped += 1;
+  let finalized = 0;
+  for (const status of ["draft", "open"] as const) {
+    // Every page: manual invoices on the subscription must not hide a renewal.
+    for await (const invoice of getStripe().invoices.list(
+      { subscription: subscriptionId, status, limit: 100 },
+      { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+    )) {
+      if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
+      const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
+      if (outcome.cancelled) stopped += 1;
+      if (outcome.pendingDeletion && outcome.invoiceFinalized) finalized += 1;
+    }
   }
-  return stopped;
+  return { stopped, finalized };
 }
 
 export type DeletionRenewalOutcome = {
