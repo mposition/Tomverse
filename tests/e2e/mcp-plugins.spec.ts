@@ -91,6 +91,32 @@ test("@ui-risk mobile plugin header exposes global navigation and the current pa
   await expect(page).toHaveURL(/\/review(?:\?|$)/, { timeout: 15_000 });
   await expect(page.getByRole("dialog", { name: /User Settings|사용자 설정/ })).toBeVisible({ timeout: 10_000 });
 });
+for (const theme of ["light", "dark"] as const) {
+  test(`@ui-risk plugin navigation drawer shows chat history and account settings in ${theme}`, async ({ page, isMobile }) => {
+    test.skip(isMobile, "The navigation rail drawer is the desktop entry point.");
+    await page.setViewportSize({ width: 1024, height: 800 });
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    await page.route("**/api/mcp/connections", route => route.fulfill({ json: { enabled: true, servers: [], connections: [], invocations: [] } }));
+    await page.goto("/plugins?lang=ko");
+    await page.locator(".review-navigation-history").click();
+    const drawer = page.locator(".review-history-drawer");
+    const panel = drawer.getByTestId("workspace-account-panel");
+    const historyLink = panel.getByRole("link", { name: "채팅 기록 열기", exact: true });
+    await expect(panel).toBeVisible();
+    await expect(historyLink).toHaveAttribute("href", "/chat?lang=ko");
+    // The drawer is a solid surface, not a transparent layer over the blurred page.
+    expect(await drawer.evaluate(node => getComputedStyle(node).backgroundColor)).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
+    await expectAccessibleContrast(historyLink, `plugin drawer history link (${theme})`);
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    // Settings in the rail reaches the settings modal that lives in the drawer's account panel.
+    await page.locator(".review-navigation > button").filter({ hasText: "설정" }).click();
+    await expect(page.getByRole("dialog", { name: /User Settings|사용자 설정/ })).toBeVisible({ timeout: 10_000 });
+  });
+}
+
 test("@ui-risk Chat sends a connector only after an explicit conversation selection", async ({ page }) => {
   await mockAuthenticatedApi(page, { productKey: "chat", selectedModels: ["gpt-5-6-luna"], selectionMode: "manual", messages: [] });
   await restoreActiveConversation(page);

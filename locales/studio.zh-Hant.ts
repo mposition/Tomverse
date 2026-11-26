@@ -57,7 +57,6 @@ export const studioLocale = {
   "myStickerPack": "我的貼圖包",
   "newCaption": "新文案",
   "newImage": "新圖片",
-  "openHistory": "開啟聊天記錄",
   "openingSituation": "開場情節",
   "originalPhoto": "原始相片",
   "original": "原圖",
