@@ -18,7 +18,7 @@ const rows = (count: number) => Array.from({ length: count }, (_, i) => `line ${
 
 function makeRepo(t: test.TestContext) {
   const temp = realpathSync(mkdtempSync(join(tmpdir(), "tomverse-review-git-")));
-  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 }));
+  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 }));
   const root = join(temp, "repo");
   mkdirSync(join(root, "src"), { recursive: true });
   git(root, "init", "-b", "main");
@@ -104,7 +104,7 @@ test("a project folder inside the repository sees only its own files, with paths
 
 test("folders that are not repositories, and repositories with nothing committed, are reported and not guessed at", { skip: !gitAvailable }, async (t) => {
   const temp = realpathSync(mkdtempSync(join(tmpdir(), "tomverse-review-plain-")));
-  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 }));
+  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 }));
   assert.deepEqual(await readScopeDiff(bindProjectRoot(temp), "uncommitted"), { status: "unavailable", reason: "not-git" });
   git(temp, "init", "-b", "main");
   assert.deepEqual(await readScopeDiff(bindProjectRoot(temp), "uncommitted"), { status: "unavailable", reason: "git-unavailable" });
