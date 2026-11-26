@@ -23,6 +23,17 @@ export type StudioImageQuote = {
   targets?: { modelId: string; model: string; credits: number; pricingVersion: string }[];
 };
 
+/**
+ * The quote for the tools a press will actually request: their names and the
+ * sum of their prices, which is what the press charges. Fewer than all of them
+ * once a result is held, and none when a held result only needs showing again.
+ */
+export const studioToolsQuote = <Quote extends StudioImageQuote>(quote: Quote, tools: NonNullable<StudioImageQuote["targets"]>): Quote => ({
+  ...quote,
+  model: (tools.length > 0 ? tools : quote.targets ?? []).map(tool => tool.model).join(" + "),
+  credits: tools.reduce((sum, tool) => sum + tool.credits, 0),
+});
+
 /** The quote one tool of a several-tool feature is submitted with. */
 export const studioToolQuote = <Quote extends StudioImageQuote>(quote: Quote, target: NonNullable<StudioImageQuote["targets"]>[number]): Quote =>
   ({ ...quote, modelId: target.modelId, model: target.model, credits: target.credits, pricingVersion: target.pricingVersion, targets: undefined });
