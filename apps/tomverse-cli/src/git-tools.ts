@@ -36,10 +36,17 @@ const publishInput = z.object({
 
 const unavailable = { status: "error", message: "Git actions are not available in this session." };
 
-export function createGitTools(host: GitToolHost, blocked: () => string | undefined, signal: () => AbortSignal): ToolSet {
+/**
+ * `blocked`: why nothing can be proposed right now (a plan that is not ready); `refused`: what the permission mode says (read-only
+ * mode: a commit changes the repository). Both answer before the host is asked, so no card opens. Neither can approve: when they
+ * allow, the host still shows its own card and only a person answers it.
+ */
+export function createGitTools(host: GitToolHost, blocked: () => string | undefined, signal: () => AbortSignal, refused: () => string | undefined = () => undefined): ToolSet {
     const ask = async (action: GitToolAction) => {
         const reason = blocked();
         if (reason) return { status: "error", message: reason };
+        const refusal = refused();
+        if (refusal) return { status: "denied", message: refusal };
         signal().throwIfAborted();
         const reply = await host(action, signal());
         signal().throwIfAborted();

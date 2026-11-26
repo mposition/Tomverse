@@ -292,6 +292,31 @@ test("The approved pull request is created with gh using the approved text, once
   assert.match(remoteRefs(bare), /refs\/heads\/feature/);
 });
 
+test("An agent's push and pull request never run on anything but a granted card: denied, closed, thrown and unanswered cards all leave the remote and gh untouched", async () => {
+  const calls: string[][] = [];
+  const gh: GhRunner = async (args) => {
+    calls.push([...args]);
+    return args[0] === "auth" ? { code: 0, stdout: "", stderr: "" } : { code: 1, stdout: "", stderr: "" };
+  };
+  const { work, bare, ctx } = await repository({ gh, githubRepo: "example/site" });
+  await featureCommit(work, ctx);
+  const answers: Array<[string, GitApprovals["request"]]> = [
+    ["denied", async () => false],
+    ["thrown", async () => { throw new Error("the window crashed"); }],
+    // A card answered "yes" without the ledger granting its ticket (anything but the approval window) is not an approval.
+    ["not granted", async () => true],
+  ];
+  for (const [label, request] of answers) {
+    const result = await publishBranch(ctx, { pullRequest: { ...draft, draft: true } }, "agent", { ledger: new ApprovalLedger(), request });
+    assert.deepEqual(result, { status: "error", code: label === "not granted" ? "changed" : "denied" }, label);
+  }
+  assert.equal(remoteRefs(bare).includes("feature"), false, "nothing was pushed");
+  assert.deepEqual(calls.filter((call) => call[0] === "pr"), [], "no pull request was created");
+  // An agent's commit with no approvals at all is refused instead of running.
+  writeFileSync(join(work, "late.txt"), "late\n");
+  assert.deepEqual(await commitChanges(ctx, { message: "x", paths: ["late.txt"] }, "agent"), { status: "error", code: "denied" });
+});
+
 test("When creating the pull request has an unknown outcome the branch's open pull requests are checked, and it is never retried", async () => {
   let creates = 0;
   const run = (listed: string | null): GhRunner => async (args) => {

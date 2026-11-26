@@ -27,7 +27,10 @@ const shellView = (line: string): ApprovalView => ({
 const webView = (host: string): ApprovalView => ({
     approvalId: "a", toolCallId: "t", toolName: "web_fetch", input: { url: `https://${host}/x` }, root: ROOT, web: { url: `https://${host}/x`, host },
 });
-const mcpView = (name: string): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolName: name, input: { q: 1 }, root: ROOT });
+const mcpView = (name: string): ApprovalView => {
+    const [server = "", ...tool] = name.slice("mcp__".length).split("__");
+    return { approvalId: "a", toolCallId: "t", toolName: name, input: { q: 1 }, root: ROOT, mcp: { server, tool: tool.join("__"), definition: "def-1", scope: "user" } };
+};
 
 const rule = (effect: PermissionRule["effect"], tool: string, pattern?: string, extra: Partial<PermissionRule> = {}, scope: ScopedRule["scope"] = "user"): ScopedRule =>
     ({ effect, tool, ...(pattern !== undefined ? { pattern } : {}), ...extra, scope });
@@ -37,8 +40,8 @@ test("matrix: with no rules each mode answers each kind of action as documented"
     const expected: Record<PermissionMode, Record<string, string>> = {
         read_only: { patch: "deny", command: "deny", web: "human", mcp: "deny" },
         ask: { patch: "human", command: "human", web: "human", mcp: "human" },
-        auto_review: { patch: "review", command: "review", web: "human", mcp: "review" },
-        allow_all: { patch: "allow", command: "allow", web: "human", mcp: "allow" },
+        auto_review: { patch: "review", command: "review", web: "human", mcp: "human" },
+        allow_all: { patch: "allow", command: "allow", web: "human", mcp: "human" },
     };
     for (const mode of PERMISSION_MODES) {
         assert.equal(kindOf(patchView("src/a.ts"), mode), expected[mode]!.patch, `${mode} patch`);

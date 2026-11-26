@@ -107,3 +107,24 @@ test("The agent's push is off by default; once switched on it opens the same car
   assert.match(remote(bare), /refs\/heads\/feature/);
   assert.deepEqual(await integration.agent({ kind: "publish", approved: true }), { status: "error" });
 });
+
+test("An agent's push or commit while another card is open or a task is not idle opens no card and runs nothing", async () => {
+  const { work, bare, shown, integration } = setup("agent-busy");
+  writeFileSync(join(work, "g.txt"), "g\n");
+  assert.deepEqual(await integration.handle({ type: "agent-actions", enabled: true }), { enabled: true });
+  const first = integration.agent({ kind: "publish" });
+  await until(() => shown.length === 1);
+  // A second request while the first card is waiting is refused at once: there is never a queue of cards the person might click through.
+  assert.deepEqual(await integration.agent({ kind: "publish" }), { status: "denied", code: "denied" });
+  assert.deepEqual(await integration.agent({ kind: "commit", message: "x", paths: ["g.txt"] }), { status: "denied", code: "denied" });
+  assert.equal(shown.length, 1);
+  // A card that is answered with anything but "once" (here: allow for this run) does not approve, and nothing is remembered for the next push.
+  integration.decide({ id: shown[0]!.id, action: "run" });
+  assert.deepEqual(await first, { status: "denied", code: "denied" });
+  assert.equal(remote(bare).includes("feature"), false);
+  const second = integration.agent({ kind: "publish" });
+  await until(() => shown.length === 2);
+  integration.dismiss();
+  assert.deepEqual(await second, { status: "denied", code: "denied" });
+  assert.equal(remote(bare).includes("feature"), false, "a push asks again every time");
+});
