@@ -30,7 +30,7 @@ import { imageAssetR2Key } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { accountAttachmentPrefix, MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
-import { bindStudioImageUpload } from "@/lib/studioImageReference";
+import { bindStudioImageUpload, recordStudioRequest, STUDIO_RUN_CONVERSATION } from "@/lib/studioImageReference";
 
 const resetImageTestData = () =>
   prisma.$executeRawUnsafe(`
@@ -460,6 +460,40 @@ test("the same idempotency key replays the winner instead of double-charging", a
     where: { key: getUserChatUsageKey(user.id), period: "month" },
   });
   assert.equal(Number(monthBucket?.count ?? 0), 15);
+});
+
+test("a Studio run is left out of the conversation list, and image and chat conversations stay in it", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const listed = async () => (await prisma.conversation.findMany({
+    where: { userId: user.id, NOT: STUDIO_RUN_CONVERSATION }, select: { id: true }, orderBy: { createdAt: "asc" },
+  })).map(row => row.id);
+
+  // The image workspace: prompts live on the generation rows, so the conversation has no message.
+  const workspace = await requestImageGeneration(requestInput(user.id));
+  await prisma.chatRequestLease.deleteMany({});
+  // A Studio tool without a photo records its request in the same transaction as the reservation.
+  const run = await requestImageGeneration({
+    ...requestInput(user.id, { prompt: "Design a poster" }),
+    onReserved: (tx, conversationId) => recordStudioRequest(tx, conversationId, "Design a poster"),
+  });
+  await prisma.chatRequestLease.deleteMany({});
+  assert.notEqual(run.conversationId, workspace.conversationId);
+  assert.deepEqual(
+    await prisma.message.findMany({ where: { conversationId: run.conversationId }, select: { role: true, content: true } }),
+    [{ role: "user", content: "Design a poster" }],
+  );
+  const chat = await prisma.conversation.create({
+    data: { userId: user.id, title: "A chat", kind: "chat", selectedModels: "[]", messages: { create: { role: "user", content: "Hello" } } },
+  });
+  assert.deepEqual(await listed(), [workspace.conversationId, chat.id]);
+
+  // A request that cannot be recorded reserves nothing and leaves no conversation behind.
+  const before = await Promise.all([prisma.conversation.count(), prisma.imageGenerationGroup.count(), prisma.imageCreditReservation.count()]);
+  await assert.rejects(requestImageGeneration({
+    ...requestInput(user.id), onReserved: async () => { throw new Error("request not recorded"); },
+  }), /request not recorded/);
+  assert.deepEqual(await Promise.all([prisma.conversation.count(), prisma.imageGenerationGroup.count(), prisma.imageCreditReservation.count()]), before);
 });
 
 test("Studio edit reservations roll back on foreign or already bound uploads and replay once", async t => {

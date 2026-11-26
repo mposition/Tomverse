@@ -29,6 +29,7 @@ import {
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
 import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
+import { STUDIO_RUN_CONVERSATION } from "@/lib/studioImageReference";
 
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -82,7 +83,8 @@ export async function GET(req: Request) {
     // hundred shared conversations pulled hundreds of megabytes into the
     // process to answer a request that sends back a title and a count.
     const conversations = await prisma.conversation.findMany({
-      where: { userId },
+      // A Studio tool run is a one-off shown in the tool, not a conversation to come back to.
+      where: { userId, NOT: STUDIO_RUN_CONVERSATION },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,

@@ -5,6 +5,19 @@ import { ChatAccessError } from "@/lib/chatSecurity";
 import { IMAGE_EDIT_SOURCE_MAX_BYTES, IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import { accountAttachmentPrefix, bindMessageAttachments } from "@/lib/messageAttachmentStorage";
 
+/**
+ * A Studio tool run is a one-off: its result is shown and saved in the tool and nothing resumes it, so it
+ * is not part of the conversation history. It still has a conversation row, which the image tables hang
+ * from, and is told apart by the request message this file writes into it. Nothing else writes a message
+ * into an image conversation: the image workspace keeps its prompts on the generation rows.
+ */
+export const STUDIO_RUN_CONVERSATION = { kind: "image", messages: { some: {} } } satisfies Prisma.ConversationWhereInput;
+
+/** The request of a Studio run that has no photo. With a photo, bindStudioImageUpload writes it. */
+export async function recordStudioRequest(tx: Prisma.TransactionClient, conversationId: string, prompt: string) {
+  return tx.message.create({ data: { conversationId, role: "user", content: prompt }, select: { id: true } });
+}
+
 export async function bindStudioImageUpload(tx: Prisma.TransactionClient, input: {
   userId: string;
   email: string;
@@ -20,10 +33,7 @@ export async function bindStudioImageUpload(tx: Prisma.TransactionClient, input:
   if (!upload || upload.size > IMAGE_EDIT_SOURCE_MAX_BYTES || !IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(upload.mediaType)) {
     throw new ChatAccessError(400, "STUDIO_INVALID_REFERENCE", "The reference image is unavailable.");
   }
-  const message = await tx.message.create({
-    data: { conversationId, role: "user", content: prompt },
-    select: { id: true },
-  });
+  const message = await recordStudioRequest(tx, conversationId, prompt);
   await bindMessageAttachments(tx, {
     userId,
     ownPrefix: accountAttachmentPrefix(email),
