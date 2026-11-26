@@ -36,14 +36,14 @@ export function effortOptions(offered: readonly string[] | undefined, chosen: st
 const storageKey = "tomverse.desktop.codeEngine";
 
 /** What the person chose for new Code tasks: limit profile and goal mode. Kept in this window only. */
-export type CodeEnginePreference = { limits: CodeLimitProfile; goal: boolean };
-export const defaultCodeEngine: CodeEnginePreference = { limits: "standard", goal: false };
+export type CodeEnginePreference = { limits: CodeLimitProfile; goal: boolean; orchestrate: boolean };
+export const defaultCodeEngine: CodeEnginePreference = { limits: "standard", goal: false, orchestrate: false };
 
 export function readCodeEnginePreference(): CodeEnginePreference {
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as { limits?: unknown; goal?: unknown } | null;
+    const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as { limits?: unknown; goal?: unknown; orchestrate?: unknown } | null;
     const limits = codeLimitProfile.safeParse(saved?.limits);
-    return { limits: limits.success ? limits.data : "standard", goal: saved?.goal === true };
+    return { limits: limits.success ? limits.data : "standard", goal: saved?.goal === true, orchestrate: saved?.orchestrate === true };
   } catch {
     return defaultCodeEngine;
   }

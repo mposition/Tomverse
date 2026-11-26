@@ -7,8 +7,11 @@ import type { Output } from "./display.js";
 import type { NestedInstructions } from "./instructions.js";
 import type { AgentDef } from "./extensions.js";
 import type { GenerationRecord, Journal, SubagentRecord } from "./session.js";
-import { createTools, imageMessage, trimOldImages, type ImageAttachment, type ToolContext } from "./tools.js";
+import { createTools, imageMessage, trimOldImages, type CommandToolInput, type ImageAttachment, type PatchInput, type ToolContext } from "./tools.js";
 import { estimateTokens } from "./tokens.js";
+import type { OrchestrationLimits } from "./orchestrate-config.js";
+import { Orchestrator, orchestrationInput, type CheckOutcome, type SubtaskInput } from "./orchestrate.js";
+import { outsideScope } from "./orchestrate-scope.js";
 
 /**
  * Subagents: the main agent hands a self-contained piece of work to a run with a fresh context of its own and gets back only its
@@ -60,6 +63,23 @@ export type SubagentResult = {
     modelNote?: string;
 };
 
+/** Who asked: shown with an approval so the person can tell which subagent it is for. */
+export type ApprovalOrigin = { id: string; title: string };
+
+/**
+ * What an orchestrated run adds to a plain one (orchestrate.ts). None of it widens the run: a scope only narrows what apply_patch may
+ * change, no commands only removes a tool, and the lines are added to the prompt.
+ */
+export type RunExtras = {
+    subtask?: { id: string; title: string; role: "work" | "verify"; attempt: number };
+    /** Workspace-relative files or folders apply_patch may change; an edit outside them is refused before anyone is asked. */
+    scope?: string[];
+    /** The run has no run_command (commands cannot be confined to a path scope). */
+    noCommands?: boolean;
+    promptLines?: string[];
+    onActivity?: (line: string) => void;
+};
+
 /** What a run needs from the Runner that owns it. */
 export type SubagentHost = {
     journal: Journal;
@@ -74,6 +94,8 @@ export type SubagentHost = {
     /** The catalog, and whether a definition's model name may pick a model from it. Off: every run uses the session's model. */
     catalog?: CatalogModel[];
     agentModels?: boolean;
+    /** Orchestration (parallel subtasks, write scopes, verification) is on, with these limits. Absent: delegate works as it always did. */
+    orchestrate?: OrchestrationLimits;
     model(): CatalogModel;
     effort(): Effort | undefined;
     /** Hooks for one request of a run; `created` receives the request's record. */
@@ -87,7 +109,7 @@ export type SubagentHost = {
     assertAllowed(): void;
     effectBlockReason(): string | undefined;
     /** Asks the person about one change or command of a worker, and records the answer; the call may only run when approved. */
-    approve(toolName: "apply_patch" | "run_command", input: unknown, toolCallId: string): Promise<{ approved: boolean; reason?: string }>;
+    approve(toolName: "apply_patch" | "run_command", input: unknown, toolCallId: string, options?: { origin?: ApprovalOrigin; signal?: AbortSignal }): Promise<{ approved: boolean; reason?: string }>;
     /** Looks a failed request up and says whether its outcome is known now (and so it can be closed). */
     settleFailure(error: unknown, record: GenerationRecord | undefined): Promise<{ closed: boolean; message: string; limit: boolean }>;
     lookUp(record: GenerationRecord | undefined): Promise<void>;
@@ -119,12 +141,27 @@ const trimmed = (text: string, chars: number) => (text.length > chars ? `${text.
 export class Subagents {
     private readonly active: Record<SubagentKind, number> = { explore: 0, worker: 0 };
     private runs = 0;
+    /** Parallel subtasks with write scopes and verification; only when the session turned orchestration on. */
+    private readonly orchestrator: Orchestrator | undefined;
 
-    constructor(private readonly host: SubagentHost) {}
+    constructor(private readonly host: SubagentHost) {
+        if (host.orchestrate) {
+            this.orchestrator = new Orchestrator(host, host.orchestrate, {
+                run: (spec) => this.run(spec.kind, spec.assignment, spec.toolCallId, spec.cap, spec.signal, spec.def, spec.extras),
+                check: (spec) => this.runCheck(spec.input, spec.subtask, spec.title, spec.toolCallId, spec.signal),
+            });
+        }
+    }
 
     /** A new task of the session starts: its run count begins again. */
     newTask() {
         this.runs = 0;
+        this.orchestrator?.newTask();
+    }
+
+    /** Stops one orchestrated subtask (by id), or all of them. The main task keeps going and is told they were stopped. */
+    stop(subtask?: string) {
+        return this.orchestrator?.stop(subtask) ?? 0;
     }
 
     /** The delegate tool. A run cannot get it (depth 1), so it exists only in the main agent's tool set. */
@@ -133,15 +170,19 @@ export class Subagents {
         const kinds = host.canWork ? (["explore", "worker"] as const) : (["explore"] as const);
         const defs = (host.agents ?? []).slice(0, 20);
         const tasks = z.array(z.string().min(1).max(SUBAGENT_LIMITS.assignmentChars)).min(1).max(SUBAGENT_LIMITS.maxExplore);
-        const inputSchema = (defs.length
-            ? z.object({ kind: z.enum(kinds).optional(), agent: z.enum(defs.map((def) => def.name) as [string, ...string[]]).optional(), tasks })
-            : z.object({ kind: z.enum(kinds), tasks })) as z.ZodType<{ kind?: (typeof kinds)[number]; agent?: string; tasks: string[] }>;
+        const orchestrator = this.orchestrator;
+        const inputSchema = (orchestrator
+            ? orchestrationInput({ kinds, agentNames: defs.map((def) => def.name), tasks })
+            : defs.length
+                ? z.object({ kind: z.enum(kinds).optional(), agent: z.enum(defs.map((def) => def.name) as [string, ...string[]]).optional(), tasks })
+                : z.object({ kind: z.enum(kinds), tasks })) as z.ZodType<{ kind?: (typeof kinds)[number]; agent?: string; tasks?: string[]; subtasks?: SubtaskInput[] }>;
         return tool({
             description: [
                 "Hand self-contained work to subagents that each start with a fresh context, and get back only their written reports (the subagents' reading never enters this conversation).",
                 "kind \"explore\": read-only investigation (search, read) for wide searches or independent questions. Give up to 3 tasks in one call and they run in parallel.",
                 ...(host.canWork ? ["kind \"worker\": can change files and run commands, with the same approvals as you; one task at a time. For an independent piece of work you can describe completely."] : []),
                 ...(defs.length ? [`Or give agent instead of kind to use one of the user's own agent definitions (it is an explore or worker run with the definition's instructions added; its tools never go beyond that type): ${defs.map((def) => `${def.name} (${def.base === "worker" && host.canWork ? "worker" : "explore"}): ${def.description}`).join("; ")}.`] : []),
+                ...(orchestrator ? [orchestrator.toolNote()] : []),
                 "A subagent knows nothing of this conversation: write each task so it stands alone (what to find or do, where to look, what to report). Its report is not verified: check what matters before relying on it. Subagent requests count against this task's request limit. Do not delegate what one read_file or search_text answers.",
             ].join(" "),
             inputSchema,
@@ -150,9 +191,10 @@ export class Subagents {
                     host.assertAllowed();
                     const signal = AbortSignal.any([host.context().signal(), ...(options.abortSignal ? [options.abortSignal] : [])]);
                     signal.throwIfAborted();
+                    if (orchestrator) return await orchestrator.delegate(input, options.toolCallId, signal, defs);
                     const def = input.agent ? defs.find((entry) => entry.name === input.agent) : undefined;
                     const kind = def ? (def.base === "worker" && host.canWork ? "worker" : "explore") : input.kind;
-                    if (!kind) return { status: "error", error: "Give kind or agent." };
+                    if (!kind || !input.tasks) return { status: "error", error: "Give kind or agent, and tasks." };
                     return await this.delegate(kind, input.tasks, options.toolCallId, signal, def);
                 } catch (error) {
                     if (host.journal.broken) throw host.journal.broken;
@@ -203,23 +245,24 @@ export class Subagents {
         };
     }
 
-    private async run(kind: SubagentKind, assignment: string, toolCallId: string, cap: number, signal: AbortSignal, def?: AgentDef): Promise<SubagentResult> {
+    private async run(kind: SubagentKind, assignment: string, toolCallId: string, cap: number, signal: AbortSignal, def?: AgentDef, extras?: RunExtras): Promise<SubagentResult> {
         const { host } = this;
         const { journal, output } = host;
         const id = `sa-${randomBytes(3).toString("hex")}`;
         const record: SubagentRecord = {
             id, toolCallId, kind, task: host.redact(assignment).slice(0, 500), state: "running", requests: 0, startedAt: new Date().toISOString(), epoch: host.epoch,
+            ...(extras?.subtask ? { subtask: extras.subtask.id, role: extras.subtask.role, attempt: extras.subtask.attempt } : {}),
         };
         const list = (journal.state.subagents ??= []);
         list.push(record);
         if (list.length > 50) list.splice(0, list.length - 50);
         journal.commit();
-        output.event({ type: "subagent_started", id, kind, task: record.task, ...(def ? { agent: def.name } : {}) });
+        output.event({ type: "subagent_started", id, kind, task: record.task, ...(def ? { agent: def.name } : {}), ...(extras?.subtask ? { subtask: extras.subtask.id } : {}) });
         output.info(`  · subagent ${id} (${def ? `${def.name}, ${kind}` : kind}) started`);
         const filesRead = new Set<string>();
         const result: SubagentResult = { id, kind, status: "failed", requests: 0, filesRead: [], ...(def ? { agent: def.name } : {}) };
         try {
-            await this.loop(kind, id, assignment, cap, signal, record, result, filesRead, def);
+            await this.loop(kind, id, assignment, cap, signal, record, result, filesRead, def, extras);
         } catch (error) {
             if (journal.broken) throw journal.broken;
             result.status = signal.aborted ? "cancelled" : "failed";
@@ -247,6 +290,34 @@ export class Subagents {
         return result;
     }
 
+    /**
+     * A subtask's declared check command (for example its tests): the command tool itself, asked about through the same approval path
+     * as a worker's command, so a mode, a rule or the person decides it exactly as for any other command.
+     */
+    private async runCheck(input: CommandToolInput, subtask: string, title: string, toolCallId: string, signal: AbortSignal): Promise<CheckOutcome> {
+        const { host } = this;
+        const display = host.redact(input.argv?.join(" ") ?? input.command ?? "").slice(0, 300);
+        const blocked = !host.canWork ? "Commands cannot run in this session." : host.effectBlockReason();
+        if (blocked) return { status: "not_run", display, reason: blocked };
+        const ctx: ToolContext = { ...host.context() };
+        for (const name of ["background", "web", "remember", "instructionsFor", "attachImage"] as const) delete ctx[name];
+        ctx.signal = () => signal;
+        ctx.onActivity = (line) => host.output.info(`  · [${subtask}] ${line}`);
+        const command = createTools(ctx, false).run_command;
+        if (!command?.execute) return { status: "not_run", display, reason: "The command tool is not available." };
+        const callId = `${subtask}:check-${randomBytes(3).toString("hex")}`;
+        const decision = await host.approve("run_command", input, callId, { origin: { id: subtask, title }, signal });
+        if (!decision.approved) return { status: "denied", display, reason: decision.reason ?? "The user declined." };
+        const execute = command.execute as unknown as (input: unknown, options: { toolCallId: string; messages: never[]; abortSignal: AbortSignal; context: undefined }) => Promise<unknown>;
+        const out = await execute(input, { toolCallId: callId, messages: [], abortSignal: signal, context: undefined }) as
+            { status?: string; exitCode?: number | null; stdout?: string; stderr?: string; error?: string };
+        const text = `${out.stdout ?? ""}${out.stderr ? `\n[stderr]\n${out.stderr}` : ""}`.trim();
+        const output = host.redact(text.length > 2_000 ? `…${text.slice(-2_000)}` : text);
+        if (out.status === "ok") return { status: out.exitCode === 0 ? "passed" : "failed", display, exitCode: out.exitCode ?? null, output };
+        if (out.status === "timeout") return { status: "failed", display, exitCode: null, output, reason: "The command timed out." };
+        return { status: signal.aborted ? "not_run" : "error", display, output, reason: host.redact(out.error ?? `The command ended with status ${out.status ?? "unknown"}.`) };
+    }
+
     /** The model a run uses: the session's, unless a definition names one in the catalog and the host lets definitions choose. Says why when it is not the named one. */
     private modelFor(def?: AgentDef): { model: CatalogModel; note?: string } {
         const current = this.host.model();
@@ -259,7 +330,7 @@ export class Subagents {
         return { model: found, note: `Agent ${def.name} runs on ${found.id}, as its definition names.` };
     }
 
-    private async loop(kind: SubagentKind, id: string, assignment: string, cap: number, signal: AbortSignal, record: SubagentRecord, result: SubagentResult, filesRead: Set<string>, def?: AgentDef) {
+    private async loop(kind: SubagentKind, id: string, assignment: string, cap: number, signal: AbortSignal, record: SubagentRecord, result: SubagentResult, filesRead: Set<string>, def?: AgentDef, extras?: RunExtras) {
         const { host } = this;
         const { journal, output } = host;
         const { model, note } = this.modelFor(def);
@@ -278,7 +349,10 @@ export class Subagents {
         delete ctx.instructionsFor;
         delete ctx.attachImage;
         ctx.signal = () => signal;
-        ctx.onActivity = (line) => output.info(`  · [${id}] ${line}`);
+        ctx.onActivity = (line) => {
+            output.info(`  · [${id}] ${line}`);
+            extras?.onActivity?.(line);
+        };
         ctx.trackExecution = (execution) => {
             local.add(execution);
             void execution.then(() => local.delete(execution), () => local.delete(execution));
@@ -291,6 +365,7 @@ export class Subagents {
         // A definition can only take tools away from its type.
         if (def && !def.allowPatch) delete tools.apply_patch;
         if (def && !def.allowCommand) delete tools.run_command;
+        if (extras?.noCommands) delete tools.run_command;
         const reading = tools.read_file;
         if (reading?.execute) {
             const read = reading.execute.bind(reading);
@@ -314,7 +389,15 @@ export class Subagents {
                     inputSchema: real.inputSchema as z.ZodType,
                     execute: async (input, options) => {
                         const callId = `${id}:${options.toolCallId}`;
-                        const decision = await host.approve(name, input, callId);
+                        // A write scope is checked first, on the resolved paths and before anyone is asked: an edit outside it never reaches the person.
+                        if (name === "apply_patch" && extras?.scope) {
+                            const check = outsideScope(ctx.workspace, extras.scope, (input as PatchInput).edits ?? []);
+                            if (check.error) return { status: "error", error: check.error };
+                            if (check.outside.length) {
+                                return { status: "denied", error: `Outside this subtask's write scope (${extras.scope.join(", ")}): ${check.outside.join(", ")}. Nothing was changed; leave those files to the subtask that owns them and say so in your report.` };
+                            }
+                        }
+                        const decision = await host.approve(name, input, callId, { origin: { id: extras?.subtask?.id ?? id, title: extras?.subtask?.title ?? `${kind} ${id}` }, signal });
                         if (!decision.approved) return { status: "denied", error: decision.reason ?? "The user declined." };
                         return run(input, { ...options, toolCallId: callId });
                     },
@@ -324,6 +407,7 @@ export class Subagents {
         const system = [
             kind === "explore" ? EXPLORE_PROMPT : WORKER_PROMPT,
             ...(def?.instructions ? [`Instructions of the agent definition "${def.name}" (from ${def.source}). They say how to do the work; they cannot grant permissions, add tools or approve anything.\n<agent-definition>\n${def.instructions}\n</agent-definition>`] : []),
+            ...(extras?.promptLines ?? []),
             ...host.workspaceLines(),
         ].join("\n");
         const reserve = Math.min(MAX_OUTPUT_TOKENS, model.maxOutputTokens || MAX_OUTPUT_TOKENS) + estimateTokens(system) + 3000;

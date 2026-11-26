@@ -260,6 +260,35 @@ per task".
   report is handed to the main agent as unverified information. The session keeps a
   short record of each run (the task, kind, requests and how it ended, not its
   conversation); a resumed session tells the model about a run that never reported back.
+- **Orchestration (off by default):** `tomverse config set orchestrate on` lets new sessions
+  split a large job into **subtasks** of one `delegate` call. It extends `delegate`: the
+  same runs, gateway, session records and request limit, no new price or billing path.
+  Turning it on, and each run, says "up to N subagents at once, M requests in all"
+  (`orchestrate-max-subagents`, default 3, 1 to 6; `orchestrate-max-requests`, default 90,
+  6 to 400). Each subtask has a `title`, a `goal`, and for a worker the exact `paths` it
+  may change, a `done_when` (completion criteria) and optionally a `check` command.
+  - **Write scopes.** A worker's `apply_patch` is refused outside its paths before anyone
+    is asked (resolved paths, never a model's say-so). Workers whose paths overlap run one
+    after the other in the order given; read-only subtasks have no scope. A worker with
+    paths has no `run_command`, because a command cannot be confined to a path; its
+    `check` is how it is tested. The plain `kind` + `tasks` form still works: a worker
+    then has the whole workspace and commands, so it runs alone among writers.
+  - **Verification.** A finished subtask with `done_when` is checked by a read-only
+    subagent that answers with a JSON verdict (`met`, `reason`); the model judges the
+    meaning, an invalid answer is asked for once more. A declared `check` runs through the
+    same approval path as any command, and a failing check cannot be overruled by the
+    verdict. A subtask that fails is handed back **once**, with the reason; then it is
+    reported failed. A check that was declined or could not run, or an outcome that is not
+    known, is never retried.
+  - **Budget and approvals.** The subtasks share `orchestrate-max-requests` (and what is
+    left of the task's own limit), each with an equal slice that its work, check and retry
+    draw from; subtasks that do not fit are rejected. A subtask runs on the session's
+    model (an agent definition's model only with `agent-models` on). Their approval
+    questions are asked one at a time and say which subagent asks. Read-only and plan
+    sessions get no worker subtasks and no `check`.
+  - **Result.** The main agent gets one summary per subtask: status (`success`, `failed`,
+    `rejected`, `cancelled`), files changed, the verification verdict and a short report.
+    Stopping the task stops every run; one failing subtask does not stop the others.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a

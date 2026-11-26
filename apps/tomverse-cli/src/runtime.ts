@@ -32,9 +32,11 @@ export { currentDigest } from "./patch.js";
 export type { PlannedEdit } from "./patch.js";
 export { estimateTokens } from "./agent.js";
 export { SUBAGENT_LIMITS } from "./subagent.js";
+export { ORCHESTRATION_BOUNDS, ORCHESTRATION_DEFAULTS, describeOrchestration, normalizeOrchestration } from "./orchestrate-config.js";
+export type { OrchestrationLimits } from "./orchestrate-config.js";
 export { RewindError, forkSession, historyBlockReason, listTurns, planRewind, rewindSession } from "./rewind.js";
 export type { RewindCommand, RewindFile, RewindMode, RewindOutcome, RewindPlan, RewindTurn } from "./rewind.js";
-export type { SubagentRecord, CheckpointRecord, RewindRecord } from "./session.js";
+export type { SubagentRecord, SubtaskRecord, CheckpointRecord, RewindRecord } from "./session.js";
 export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
 
 /**
@@ -75,6 +77,7 @@ export const createSession = (
         readOnly: boolean;
         limits: SessionState["limits"];
         goal?: SessionState["goal"];
+        orchestrate?: SessionState["orchestrate"];
         sessionId?: string;
         codeContinuation?: SessionState["codeContinuation"];
         codeMode?: SessionState["codeMode"];
@@ -103,6 +106,7 @@ export const createSession = (
             },
             limits: options.limits,
             ...(options.goal ? { goal: options.goal } : {}),
+            ...(options.orchestrate ? { orchestrate: options.orchestrate } : {}),
         },
         io,
         options.sessionId,
@@ -212,6 +216,12 @@ export const reconcile = (journal: Journal) => {
         record.state = "unknown";
         record.endedAt ??= new Date().toISOString();
         notes.push(`Subagent ${record.id} (${record.kind}: ${record.task.slice(0, 80)}) was running when the CLI stopped; what it did is not known.`);
+    }
+    for (const record of (journal.state.subtasks ?? []).filter((r) => r.state === "queued" || r.state === "running" || r.state === "verifying")) {
+        record.state = "failed";
+        record.reason ??= "The CLI stopped while this subtask was under way.";
+        record.endedAt ??= new Date().toISOString();
+        notes.push(`Subtask ${record.id} (${record.title.slice(0, 80)}) was under way when the CLI stopped; its result is not known.`);
     }
     for (const tool of journal.state.tools.filter((t) => t.state === "started")) {
         notes.push(`${tool.toolName} (${tool.toolCallId}) had started and its outcome is unknown; it was not run again.`);

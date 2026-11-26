@@ -16,7 +16,8 @@ import type { ProjectMemory } from "./memory.js";
 import { createGitTools, type GitToolHost } from "./git-tools.js";
 import { createTools, imageMessage, planCommandCall, planPatchCall, READ_TOOLS, trimOldImages, VIEW_IMAGE_MARK, type ImageAttachment, type ToolContext } from "./tools.js";
 import { estimateTokens } from "./tokens.js";
-import { Subagents } from "./subagent.js";
+import { Subagents, type ApprovalOrigin } from "./subagent.js";
+import { describeOrchestration } from "./orchestrate-config.js";
 import { skillListing, type ExtensionRegistry } from "./extensions.js";
 import { createSkillTool } from "./skill-tool.js";
 import { LocalExtensions } from "./local-extensions.js";
@@ -67,6 +68,8 @@ export type ApprovalView = {
     root?: string;
     /** A call of an MCP server's tool: which server and tool, and the hash of the server definition the approval is for. */
     mcp?: { server: string; tool: string; definition: string; scope: "user" | "project" };
+    /** The subagent (or orchestrated subtask) this request is for, so the person can tell which one is asking. */
+    origin?: ApprovalOrigin;
 };
 
 /**
@@ -399,6 +402,7 @@ export class Runner {
                 agents: options.extensions?.agents,
                 catalog: options.catalog,
                 agentModels: options.agentModels,
+                orchestrate: options.journal.state.orchestrate,
                 model: () => this.model(),
                 effort: () => this.currentTask().effort,
                 hooks: (run) => this.hooks("subagent", undefined, run),
@@ -408,7 +412,7 @@ export class Runner {
                 redact: (text) => options.redactText?.(text) ?? text,
                 assertAllowed: () => options.assertAllowed?.(),
                 effectBlockReason: () => this.effectBlockReason(),
-                approve: (toolName, input, toolCallId) => this.askSubagentApproval(toolName, input, toolCallId),
+                approve: (toolName, input, toolCallId, approval) => this.askSubagentApproval(toolName, input, toolCallId, approval),
                 settleFailure: (error, record) => this.settleSubagentFailure(error, record),
                 lookUp: (record) => this.lookUp(record),
                 unknownReport: (record) => this.unknownReport(record),
@@ -664,6 +668,9 @@ export class Runner {
             "delegate gives self-contained work to subagents that each start with a fresh context and return only a written report: kind explore (read-only; up to 3 tasks in one call run in parallel) for wide searches and independent investigations that would otherwise fill this conversation with file contents" +
             (readOnly ? "." : "; kind worker (changes files and runs commands with the same approvals as you, one at a time) for an independent piece of work."),
             "Write each task so it stands alone: a subagent knows nothing of this conversation. A report is not verified, so check what matters before relying on it. Subagent requests count against this task's request limit. Do not delegate what one read_file or search_text answers.",
+            ...(this.journal.state.orchestrate ? [
+                `Orchestration is on (${describeOrchestration(this.journal.state.orchestrate)}). For a large job, split it into subtasks of one delegate call: workers get disjoint paths, done_when says what finished means, check names the command that must pass. Each result carries a verification verdict from a read-only verifier; look at what matters before you rely on it.`,
+            ] : []),
         ];
     }
 
@@ -1549,6 +1556,7 @@ export class Runner {
             ...(view.mcp ? { mcp: { server: view.mcp.server, tool: view.mcp.tool, scope: view.mcp.scope } } : {}),
             ...(view.command ? { command: { mode: view.command.mode, display: view.command.display, shell: view.command.shell, cwd: view.command.cwd, timeout_ms: view.command.timeoutMs } } : {}),
             ...(view.patch ? { files: view.patch.map((p) => ({ path: p.path, action: p.action })) } : {}),
+            ...(view.origin ? { subagent: { id: view.origin.id, title: view.origin.title } } : {}),
             ...(view.error ? { invalid: view.error } : {}),
         });
     }
@@ -1642,15 +1650,35 @@ export class Runner {
      * A worker subagent wants to change a file or run a command: the same question as the main agent's, through the same prompter
      * (and so the same remembered answers), recorded the same way. The tool still checks the approval before it acts.
      */
-    private async askSubagentApproval(toolName: "apply_patch" | "run_command", input: unknown, toolCallId: string) {
+    private askSubagentApproval(toolName: "apply_patch" | "run_command", input: unknown, toolCallId: string, approval?: { origin?: ApprovalOrigin; signal?: AbortSignal }) {
+        // Subagents can ask at the same moment, and the person is asked one question at a time: each waits for the one before it.
+        const turn = this.approvalTurn.then(() => this.askSubagentApprovalNow(toolName, input, toolCallId, approval));
+        this.approvalTurn = turn.then(() => undefined, () => undefined);
+        return turn;
+    }
+
+    /** The last subagent question the person was asked; the next one waits for it. */
+    private approvalTurn: Promise<void> = Promise.resolve();
+
+    /** Stops one orchestrated subtask, or all of them (the task goes on). How many were stopped. */
+    stopSubagents(subtask?: string) {
+        return this.subagents?.stop(subtask) ?? 0;
+    }
+
+    private async askSubagentApprovalNow(toolName: "apply_patch" | "run_command", input: unknown, toolCallId: string, approval?: { origin?: ApprovalOrigin; signal?: AbortSignal }) {
         const blocked = this.effectBlockReason();
         if (blocked) return { approved: false, reason: blocked };
         if (!this.options.prompter || this.controller.signal.aborted) return { approved: false, reason: "No one is available to approve this." };
+        // A subtask stopped while it waited its turn is not asked about.
+        if (approval?.signal?.aborted) return { approved: false, reason: "The subagent was stopped before this was asked." };
         const view = this.viewFor({ approvalId: `ap-${randomBytes(6).toString("hex")}`, toolCallId, toolName, input });
+        if (approval?.origin) view.origin = approval.origin;
         this.announceApproval(view);
         const blockedByHook = view.error ? undefined : await this.ext.preTool(toolName, input, toolCallId);
         const result = await this.decide(view, blockedByHook && `Blocked by a hook: ${blockedByHook}`);
         this.journal.commit();
+        // The answer arrived after the subagent was stopped: it does not count.
+        if (result.approved && approval?.signal?.aborted) return { approved: false, reason: "The subagent was stopped before the answer arrived." };
         return result;
     }
 

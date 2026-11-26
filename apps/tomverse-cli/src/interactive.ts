@@ -64,6 +64,7 @@ export const renderApproval = (view: ApprovalView) => {
         lines.push(`  env:     ${plan.envNames.length} variables (${plan.envNames.join(", ")}); your Tomverse key is not passed`);
         lines.push("  It runs with your account's permissions and is not sandboxed: it can change files outside this folder and use the network.");
     }
+    if (view.origin && lines.length) lines.splice(1, 0, `  asked by subagent ${safeLine(view.origin.id)}: ${safeLine(view.origin.title)}`);
     return lines.map((l) => safeText(l)).join("\n");
 };
 

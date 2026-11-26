@@ -47,6 +47,7 @@ import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./Account
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
 import { SlashMenu, useSlashMenu } from "./CodeExtensions";
+import { ApprovalOrigin, OrchestrationPanel } from "./OrchestrationPanel";
 import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
@@ -797,6 +798,7 @@ ${text}` : text;
         referenceIds: codeReferences.map(({ id }) => id),
         ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
         ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
+        ...(!cliFixtureModel && engine.orchestrate && executionMode === "tomverse_api" ? { orchestrate: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       clearPromptAttachments(attachmentScope);
@@ -1037,6 +1039,7 @@ ${text}` : text;
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
           {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
+          {task && surface === "code" && <OrchestrationPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
           {task && surface === "code" && <SubagentPanel task={task} language={language} />}
           {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
@@ -1291,6 +1294,7 @@ function Approval() {
     <div className="approval-content">
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
       {request.explanation && <p>{request.explanation}</p>}
+      {request.origin && <ApprovalOrigin origin={request.origin} language={language} />}
       {request.web && <section aria-label={engineCopy.approvalWebHeading}>
         <h2>{engineCopy.approvalWebHeading}</h2>
         <dl>
