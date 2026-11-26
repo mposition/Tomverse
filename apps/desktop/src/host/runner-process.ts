@@ -1038,6 +1038,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       // resumes gets the same tools as one that starts.
       browserSnapshot: command.browserSnapshot ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
       browserAgent: command.browserAgent ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
+      browserWeb: command.browserAgent && command.browserWeb === true,
       computerAgent: command.computerUse ? (request, signal) => requestComputerAgent(control, request, signal) : undefined,
       terminalRead: command.terminalRead ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
       expandFollowUp: continuation || savedCap !== undefined ? undefined : (text) => {

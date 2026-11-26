@@ -527,7 +527,9 @@ export const evaluate = (view: ApprovalView, options: EvaluateOptions): Verdict 
     if (boundary?.kind === "deny") return { kind: "deny", reason: boundary.reason, policy: note("boundary", boundary.code) };
     const subject = subjectOf(view);
     const rules = options.rules === "unreadable" ? [] : options.rules;
-    const deny = rules.find((rule) => rule.effect === "deny" && ruleApplies(rule, view.toolName, subject));
+    // Opening a site in the browser tab is reading a web page too: a deny or an ask rule for the site applies to it. An allow rule for web_fetch does not.
+    const restrictiveTool = view.toolName === "browser_navigate" ? "web_fetch" : view.toolName;
+    const deny = rules.find((rule) => rule.effect === "deny" && ruleApplies(rule, restrictiveTool, subject));
     if (deny) return { kind: "deny", reason: `Denied by your ${deny.scope} permission rule: ${describeRule(deny)}.`, policy: note("deny_rule", describeRule(deny)) };
     if (mode === "read_only" && subject.kind !== "web") {
         return { kind: "deny", reason: "Read-only mode: files are not changed and commands are not run.", policy: note("mode", "read_only") };
@@ -536,7 +538,7 @@ export const evaluate = (view: ApprovalView, options: EvaluateOptions): Verdict 
     if (options.rules === "unreadable") {
         return { kind: "human", reason: "A permission rules file could not be read, so every action is asked until it is fixed.", policy: note("boundary", "rules_unreadable") };
     }
-    const ask = rules.find((rule) => rule.effect === "ask" && ruleApplies(rule, view.toolName, subject));
+    const ask = rules.find((rule) => rule.effect === "ask" && ruleApplies(rule, restrictiveTool, subject));
     if (ask) return { kind: "human", reason: `Your ${ask.scope} permission rule asks: ${describeRule(ask)}.`, policy: note("ask_rule", describeRule(ask)) };
     const allow = rules.find((rule) => rule.effect === "allow" && ruleApplies(rule, view.toolName, subject));
     if (allow) return { kind: "allow", policy: note("allow_rule", `${allow.scope}: ${describeRule(allow)}`) };
@@ -646,7 +648,8 @@ export class PermissionGate {
 /** The "always allow" answer on an approval card, as a rule. Deleting files and commands that leave the app are never turned into one. */
 export const ruleForApproval = (view: ApprovalView): PermissionRule | null => {
     if (view.error || checkBoundaries(view)) return null;
-    if (view.web) return { effect: "allow", tool: "web_fetch", pattern: view.web.host };
+    // An answer about opening a site in the browser tab is never saved as a rule: it would also allow web_fetch.
+    if (view.web) return view.toolName === "browser_navigate" ? null : { effect: "allow", tool: "web_fetch", pattern: view.web.host };
     if (view.patch) return view.patch.some((edit) => edit.action === "delete") ? null : { effect: "allow", tool: "apply_patch", pattern: "**" };
     const subject = subjectOf(view);
     if (view.command && subject.kind === "command" && subject.strict?.length && !view.command.background) {

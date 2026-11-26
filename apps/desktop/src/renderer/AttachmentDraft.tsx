@@ -172,14 +172,23 @@ export function AttachmentPicker({ draft, busy = false, id, tool = false }: { dr
         if (event.currentTarget.files) draft.add(event.currentTarget.files);
         event.currentTarget.value = "";
       }} />
-    <button className={tool ? "composer-tool-row" : "icon"} type="button" aria-label={desktopShellCopy[draft.language].attachFiles} disabled={busy || draft.uploading}
+    <button className={tool ? "composer-tool-row" : "icon"} type="button" disabled={busy || draft.uploading}
+      {...(tool ? { "aria-labelledby": "tools-attach-label", "aria-describedby": draft.googleDrive ? "tools-attach-description" : undefined }
+        : { "aria-label": desktopShellCopy[draft.language].attachFiles })}
       onClick={(event) => {
         picker.current?.click();
         const menu = event.currentTarget.closest("details");
         if (menu && tool) menu.open = false;
-      }}>{tool ? <><span className="composer-tool-icon"><Paperclip size={17} /></span>
-        <strong>{desktopShellCopy[draft.language].attachFiles}</strong></> : <Paperclip size={17} />}</button>
+      }}>{tool ? <><span className="composer-tool-icon"><Paperclip size={18} /></span>
+        <ToolAttachLabel drive={draft.googleDrive} /></> : <Paperclip size={17} />}</button>
   </>;
+}
+
+/** The "+" menu row text, worded as on the web: the title, and where a file can come from. */
+function ToolAttachLabel({ drive }: { drive: boolean }) {
+  const { t } = useLanguage();
+  return <span><strong id="tools-attach-label">{t("chat.attachFile")}</strong>
+    {drive && <small id="tools-attach-description">{t("chat.attachSourceSubtitle")}</small>}</span>;
 }
 
 export function AttachmentDraftStatus({ draft, busy = false }: { draft: DesktopAttachmentDraft; busy?: boolean }) {

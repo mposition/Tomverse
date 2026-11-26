@@ -240,9 +240,10 @@ export type CheckoutOutcome = CheckoutReturn | "closed";
 export type CheckoutPurpose = "subscription" | "credits";
 
 /**
- * What the return URL says happened. A hint for the wording only, in either direction:
- * a cancel page does not shorten or end the account check, and whether a payment went
- * through is decided from the account the server reports afterwards.
+ * What the return URL says happened. Whether a payment went through is decided from the
+ * account the server reports afterwards, in either direction: a cancel page does not shorten
+ * or end the account check. A cancel page has one effect besides the wording: that attempt
+ * does not hold a new checkout of the same item back.
  */
 export function checkoutReturnOutcome(value: string): CheckoutReturn {
   let target: URL;

@@ -7,7 +7,6 @@ import {
 import "@tomverse/ui-tokens/tokens.css";
 import "@tomverse/ui-tokens/wordmark.css";
 import logo from "../../../../public/tomverse-logo.png";
-import { TomverseWordmark } from "../../../../components/chat/TomverseWordmark";
 import { usagePercent } from "../../../../components/chat/UsagePercentGauge";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
@@ -25,13 +24,14 @@ import { desktopReviewCopy } from "../../../../locales/desktopReview";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopSettingsCopy } from "../../../../locales/desktopSettings";
 import { mobileCopy } from "../../../../locales/mobile";
+import { desktopCodeBrowserCopy } from "../../../../locales/desktopCodeBrowser";
 import { reviewHandoffCopy } from "../../../../locales/reviewHandoff";
 import type { AccountPreferences, AccountTheme } from "../account-settings-contract";
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation } from "./DraftDictation";
-import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
+import { ChatDraftPlace } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
 import { GitPanel } from "./GitPanel";
 import { GitApprovalSection } from "./GitApproval";
@@ -247,10 +247,12 @@ function Desktop() {
   const webView = useWebViewState();
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const surface: Surface = settingsView ? "settings" : workspace;
-  const canShowBrowser = surface === "code" && snapshot?.codeBrowserAvailable === true;
-  const browserScope = JSON.stringify([snapshot?.draftNamespace, snapshot?.task?.id]);
-  const browserOpen = canShowBrowser && openBrowserScope === browserScope;
-  useAgentBrowserReveal(canShowBrowser, () => setOpenBrowserScope(browserScope));
+  // The browser panel is the person's, in Chat, Review and Code alike (no project needed); it belongs to the account and closes with it.
+  const canShowBrowser = (surface === "code" || surface === "chat" || surface === "review") && snapshot?.codeBrowserAvailable === true;
+  const browserScope = snapshot?.account.stage === "connected" ? snapshot.account.draftNamespace : "device";
+  const browserMounted = snapshot?.codeBrowserAvailable === true && openBrowserScope === browserScope;
+  const browserOpen = canShowBrowser && browserMounted;
+  const browserAgentWorking = useAgentBrowserReveal(snapshot?.codeBrowserAvailable === true, () => setOpenBrowserScope(browserScope));
   const terminalTask = snapshot?.task?.id ?? null;
   const canShowTerminal = surface === "code" && snapshot?.codeTerminal?.available === true;
   const terminalOpen = canShowTerminal && terminalPanel;
@@ -308,6 +310,8 @@ function Desktop() {
     chat: "Chat", review: "Review", code: "Tomverse Code", plugins: copy.plugins, settings: common.settings,
   };
   const [historyOpen, setHistoryOpen] = useState(() => !matchMedia(compactHistoryQuery).matches);
+  // The Plugins menu is rendered by ConnectorWorkspace (it owns the tab and selection state) into this slot of the second lane.
+  const [pluginsLane, setPluginsLane] = useState<HTMLElement | null>(null);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [reviewReference, setReviewReference] = useState("");
   const [defaultHistoryWidth, setDefaultHistoryWidth] = useState(252);
@@ -461,7 +465,6 @@ function Desktop() {
   }, [codeDraft, snapshot?.draftNamespace]);
 
   function select(next: Workspace) {
-    if (next !== workspace) setOpenBrowserScope(null);
     if (next === workspace) {
       if (next === "chat") chat.reload();
       if (next === "review") review.reload();
@@ -476,7 +479,6 @@ function Desktop() {
 
   function openSettings(view: SettingsView = "account") {
     if ((view === "list" || cliProviders.some((provider) => provider === view)) && !cliSettingsEnabled) return;
-    setOpenBrowserScope(null);
     if (!settingsView) {
       if (document.activeElement instanceof HTMLElement) settingsReturnFocus.current = document.activeElement;
     }
@@ -514,7 +516,6 @@ function Desktop() {
   const chat = useChatHistory(chatActive, "chat", accountDraft, language, snapshot?.capabilities?.deepResearch);
   const reviewActive = workspace === "review" && account?.stage === "connected";
   const nativeReview = !settingsView && reviewActive;
-  const codeAskLocation = useChatDraftLocation(JSON.stringify([codeDraft, snapshot?.draftNamespace, task?.id]));
   const review = useChatHistory(reviewActive, "review", accountDraft, language);
   async function openImportedConversation(id: string, product: "chat" | "review" = "chat") {
     const history = product === "chat" ? chat : review;
@@ -891,17 +892,16 @@ ${text}` : text;
       }}>
       <div className="history-header">
         <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>
-          {chatRail ? <><img src={logo} alt="" /><TomverseWordmark /></> : names[surface]}
+          {names[surface]}
         </h1>
         {surface === "code" && <button ref={historySearchToggle} className="icon" type="button" aria-label={copy.searchHistory} aria-expanded={searchOpen}
           aria-controls={searchOpen ? "code-history-filter" : undefined}
           onClick={() => searchOpen ? closeCodeHistorySearch() : setSearchOpen(true)}><Search size={18} /></button>}
-        {textHistory && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
-          onClick={() => void act(() => openDocs("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
       </div>
+      {surface === "plugins" && <div ref={setPluginsLane} className="desktop-plugins-slot" />}
       {nativeImages && <ImageHistoryList workspace={images} onClose={() => setImagesOpen(false)} />}
       {chatRail && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading} canModify={snapshot?.capabilities?.chatWrite === true}
-        onImages={imageCapability ? () => setImagesOpen(true) : undefined} onImport={openImportedConversations} />}
+        onImport={openImportedConversations} />}
       {nativeReview && !nativeImages && <ChatHistory key={`review:${accountDraft}`} chat={review} product="review" busy={reviewRun.running || reviewAttachments.uploading} />}
       {settingsView && <div className="settings-navigation">
         <nav aria-label="Tomverse">
@@ -919,7 +919,6 @@ ${text}` : text;
       </div>}
       {surface === "code" && <>
         <button className="soft new-task" type="button" disabled={busy} onClick={() => {
-          setOpenBrowserScope(null);
           setHistoryDraft(false);
           setRequesting(true);
           void act(() => window.desktop.newTask()).finally(() => {
@@ -942,7 +941,7 @@ ${text}` : text;
             <ul>
               {visibleCodeHistory.map((entry) => <li key={entry.id}>
                 <button type="button" disabled={busy} aria-current={task?.id === entry.id ? "page" : undefined} title={entry.title}
-                  onClick={() => { setOpenBrowserScope(null); setHistoryDraft(true); nearBottom.current = true; void act(() => window.desktop.openHistory(entry.id)); }}>
+                  onClick={() => { setHistoryDraft(true); nearBottom.current = true; void act(() => window.desktop.openHistory(entry.id)); }}>
                   <span>{entry.title}</span>
                 </button>
               </li>)}
@@ -1003,11 +1002,13 @@ ${text}` : text;
           {surface === "code" && snapshot?.project && !snapshot.remote && snapshot.draftNamespace && !busy &&
             <GitPanel key={"git:" + snapshot.draftNamespace + (task?.id ?? "new")} language={language} onVisibilityChange={setGithubDialogOpen} disabled={Boolean(busy)}
               models={snapshot.models ?? []} defaultModelId={selectedModel?.id} />}
-          {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
-            aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
-            onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
           {(nativeChat || nativeReview) && <button className="soft chat-header-usage" type="button" title={usageLabel}
             onClick={() => openSettings("plan")}><ChartNoAxesColumnIncreasing size={15} aria-hidden="true" /> {usageLabel} {usageValue == null ? "—" : `${usageValue}%`}</button>}
+          {canShowBrowser && <button className="icon browser-toggle" type="button" aria-label={codeBrowserLabel(language)} data-testid="browser-toggle"
+            aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
+            title={browserAgentWorking ? desktopCodeBrowserCopy[language].agentUsing : undefined}
+            onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} />
+            {browserAgentWorking && <span className="browser-agent-dot" aria-hidden="true" />}</button>}
           <button className="icon" aria-label={theme === "dark" ? copy.useLight : copy.useDark} type="button"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}</button>
           <button ref={historyToggle} className="icon" type="button" aria-label={historyOpen ? copy.hideHistory : copy.showHistory}
@@ -1028,7 +1029,7 @@ ${text}` : text;
       {!online && (surface === "code" || nativeChat || nativeReview) && <p id="desktop-offline" className="offline-notice" role="status">
         {copy.offline}
       </p>}
-      {surface === "code" ? <div className="code-with-browser"><div className="code-column">
+      <div className="code-with-browser"><div className={surface === "code" ? "code-column" : "work-main"}>{surface === "code" ? <>
         <div className="scroll" ref={scroll} onScroll={(event) => {
           const pane = event.currentTarget;
           const viewport = scrollViewport.current;
@@ -1155,8 +1156,8 @@ ${text}` : text;
               </details>}
               {snapshot?.deviceFixtureAvailable && snapshot.draftNamespace && <DraftDictation language={language} disabled={busy}
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
-              {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftLocation location={codeAskLocation} language={language}
-                draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} deviceLocation={false} />}
+              {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftPlace language={language}
+                draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} />}
               {queueTarget && <button className="soft" type="button" disabled={!canQueue} onClick={() => void queueDraft()}>
                 {desktopCodeEngineCopy[language].queueAdd}</button>}
               <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
@@ -1166,13 +1167,7 @@ ${text}` : text;
             </div>
           </form>
         </div>
-      </div>{canShowBrowser && browserOpen && <CodeBrowser language={language}
-        canShare={snapshot?.codeBrowserInspection === true && task?.status === "running"}
-        agentTools={snapshot?.codeBrowserAgent === true}
-        agentLive={task?.status === "running" || task?.status === "approval"}
-        onAttachComments={(block) => changeDraft(appendElementComments(prompt, block).slice(0, MAX_CODE_PROMPT_CHARACTERS))}
-        hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}
-      </div> : nativeImages ? <ImageWorkspace key={images.seedVersion} workspace={images} capability={imageCapability} />
+      </> : nativeImages ? <ImageWorkspace key={images.seedVersion} workspace={images} capability={imageCapability} />
         : nativeChat ? <>{reviewReference && <div className="review-reference" role="status">
           <p>{reviewCopy.referencePrompt}</p>
           <button className="primary" type="button" onClick={() => {
@@ -1191,7 +1186,7 @@ ${text}` : text;
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
-        deviceFixture={snapshot?.deviceFixtureAvailable === true}
+        deviceFixture={snapshot?.deviceFixtureAvailable === true} deviceLocation={snapshot?.chatLocationAvailable === true}
         handoff={handoff?.target === "chat" ? handoff : undefined} /></> : nativeReview ? <ReviewWorkspace history={review}
           capability={snapshot?.capabilities?.review ?? null} run={reviewRun} preferredModelIds={accountModels}
           analysisEnabled={snapshot?.capabilities?.reviewAnalysis} searchReadiness={snapshot?.capabilities?.searchReadiness}
@@ -1276,7 +1271,7 @@ ${text}` : text;
             </button>
           </section>}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
-          ? <ConnectorWorkspace key={account.label} language={language} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
+          ? <ConnectorWorkspace key={account.label} language={language} lane={historyOpen ? pluginsLane : null} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
           <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>
             : surface !== "chat" && <p>{copy.unavailable}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}
@@ -1285,6 +1280,14 @@ ${text}` : text;
         </section>}
         {alertText && <p className="notice" role="alert">{alertText}</p>}
       </div></div>}
+      </div>{browserMounted && <CodeBrowser language={language}
+        // Only Code has an agent, a composer for element comments and a task to share a page with.
+        canShare={surface === "code" && snapshot?.codeBrowserInspection === true && task?.status === "running"}
+        agentTools={snapshot?.codeBrowserAgent === true}
+        agentLive={surface === "code" && (task?.status === "running" || task?.status === "approval")}
+        onAttachComments={surface === "code" ? (block) => changeDraft(appendElementComments(prompt, block).slice(0, MAX_CODE_PROMPT_CHARACTERS)) : undefined}
+        hidden={!canShowBrowser || (historyOpen && matchMedia(compactHistoryQuery).matches)} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}
+      </div>
     </main>
   </div>;
 }
@@ -1320,13 +1323,13 @@ function Approval() {
       {request.remote && <RemoteApprovalNote language={language} remote={request.remote} />}
       {request.explanation && <p>{request.explanation}</p>}
       {request.origin && <ApprovalOrigin origin={request.origin} language={language} />}
-      {request.web && <section aria-label={engineCopy.approvalWebHeading}>
-        <h2>{engineCopy.approvalWebHeading}</h2>
+      {request.web && <section aria-label={request.tool === "browser_navigate" ? engineCopy.approvalBrowserOpenHeading : engineCopy.approvalWebHeading}>
+        <h2>{request.tool === "browser_navigate" ? engineCopy.approvalBrowserOpenHeading : engineCopy.approvalWebHeading}</h2>
         <dl>
           <dt>{engineCopy.approvalWebHost}</dt><dd><code>{request.web.host}</code></dd>
           <dt>{engineCopy.approvalWebAddress}</dt><dd><code>{request.web.url}</code></dd>
         </dl>
-        <p role="note">{engineCopy.approvalWebNote}</p>
+        <p role="note">{request.tool === "browser_navigate" ? engineCopy.approvalBrowserOpenNote : engineCopy.approvalWebNote}</p>
       </section>}
       {request.browser && <ApprovalBrowser browser={request.browser} copy={engineCopy} />}
       {request.computer && <ApprovalComputer computer={request.computer} language={language} />}

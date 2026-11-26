@@ -89,7 +89,7 @@ test("an account that never shows the purchase is unconfirmed after every read; 
 test("each item keeps its own record: buying another pack or the subscription leaves pack A unconfirmed", async () => {
   const { tracker, usage, stages } = harness();
   tracker.begin(starter, usage(), 500);
-  tracker.windowClosed("cancelled");
+  tracker.windowClosed("returned");
   await flush();
   tracker.begin(project, usage(), 1_500);
   tracker.windowClosed("closed");
@@ -108,7 +108,7 @@ test("one balance increase confirms only the pack it can belong to", () => {
   const { tracker, server, usage, stages } = harness();
   server.purchased = 200;
   tracker.begin(starter, usage(), 500);
-  tracker.windowClosed("cancelled");
+  tracker.windowClosed("closed");
   tracker.begin(project, usage(), 1_500);
   // Project lands: +1,500 is more than Starter alone could explain, and leaves nothing for Starter.
   server.purchased = 1_700;
@@ -186,6 +186,39 @@ test("a new checkout clears the confirmations shown and keeps every unconfirmed 
   ]);
 });
 
+test("an attempt that came back through the cancel page does not hold the next one back, and can still be confirmed", async () => {
+  const { tracker, server, usage, stages } = harness();
+  server.purchased = 100;
+  tracker.begin(starter, usage(), 500);
+  tracker.windowClosed("cancelled");
+  // While the account is still being read, and after the reads ran out: no warning either way.
+  assert.equal(tracker.admit(starter, usage()).kind, "proceed");
+  await flush();
+  assert.deepEqual(stages(), ["credits:starter_500:unconfirmed"]);
+  assert.equal(tracker.admit(starter, usage()).kind, "proceed");
+  // The second window is closed without a return page: that attempt's outcome is unknown, so a third is held.
+  tracker.begin(starter, usage(), 500);
+  tracker.windowClosed("closed");
+  await flush();
+  assert.equal(tracker.admit(starter, usage()).kind, "held");
+  // One pack lands: the oldest attempt is confirmed, the unknown one keeps holding.
+  server.purchased = 600;
+  assert.equal(tracker.admit(starter, usage()).kind, "held");
+  assert.deepEqual(stages(), ["credits:starter_500:confirmed", "credits:starter_500:unconfirmed"]);
+});
+
+test("a cancelled subscription checkout does not hold another plan's checkout back; a closed one does", async () => {
+  const { tracker, usage } = harness();
+  tracker.begin(pro, usage(), 0);
+  tracker.windowClosed("cancelled");
+  await flush();
+  assert.equal(tracker.admit({ kind: "subscription", planId: "max" }, usage()).kind, "proceed");
+  tracker.begin({ kind: "subscription", planId: "max" }, usage(), 0);
+  tracker.windowClosed("closed");
+  await flush();
+  assert.equal(tracker.admit(pro, usage()).kind, "held");
+});
+
 /** Runs the warning and then the customer's choice for `intent`, and records a second attempt of it. */
 function repeatAfterWarning(h: ReturnType<typeof harness>, intent: Parameters<ReturnType<typeof harness>["tracker"]["admit"]>[0],
   credits: number) {
@@ -199,7 +232,7 @@ test("the same pack paid twice through the warning: one pack's increase confirms
   const h = harness();
   h.server.purchased = 100;
   h.tracker.begin(starter, h.usage(), 500);
-  h.tracker.windowClosed("cancelled");
+  h.tracker.windowClosed("closed");
   await flush();
   repeatAfterWarning(h, starter, 500);
   h.tracker.windowClosed("closed");

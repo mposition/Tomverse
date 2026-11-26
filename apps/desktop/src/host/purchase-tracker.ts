@@ -202,6 +202,10 @@ export function createPurchaseTracker(deps: {
      * showed the item's last unconfirmed attempts, or "held" with a one-time token while the item has any
      * unconfirmed attempt. Only a request carrying the token this tracker issued for this item, within
      * REPEAT_HOLD_TTL_MS, goes ahead; a token the renderer made up is answered with a new hold.
+     *
+     * An attempt that came back through the server's cancel page holds nothing back (owner decision
+     * 2026-11-26): the person left Stripe's page without paying. Its record stays and is still checked
+     * against the account, so a payment that lands after all is confirmed like any other.
      */
     admit(intent: PurchaseIntent, usage: BillingUsage, hold?: string): PurchaseAdmission {
       let dirty = prune();
@@ -209,7 +213,9 @@ export function createPurchaseTracker(deps: {
       if (settled.length) dirty = true;
       if (dirty) changed();
       const item = purchaseItem(intent);
-      if (!unconfirmed(item).length) return settled.some((entry) => entry.item === item) ? { kind: "settled" } : { kind: "proceed" };
+      if (!unconfirmed(item).some((entry) => !entry.cancelled)) {
+        return settled.some((entry) => entry.item === item) ? { kind: "settled" } : { kind: "proceed" };
+      }
       const issued = holds.get(item);
       if (hold && issued?.token === hold && issued.until > now()) {
         holds.delete(item);

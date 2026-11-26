@@ -26,14 +26,14 @@ export type WorkerCommand =
   | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
   | { type: "catalog"; requestId: string; connection: Connection }
   | { type: "start"; runId: string; project: ProjectRoot; sourceProject?: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
-    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; computerUse?: boolean; terminalRead?: boolean;
+    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean;
     continuation?: CodeContinuation & { taskId: string; sourceHome: string; sourceProvider: "openai" | "anthropic" } }
   | (NativeFixtureTask & { type: "start-codex-fixture"; clientVersion: string;
     apiSource?: CodeCliContinuation & { scope: HistoryScope; connection: Connection } })
   | (NativeFixtureTask & { type: "start-claude-fixture" })
   | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
-    browserSnapshot?: boolean; browserAgent?: boolean; computerUse?: boolean; terminalRead?: boolean;
+    browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean;
     afterClarification?: { requestId: string; text: string };
     afterQuota?: { requestId: string; refusedRequestId: string; text: string;
       continuation?: { segmentId: string; maximumKeyCreditCap: number } } })
