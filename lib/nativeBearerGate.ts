@@ -303,6 +303,16 @@ export const DESKTOP_REVIEW_CREATE = "/api/products/review/conversations";
 export const DESKTOP_REVIEW_ROUTING = "/api/review/route";
 export const DESKTOP_REVIEW_PREFLIGHT = "/api/chat/preflight";
 export const DESKTOP_IMAGE_GENERATIONS = "/api/images/generations";
+/**
+ * Remote control (docs/ops/desktop-remote-control.md): the PC reports its running tasks and picks up remote answers.
+ * Enrolled whenever Desktop authentication is on, so the bearer is verified and the route itself answers "not
+ * available" while `TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED` is off.
+ */
+export const DESKTOP_REMOTE_SYNC = "/api/desktop/remote/sync";
+
+export function desktopRemoteControlEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED === "true";
+}
 
 export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
 export const DESKTOP_CHAT_HISTORY = "/api/conversations";
@@ -378,6 +388,7 @@ export function desktopPluginsEnabled() {
 }
 
 export function desktopWriteApiRoute(path: string, method: string): boolean {
+  if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && desktopChatWriteEnabled();
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;

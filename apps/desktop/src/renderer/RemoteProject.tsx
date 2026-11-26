@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Language } from "../../../../lib/language";
-import { desktopRemoteCopy } from "../../../../locales/desktopRemote";
+import { desktopRemoteCopy } from "../../../../locales/desktopRemoteProject";
 import type { RemoteConnectionState, RemoteProjectReply, RemoteRecent, RemoteResult, RemoteSnapshot, RemoteView } from "../remote-contract";
 import "./remote-project.css";
 

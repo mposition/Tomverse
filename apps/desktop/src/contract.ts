@@ -40,6 +40,7 @@ import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, t
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
 import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
 import type { LaneKind, ParallelCommand, ParallelView, ScheduleCommand, ScheduleResult, ScheduleView } from "./parallel-contract";
+import type { RemoteControlCommand, RemoteControlView } from "./remote-control-contract";
 
 type DesktopDetail = keyof typeof desktopNativeCopy.en;
 
@@ -497,6 +498,8 @@ export type DesktopApi = {
   startParallel(input: StartInput): Promise<void>;
   parallel(command: ParallelCommand): Promise<boolean>;
   schedules(command: ScheduleCommand): Promise<ScheduleResult>;
+  /** Settings: control of this PC from the account's other devices (remote-control-contract.ts). */
+  remoteControl(command: RemoteControlCommand): Promise<RemoteControlView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

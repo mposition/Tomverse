@@ -171,6 +171,23 @@ The Code screen gets a **Subagent activity** list: each subtask with its state, 
 
 **Scheduled runs** (`src/host/schedule-engine.ts`, `schedule-launch.ts`; the arithmetic is `src/schedule-core.ts`, the safety rules `src/schedule-policy.ts`). **Off by default**; **Activity > Schedules** turns them on after the person reads that a run starts at its time with nobody confirming and uses credits. A schedule has an instruction, a repeat (once, every N minutes, daily, weekly) in a time zone, the project folder open when it was saved, where it runs (that folder or a new worktree), a permission mode and a request cap (standard 20 or extended 200, never unlimited). They run only while the app runs; there is no OS service or login item. A run that came due while the app was closed is recorded as **missed** and not made up; a run that is late by more than five minutes while the app runs is missed too. Each run is recorded (times, status, changed files, the task to open), and an OS notification is sent when it ends. Rules enforced in the main process: a request that needs a person is never answered for them and no card opens by itself, the run waits as "waiting for approval" in the activity list and fails after 30 minutes; a push or a pull request always needs the person's approval card (the agent's git tool, and a `git push` or `gh` command, which the permission boundary leaves to a person in every mode; on Windows the sandbox's network list is advisory, so a program the agent writes and runs itself is not stopped by it); **allow all** is accepted only for a new worktree run on a computer whose OS sandbox really refuses writes outside the project (checked again at every run); a schedule turns itself off after 3 failed runs in a row; schedules belong to the account that turned them on (another account sees none and starts from nothing); one schedule never runs twice at once. The agent has no tool that reads or changes schedules; they change only through typed commands from the window (`parallel-contract.ts`). Daylight saving: a wall time skipped by the clock change runs right after the gap, a repeated one runs once, at its first occurrence.
 
+## Control from other devices
+
+**Settings > Execution and limits > Allow control of this PC from other devices** is off by default, applies to the signed-in account only, and asks in a native dialog before it turns on. It also needs the server switch `TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED`. While it is on and a Code task runs, the main process reports a short, redacted summary to the server: every 8 seconds, or every 2 seconds while a request that may be answered from elsewhere is open. The person can then use `tomverse.app/remote` on a phone or another computer to watch the tasks, answer the approval request on the PC's screen (allow once or deny), stop a task, or send the open task a follow-up. Nothing is sent while nothing runs, and the PC always opens the connection itself.
+
+The rules are in `src/host/remote-control.ts`, which has no Electron and is unit-tested. The settings screen says what is sent: titles, states, the first prose line of recent messages, and for the open request its kind and its command line or file paths. File contents, diffs, command output, environment values and credentials are not sent.
+
+The approval is still decided here. An answer from elsewhere is applied only through the approval window's own `answer()`, and only when all of these hold:
+
+- it is for the card on screen now, with the same digest of the whole request
+- it is "allow once" or "deny"
+- it is not a repeat
+- it is younger than 2 minutes and names this device
+
+Only file changes whose paths are all shown, and commands whose whole line is shown and that the permission boundary does not leave to a person, may be answered from elsewhere. Commits, pushes and pull requests, MCP tools, web pages, the browser panel, "Allow for this run" and every setting stay at the PC.
+
+Turning the setting off or signing out deletes the server's copy. The server side is described in `docs/ops/desktop-remote-control.md`.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

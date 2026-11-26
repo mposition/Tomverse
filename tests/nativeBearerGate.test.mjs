@@ -10,6 +10,8 @@ import {
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
   desktopPluginsEnabled,
+  desktopReadApiRoute,
+  desktopRemoteControlEnabled,
   desktopWriteApiRoute,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
@@ -30,6 +32,39 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
  */
 
 const REGISTERED = "/api/conversations";
+
+test("Desktop remote control enrols only the PC's own sync path, and only for the Desktop bearer", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const sync = "/api/desktop/remote/sync";
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopRemoteControlEnabled(), false);
+    assert.equal(desktopWriteApiRoute(sync, "POST"), false);
+    // Enrolled with Desktop authentication, so the bearer is verified and the route itself says "not available".
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopRemoteControlEnabled(), false);
+    assert.equal(desktopWriteApiRoute(sync, "POST"), true);
+    assert.equal(desktopWriteApiRoute(sync, "DELETE"), true);
+    for (const method of ["GET", "PUT", "PATCH"]) assert.equal(desktopWriteApiRoute(sync, method), false, method);
+    assert.equal(desktopWriteApiRoute(sync + "/x", "POST"), false);
+    process.env.TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED = "true";
+    assert.equal(desktopRemoteControlEnabled(), true);
+    // The web screen's routes take the signed-in browser session only; a Desktop bearer never reaches them.
+    for (const [path, method] of [["/api/desktop/remote/devices", "GET"], ["/api/desktop/remote/commands", "POST"]]) {
+      assert.equal(desktopWriteApiRoute(path, method), false, path);
+      assert.equal(desktopReadApiRoute(path, method), false, path);
+    }
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopRemoteControlEnabled(), false);
+    assert.equal(desktopWriteApiRoute(sync, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
 
 test("Desktop analysis and composer tools require their own enrollment", () => {
   const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED",

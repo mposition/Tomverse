@@ -332,6 +332,11 @@ export class TaskLanes {
     return [...this.lanes.values()].some((lane) => lane.approvals.some((approval) => approval.id === id));
   }
 
+  /** The lane a waiting request belongs to (remote control reports the card with its task). */
+  approvalKey(id: string): string | null {
+    return [...this.lanes.values()].find((lane) => lane.approvals.some((approval) => approval.id === id))?.key ?? null;
+  }
+
   /** Called about once a second: fails scheduled runs whose request waited too long, and kills a stopped task that did not end. */
   tick() {
     this.pump();
