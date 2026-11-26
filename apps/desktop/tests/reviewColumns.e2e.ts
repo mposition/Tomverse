@@ -21,6 +21,13 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
       for (const model of columnModels) await expect(desktop.getByText(model.id, { exact: true })).toHaveCount(0);
     });
 
+    await t.test("an older answer saved without its model is still shown with its question", async () => {
+      const legacy = desktop.getByTestId("review-unlabelled-answer");
+      await expect(legacy).toHaveCount(1);
+      await expect(legacy).toContainText("An older answer saved without its model.");
+      await expect(columns.getByText("An older answer saved without its model.")).toHaveCount(0);
+    });
+
     await t.test("the question is the user's chat bubble in every column, not a heading", async () => {
       await expect(desktop.getByRole("heading", { name: columnsQuestion })).toHaveCount(0);
       await expect(desktop.getByTestId("review-user-bubble")).toHaveCount(3);

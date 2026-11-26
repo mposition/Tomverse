@@ -22,6 +22,7 @@ import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
 import { DesktopCompareSummary } from "./DesktopCompareSummary";
 import { BrandMark } from "./ReviewBrand";
 import { ReviewColumns, UserBubble, type ReviewLive } from "./ReviewColumns";
+import { ChatMarkdown } from "./ChatTranscript";
 import { arrangeColumns } from "../review-columns";
 import type { ImageCapability } from "../images-contract";
 
@@ -197,7 +198,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
     answers: showOutcome ? run.answers : {}, only: run.only, participants: run.models };
   const actualModels = new Map(history.conversation?.responseAttempts?.flatMap(({ assistantMessageId, actualModelId, provider }) =>
     assistantMessageId && actualModelId ? [[assistantMessageId, { id: actualModelId, provider }] as const] : []));
-  const imageTurns = turns.map(({ question, answers }) => ({ question, answers: answers.filter((answer) => answer.imageTurn) }))
+  // Answers that have no column to go to: image turns, and an older answer saved without its model.
+  const leadTurns = turns.map(({ question, answers }) => ({ question, answers: answers.filter((answer) => answer.imageTurn || !answer.modelId) }))
     .filter((turn) => columns.length ? turn.answers.length : true);
   function changeChoices(next: string[]) { setPicked({ conversationId: id, mode, choices: next }); }
   function moveColumns(next: string[]) {
@@ -308,9 +310,14 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
       {history.conversation?.surface === "continuation" &&
         <ImportedSource key={history.conversation.id} id={history.conversation.id} language={language} />}
       {history.conversation && !turns.length && !run.running && <p className="notice">{copy.empty}</p>}
-      {imageTurns.map(({ question, answers }) => <section className="review-turn" aria-label={copy.turn} key={question.id}>
+      {leadTurns.map(({ question, answers }) => <section className="review-turn" aria-label={copy.turn} key={question.id}>
         <UserBubble content={question.content} message={question} language={language} />
-        {answers.map((answer) => <SavedImageTurn key={answer.imageTurn!.groupId} turn={answer.imageTurn!} language={language} />)}
+        {answers.map((answer) => answer.imageTurn
+          ? <SavedImageTurn key={answer.imageTurn.groupId} turn={answer.imageTurn} language={language} />
+          : <article className="review-unlabelled-answer" key={answer.id} data-testid="review-unlabelled-answer">
+            <h3>{copy.modelUnavailable}</h3>
+            <div className="review-answer-bubble"><ChatMarkdown content={answer.content} language={language} /></div>
+          </article>)}
       </section>)}
       {!columns.length && live.running && live.question && <UserBubble content={live.question} language={language} />}
       {run.running && !liveAnswers.length && !columns.length && <p className="notice" role="status">{copy.waiting}</p>}

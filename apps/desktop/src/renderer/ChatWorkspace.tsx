@@ -949,20 +949,32 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     if (scroll.current && nearBottom.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat.live, chat.conversation]);
 
+  // The account and conversation a message is being prepared for. Uploads and the position read take time;
+  // if either changed meanwhile, the message belongs to neither and is not sent.
+  const sendScope = useRef(toolsScope);
+  useLayoutEffect(() => { sendScope.current = toolsScope; }, [toolsScope]);
+  const [preparing, setPreparing] = useState(false);
   async function send(depth?: DeepResearchDepth) {
     const model = depth ? researchModel : selectedModel;
-    if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) ||
+    if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || preparing ||
         chat.sending || chat.writing || location.state.pending || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
-    const attachmentUploadIds = await attachments.prepare();
-    if (!attachmentUploadIds) return;
-    // A fresh fix for this message only; a failed read continues without a location.
-    const currentLocation = depth ? undefined : await location.read();
-    const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
-      effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
-      ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation,
-        ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
-      tools: composerTools ? toolChanges : undefined });
-    if (saved) { attachments.clear(); setToolDraft(undefined); }
+    const scope = toolsScope;
+    setPreparing(true);
+    try {
+      const attachmentUploadIds = await attachments.prepare();
+      if (!attachmentUploadIds || sendScope.current !== scope) return;
+      // A fresh fix for this message only; a failed read continues without a location.
+      const currentLocation = depth ? undefined : await location.read();
+      if (sendScope.current !== scope) return;
+      const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
+        effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
+        ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation,
+          ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
+        tools: composerTools ? toolChanges : undefined });
+      if (saved) { attachments.clear(); setToolDraft(undefined); }
+    } finally {
+      setPreparing(false);
+    }
   }
 
   const live = chat.live;
@@ -1090,7 +1102,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
         {draftExcerpt && <HandoffDraft handoff={draftExcerpt} busy={chat.sending} language={language} />}
         <AttachmentDraftStatus draft={attachments} busy={chat.sending} />
         <ChatLocationStatus location={location} language={language} />
-        <textarea ref={composer} id="chat-draft-input" aria-label={copy.message} value={chat.draft} disabled={chat.sending || attachments.uploading}
+        <textarea ref={composer} id="chat-draft-input" aria-label={copy.message} value={chat.draft} disabled={chat.sending || attachments.uploading || preparing}
           onPaste={attachments.onPaste}
           placeholder={activeId ? copy.followUp : copy.ask}
           onChange={(event) => {
@@ -1135,7 +1147,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           {chat.sending
             ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={17} /></button>
             : <button className="send" type="submit" aria-label={copy.send}
-              disabled={!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.writing || attachments.uploading}><ArrowUp size={18} /></button>}
+              disabled={!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.writing || attachments.uploading || preparing}><ArrowUp size={18} /></button>}
         </div>
       </form>
     </div>}
@@ -1143,7 +1155,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     {showComposer && researchModel && researchSetup === toolsScope && <DesktopResearchSetup language={language}
       model={researchModel.name} credits={getWeightedUsageCredits(researchModel, estimateDeepResearchInputTokens(chat.draft))}
       locked={!canUseModelWithPlan(plan, researchModel)}
-      ready={Boolean(chat.draft.trim()) && online && !chat.sending && !chat.writing && !attachments.uploading}
+      ready={Boolean(chat.draft.trim()) && online && !chat.sending && !chat.writing && !attachments.uploading && !preparing}
       onClose={() => setResearchSetup(undefined)} onStart={(depth) => { setResearchSetup(undefined); void send(depth); }} />}
   </div>;
 }

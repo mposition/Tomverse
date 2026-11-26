@@ -52,6 +52,9 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
           { url: "https://vite.dev/guide/", title: "Getting Started | Vite" }, { url: "https://nextjs.org/docs", title: "Next.js Docs" },
         ] } : { requested: false, supported: true, executed: false, citations: [] },
       }));
+      // An answer saved before answers carried their model: it has no column to go to.
+      messages.push({ id: "answer-legacy", role: "assistant", content: "An older answer saved without its model.", status: "normal",
+        createdAt: new Date(2_500).toISOString() });
       host.columns = { saves: [], dispatches: [], models: fixture.models.map((model) => model.id) } satisfies ColumnsState;
       const realFetch = globalThis.fetch;
       shell.openExternal = async (href) => {

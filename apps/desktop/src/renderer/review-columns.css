@@ -51,6 +51,8 @@
 .review-answer-badge { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--raised); font-size: 11px; white-space: nowrap; }
 .review-answer-bubble { position: relative; min-width: 0; padding: 12px 15px; border: 1px solid var(--chat-answer-border, var(--line)); border-radius: 15px; border-start-start-radius: 6px; background: color-mix(in srgb, var(--raised) 45%, var(--surface)); overflow-wrap: anywhere; }
 .review-answer-bubble > .chat-copy-text + div { padding-inline-end: 20px; }
+.review-unlabelled-answer { display: grid; gap: 6px; margin-block-start: 10px; }
+.review-unlabelled-answer > h3 { margin: 0; font-size: .8125rem; font-weight: 600; color: var(--muted); }
 .review-answer-bubble table { display: block; overflow-x: auto; border-collapse: collapse; }
 .review-answer-bubble th, .review-answer-bubble td { padding: 6px 10px; border: 1px solid var(--line); overflow-wrap: normal; }
 .review-answer-block > .chat-review-link { align-self: flex-start; margin-top: 2px; }
