@@ -322,6 +322,7 @@ public static class Cu {
       list.Add(Key((ushort)vk, 0, ext)); list.Add(Key((ushort)vk, 0, ext | 2u));
       if (shift) list.Add(Key(0x10, 0, 2));
       if (ctrl) list.Add(Key(0x11, 0, 2));
+      if (!IsFront(h)) { d["performed"] = false; d["reason"] = "focus-lost"; return d; }
       Send(list.ToArray());
       d["performed"] = true;
     } else if (kind == "type") {

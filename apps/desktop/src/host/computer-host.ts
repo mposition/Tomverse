@@ -12,8 +12,10 @@ import { computerRequestRefusal, isUserIntervention, keyInput, mapPoint, partial
 
 /** The longest side of the picture the agent gets. Larger windows are scaled down; its coordinates are pixels of that picture. */
 export const COMPUTER_IMAGE_EDGE = 1568;
-/** A mouse or keyboard input newer than this, after the agent's own last input or the person's approval, was the person's. */
+/** After the person's own click that the host is told of (an approval card, the hand-back, choosing the window): their hand leaving the mouse is part of it. */
 export const USER_INPUT_GRACE_MS = 400;
+/** After the agent's own input, whose time the backend reports: the way back from the backend and one timer tick, nothing more. */
+export const AGENT_INPUT_SLACK_MS = 50;
 export const COMPUTER_STOP_KEY = "CommandOrControl+Alt+Shift+X";
 const MAX_LISTED = 60;
 
@@ -48,6 +50,10 @@ export function createComputerHost(deps: ComputerHostDeps) {
   let stopKeyReady = false;
   let busy = 0;
   let baseline = deps.now();
+  /** How long after the baseline input still counts as part of it: long after the person's own click, short after the agent's input. */
+  let grace = USER_INPUT_GRACE_MS;
+  /** The person did something the host is told of, now. */
+  const personActed = () => { baseline = deps.now(); grace = USER_INPUT_GRACE_MS; };
   const inflight = new Set<AbortController>();
 
   const getBackend = () => (backend === undefined ? (backend = deps.createBackend()) : backend);
@@ -137,7 +143,7 @@ export function createComputerHost(deps: ComputerHostDeps) {
     if (!current.foreground && !deps.ownPids().includes(current.foregroundPid)) return fail(refusalText("not-front"));
     const idle = await os.idleMs();
     signal.throwIfAborted();
-    if (deps.now() - idle > baseline + USER_INPUT_GRACE_MS) {
+    if (deps.now() - idle > baseline + grace) {
       stopAgent("user-input", self);
       return fail("The user used the mouse or keyboard, so the agent stopped. Wait for the user to hand control back.");
     }
@@ -150,7 +156,9 @@ export function createComputerHost(deps: ComputerHostDeps) {
     const part = { typed: outcome.typed ?? 0, delivered: outcome.delivered ?? 0, planned: outcome.planned ?? 0 };
     const partial = !outcome.performed && (part.typed > 0 || part.delivered > 0);
     // Only input the agent really sent moves the baseline: a refusal that sent nothing must not hide what the person did meanwhile.
-    if (outcome.performed || partial) baseline = deps.now();
+    // The backend says how long ago the system last saw input when it finished: that is the agent's own last input, and input any
+    // later than that is the person's.
+    if (outcome.performed || partial) { baseline = deps.now() - Math.max(0, outcome.idleMs ?? 0); grace = AGENT_INPUT_SLACK_MS; }
     const window = info(chosen, current.title);
     if (outcome.performed) return { status: "ok", window, position: "front", note: "Done." };
     // The pointer or the window was changed under the input: that was the person, so it ends like any other use of the mouse.
@@ -231,7 +239,7 @@ export function createComputerHost(deps: ComputerHostDeps) {
       if (command.type === "revoke") { revoke(); notice = null; publish(); return { state: state() }; }
       if (command.type === "take") { stopAgent("taken"); return { state: state() }; }
       if (command.type === "give") {
-        if (selection) { control = "active"; notice = null; baseline = deps.now(); }
+        if (selection) { control = "active"; notice = null; personActed(); }
         publish();
         return { state: state() };
       }
@@ -253,18 +261,18 @@ export function createComputerHost(deps: ComputerHostDeps) {
       revoke();
       selection = { id: row.id, pid: row.pid, cls: row.cls, title: row.title, app: row.app, scope: run.scope, taskId: run.taskId };
       notice = null;
-      baseline = deps.now();
+      personActed();
       stopKeyReady = deps.registerStopKey(() => stopAgent("stop-key"));
       if (!stopKeyReady) notice = "stop-key-unavailable";
       // The person has just chosen it: bringing it forward is theirs, and the agent will need it in front.
       try { await os.bringToFront(ref(selection)); } catch { /* The agent is told the window is not in front when it asks. */ }
-      baseline = deps.now();
+      personActed();
       publish();
       return { state: state() };
     },
 
     /** The person answered an approval card: their click is not interference. */
-    noteApprovalAnswered() { baseline = deps.now(); },
+    noteApprovalAnswered() { personActed(); },
 
     /** The open task or account changed: a window chosen for another task or account does not carry over. */
     refresh() {

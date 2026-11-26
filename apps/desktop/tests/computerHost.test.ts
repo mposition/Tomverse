@@ -509,3 +509,24 @@ test("input of the person between two parts of an action stops the agent and say
   assert.match(errorOf(reply), /32/);
   assert.equal(r.host.state().control, "stopped");
 });
+
+test("after the agent's own input the person's input counts at once; the long grace is only for the person's own click", async () => {
+  const { AGENT_INPUT_SLACK_MS } = await import("../src/host/computer-host");
+  assert.ok(AGENT_INPUT_SLACK_MS < USER_INPUT_GRACE_MS);
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.tick(USER_INPUT_GRACE_MS + 100);
+  // The agent's click goes out; the backend says the system saw input just now.
+  r.backend.act = async () => ({ performed: true, idleMs: 0 });
+  r.backend.state.idleMs = USER_INPUT_GRACE_MS + 100;
+  assert.equal(errorOf(await r.ask(CLICK)), "ok");
+  // The person presses a key 150 ms later, well inside the grace their own click would have had.
+  r.tick(200);
+  r.backend.state.idleMs = 50;
+  let sent = false;
+  r.backend.act = async () => { sent = true; return { performed: true, idleMs: 0 }; };
+  assert.match(errorOf(await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" })), /used the mouse or keyboard/);
+  assert.equal(sent, false);
+  assert.equal(r.host.state().control, "stopped");
+});
