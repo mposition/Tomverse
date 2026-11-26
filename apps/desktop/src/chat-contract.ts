@@ -109,6 +109,8 @@ export const chatMessage = z.object({
     supported: z.boolean().optional().catch(undefined),
     executed: z.boolean().optional().catch(undefined),
     failureCode: z.string().max(100).optional().catch(undefined),
+    // Only the source URLs a Research report already lists in its body, so the list under it can leave them out.
+    research: z.object({ sources: z.array(z.object({ url: z.string() })).max(50).optional() }).optional().catch(undefined),
   }).nullish(),
   attachments: z.array(attachmentRead).optional(),
   artifacts: z.unknown().optional().transform((value) => parseChatStreamArtifacts(value) ?? []),

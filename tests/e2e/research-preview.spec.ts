@@ -6,6 +6,8 @@ const MODEL = "gemini-3-1-pro";
 const QUESTION = "Compare the public battery specifications of two products.";
 const PRIVATE_HISTORY = "Private earlier conversation: never send this to web research.";
 const REPORT = "Research report. [1](<https://example.org/specification>)";
+// The saved shape: the server-rendered report ends with its own source list.
+const SAVED_REPORT = `${REPORT}\n\n### Sources\n\n1. [Public specification](<https://example.org/specification>)`;
 const metadata = {
   requested: true, supported: true, executed: true, provider: "google",
   executionKind: "app_managed", searchBackend: "brave", queryCount: 1,
@@ -14,6 +16,8 @@ const metadata = {
     version: 1, mode: "preview", evidenceLevel: "search_snippets", outcome: "partial",
     startedAt: "2026-11-15T00:00:00.000Z", completedAt: "2026-11-15T00:00:03.000Z",
     stopReason: "report_submitted",
+    sources: [{ sourceId: "R1", referenceNumber: 1, url: "https://example.org/specification",
+      title: "Public specification", retrievedAt: "2026-11-15T00:00:01.000Z" }],
   },
 };
 
@@ -24,7 +28,7 @@ async function prepare(page: Page, offered = true, saved = false) {
     messages: [
       { id: "qa-private-user", role: "user", content: PRIVATE_HISTORY },
       { id: "qa-private-assistant", role: "assistant", content: "Earlier private answer.", modelId: MODEL },
-      ...(saved ? [{ id: "qa-research-report", role: "assistant" as const, content: REPORT, modelId: MODEL, searchMetadata: metadata }] : []),
+      ...(saved ? [{ id: "qa-research-report", role: "assistant" as const, content: SAVED_REPORT, modelId: MODEL, searchMetadata: metadata }] : []),
     ],
   });
   await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsMonth: 10_000 } });
@@ -146,10 +150,13 @@ test.describe("Research Preview", () => {
   test("reload restores a limited report and its citation without starting another run", async ({ page }) => {
     await prepare(page, true, true);
     await expect(page.getByTestId("research-preview-result")).toHaveAttribute("data-outcome", "partial");
-    await expect(page.getByTestId("search-citation-item")).toHaveAttribute("data-reference-number", "1");
-    await expect(page.getByTestId("search-citation-item").getByRole("link")).toHaveAttribute("href", "https://example.org/specification");
+    // The report body carries its sources once; the list under the answer does not repeat them.
+    await expect(page.getByRole("link", { name: "Public specification" })).toHaveAttribute("href", "https://example.org/specification");
+    await expect(page.getByTestId("search-citation-item")).toHaveCount(0);
     await page.reload();
     await expect(page.getByTestId("research-preview-result")).toHaveAttribute("data-outcome", "partial");
+    await expect(page.getByRole("link", { name: "Public specification" })).toHaveCount(1);
+    await expect(page.getByTestId("search-citation-item")).toHaveCount(0);
     expect(await page.evaluate(() => (window as unknown as { __chatModelStubRequests?: unknown[] }).__chatModelStubRequests ?? [])).toHaveLength(0);
   });
 });
