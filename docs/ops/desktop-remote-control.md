@@ -52,6 +52,13 @@ The server checks the same things before it stores an answer:
 
 The server is still trusted to say who answered. It can only answer a request the PC already has open. A stronger proof, such as a key held on the phone, is not part of this version.
 
+## Known limits
+
+Open findings of the independent review (`r-20261126-090139-1ce349`, `r-20261126-090143-315146`), not fixed. Read them before the server switch is turned on.
+
+- A withdrawal is not checked against the request numbers. If the person turns the switch off and on again and the delete of the first reaches the server after a sync of the second, that delete empties the live report and removes the answers waiting for it. The PC's next sync, a few seconds later, restores the report; an answer removed that way was never handed to the PC and can be given again.
+- A withdrawal removes the waiting answers before it locks the device's row. An answer the web screen records at that very moment can be left behind, and is handed to the PC if remote control is turned on again within the answer's 2 minutes. The PC still applies it only to the request it has open with the same digest.
+
 ## Authentication
 
 - PC: `POST` and `DELETE /api/desktop/remote/sync` take the device's own Desktop bearer, with `Origin: tomverse://desktop` and no cookie. The path is enrolled in `desktopWriteApiRoute` while Desktop authentication is on.
