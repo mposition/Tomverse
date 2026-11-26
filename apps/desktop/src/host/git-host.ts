@@ -77,8 +77,7 @@ export function createGitHost(deps: GitHostDeps) {
       }
       case "commit": return commitChanges(ctx, { message: command.message, paths: command.paths }, "user");
       case "publish": {
-        const { type: _type, ...input } = command;
-        const result = await publishBranch(ctx, input, "user", approvals);
+        const result = await publishBranch(ctx, { remote: command.remote, remoteBranch: command.remoteBranch, pullRequest: command.pullRequest }, "user", approvals);
         if (result.status === "ok" && result.pullRequest && "url" in result.pullRequest) await deps.linkPull(result.pullRequest.url).catch(() => undefined);
         return result;
       }
@@ -94,8 +93,7 @@ export function createGitHost(deps: GitHostDeps) {
     if (!ctx) return { status: "error", code: "no-git" };
     const action = parsed.data;
     if (action.kind === "commit") return agentResult(await commitChanges(ctx, { message: action.message, paths: action.paths }, "agent", approvals));
-    const { kind: _kind, ...input } = action;
-    const result = await publishBranch(ctx, input, "agent", approvals);
+    const result = await publishBranch(ctx, { remote: action.remote, remoteBranch: action.remoteBranch, pullRequest: action.pullRequest }, "agent", approvals);
     if (result.status === "ok" && result.pullRequest && "url" in result.pullRequest) await deps.linkPull(result.pullRequest.url).catch(() => undefined);
     return agentResult(result);
   }
