@@ -41,10 +41,9 @@ function systemBrowserReferences() {
   return found.sort();
 }
 
-test("Desktop reaches the system browser from exactly three places: sign-in, the Google Drive picker and a saved GitHub pull request", () => {
+test("Desktop reaches the system browser from exactly two places: sign-in and the Google Drive picker", () => {
   assert.deepEqual(systemBrowserReferences(), [
     "main.ts function importDriveAttachments",
-    "main.ts function readTaskPullCommand",
     "main.ts function signIn",
   ]);
 });

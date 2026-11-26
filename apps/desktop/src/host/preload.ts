@@ -55,6 +55,7 @@ if (trustedWindow) {
       return () => ipcRenderer.removeListener("desktop:dictation-stop", onStop);
     },
     taskPulls: (command: Parameters<DesktopApi["taskPulls"]>[0]) => ipcRenderer.invoke("desktop:task-pulls", command),
+    git: (command: unknown) => ipcRenderer.invoke("desktop:git", command),
     codeBrowser: (command: Parameters<DesktopApi["codeBrowser"]>[0]) => ipcRenderer.invoke("desktop:code-browser", command),
     subscribeCodeBrowser(listener: (state: BrowserState) => void) {
       const onState = (_event: Electron.IpcRendererEvent, state: BrowserState) => listener(state);

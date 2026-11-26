@@ -9,6 +9,7 @@ import type { DesktopMcpAction, DesktopMcpReply } from "../../../../lib/desktopC
 import type { CliFixtureInput } from "./cli-fixture-input";
 import type { TerminalReadReply } from "../../../tomverse-cli/src/terminal-read";
 import type { ReviewDiff, ReviewFile, ReviewHunk, ReviewModelResult, ReviewScope } from "../review-contract";
+import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
 
 export type Connection = { endpoint: string; key: string };
 export type RecordedSession = { requestId: string; storage: string | null; sessionId: string; project: ProjectRoot;
@@ -38,6 +39,7 @@ export type WorkerCommand =
   | { type: "browser-snapshot-result"; runId: string; requestId: string; text: string | null }
   | { type: "browser-agent-result"; runId: string; requestId: string; reply: BrowserAgentReply }
   | { type: "terminal-read-result"; runId: string; requestId: string; reply: TerminalReadReply | null }
+  | { type: "git-action-result"; runId: string; requestId: string; result: AgentGitResult }
   | { type: "answer"; runId: string; decision: Decision }
   | { type: "follow-up"; runId: string; requestId: string; text: string }
   | { type: "queue"; runId: string; requestId: string; operation: QueueOperation }
@@ -75,6 +77,7 @@ export type WorkerEvent =
   | { type: "browser-snapshot"; runId: string; requestId: string }
   | { type: "browser-agent"; runId: string; requestId: string; request: BrowserAgentRequest }
   | { type: "terminal-read"; runId: string; requestId: string; terminal?: number; lines: number }
+  | { type: "git-action"; runId: string; requestId: string; action: AgentGitAction }
   | { type: "approval"; runId: string; request: ApprovalRequest }
   | { type: "follow-up-queued"; runId: string; requestId: string; queued: boolean }
   | { type: "queue-result"; runId: string; requestId: string; ok: boolean }
