@@ -34,7 +34,6 @@ export const studioLocale = {
   "posterMobile": "海报、动态、快拍",
   "samplePack": "20 张贴图，含示例图案",
   "exampleEventDetails": "8 月 15 日 · 济州涯月",
-  "backgroundArtwork": "背景图片",
   "changeImage": "更换图片",
   "changePhoto": "更换照片",
   "invalidImage": "请选择不超过 12 MB 的 PNG、JPEG 或 WebP 图片。",

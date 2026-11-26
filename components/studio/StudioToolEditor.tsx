@@ -6,6 +6,8 @@ import { Download, ImagePlus } from "lucide-react";
 import { STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, studioArtworkPath as asset, type StudioCreativeTool, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
 import { studioPresetName, studioPublicationPresets, type StudioPublicationPreset } from "@/lib/studioPresetLibrary";
 import { studioOutputLanguage } from "@/locales/studio";
+import type { Language } from "@/lib/language";
+import { studioMemePrompt } from "@/lib/studioMeme";
 import { STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets, studioPublishingDesign, studioPublishingPrompt, studioSocialFormat } from "@/lib/studioPublishing";
 import { drawStudioPublishingArtwork, renderStudioPublishingArtwork, type StudioPublishingArtwork } from "./studioPublishingArtwork";
 import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
@@ -70,16 +72,16 @@ function PublishingPreview({ artwork, label }: { artwork: StudioPublishingArtwor
   return <canvas ref={preview} className={styles.publishingPreview} width={width} height={height} role="img" aria-label={label} />;
 }
 
-function renderMeme(source: string, caption: string) {
-  return renderStudioImage(source, { width: 1080, height: 1080, fit: "cover", memeCaption: caption });
+function renderMeme(source: string, caption: string, language: Language) {
+  return renderStudioImage(source, { width: 1080, height: 1080, fit: "cover", memeCaption: caption, language });
 }
 
-function MemePreview({ source, caption }: { source: string; caption: string }) {
+function MemePreview({ source, caption, language }: { source: string; caption: string; language: Language }) {
   const [rendered, setRendered] = useState<{ source: string; caption: string; url: string }>();
   useEffect(() => {
     let active = true;
     let url: string | undefined;
-    void renderMeme(source, caption).then(blob => {
+    void renderMeme(source, caption, language).then(blob => {
       if (!active) return;
       url = URL.createObjectURL(blob);
       setRendered({ source, caption, url });
@@ -88,7 +90,7 @@ function MemePreview({ source, caption }: { source: string; caption: string }) {
       active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [source, caption]);
+  }, [source, caption, language]);
   const current = rendered?.source === source && rendered.caption === caption ? rendered.url : source;
   return <div className={styles.memeArt}><img src={current} alt={caption} /></div>;
 }
@@ -130,6 +132,7 @@ export function StudioToolEditor({ tool, preset }: {
   const activePreset = social ? (publication ?? publicationChoices[0]).id : publicationPreset;
   const photoTool = id === "illustration" || id === "caricature";
   const pngTool = id === "transparent-png";
+  // These tools work from words alone; a photo is an extra, so none is shown until the user adds one.
   const template = id === "meme" || publishing;
   const illustrationPresets = STUDIO_PHOTO_PRESETS.slice(0, 6).filter(item => item.id !== "watercolor" && item.style);
   if (preset?.style && preset.id !== "watercolor" && !illustrationPresets.some(item => item.id === preset.id)) illustrationPresets.push(preset);
@@ -141,7 +144,7 @@ export function StudioToolEditor({ tool, preset }: {
       ...illustrationPresets.map(item => [item.style, studioPresetName(item, lang), item.artwork]),
     ]
     : [["subtle", copy.subtle, undefined], ["playful", copy.playful, undefined], ["bold", copy.bold, undefined]];
-  const [photo, setPhoto] = useState(() => publishing ? "" : id === "meme" ? asset("selfie") : photoTool ? asset(preset?.id.startsWith("pet-") ? "cat" : "selfie") : asset(tool.artwork));
+  const [photo, setPhoto] = useState(() => template ? "" : photoTool ? asset(preset?.id.startsWith("pet-") ? "cat" : "selfie") : asset(tool.artwork));
   const [customPhoto, setCustomPhoto] = useState(false);
   const [logo, setLogo] = useState("");
   const [result, setResult] = useState(() => publishing ? asset(publicationChoices[0].artwork)
@@ -175,8 +178,8 @@ export function StudioToolEditor({ tool, preset }: {
   const artworkSource = sample ? asset(sample.artwork) : result;
   const artwork = useMemo<StudioPublishingArtwork | undefined>(() => artworkSource && publishing ? {
     source: artworkSource, logo: logo || undefined, width: dim.width, height: dim.height,
-    placement: social ? socialFormat : undefined, details, locale: lang,
-  } : undefined, [artworkSource, logo, dim, publishing, social, socialFormat, details, lang]);
+    placement: social ? socialFormat : undefined, generated: !sample, details, locale: lang,
+  } : undefined, [artworkSource, sample, logo, dim, publishing, social, socialFormat, details, lang]);
   const imageQuote = useStudioImageQuote(size, hasReference, true, publishing ? "1024x1024" : undefined, id);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
@@ -186,7 +189,7 @@ export function StudioToolEditor({ tool, preset }: {
     if (inputVersion.current !== 0) return;
     urls.release(photo);
     urls.release(result);
-    const restoredPhoto = publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo);
+    const restoredPhoto = template && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo);
     setPhoto(restoredPhoto);
     toolResults.clear();
     // `owed` comes back too: a tool that was being asked again when checkout began is still the only one owed.
@@ -277,16 +280,10 @@ export function StudioToolEditor({ tool, preset }: {
     setResultIsExample(true);
   }
 
-  const imagePrompt = () => {
+  const imagePrompt = (drawnSize: string) => {
     switch (id) {
       case "meme":
-        return [
-          hasReference ? "Cast the person in the photo as the protagonist, preserving the person’s recognizable face." : "Create one original, shareable reaction image.",
-          "Stage a single comedic reversal rooted in the supplied situation. Make the setup visible in the setting or one familiar object, then turn the character’s action into the punchline. Exaggerate the telling gesture, scale or consequence in the same scene.",
-          "Use an expressive reaction specific to the joke: smug triumph, awkward denial, weary disbelief or something equally legible. Every prop must make sense for this situation. Avoid generic screaming, arbitrary spectacle and changing the premise.",
-          "Use one edge-to-edge square composition. Keep the face and the punchline prop out of the lower caption area while continuing real scene detail across the full frame. No letters, words, blank bands, colored footer panels, caption boxes or watermarks. The provided caption is context for acting only.",
-          JSON.stringify({ situation: details, captionContext: caption }),
-        ].join(" ");
+        return studioMemePrompt({ hasPhoto: hasReference, situation: details, caption });
       case "illustration":
         return "Transform the attached photo using this visual style: " + artisticStyle + ". Preserve the subject's identity and recognisable details. Direction: " + details;
       case "caricature":
@@ -302,6 +299,7 @@ export function StudioToolEditor({ tool, preset }: {
           kind: id, design: design!, placement: social ? socialFormat : undefined,
           language: studioOutputLanguage[lang], brief: posterBrief, title, details, hasPhoto: hasReference, hasLogo: Boolean(logo),
           category: posterCategory, style: posterStyle,
+          drawn: { width: Number(drawnSize.split("x")[0]), height: Number(drawnSize.split("x")[1]) }, finished: dim,
         });
       case "transparent-png":
         // The background remover takes no prompt; this is the request's label.
@@ -337,7 +335,7 @@ export function StudioToolEditor({ tool, preset }: {
       const reference = hasReference ? () => prepared ??= pngTool
         ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })
         : makeStudioImageReference(photo) : undefined;
-      const run = { inputKey: hasReference ? photo : id, prompt: imagePrompt(), size: quote.size, reference, signal };
+      const run = { inputKey: hasReference ? photo : id, prompt: imagePrompt(quote.size), size: quote.size, reference, signal };
       if (quote.targets) {
         // Each remover is its own request, sent one after the other: a user may have one image request
         // running at a time. Each cut-out is shown as it arrives and the first is picked until the user chooses.
@@ -432,7 +430,7 @@ export function StudioToolEditor({ tool, preset }: {
   const prepareImage = () => {
     if (artwork) return renderStudioPublishingArtwork(artwork);
     if (pngTool && !resultIsExample) return readStudioBlob(result);
-    if (id === "meme") return renderMeme(result, caption);
+    if (id === "meme") return renderMeme(result, caption, lang);
     return renderStudioImage(result, {
       width: 1080, height: 1080, fit: template ? "cover" : "contain",
     });
@@ -483,11 +481,11 @@ export function StudioToolEditor({ tool, preset }: {
     <div className={styles.workbench}>
     <section className={styles.panel}>
       <h2>{copy.inputs}</h2>
-      <div className={publishing ? styles.photoInput : styles.fileRow}>
+      <div className={template ? styles.photoInput : styles.fileRow}>
         {photo ? <img src={photo} alt="" width={56} height={56} /> : <ImagePlus size={26} aria-hidden />}
-        <span>{publishing ? copy.optionalPublishingPhoto : photoTool || pngTool ? copy.originalPhoto : copy.backgroundArtwork}</span>
+        <span>{template ? copy.optionalPublishingPhoto : copy.originalPhoto}</span>
         <StudioFileButton label={photo ? copy.changeImage : copy.uploadPhoto} disabled={busy} onInvalid={() => report(copy.invalidImage, true)} onFile={changePhoto} />
-        {publishing && photo && <button type="button" className={styles.secondary} disabled={busy} onClick={removePhoto}>{copy.removePhoto}</button>}
+        {template && photo && <button type="button" className={styles.secondary} disabled={busy} onClick={removePhoto}>{copy.removePhoto}</button>}
       </div>
       {publishing && <>
         <div className={styles.photoInput}>
@@ -554,7 +552,7 @@ export function StudioToolEditor({ tool, preset }: {
             {dim.width} × {dim.height} · PNG
           </figcaption>
         </figure>}
-        {id === "meme" && result && <MemePreview source={result} caption={caption} />}
+        {id === "meme" && result && <MemePreview source={result} caption={caption} language={lang} />}
         {template && !result && <p className={styles.hint}>{busy ? copy.generating : copy.emptyResult}</p>}
         {!template && <div className={styles.compare}>
           <figure><figcaption>{copy.original}</figcaption><img src={photo} alt="" /></figure>

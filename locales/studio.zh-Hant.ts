@@ -34,7 +34,6 @@ export const studioLocale = {
   "posterMobile": "海報、貼文、限時動態",
   "samplePack": "20 張貼圖，含範例圖案",
   "exampleEventDetails": "8 月 15 日 · 濟州涯月",
-  "backgroundArtwork": "背景圖片",
   "changeImage": "更換圖片",
   "changePhoto": "更換相片",
   "invalidImage": "請選擇不超過 12 MB 的 PNG、JPEG 或 WebP 圖片。",

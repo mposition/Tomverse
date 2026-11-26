@@ -1,6 +1,7 @@
 import {
   studioStickerArt, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, studioStickerRowEdge, type StickerRect,
 } from "@/lib/studioStickerGeometry";
+import { studioMemeCaptionLines } from "@/lib/studioMeme";
 import { studioStickerLayout } from "@/lib/studioTools";
 import type { Language } from "@/lib/language";
 import { loadStudioStickerFont } from "./studioStickerFonts";
@@ -67,7 +68,7 @@ function drawImage(
 
 export async function renderStudioImage(
   source: string,
-  options: { width: number; height: number; fit?: "contain" | "cover"; memeCaption?: string; bleed?: boolean },
+  options: { width: number; height: number; fit?: "contain" | "cover"; memeCaption?: string; language?: Language; bleed?: boolean },
 ): Promise<Blob> {
   const { width, height, fit = "cover", memeCaption } = options;
   const image = await readImage(source);
@@ -83,24 +84,30 @@ export async function renderStudioImage(
   }
   drawImage(context, image, width, height, fit);
   if (memeCaption?.trim()) {
-    const caption = memeCaption.trim();
-    const family = getComputedStyle(document.documentElement).getPropertyValue("--font-ui").trim() || "system-ui, sans-serif";
-    await document.fonts.load(`850 24px ${family}`, caption).catch(() => []);
-    const maxWidth = width * .88;
-    const targetSize = width * .09;
-    context.font = `850 ${targetSize}px ${family}`;
-    const lines = context.measureText(caption).width > maxWidth ? splitCaption(caption) : [caption];
-    const size = Math.min(targetSize, targetSize * maxWidth / Math.max(...lines.map(line => context.measureText(line).width)));
-    const step = size * 1.1;
-    context.font = `850 ${size}px ${family}`;
+    // Meme lettering: the display face of the caption's language, white with a heavy dark edge.
+    const font = await loadStudioStickerFont(options.language ?? "en", memeCaption);
+    const target = width * .1;
+    context.font = font(target);
+    const { lines, scale } = studioMemeCaptionLines(memeCaption, line => context.measureText(line).width, width * .9);
+    const size = target * scale;
+    const step = size * 1.16;
+    const base = height * .94;
+    // A soft shade under the caption keeps it readable on a bright scene.
+    const top = base - step * lines.length - size * .7;
+    const shade = context.createLinearGradient(0, top, 0, height);
+    shade.addColorStop(0, "rgba(0,0,0,0)");
+    shade.addColorStop(1, "rgba(0,0,0,.5)");
+    context.fillStyle = shade;
+    context.fillRect(0, top, width, height - top);
+    context.font = font(size);
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillStyle = "#fff4d8";
-    context.strokeStyle = "#241812";
-    context.lineWidth = size * .075;
     context.lineJoin = "round";
+    context.strokeStyle = "#141210";
+    context.lineWidth = size * .2;
+    context.fillStyle = "#fff";
     lines.forEach((line, index) => {
-      const y = height * .91 - step * (lines.length - index - .5);
+      const y = base - step * (lines.length - index - .5);
       context.strokeText(line, width / 2, y);
       context.fillText(line, width / 2, y);
     });
