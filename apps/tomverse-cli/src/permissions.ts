@@ -301,18 +301,21 @@ const egressReason = (subject: Extract<Subject, { kind: "command" }>) => {
     return unreadableReason(subject);
 };
 
-/** A variable or a command substitution: text that becomes something else when the shell runs the line. */
-const RUN_TIME_TEXT = /\$[({A-Za-z_?]|`[^`]*`|%[A-Za-z_][A-Za-z0-9_]*%|![A-Za-z_][A-Za-z0-9_]*!/;
 /** Programs that send something out only with a particular subcommand: their arguments decide. */
 const SUBCOMMAND_PROGRAMS = new Set(EGRESS_COMMANDS.map((command) => command[0]!));
-/** Words that run text as a command, or hand a program its arguments from somewhere else. */
-const COMMAND_BUILDERS = new Set(["eval", "iex", "invoke-expression", "xargs", "invoke-command", "icm", "start-process", "saps", "start"]);
+/** Words that run the text they are given as a command. */
 const TEXT_RUNNERS = new Set(["eval", "iex", "invoke-expression"]);
+/** Words that start another command from their own arguments: what follows them is a command line again. */
+const COMMAND_WRAPPERS = new Set([
+    "env", "command", "builtin", "exec", "sudo", "doas", "nohup", "time", "nice", "timeout", "stdbuf", "setsid", "xargs", "call", "busybox",
+    "start", "start-process", "saps", "invoke-command", "icm", "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "powershell", "pwsh",
+]);
 const SHELL_PROGRAMS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "powershell", "pwsh"]);
-/** Subcommands that keep the work on this computer. Once one of them is read, later run-time text is only its argument. */
+const ENCODED_COMMAND = /(?:^|\s)[-/](?:e|ec|enc|encodedcommand)(?:\s|$)/i;
+/** Subcommands that keep the work on this computer. Once one of them is read, what follows is only its argument. */
 const LOCAL_SUBCOMMANDS: Record<string, readonly string[]> = {
     git: ["status", "diff", "log", "show", "add", "commit", "checkout", "switch", "branch", "merge", "rebase", "stash", "restore", "reset", "tag", "mv", "rm",
-        "blame", "grep", "clean", "describe", "init", "worktree", "apply", "cherry-pick", "revert", "rev-parse", "ls-files"],
+        "blame", "grep", "clean", "describe", "init", "worktree", "apply", "cherry-pick", "revert", "rev-parse", "ls-files", "version", "help"],
     npm: ["run", "run-script", "test", "t", "install", "i", "ci", "start", "build", "exec", "x", "ls", "list", "outdated", "audit", "why", "rebuild", "update"],
     pnpm: ["run", "test", "install", "i", "add", "remove", "start", "build", "exec", "dlx", "ls", "list", "outdated", "audit", "why", "rebuild", "update"],
     yarn: ["run", "test", "install", "add", "remove", "start", "build", "exec", "dlx", "list", "outdated", "audit", "why", "rebuild", "up"],
@@ -327,21 +330,32 @@ const LOCAL_SUBCOMMANDS: Record<string, readonly string[]> = {
     flutter: ["run", "build", "test", "analyze", "format"],
 };
 
-/** Whether run-time text sits where the program's subcommand or one of its own options is read: before a local subcommand. */
-const subcommandUnread = (program: string, args: string[]) => {
+/**
+ * A word a shell passes on as written: letters, digits and the punctuation of names, paths and options. Anything a
+ * shell can turn into other text (a quote of any kind, `$`, a backtick, `%`, `!`, a glob, a brace, a caret) is not in it.
+ * A backslash is, for Windows paths; a backslash that hides a word is undone by the joined reading before this is asked.
+ */
+const PLAIN_WORD = /^[A-Za-z0-9_.,:=@+/\\-]+$/;
+
+/**
+ * Whether the words after a subcommand-sensitive program say, as written, that the work stays on this computer: only
+ * plain words up to a subcommand of the local list. A word that is not plain, or no local subcommand at all, does not.
+ */
+const staysLocal = (program: string, args: string[]) => {
     const local = LOCAL_SUBCOMMANDS[program] ?? [];
     for (const arg of args) {
-        if (RUN_TIME_TEXT.test(arg) || arg.includes("`")) return true;
-        if (local.includes(joinedWords(arg).trim().toLowerCase())) return false;
+        if (!PLAIN_WORD.test(arg)) return false;
+        if (arg === "--version" || arg === "--help" || local.includes(arg.toLowerCase())) return true;
     }
     return false;
 };
-const ENCODED_COMMAND = /(?:^|\s)[-/](?:e|ec|enc|encodedcommand)(?:\s|$)/i;
 
 /**
- * Shell lines whose words do not say what will run, so the check above cannot clear them: a program name worked out
- * when the line runs, a subcommand-sensitive program (git, npm, docker ...) given a variable or a substitution, text
- * run as a command, or a shell started on text that is built or encoded. A person decides those.
+ * Shell lines whose words do not say what will run, so the checks above cannot clear them. This is a list of what is
+ * read, not of what hides: a line runs without a person only when the place a command name or a subcommand stands in
+ * holds a plain word. A person decides the rest: a program name that is quoted, built or a variable; a wrapper (env,
+ * xargs, a shell ...) given anything but plain words; eval and iex; an encoded command; and git, npm, docker and the
+ * like without a local subcommand read as written before anything else.
  * What stays unread, and the README says so: what a script or a repository alias does once it runs.
  */
 const unreadableReason = (subject: Extract<Subject, { kind: "command" }>) => {
@@ -350,19 +364,29 @@ const unreadableReason = (subject: Extract<Subject, { kind: "command" }>) => {
         if (!raw) continue;
         const tokens = raw.replace(/[()]/g, " ").split(/\s+/).filter(Boolean);
         const words = tokens.map((token) => programName(joinedWords(token)));
-        const assignment = /^\$?[A-Za-z_][\w:.{}]*\s*=/.test(raw);
-        if (!assignment && /^(?:\$|`|\(|["']\s*\$)/.test(raw)) return "The program it starts is worked out when it runs, so what it sends cannot be read from the text.";
-        const dynamic = RUN_TIME_TEXT.test(raw);
-        const at = words.findIndex((word) => SUBCOMMAND_PROGRAMS.has(word));
-        const sensitive = at < 0 ? undefined : words[at];
-        if (sensitive && dynamic && subcommandUnread(sensitive, tokens.slice(at + 1))) {
-            return `It runs ${sensitive} with a subcommand or an option that is worked out when it runs, so what it sends cannot be read from the text.`;
+        // Where the command name stands: after `NAME=value` prefixes, or after the `=` of a PowerShell assignment.
+        let head = 0;
+        let expression = false;
+        if (/^\$[\w:.{}]+\s*[-+*/]?=/.test(raw)) {
+            head = tokens.findIndex((token) => token.includes("=")) + 1;
+            // `$x = "text"`, `$x = 1`, `$x = @(...)`: a value, not a command.
+            expression = head >= tokens.length || /^["'0-9@[$]/.test(tokens[head]!);
+        } else {
+            while (head < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[head]!)) head += 1;
         }
-        const builder = words.find((word) => COMMAND_BUILDERS.has(word));
-        // eval and its PowerShell forms run whatever text they are given, joined from pieces or not.
-        if (builder && (dynamic || sensitive || TEXT_RUNNERS.has(builder))) return `It uses ${builder} to build a command, so what it sends cannot be read from the text.`;
-        const shell = words.find((word) => SHELL_PROGRAMS.has(word));
-        if (shell && (dynamic || ENCODED_COMMAND.test(raw))) return `It starts ${shell} on text that is built or encoded, so what it sends cannot be read from the text.`;
+        if (!expression && head < tokens.length) {
+            const name = words[head]!;
+            if (!PLAIN_WORD.test(tokens[head]!)) return "The program it starts is not written as a plain name, so what it runs cannot be read from the text.";
+            if (TEXT_RUNNERS.has(name)) return `It uses ${name} to run text as a command, so what it sends cannot be read from the text.`;
+            if (SHELL_PROGRAMS.has(name) && ENCODED_COMMAND.test(raw)) return `It starts ${name} on an encoded command, so what it sends cannot be read from the text.`;
+            if (COMMAND_WRAPPERS.has(name) && tokens.slice(head + 1).some((token) => !PLAIN_WORD.test(token))) {
+                return `It uses ${name} to start a command from text a shell changes when it runs, so what it sends cannot be read from the text.`;
+            }
+        }
+        const at = words.findIndex((word) => SUBCOMMAND_PROGRAMS.has(word));
+        if (at >= 0 && !staysLocal(words[at]!, tokens.slice(at + 1))) {
+            return `It runs ${words[at]} without a subcommand that is known to stay on this computer and written as a plain word, so what it sends cannot be read from the text.`;
+        }
     }
     return null;
 };

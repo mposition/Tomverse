@@ -348,6 +348,9 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
         "$g push origin main", "g=git; $g push", "git $verb origin", "git -C sub $verb", "git $(echo push)", "git `echo push`", "git %VERB% origin", "& $tool push",
         "npm $what", "echo push | xargs git", 'iex ("gi" + "t pu" + "sh")', 'eval "$cmd"', 'bash -c "$line"', "powershell -enc ZwBpAHQA", "cmd /c %LINE%",
         "git config alias.up push",
+        // Quoting forms and globs that still spell the word for the shell, and a program name hidden behind a wrapper.
+        "git $'push' origin main", "git $\"push\"", "gi$''t push", "env gi$''t push", "/usr/bin/gi? push", "git pus[h] origin", "git {push,} origin",
+        "git fetch-pack x", "git up",
     ];
     for (const line of hidden) {
         assert.equal(egress(line), "egress_command", line);
