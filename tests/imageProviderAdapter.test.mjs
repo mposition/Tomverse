@@ -949,13 +949,10 @@ test("the background remover sends only the padded photo and accepts only a same
     const audit = JSON.stringify(result.requestParams);
     assert.ok(!audit.includes("base64") && !audit.includes(request.prompt));
 
-    // Nearly opaque comes back opaque; a real edge keeps its transparency.
-    const raw = Buffer.alloc(1024 * 1024 * 4, 9);
-    for (let i = 3; i < raw.length; i += 4) raw[i] = i < 4 * 1024 * 8 ? 100 : 245;
-    const soft = await sharp(raw, { raw: { width: 1024, height: 1024, channels: 4 } }).png().toBuffer();
-    answer = async () => ({ credits: 10, image: { b64_json: soft.toString("base64") } });
-    const solid = await sharp((await generateImageWithProvider(request)).imageBytes).raw().toBuffer();
-    assert.deepEqual([solid[3], solid[4 * 1024 * 512 + 3]], [100, 255]);
+    // The stored original is the provider's own bytes: nothing here re-encodes or adjusts them (policy section 9).
+    const returned = await cutOut(1024);
+    answer = async () => ({ credits: 10, image: { b64_json: returned.toString("base64") } });
+    assert.ok((await generateImageWithProvider(request)).imageBytes.equals(returned));
 
     // Billed, then refused: another size, or a picture with no alpha channel. The refusal carries what the
     // provider said it cost, so a price above the reservation is not lost with the image.

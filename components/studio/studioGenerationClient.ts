@@ -97,6 +97,24 @@ export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = tr
   };
 }
 
+/**
+ * Runs one tool of a several-tool feature after another has finished. The
+ * slot the previous request held is given back a moment after its result
+ * becomes readable, so a refusal for a busy slot is waited out twice before it
+ * counts. Nothing was reserved by a refused request.
+ */
+export async function runStudioTool<Result>(run: () => Promise<Result>, signal: AbortSignal, waitMs = 2_000): Promise<Result> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      const busy = error instanceof StudioGenerationError && error.status === 429 && error.code === "IMAGE_CONCURRENCY_EXCEEDED";
+      if (!busy || attempt >= 2 || signal.aborted) throw error;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
+}
+
 async function uploadStudioReference(blob: Blob, signal: AbortSignal) {
   const descriptor = { name: "studio-reference.png", mediaType: blob.type, size: blob.size };
   const prepared = await readJson<{ key: string; uploadUrl: string; uploadHeaders?: Record<string, string> }>(

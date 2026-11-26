@@ -348,7 +348,9 @@ export async function makeStudioStyleReference(source: string, styleSource: stri
 /**
  * The background remover works on the photo centred in a square
  * (renderStudioImage, "contain"). This takes the photo's own area back out of
- * the square it returns.
+ * the square it returns, and counts nearly opaque as opaque: one remover
+ * leaves most of a subject at 240-254, which lets a little of whatever the
+ * cut-out is placed on show through it.
  */
 export async function cropStudioCutout(source: string, cutout: Blob) {
   const url = URL.createObjectURL(cutout);
@@ -359,6 +361,9 @@ export async function cropStudioCutout(source: string, cutout: Blob) {
     const height = Math.max(1, Math.round(photo.naturalHeight * scale));
     const { element, context } = canvas(width, height);
     context.drawImage(square, (width - square.naturalWidth) / 2, (height - square.naturalHeight) / 2);
+    const pixels = context.getImageData(0, 0, width, height);
+    for (let i = 3; i < pixels.data.length; i += 4) if (pixels.data[i] >= 240) pixels.data[i] = 255;
+    context.putImageData(pixels, 0, 0);
     return await encode(element);
   } finally {
     URL.revokeObjectURL(url);

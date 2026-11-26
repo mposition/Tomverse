@@ -51,3 +51,22 @@ test("each tool of a several-tool feature is submitted with its own price, never
   });
   assert.equal(studioToolQuote(total, targets[0]).credits, 20);
 });
+
+test("a tool sent after another waits out a busy slot twice, and nothing else", async () => {
+  const { runStudioTool } = await import("../components/studio/studioGenerationClient.ts");
+  const signal = new AbortController().signal;
+  const busy = () => new StudioGenerationError(429, "IMAGE_CONCURRENCY_EXCEEDED");
+  let calls = 0;
+  const flaky = failures => async () => { calls++; if (calls <= failures) throw busy(); return "cut-out"; };
+  assert.equal(await runStudioTool(flaky(2), signal, 0), "cut-out");
+  assert.equal(calls, 3);
+  calls = 0;
+  await assert.rejects(runStudioTool(flaky(3), signal, 0), error => error.status === 429);
+  assert.equal(calls, 3);
+  // A rate limit, a credit shortfall or a changed quote is not a busy slot: one attempt.
+  for (const error of [new StudioGenerationError(429, "RATE_LIMITED"), new StudioGenerationError(402, "CREDITS_REQUIRED"), new StudioGenerationError(409, "STUDIO_QUOTE_CHANGED")]) {
+    calls = 0;
+    await assert.rejects(runStudioTool(async () => { calls++; throw error; }, signal, 0), thrown => thrown === error);
+    assert.equal(calls, 1);
+  }
+});

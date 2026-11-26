@@ -11,7 +11,7 @@ import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudi
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
-import { createStudioImageRunner, StudioGenerationError, studioToolQuote, useStudioImageQuote } from "./studioGenerationClient";
+import { createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolQuote, useStudioImageQuote } from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
@@ -280,26 +280,32 @@ export function StudioToolEditor({ tool, preset }: {
         : makeStudioImageReference(photo) : undefined;
       const run = { inputKey: hasReference ? photo : id, prompt: imagePrompt(), size: quote.size, reference, signal };
       if (quote.targets) {
-        // Every remover is asked on its own and its cut-out shown as it arrives; the first to arrive is
-        // picked until the user chooses. One of them failing leaves the other's result.
+        // Each remover is its own request, sent one after the other: a user may have one image request
+        // running at a time. Each cut-out is shown as it arrives and the first is picked until the user chooses.
         const fresh: typeof cutouts = [];
-        const outcomes = await Promise.allSettled(quote.targets.map(async target => {
+        let failure: unknown;
+        for (const target of quote.targets) {
           const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
           toolRunners.set(target.modelId, runner);
-          const url = urls.make(await cropStudioCutout(photo, await runner({ ...run, quote: studioToolQuote(quote, target) })));
-          if (signal.aborted) return urls.release(url);
-          if (fresh.length === 0) {
-            urls.release(result);
-            for (const old of cutouts) urls.release(old.url);
-            setResult(url);
-            setResultIsExample(false);
+          try {
+            const url = urls.make(await cropStudioCutout(photo, await runStudioTool(() => runner({ ...run, quote: studioToolQuote(quote, target) }), signal)));
+            if (signal.aborted) return urls.release(url);
+            if (fresh.length === 0) {
+              urls.release(result);
+              for (const old of cutouts) urls.release(old.url);
+              setResult(url);
+              setResultIsExample(false);
+            }
+            fresh.push({ modelId: target.modelId, url });
+            setCutouts([...fresh]);
+          } catch (error) {
+            if (signal.aborted) return;
+            failure ??= error;
           }
-          fresh.push({ modelId: target.modelId, url });
-          setCutouts([...fresh]);
-        }));
-        signal.throwIfAborted();
-        const failed = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
-        if (fresh.length === 0 && failed) throw failed.reason;
+        }
+        // Nothing made is a failure; one of two made is said so, because the quote named both.
+        if (fresh.length === 0 && failure) throw failure;
+        if (failure) report(copy.cutoutMissing, true);
       } else {
         const generated = await runImage({ ...run, quote });
         const output = pngTool ? await cropStudioCutout(photo, generated) : generated;

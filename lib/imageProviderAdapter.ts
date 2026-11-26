@@ -1617,18 +1617,12 @@ const removeBackground = async (model: ImageModelProfile, input: ImageRequestInp
   const dimensions = answer.bytes.byteLength > 0 && answer.bytes.byteLength <= FAL_MAX_ASSET_BYTES
     ? readImageDimensions(answer.bytes, "image/png") : null;
   if (!dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) refuse();
-  // A cut-out has an alpha channel; a picture without one is the photo unchanged.
-  const pixels = await sharp(answer.bytes).raw().toBuffer({ resolveWithObject: true }).catch(() => null);
-  if (!pixels || pixels.info.channels !== 4) return refuse();
-  // Nearly opaque is opaque: Bria leaves most of a subject at 240-254, which lets
-  // a little of whatever the cut-out is placed on show through it.
-  for (let i = 3; i < pixels.data.length; i += 4) if (pixels.data[i] >= 240) pixels.data[i] = 255;
-  // A failed re-encode is refused like any other unusable answer, so what the provider billed is not lost with it.
-  const imageBytes = await sharp(pixels.data, { raw: { width: pixels.info.width, height: pixels.info.height, channels: 4 } })
-    .png().toBuffer().catch(() => null);
-  if (!imageBytes) return refuse();
+  // A cut-out has an alpha channel; a picture without one is the photo unchanged. Only read here:
+  // the provider's bytes are stored as they came (policy section 9), never re-encoded.
+  const hasAlpha = await sharp(answer.bytes).metadata().then(meta => meta.hasAlpha === true, () => false);
+  if (!hasAlpha) return refuse();
   return {
-    imageBytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
+    imageBytes: answer.bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
     providerRequestId: answer.providerRequestId, provenance: [],
     outputWidth: dimensions!.width, outputHeight: dimensions!.height, requestParams: answer.requestParams,
     ...(answer.providerUsage ? { providerUsage: answer.providerUsage } : {}),
