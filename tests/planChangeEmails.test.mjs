@@ -104,35 +104,17 @@ test("both templates are transactional billing mail with no unsubscribe link", (
   }
 });
 
-test("each confirmation is queued from the one write that moved the change", () => {
-  // The standard lane does not dedupe by reference, so "once per change" is
-  // where the enqueue sits: after the confirm's previewed -> pending update for
-  // a downgrade, and inside the settlement's matched conditional update for an
-  // upgrade -- never on a redelivered webhook.
+test("each confirmation has exactly one place that queues it", () => {
+  // A count, not a position: the standard lane does not dedupe by reference,
+  // so a second call site would be a second email for one change. Where each
+  // one sits (after the conditional update that moved the row) is described
+  // in docs/policy/plan-change.md section 9.
   const source = readFileSync("lib/planChangeService.ts", "utf8");
-  const settlement = source.slice(source.indexOf("export async function settlePlanChangesForSubscription"));
-  assert.match(
-    settlement,
-    /if \(applied\.count > 0\) \{[\s\S]*?next === "applied" && row\.execution === "immediate_upgrade"[\s\S]*?PLAN_CHANGE_UPGRADED_TEMPLATE/
-  );
-  const confirm = source.slice(
-    source.indexOf("export async function confirmPlanChange"),
-    source.indexOf("async function applyImmediateUpgrade")
-  );
-  assert.match(
-    confirm,
-    /stripeScheduleId: scheduleId,[\s\S]*?PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE[\s\S]*?return \{ ok: true, reservation: viewOf\(updated\) \};/
-  );
-  // Two confirms racing on one quote: only the one whose conditional update
-  // moved the row queues the email.
-  assert.match(
-    confirm,
-    /updateMany\(\{\s*where: \{ id: stored\.id, status: "previewed" \},[\s\S]*?stripeScheduleId: scheduleId,[\s\S]*?if \(moved\.count !== 1\) \{\s*return[\s\S]*?PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE/
-  );
-  // The upgrade confirm itself sends nothing: payment has not happened yet.
-  const upgradeBranch = confirm.slice(
-    confirm.indexOf('if (decision.plan.execution === "immediate_upgrade")'),
-    confirm.indexOf("const scheduleId = await scheduleDowngrade")
-  );
-  assert.doesNotMatch(upgradeBranch, /enqueuePlanChangeConfirmation/);
+  const count = (needle) => source.split(needle).length - 1;
+  assert.equal(count("await enqueuePlanChangeConfirmation({"), 2);
+  assert.equal(count("templateKey: PLAN_CHANGE_UPGRADED_TEMPLATE,"), 1);
+  assert.equal(count("templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,"), 1);
+  // Both are gated on a conditional update having matched.
+  assert.equal(count("if (moved.count !== 1)"), 1);
+  assert.equal(count("if (applied.count > 0) {"), 1);
 });

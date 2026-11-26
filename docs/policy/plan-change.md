@@ -518,6 +518,16 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   실패하면 삭제는 그대로 진행하고(이미 기록됐으므로 실패로 보고하지 않음) 운영 사고
   `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올려 사람이 Stripe 상태를
   확인합니다. 유예 기간 끝의 영구 삭제는 어떤 경우든 구독을 즉시 해지합니다.
+- **최종 정리는 웹훅이 합니다.** 위의 즉시 검사들은 대부분의 경우를 그 자리에서
+  막지만, 타임아웃된 재개가 늦게 적용되거나 재확인 DB 조회가 실패하는 순서까지 쓰기
+  순서로 다 막을 수는 없습니다. 그래서 `resyncSubscriptionFromStripe()`가 구독 이벤트마다
+  `keepDeletionCancellation()`을 부릅니다: 계정이 `pending_deletion`인데 Stripe 구독이
+  갱신 상태(`cancel_at_period_end: false`, active · trialing · past_due)면 해지를 다시
+  겁니다. 그 쓰기가 일시적으로 실패하면 throw해서 500 → Stripe 재전송이 지속적인 재시도가
+  되고, Stripe가 매번 같은 이유로 거부하는 요청(`StripeInvalidRequestError`)이면 운영 사고
+  `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올리고 그 이벤트는 넘깁니다. 어떤
+  순서든 재개의 결과는 `customer.subscription.updated`로 돌아오므로 해지가 최종 상태가
+  됩니다.
 - Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
 - 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
 

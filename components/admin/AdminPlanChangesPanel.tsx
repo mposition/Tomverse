@@ -33,7 +33,6 @@ const STATUS_TONE: Record<string, AdminTone> = {
   pending: "info",
   applied: "ok",
   cancelled: "idle",
-  expired: "idle",
   failed: "bad",
 };
 
