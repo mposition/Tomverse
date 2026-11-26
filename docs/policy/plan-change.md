@@ -553,13 +553,14 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   - 복원이 먼저 커밋됐으면 행이 맞지 않아 갱신은 그대로 진행됩니다.
   - 삭제 요청 직전에 이미 만들어진 갱신 인보이스는 그 `invoice.created`가 계정이 활성일 때
     처리됐으므로, 삭제 흐름이 `pending_deletion` 커밋 뒤에 그 구독의 미수금 갱신 인보이스
-    (draft와, 이미 확정돼 결제를 기다리는 open)를 찾아(모든 페이지) 같은 방법으로 막습니다
-    (`stopDeletionPendingDraftRenewals()`). open이 있었으면 추심을 끈 뒤 운영 사고
+    (draft와, 이미 확정돼 결제를 기다리는 open)를 모두 먼저 찾은 뒤(모든 페이지, 최대 500건)
+    구독을 한 번 즉시 해지해 전부의 추심을 끕니다(`stopDeletionPendingDraftRenewals()`). open이 있었으면 추심을 끈 뒤 운영 사고
     `ACCOUNT_DELETION_RENEWAL_FINALIZED`로 사람에게 알립니다. 실패하면 삭제는 그대로
     두고 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`를 올립니다.
-  - 갱신 재개 route가 저장된 flag를 쓸 때는 그 값이 전제한 계정 상태일 때만 씁니다. 갱신
-    켜짐(재개 성공, "이미 갱신 중")은 `pending_deletion`이 아닐 때만, 삭제 예약으로 되돌린
-    해지는 아직 `pending_deletion`일 때만 씁니다. 그 사이 커밋된 삭제가 있으면 쓰지 않고 409이며,
+  - 갱신 재개 route는 저장된 구독 상태를 직접 쓰지 않습니다. 재개 뒤("이미 갱신 중" 포함)
+    웹훅과 같은 `resyncSubscriptionFromStripe()`로 Stripe를 다시 읽어 단조 시각 snapshot으로
+    기록하므로, 다른 곳의 해지 · 삭제 · 복원과 겹쳐도 더 새로운 읽기가 이깁니다. 기록 뒤 계정이
+    `pending_deletion`이면 409로 답합니다. 그 사이 커밋된 삭제가 있으면 쓰지 않고 409이며,
     Stripe 쪽 해지는 삭제 흐름의 잠금 정리가 다시 겁니다.
   - 실패는 throw → 500 → 재전송이고, 그동안 인보이스는 청구되지 않은 draft로 남습니다.
     Stripe가 매번 거부할 요청이면 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`도 올립니다.

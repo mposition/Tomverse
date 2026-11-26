@@ -88,35 +88,47 @@ export async function keepDeletionCancellation(
   );
 }
 
+/** Far beyond any real subscription; bounds the deletion request if Stripe returns more. */
+const RENEWAL_SCAN_LIMIT = 500;
+
 /**
  * Run by the deletion flow once pending_deletion is committed. A renewal
  * invoice created before that commit had its `invoice.created` handled while
  * the account was still active, so nothing stopped it. The subscription's
  * uncollected renewals -- still draft, or already finalized (`open`) and
- * waiting on payment -- are looked up now and stopped the same way. One created
- * after the commit is stopped by its own webhook.
+ * waiting on payment -- are all found first, and then the subscription is
+ * ended once: that stops collection on every one of them, and nothing is read
+ * after the cancellation (whose webhook clears the account's subscription id).
+ * One created after the commit is stopped by its own webhook.
  *
- * `finalized` counts the renewals found already open: collection on them is
- * stopped too, but a person checks them (an open invoice can be paid by hand).
+ * `finalized` counts the open renewals found: their collection is stopped too,
+ * but an open invoice can still be paid by hand, so a person checks them.
  */
 export async function stopDeletionPendingDraftRenewals(
   subscriptionId: string
 ): Promise<{ stopped: number; finalized: number }> {
-  let stopped = 0;
-  let finalized = 0;
-  for (const status of ["draft", "open"] as const) {
+  const renewals: { id: string; status: string }[] = [];
+  let scanned = 0;
+  scan: for (const status of ["open", "draft"] as const) {
     // Every page: manual invoices on the subscription must not hide a renewal.
     for await (const invoice of getStripe().invoices.list(
       { subscription: subscriptionId, status, limit: 100 },
       { timeout: STRIPE_REQUEST_TIMEOUT_MS }
     )) {
-      if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
-      const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
-      if (outcome.cancelled) stopped += 1;
-      if (outcome.pendingDeletion && outcome.invoiceFinalized) finalized += 1;
+      scanned += 1;
+      if (scanned > RENEWAL_SCAN_LIMIT) break scan;
+      if (invoice.billing_reason === "subscription_cycle" && invoice.id) {
+        renewals.push({ id: invoice.id, status });
+      }
     }
   }
-  return { stopped, finalized };
+  const finalized = renewals.filter((renewal) => renewal.status === "open").length;
+  if (renewals.length === 0) return { stopped: 0, finalized };
+  const outcome = await stopDeletionPendingRenewal({
+    subscriptionId,
+    invoiceId: renewals[0]!.id,
+  });
+  return { stopped: outcome.cancelled ? 1 : 0, finalized };
 }
 
 export type DeletionRenewalOutcome = {

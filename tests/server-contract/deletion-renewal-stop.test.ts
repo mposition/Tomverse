@@ -139,10 +139,11 @@ test("a Stripe failure throws so the webhook answers 500 and the draft waits for
 test("the deletion flow stops a renewal drafted before pending_deletion was committed", async () => {
   reset();
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  // The draft renewal ends the subscription; the open one is found too and
-  // counted for a person, even though there is nothing left to cancel.
+  // Both renewals are found before anything is cancelled (the cancellation's
+  // webhook clears the account's subscription id); one cancellation stops
+  // collection on all of them, and the open one is counted for a person.
   assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
   // Only renewals are looked at; other invoices are not reasons to cancel.
   assert.equal(state.cancels.length, 1);
-  assert.equal(state.locked, 2);
+  assert.equal(state.locked, 1);
 });

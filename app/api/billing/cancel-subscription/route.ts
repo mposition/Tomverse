@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { keepDeletionCancellation } from "@/lib/deletionCancellation";
+import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
 import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
@@ -199,6 +200,39 @@ async function restoreCancellationIfDeletionPending(
 }
 
 /**
+ * The stored billing state after a resume, or after finding the subscription
+ * already renewing, is written the way the webhook writes it: re-read from
+ * Stripe and applied through the snapshot stamped before that read, which a
+ * newer read (an ordinary cancellation elsewhere, a deletion, a restore) always
+ * outranks. A failure is logged only: Stripe already has the truth, and the
+ * webhook of the same change records it.
+ */
+async function recordSubscriptionFromStripe(userId: string, subscriptionId: string) {
+  try {
+    await resyncSubscriptionFromStripe(subscriptionId);
+  } catch (error) {
+    console.error("billing.subscription.resume_record_failed", {
+      userId,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+}
+
+async function accountPendingDeletion(userId: string) {
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { accountStatus: true },
+  });
+  return account?.accountStatus === "pending_deletion";
+}
+
+const deletionPendingResponse = () =>
+  NextResponse.json(
+    { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
+    { status: 409 }
+  );
+
+/**
  * Undo a scheduled cancellation: the subscription renews again on its current
  * plan. It is its own control with its own label -- a plan change never does
  * this as a side effect (docs/policy/plan-change.md section 1) -- and it is the
@@ -277,19 +311,10 @@ export async function DELETE(req: Request) {
     if (!current.cancel_at_period_end) {
       // Already renewing: nothing to undo, and saying so is idempotent. The
       // stored flag is corrected too -- a missed webhook would otherwise keep
-      // showing a cancellation (and this button) after a reload. Written only
-      // while the account is not pending deletion: a deletion committed after
-      // the check above records its own cancellation, and this read is older.
-      const corrected = await prisma.user.updateMany({
-        where: { id: user.id, accountStatus: { not: "pending_deletion" } },
-        data: { subscriptionCancelAtPeriodEnd: false, subscriptionStatus: current.status },
-      });
-      if (corrected.count !== 1) {
-        return NextResponse.json(
-          { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
-          { status: 409 }
-        );
-      }
+      // showing a cancellation (and this button) after a reload.
+      await recordSubscriptionFromStripe(user.id, user.stripeSubscriptionId);
+      // A deletion committed after the check above is not told "renewing".
+      if (await accountPendingDeletion(user.id)) return deletionPendingResponse();
       return NextResponse.json({
         success: true,
         cancelAtPeriodEnd: false,
@@ -324,36 +349,15 @@ export async function DELETE(req: Request) {
     }
 
     if (await restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")) {
-      // Only while still pending deletion: a restore (and the customer's own
-      // resume after it) committed since the reconcile is newer than this.
-      await prisma.user.updateMany({
-        where: { id: user.id, accountStatus: "pending_deletion" },
-        data: { subscriptionCancelAtPeriodEnd: true, subscriptionStatus: subscription.status },
-      });
-      return NextResponse.json(
-        { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
-        { status: 409 }
-      );
+      await recordSubscriptionFromStripe(user.id, subscriptionId);
+      return deletionPendingResponse();
     }
 
+    await recordSubscriptionFromStripe(user.id, subscriptionId);
+    // A deletion committed after the reconcile re-asserts its own cancellation
+    // (lib/accountDeletion.ts); this answer must not say "renewing" to it.
+    if (await accountPendingDeletion(user.id)) return deletionPendingResponse();
     const periodEnd = getPeriodEnd(subscription) || user.subscriptionCurrentPeriodEnd;
-    // Only while the account is still not pending deletion: a deletion that
-    // committed after the reconcile above records its own cancellation (and
-    // re-asserts it at Stripe), and this response is older than that.
-    const recorded = await prisma.user.updateMany({
-      where: { id: user.id, accountStatus: { not: "pending_deletion" } },
-      data: {
-        subscriptionStatus: subscription.status,
-        subscriptionCurrentPeriodEnd: periodEnd,
-        subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-      },
-    });
-    if (recorded.count !== 1) {
-      return NextResponse.json(
-        { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
-        { status: 409 }
-      );
-    }
     console.info("billing.subscription.renewal_resumed", {
       userId: user.id,
       subscriptionId: subscription.id,

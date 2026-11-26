@@ -109,6 +109,19 @@ mock.module(mod("lib/deletionCancellation.ts"), {
     },
   },
 });
+// The webhook's resync, as it behaves for this route: the stored state becomes
+// what Stripe has now (ordering against newer reads is its own tested contract).
+mock.module(mod("lib/stripeWebhookProcessing.ts"), {
+  namedExports: {
+    resyncSubscriptionFromStripe: async () => {
+      state.accountUpdates.push({
+        subscriptionCancelAtPeriodEnd: state.subscription.cancel_at_period_end,
+        subscriptionStatus: state.subscription.status,
+      });
+      return null;
+    },
+  },
+});
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
     prisma: {
@@ -239,25 +252,29 @@ test("a cancellation that cannot be restored is an operational incident", async 
   assert.deepEqual(state.incidents, ["BILLING_RESUME_RENEWAL_DELETION_CONFLICT"]);
 });
 
-test("an already-renewing answer never overwrites the flag of a deletion committed after the read", async () => {
+test("an already-renewing answer to a deletion committed after the read is 409, and stores what Stripe has", async () => {
   reset({ subscription: { id: "sub_1", status: "active", cancel_at_period_end: false }, deletionAfterRead: true });
   const { status, body } = await call();
   assert.equal(status, 409);
   assert.equal(body.code, "ACCOUNT_DELETION_PENDING");
-  assert.deepEqual(state.accountUpdates, []);
+  assert.equal(state.accountUpdates.at(-1)?.subscriptionCancelAtPeriodEnd, state.subscription.cancel_at_period_end);
 });
 
-test("a resume answer never overwrites the flag of a deletion committed after the reconcile", async () => {
+test("a resume answer to a deletion committed after the reconcile is 409, and stores what Stripe has", async () => {
   reset({ deletionAfterReconcile: true });
   const { status, body } = await call();
   assert.equal(status, 409);
   assert.equal(body.code, "ACCOUNT_DELETION_PENDING");
-  assert.deepEqual(state.accountUpdates, []);
+  assert.equal(state.accountUpdates.at(-1)?.subscriptionCancelAtPeriodEnd, state.subscription.cancel_at_period_end);
 });
 
-test("a restore committed after the reconcile is not overwritten with the deletion's flag", async () => {
-  reset({ deletionDuringWrite: true, restoreAfterReconcile: true });
-  const { status } = await call();
-  assert.equal(status, 409);
-  assert.deepEqual(state.accountUpdates, []);
+test("no route write is a stored flag of its own: every one is re-read from Stripe", async () => {
+  for (const overrides of [{}, { deletionDuringWrite: true }, { deletionDuringWrite: true, restoreAfterReconcile: true }]) {
+    reset(overrides);
+    await call();
+    assert.ok(state.accountUpdates.length > 0);
+    for (const update of state.accountUpdates) {
+      assert.equal(update.subscriptionCancelAtPeriodEnd, state.subscription.cancel_at_period_end);
+    }
+  }
 });
