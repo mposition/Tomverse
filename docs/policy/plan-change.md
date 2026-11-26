@@ -546,7 +546,8 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   갱신 인보이스를 약 1시간 draft로 두고, `invoice.created` 전달이 실패하는 동안 확정을
   최대 72시간 미룹니다. 웹훅은 `billing_reason: subscription_cycle`인 `invoice.created`마다
   `stopDeletionPendingRenewal()`(같은 파일, 같은 행 잠금)을 부릅니다.
-  - 계정이 `pending_deletion`이면 구독을 즉시 해지합니다(`prorate: false`,
+  - 계정이 `pending_deletion`이고 그 인보이스가 아직 수금될 수 있으면(draft · open) 구독을
+    즉시 해지합니다(void · uncollectible은 해지 사유가 아닙니다)(`prorate: false`,
     `invoice_now: false`). 해지는 그 구독의 draft · open 인보이스의 자동 청구를 끕니다.
     구독 인보이스는 삭제할 수 없으므로 이것이 청구를 막는 방법입니다. 떠나려는 계정이라
     새 기간을 줄 이유가 없고, 유예 끝의 영구 삭제도 어차피 즉시 해지합니다.

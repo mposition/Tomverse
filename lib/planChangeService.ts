@@ -855,6 +855,8 @@ export async function confirmPlanChange({
       // here -- an unrecorded schedule would move the plan at the period end
       // with no reservation to show or cancel.
       await releaseUnrecordedSchedule(scheduleId, stored.id);
+      // Spent like every other refused quote, so it is not claimable again.
+      await spend("concurrent_confirm").catch(() => {});
       return fail(
         "PLAN_CHANGE_PREVIEW_EXPIRED",
         "The quote was confirmed twice at once; request a new one."

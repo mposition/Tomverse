@@ -126,7 +126,11 @@ export async function stopDeletionPendingDraftRenewals(
       }
     }
   }
-  const finalized = renewals.filter((renewal) => renewal.status === "open").length;
+  // Renewals found open, plus any that left draft between the list and its
+  // re-read under the lock: all of them are for a person to check.
+  const finalizedIds = new Set(
+    renewals.filter((renewal) => renewal.status === "open").map((renewal) => renewal.id)
+  );
   // Each renewal until one ends the subscription: one paid in the meantime is
   // left for a person (see stopDeletionPendingRenewal) and must not stop the
   // check of the others.
@@ -134,6 +138,7 @@ export async function stopDeletionPendingDraftRenewals(
   for (const renewal of renewals) {
     const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: renewal.id });
     if (!outcome.pendingDeletion) break;
+    if (outcome.invoiceFinalized) finalizedIds.add(renewal.id);
     if (outcome.cancelled) {
       stopped = 1;
       break;
@@ -144,7 +149,7 @@ export async function stopDeletionPendingDraftRenewals(
   if (!complete) {
     throw new Error("Uncollected invoices on the subscription exceed the scan limit.");
   }
-  return { stopped, finalized };
+  return { stopped, finalized: finalizedIds.size };
 }
 
 export type DeletionRenewalOutcome = {
@@ -195,10 +200,12 @@ export async function stopDeletionPendingRenewal({
       const stripe = getStripe();
       const invoice = await stripe.invoices.retrieve(invoiceId, {}, budget());
       const invoiceFinalized = invoice.status !== "draft";
-      // A renewal that was already paid is a refund for a person to decide,
-      // not something to cancel over: ending the subscription now would take
-      // the period the customer just paid for and still leave the charge.
-      if (invoice.status === "paid") {
+      // Only a renewal Stripe can still collect (draft, or open and awaiting
+      // payment) is a reason to end the subscription. A paid one is a refund
+      // for a person to decide -- ending the subscription now would take the
+      // period just paid for and still leave the charge -- and a void or
+      // uncollectible one is no longer collected at all.
+      if (invoice.status !== "draft" && invoice.status !== "open") {
         return { pendingDeletion: true, cancelled: false, invoiceFinalized };
       }
       const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, budget());

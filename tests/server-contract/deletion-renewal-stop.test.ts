@@ -169,3 +169,19 @@ test("a lookup cut off by the scan limit is a failure, after stopping what it fo
   await assert.rejects(stopDeletionPendingDraftRenewals("sub_1"), /scan limit/);
   assert.equal(state.cancels.length, 1);
 });
+
+test("a void or uncollectible renewal is no reason to end the subscription", async () => {
+  for (const invoiceStatus of ["void", "uncollectible"]) {
+    reset({ invoiceStatus });
+    const outcome = await call();
+    assert.equal(outcome.cancelled, false, invoiceStatus);
+    assert.equal(state.cancels.length, 0, invoiceStatus);
+  }
+});
+
+test("a draft renewal paid before its re-read is counted for a person", async () => {
+  reset({ paidAfterList: ["in_open", "in_1"] });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 0, finalized: 2 });
+  assert.equal(state.cancels.length, 0);
+});
