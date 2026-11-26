@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserState, ElementPick } from "../browser-contract";
+import type { ComputerState } from "../computer-contract";
 import type { WebViewState } from "../web-view-contract";
 import type { TerminalEvent } from "../terminal-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
@@ -78,6 +79,12 @@ if (trustedWindow) {
       const onPick = (_event: Electron.IpcRendererEvent, pick: ElementPick) => listener(pick);
       ipcRenderer.on("desktop:code-browser-pick", onPick);
       return () => ipcRenderer.removeListener("desktop:code-browser-pick", onPick);
+    },
+    codeComputer: (command: Parameters<DesktopApi["codeComputer"]>[0]) => ipcRenderer.invoke("desktop:code-computer", command),
+    subscribeCodeComputer(listener: (state: ComputerState) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: ComputerState) => listener(state);
+      ipcRenderer.on("desktop:code-computer-state", onState);
+      return () => ipcRenderer.removeListener("desktop:code-computer-state", onState);
     },
     codeTerminal: (command: Parameters<DesktopApi["codeTerminal"]>[0]) => ipcRenderer.invoke("desktop:code-terminal", command),
     subscribeCodeTerminal(listener: (event: TerminalEvent) => void) {

@@ -1,13 +1,16 @@
 import { selectDriveFiles } from "./drive-picker";
 import { desktopResearchAnswerId } from "../../../../lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
+import { createDesktopComputer } from "./computer-wiring";
+import { createFixtureBackend } from "./computer-fixture-backend";
+import type { ComputerBackend } from "./computer-backend";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
@@ -164,6 +167,8 @@ const fixtureSchema = z.object({
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
   browserAgent: z.boolean().optional(),
+  /** A test runs the computer tools against a fake desktop (two windows and a picture). */
+  computerUse: z.boolean().optional(),
   codex: cliFixtureInput.optional(),
   claude: cliFixtureInput.optional(),
   qwen: qwenFixtureInput.optional(),
@@ -482,6 +487,7 @@ function broadcast() {
   state.codeBrowserAvailable = scope !== null;
   state.codeBrowserInspection = scope !== null && browserTools().inspection;
   state.codeBrowserAgent = browserTools().agent;
+  computer.host.refresh();
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
@@ -976,6 +982,7 @@ function stop() {
   if (!runId || !worker || state.task?.status === "stopping") return;
   if (codeBrowser) codeBrowser.grant = undefined;
   browserAgent.abortAll();
+  computer.host.abortAll();
   revokeCodePlugin();
   if (state.task) {
     state.task.status = "stopping";
@@ -1089,6 +1096,7 @@ function onWorkerMessage(event: WorkerEvent) {
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
   if (event.type === "browser-agent") { void browserAgent.handle(event); return; }
+  if (event.type === "computer-agent") { void computer.host.handle(event); return; }
   if (event.type === "terminal-read") { replyToTerminalRead(event); return; }
   if (event.type === "queue-result") {
     if (pendingQueue?.requestId === event.requestId) {
@@ -2566,6 +2574,26 @@ const browserAgent = createBrowserAgentBridge({
   clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
 });
 
+// The computer tools: one window the person chose for the task (computer-host.ts holds every check; the person's switch is off by default).
+let computerFixture: ComputerBackend | undefined;
+const computer = createDesktopComputer({
+  switchFile: () => join(app.getPath("userData"), "code-computer.txt"),
+  fixtureBackend: () => DESKTOP_FIXTURE_ALLOWED && !!fixture && codeConnection() === fixture && fixture.computerUse === true ? (computerFixture ??= createFixtureBackend()) : null,
+  shortcuts: { register: (accelerator, handler) => globalShortcut.register(accelerator, handler), unregister: (accelerator) => globalShortcut.unregister(accelerator) },
+  send: (computerState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-computer-state", computerState); },
+  run: () => {
+    const scope = currentCodeBrowserScope();
+    const parts = scope ? JSON.parse(scope) as unknown[] : null;
+    return {
+      runId: runId && runId !== discardedRunId ? runId : null, taskId: state.task?.id ?? null,
+      running: Boolean(state.busy && state.task?.status === "running"), apiExecution: state.task?.execution?.executionMode === "tomverse_api",
+      suspended, scope: parts ? JSON.stringify([parts[0], parts[2]]) : null,
+    };
+  },
+  reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "computer-agent-result", runId: replyRunId, requestId, reply }); },
+  clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
+});
+
 function currentCodeBrowserScope() {
   if (!codeConnection() || signingOut || closing) return null;
   const scope = currentHistoryScope();
@@ -2693,12 +2721,13 @@ function loadCodeTerminal() {
   try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
   catch { codeTerminalEnabled = false; }
   browserAgentSwitch.load();
+  computer.load();
 }
 
 /** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
 function codeRunTools() {
   const { agent, inspection } = browserTools();
-  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(codeTerminalEnabled ? { terminalRead: true } : {}) };
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled ? { terminalRead: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
@@ -3464,6 +3493,7 @@ function registerIpc() {
     return { ...state, handoff: currentHandoff() };
   });
   main("desktop:code-browser", runCodeBrowser);
+  main("desktop:code-computer", (value) => computer.host.command(value));
   main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
     if (!accountPermissionsFixture()) return false;
@@ -3973,6 +4003,7 @@ function registerIpc() {
   });
   ipcMain.handle("approval:decide", (event, value: unknown) => {
     trusted(event, approvalWindow, approvalUrl);
+    computer.host.noteApprovalAnswered();
     return answer(decisions.parse(value));
   });
 }
@@ -4135,6 +4166,7 @@ else {
     linkAttempt?.abort();
     renewal?.controller.abort();
     terminalHost.closeAllSync();
+    computer.host.dispose();
     parallel.shutdown();
     browserSession = null;
     linkedCode = null;

@@ -16,6 +16,7 @@ import { CodeSandboxSettings } from "./CodeSandboxSettings";
 import { CodeCloudSettings } from "./CodeCloudSettings";
 import { PluginsPanel } from "./PluginsPanel";
 import { CodeBrowserSettings } from "./CodeBrowserSettings";
+import { CodeComputerSettings } from "./CodeComputerSettings";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -213,6 +214,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
       </label>)}
     </fieldset>}
     <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
+    <CodeComputerSettings language={language} />
     <CodeSandboxSettings language={language} />
     <CodeCloudSettings language={language} enabled={snapshot?.capabilities?.managedCode === true} />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}

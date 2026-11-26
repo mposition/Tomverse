@@ -27,6 +27,7 @@ import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
 import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
+import type { ComputerAgentRequest } from "../../../tomverse-cli/src/computer-tools";
 import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { startCodeSandbox } from "./code-sandbox";
@@ -46,6 +47,7 @@ type ActiveRun = {
   runner?: Runner;
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
   browserAgent?: Map<string, (reply: unknown) => void>;
+  computerAgent?: Map<string, (reply: unknown) => void>;
   terminalRead?: { requestId: string; settle: (reply: TerminalReadReply | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   gitRequest?: { requestId: string; settle: (result: AgentGitResult | null) => void };
@@ -576,6 +578,10 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
       selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
       ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
+    ...(view.computer ? { computer: { action: view.computer.action, window: { title: clean(view.computer.window.title), app: clean(view.computer.window.app) },
+      ...(view.computer.x !== undefined ? { x: view.computer.x, y: view.computer.y } : {}), ...(view.computer.button ? { button: view.computer.button } : {}),
+      ...(view.computer.double ? { double: true } : {}), ...(view.computer.text !== undefined ? { text: clean(view.computer.text) } : {}),
+      ...(view.computer.key ? { key: view.computer.key } : {}), ...(view.computer.dy !== undefined ? { dx: view.computer.dx, dy: view.computer.dy } : {}) } } : {}),
     ...(view.mcp ? { mcp: { server: clean(view.mcp.server), tool: clean(view.mcp.tool), scope: view.mcp.scope, args: clean(JSON.stringify(view.input, null, 2) ?? "").slice(0, 4_000) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
@@ -625,6 +631,25 @@ function requestBrowserAgent(control: ActiveRun, request: BrowserAgentRequest, s
     stop.addEventListener("abort", aborted, { once: true });
     pending.set(requestId, settle);
     send({ type: "browser-agent", runId: control.runId, requestId, request });
+  });
+}
+
+/** One request of the computer tools; the main process answers it (or refuses it) and the runner never touches a window. */
+function requestComputerAgent(control: ActiveRun, request: ComputerAgentRequest, signal: AbortSignal) {
+  return new Promise<unknown>((resolve) => {
+    const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(40_000)]);
+    if (stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const pending = control.computerAgent ??= new Map();
+    const settle = (reply: unknown) => {
+      stop.removeEventListener("abort", aborted);
+      pending.delete(requestId);
+      resolve(reply);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    pending.set(requestId, settle);
+    send({ type: "computer-agent", runId: control.runId, requestId, request });
   });
 }
 
@@ -991,6 +1016,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       // resumes gets the same tools as one that starts.
       browserSnapshot: command.browserSnapshot ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
       browserAgent: command.browserAgent ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
+      computerAgent: command.computerUse ? (request, signal) => requestComputerAgent(control, request, signal) : undefined,
       terminalRead: command.terminalRead ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
       expandFollowUp: continuation || savedCap !== undefined ? undefined : (text) => {
         const slash = slashPromptFor(workspace.root, text);
@@ -1001,7 +1027,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.computer?.text, view.computer?.window.title, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -1693,6 +1719,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     if (active.browserSnapshot?.requestId === data.requestId) active.browserSnapshot.settle(data.text);
   } else if (data.type === "browser-agent-result" && active?.runId === data.runId) {
     active.browserAgent?.get(data.requestId)?.(data.reply);
+  } else if (data.type === "computer-agent-result" && active?.runId === data.runId) {
+    active.computerAgent?.get(data.requestId)?.(data.reply);
   } else if (data.type === "terminal-read-result" && active?.runId === data.runId) {
     if (active.terminalRead?.requestId === data.requestId) active.terminalRead.settle(data.reply);
   } else if (data.type === "answer" && active?.runId === data.runId) {

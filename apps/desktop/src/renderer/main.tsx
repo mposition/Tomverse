@@ -39,6 +39,8 @@ import { PromptAttachmentChips } from "./PromptAttachments";
 import { clearPromptAttachments, promptAttachmentsFor, withPromptAttachments } from "./prompt-attachments";
 import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { ApprovalBrowser } from "./ApprovalBrowser";
+import { ApprovalComputer } from "./ApprovalComputer";
+import { CodeComputer } from "./CodeComputer";
 import { appendElementComments } from "../element-comment";
 import { useAgentBrowserReveal } from "./useAgentBrowserReveal";
 import { CodeTerminal } from "./CodeTerminal";
@@ -1054,6 +1056,7 @@ ${text}` : text;
           {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
           {task && surface === "code" && <OrchestrationPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
           {task && surface === "code" && <SubagentPanel task={task} language={language} />}
+          {surface === "code" && <CodeComputer language={language} />}
           {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
@@ -1322,6 +1325,7 @@ function Approval() {
         <p role="note">{engineCopy.approvalWebNote}</p>
       </section>}
       {request.browser && <ApprovalBrowser browser={request.browser} copy={engineCopy} />}
+      {request.computer && <ApprovalComputer computer={request.computer} language={language} />}
       {request.mcp && <section aria-label={extensionsCopy.approvalHeading}>
         <h2>{extensionsCopy.approvalHeading}</h2>
         <dl>

@@ -13,6 +13,7 @@ import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { GitApprovalView, GitCommand, GitResultMap } from "./git-actions-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState, ElementPick } from "./browser-contract";
+import type { ComputerCommand, ComputerResult, ComputerState } from "./computer-contract";
 import type { TerminalCommand, TerminalEvent, TerminalInfo, TerminalListing, TerminalReplayResult } from "./terminal-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
@@ -423,6 +424,9 @@ export type ApprovalRequest = {
   web?: { url: string; host: string };
   /** A click or typing in the local browser tab: the site, the page, the element and the text the agent would type. */
   browser?: { action: "click" | "type"; origin: string; url: string; selector: string; text?: string; clear?: boolean; submit?: boolean };
+  /** A click, typing, key or scroll in the one desktop window the person chose for the task. */
+  computer?: { action: "click" | "type" | "key" | "scroll"; window: { title: string; app: string }; x?: number; y?: number; button?: "left" | "right"; double?: boolean;
+    text?: string; key?: string; dx?: number; dy?: number };
   /** A call of a tool of an MCP server on this computer: which server and tool, where the server is defined, and the arguments. */
   mcp?: { server: string; tool: string; scope: "user" | "project"; args: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
@@ -441,6 +445,8 @@ export type DesktopApi = {
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
   git<Type extends GitCommand["type"]>(command: Extract<GitCommand, { type: Type }>): Promise<GitResultMap[Type]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
+  codeComputer: (command: ComputerCommand) => Promise<ComputerResult>;
+  subscribeCodeComputer: (listener: (state: ComputerState) => void) => () => void;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
   subscribeCodeBrowserPick: (listener: (pick: ElementPick) => void) => () => void;
   codeTerminal: (command: TerminalCommand) => Promise<TerminalListing | TerminalInfo | TerminalReplayResult | void>;
