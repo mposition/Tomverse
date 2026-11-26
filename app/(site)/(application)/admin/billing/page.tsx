@@ -11,6 +11,7 @@ import {
 import { PromotionDiagnosticsPanel } from "@/components/admin/PromotionDiagnosticsPanel";
 import {
   AdminPlanChangesPanel,
+  ROW_LIMIT as PLAN_CHANGE_ROW_LIMIT,
   type AdminPlanChangeRow,
 } from "@/components/admin/AdminPlanChangesPanel";
 import { adminPlanChangesMessages } from "@/lib/adminMessages/planChanges";
@@ -106,13 +107,13 @@ export default async function AdminBillingPage({
     } as const;
     const [pendingRead, recentRead, planChangeMessages, locale] = await Promise.all([
       prisma.planChangeRequest
-        .findMany({ where: { status: "pending" }, orderBy: { confirmedAt: "asc" }, take: 200, select })
+        .findMany({ where: { status: "pending" }, orderBy: { confirmedAt: "asc" }, take: PLAN_CHANGE_ROW_LIMIT, select })
         .then((rows) => ({ ok: true as const, rows }), (error) => ({ ok: false as const, error })),
       prisma.planChangeRequest
         .findMany({
           where: { status: { in: ["applied", "cancelled", "failed"] }, settledAt: { gte: since } },
           orderBy: { settledAt: "desc" },
-          take: 200,
+          take: PLAN_CHANGE_ROW_LIMIT,
           select,
         })
         .then((rows) => ({ ok: true as const, rows }), (error) => ({ ok: false as const, error })),

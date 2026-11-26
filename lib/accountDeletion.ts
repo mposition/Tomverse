@@ -101,16 +101,10 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   // before this record and wrote to Stripe after the first call above would
   // otherwise leave this account renewing; that route re-reads the account
   // after its own write, so one of the two always ends with the cancellation.
-  // Idempotent, and not fatal: the deletion is recorded and the first call
-  // already scheduled the cancellation.
-  await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId).catch(
-    (error) => {
-      console.error("Stripe cancellation re-assert after deletion record failed:", {
-        userId: user.id,
-        errorName: error instanceof Error ? error.name : "UnknownError",
-      });
-    }
-  );
+  // Fatal like the first call: in the race this is the only write that puts
+  // the cancellation back, so the request must not report success without it.
+  // Retrying the deletion repeats the same idempotent cancellation.
+  await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
   await revokeAllUserSessions(user.id);
   return {
     scheduled: true as const,

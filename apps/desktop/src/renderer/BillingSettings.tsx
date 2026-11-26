@@ -739,7 +739,7 @@ function CancelSubscription({ language, account, periodEnd, onSettled }: {
       setMessage(undefined);
       void billing<"resumeRenewal">({ action: "resumeRenewal" }).then(result => {
         setMessage(result.ok ? { text: change.resumeRenewalDone, failed: false }
-          : { text: result.code === "ACCOUNT_DELETION_PENDING" || result.code === "REFUND_REQUEST_PENDING"
+          : { text: result.code === "ACCOUNT_DELETION_PENDING"
             ? change.resumeRenewalBlocked : change.resumeRenewalFailed, failed: true });
       }, () => setMessage({ text: change.resumeRenewalFailed, failed: true })).finally(() => {
         setBusy(false);

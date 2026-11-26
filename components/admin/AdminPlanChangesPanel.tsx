@@ -26,6 +26,9 @@ export type AdminPlanChangeRow = {
   settledAt: string | null;
 };
 
+/** The page reads at most this many rows per list. */
+export const ROW_LIMIT = 200;
+
 const STATUS_TONE: Record<string, AdminTone> = {
   pending: "info",
   applied: "ok",
@@ -139,6 +142,11 @@ export function AdminPlanChangesPanel({
       </div>
       {rows ? (
         <AdminDataTable
+          footer={
+            rows.length >= ROW_LIMIT ? (
+              <p className="px-4 py-2 text-xs text-zinc-500">{m.truncated(ROW_LIMIT)}</p>
+            ) : undefined
+          }
           columns={columns}
           rows={rows}
           rowKey={(row) => row.id}

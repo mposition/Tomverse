@@ -1238,8 +1238,7 @@ export function AuthButton({
                 | null;
             if (!response.ok) {
                 dispatchAppToast(
-                    data?.code === "ACCOUNT_DELETION_PENDING" ||
-                        data?.code === "REFUND_REQUEST_PENDING"
+                    data?.code === "ACCOUNT_DELETION_PENDING"
                         ? planChangeCopy.resumeRenewalBlocked
                         : planChangeCopy.resumeRenewalFailed,
                     "error"

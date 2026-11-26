@@ -23,7 +23,6 @@ test("every refusal comes before the one Stripe write", () => {
   for (const refusal of [
     '"NO_ACTIVE_SUBSCRIPTION"',
     '"ACCOUNT_DELETION_PENDING"',
-    '"REFUND_REQUEST_PENDING"',
     '"SUBSCRIPTION_NOT_CHANGEABLE"',
   ]) {
     assert.ok(position(refusal) < write, `${refusal} is checked after the write`);
@@ -39,12 +38,12 @@ test("it decides on the subscription Stripe has now, and is idempotent when alre
   assert.match(source, /RESUMABLE_STATUSES = new Set\(\["active", "trialing"\]\)/);
 });
 
-test("a deletion or refund that lands during the write puts the cancellation back", () => {
+test("a deletion that lands during the write puts the cancellation back", () => {
   // Account deletion schedules the cancellation at Stripe, then records
   // pending_deletion, then asserts the cancellation again. This route re-reads
   // the account after its own write. Between the two, the cancellation wins.
   const write = position("cancel_at_period_end: false");
-  const recheck = resume.indexOf('after?.accountStatus === "pending_deletion" || refundAfter', write);
+  const recheck = resume.indexOf('after?.accountStatus === "pending_deletion"', write);
   assert.ok(recheck > write, "no re-read after the write");
   const revert = resume.indexOf("cancel_at_period_end: true", recheck);
   assert.ok(revert > recheck, "no revert after the re-read");
@@ -54,6 +53,10 @@ test("a deletion or refund that lands during the write puts the cancellation bac
   const record = schedule.indexOf('accountStatus: "pending_deletion"');
   const reassert = schedule.indexOf("await scheduleStripeSubscriptionCancellation", record);
   assert.ok(record > 0 && reassert > record, "deletion does not re-assert after its record");
+  // And its failure is not swallowed: in the race it is the only write that
+  // restores the cancellation.
+  const reassertCall = schedule.slice(reassert, schedule.indexOf(";", reassert) + 1);
+  assert.doesNotMatch(reassertCall, /\.catch\(/);
 });
 
 test("an already-renewing subscription corrects a stale stored flag", () => {

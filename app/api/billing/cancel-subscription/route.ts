@@ -166,9 +166,10 @@ const RESUMABLE_STATUSES = new Set(["active", "trialing"]);
  * step the plan-change refusal PLAN_CHANGE_BLOCKED_BY_CANCELLATION tells the
  * customer to take first.
  *
- * Refused while an account deletion or a refund request is pending: both of
- * those scheduled the cancellation themselves, and renewing underneath them
- * would charge an account that asked to leave or to be refunded.
+ * Refused while an account deletion is pending: the deletion scheduled the
+ * cancellation itself, and renewing underneath it would charge an account that
+ * asked to leave. (A refund request does not cancel anything on its own --
+ * approval settles the subscription -- so it is not a reason to refuse.)
  */
 export async function DELETE(req: Request) {
   try {
@@ -220,17 +221,6 @@ export async function DELETE(req: Request) {
         { status: 409 }
       );
     }
-    const pendingRefund = await prisma.refundRequest.findFirst({
-      where: { userId: user.id, status: "pending" },
-      select: { id: true },
-    });
-    if (pendingRefund) {
-      return NextResponse.json(
-        { code: "REFUND_REQUEST_PENDING", error: "A refund request is pending." },
-        { status: 409 }
-      );
-    }
-
     // Decided on the subscription as Stripe has it now, not on the stored
     // flag, which a missed webhook can leave stale.
     const stripe = getStripe();
@@ -264,26 +254,22 @@ export async function DELETE(req: Request) {
       cancel_at_period_end: false,
     });
 
-    // A deletion or refund request may have landed between the checks above
-    // and this write. Account deletion schedules the cancellation at Stripe
+    // A deletion may have landed between the check above and this write. Account deletion schedules the cancellation at Stripe
     // and then records pending_deletion, and re-asserts the cancellation after
     // that record (lib/accountDeletion.ts), so between the two of them the
     // cancellation always wins: if the record is here now, put it back.
-    const [after, refundAfter] = await Promise.all([
-      prisma.user.findUnique({ where: { id: user.id }, select: { accountStatus: true } }),
-      prisma.refundRequest.findFirst({
-        where: { userId: user.id, status: "pending" },
-        select: { id: true },
-      }),
-    ]);
-    if (after?.accountStatus === "pending_deletion" || refundAfter) {
+    const after = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { accountStatus: true },
+    });
+    if (after?.accountStatus === "pending_deletion") {
       try {
         await stripe.subscriptions.update(user.stripeSubscriptionId, {
           cancel_at_period_end: true,
         });
       } catch (revertError) {
         // The one state worth a page: renewal is on for an account that asked
-        // to leave or to be refunded. Not retried blindly -- the outcome of
+        // to leave. Not retried blindly -- the outcome of
         // the write is unknown and is read back by whoever picks this up.
         console.error("billing.subscription.resume_revert_failed", {
           userId: user.id,
@@ -293,9 +279,7 @@ export async function DELETE(req: Request) {
         throw revertError;
       }
       return NextResponse.json(
-        after?.accountStatus === "pending_deletion"
-          ? { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." }
-          : { code: "REFUND_REQUEST_PENDING", error: "A refund request is pending." },
+        { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
         { status: 409 }
       );
     }

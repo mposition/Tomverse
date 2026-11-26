@@ -73,6 +73,13 @@ test("it uses the billing welcome email's shell, so it reads like the receipt", 
   assert.ok(upgraded.html.includes("border:1px solid #dbeafe"));
 });
 
+test("an upgrade with no known renewal date leaves that row out", () => {
+  const email = render("upgraded", "en", { effectiveAt: null });
+  assert.doesNotMatch(email.text, /Next renewal/);
+  assert.doesNotMatch(email.html, /Next renewal/);
+  assert.doesNotMatch(email.text, /Not available/);
+});
+
 test("plan names are escaped in the HTML part", () => {
   const email = render("downgrade_scheduled", "en", { fromPlan: "<b>Max</b>" });
   assert.doesNotMatch(email.html, /<b>Max<\/b>/);

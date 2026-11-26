@@ -38,6 +38,7 @@ export const adminPlanChangesMessages = defineAdminMessages({
       failed: "Failed",
     },
     renewalResumed: "Renewal resumed with consent",
+    truncated: (limit: number) => `Showing the first ${limit} rows only.`,
     notSet: "—",
   },
   ko: {
@@ -72,6 +73,7 @@ export const adminPlanChangesMessages = defineAdminMessages({
       failed: "실패",
     },
     renewalResumed: "동의 후 갱신 재개",
+    truncated: (limit: number) => `앞의 ${limit}건만 보여요.`,
     notSet: "—",
   },
 });

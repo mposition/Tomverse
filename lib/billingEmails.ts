@@ -1231,6 +1231,9 @@ export function buildPlanChangeEmail(
   const toPlan = escapeHtml(rawTo);
   const billingInterval = formatBillingInterval(input.billingInterval, language);
   const date = formatDate(input.effectiveAt ?? null, language);
+  // An upgrade whose next renewal Stripe did not report leaves the row out
+  // rather than printing "not available" under "Next renewal".
+  const showDate = Boolean(input.effectiveAt);
   const phaseCopy = phase === "upgraded" ? copy.upgraded : copy.downgradeScheduled;
   const intro =
     phase === "upgraded"
@@ -1243,9 +1246,11 @@ export function buildPlanChangeEmail(
     `${copy.fromLabel}: ${rawFrom}`,
     `${copy.toLabel}: ${rawTo}`,
     `${copy.billingLabel}: ${billingInterval}`,
-    `${phaseCopy.dateLabel}: ${date}`,
+    showDate ? `${phaseCopy.dateLabel}: ${date}` : "",
     note,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
   const html = shell(
     phaseCopy.title,
     `
@@ -1253,8 +1258,8 @@ export function buildPlanChangeEmail(
         <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
           <div style="margin-bottom:8px;"><strong>${copy.fromLabel}:</strong> ${fromPlan}</div>
           <div style="margin-bottom:8px;"><strong>${copy.toLabel}:</strong> ${toPlan}</div>
-          <div style="margin-bottom:8px;"><strong>${copy.billingLabel}:</strong> ${billingInterval}</div>
-          <div><strong>${phaseCopy.dateLabel}:</strong> ${date}</div>
+          <div${showDate ? ' style="margin-bottom:8px;"' : ""}><strong>${copy.billingLabel}:</strong> ${billingInterval}</div>
+          ${showDate ? `<div><strong>${phaseCopy.dateLabel}:</strong> ${date}</div>` : ""}
         </div>
         <p>${escapeHtml(note)}</p>
       `,
