@@ -79,6 +79,33 @@ export function keyInput(key: string): { ctrl: boolean; shift: boolean; vk: numb
   return vk === undefined ? null : { ctrl: parts.includes("ctrl"), shift: parts.includes("shift"), vk };
 }
 
+/**
+ * Whether the backend's refusal means the person (or something outside the agent) touched the pointer or the window while the input
+ * was being sent. The host had just seen the window in front and not minimized, so these can only have changed since. A window that
+ * was already not in front, resized since the picture, or covered at a point is a standing condition, not an interruption.
+ * `frontBefore`: the window was in front when the host looked, just before the input.
+ */
+export function isUserIntervention(reason: string, frontBefore: boolean): boolean {
+  switch (reason) {
+    case "cursor-moved": case "moved": case "minimized": case "focus-lost": return true;
+    case "not-front": return frontBefore;
+    default: return false;
+  }
+}
+
+const INTERRUPTION: Record<string, string> = {
+  "cursor-moved": "the mouse pointer was moved away", moved: "the window moved", minimized: "the window was minimized", "not-front": "the window left the front",
+  "focus-lost": "the window lost the focus", covered: "another window came over it", "covered-point": "another window came over the point",
+  resized: "the window changed size", gone: "the window was closed", "input-failed": "Windows stopped accepting the input",
+};
+
+/** What the agent is told when only part of an action went out: how much, and that it must not be repeated before looking again. */
+export function partialText(reason: string, part: { typed: number; delivered: number; planned: number }): string {
+  const why = INTERRUPTION[reason] ?? "the window changed";
+  if (part.typed > 0) return `Only part of the text was typed: ${part.typed} characters went in before ${why}. Do not type it again; take a screenshot to see what is in the window first.`;
+  return `Only part of the action was done: ${part.delivered} of ${part.planned} inputs went out before ${why}. Do not repeat it; take a screenshot to see what happened first.`;
+}
+
 /** What the agent is told when the window refused an action, by the reason the backend gave. */
 export function refusalText(reason: string): string {
   switch (reason) {

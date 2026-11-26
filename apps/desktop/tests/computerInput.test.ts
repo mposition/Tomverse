@@ -116,3 +116,49 @@ test("the generated script compiles in Windows PowerShell and answers a read-onl
     assert.ok(Number.isFinite(idle) && idle >= 0);
   } finally { backend.dispose(); }
 });
+
+// ── An input refused after an earlier one went out ────────────────────────
+
+test("a refusal after the first click or the first wheel input reports how much went out, and a refusal before any input does not", () => {
+  // Every mouse refusal goes through Refused with the number of inputs already sent; none returns a bare "performed: false" after an input.
+  const afterPointer = actSection.slice(actSection.indexOf("Thread.Sleep(20);"), actSection.indexOf('kind == "key"'));
+  assert.doesNotMatch(afterPointer, /d\["reason"\] = why/, "once the pointer is placed, no refusal is built by hand: each goes through Refused");
+  const click = actSection.slice(actSection.indexOf("for (int i = 0; i < times; i++)"), actSection.indexOf("} else {\n        int dx"));
+  assert.match(click, /if \(why != null\) return Refused\(d, why, i, times\);/, "the second click's refusal counts the first");
+  assert.match(click, /catch \(Exception\) \{ if \(i == 0\) throw; why = "input-failed"; \}/, "a Windows failure on the second click is reported as partial, on the first it is an error");
+  const scroll = actSection.slice(actSection.indexOf("int steps ="), actSection.indexOf("d[\"performed\"] = true;"));
+  assert.match(scroll, /Refused\(d, why, done, steps\)/);
+  assert.equal([...scroll.matchAll(/done\+\+;/g)].length, 1, "the first wheel input is counted once it is sent");
+  assert.ok(scroll.indexOf("done++;") > scroll.indexOf("Send(Mouse(0x800"), "...and only after it is sent");
+  assert.match(scroll, /catch \(Exception\) \{ if \(done == 0\) throw; why = "input-failed"; \}/);
+  const refused = WINDOWS_COMPUTER_SCRIPT.slice(WINDOWS_COMPUTER_SCRIPT.indexOf("static Dictionary<string, object> Refused("), WINDOWS_COMPUTER_SCRIPT.indexOf("static int IdleMs()"));
+  assert.match(refused, /d\["performed"\] = false; d\["reason"\] = why;/);
+  assert.match(refused, /if \(done > 0\) \{ d\["done"\] = done; d\["of"\] = of; \}/, "nothing is added when nothing went out");
+});
+
+test("typing that stops after some characters went out is never reported as performed or as untouched", () => {
+  const typing = actSection.slice(actSection.indexOf('kind == "type"'), actSection.indexOf('Unknown input kind'));
+  assert.match(typing, /if \(!IsFront\(h\)\) \{ d\["performed"\] = false; d\["reason"\] = "focus-lost"; d\["typed"\] = sent; return d; \}/);
+  assert.doesNotMatch(typing, /performed"\] = sent > 0/);
+  assert.match(typing, /catch \(Exception\) \{ if \(sent == 0\) throw; d\["performed"\] = false; d\["reason"\] = "input-failed"; d\["typed"\] = sent; return d; \}/);
+});
+
+// A stand-in that answers "act" as the script does when the second click was refused.
+const ANSWERING = [
+  "process.stdout.write(JSON.stringify({ ready: true }) + '\\n');",
+  "require('readline').createInterface({ input: process.stdin }).on('line', (line) => {",
+  "  const req = JSON.parse(line);",
+  "  const reply = req.kind === 'type' ? { performed: false, reason: 'focus-lost', typed: 32 }",
+  "    : req.double ? { performed: false, reason: 'cursor-moved', done: 1, of: 2 } : { performed: false, reason: 'covered-point' };",
+  "  process.stdout.write(JSON.stringify({ id: req.id, ok: true, ...reply }) + '\\n');",
+  "});",
+].join("\n");
+
+test("the Windows backend hands the partial counts of an answer to the host", async () => {
+  const backend = createWindowsBackend({ powershell: process.execPath, args: ["-e", ANSWERING] });
+  try {
+    assert.deepEqual(await backend.act(WINDOW, SIZE, CLICK, 0), { performed: false, reason: "cursor-moved", delivered: 1, planned: 2 });
+    assert.deepEqual(await backend.act(WINDOW, SIZE, { ...CLICK, double: false }, 0), { performed: false, reason: "covered-point" }, "nothing went out: no counts");
+    assert.deepEqual(await backend.act(WINDOW, SIZE, { kind: "type", text: "x".repeat(40) }, 0), { performed: false, reason: "focus-lost", typed: 32 });
+  } finally { backend.dispose(); }
+});

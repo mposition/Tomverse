@@ -364,3 +364,120 @@ test("a request that is already stopped never reaches the backend's input", asyn
   assert.equal(replies[0]!.status, "error");
   assert.equal(called, 0);
 });
+
+// ── A refusal that the person caused, and an action that went out only in part ──
+
+const CLICK = { tool: "click", window: FIXTURE_WINDOW.id, x: 10, y: 10, button: "left", double: true } as const;
+
+test("a refusal that sent nothing does not move the baseline, so the person's input during the refused call still stops the agent", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.backend.act = async () => {
+    // The person grabs the mouse a second into the call; the backend then refuses for a standing reason.
+    r.tick(1_200);
+    r.backend.state.idleMs = 200;
+    return { performed: false, reason: "covered-point" };
+  };
+  const refused = await r.ask(CLICK);
+  assert.match(errorOf(refused), /Another window is over that point/);
+  assert.equal(r.host.state().control, "idle", "a standing condition is not the person");
+  r.tick(500);
+  r.backend.state.idleMs = 700;
+  assert.match(errorOf(await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" })), /used the mouse or keyboard/);
+  assert.equal(r.host.state().control, "stopped");
+});
+
+test("a refusal because the pointer, the window or the focus changed under the input is the person's: the agent stops", async () => {
+  for (const reason of ["cursor-moved", "moved", "minimized", "focus-lost"]) {
+    const r = rig();
+    await choose(r);
+    await r.ask({ tool: "screenshot" });
+    r.backend.act = async () => ({ performed: false, reason });
+    const [reply] = await r.ask(CLICK);
+    assert.match(errorOf([reply!]), /used the mouse or keyboard, so the agent stopped/, reason);
+    assert.match(errorOf([reply!]), /Nothing was done/, reason);
+    assert.equal(r.host.state().control, "stopped", reason);
+    assert.equal(r.host.state().notice, "user-input", reason);
+    assert.match(errorOf(await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" })), /took control/, `${reason}: it stays stopped`);
+  }
+  // The window left the front between the host's look and the input: the person. Already not in front, but Tomverse may hand it back: not the person.
+  const front = rig();
+  await choose(front);
+  await front.ask({ tool: "screenshot" });
+  front.backend.act = async () => ({ performed: false, reason: "not-front" });
+  await front.ask(CLICK);
+  assert.equal(front.host.state().control, "stopped");
+  const handback = rig();
+  await choose(handback);
+  await handback.ask({ tool: "screenshot" });
+  const status = handback.backend.info.bind(handback.backend);
+  handback.backend.info = async (window) => { const value = await status(window); return value.gone ? value : { ...value, foreground: false, covered: false, foregroundPid: OWN }; };
+  handback.backend.act = async () => ({ performed: false, reason: "not-front" });
+  assert.match(errorOf(await handback.ask(CLICK)), /not in front/);
+  assert.equal(handback.host.state().control, "idle");
+});
+
+test("standing refusals do not stop the agent", async () => {
+  for (const reason of ["covered", "covered-point", "resized", "outside", "cursor-failed", "something-new"]) {
+    const r = rig();
+    await choose(r);
+    await r.ask({ tool: "screenshot" });
+    r.backend.act = async () => ({ performed: false, reason });
+    assert.equal((await r.ask(CLICK))[0]!.status, "error", reason);
+    assert.equal(r.host.state().control, "idle", reason);
+  }
+});
+
+test("a double click or a two-axis scroll that went out in part is reported as partial and is not to be repeated", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.backend.act = async () => ({ performed: false, reason: "covered-point", delivered: 1, planned: 2 });
+  const [reply] = await r.ask(CLICK);
+  assert.equal(reply!.status, "error");
+  const message = errorOf([reply!]);
+  assert.match(message, /Only part of the action was done: 1 of 2 inputs/);
+  assert.match(message, /Do not repeat it; take a screenshot/);
+  assert.doesNotMatch(message, /nothing was done/i, "it never says that nothing happened");
+  assert.equal(reply!.status === "error" && reply!.window?.id, FIXTURE_WINDOW.id);
+  assert.equal(r.host.state().control, "idle", "another window coming over the point is not the person");
+  // The same for a scroll, and the person's hand in it still stops the agent while telling what went out.
+  r.backend.act = async () => ({ performed: false, reason: "cursor-moved", delivered: 1, planned: 2 });
+  const scrolled = errorOf(await r.ask({ tool: "scroll", window: FIXTURE_WINDOW.id, x: 10, y: 10, dx: 3, dy: 3 }));
+  assert.match(scrolled, /used the mouse or keyboard, so the agent stopped/);
+  assert.match(scrolled, /1 of 2 inputs went out before the mouse pointer was moved away/);
+  assert.match(scrolled, /Do not repeat it/);
+  assert.equal(r.host.state().control, "stopped");
+});
+
+test("typing that stopped part-way says how much was typed, whether the focus left or Windows stopped taking the input", async () => {
+  for (const [reason, stops] of [["focus-lost", true], ["input-failed", false]] as const) {
+    const r = rig();
+    await choose(r);
+    await r.ask({ tool: "screenshot" });
+    r.backend.act = async () => ({ performed: false, reason, typed: 32 });
+    const message = errorOf(await r.ask({ tool: "type", window: FIXTURE_WINDOW.id, text: "x".repeat(100) }));
+    assert.match(message, /Only part of the text was typed: 32 characters went in before/, reason);
+    assert.match(message, /Do not type it again/, reason);
+    assert.equal(r.host.state().control, stops ? "stopped" : "idle", reason);
+  }
+  // Nothing typed is a plain refusal.
+  const none = rig();
+  await choose(none);
+  await none.ask({ tool: "screenshot" });
+  none.backend.act = async () => ({ performed: false, reason: "focus-lost", typed: 0 });
+  assert.doesNotMatch(errorOf(await none.ask({ tool: "type", window: FIXTURE_WINDOW.id, text: "abc" })), /Only part/);
+});
+
+test("a request that ends while input may be going out tells the agent part of it may be done; one that was only looking does not", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.backend.act = async () => { throw new Error("PowerShell ended."); };
+  assert.match(errorOf(await r.ask(CLICK)), /could not be completed\. Part of the action may already have been done/);
+  r.backend.capture = async () => { throw new Error("no picture"); };
+  const looked = errorOf(await r.ask({ tool: "screenshot" }));
+  assert.match(looked, /could not be completed/);
+  assert.doesNotMatch(looked, /already have been done/);
+});

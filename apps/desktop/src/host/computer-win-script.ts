@@ -6,7 +6,9 @@
  * ends up in the picture) and sends mouse and keyboard input with SendInput. Every input operation re-checks, inside the same call
  * and right before the input is sent, that the window is still the same one, is not minimized, is the foreground window, and (for a
  * point) that the pointer is on the target and the window itself is what sits under it; a double click checks again before its
- * second click, and a scroll before each wheel input. The host ends this process when the person stops the agent. The C# is C# 5: that is what Windows PowerShell 5.1 compiles.
+ * second click, and a scroll before each wheel input. When a later input is refused after an earlier one went out (the second click,
+ * the second wheel axis, a later batch of typed characters) the answer says how much went out, so a partial action is never reported
+ * as nothing done. The host ends this process when the person stops the agent. The C# is C# 5: that is what Windows PowerShell 5.1 compiles.
  *
  * The text is ASCII: non-ASCII characters travel as \uXXXX escapes in both directions, so no console code page can change them.
  */
@@ -236,6 +238,13 @@ public static class Cu {
     return AtPoint(h, f, px, py);
   }
 
+  // A refusal. When some of the inputs already went out, how many of how many is reported: the action was not left untouched.
+  static Dictionary<string, object> Refused(Dictionary<string, object> d, string why, int done, int of) {
+    d["performed"] = false; d["reason"] = why;
+    if (done > 0) { d["done"] = done; d["of"] = of; }
+    return d;
+  }
+
   static int IdleMs() { var i = new LASTINPUTINFO(); i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)); GetLastInputInfo(ref i); return (int)((uint)Environment.TickCount - i.dwTime); }
 
   static Dictionary<string, object> Act(Dictionary<string, object> r) {
@@ -266,22 +275,28 @@ public static class Cu {
         uint down = right ? 0x8u : 0x2u, up = right ? 0x10u : 0x4u;
         int times = (bool)r["double"] ? 2 : 1;
         for (int i = 0; i < times; i++) {
-          why = PointCheck(h, r, f, px, py);
-          if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
-          Send(Mouse(down, 0), Mouse(up, 0));
+          try {
+            why = PointCheck(h, r, f, px, py);
+            if (why == null) Send(Mouse(down, 0), Mouse(up, 0));
+          } catch (Exception) { if (i == 0) throw; why = "input-failed"; }
+          if (why != null) return Refused(d, why, i, times);
           if (i + 1 < times) Thread.Sleep(60);
         }
       } else {
         int dx = Convert.ToInt32(r["dx"]), dy = Convert.ToInt32(r["dy"]);
+        int steps = (dy != 0 ? 1 : 0) + (dx != 0 ? 1 : 0), done = 0;
         if (dy != 0) {
           why = PointCheck(h, r, f, px, py);
-          if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
+          if (why != null) return Refused(d, why, done, steps);
           Send(Mouse(0x800, unchecked((uint)(-dy * 120))));
+          done++;
         }
         if (dx != 0) {
-          why = PointCheck(h, r, f, px, py);
-          if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
-          Send(Mouse(0x1000, unchecked((uint)(dx * 120))));
+          try {
+            why = PointCheck(h, r, f, px, py);
+            if (why == null) Send(Mouse(0x1000, unchecked((uint)(dx * 120))));
+          } catch (Exception) { if (done == 0) throw; why = "input-failed"; }
+          if (why != null) return Refused(d, why, done, steps);
         }
       }
       d["performed"] = true;
@@ -310,8 +325,10 @@ public static class Cu {
           inBatch++;
         }
         if (inBatch > 0 && (inBatch >= 16 || i == text.Length - 1)) {
-          if (!IsFront(h)) { d["performed"] = sent > 0; d["reason"] = "focus-lost"; d["typed"] = sent; return d; }
-          Send(batch.ToArray()); batch.Clear(); sent += inBatch; inBatch = 0; Thread.Sleep(5);
+          if (!IsFront(h)) { d["performed"] = false; d["reason"] = "focus-lost"; d["typed"] = sent; return d; }
+          try { Send(batch.ToArray()); }
+          catch (Exception) { if (sent == 0) throw; d["performed"] = false; d["reason"] = "input-failed"; d["typed"] = sent; return d; }
+          batch.Clear(); sent += inBatch; inBatch = 0; Thread.Sleep(5);
         }
       }
       d["performed"] = true; d["typed"] = sent;

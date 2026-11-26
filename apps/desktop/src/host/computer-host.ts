@@ -2,7 +2,7 @@ import { computerAgentRequest, type ComputerAgentReply, type ComputerAgentReques
 import { computerCommand, type ComputerCommand, type ComputerNotice, type ComputerResult, type ComputerState, type ComputerWindowRow } from "../computer-contract";
 import type { ActOutcome, BackendAction, ComputerBackend, WindowRef } from "./computer-backend";
 import { windowDenial } from "./computer-deny";
-import { computerRequestRefusal, keyInput, mapPoint, refusalText, type ComputerSelection, type ComputerShot } from "./computer-policy";
+import { computerRequestRefusal, isUserIntervention, keyInput, mapPoint, partialText, refusalText, type ComputerSelection, type ComputerShot } from "./computer-policy";
 
 /**
  * The host side of the computer tools: the one window the person chose, the screenshot and the input, and every check before the
@@ -90,7 +90,8 @@ export function createComputerHost(deps: ComputerHostDeps) {
 
   const info = (value: ComputerSelection, title?: string) => ({ id: value.id, title: (title ?? value.title).slice(0, 300), app: value.app.slice(0, 120) });
 
-  async function execute(request: ComputerAgentRequest, chosen: ComputerSelection, signal: AbortSignal, self: AbortController): Promise<ComputerAgentReply> {
+  /** `phase.sending`: the backend was asked to send input, so a request that ends early may already have done part of it. */
+  async function execute(request: ComputerAgentRequest, chosen: ComputerSelection, signal: AbortSignal, self: AbortController, phase: { sending: boolean }): Promise<ComputerAgentReply> {
     const os = getBackend()!;
     const target = ref(chosen);
     if (request.tool === "screenshot") {
@@ -142,13 +143,24 @@ export function createComputerHost(deps: ComputerHostDeps) {
     }
     const size = shot && (request.tool === "click" || request.tool === "scroll") ? { width: shot.width, height: shot.height } : { width: current.width, height: current.height };
     signal.throwIfAborted();
+    phase.sending = true;
     const outcome: ActOutcome = await os.act(target, size, action, process.pid, signal);
-    baseline = deps.now();
     signal.throwIfAborted();
+    const reason = outcome.reason ?? "";
+    const part = { typed: outcome.typed ?? 0, delivered: outcome.delivered ?? 0, planned: outcome.planned ?? 0 };
+    const partial = !outcome.performed && (part.typed > 0 || part.delivered > 0);
+    // Only input the agent really sent moves the baseline: a refusal that sent nothing must not hide what the person did meanwhile.
+    if (outcome.performed || partial) baseline = deps.now();
     const window = info(chosen, current.title);
-    if (!outcome.performed && (outcome.typed ?? 0) === 0) return fail(refusalText(outcome.reason ?? ""));
-    if (!outcome.performed) return { status: "error", message: `${refusalText(outcome.reason ?? "")} ${outcome.typed ?? 0} characters were typed.`.slice(0, 500), window };
-    return { status: "ok", window, position: "front", note: "Done." };
+    if (outcome.performed) return { status: "ok", window, position: "front", note: "Done." };
+    // The pointer or the window was changed under the input: that was the person, so it ends like any other use of the mouse.
+    if (isUserIntervention(reason, current.foreground)) {
+      stopAgent("user-input", self);
+      const stopped = "The user used the mouse or keyboard, so the agent stopped. Wait for the user to hand control back.";
+      return partial ? { status: "error", message: `${stopped} ${partialText(reason, part)}`.slice(0, 500), window } : fail(`${stopped} Nothing was done.`);
+    }
+    if (partial) return { status: "error", message: partialText(reason, part), window };
+    return fail(refusalText(reason));
   }
 
   return {
@@ -185,8 +197,10 @@ export function createComputerHost(deps: ComputerHostDeps) {
       busy += 1;
       publish();
       let reply: ComputerAgentReply;
-      try { reply = await execute(request, chosen, signal, controller); }
-      catch { reply = fail(controller.signal.aborted ? "The user stopped the agent." : signal.aborted ? "The window did not answer in time." : "The window request could not be completed."); }
+      const phase = { sending: false };
+      const mayHaveActed = () => phase.sending ? " Part of the action may already have been done: take a screenshot before doing it again." : "";
+      try { reply = await execute(request, chosen, signal, controller, phase); }
+      catch { reply = fail((controller.signal.aborted ? "The user stopped the agent." : signal.aborted ? "The window did not answer in time." : "The window request could not be completed.") + mayHaveActed()); }
       finally {
         inflight.delete(controller);
         busy -= 1;
@@ -194,7 +208,7 @@ export function createComputerHost(deps: ComputerHostDeps) {
       publish();
       // A reply to a run that has ended, or to a task that is no longer this one, is dropped.
       const after = deps.run();
-      if (after.runId === event.runId && after.scope === run.scope) respond(controller.signal.aborted ? fail("The user stopped the agent.") : reply);
+      if (after.runId === event.runId && after.scope === run.scope) respond(controller.signal.aborted ? fail("The user stopped the agent." + mayHaveActed()) : reply);
     },
 
     /** The person's own commands. Everything about the window is looked up here; the renderer only names an id it was shown. */

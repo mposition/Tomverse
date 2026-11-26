@@ -32,7 +32,11 @@ export type BackendAction =
   | { kind: "key"; ctrl: boolean; shift: boolean; vk: number }
   | { kind: "type"; text: string };
 
-export type ActOutcome = { performed: boolean; reason?: string; typed?: number; idleMs?: number };
+/**
+ * `performed: false` with `reason` means the action stopped. Whatever had already gone out is not undone: `typed` is the characters
+ * typed, and `delivered` of `planned` is the clicks or wheel inputs of a double click or a two-axis scroll (both absent when nothing went out).
+ */
+export type ActOutcome = { performed: boolean; reason?: string; typed?: number; delivered?: number; planned?: number; idleMs?: number };
 
 export interface ComputerBackend {
   list(): Promise<RawWindow[]>;

@@ -140,7 +140,9 @@ export function createWindowsBackend(options: { powershell?: string; args?: stri
     async act(window, size, action: BackendAction, handBackFrom, signal?: AbortSignal): Promise<ActOutcome> {
       const answer = await call("act", { ...ref(window), w: size.width, h: size.height, allowPid: handBackFrom, ...action }, CALL_TIMEOUT_MS, signal);
       return { performed: answer.performed === true, ...(typeof answer.reason === "string" ? { reason: answer.reason } : {}),
-        ...(typeof answer.typed === "number" ? { typed: answer.typed } : {}), ...(typeof answer.idleMs === "number" ? { idleMs: answer.idleMs } : {}) };
+        ...(typeof answer.typed === "number" ? { typed: answer.typed } : {}),
+        ...(typeof answer.done === "number" && typeof answer.of === "number" ? { delivered: answer.done, planned: answer.of } : {}),
+        ...(typeof answer.idleMs === "number" ? { idleMs: answer.idleMs } : {}) };
     },
     async bringToFront(window) {
       const answer = await call("front", ref(window));
