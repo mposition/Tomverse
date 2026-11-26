@@ -298,26 +298,33 @@ test("reports expire and are deleted; turning off and signing the PC out remove 
     SELECT (SELECT count(*)::int FROM "DesktopRemoteDevice") AS devices, (SELECT count(*)::int FROM "DesktopRemoteCommand") AS commands
   `)[0]!;
 
-  // Past its expiry, the report is deleted the next time the screen reads, with its answers.
+  // Past its expiry a report is no longer shown, and nothing can be sent to it.
   await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "expiresAt" = now() - interval '1 second'`;
   assert.deepEqual((await (await listAs(session)).json()).devices, []);
-  assert.deepEqual(await count(), { devices: 0, commands: 0 });
-
-  // Maintenance deletes old answers and expired reports with nobody reading. An answer for a request the PC still
-  // reports is kept past its retention, by maintenance and by the PC's own sync, so the request cannot be answered a
-  // second time; it goes once the PC reports the request closed.
-  await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
-  await commandAs(session, answer(pc.deviceId));
+  assert.equal((await commandAs(session, answer(pc.deviceId, { decision: "deny" }))).status, 404);
+  // This one is kept, hidden, with its answer: the PC went away with the request still open. Neither the screen nor
+  // maintenance deletes it, however old the answer is, so a second answer is still refused when the PC comes back
+  // with the same request, and the screen shows the first one.
+  assert.deepEqual(await count(), { devices: 1, commands: 1 });
   await prisma.$executeRaw`UPDATE "DesktopRemoteCommand" SET "createdAt" = now() - interval '16 minutes'`;
   assert.deepEqual(await purge(), { commands: 0, devices: 0 });
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
   assert.deepEqual(await count(), { devices: 1, commands: 1 });
   const second = await commandAs(session, answer(pc.deviceId, { decision: "deny" }));
   assert.deepEqual(await second.json(), { ok: false, code: "ALREADY_ANSWERED" });
+  assert.equal((await (await listAs(session)).json()).devices[0].commands.length, 1);
+
+  // Once the PC reports the request closed, maintenance deletes the answer at its retention, and the report at its
+  // expiry, with nobody reading.
   await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "snapshot" = jsonb_set("snapshot", '{approval}', 'null'::jsonb)`;
   assert.deepEqual(await purge(), { commands: 1, devices: 0 });
   await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "expiresAt" = now() - interval '1 second'`;
   assert.deepEqual(await purge(), { commands: 0, devices: 1 });
+  // An expired report with no answered request is deleted by the screen's own read as well.
+  await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "expiresAt" = now() - interval '1 second'`;
+  assert.deepEqual((await (await listAs(session)).json()).devices, []);
+  assert.deepEqual(await count(), { devices: 0, commands: 0 });
 
   // Turning remote control off on the PC deletes its report and the answers waiting for it.
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
@@ -330,9 +337,13 @@ test("reports expire and are deleted; turning off and signing the PC out remove 
 
   // Signing the PC out revokes its token family: the report is no longer shown and is deleted, and nothing can be sent to it.
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  await commandAs(session, answer(pc.deviceId));
   const { logoutMobileSession } = (await import(mod("lib/mobileAuthService.ts"))) as typeof import("@/lib/mobileAuthService");
   await logoutMobileSession({ request: new Request("https://tomverse.test/api/auth/desktop/logout", { method: "POST" }), refreshToken: pc.refreshToken, client: "desktop" });
-  assert.equal((await commandAs(session, answer(pc.deviceId))).status, 404);
+  assert.equal((await commandAs(session, answer(pc.deviceId, { decision: "deny" }))).status, 404);
+  // The expired report maintenance keeps for an answered request goes too once the sign-in has ended.
+  await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "expiresAt" = now() - interval '1 second'`;
+  assert.deepEqual(await purge(), { commands: 0, devices: 1 });
   assert.deepEqual((await (await listAs(session)).json()).devices, []);
   assert.deepEqual(await count(), { devices: 0, commands: 0 });
 

@@ -4292,7 +4292,9 @@ domains:
       diffs, command output or environment values. One row per device, replaced
       on every report and removed when it expires, when the person turns the
       feature off on that PC, or when the device's sign-in is revoked; an
-      account deletion removes it through MobileDevice. Excluded from the
+      account deletion removes it through MobileDevice. One expired row is
+      kept, hidden, until the device's sign-in ends: the report of a request
+      that already has an answer, so the request cannot be answered twice. Excluded from the
       export because it is a short-lived copy of state that lives on the
       person's own PC.
 

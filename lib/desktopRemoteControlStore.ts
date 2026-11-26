@@ -125,17 +125,22 @@ const commandState = (row: CommandRow): DesktopRemoteCommandView["state"] =>
 
 /**
  * The account's PCs that report now, for the web screen. A report past its expiry, or of a device or token family that
- * is revoked or no longer the account's, is deleted here rather than shown.
+ * is revoked or no longer the account's, is deleted here rather than shown. One expired report is kept, hidden: the
+ * report whose request already has an answer. Its answer row is what refuses a second answer when the PC comes back
+ * with the same request still open, and it goes when the PC reports the request closed or its sign-in ends.
  */
 export async function listDesktopRemoteDevices(userId: string): Promise<DesktopRemoteDeviceView[]> {
   await prisma.$executeRaw`
     DELETE FROM "DesktopRemoteDevice" AS r
-    WHERE r."userId" = ${userId} AND (r."expiresAt" <= now() OR NOT EXISTS (
+    WHERE r."userId" = ${userId} AND (NOT EXISTS (
       SELECT 1 FROM "MobileDevice" d JOIN "MobileTokenFamily" f ON f."deviceId" = d."id"
       WHERE d."id" = r."deviceId" AND d."userId" = r."userId" AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
         AND f."id" = r."familyId" AND f."userId" = r."userId" AND f."revokedAt" IS NULL
         AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
-    ))
+    ) OR (r."expiresAt" <= now() AND NOT EXISTS (
+      SELECT 1 FROM "DesktopRemoteCommand" c
+      WHERE c."deviceId" = r."deviceId" AND c."approvalId" = r."snapshot"->'approval'->>'id'
+    )))
   `;
   const devices = await prisma.$queryRaw<DeviceRow[]>`
     SELECT r."deviceId", d."label", r."snapshot", (EXTRACT(EPOCH FROM r."updatedAt") * 1000)::float8 AS "updatedMs"
@@ -150,7 +155,11 @@ export async function listDesktopRemoteDevices(userId: string): Promise<DesktopR
       "expiresAt" <= now() AS "expired", "result", "resultReason", (EXTRACT(EPOCH FROM "createdAt") * 1000)::float8 AS "createdMs"
     FROM "DesktopRemoteCommand"
     WHERE "userId" = ${userId} AND "deviceId" = ANY(${devices.map((device) => device.deviceId)}::text[])
-      AND "createdAt" > now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+      AND ("createdAt" > now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+        OR ("approvalId" IS NOT NULL AND EXISTS (
+          SELECT 1 FROM "DesktopRemoteDevice" r
+          WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
+        )))
     ORDER BY "createdAt" DESC
     LIMIT 100
   `;
@@ -258,8 +267,9 @@ export async function recordDesktopRemoteCommand(input: {
 
 /**
  * Maintenance: reports past their expiry and answers past their retention. Both are short-lived by design. An answer
- * for a request its PC still reports is kept, so that request cannot be answered a second time; it goes with the
- * report once the PC stops reporting.
+ * for a request its PC still reports is kept, so that request cannot be answered a second time. So is the expired
+ * report that shows it, for as long as the device's sign-in is valid: a PC that was away and comes back with the
+ * request still open finds its answer here.
  */
 export async function purgeDesktopRemoteControl() {
   const commands = await prisma.$executeRaw`
@@ -270,6 +280,17 @@ export async function purgeDesktopRemoteControl() {
       WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
     ))
   `;
-  const devices = await prisma.$executeRaw`DELETE FROM "DesktopRemoteDevice" WHERE "expiresAt" <= now()`;
+  const devices = await prisma.$executeRaw`
+    DELETE FROM "DesktopRemoteDevice" AS r
+    WHERE r."expiresAt" <= now() AND NOT (EXISTS (
+      SELECT 1 FROM "DesktopRemoteCommand" c
+      WHERE c."deviceId" = r."deviceId" AND c."approvalId" = r."snapshot"->'approval'->>'id'
+    ) AND EXISTS (
+      SELECT 1 FROM "MobileDevice" d JOIN "MobileTokenFamily" f ON f."deviceId" = d."id"
+      WHERE d."id" = r."deviceId" AND d."userId" = r."userId" AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
+        AND f."id" = r."familyId" AND f."userId" = r."userId" AND f."revokedAt" IS NULL
+        AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
+    ))
+  `;
   return { commands, devices };
 }
