@@ -77,7 +77,7 @@ export const studioLocale = {
   "processedImage": "처리된 이미지",
   "questionExample": "질문 예시",
   "quizTitle": "테스트 제목",
-  "realFace": "실사 얼굴",
+  "realFace": "반실사 얼굴",
   "regenerateFromWords": "문구로 이모티콘 다시 만들기",
   "regenerate": "재생성",
   "removeBackground": "배경 제거",

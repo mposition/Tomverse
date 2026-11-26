@@ -70,7 +70,7 @@ export const studioLocale = {
   "processedImage": "Image traitée",
   "questionExample": "Exemple de question",
   "quizTitle": "Titre du quiz",
-  "realFace": "Visage réel",
+  "realFace": "Visage semi-réaliste",
   "regenerateFromWords": "Recréer le sticker à partir du texte",
   "regenerate": "Recréer",
   "removeBackground": "Retirer l’arrière-plan",

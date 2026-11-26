@@ -70,7 +70,7 @@ export const studioLocale = {
   "processedImage": "處理後的圖片",
   "questionExample": "範例問題",
   "quizTitle": "測驗標題",
-  "realFace": "真人臉孔",
+  "realFace": "半寫實臉型",
   "regenerateFromWords": "依文案重新產生貼圖",
   "regenerate": "重新產生",
   "removeBackground": "移除背景",

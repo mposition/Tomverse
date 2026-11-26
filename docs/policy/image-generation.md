@@ -1228,7 +1228,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     - Studio는 기능 키(예: `real-sticker-pack`, `live-action-character`, `poster`)로 모델을 고른다.
       `STUDIO_IMAGE_ROUTE_PREFERENCES`는 기능별로 검증한 모델 ID를 우선순위 순서로 나열하는 JSON이다.
       DB 카탈로그에서 활성 상태이며 크기·작업·비용 조건을 통과한 후보만 고르고, 제출 시 같은 견적을 다시 확인한다.
-      실사·캐릭터 이모티콘 팩과 개별 재생성은 GPT Image 2.6 Sunburst의 1024×1024 Medium 사진 편집 견적을 사용할 수 있을 때만 생성한다.
+      반실사·캐릭터 이모티콘 팩과 개별 재생성은 GPT Image 2.6 Sunburst의 1024×1024 Medium 사진 편집 견적을 사용할 수 있을 때만 생성한다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.
