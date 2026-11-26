@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import test from "node:test";
 import { browserAgentRequest, type BrowserAgentReply } from "../../tomverse-cli/src/browser-tools";
 import { browserCommand, elementPickId, loopbackBrowserUrl, type BrowserState, type ElementPick } from "../src/browser-contract";
@@ -6,6 +7,7 @@ import { appendElementComments, MAX_ELEMENT_COMMENTS, serializeElementComments, 
 import { createBrowserAgentBridge, type BridgeDeps, type BridgeRun, type BridgeTab } from "../src/host/browser-agent-bridge";
 import { cleanReply, formatAxTree, formatPageText, MAX_CONSOLE_ENTRIES, pushConsoleEntry, type ConsoleEntry } from "../src/host/browser-agent-format";
 import { agentNavigateTarget, agentRequestRefusal, sameApprovedSite, type AgentGateInput } from "../src/host/browser-agent-policy";
+import { locateScript } from "../src/host/browser-agent-page";
 import { rememberPick } from "../src/host/browser-pick-store";
 
 const TAB = "11111111-1111-4111-8111-111111111111";
@@ -311,4 +313,33 @@ test("at most eight comments go into one message, and they are appended after th
   assert.equal(appendElementComments("Fix the form.  \n", "BLOCK"), "Fix the form.\n\nBLOCK");
   assert.equal(appendElementComments("", "BLOCK"), "BLOCK");
   assert.equal(appendElementComments("Keep", ""), "Keep");
+});
+
+test("typing into a password, one-time-code or card field is refused by the page script itself, whatever was approved or allowed for the run", () => {
+  class FakeInput {
+    localName = "input";
+    disabled = false;
+    value = "";
+    innerText = "";
+    constructor(readonly type: string, private readonly attributes: Record<string, string> = {}) {}
+    getAttribute(name: string) { return this.attributes[name] ?? null; }
+    scrollIntoView() { /* nothing to scroll */ }
+    getBoundingClientRect() { return { left: 10, top: 10, width: 100, height: 20 }; }
+    matches() { return false; }
+    contains(node: unknown) { return node === this; }
+  }
+  class FakeTextArea extends FakeInput { constructor(attributes: Record<string, string> = {}) { super("textarea", attributes); this.localName = "textarea"; } }
+  const run = (element: FakeInput, forTyping: boolean) => vm.runInNewContext(locateScript("#field", forTyping), {
+    document: { querySelector: () => element, querySelectorAll: () => [element], elementFromPoint: () => element },
+    HTMLInputElement: FakeInput, HTMLTextAreaElement: FakeTextArea, innerWidth: 1000, innerHeight: 800,
+  }) as { error?: string; x?: number };
+  // The script has no input but the selector: no mode, approval or remembered site reaches it.
+  assert.equal(locateScript("#field", true).includes("permission"), false);
+  const secrets = [new FakeInput("password"), new FakeInput("text", { autocomplete: "cc-number" }), new FakeInput("text", { autocomplete: "one-time-code" }),
+    new FakeInput("text", { autocomplete: "new-password" }), new FakeTextArea({ autocomplete: "cc-csc" })];
+  for (const secret of secrets) {
+    assert.match(run(secret, true).error ?? "", /never typed by the agent/, `${secret.type} ${JSON.stringify(secret.getAttribute("autocomplete"))}`);
+  }
+  assert.equal(typeof run(new FakeInput("text", { autocomplete: "email" }), true).x, "number", "an ordinary field can be typed into");
+  assert.equal(typeof run(secrets[0]!, false).x, "number", "clicking a password field is a click, not typing");
 });

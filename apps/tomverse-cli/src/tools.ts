@@ -49,6 +49,8 @@ export type ToolContext = {
     /** Reading public web pages; without it the web_fetch tool does not exist. Each host is approved by the person first. */
     web?: { transport?: WebTransport; resolve?: HostResolver };
     signal: () => AbortSignal;
+    /** The host runs commands inside a sandbox it enforces; run_command then says so instead of "not sandboxed". Off: commands run with the user's own permissions. */
+    sandboxed?: boolean;
     assertAllowed?: () => void;
     effectBlockReason?: () => string | undefined;
     redactText?: (text: string) => string;
@@ -113,6 +115,12 @@ export const commandSchema = z.object({
 
 export type PatchInput = z.infer<typeof patchSchema>;
 export type CommandToolInput = z.infer<typeof commandSchema>;
+
+/** What run_command tells the model about where the command runs: a fact of the host, never a promise the model can rely on for more. */
+export const runCommandDescription = (environment: { sandboxed?: boolean } = {}) =>
+    `Run one command in the workspace after the user approves it. ${environment.sandboxed
+        ? "It runs inside the app's command sandbox, which limits what it can reach; the user's approval is still needed for each command."
+        : "It runs with the user's permissions (not sandboxed)."} Prefer argv; use command for shell syntax or Windows npm/npx. stdin is closed; output is bounded.`;
 
 /** The plan the approval screen shows and the approval is bound to. */
 export const planPatchCall = (ctx: Pick<ToolContext, "workspace">, input: PatchInput) => planPatch(ctx.workspace, input.edits as PatchEdit[]);
@@ -554,8 +562,7 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
         },
     });
     tools.run_command = tool({
-        description:
-            "Run one command in the workspace after the user approves it. It runs with the user's permissions (not sandboxed). Prefer argv; use command for shell syntax or Windows npm/npx. stdin is closed; output is bounded.",
+        description: runCommandDescription(ctx),
         inputSchema: commandSchema,
         execute: async (input, { toolCallId }) => {
             const decision = gate(ctx, "run_command", toolCallId, input);

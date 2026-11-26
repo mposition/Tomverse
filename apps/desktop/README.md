@@ -68,7 +68,19 @@ A worktree keeps the path relative to the repository of the folder you opened. A
 
 ## Permissions
 
-**Settings > Task permissions** has the permission mode for Tomverse API Agent tasks and the allow, ask and deny rules. The modes are read only, ask each time (default), auto review (a separate model request judges each approval and is charged like any request; off by default) and allow all (asks for a confirmation, stays on show on the Code screen, and is not remembered after the app closes). Rules are saved by the CLI's rule store: user rules in the CLI configuration folder (`~/.tomverse/permissions.json`, or `TOMVERSE_HOME`) and project rules in `.tomverse/permissions.json` of the project; a project's own allow rules wait for your confirmation. The "always" answer on an approval card is saved as a project allow rule. Credential files, files outside the project and actions that leave the app (git push, pull requests, uploads) are never decided by a mode or a rule. The main process owns the mode; the Code runtime receives it as a message and nothing the model writes can change it.
+**Settings > Task permissions** has the permission mode for Tomverse API Agent tasks and the allow, ask and deny rules. The modes are read only, ask each time (default), auto review (a separate model request judges each approval and is charged like any request; off by default) and allow all (asks for a confirmation, stays on show on the Code screen, and is not remembered after the app closes). Rules are saved by the CLI's rule store: user rules in the CLI configuration folder (`~/.tomverse/permissions.json`, or `TOMVERSE_HOME`) and project rules in `.tomverse/permissions.json` of the project; a project's own allow rules wait for your confirmation. The "always" answer on an approval card is saved as a project allow rule. Credential files, files outside the project and actions that leave the app (git push, pull requests, uploads) are never decided by a mode or a rule. The table below says what each mode decides; the CLI README has the same table with the details. The main process owns the mode; the Code runtime receives it as a message and nothing the model writes can change it.
+
+| Request | read only | ask each time | auto review | allow all |
+|---|---|---|---|---|
+| File change, command | refused | approval window | a model request judges it | runs |
+| Web page | approval window | approval window | approval window | approval window (a rule naming the site skips it) |
+| Browser click or typing | refused | approval window | a model request judges it | runs |
+| MCP tool | refused | approval window | approval window | approval window (a rule naming the tool or server skips it) |
+| Agent commit | refused before the card opens | commit card | commit card | commit card |
+| Agent push and pull request | refused before the card opens | push card | push card | push card |
+| A subagent worker's change or command | refused | approval window | a model request judges it | runs |
+
+A rule that denies always wins, an ask rule always asks, and a command that leaves the app, a credential file or a path outside the project is never run without you. The agent's commit and push are off until you switch them on, and each call opens its own card in the main process, which the agent and every mode, rule and reviewer cannot answer: a push and a pull request need your approval every time, whatever the mode. A hook's "allow" is ignored in every mode, and a PreToolUse hook that blocks stops the call in every mode. Typing into a password, one-time-code or card field is refused by the browser tab itself in every mode.
 
 ## Browser panel: agent tools and element comments
 

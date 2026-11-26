@@ -19,8 +19,14 @@ import { JournalError } from "./session.js";
  *   3. read-only mode, which refuses every change;
  *   4. ask rules (a person decides, even in allow-all);
  *   5. allow rules;
- *   6. the mode: ask → a person, auto review → a separate model request, allow
+ *   6. an MCP tool (or a web host) that no allow rule names: a person, in every mode;
+ *   7. the mode: ask → a person, auto review → a separate model request, allow
  *      all → run.
+ *
+ * Only what asks for an approval passes through here: patches, commands, web pages, clicks and typing in the browser tab, and
+ * MCP tools (and, through the same Runner path, a subagent's patches and commands). The git tools (commit_changes,
+ * publish_changes) never do: the host opens its own approval card for each call, and no mode, rule or reviewer can answer it.
+ * The Runner only refuses them before they reach the host in read-only mode.
  *
  * Model output never reaches this order as an input: the mode comes from the
  * host's own state (a person's action in the app, a CLI flag), the rules from
@@ -79,6 +85,10 @@ type Subject =
     | { kind: "patch"; paths: string[]; deletes: boolean }
     | { kind: "command"; strict: string[] | null; broad: string[][]; text: string }
     | { kind: "web"; host: string }
+    /** A tool of an MCP server. `server` and `tool` are null when the request carries no server information. */
+    | { kind: "mcp"; name: string; server: string | null; tool: string | null }
+    /** A click or typing in the local browser tab. */
+    | { kind: "browser"; origin: string }
     | { kind: "other" };
 
 const SHELL_META = /[;&|<>`$(){}\n\r]/;
@@ -131,6 +141,9 @@ const subjectOf = (view: ApprovalView): Subject => {
         });
         return { kind: "command", strict, broad, text };
     }
+    if (view.mcp) return { kind: "mcp", name: view.toolName, server: view.mcp.server, tool: view.mcp.tool };
+    if (view.toolName.startsWith("mcp__")) return { kind: "mcp", name: view.toolName, server: null, tool: null };
+    if (view.browser) return { kind: "browser", origin: view.browser.origin };
     return { kind: "other" };
 };
 
@@ -171,10 +184,25 @@ const hostMatches = (pattern: string, host: string) => {
     return host === wanted;
 };
 
-const toolMatches = (rule: PermissionRule, toolName: string) => {
+/** The tool part of a function name: what `mcpToolName` (mcp-client.ts) makes of the server's own tool name. */
+const nameSafe = (text: string) => text.replace(/[^A-Za-z0-9_-]/g, "_");
+
+/**
+ * An MCP rule names a server (`mcp__server`, `mcp__server__*`) or one of its tools (`mcp__server__tool`). It is compared with the
+ * server and tool the request is for, not by text prefix: a server id may itself hold `__`, so `mcp__a__*` must not reach the
+ * tools of a server called `a__b`. A tool whose function name was shortened (over 64 characters, a hash is added) matches by its
+ * own name, its name with unusable characters replaced, or the function name the model sees.
+ */
+const toolMatches = (rule: PermissionRule, toolName: string, subject: Subject) => {
     if (!rule.tool.startsWith("mcp__")) return rule.tool === toolName;
-    if (rule.tool.endsWith("__*")) return toolName.startsWith(rule.tool.slice(0, -1));
-    return toolName === rule.tool || (rule.tool.split("__").length === 2 && toolName.startsWith(`${rule.tool}__`));
+    if (subject.kind !== "mcp") return false;
+    // Without the server and tool the request carries, only a deny or ask rule can still be read, by name; an allow rule cannot be trusted.
+    if (subject.server === null || subject.tool === null) {
+        return rule.effect !== "allow" && (rule.tool === toolName || toolName.startsWith(rule.tool.endsWith("__*") ? rule.tool.slice(0, -1) : `${rule.tool}__`));
+    }
+    if (rule.tool === subject.name) return true;
+    const server = `mcp__${subject.server}`;
+    return rule.tool === server || rule.tool === `${server}__*` || rule.tool === `${server}__${subject.tool}` || rule.tool === `${server}__${nameSafe(subject.tool)}`;
 };
 
 /**
@@ -184,9 +212,9 @@ const toolMatches = (rule: PermissionRule, toolName: string) => {
  * command line, quotes ignored), so the restrictive side is the one that errs.
  */
 const ruleApplies = (rule: PermissionRule, toolName: string, subject: Subject) => {
-    if (!toolMatches(rule, toolName)) return false;
+    if (!toolMatches(rule, toolName, subject)) return false;
     const strict = rule.effect === "allow";
-    if (subject.kind === "other") return rule.pattern === undefined;
+    if (subject.kind === "other" || subject.kind === "browser" || subject.kind === "mcp") return rule.pattern === undefined;
     if (rule.pattern === undefined) return true;
     if (subject.kind === "web") return hostMatches(rule.pattern, subject.host);
     if (subject.kind === "patch") {
@@ -320,6 +348,9 @@ export const evaluate = (view: ApprovalView, options: EvaluateOptions): Verdict 
     if (allow) return { kind: "allow", policy: note("allow_rule", `${allow.scope}: ${describeRule(allow)}`) };
     // Reading a web page sends the address to a site: only a host a person or a rule named is read.
     if (subject.kind === "web") return { kind: "human", reason: "A web page is read only from a site you approved.", policy: note("boundary", "web_host") };
+    // An MCP tool is another program that may send anything it is given out of this computer: like a web host, only a rule
+    // that names the tool (or its server) lets it run without a person, whatever the mode.
+    if (subject.kind === "mcp") return { kind: "human", reason: "An MCP tool runs without asking only when a permission rule names it.", policy: note("boundary", "mcp_tool") };
     if (mode === "allow_all") return { kind: "allow", policy: note("mode", "allow_all") };
     if (mode === "auto_review") return { kind: "review", policy: note("auto_review", "reviewing") };
     return { kind: "human", reason: "Ask mode.", policy: note("mode", mode) };
@@ -366,13 +397,24 @@ export class PermissionGate {
         return this.reviewer;
     }
 
-    async decide(view: ApprovalView, context: GateContext): Promise<GateResult> {
-        let rules: readonly ScopedRule[] | "unreadable";
+    private rulesNow(): readonly ScopedRule[] | "unreadable" {
         try {
-            rules = this.options.rules();
+            return this.options.rules();
         } catch {
-            rules = "unreadable";
+            return "unreadable";
         }
+    }
+
+    /**
+     * What the mode and the rules say now, without asking a reviewer and without counting anything. For a host with no
+     * one to ask (`tomverse exec`): it can tell what is refused or allowed already from what needs a person.
+     */
+    preview(view: ApprovalView): Verdict {
+        return evaluate(view, { mode: this.mode, rules: this.rulesNow(), protectedDirs: this.options.protectedDirs });
+    }
+
+    async decide(view: ApprovalView, context: GateContext): Promise<GateResult> {
+        const rules = this.rulesNow();
         const mode = this.mode;
         const reviewer = this.reviewerFor(mode);
         const verdict = evaluate(view, { mode, rules, protectedDirs: this.options.protectedDirs });

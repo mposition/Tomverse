@@ -30,6 +30,8 @@ import type { PlannedEdit } from "./patch.js";
 import { withWorkspaceReferences, type Workspace } from "./workspace.js";
 import { terminalReadTool, type TerminalReadReply, type TerminalReadRequest } from "./terminal-read.js";
 
+const GIT_READ_ONLY_MODE = "Read-only mode: nothing is committed or pushed. Do not ask again; say what you would have committed.";
+
 /**
  * The coding loop. The model plans, picks tools and summarises; this file
  * only drives the AI SDK's own tool loop one model step at a time so that a
@@ -95,6 +97,8 @@ export type RunnerOptions = {
     catalog: CatalogModel[];
     commandEnv: string[];
     launchCommand?: CommandLaunch;
+    /** The host confirms commands run in a sandbox it enforces (sandbox.ts): run_command's description says so. Leave it out and commands are described as not sandboxed. */
+    sandboxed?: boolean;
     instructions: string | null;
     instructionsTruncated?: boolean;
     echoCommandOutput?: boolean;
@@ -369,6 +373,7 @@ export class Runner {
             commandTimeoutMs: options.journal.state.limits.commandTimeoutMs,
             commandEnv: options.commandEnv,
             launchCommand: options.launchCommand,
+            ...(options.sandboxed ? { sandboxed: true } : {}),
             signal: () => this.controller.signal,
             trackExecution: (execution) => {
                 this.executions.add(execution);
@@ -386,7 +391,8 @@ export class Runner {
         };
         this.tools = createTools(this.toolContext, options.journal.state.readOnly || options.taskPlan === "plan");
         if (options.git && !options.journal.state.readOnly && options.taskPlan !== "plan") {
-            Object.assign(this.tools, createGitTools(options.git, () => this.effectBlockReason(), () => this.controller.signal));
+            Object.assign(this.tools, createGitTools(options.git, () => this.effectBlockReason(), () => this.controller.signal,
+                () => (options.permissions?.mode === "read_only" ? GIT_READ_ONLY_MODE : undefined)));
         }
         if (options.subagents) {
             this.subagents = new Subagents({
@@ -1574,6 +1580,9 @@ export class Runner {
             approved = auto.kind === "allow";
             reason = auto.kind === "deny" ? auto.reason : undefined;
             if (!auto.info) options.output.info(`  · ${view.toolName} ${approved ? "allowed" : "refused"} without asking (${auto.policy.source}: ${auto.policy.detail})`);
+        } else if (!options.prompter) {
+            // No one to ask (a run without prompts): what the mode and the rules leave to a person is refused, never approved.
+            reason = "No one is available to approve this.";
         } else {
             // The person's time answering is not model time: inside a step it stops that step's clock.
             const answer = await this.whileWaiting(async () => options.prompter!.approve(view));
@@ -1668,6 +1677,16 @@ export class Runner {
         return { closed, message, limit: false };
     }
 
+    /**
+     * With no one to ask (`tomverse exec`): whether the mode and the rules already settle every approval of this batch, by allowing
+     * or refusing it. A refusal (a deny rule, read-only mode, a boundary) is an answer, not something to wait for. If any approval
+     * needs a person, the whole batch waits, as it always did; nothing was asked or recorded yet, so a resume decides it all again.
+     */
+    private settledWithoutPerson(views: ApprovalView[]) {
+        const gate = this.options.permissions;
+        return gate !== undefined && views.every((view) => { const kind = gate.preview(view).kind; return kind === "allow" || kind === "deny"; });
+    }
+
     /** Asks for each pending approval, records the decision with what it is bound to. */
     async answerApprovals(pending: PendingApproval[], denyReason?: string, clarification?: string): Promise<"answered" | "needs_approval"> {
         const { journal, options } = this;
@@ -1677,7 +1696,7 @@ export class Runner {
             this.announceApproval(view);
         }
         const needUser = views.filter((v) => !v.error);
-        if (needUser.length && !options.prompter && !denyReason) {
+        if (needUser.length && !options.prompter && !denyReason && !this.settledWithoutPerson(needUser)) {
             journal.state.pendingApprovals = pending;
             journal.commit();
             options.output.info(

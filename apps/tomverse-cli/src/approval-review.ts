@@ -47,6 +47,11 @@ export const reviewRequestText = (view: ApprovalView, userRequest: string) => {
         action.command = { display: clip(view.command.display, 2000), shell: view.command.mode === "shell", folder: view.command.cwd, background: view.command.background === true };
     } else if (view.web) {
         action.web = { url: view.web.url };
+    } else if (view.browser) {
+        action.browser = { action: view.browser.action, site: view.browser.origin, page: view.browser.url, element: view.browser.selector,
+            ...(view.browser.text !== undefined ? { text: clip(view.browser.text, 1000) } : {}), ...(view.browser.submit ? { pressesEnter: true } : {}) };
+    } else if (view.mcp) {
+        action.mcp = { server: view.mcp.server, tool: view.mcp.tool, input: clip(JSON.stringify(view.input ?? null) ?? "null", 2000) };
     } else {
         action.input = clip(JSON.stringify(view.input ?? null) ?? "null", 2000);
     }

@@ -278,10 +278,15 @@ per task".
   makes everything ask again. The session records which approvals came from
   an earlier `a`.
 - `--read-only` gives the model no patch or command tool at all.
-- Without a terminal (`exec`, pipes, CI) nothing can be approved: the run stops
-  with exit code 3 and the pending actions in the output. Review them with
-  `tomverse resume <session>` in a terminal. There is no flag that approves
-  everything.
+- Without a terminal (`exec`, pipes, CI) nobody can be asked, and the rules still
+  apply: a deny rule, a boundary that refuses (a credential file, a path outside
+  the folder) and a mode that refuses are answered as refusals, not held, and an
+  allow rule runs what it names. What needs a person (no rule names it, a command
+  that leaves the computer, a web host nobody approved, an MCP tool no rule names)
+  stops the run with exit code 3 and the pending actions in the output; if one
+  call of a batch needs a person, the whole batch waits and is decided again when
+  you review it with `tomverse resume <session>` in a terminal. There is no flag
+  that approves everything.
 - **Project instructions:** the folder's `AGENTS.md`, its `CLAUDE.md` (a whole-line
   `@file` in it pulls that file in, inside the folder only, and each file is
   given once) and the unconditional rules of `.claude/rules/*.md` (a rule whose
@@ -321,6 +326,50 @@ per task".
   `--read-only` session reads them but cannot add one. `tomverse memory show`
   lists this folder's notes and `tomverse memory clear` deletes them;
   `tomverse config set memory off` stops all reading and writing.
+
+### What each permission mode decides
+
+The mode and the rules answer first; only what they leave to a person reaches the
+prompt. Rows are what asks for an approval; `allow`, `review`, `person` and `refuse` are who decides
+when no rule names the action (a deny rule refuses in every mode, an ask rule always
+asks, an allow rule skips the question except where noted).
+
+| Request | read only | ask (default) | auto review | allow all |
+|---|---|---|---|---|
+| File change (`apply_patch`) | refuse | person | review | allow |
+| Command (`run_command`) | refuse | person | review | allow |
+| Web page (`web_fetch`) | person | person | person | person (a rule naming the host skips it) |
+| Click or typing in the browser tab | refuse | person | review | allow |
+| MCP tool (`mcp__server__tool`) | refuse | person | person | person (a rule naming the tool or server skips it) |
+| `commit_changes`, `publish_changes` (Desktop) | refuse before the host is asked | the host's card | the host's card | the host's card |
+| A subagent worker's change or command | refuse | person | review | allow |
+
+- **Never decided by a mode, a rule, a hook or a reviewer:** a push, a pull request,
+  a command that sends something out of the computer, a credential file, a path
+  outside the folder. `commit_changes` and `publish_changes` do not pass through the
+  permission gate at all: the host opens its own card for every call (a push and a
+  pull request every time, a commit too), the model cannot answer it, and only the
+  person's answer on that card lets it run.
+- **MCP tools** are other programs that can send what they are given anywhere, so
+  allow all and auto review treat them like a web host: only a rule that names the
+  tool (`mcp__server__tool`) or its server (`mcp__server__*`, `mcp__server`) runs one without
+  asking. A rule is compared with the server and tool the call is for, not with
+  text, so a long tool name (shortened with a hash) and a server whose name holds
+  `__` are matched exactly. An "always" answer is remembered for this CLI process
+  and that exact server definition only. Even when a rule allowed the call, it runs
+  only if the server definition connected now is the one the approval was made for;
+  a project's own server also needs your approval of its definition before it is
+  started at all.
+- **Browser clicks and typing** follow the mode as above, on a loopback page only. A
+  password, one-time-code or card field is refused by the browser host itself, in
+  every mode and whatever was allowed.
+- **Hooks** can block a call in every mode (a PreToolUse hook that exits 2 answers
+  before the gate is asked). Their "allow" output is ignored in every mode: it
+  never lifts read only, a rule, a boundary or the question.
+- **Subagent workers** ask through the same gate as the main agent, so read only
+  refuses their changes and commands, and a rule or a boundary applies to them too.
+- `run_command` is described to the model as not sandboxed unless the host says it runs
+  commands in a sandbox it enforces.
 
 ## MCP servers and hooks
 
