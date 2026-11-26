@@ -22,6 +22,7 @@ import { memoryFileFor, ProjectMemory } from "./memory.js";
 import { PERMISSIONS_HELP, PermissionsUsageError, permissionsCommand } from "./permission-cli.js";
 import { PermissionGate } from "./permissions.js";
 import { PermissionRuleStore } from "./permission-rules.js";
+import { discoverExtensions, describeRegistry, expandInvocation, ExtensionError } from "./extensions.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -408,13 +409,16 @@ const configCommand = async (ctx: Context, args: string[]) => {
         else if (key === "memory") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("memory must be on or off.");
             config.memory = value === "true" || value === "on";
+        } else if (key === "agent-models") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("agent-models must be on or off.");
+            config.agentModels = value === "true" || value === "on";
         } else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
         else throw new UsageError(`Unknown config key '${key}'.`);
         writeConfig(config);
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -460,8 +464,25 @@ const exitFor = (outcome: Outcome) => EXIT_CODES[outcome];
 /** The notes kept about a folder, in the CLI's own home next to the sessions. */
 const projectMemory = (ctx: Context, root: string) => new ProjectMemory(memoryFileFor(join(tomverseHome(), "memory"), root), root);
 
-/** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, and project memory unless it is turned off. */
+/** `/name args` of a skill or command from the project or the user's own folders, as the prompt it stands for. Other text comes back as it is; null when the file cannot be read. */
+const withSlashPrompt = (ctx: Context, root: string, text: string): string | null => {
+    if (!text.startsWith("/")) return text;
+    try {
+        const invocation = expandInvocation(root, discoverExtensions(root), text);
+        if (!invocation) return text;
+        ctx.output.info(`Running ${invocation.kind} /${invocation.name} (${invocation.source})${invocation.ignored.length ? `; not applied: ${invocation.ignored.join(", ")}` : ""}.`);
+        return invocation.prompt;
+    } catch (error) {
+        if (!(error instanceof ExtensionError)) throw error;
+        ctx.output.info(error.message);
+        return null;
+    }
+};
+
+/** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, skills and agent definitions, and project memory unless it is turned off. */
 const engineExtras = (ctx: Context, root: string) => ({
+    extensions: discoverExtensions(root),
+    agentModels: ctx.config.agentModels === true,
     web: {},
     backgroundCommands: true,
     images: true,
@@ -562,8 +583,9 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     const removeSigint = installSigint(runner, ctx.output);
     try {
         let outcome: Outcome = "success";
-        if (task) {
-            outcome = await runner.runTask(task, parseEffort(ctx.flags.effort));
+        const first = task ? withSlashPrompt(ctx, root, task) : null;
+        if (task && first !== null) {
+            outcome = await runner.runTask(first, parseEffort(ctx.flags.effort));
             await finalEvent(ctx, runner, gateway, outcome);
         }
         if (interactive) outcome = await repl(ctx, runner, gateway, outcome, prompter?.memory ?? null, task ? "default" : parseEffort(ctx.flags.effort));
@@ -584,7 +606,12 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         const text = line.trim();
         if (!text) continue;
         if (text === "/help") {
-            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /rewind  take files and conversation back to a turn   /fork [turn]  copy the conversation into a new session   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
+            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /rewind  take files and conversation back to a turn   /fork [turn]  copy the conversation into a new session   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /skills  skills, commands and agents found   /<name> [arguments]  run a skill or command   /exit");
+            continue;
+        }
+        if (text === "/skills") {
+            const lines = describeRegistry(discoverExtensions(runner.journal.state.workspace.root));
+            ctx.output.info(lines.length ? lines.map((line) => safeLine(line)).join("\n") : "No skills, commands or agent definitions found (.claude/, .agents/, .codex/ in this folder or your home).");
             continue;
         }
         if (text === "/diff") {
@@ -650,7 +677,9 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
             ctx.output.info((error as Error).message);
             continue;
         }
-        last = await runner.runTask(text, effort);
+        const prompt = withSlashPrompt(ctx, runner.journal.state.workspace.root, text);
+        if (prompt === null) continue;
+        last = await runner.runTask(prompt, effort);
         effort = "default";
         await finalEvent(ctx, runner, gateway, last);
     }

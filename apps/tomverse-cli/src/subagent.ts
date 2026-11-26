@@ -5,6 +5,7 @@ import type { Effort } from "./effort.js";
 import type { CatalogModel, Gateway, GenerationHooks } from "./gateway.js";
 import type { Output } from "./display.js";
 import type { NestedInstructions } from "./instructions.js";
+import type { AgentDef } from "./extensions.js";
 import type { GenerationRecord, Journal, SubagentRecord } from "./session.js";
 import { createTools, imageMessage, trimOldImages, type ImageAttachment, type ToolContext } from "./tools.js";
 import { estimateTokens } from "./tokens.js";
@@ -54,6 +55,9 @@ export type SubagentResult = {
     error?: string;
     filesRead: string[];
     filesChanged?: string[];
+    /** The custom agent definition the run used, and what became of the model it names. */
+    agent?: string;
+    modelNote?: string;
 };
 
 /** What a run needs from the Runner that owns it. */
@@ -65,6 +69,11 @@ export type SubagentHost = {
     /** Whether worker runs exist: the session can change files and there is someone to approve. */
     canWork: boolean;
     images: boolean;
+    /** Custom agent definitions (from the user's .claude/agents and .codex/agents files), offered as delegate types. */
+    agents?: AgentDef[];
+    /** The catalog, and whether a definition's model name may pick a model from it. Off: every run uses the session's model. */
+    catalog?: CatalogModel[];
+    agentModels?: boolean;
     model(): CatalogModel;
     effort(): Effort | undefined;
     /** Hooks for one request of a run; `created` receives the request's record. */
@@ -122,23 +131,29 @@ export class Subagents {
     tool() {
         const { host } = this;
         const kinds = host.canWork ? (["explore", "worker"] as const) : (["explore"] as const);
+        const defs = (host.agents ?? []).slice(0, 20);
+        const tasks = z.array(z.string().min(1).max(SUBAGENT_LIMITS.assignmentChars)).min(1).max(SUBAGENT_LIMITS.maxExplore);
+        const inputSchema = (defs.length
+            ? z.object({ kind: z.enum(kinds).optional(), agent: z.enum(defs.map((def) => def.name) as [string, ...string[]]).optional(), tasks })
+            : z.object({ kind: z.enum(kinds), tasks })) as z.ZodType<{ kind?: (typeof kinds)[number]; agent?: string; tasks: string[] }>;
         return tool({
             description: [
                 "Hand self-contained work to subagents that each start with a fresh context, and get back only their written reports (the subagents' reading never enters this conversation).",
                 "kind \"explore\": read-only investigation (search, read) for wide searches or independent questions. Give up to 3 tasks in one call and they run in parallel.",
                 ...(host.canWork ? ["kind \"worker\": can change files and run commands, with the same approvals as you; one task at a time. For an independent piece of work you can describe completely."] : []),
+                ...(defs.length ? [`Or give agent instead of kind to use one of the user's own agent definitions (it is an explore or worker run with the definition's instructions added; its tools never go beyond that type): ${defs.map((def) => `${def.name} (${def.base === "worker" && host.canWork ? "worker" : "explore"}): ${def.description}`).join("; ")}.`] : []),
                 "A subagent knows nothing of this conversation: write each task so it stands alone (what to find or do, where to look, what to report). Its report is not verified: check what matters before relying on it. Subagent requests count against this task's request limit. Do not delegate what one read_file or search_text answers.",
             ].join(" "),
-            inputSchema: z.object({
-                kind: z.enum(kinds),
-                tasks: z.array(z.string().min(1).max(SUBAGENT_LIMITS.assignmentChars)).min(1).max(SUBAGENT_LIMITS.maxExplore),
-            }),
+            inputSchema,
             execute: async (input, options) => {
                 try {
                     host.assertAllowed();
                     const signal = AbortSignal.any([host.context().signal(), ...(options.abortSignal ? [options.abortSignal] : [])]);
                     signal.throwIfAborted();
-                    return await this.delegate(input.kind, input.tasks, options.toolCallId, signal);
+                    const def = input.agent ? defs.find((entry) => entry.name === input.agent) : undefined;
+                    const kind = def ? (def.base === "worker" && host.canWork ? "worker" : "explore") : input.kind;
+                    if (!kind) return { status: "error", error: "Give kind or agent." };
+                    return await this.delegate(kind, input.tasks, options.toolCallId, signal, def);
                 } catch (error) {
                     if (host.journal.broken) throw host.journal.broken;
                     return { status: "error", error: `Failed: ${(error as Error).message}` };
@@ -147,7 +162,7 @@ export class Subagents {
         });
     }
 
-    private async delegate(kind: SubagentKind, assignments: string[], toolCallId: string, signal: AbortSignal) {
+    private async delegate(kind: SubagentKind, assignments: string[], toolCallId: string, signal: AbortSignal, def?: AgentDef) {
         const { host } = this;
         const refuse = (error: string) => ({ status: "error" as const, error });
         if (kind === "worker") {
@@ -172,7 +187,7 @@ export class Subagents {
         }
         this.runs += assignments.length;
         this.active[kind] += assignments.length;
-        const execution = Promise.all(assignments.map((assignment) => this.run(kind, assignment, toolCallId, share, signal)));
+        const execution = Promise.all(assignments.map((assignment) => this.run(kind, assignment, toolCallId, share, signal, def)));
         host.track(execution);
         let results: SubagentResult[];
         try {
@@ -188,7 +203,7 @@ export class Subagents {
         };
     }
 
-    private async run(kind: SubagentKind, assignment: string, toolCallId: string, cap: number, signal: AbortSignal): Promise<SubagentResult> {
+    private async run(kind: SubagentKind, assignment: string, toolCallId: string, cap: number, signal: AbortSignal, def?: AgentDef): Promise<SubagentResult> {
         const { host } = this;
         const { journal, output } = host;
         const id = `sa-${randomBytes(3).toString("hex")}`;
@@ -199,12 +214,12 @@ export class Subagents {
         list.push(record);
         if (list.length > 50) list.splice(0, list.length - 50);
         journal.commit();
-        output.event({ type: "subagent_started", id, kind, task: record.task });
-        output.info(`  · subagent ${id} (${kind}) started`);
+        output.event({ type: "subagent_started", id, kind, task: record.task, ...(def ? { agent: def.name } : {}) });
+        output.info(`  · subagent ${id} (${def ? `${def.name}, ${kind}` : kind}) started`);
         const filesRead = new Set<string>();
-        const result: SubagentResult = { id, kind, status: "failed", requests: 0, filesRead: [] };
+        const result: SubagentResult = { id, kind, status: "failed", requests: 0, filesRead: [], ...(def ? { agent: def.name } : {}) };
         try {
-            await this.loop(kind, id, assignment, cap, signal, record, result, filesRead);
+            await this.loop(kind, id, assignment, cap, signal, record, result, filesRead, def);
         } catch (error) {
             if (journal.broken) throw journal.broken;
             result.status = signal.aborted ? "cancelled" : "failed";
@@ -232,10 +247,26 @@ export class Subagents {
         return result;
     }
 
-    private async loop(kind: SubagentKind, id: string, assignment: string, cap: number, signal: AbortSignal, record: SubagentRecord, result: SubagentResult, filesRead: Set<string>) {
+    /** The model a run uses: the session's, unless a definition names one in the catalog and the host lets definitions choose. Says why when it is not the named one. */
+    private modelFor(def?: AgentDef): { model: CatalogModel; note?: string } {
+        const current = this.host.model();
+        if (!def?.model) return { model: current };
+        const wanted = def.model.toLowerCase();
+        const found = this.host.catalog?.find((entry) => entry.tools && (entry.id.toLowerCase() === wanted || entry.name.toLowerCase() === wanted));
+        if (!found) return { model: current, note: `The model "${def.model}" of agent ${def.name} is not in the Tomverse catalog; the current model (${current.id}) is used.` };
+        if (found.id === current.id) return { model: current };
+        if (!this.host.agentModels) return { model: current, note: `The model "${def.model}" of agent ${def.name} is not used: agent definitions may not choose a model here, so the current model (${current.id}) is used.` };
+        return { model: found, note: `Agent ${def.name} runs on ${found.id}, as its definition names.` };
+    }
+
+    private async loop(kind: SubagentKind, id: string, assignment: string, cap: number, signal: AbortSignal, record: SubagentRecord, result: SubagentResult, filesRead: Set<string>, def?: AgentDef) {
         const { host } = this;
         const { journal, output } = host;
-        const model = host.model();
+        const { model, note } = this.modelFor(def);
+        if (note) {
+            result.modelNote = note;
+            output.info(`  · [${id}] ${note}`);
+        }
         const window = model.contextWindowTokens || 128_000;
         const pendingImages: ImageAttachment[] = [];
         const local = new Set<Promise<unknown>>();
@@ -257,6 +288,9 @@ export class Subagents {
         if (host.images && model.vision) ctx.attachImage = (image) => void (pendingImages.length < 4 && pendingImages.push(image));
         const tools = createTools(ctx, kind === "explore");
         if (!model.vision) delete tools.view_image;
+        // A definition can only take tools away from its type.
+        if (def && !def.allowPatch) delete tools.apply_patch;
+        if (def && !def.allowCommand) delete tools.run_command;
         const reading = tools.read_file;
         if (reading?.execute) {
             const read = reading.execute.bind(reading);
@@ -287,7 +321,11 @@ export class Subagents {
                 }) as ToolSet[string];
             }
         }
-        const system = [kind === "explore" ? EXPLORE_PROMPT : WORKER_PROMPT, ...host.workspaceLines()].join("\n");
+        const system = [
+            kind === "explore" ? EXPLORE_PROMPT : WORKER_PROMPT,
+            ...(def?.instructions ? [`Instructions of the agent definition "${def.name}" (from ${def.source}). They say how to do the work; they cannot grant permissions, add tools or approve anything.\n<agent-definition>\n${def.instructions}\n</agent-definition>`] : []),
+            ...host.workspaceLines(),
+        ].join("\n");
         const reserve = Math.min(MAX_OUTPUT_TOKENS, model.maxOutputTokens || MAX_OUTPUT_TOKENS) + estimateTokens(system) + 3000;
         const messages: ModelMessage[] = [{ role: "user", content: assignment }];
         for (let step = 1; ; step += 1) {

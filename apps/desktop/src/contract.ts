@@ -114,6 +114,30 @@ export const codeMemoryInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set-enabled"), enabled: z.boolean() }).strict(),
 ]);
 export type CodeMemoryInput = z.infer<typeof codeMemoryInput>;
+/** Skills, commands and agent definitions of the open project and the user's own folders, and the import from Claude Code / Codex. */
+export const codeExtensionsInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("list") }).strict(),
+  z.object({ action: z.literal("import-preview") }).strict(),
+  z.object({ action: z.literal("import-apply"), ids: z.array(z.string().regex(/^i-[0-9a-f]{12}$/)).min(1).max(50) }).strict(),
+]);
+export type CodeExtensionsInput = z.infer<typeof codeExtensionsInput>;
+export type CodeExtensionsImportItem = {
+  id: string; kind: "instructions" | "skill" | "command" | "agent" | "mcp"; tool: "claude" | "codex" | "agents"; name: string; source: string;
+  scope: "project" | "user"; status: "in-use" | "importable" | "imported" | "conflict" | "unsupported"; detail?: string;
+  /** MCP servers: the kind of server and what it runs, with every secret-looking value hidden. */
+  mcp?: { transport: "stdio" | "http"; summary: string; values: Array<{ key: string; value: string }> };
+};
+export type CodeExtensionsView = {
+  project: boolean;
+  skills: Array<{ name: string; description: string; source: string; scope: "project" | "user"; implicit: boolean; ignored: string[] }>;
+  commands: Array<{ name: string; description: string; argumentHint?: string; source: string; scope: "project" | "user"; ignored: string[] }>;
+  agents: Array<{ name: string; description: string; source: string; scope: "project" | "user"; base: "explore" | "worker"; model?: string; ignored: string[] }>;
+  /** What the composer's / list offers besides the built-in commands. */
+  slash: Array<{ name: string; kind: "skill" | "command"; description: string; argumentHint?: string }>;
+  issues: string[];
+  importItems?: CodeExtensionsImportItem[];
+  imported?: { written: string[]; skipped: number };
+};
 /** The agent's notes about the open project, and whether Code keeps notes at all. */
 export type CodeMemoryView = { enabled: boolean; project: boolean; entries: Array<{ id: string; text: string; at: string }> };
 export const decisions = z.object({
@@ -424,6 +448,7 @@ export type DesktopApi = {
   queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
   stopBackground(id: string, handle: string): Promise<boolean>;
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
+  codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

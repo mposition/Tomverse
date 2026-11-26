@@ -25,6 +25,8 @@ export type CliConfig = {
     commandEnv?: string[];
     /** Notes the agent keeps about a project for later tasks. On unless set to false; when off nothing is read or written. */
     memory?: boolean;
+    /** Lets an agent definition's model name pick the model of its subagent runs. Off unless set to true: it is a billing choice. */
+    agentModels?: boolean;
     /** Folders the user has said the CLI may work in (real paths). */
     trustedRoots?: string[];
 };
@@ -63,6 +65,7 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): CliConfig => {
     if (typeof value.model === "string") config.model = value.model;
     if (Array.isArray(value.commandEnv)) config.commandEnv = value.commandEnv.filter((v): v is string => typeof v === "string");
     if (typeof value.memory === "boolean") config.memory = value.memory;
+    if (typeof value.agentModels === "boolean") config.agentModels = value.agentModels;
     if (Array.isArray(value.trustedRoots)) config.trustedRoots = value.trustedRoots.filter((v): v is string => typeof v === "string");
     return config;
 };
