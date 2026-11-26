@@ -182,7 +182,19 @@ export function StudioToolEditor({ tool, preset }: {
     setPhoto(restoredPhoto);
     toolResults.clear();
     for (const held of saved.toolBlobs ?? []) toolResults.set(held.modelId, { photo: restoredPhoto, blob: held.blob });
-    setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
+    const restoredResult = typeof saved.result === "string" ? saved.result : urls.make(saved.result);
+    setResult(restoredResult);
+    // The cut-outs that were paid for come back as they were shown, each under its own tool.
+    if (restoredPhoto && saved.toolBlobs?.length) {
+      void Promise.all(saved.toolBlobs.map(async held => ({ modelId: held.modelId, url: urls.make(await cropStudioCutout(restoredPhoto, held.blob)) })))
+        .then(restored => {
+          urls.release(restoredResult);
+          setCutouts(restored);
+          setResult(restored[0].url);
+          setResultIsExample(false);
+        })
+        .catch(() => undefined);
+    }
     setCustomPhoto(saved.customPhoto);
     setResultIsExample(saved.resultIsExample);
     setFormat(saved.format);
@@ -200,13 +212,15 @@ export function StudioToolEditor({ tool, preset }: {
     report(copy.checkoutDraftRestored);
   });
 
-  async function saveCheckoutDraft() {
+  // `shown` is what is on screen now. A press that already replaced the result passes it: the render it
+  // started from still names the old one, whose object URL has been released.
+  async function saveCheckoutDraft(shown: { result: string; resultIsExample: boolean } = { result, resultIsExample }) {
     try {
       const [photoDraft, resultDraft, logoDraft] = await Promise.all(
-        [photo, result, logo].map(captureStudioDraftImage),
+        [photo, shown.result, logo].map(captureStudioDraftImage),
       );
       await checkoutDraft.save({
-        photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample,
+        photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample: shown.resultIsExample,
         format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText, publicationPreset, socialFormatId,
         toolBlobs: [...toolResults].filter(([, held]) => held.photo === photo).map(([modelId, held]) => ({ modelId, blob: held.blob })),
       });
@@ -282,6 +296,7 @@ export function StudioToolEditor({ tool, preset }: {
     const controller = new AbortController();
     active.current = controller;
     const { signal } = controller;
+    let onScreen = { result, resultIsExample };
     try {
       const quote = imageQuote.quote;
       if (!quote) return;
@@ -318,6 +333,7 @@ export function StudioToolEditor({ tool, preset }: {
               for (const old of cutouts) urls.release(old.url);
               setResult(url);
               setResultIsExample(false);
+              onScreen = { result: url, resultIsExample: false };
             }
             fresh.push({ modelId: target.modelId, url });
             setCutouts([...fresh]);
@@ -348,7 +364,7 @@ export function StudioToolEditor({ tool, preset }: {
     } catch (error) {
       if (signal.aborted) return;
       if (isStudioCreditShortfall(error)) {
-        await saveCheckoutDraft();
+        await saveCheckoutDraft(onScreen);
         if (signal.aborted) void checkoutDraft.clear();
         else setCreditError(error);
         return;
@@ -521,7 +537,7 @@ export function StudioToolEditor({ tool, preset }: {
     </section>
   </div>
     <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?" + new URLSearchParams({ lang, ...(preset ? { preset: preset.id } : {}) })}
-      draftSaved={draftSaved} onSaveDraft={saveCheckoutDraft} onClose={async () => {
+      draftSaved={draftSaved} onSaveDraft={() => saveCheckoutDraft()} onClose={async () => {
         await checkoutDraft.clear();
         setCreditError(null);
       }} />
