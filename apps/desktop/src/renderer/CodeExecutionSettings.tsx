@@ -8,6 +8,7 @@ import { codeFallbackModelAvailable, codeFallbackUpdate, codeTransferScope, defa
 import { codeLimitProfile, type CodeLimitProfile, type CodeMemoryInput, type CodeMemoryView, type Snapshot } from "../contract";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import type { CodeEnginePreference } from "./CodeEngine";
+import { CodeExtensionsSettings } from "./CodeExtensions";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -150,6 +151,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
       </select>
     } />
     <CodeMemorySettings language={language} />
+    <CodeExtensionsSettings language={language} />
     <SettingRow field="code-fallback-automatic" label={copy.automatic} detail={automatic ? copy.awaitingVerification : copy.automaticDetail}
       status={automatic} control={
       <select id="code-fallback-automatic" aria-describedby="code-fallback-automatic-info" value={automatic ? "on" : "off"}

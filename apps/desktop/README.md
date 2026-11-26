@@ -66,6 +66,12 @@ New Tomverse API Agent tasks in a Git project start in their own worktree when G
 
 A worktree keeps the path relative to the repository of the folder you opened. Attachments for an isolated task must exist in the selected commit. After restarting Desktop, open the source folder and select the saved task from history to resume in its worktree. If the worktree is missing or on a different branch, Desktop blocks resumption and undo until the original checkout is available. Saved diffs and command details can still be inspected. Worktree files stay on disk when you delete Desktop task history.
 
+## Skills, commands and agents
+
+Code reads the skills, commands and agent definitions written for Claude Code and Codex where they are: `.claude/`, `.agents/` and `.codex/` in the open project and in your home folder (the CLI README lists the exact locations and rules). Typing `/` at the start of a Code request lists the skills and commands; the task shows what you typed and the model receives the skill or command text, with its arguments filled in by the rules of the tool the file is written for. The text is guidance only: permissions, hooks and tool lists in the files are not applied, and every change and command is still approved in the approval window. Settings, under **Execution and limits**, lists what was read with its source path and what was not applied.
+
+**Import from Claude Code / Codex** previews what those tools already hold for this project. Instruction files, skills, commands and agents are read in place, so only MCP servers from your own configuration (`~/.claude.json`, `~/.codex/config.toml`) can be copied, into `mcp.json` in the Tomverse CLI folder (`$TOMVERSE_HOME`, default `~/.tomverse`), in the same shape as a project `.mcp.json`. Nothing is selected by default, `env` and header values are hidden in the preview, and the values are read again in the main process when you confirm. Desktop does not start MCP servers from this screen.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.

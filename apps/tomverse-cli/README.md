@@ -275,6 +275,22 @@ per task".
   every read, so a link out of the folder or a credential file is never sent.
   Instructions cannot grant permissions, and the CLI never runs commands or
   install hooks because a file says so.
+- **Skills, commands and agent definitions** written for Claude Code and Codex are read where they
+  are: `SKILL.md` folders in `.claude/skills` and `.agents/skills` of the project and of your home
+  folder, commands in `.claude/commands` (a subfolder becomes `folder:name`) and Codex custom prompts
+  in `~/.codex/prompts` (`/prompts:name`), agents in `.claude/agents/*.md` and `.codex/agents/*.toml`.
+  The system prompt lists each skill by name and description only; the model reads one with
+  `load_skill` (and `load_skill` with `file` for a file of its folder). `/name arguments` runs a skill
+  or command yourself, with the arguments replaced by the rules of the tool the file is written for
+  (`/skills` lists what was found and where). Their text is guidance: `allowed-tools`, hooks,
+  permission modes, sandbox settings and the like are not applied and are listed as such, and
+  every change and command is still asked. An agent definition becomes a `delegate` type (`agent`
+  instead of `kind`) that adds its instructions to an explore or worker run; its tool list can only
+  take tools away from that type. The model a definition names is not used unless
+  `tomverse config set agent-models on` allows it (it is a billing choice), and a name that is not in
+  the catalog always falls back to the task's model, with a note. Not read: `!`command`` injection
+  and `@file` in a command (nothing runs because a file says so), nested `.claude/skills` of
+  subfolders, plugin and enterprise locations.
 - **Project memory:** the model can keep a short note about the project
   (`remember_fact`: how the tests run, a decision, a trap) without asking you.
   Notes are stored in `~/.tomverse/memory/` (or `$TOMVERSE_HOME`), next to the

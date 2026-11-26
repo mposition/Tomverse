@@ -37,6 +37,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
+import { SlashMenu, useSlashMenu } from "./CodeExtensions";
 import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
@@ -672,6 +673,8 @@ function Desktop() {
     }
   }
 
+  const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus() });
+
   function changeSaveHistory(value: boolean) {
     setSaveHistory(value);
     if (snapshot?.draftNamespace) writeDesktopDraft(codeDraft, `code:${snapshot.draftNamespace}`, value ? prompt : "");
@@ -1011,12 +1014,14 @@ function Desktop() {
               </button>}
           </div>
           <form className="composer" onSubmit={send} aria-label={copy.codeComposer}>
+            <SlashMenu menu={slashMenu} language={language} />
             <div className="code-composer-body">
               {codeHandoff && <HandoffDraft handoff={codeHandoff} busy={Boolean(busy)} language={language} />}
               <textarea ref={composer} aria-label={copy.codeRequest} aria-describedby={online ? "code-readiness" : "desktop-offline"}
                 placeholder={task ? copy.followUp : copy.firstRequest} value={prompt}
                 onChange={(event) => changeDraft(event.currentTarget.value)} maxLength={MAX_CODE_PROMPT_CHARACTERS}
                 onKeyDown={(event) => {
+                  if (slashMenu.onKeyDown(event)) return;
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
                     event.preventDefault(); event.currentTarget.form?.requestSubmit();
                   }

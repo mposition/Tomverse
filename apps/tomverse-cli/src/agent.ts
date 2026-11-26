@@ -16,6 +16,8 @@ import type { ProjectMemory } from "./memory.js";
 import { createTools, imageMessage, planCommandCall, planPatchCall, READ_TOOLS, trimOldImages, VIEW_IMAGE_MARK, type ImageAttachment, type ToolContext } from "./tools.js";
 import { estimateTokens } from "./tokens.js";
 import { Subagents } from "./subagent.js";
+import { skillListing, type ExtensionRegistry } from "./extensions.js";
+import { createSkillTool } from "./skill-tool.js";
 import type { RememberedRule } from "./approvals.js";
 import type { CommandLaunch, CommandPlan } from "./commands.js";
 import type { PlannedEdit } from "./patch.js";
@@ -107,6 +109,13 @@ export type RunnerOptions = {
      * back. For hosts that show them (CLI, Desktop). Worker subagents also need a prompter to ask the person.
      */
     subagents?: boolean;
+    /**
+     * The skills and agent definitions found in the project and the user's folders. Skills are listed by name and description in the
+     * system prompt and read with load_skill; agent definitions become delegate types. Neither widens what the agent may do.
+     */
+    extensions?: ExtensionRegistry;
+    /** Lets an agent definition's model name pick a catalog model for its subagent runs. Off: they use the session's model (a billing choice). */
+    agentModels?: boolean;
     /** Gives the model the instruction files of a subfolder (AGENTS.md, CLAUDE.md) when it first reads or changes a file there. */
     nestedInstructions?: boolean;
     /**
@@ -352,6 +361,9 @@ export class Runner {
                 epoch: this.epoch,
                 canWork: !options.journal.state.readOnly && options.taskPlan !== "plan" && Boolean(options.prompter),
                 images: Boolean(options.images),
+                agents: options.extensions?.agents,
+                catalog: options.catalog,
+                agentModels: options.agentModels,
                 model: () => this.model(),
                 effort: () => this.currentTask().effort,
                 hooks: (run) => this.hooks("subagent", undefined, run),
@@ -371,6 +383,16 @@ export class Runner {
                 },
             });
             this.tools.delegate = this.subagents.tool();
+        }
+        if (options.extensions?.skills.some((skill) => skill.implicit)) {
+            this.tools.load_skill = createSkillTool({
+                root: options.workspace.root,
+                skills: () => options.extensions?.skills ?? [],
+                signal: () => this.controller.signal,
+                assertAllowed: options.assertAllowed,
+                redactText: options.redactText,
+                onActivity: (line) => options.output.info(`  · ${line}`),
+            });
         }
         const plugin = options.codePlugin;
         if (plugin) {
@@ -547,6 +569,7 @@ export class Runner {
                 ...(plan ? [`The saved plan revision is ${plan.revision}. When the user sends a follow-up, account for it in this plan and collect fresh evidence for open items.`] : []),
             ] : []),
             this.instructionsLine(),
+            ...(this.tools.load_skill ? skillListing(this.options.extensions?.skills ?? []) : []),
             ...(this.memoryBlock ? [this.memoryBlock] : []),
             ...(this.options.memory && !readOnly ? [
                 "remember_fact keeps one short, durable fact about this project for future sessions. Use it sparingly, for what a later session would be glad to know and could not see in the code; never keep a secret or anything personal.",
@@ -1145,7 +1168,7 @@ export class Runner {
         let finishReason: string | undefined;
         let savedToolMessages = 0;
         let analysisOnly = false;
-        const analysisTools = [...READ_TOOLS, "view_image", "delegate", "update_task_plan", ...(options.browserSnapshot ? ["snapshot_browser"] : []),
+        const analysisTools = [...READ_TOOLS, "view_image", "delegate", "update_task_plan", ...(options.browserSnapshot ? ["snapshot_browser"] : []), ...(this.tools.load_skill ? ["load_skill"] : []),
             ...(options.codePlugin ? ["list_plugin_tools", "read_plugin"] : [])];
         const result = streamText({
             model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf), model.reasoningEfforts === undefined ? undefined : this.currentTask().effort),

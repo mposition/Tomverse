@@ -178,6 +178,10 @@ export const sessionCost = async (gateway: Gateway, journal: Journal, catalog?: 
 };
 
 export { readProjectInstructions, readInstructions, NestedInstructions } from "./instructions.js";
+export { discoverExtensions, expandInvocation, slashEntries, ExtensionError } from "./extensions.js";
+export type { ExtensionRegistry, SlashEntry, Invocation } from "./extensions.js";
+export { collectImport, applyImport } from "./extension-import.js";
+export type { ImportItem, ImportResult } from "./extension-import.js";
 
 /**
  * After a crash: what the journal says was under way. A write whose end was

@@ -2,12 +2,13 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, discoverExtensions, Journal, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
+import { slashPromptFor } from "./code-extensions";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
@@ -869,6 +870,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       subagents: true,
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
       nestedInstructions: !continuation && savedCap === undefined,
+      // Skills and agent definitions are folder contents like the instruction files: a capped continuation sends none of them.
+      extensions: !continuation && savedCap === undefined ? discoverExtensions(workspace.root) : undefined,
       memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
@@ -935,13 +938,17 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         send({ type: "follow-up-queued", runId: command.runId, requestId: resumedInstruction.requestId, queued: true });
       } });
     } else {
+      // `/name arguments` of a skill or command stands for its text; the task still shows what the person typed.
+      const slash = continuation ? null : slashPromptFor(workspace.root, command.input.prompt);
+      if (slash) { addEvent(slash.notice); publish(); }
+      const requested = slash?.prompt ?? command.input.prompt;
       const prompt = continuationPrompt ?? (command.input.mode === "plan"
-        ? `Review this request using read-only tools. Return the objective, evidence, assumptions, intended changes, verification and completion criteria as a public plan. Do not make changes.\n\n${command.input.prompt}`
-        : command.input.prompt);
+        ? `Review this request using read-only tools. Return the objective, evidence, assumptions, intended changes, verification and completion criteria as a public plan. Do not make changes.\n\n${requested}`
+        : requested);
       if (sourceEdits) verifiedContinuationEdits(sourceEdits);
-      await control.runner.runTask(prompt, command.input.effort, continuation || references.length
+      await control.runner.runTask(prompt, command.input.effort, continuation || references.length || slash
         ? { visiblePrompt: command.input.prompt, references } : undefined);
-      if (!continuation && command.input.mode === "plan" && !references.length) {
+      if (!continuation && command.input.mode === "plan" && !references.length && !slash) {
         const first = journal.state.messages.find((message) => message.role === "user");
         if (first && first.content === prompt) first.content = command.input.prompt;
         const record = journal.state.tasks[0];

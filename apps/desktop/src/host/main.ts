@@ -40,7 +40,7 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeExtensionsInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
@@ -66,6 +66,7 @@ import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-s
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { codeMemoryView } from "./code-memory";
+import { codeExtensionsView } from "./code-extensions";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -3305,6 +3306,11 @@ function registerIpc() {
     const input = codeMemoryInput.parse(value);
     if (projectRoot) assertProjectRoot(projectRoot);
     return codeMemoryView(codeMemoryDirectory(), projectRoot, input);
+  });
+  main("desktop:code-extensions", (value) => {
+    const input = codeExtensionsInput.parse(value);
+    if (projectRoot) assertProjectRoot(projectRoot);
+    return codeExtensionsView(projectRoot?.path ?? null, input);
   });
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);
