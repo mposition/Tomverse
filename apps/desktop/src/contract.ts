@@ -22,6 +22,7 @@ import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extens
 import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
+import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -399,7 +400,7 @@ export type Snapshot = {
     googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
-    billing?: boolean;
+    billing?: boolean; managedCode?: boolean;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
@@ -505,6 +506,8 @@ export type DesktopApi = {
   billing<Action extends BillingAction>(input: Extract<DesktopBillingInput, { action: Action }>): Promise<BillingResult<Action>>;
   /** The checkout window and this account's purchase records, pushed on every change (see `billing({ action: "purchases" })`). */
   subscribeBilling(listener: (state: BillingState) => void): () => void;
+  /** Managed Code credits: read the catalogue and the reservation, reserve, release. Credit numbers are the server's receipt values. */
+  managedCode(input: DesktopManagedCodeInput): Promise<ManagedCodeView>;
   chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
   exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
   projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;

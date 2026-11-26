@@ -28,6 +28,9 @@ import { createResearchActions } from "./research-host";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { createBillingApi, type BillingApi } from "./billing-api";
+import { createManagedCodeClient } from "./managed-code-client";
+import { createManagedCodeSession, type ManagedCodeSession } from "./managed-code-session";
+import { desktopManagedCodeInput } from "../managed-code-contract";
 import { createBillingWindowHost } from "./billing-window";
 import { desktopBillingInput, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
@@ -2836,6 +2839,19 @@ async function billing(value: unknown) {
   return billingApi.api.billing(input);
 }
 
+// Managed Code credits share the account session; one reservation per signed-in window, kept alive here in the main process.
+let managedCodeSession: { signal: AbortSignal; session: ManagedCodeSession } | undefined;
+async function managedCode(value: unknown) {
+  const input = desktopManagedCodeInput.parse(value);
+  if (!state.capabilities?.managedCode) throw new Error("Managed Code credits are unavailable.");
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (managedCodeSession?.signal !== signal) {
+    managedCodeSession = { signal, session: createManagedCodeSession({ client: createManagedCodeClient({ send: settings.send, signal }), signal }) };
+  }
+  return managedCodeSession.session.run(input);
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -3841,6 +3857,7 @@ function registerIpc() {
   main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
   main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));
   main("desktop:billing", billing);
+  main("desktop:managed-code", managedCode);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
   main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
   main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,

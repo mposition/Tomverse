@@ -22,6 +22,7 @@ const capabilities = z.object({
   desktopPlugins: z.boolean().optional(),
   desktopCodeMcp: z.boolean().optional(),
   desktopBilling: z.boolean().optional(),
+  desktopManagedCode: z.boolean().optional(),
 });
 
 const starterOrder = randomInt(STARTER_ORDER_SEED_LIMIT);
@@ -44,5 +45,6 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     chatImport: data.desktopImport === true, chatStarters: data.desktopStarters ?? [],
     review: data.desktopReview ?? null, images: data.desktopImages ?? null, attachments: data.desktopAttachments === true,
     googleDrive: data.desktopGoogleDrive === true, deepResearch: data.desktopDeepResearch === true,
-    plugins: data.desktopPlugins === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true };
+    plugins: data.desktopPlugins === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
+    managedCode: data.desktopManagedCode === true };
 }
