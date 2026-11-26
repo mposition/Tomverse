@@ -949,23 +949,27 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     if (scroll.current && nearBottom.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat.live, chat.conversation]);
 
-  // The account and conversation a message is being prepared for. Uploads and the position read take time;
-  // if either changed meanwhile, the message belongs to neither and is not sent.
-  const sendScope = useRef(toolsScope);
-  useLayoutEffect(() => { sendScope.current = toolsScope; }, [toolsScope]);
+  // Uploads and the position read take time. A message is sent only if the account and conversation never
+  // changed meanwhile (leaving and coming back counts as a change) and the draft is still the one it was.
+  const scopeChanges = useRef(0);
+  useLayoutEffect(() => { scopeChanges.current += 1; }, [toolsScope]);
+  const latestDraft = useRef(chat.draft);
+  useLayoutEffect(() => { latestDraft.current = chat.draft; });
   const [preparing, setPreparing] = useState(false);
   async function send(depth?: DeepResearchDepth) {
     const model = depth ? researchModel : selectedModel;
     if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || preparing ||
         chat.sending || chat.writing || location.state.pending || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
-    const scope = toolsScope;
+    const changes = scopeChanges.current;
+    const draft = chat.draft;
+    const stale = () => scopeChanges.current !== changes || latestDraft.current !== draft;
     setPreparing(true);
     try {
       const attachmentUploadIds = await attachments.prepare();
-      if (!attachmentUploadIds || sendScope.current !== scope) return;
+      if (!attachmentUploadIds || stale()) return;
       // A fresh fix for this message only; a failed read continues without a location.
       const currentLocation = depth ? undefined : await location.read();
-      if (sendScope.current !== scope) return;
+      if (stale()) return;
       const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
         effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
         ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation,
@@ -1143,7 +1147,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             {effortEnabled && effort !== "default" && ` · ${effortLabels[effort]}`}
           </DesktopModelPicker>
           {deviceFixture && <DraftDictation language={language} scope={"chat:" + (activeId ?? "new")}
-            disabled={chat.sending || attachments.uploading} draft={chat.draft} setDraft={chat.setDraft} />}
+            disabled={chat.sending || attachments.uploading || preparing} draft={chat.draft} setDraft={chat.setDraft} />}
           {chat.sending
             ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={17} /></button>
             : <button className="send" type="submit" aria-label={copy.send}

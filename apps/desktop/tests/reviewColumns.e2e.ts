@@ -30,7 +30,7 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
 
     await t.test("the question is the user's chat bubble in every column, not a heading", async () => {
       await expect(desktop.getByRole("heading", { name: columnsQuestion })).toHaveCount(0);
-      await expect(desktop.getByTestId("review-user-bubble")).toHaveCount(3);
+      await expect(columns.getByTestId("review-user-bubble")).toHaveCount(3);
       for (let index = 0; index < 3; index++) await expect(columns.nth(index).getByTestId("review-user-bubble")).toContainText(columnsQuestion);
       const bubble = columns.first().getByTestId("review-user-bubble");
       const [bubbleBox, columnBox] = await Promise.all([bubble.boundingBox(), columns.first().boundingBox()]);
