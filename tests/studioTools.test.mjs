@@ -178,21 +178,13 @@ test("A report card shows the whole named area instead of the middle of a wide o
 test("Studio renders only schema-checked, bounded analysis data", () => {
   assert.equal(parseStudioAnalysis("face-analysis", '{"status":"retry"}'), null);
   const feature = { color: "#889977", name: "Olive", region: [.2, .3, .4, .1] };
-  const color = {
-    status: "ok", season: "Soft autumn", summary: "Soft colors", features: { hair: feature, eyes: feature, skin: feature },
-    profile: {
-      undertone: { name: "Warm", color: "#dda88c" },
-      contrast: { name: "Medium", colors: ["#665550", "#d6baa2"] },
-      tone: { name: "Soft", colors: ["#bc855c", "#b6a791", "#657650", "#37505b"] },
-    },
-    recommended: Array(6).fill({ color: "#889977", name: "Olive" }),
-    comparison: Array(6).fill({ color: "#6464cc", name: "Periwinkle" }),
-    recommendedPalette: Array(10).fill("#889977"), comparisonPalette: Array(10).fill("#6464cc"), garment: null,
-  };
+  const color = { status: "ok", summary: "Even daylight", face: [.25, .3, .5, .5], features: { hair: feature, eyes: feature, skin: { name: "Light beige" } }, garment: null, unreliable: false };
   assert.deepEqual(parseStudioAnalysis("color-analysis", JSON.stringify(color)), color);
-  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({
-    ...color, comparison: Array(6).fill({ color: "url(example)", name: "Invalid" }),
-  })));
+  // Anything else the model adds, a season included, is dropped; a colour that is not a hex value is refused.
+  assert.deepEqual(parseStudioAnalysis("color-analysis", JSON.stringify({ ...color, season: "Winter", unreliable: "maybe", features: { ...color.features, skin: { ...feature, name: "Light beige" } } })), color);
+  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({ ...color, features: { ...color.features, hair: { ...feature, color: "url(example)" } } })));
+  // The face must be located: without its box there are no cheeks to measure.
+  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({ ...color, face: null })));
   assert.throws(() => parseStudioAnalysis("face-analysis", '{"status":"ok","score":11}'));
   const metric = { score: 7.9, label: "Eyes" };
   const face = {
@@ -210,17 +202,12 @@ test("Studio renders only schema-checked, bounded analysis data", () => {
 });
 
 test("Analysis answers in the shapes the model really returns are read, and the overall score is the metrics' mean", () => {
-  // Seen from the default model on 2026-11-26: named objects in a hex palette, a one-iris region a few
-  // percent across, and an overall score that is not the mean of its own metrics.
+  // Seen from the default model on 2026-11-26: a one-iris region a few percent across, and an overall
+  // score that is not the mean of its own metrics.
   const feature = { color: "#1b1a1b", name: "Black", region: [.385, .38, .045, .026] };
-  const named = Array.from({ length: 10 }, (_, i) => ({ color: "#a64b3" + i, name: "Shade " + i }));
   const color = parseStudioAnalysis("color-analysis", JSON.stringify({
-    status: "ok", season: "Autumn", summary: "Warm skin", features: { hair: feature, eyes: feature, skin: feature },
-    profile: { undertone: { name: "Warm", color: "#dda88c" }, contrast: { name: "High", colors: ["#1b1a1b", "#d6baa2"] },
-      tone: { name: "Muted", colors: ["#bc855c", "#b6a791", "#657650", "#37505b"] } },
-    recommended: named.slice(0, 6), comparison: named.slice(0, 6), recommendedPalette: named, comparisonPalette: named.map(item => item.color), garment: null,
+    status: "ok", summary: "Even light", face: [.25, .3, .5, .5], features: { hair: feature, eyes: feature, skin: { name: "Light beige" } }, garment: null, unreliable: false,
   }));
-  assert.deepEqual(color.recommendedPalette, named.map(item => item.color));
   assert.deepEqual(color.features.eyes.region, [.385, .38, .045, .026]);
   // The card widens a tiny area before showing it, and keeps the iris inside.
   const crop = studioReportCrop(color.features.eyes.region, { width: 772, height: 1024 }, { width: 200, height: 99 });
@@ -235,7 +222,7 @@ test("Analysis answers in the shapes the model really returns are read, and the 
   assert.equal(face.score, 7.3);
   for (const kind of ["face-analysis", "color-analysis"]) {
     const prompt = studioAnalysisPrompt(kind, "Korean");
-    assert.match(prompt, /Return an object with exactly these keys: status, (score|season), summary/);
+    assert.match(prompt, /Return an object with exactly these keys: status, (score, )?summary/);
     assert.match(prompt, /check that every bracket and brace closes/);
   }
   // The key the model used when it was only told "the numeric overall score" is not accepted silently.

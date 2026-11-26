@@ -19,6 +19,7 @@ type Labels = {
   color: {
     title: [string, string];
     season: string;
+    alsoClose: string;
     recommended: string;
     comparison: string;
     features: [string, string, string];
@@ -158,9 +159,11 @@ function colorPage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, l
 
   box(ctx, 45, 235, 511, 256, "#f1e3d6");
   caps(copy.season, 75, 269, 432, 18, colorAccent);
-  display(report.season, 72, 341, 58, 445);
-  report.recommendedPalette.slice(0, 5).forEach((color, i) => dot(ctx, 112 + i * 78, 395, 29, color));
-  paragraph(ctx, report.summary, 75, 451, 443, 19, 2, "#5f4e43");
+  display(report.season, 72, 326, 44, 450);
+  // The type that differs on the least certain axis is named beside the first: a single photo leans, it does not settle.
+  if (report.alternative) value(copy.alsoClose + " · " + report.alternative, 75, 358, 18, 445);
+  report.recommendedPalette.slice(0, 5).forEach((color, i) => dot(ctx, 100 + i * 62, 402, 23, color));
+  paragraph(ctx, report.summary, 75, 453, 443, 19, 2, "#5f4e43");
 
   const cardGap = 9, cardWidth = (content - 2 * cardGap) / 3;
   [report.features.hair, report.features.eyes, report.features.skin].forEach((feature, index) => {
@@ -180,17 +183,12 @@ function colorPage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, l
     const x = margin + index * (cardWidth + cardGap);
     box(ctx, x, 685, cardWidth, 130, "#f3e9de");
     caps(copy.profile[index], x + 25, 713, cardWidth - 50, 19);
+    // Swatches above, then the side and how sure it is: one layout holds the longest wording in every language.
     const colors = "colors" in profile ? profile.colors : [profile.color];
-    if (index < 2) {
-      colors.forEach((color, i) => dot(ctx, x + 64 + 58 * i, 765, 23, color));
-      const offset = colors.length === 1 ? 106 : 160;
-      value(profile.name, x + offset, 773, 23, cardWidth - offset - 17);
-    } else {
-      colors.forEach((color, i) => dot(ctx, x + cardWidth / 2 - 87 + i * 58, 753, 19, color));
-      ctx.textAlign = "center";
-      value(profile.name, x + cardWidth / 2, 799, 21, cardWidth - 36);
-      ctx.textAlign = "left";
-    }
+    colors.forEach((color, i) => dot(ctx, x + cardWidth / 2 - (colors.length - 1) * 29 + i * 58, 753, 19, color));
+    ctx.textAlign = "center";
+    value(profile.name, x + cardWidth / 2, 799, 21, cardWidth - 36);
+    ctx.textAlign = "left";
   });
 
   const rows = [report.recommended, report.comparison];
