@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { BackgroundCommands } from "../src/background.js";
 import { planCommand, runCommand, type CommandLaunch } from "../src/commands.js";
 import { startFilteringProxy, type FilteringProxy } from "../src/net-proxy.js";
 import {
@@ -258,4 +259,25 @@ test("the Unix socket the Linux proxy needs is created by the real proxy and ref
     assert.equal(existsSync(join(dir, "p.sock")), true);
     await proxy.close();
     assert.equal(existsSync(join(dir, "p.sock")), false);
+});
+
+test("a background command is refused the same way and no process is left behind", async () => {
+    const workspace = tempDir("sbx");
+    const runtime = await createSandboxRuntime(options(workspace, { platform: "linux", probe: probe({ bwrap: async () => ({ error: "bwrap (bubblewrap) is not installed" }) }) }));
+    const commands = new BackgroundCommands({ launch: runtime!.launch });
+    const plan = planCommand({ argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"], background: true }, workspace, 20_000);
+    await assert.rejects(commands.start(plan, "call-1", plan.display), /could not be started: The sandbox is turned on but cannot be created here/);
+    assert.equal(commands.running, 0);
+});
+
+test("the config file keeps the sandbox choice and the site list, and unreadable values mean off", async () => {
+    const { readConfig, writeConfig } = await import("../src/config.js");
+    const home = tempDir("sbx-home");
+    const env = { ...process.env, TOMVERSE_HOME: home };
+    writeConfig({ sandbox: "read-only", sandboxDomains: ["pypi.org"], sandboxLocalhost: true }, env);
+    assert.deepEqual(readConfig(env), { sandbox: "read-only", sandboxDomains: ["pypi.org"], sandboxLocalhost: true });
+    const config = readConfig(env);
+    assert.deepEqual(normalizeSandboxSettings({ mode: config.sandbox, allowedDomains: config.sandboxDomains, allowLocalhost: config.sandboxLocalhost }),
+        { mode: "read-only", allowedDomains: ["pypi.org"], allowLocalhost: true });
+    assert.equal(normalizeSandboxSettings({ mode: "workspace_write" }).mode, "off");
 });

@@ -27,6 +27,12 @@ export type CliConfig = {
     memory?: boolean;
     /** Folders the user has said the CLI may work in (real paths). */
     trustedRoots?: string[];
+    /** An operating-system sandbox for approved commands: off (the default), workspace-write or read-only. See sandbox.ts. */
+    sandbox?: string;
+    /** The hosts a sandboxed command may reach through the filtering proxy. When absent a small list of package registries is used. */
+    sandboxDomains?: string[];
+    /** Lets a sandboxed command connect to localhost. Off unless set to true. */
+    sandboxLocalhost?: boolean;
 };
 
 export const tomverseHome = (env: NodeJS.ProcessEnv = process.env) =>
@@ -64,6 +70,9 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): CliConfig => {
     if (Array.isArray(value.commandEnv)) config.commandEnv = value.commandEnv.filter((v): v is string => typeof v === "string");
     if (typeof value.memory === "boolean") config.memory = value.memory;
     if (Array.isArray(value.trustedRoots)) config.trustedRoots = value.trustedRoots.filter((v): v is string => typeof v === "string");
+    if (typeof value.sandbox === "string") config.sandbox = value.sandbox;
+    if (Array.isArray(value.sandboxDomains)) config.sandboxDomains = value.sandboxDomains.filter((v): v is string => typeof v === "string");
+    if (typeof value.sandboxLocalhost === "boolean") config.sandboxLocalhost = value.sandboxLocalhost;
     return config;
 };
 

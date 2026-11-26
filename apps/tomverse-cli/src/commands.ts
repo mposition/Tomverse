@@ -297,11 +297,10 @@ const posixDescendants = async (pid: number): Promise<number[] | null> => {
 
 /** Starts the planned program with the small command environment, as its own process group on POSIX so the whole tree can be ended. */
 export const spawnPlanned = (plan: CommandPlan, extraEnv: string[] = [], launchCommand?: CommandLaunch): ChildProcess => {
-    const env = commandEnv(extraEnv);
-    const launch: CommandLaunchResult = launchCommand?.(plan.file, plan.args, { cwd: plan.cwd, env }) ?? plan;
+    const launch: CommandLaunchResult = launchCommand?.(plan.file, plan.args, { cwd: plan.cwd, env: commandEnv(extraEnv) }) ?? plan;
     return spawn(launch.file, launch.args, {
         cwd: plan.cwd,
-        env: launch.env ? { ...env, ...launch.env } : env,
+        env: commandEnv(extraEnv, process.env, launch.env),
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: true,

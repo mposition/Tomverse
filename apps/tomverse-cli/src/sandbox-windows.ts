@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { CommandLaunch, CommandLaunchResult } from "./commands.js";
+import { commandEnv } from "./env.js";
 import type { SandboxMode, SandboxUnavailable } from "./sandbox.js";
 
 /**
@@ -163,6 +164,8 @@ public static class TvSandbox
 
         var si = new StartupInfo();
         si.cb = Marshal.SizeOf(typeof(StartupInfo));
+        // The interactive desktop, named: a parent that runs on another desktop would hand its own down, and a low-integrity process cannot open that one.
+        si.lpDesktop = @"winsta0\default";
         si.dwFlags = 0x100; // STARTF_USESTDHANDLES
         si.hStdInput = GetStdHandle(-10); si.hStdOutput = GetStdHandle(-11); si.hStdError = GetStdHandle(-12);
         foreach (var h in new[] { si.hStdInput, si.hStdOutput, si.hStdError })
@@ -254,7 +257,7 @@ const exec = (file: string, args: string[], env: Record<string, string>, timeout
     new Promise((done) => {
         let stdout = "";
         let stderr = "";
-        const child = spawn(file, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+        const child = spawn(file, args, { env: commandEnv([], process.env, env), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
         const timer = setTimeout(() => child.kill(), timeoutMs);
         child.stdout.on("data", (chunk: Buffer) => (stdout = (stdout + chunk).slice(-4000)));
         child.stderr.on("data", (chunk: Buffer) => (stderr = (stderr + chunk).slice(-4000)));

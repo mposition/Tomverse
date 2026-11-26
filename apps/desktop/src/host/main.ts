@@ -66,6 +66,8 @@ import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-s
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { codeMemoryView } from "./code-memory";
+import { codeSandboxInput } from "../code-sandbox-contract";
+import { codeSandboxView } from "./code-sandbox";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -1225,13 +1227,14 @@ function checkpointNativeTurn(task: Task, force = false) {
 }
 
 const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
+const codeSandboxDirectory = () => join(app.getPath("userData"), "code-sandbox");
 
 function bootWorker() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
   const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
-    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory() },
+    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
@@ -3306,6 +3309,7 @@ function registerIpc() {
     if (projectRoot) assertProjectRoot(projectRoot);
     return codeMemoryView(codeMemoryDirectory(), projectRoot, input);
   });
+  main("desktop:code-sandbox", (value) => codeSandboxView(codeSandboxDirectory(), codeSandboxInput.parse(value)));
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);
     const task = state.task;

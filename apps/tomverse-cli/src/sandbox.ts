@@ -3,6 +3,7 @@ import { accessSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSyn
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { CommandError, type CommandLaunch, type CommandLaunchResult } from "./commands.js";
+import { commandEnv } from "./env.js";
 import { DEFAULT_ALLOWED_DOMAINS, normalizeAllowedDomains, startFilteringProxy, type FilteringProxy } from "./net-proxy.js";
 import { prepareWindowsSandbox, windowsSandboxAvailable, type WindowsSandbox } from "./sandbox-windows.js";
 
@@ -118,7 +119,6 @@ export const workspaceTooBroad = (workspace: string, home: string, platform: San
 
 const proxyEnv = (url: string, allowLocalhost: boolean): Record<string, string> => ({
     HTTP_PROXY: url, HTTPS_PROXY: url, http_proxy: url, https_proxy: url, ALL_PROXY: url, all_proxy: url,
-    NODE_USE_ENV_PROXY: "1",
     NO_PROXY: allowLocalhost ? "localhost,127.0.0.1,::1" : "", no_proxy: allowLocalhost ? "localhost,127.0.0.1,::1" : "",
 });
 
@@ -228,7 +228,7 @@ const onPath = (name: string, env: NodeJS.ProcessEnv = process.env): string | nu
 const run = (file: string, args: string[], timeoutMs = 8000) =>
     new Promise<{ code: number | null; stderr: string }>((done) => {
         let stderr = "";
-        const child = spawn(file, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+        const child = spawn(file, args, { env: commandEnv(), stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
         const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
         child.stderr.on("data", (chunk: Buffer) => (stderr = (stderr + chunk).slice(-400)));
         child.on("error", (error) => done({ code: null, stderr: error.message }));

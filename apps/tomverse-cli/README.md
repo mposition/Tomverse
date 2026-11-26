@@ -186,7 +186,10 @@ per task".
   shell line and the shell), the folder, the time limit and the environment
   variable names. **A command runs with your own operating-system permissions.
   The folder is where it starts, not a sandbox: it can change files elsewhere
-  and use the network.** A test script is a command like any other; the CLI
+  and use the network** unless you turn the OS sandbox on
+  (`tomverse config set sandbox workspace-write` or `read-only`; off by default.
+  What it does and does not enforce on each system, and the host list a sandboxed
+  command may reach, are in `docs/ops/desktop-sandbox.md`). A test script is a command like any other; the CLI
   does not judge commands as safe. Commands get a small environment (PATH,
   HOME, temp folders, locale, …) plus names you add with
   `tomverse config set command-env NAME1,NAME2`; Tomverse variables are never

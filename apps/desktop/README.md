@@ -66,6 +66,10 @@ New Tomverse API Agent tasks in a Git project start in their own worktree when G
 
 A worktree keeps the path relative to the repository of the folder you opened. Attachments for an isolated task must exist in the selected commit. After restarting Desktop, open the source folder and select the saved task from history to resume in its worktree. If the worktree is missing or on a different branch, Desktop blocks resumption and undo until the original checkout is available. Saved diffs and command details can still be inspected. Worktree files stay on disk when you delete Desktop task history.
 
+## Command sandbox
+
+Settings > Execution and limits > Command sandbox limits what the commands Code runs can change: `workspace-write` (the project folder and a temporary folder), `read-only`, or `off` (the default), with an editable list of sites a command may reach through a filtering proxy. The screen shows what the current operating system really enforces. Windows limits writes only; its network list is advisory. The method, its limits and what it changes on disk are in `docs/ops/desktop-sandbox.md`. The sandbox applies to the Tomverse API path and is read again when each task starts.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.
