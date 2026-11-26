@@ -49,6 +49,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
 import { SearchCitationList } from "@/components/chat/SearchCitationList";
+import { citationsOutsideResearchBody } from "@/lib/researchCitationDisplay";
 import { getImageModel, imageModelOwner } from "@/lib/imageModelRegistry";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
@@ -1641,7 +1642,8 @@ export function ChatMessageList({
                       </div>
                     )}
                     {msg.searchMetadata && (
-                      <SearchCitationList citations={msg.searchMetadata.citations} label={t("chat.searchCitationsLabel")} />
+                      // A Research report lists its sources in its own body; this list adds only the rest.
+                      <SearchCitationList citations={citationsOutsideResearchBody(msg.searchMetadata.citations, msg.searchMetadata.research)} label={t("chat.searchCitationsLabel")} />
                     )}
                     {!isUser && msg.status !== "error" && !isActivelyGenerating && msg.content && typeof msg.id === "string" && !isGuestMode && (
                       // What a project delivered with this answer; renders

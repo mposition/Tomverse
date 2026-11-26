@@ -1,4 +1,5 @@
 import type { Language } from "../../../../lib/language";
+import { citationsOutsideResearchBody } from "../../../../lib/researchCitationDisplay";
 import { sourceRows } from "../answer-sources";
 import type { ChatConversation } from "../chat-contract";
 import { AnswerFeedback } from "./AnswerFeedback";
@@ -31,7 +32,8 @@ export function AnswerExtras({ message, language, product = "chat" }: { message:
   const reportable = !message.imageTurn && (message.status === undefined || message.status === "normal" || message.status === "incomplete") &&
     Boolean(message.content.trim());
   return <>
-    <SearchCitations citations={message.searchMetadata?.citations ?? []} language={language} />
+    {/* A Research report lists its sources in its own body; this list adds only the rest. */}
+    <SearchCitations citations={citationsOutsideResearchBody(message.searchMetadata?.citations, message.searchMetadata?.research)} language={language} />
     {reportable && <AnswerFeedback product={product} messageId={message.id} modelId={message.modelId} language={language} />}
   </>;
 }
