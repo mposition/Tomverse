@@ -322,29 +322,6 @@ export async function makeStudioStickerReference(source: string, spellingKey?: r
   return encode(element);
 }
 
-export const studioStyleReferenceDirection =
-  "The wide left panel is the subject reference. The narrow right panel contains material, color and lighting samples. Use the left panel for the person's identity and the right panel only for the chosen look. Output one complete image with no panel layout.";
-
-export async function makeStudioStyleReference(source: string, styleSource: string) {
-  const [subject, style] = await Promise.all([readImage(source), readImage(styleSource)]);
-  const { element, context } = canvas(1024, 1024);
-  const subjectWidth = 730;
-  const stripLeft = 746;
-  const stripWidth = element.width - stripLeft;
-  const cropWidth = Math.round(style.naturalWidth * .16);
-  const lower = Math.round(style.naturalHeight * .76);
-  context.fillStyle = "#f4f0eb";
-  context.fillRect(0, 0, element.width, element.height);
-  drawImage(context, subject, subjectWidth, element.height, "contain");
-  // Use the outer and lower edges of the preset portrait for color and wardrobe.
-  context.drawImage(style, 0, 0, cropWidth, style.naturalHeight, stripLeft, 0, stripWidth / 2, 632);
-  context.drawImage(style, style.naturalWidth - cropWidth, 0, cropWidth, style.naturalHeight,
-    stripLeft + stripWidth / 2, 0, stripWidth / 2, 632);
-  context.drawImage(style, 0, lower, style.naturalWidth, style.naturalHeight - lower,
-    stripLeft, 640, stripWidth, element.height - 640);
-  return encode(element);
-}
-
 /**
  * The background remover works on the photo centred in a square
  * (renderStudioImage, "contain"). This takes the photo's own area back out of
