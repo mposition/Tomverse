@@ -345,28 +345,28 @@ export async function makeStudioStyleReference(source: string, styleSource: stri
   return encode(element);
 }
 
-export async function applyStudioSubjectMask(source: string, mask: Blob) {
-  const maskUrl = URL.createObjectURL(mask);
+/**
+ * The background remover works on the photo centred in a square
+ * (renderStudioImage, "contain"). This takes the photo's own area back out of
+ * the square it returns, and counts nearly opaque as opaque: one remover
+ * leaves most of a subject at 240-254, which lets a little of whatever the
+ * cut-out is placed on show through it.
+ */
+export async function cropStudioCutout(source: string, cutout: Blob) {
+  const url = URL.createObjectURL(cutout);
   try {
-    const [photo, matte] = await Promise.all([readImage(source), readImage(maskUrl)]);
-    const side = 1024;
-    const frame = canvas(side, side);
-    drawImage(frame.context, matte, side, side, "contain");
-    const scale = Math.min(side / photo.naturalWidth, side / photo.naturalHeight);
+    const [photo, square] = await Promise.all([readImage(source), readImage(url)]);
+    const scale = Math.min(square.naturalWidth / photo.naturalWidth, square.naturalHeight / photo.naturalHeight);
     const width = Math.max(1, Math.round(photo.naturalWidth * scale));
     const height = Math.max(1, Math.round(photo.naturalHeight * scale));
     const { element, context } = canvas(width, height);
-    context.drawImage(photo, 0, 0, width, height);
+    context.drawImage(square, (width - square.naturalWidth) / 2, (height - square.naturalHeight) / 2);
     const pixels = context.getImageData(0, 0, width, height);
-    const mattePixels = frame.context.getImageData(Math.floor((side - width) / 2), Math.floor((side - height) / 2), width, height);
-    for (let i = 0; i < pixels.data.length; i += 4) {
-      const luminance = (mattePixels.data[i] + mattePixels.data[i + 1] + mattePixels.data[i + 2]) / 3;
-      pixels.data[i + 3] = Math.round(pixels.data[i + 3] * luminance / 255);
-    }
+    for (let i = 3; i < pixels.data.length; i += 4) if (pixels.data[i] >= 240) pixels.data[i] = 255;
     context.putImageData(pixels, 0, 0);
     return await encode(element);
   } finally {
-    URL.revokeObjectURL(maskUrl);
+    URL.revokeObjectURL(url);
   }
 }
 

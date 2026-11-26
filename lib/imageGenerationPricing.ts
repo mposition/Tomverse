@@ -11,6 +11,7 @@
 // integers, same unit as the rest of the billing code.
 
 import { CATALOG_IMAGE_SIZES, DIRECT_RASTER_MODELS, RECRAFT_API_MODEL, RECRAFT_SIZE, SEEDREAM_API_MODEL } from "@/lib/directRasterModels";
+import { IMAGE_PHOTO_TOOL_SIZE, imagePhotoToolContract } from "@/lib/imagePhotoTools";
 import { ALIBABA_SINGLE_PHOTO_EDIT_COST } from "@/lib/qwenImageRequest";
 import { BFL_FLUX3_IMAGE_EDIT_COST } from "@/lib/bflImageRequest";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
@@ -50,7 +51,7 @@ export const IMAGE_EDIT_INPUT_MAX_EDGE_PX = 1_024;
 
 export type ImageEditPricing = {
   option?: {
-    provider: "qwen" | "bfl" | "google" | "openai" | "ideogram" | "recraft";
+    provider: "qwen" | "bfl" | "google" | "openai" | "ideogram" | "recraft" | "fal";
     size: ImageSize;
     quality?: ImageQuality;
     minimumOutputCostMicroUsd?: number;
@@ -174,6 +175,21 @@ export const imageEditPricing = (modelId: string): ImageEditPricing | null => {
         minimumOutputCostMicroUsd: DIRECT_RASTER_MODELS.recraft.outputCostMicroUsd,
       },
       verification: { verifiedAt: "2026-11-25", source: "https://www.recraft.ai/docs/api-reference/tools/image-to-image" },
+    };
+  }
+  const photoTool = imagePhotoToolContract(modelId);
+  if (photoTool) {
+    // Sold per request whatever the photo: nothing is charged for it beside
+    // that price, and no prompt is sent. Off until its own switch is on.
+    return process.env[photoTool.switch] !== "true" ? null : {
+      surchargeCredits: 0,
+      inputBudgetMicroUsd: 0,
+      inputTokens: null,
+      option: {
+        provider: photoTool.provider, size: IMAGE_PHOTO_TOOL_SIZE, quality: "medium",
+        minimumOutputCostMicroUsd: photoTool.outputCostMicroUsd,
+      },
+      verification: { verifiedAt: photoTool.verifiedAt, source: photoTool.pricing },
     };
   }
   if (process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED === "true" && OPENAI_2_6_PHOTO_EDIT_IDS.includes(modelId)) {

@@ -84,6 +84,7 @@ export const studioLocale = {
   "stickerReplaced": "The selected sticker was replaced.",
   "exampleMemeSituation": "They said five minutes and I arrived before everyone.",
   "taskFailed": "We couldn't finish this step. Check the image or try again.",
+  "cutoutMissing": "One of the two results couldn't be made. Press the button again to retry only that one.",
   "exampleRoleplay": "We find a wedding dress labelled with our names at Jeju Airport.",
   "exampleQuizQuestion": "What do you pack first before a trip?",
   "exampleQuizTitle": "Who are you on our group trip?",

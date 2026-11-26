@@ -234,6 +234,11 @@ test("a stated thinking cap is a bound only where the request can hold it", () =
   assert.equal(imageThinkingBilling("toString", "qwen-image-3.0"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("constructor", "qwen-image-3.0"), null);
   assert.equal(imageThinkingBilling(undefined), null);
+  // A photo tool answers only for its own provider and id.
+  assert.equal(imageThinkingBilling("fal", "bria/rmbg-3"), "not_billed");
+  assert.equal(imageThinkingBilling("recraft", "bria/rmbg-3"), null);
+  assert.equal(imageThinkingBilling("recraft", "recraft-remove-background"), "not_billed");
+  assert.equal(imageThinkingBilling("recraft", undefined), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("ideogram"), null);
   assert.equal(imageThinkingCapMinimumMicroUsd("google"), null);
 });

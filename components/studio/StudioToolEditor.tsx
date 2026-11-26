@@ -8,11 +8,14 @@ import { studioPresetName, studioPublicationPresets, type StudioPublicationPrese
 import { studioOutputLanguage } from "@/locales/studio";
 import { STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets, studioPublishingDesign, studioPublishingPrompt, studioSocialFormat } from "@/lib/studioPublishing";
 import { drawStudioPublishingArtwork, renderStudioPublishingArtwork, type StudioPublishingArtwork } from "./studioPublishingArtwork";
-import { applyStudioSubjectMask, makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
+import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
-import { createStudioImageRunner, StudioGenerationError, useStudioImageQuote } from "./studioGenerationClient";
+import {
+  createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolOrder, studioToolOutcome, studioToolQuote,
+  studioToolSequenceStops, studioToolsQuote, studioToolsToRequest, useStudioImageQuote,
+} from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
@@ -32,6 +35,10 @@ type ToolCheckoutDraft = {
   publicationPreset?: string;
   socialFormatId?: string;
   logo?: StudioDraftImage;
+  /** Background remover results already paid for, so a return from checkout does not request them again. */
+  toolBlobs?: { modelId: string; blob: Blob; owed?: boolean }[];
+  /** The tool whose cut-out was picked when the draft was saved. */
+  pickedTool?: string;
 };
 
 const posterCategories = [["autoStyle", "auto"], ["eventCategory", "event"], ["productCategory", "product"], ["announcementCategory", "announcement"]] as const;
@@ -95,6 +102,16 @@ export function StudioToolEditor({ tool, preset }: {
   const { busy, status, report, task } = useStudioTask();
   const active = useRef<AbortController | null>(null);
   const [runImage] = useState(createStudioImageRunner);
+  // One runner per background remover: each tool is its own request, with its own retry state.
+  const [toolRunners] = useState(() => new Map<string, ReturnType<typeof createStudioImageRunner>>());
+  // What each remover returned for a photo, held until the photo changes: a result already paid for is
+  // never requested again because the other tool, or its own cropping, failed.
+  // `owed` marks a result whose tool has been asked again: it is kept, and saved with a checkout draft,
+  // until the new one is in hand, but it no longer counts as held.
+  const [toolResults] = useState(() => new Map<string, { photo: string; blob: Blob; owed?: boolean }>());
+  // Bumped whenever the user changes the photo or presses the button (and by a restore itself), so a
+  // draft that arrives or finishes late does not overwrite what they are doing.
+  const inputVersion = useRef(0);
   const { id } = tool;
   const poster = id === "poster";
   const social = id === "social-post";
@@ -130,6 +147,8 @@ export function StudioToolEditor({ tool, preset }: {
   const [result, setResult] = useState(() => publishing ? asset(publicationChoices[0].artwork)
     : preset ? asset(preset.artwork) : asset(tool.artwork));
   const [resultIsExample, setResultIsExample] = useState(true);
+  // Transparent PNG: one cut-out per background remover; `result` is the one picked.
+  const [cutouts, setCutouts] = useState<{ modelId: string; url: string }[]>([]);
   const [format, setFormat] = useState(() => {
     if (id === "caricature") return 1;
     const style = preset?.style ?? (id === "illustration" ? "watercolor illustration" : "");
@@ -162,10 +181,35 @@ export function StudioToolEditor({ tool, preset }: {
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
+    // The draft is read from storage after the editor is usable. Once the user has picked a photo or
+    // pressed the button, what they are doing wins: a draft that arrives late is not applied.
+    if (inputVersion.current !== 0) return;
     urls.release(photo);
     urls.release(result);
-    setPhoto(publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo));
-    setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
+    const restoredPhoto = publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo);
+    setPhoto(restoredPhoto);
+    toolResults.clear();
+    // `owed` comes back too: a tool that was being asked again when checkout began is still the only one owed.
+    for (const held of saved.toolBlobs ?? []) toolResults.set(held.modelId, { photo: restoredPhoto, blob: held.blob, owed: held.owed });
+    const restoredResult = typeof saved.result === "string" ? saved.result : urls.make(saved.result);
+    setResult(restoredResult);
+    // The cut-outs that were paid for come back as they were shown, each under its own tool and with the
+    // same one picked. A restore that finishes after the photo changed or a press began is dropped.
+    const version = ++inputVersion.current;
+    if (restoredPhoto && saved.toolBlobs?.length) {
+      void Promise.all(saved.toolBlobs.map(async held => ({ modelId: held.modelId, url: urls.make(await cropStudioCutout(restoredPhoto, held.blob)) })))
+        .then(restored => {
+          if (inputVersion.current !== version) {
+            for (const stale of restored) urls.release(stale.url);
+            return;
+          }
+          urls.release(restoredResult);
+          setCutouts(restored);
+          setResult((restored.find(cutout => cutout.modelId === saved.pickedTool) ?? restored[0]).url);
+          setResultIsExample(false);
+        })
+        .catch(() => undefined);
+    }
     setCustomPhoto(saved.customPhoto);
     setResultIsExample(saved.resultIsExample);
     setFormat(saved.format);
@@ -182,14 +226,21 @@ export function StudioToolEditor({ tool, preset }: {
     report(copy.checkoutDraftRestored);
   });
 
-  async function saveCheckoutDraft() {
+  // `shown` is what is on screen now. A press that already replaced the result passes it: the render it
+  // started from still names the old one, whose object URL has been released.
+  async function saveCheckoutDraft(shown: { result: string; resultIsExample: boolean; tool?: string } = {
+    result, resultIsExample, tool: cutouts.find(cutout => cutout.url === result)?.modelId,
+  }) {
     try {
       const [photoDraft, resultDraft, logoDraft] = await Promise.all(
-        [photo, result, logo].map(captureStudioDraftImage),
+        [photo, shown.result, logo].map(captureStudioDraftImage),
       );
       await checkoutDraft.save({
-        photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample,
+        photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample: shown.resultIsExample,
         format, title, details, caption, posterBrief, posterCategory, posterStyle, publicationPreset, socialFormatId,
+        toolBlobs: [...toolResults].filter(([, held]) => held.photo === photo)
+          .map(([modelId, held]) => ({ modelId, blob: held.blob, owed: held.owed })),
+        pickedTool: shown.tool,
       });
       setDraftSaved(true);
     } catch {
@@ -200,16 +251,20 @@ export function StudioToolEditor({ tool, preset }: {
   useEffect(() => () => active.current?.abort(), []);
 
   const changePhoto = (file: File) => {
+    inputVersion.current++;
     const url = urls.make(file);
     urls.release(photo);
     setPhoto(url);
     setCustomPhoto(true);
     urls.release(result);
+    for (const cutout of cutouts) urls.release(cutout.url);
+    setCutouts([]);
     setResult("");
     setResultIsExample(false);
   };
 
   const removePhoto = () => {
+    inputVersion.current++;
     urls.release(photo);
     setPhoto("");
     setCustomPhoto(false);
@@ -249,38 +304,113 @@ export function StudioToolEditor({ tool, preset }: {
           category: posterCategory, style: posterStyle,
         });
       case "transparent-png":
-        return "Produce a square grayscale segmentation matte of the foreground subject. Subject pixels are white, background pixels black, and partially transparent edges gray. Do not reproduce the image, move, resize or crop anything. Match the exact original subject boundaries and keep transparent padding black.";
+        // The background remover takes no prompt; this is the request's label.
+        return "Remove the background from the photo.";
       default:
         return "";
     }
   };
 
+  const heldTool = (modelId: string) => {
+    const earlier = toolResults.get(modelId);
+    return earlier?.photo === photo && !earlier.owed ? earlier.blob : undefined;
+  };
+  // The tools the next press requests, and so what it charges: all of them, or only what is still owed.
+  const toolsToRequest = imageQuote.quote?.targets && studioToolsToRequest(
+    imageQuote.quote.targets, modelId => Boolean(heldTool(modelId)),
+    modelId => !resultIsExample && cutouts.some(cutout => cutout.modelId === modelId),
+  );
+
   const generate = () => void task(async () => {
     const controller = new AbortController();
     active.current = controller;
     const { signal } = controller;
+    inputVersion.current++;
+    let onScreen: { result: string; resultIsExample: boolean; tool?: string } = {
+      result, resultIsExample, tool: cutouts.find(cutout => cutout.url === result)?.modelId,
+    };
     try {
-      if (!imageQuote.quote) return;
-      const generated = await runImage({
-        inputKey: hasReference ? photo : id,
-        prompt: imagePrompt(),
-        size: imageQuote.quote.size,
-        quote: imageQuote.quote,
-        reference: hasReference ? () => pngTool
-          ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })
-          : makeStudioImageReference(photo) : undefined,
-        signal,
-      });
-      const output = pngTool ? await applyStudioSubjectMask(photo, generated) : generated;
-      signal.throwIfAborted();
-      urls.release(result);
-      setResult(urls.make(output));
+      const quote = imageQuote.quote;
+      if (!quote) return;
+      // Rendered once: two removers upload the same reference.
+      let prepared: Promise<Blob> | undefined;
+      const reference = hasReference ? () => prepared ??= pngTool
+        ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })
+        : makeStudioImageReference(photo) : undefined;
+      const run = { inputKey: hasReference ? photo : id, prompt: imagePrompt(), size: quote.size, reference, signal };
+      if (quote.targets) {
+        // Each remover is its own request, sent one after the other: a user may have one image request
+        // running at a time. Each cut-out is shown as it arrives and the first is picked until the user chooses.
+        // What is about to be requested is owed again: if it fails, the next press requests that tool alone.
+        // What it returned before is kept until then, so a checkout on the way does not lose a paid result.
+        for (const target of toolsToRequest ?? []) {
+          const earlier = toolResults.get(target.modelId);
+          if (earlier?.photo === photo) earlier.owed = true;
+        }
+        const fresh: typeof cutouts = [];
+        const failures: unknown[] = [];
+        for (const target of studioToolOrder(quote.targets, modelId => Boolean(toolRunners.get(modelId)?.pending()))) {
+          const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
+          toolRunners.set(target.modelId, runner);
+          try {
+            let blob = heldTool(target.modelId);
+            if (!blob) {
+              blob = await runStudioTool(() => runner({ ...run, quote: studioToolQuote(quote, target) }), signal);
+              toolResults.set(target.modelId, { photo, blob });
+            }
+            const url = urls.make(await cropStudioCutout(photo, blob));
+            if (signal.aborted) return urls.release(url);
+            if (fresh.length === 0) {
+              urls.release(result);
+              for (const old of cutouts) urls.release(old.url);
+              setResult(url);
+              setResultIsExample(false);
+              onScreen = { result: url, resultIsExample: false, tool: target.modelId };
+            }
+            fresh.push({ modelId: target.modelId, url });
+            setCutouts([...fresh]);
+          } catch (error) {
+            if (signal.aborted) return;
+            failures.push(error);
+            if (studioToolSequenceStops(error, runner.pending(), isStudioCreditShortfall)) break;
+          }
+        }
+        const made = fresh.length;
+        // The first arrival cleared the screen. A tool that got no new cut-out in this run (it failed, or
+        // the sequence stopped before it) gets its earlier one back: it was paid for. It stays owed, so the
+        // next press still requests that tool alone.
+        for (const target of made > 0 ? quote.targets : []) {
+          const earlier = toolResults.get(target.modelId);
+          if (earlier?.photo !== photo || fresh.some(cutout => cutout.modelId === target.modelId)) continue;
+          const url = await cropStudioCutout(photo, earlier.blob).then(urls.make, () => undefined);
+          if (signal.aborted) {
+            if (url) urls.release(url);
+            return;
+          }
+          if (url) fresh.push({ modelId: target.modelId, url });
+        }
+        if (fresh.length > made) setCutouts([...fresh]);
+        if (failures.length > 0) {
+          const outcome = studioToolOutcome({
+            failures, made, isShortfall: isStudioCreditShortfall,
+            unfinished: quote.targets.some(target => toolRunners.get(target.modelId)?.pending()),
+          });
+          if (outcome.action === "throw") throw outcome.error;
+          report(copy.cutoutMissing, true);
+        }
+      } else {
+        const generated = await runImage({ ...run, quote });
+        const output = pngTool ? await cropStudioCutout(photo, generated) : generated;
+        signal.throwIfAborted();
+        urls.release(result);
+        setResult(urls.make(output));
+      }
       setResultIsExample(false);
       void checkoutDraft.clear();
     } catch (error) {
       if (signal.aborted) return;
       if (isStudioCreditShortfall(error)) {
-        await saveCheckoutDraft();
+        await saveCheckoutDraft(onScreen);
         if (signal.aborted) void checkoutDraft.clear();
         else setCreditError(error);
         return;
@@ -291,6 +421,9 @@ export function StudioToolEditor({ tool, preset }: {
       active.current = null;
     }
   });
+
+  const quotedToolName = (modelId: string) =>
+    imageQuote.quote?.targets?.find(target => target.modelId === modelId)?.model ?? copy.result;
 
   const valid = (!publishing || Boolean(title.trim() || posterBrief.trim())) && (id !== "meme" || Boolean(details.trim()));
   const generationLabel = pngTool ? copy.removeBackground : copy.generate;
@@ -409,7 +542,7 @@ export function StudioToolEditor({ tool, preset }: {
       <StudioGenerateButton label={generationLabel} busy={busy}
         disabled={!valid || !imageQuote.quote}
         onClick={() => generate()} />
-      <StudioQuoteHint {...imageQuote} />
+      <StudioQuoteHint {...imageQuote} quote={imageQuote.quote && toolsToRequest !== undefined ? studioToolsQuote(imageQuote.quote, toolsToRequest) : imageQuote.quote} />
       <StudioStatus status={status} />
     </section>
     <section className={styles.panel} aria-busy={busy}>
@@ -425,11 +558,20 @@ export function StudioToolEditor({ tool, preset }: {
         {template && !result && <p className={styles.hint}>{busy ? copy.generating : copy.emptyResult}</p>}
         {!template && <div className={styles.compare}>
           <figure><figcaption>{copy.original}</figcaption><img src={photo} alt="" /></figure>
-          <figure className={pngTool ? styles.checker : undefined}>
-            <figcaption>{artisticPreview ? `${copy.exampleResult} · ${artisticLabel}` : copy.result}</figcaption>
-            {artisticPreview ? <img src={artisticPreview} alt={artisticLabel} />
-              : result ? <img src={result} alt={copy.processedImage} /> : <p>{busy ? copy.generating : copy.emptyResult}</p>}
-          </figure>
+          {pngTool && cutouts.length > 0 && !resultIsExample
+            // One figure per remover; pressing one makes it the image that is saved and shared.
+            ? cutouts.map(cutout => <figure key={cutout.modelId} className={styles.checker} data-picked={cutout.url === result || undefined}>
+              <figcaption>{quotedToolName(cutout.modelId)}</figcaption>
+              <button type="button" aria-pressed={cutout.url === result} aria-label={quotedToolName(cutout.modelId)}
+                onClick={() => setResult(cutout.url)}>
+                <img src={cutout.url} alt={copy.processedImage} />
+              </button>
+            </figure>)
+            : <figure className={pngTool ? styles.checker : undefined}>
+              <figcaption>{artisticPreview ? `${copy.exampleResult} · ${artisticLabel}` : copy.result}</figcaption>
+              {artisticPreview ? <img src={artisticPreview} alt={artisticLabel} />
+                : result ? <img src={result} alt={copy.processedImage} /> : <p>{busy ? copy.generating : copy.emptyResult}</p>}
+            </figure>}
         </div>}
         <div className={styles.creativeActions}>
           <button type="button" className={styles.primary} disabled={!result || busy || Boolean(artisticPreview)}
@@ -441,7 +583,7 @@ export function StudioToolEditor({ tool, preset }: {
     </section>
   </div>
     <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?" + new URLSearchParams({ lang, ...(preset ? { preset: preset.id } : {}) })}
-      draftSaved={draftSaved} onSaveDraft={saveCheckoutDraft} onClose={async () => {
+      draftSaved={draftSaved} onSaveDraft={() => saveCheckoutDraft()} onClose={async () => {
         await checkoutDraft.clear();
         setCreditError(null);
       }} />

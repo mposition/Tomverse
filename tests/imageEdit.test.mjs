@@ -388,3 +388,26 @@ test("an edit is priced on the live option and refused where its photo breaks th
   assert.equal(imageEditCredits(grok, lowered), null);
   assert.equal(imageEditCredits(getImageModel("gemini-3.1-flash-image"), { quality: "medium", size: "1024x1024", credits: 100, outputCostMicroUsd: 1 }), null);
 });
+
+test("a provider-reported cost above an edit's price is charged to the provider budget", async () => {
+  const { reportedEditOverageMicroUsd } = await import("../lib/imageGenerationService.ts");
+  // The background remover: 10,000 priced, no photo budget. 10 units is the price; 25 units is 15,000 over.
+  assert.equal(reportedEditOverageMicroUsd(10_000, 0, 10_000), 0);
+  assert.equal(reportedEditOverageMicroUsd(10_000, 0, 25_000), 15_000);
+  assert.equal(reportedEditOverageMicroUsd(50_000, 10_000, 60_000), 0);
+  assert.equal(reportedEditOverageMicroUsd(50_000, 10_000, 61_000), 1_000);
+  // Under the price is not a refund here, and nothing reported or no edit adds nothing.
+  assert.equal(reportedEditOverageMicroUsd(10_000, 0, 4_000), 0);
+  for (const reported of [null, undefined, Number.NaN]) assert.equal(reportedEditOverageMicroUsd(10_000, 0, reported), 0);
+  assert.equal(reportedEditOverageMicroUsd(10_000, undefined, 25_000), 0);
+  assert.equal(reportedEditOverageMicroUsd(null, 0, 25_000), 0);
+});
+
+test("a failed request that the provider billed past its reservation still charges the provider budget", async () => {
+  const { failureReportedOverageMicroUsd } = await import("../lib/imageGenerationService.ts");
+  // The background remover reserves 15,000 (price plus prompt budget). A refused answer that reported 25 units is 10,000 over.
+  assert.equal(failureReportedOverageMicroUsd(15_000, 25_000), 10_000);
+  assert.equal(failureReportedOverageMicroUsd(15_000, 10_000), 0);
+  assert.equal(failureReportedOverageMicroUsd(15_000, 15_000), 0);
+  for (const reported of [null, undefined, Number.NaN]) assert.equal(failureReportedOverageMicroUsd(15_000, reported), 0);
+});
