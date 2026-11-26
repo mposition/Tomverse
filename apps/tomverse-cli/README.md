@@ -392,7 +392,10 @@ asks, an allow rule skips the question except where noted).
   what a script file, a package script (`npm run deploy`) or a git alias set in the
   repository does once it runs. The command sandbox is what limits a command that
   is already running, and on Windows the sandbox does not limit the network, so
-  allow all on Windows should be used only with code you trust.
+  allow all on Windows should be used only with code you trust. Allow all and
+  auto review do not require the sandbox: the owner decided on 2026-11-26 to keep
+  this reading as a best-effort check with its limits stated here, instead of
+  tying those modes to a sandbox that enforces the network.
 - **MCP tools** are other programs that can send what they are given anywhere, so
   allow all and auto review treat them like a web host: only a rule that names the
   tool (`mcp__server__tool`, as the model sees the name) or its server (`mcp__server__*`, or
