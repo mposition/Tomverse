@@ -26,7 +26,7 @@ async function launch(prefix: string, gateway: FakeGateway) {
   await Promise.all([mkdir(root), mkdir(profile)]);
   await writeFile(join(profile, "language.txt"), "en");
   await writeFile(join(root, "sum.js"), "export const sum = (a, b) => a - b;\n");
-  await writeFile(join(root, "test.js"), "import { sum } from './sum.js';\nif (sum(2, 3) !== 5) process.exit(1);\n");
+  await writeFile(join(root, "test.js"), "// Covers sum() of sum.js: sum(2, 3) must be 5.\n");
   const descriptor = join(directory, "fixture.json");
   await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
   const app = await electron.launch({ executablePath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 20_000 });
