@@ -301,6 +301,9 @@
 .compare figure { padding: 10px; background-color: var(--studio-field); }
 .compare figcaption { width: fit-content; max-width: 100%; overflow-wrap: anywhere; padding: 2px 4px; border-radius: 4px; background: var(--studio-surface); font-size: .77rem; font-weight: 700; }
 .compare img { display: block; width: 100%; height: clamp(126px, 22vw, 290px); object-fit: contain; }
+.compare figure button { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+.compare figure[data-picked] { outline: 2px solid var(--studio-accent, currentColor); outline-offset: -2px; }
+@media (min-width: 760px) { .compare:has(figure:nth-child(3)) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .publicationChooser > button { margin-top: 12px; }
 .socialPlacement { display: grid; grid-template-columns: minmax(140px, 210px) minmax(0, 1fr); align-items: start; gap: 16px; }
 .socialPlacement .field, .socialPlacement .fieldset { margin: 0; }

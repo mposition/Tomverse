@@ -84,6 +84,7 @@ export const studioLocale = {
   "stickerReplaced": "Der gewählte Sticker wurde ersetzt.",
   "exampleMemeSituation": "Alle sagten fünf Minuten, aber ich war vor allen da.",
   "taskFailed": "Der Schritt konnte nicht abgeschlossen werden. Prüfe das Bild oder versuche es erneut.",
+  "cutoutMissing": "Eines der beiden Ergebnisse konnte nicht erstellt werden. Erneut tippen, um nur dieses zu wiederholen.",
   "exampleRoleplay": "Am Flughafen Jeju finden wir ein Brautkleid mit unseren Namen.",
   "exampleQuizQuestion": "Was packst du vor einer Reise zuerst ein?",
   "exampleQuizTitle": "Welche Rolle hast du auf unserer Gruppenreise?",

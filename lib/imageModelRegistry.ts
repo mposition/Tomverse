@@ -12,6 +12,7 @@
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, type DirectRasterProvider } from "@/lib/directRasterModels";
+import { IMAGE_PHOTO_TOOL_CONTRACTS, IMAGE_PHOTO_TOOL_SIZE, imagePhotoToolContract } from "@/lib/imagePhotoTools";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import type { ImageUseCase } from "@/lib/runtimeImageProviders";
@@ -838,6 +839,46 @@ function directRasterProfile(provider: DirectRasterProvider, name: string, useCa
   };
 }
 
+/**
+ * Photo tools (lib/imagePhotoTools.ts) as profiles, so pricing, reservation
+ * and settlement treat one like a model. Kept out of IMAGE_MODEL_REGISTRY on
+ * purpose: no picker, router, comparison or catalogue screen lists one. A tool
+ * is found by its id alone and admitted only for the feature that owns it
+ * (imagePhotoToolAdmitted).
+ */
+export const IMAGE_PHOTO_TOOLS: readonly ImageModelProfile[] = IMAGE_PHOTO_TOOL_CONTRACTS.map((tool): ImageModelProfile => ({
+  id: tool.modelId,
+  apiModelId: tool.modelId,
+  provider: tool.provider,
+  name: tool.name,
+  lifecycle: "stable",
+  disabledReason: null,
+  sizes: [IMAGE_PHOTO_TOOL_SIZE],
+  qualities: ["medium"],
+  prices: [{ size: IMAGE_PHOTO_TOOL_SIZE, quality: "medium", credits: tool.credits, outputCostMicroUsd: tool.outputCostMicroUsd }],
+  latencyClass: "fast",
+  provenance: [],
+  outputMimeTypes: ["image/png"],
+  deliveryMimeType: "image/png",
+  pricingVersion: tool.modelId + "-" + tool.verifiedAt,
+  // Billed per request; no prompt and no reasoning charge.
+  priceVerification: { verifiedAt: tool.verifiedAt, sources: [tool.pricing, tool.docs], thinkingCapMicroUsd: 0 },
+}));
+
+/** True for a photo tool: a model id that edits a photo and can generate nothing. */
+export const isImagePhotoTool = (modelId: string): boolean => imagePhotoToolContract(modelId) !== null;
+
+/**
+ * Whether a request may name this model. A photo tool is admitted only for
+ * the feature that names it server-side (`photoTools`) and only with a photo:
+ * a model id a client sends never selects one, because being absent from the
+ * pickers is not an admission check. Every other model is always admitted here.
+ */
+export const imagePhotoToolAdmitted = (
+  modelId: string,
+  request: { photoTools?: readonly string[]; hasPhoto: boolean }
+): boolean => !isImagePhotoTool(modelId) || (request.photoTools?.includes(modelId) === true && request.hasPhoto);
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
@@ -913,15 +954,16 @@ export const listImageModels = () => activeImageModels;
 export const listEnabledImageModels = () =>
   activeImageModels.filter((model) => model.disabledReason === null);
 
+// A photo tool's id is reserved by code: a catalogue row cannot stand in for it or reprice it.
 export const getImageModel = (modelId: string): ImageModelProfile | null =>
-  findImageModel(activeImageModels, modelId);
+  findImageModel(IMAGE_PHOTO_TOOLS, modelId) ?? findImageModel(activeImageModels, modelId);
 
 export const getImageModelPrice = (
   modelId: string,
   quality: string,
   size: string
 ): ImageModelOptionPrice | null =>
-  findImageModelPrice(activeImageModels, modelId, quality, size);
+  findImageModelPrice(isImagePhotoTool(modelId) ? IMAGE_PHOTO_TOOLS : activeImageModels, modelId, quality, size);
 
 /**
  * How a provider bills the thinking of one image request, and so whether the
@@ -1089,6 +1131,9 @@ const imageThinkingTerms = (
   apiModelId: unknown,
   confirmed?: ConfirmedImageBillingTerms | null
 ): ImageThinkingTerms | null => {
+  // A photo tool is sold per request and has no reasoning to bill, whichever provider serves it.
+  const photoTool = imagePhotoToolContract(apiModelId);
+  if (photoTool && photoTool.provider === provider) return { billing: "not_billed" };
   if (isDirectRasterProvider(provider) && apiModelId !== DIRECT_RASTER_MODELS[provider].apiModelId) return null;
   if (provider === "ideogram" && apiModelId !== IDEOGRAM_MODEL_ID) return null;
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
