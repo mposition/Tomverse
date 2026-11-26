@@ -17,7 +17,7 @@ const result = spawnSync(process.execPath, [runner], {
   env: {
     ...process.env,
     DB_INTEGRATION_GROUP: "",
-    DB_INTEGRATION_SUITES: "tests/integration/mobile-auth-schema.db.test.ts,tests/integration/mobile-auth-service.db.test.ts",
+    DB_INTEGRATION_SUITES: "tests/integration/mobile-auth-schema.db.test.ts,tests/integration/mobile-auth-service.db.test.ts,tests/integration/desktop-remote-control.db.test.ts",
   },
   stdio: "inherit",
 });

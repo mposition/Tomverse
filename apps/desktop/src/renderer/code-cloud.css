@@ -1,0 +1,24 @@
+.managed-code { margin-top: 24px; }
+.managed-code h3 { font-size: 20px; line-height: 1.5; }
+.managed-code h4 { margin: 16px 0 8px; font-size: 14px; font-weight: 600; }
+.managed-code > p { margin-block: 8px; }
+.managed-locations { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.managed-locations li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.managed-locations li > div { display: grid; gap: 2px; min-width: 0; }
+.managed-locations small { color: var(--muted); overflow-wrap: anywhere; }
+.managed-locations li > span { flex: none; color: var(--muted); }
+.managed-locations li[data-available="true"] > span { color: inherit; }
+.managed-form { display: grid; gap: 10px; max-width: 520px; }
+.managed-form > div { display: grid; gap: 4px; }
+.managed-form select, .managed-form input { width: 100%; }
+.managed-confirm { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.managed-confirm p { margin: 0; }
+.managed-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.managed-reservation { display: grid; gap: 8px; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.managed-reservation h4 { margin: 0; }
+.managed-reservation p { margin: 0; }
+.managed-reservation dl { display: grid; gap: 6px; margin: 0; }
+.managed-reservation dl > div { display: grid; grid-template-columns: minmax(120px, 40%) minmax(0, 1fr); gap: 10px; }
+.managed-reservation dt { color: var(--muted); }
+.managed-reservation dd { margin: 0; }
+.managed-reservation button { justify-self: start; }

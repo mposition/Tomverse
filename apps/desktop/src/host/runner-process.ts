@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
@@ -27,13 +27,19 @@ import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
 import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
+import type { ComputerAgentRequest } from "../../../tomverse-cli/src/computer-tools";
 import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
+import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
+import { RemoteError } from "../../../tomverse-cli/src/remote-target.js";
+import { setRemoteShadowBase } from "./remote-project";
+import { inspectRemoteChange, openRemoteWorkspace, RemoteRunError, undoRemoteChange } from "./remote-worker";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
+setRemoteShadowBase(process.env.TOMVERSE_DESKTOP_REMOTE_PROJECTS);
 type PluginRequest = Extract<WorkerEvent, { type: "code-plugin" }>;
 type PluginResponse = Extract<WorkerCommand, { type: "code-plugin-result" }>;
 import { readAgentGitSwitch } from "./git-agent-switch";
@@ -46,6 +52,7 @@ type ActiveRun = {
   runner?: Runner;
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
   browserAgent?: Map<string, (reply: unknown) => void>;
+  computerAgent?: Map<string, (reply: unknown) => void>;
   terminalRead?: { requestId: string; settle: (reply: TerminalReadReply | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   gitRequest?: { requestId: string; settle: (result: AgentGitResult | null) => void };
@@ -569,6 +576,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
   return {
     id: randomUUID(),
     root: clean(view.root ?? ""),
+    ...(view.remote ? { remote: { target: clean(view.remote.target), folder: clean(view.remote.folder) } } : {}),
     tool: view.toolName,
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
@@ -576,6 +584,10 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
       selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
       ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
+    ...(view.computer ? { computer: { action: view.computer.action, window: { title: clean(view.computer.window.title), app: clean(view.computer.window.app) },
+      ...(view.computer.x !== undefined ? { x: view.computer.x, y: view.computer.y } : {}), ...(view.computer.button ? { button: view.computer.button } : {}),
+      ...(view.computer.double ? { double: true } : {}), ...(view.computer.text !== undefined ? { text: clean(view.computer.text) } : {}),
+      ...(view.computer.key ? { key: view.computer.key } : {}), ...(view.computer.dy !== undefined ? { dx: view.computer.dx, dy: view.computer.dy } : {}) } } : {}),
     ...(view.mcp ? { mcp: { server: clean(view.mcp.server), tool: clean(view.mcp.tool), scope: view.mcp.scope, args: clean(JSON.stringify(view.input, null, 2) ?? "").slice(0, 4_000) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
@@ -625,6 +637,25 @@ function requestBrowserAgent(control: ActiveRun, request: BrowserAgentRequest, s
     stop.addEventListener("abort", aborted, { once: true });
     pending.set(requestId, settle);
     send({ type: "browser-agent", runId: control.runId, requestId, request });
+  });
+}
+
+/** One request of the computer tools; the main process answers it (or refuses it) and the runner never touches a window. */
+function requestComputerAgent(control: ActiveRun, request: ComputerAgentRequest, signal: AbortSignal) {
+  return new Promise<unknown>((resolve) => {
+    const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(40_000)]);
+    if (stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const pending = control.computerAgent ??= new Map();
+    const settle = (reply: unknown) => {
+      stop.removeEventListener("abort", aborted);
+      pending.delete(requestId);
+      resolve(reply);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    pending.set(requestId, settle);
+    send({ type: "computer-agent", runId: control.runId, requestId, request });
   });
 }
 
@@ -833,6 +864,19 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     if (execution.executionMode !== "tomverse_api") throw new Error("The selected Code execution route is unavailable.");
     if (!continuation) task.execution = execution;
     const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+    // A project on another machine: connect first, so a task never starts against a machine it cannot reach.
+    let remote: RemoteWorkspace | undefined;
+    if (command.project.remote) {
+      if (command.type === "start" && command.input.orchestrate) throw new Error("Orchestration is not available in a remote project.");
+      try {
+        remote = await openRemoteWorkspace(command.project, { fixtureAllowed: DESKTOP_FIXTURE_ALLOWED, signal: control.abort.signal });
+      } catch (error) {
+        addEvent(desktopCodeNotice(error instanceof RemoteRunError ? error.notice : "remoteUnavailable"));
+        if (error instanceof RemoteError) addEvent(error.message);
+        throw error;
+      }
+      remote.onLost(() => { addEvent(desktopCodeNotice("remoteLost")); publish(); });
+    }
     const savedReferences = resuming ? checkpoint?.tasks.at(-1)?.references ?? [] : command.references;
     const references = validateReferences(workspace, savedReferences, command.connection.key);
     task.references = references;
@@ -876,7 +920,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     task.canRewind = undefined;
     task.pendingFollowUp = journalPendingFollowUp(journal.state, command.connection.key);
     assertAllowed();
-    const instructions = continuation || savedCap !== undefined ? null : readProjectInstructions(workspace);
+    const instructions = continuation || savedCap !== undefined ? null : remote ? await remote.readInstructions(control.abort.signal) : readProjectInstructions(workspace);
     if (instructions?.truncated) addEvent(desktopCodeNotice("instructionClipped"));
     publish();
     const permissionEnv: NodeJS.ProcessEnv = permissionSetting ? { TOMVERSE_HOME: permissionSetting.home } : {};
@@ -886,10 +930,11 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     // "Allow for this run" is remembered for this run only, as the button says. Rules that last are written by the person
     // in Settings > Task permissions, never as a side effect of an approval card.
     const memory = new ApprovalMemory();
+    const protectedDirs = [tomverseHome(permissionEnv), ...protectedRoots(command.protectedRoot)];
     const permissions = new PermissionGate({
       mode: () => permissionSetting?.mode ?? "ask",
       rules: () => rulesFor().effective(),
-      protectedDirs: [tomverseHome(permissionEnv), ...protectedRoots(command.protectedRoot)],
+      protectedDirs,
     });
     const output: Output = {
       json: false,
@@ -965,20 +1010,22 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       }
     }
     // The folder commands may write is the one the agent works in: for a task in a managed worktree, that worktree.
-    sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
+    // Commands of a remote project run on the other machine, outside this computer's sandbox: none is started for them.
+    sandbox = remote ? null : await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
     if (sandbox && !sandbox.enforcement.available) addEvent(desktopCodeNotice("sandboxUnavailable"));
     control.runner = new Runner({
-      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), sandboxed: sandbox?.enforcement.available === true, permissions,
+      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: remote ? undefined : composeLaunch(sandbox?.launch, codeProcessLaunch), sandboxed: sandbox?.enforcement.available === true, permissions,
+      ...(remote ? { remote } : {}),
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
       ...(extensions ? { mcp: extensions.mcp, lifecycleHooks: extensions.hooks } : {}),
-      backgroundCommands: true,
+      backgroundCommands: !remote,
       images: true,
       subagents: true,
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
-      nestedInstructions: !continuation && savedCap === undefined,
+      nestedInstructions: !remote && !continuation && savedCap === undefined,
       // Skills and agent definitions are folder contents like the instruction files: a capped continuation sends none of them.
       // Installed plugins are read from the same Tomverse folder the settings screens use (the worker's own environment has no TOMVERSE_HOME).
       extensions: !continuation && savedCap === undefined ? discoverForRuntime(workspace.root) : undefined,
@@ -986,11 +1033,12 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
-      git: !usesCodePlugin && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
+      git: !usesCodePlugin && !remote && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
       // The main process decides which host tools a run gets (the person's settings) and checks every request again; a run that
       // resumes gets the same tools as one that starts.
       browserSnapshot: command.browserSnapshot ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
       browserAgent: command.browserAgent ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
+      computerAgent: command.computerUse ? (request, signal) => requestComputerAgent(control, request, signal) : undefined,
       terminalRead: command.terminalRead ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
       expandFollowUp: continuation || savedCap !== undefined ? undefined : (text) => {
         const slash = slashPromptFor(workspace.root, text);
@@ -1001,7 +1049,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.computer?.text, view.computer?.window.title, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -1015,7 +1063,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           const remembered = memory.match(view);
           if (remembered) return { approved: true, remembered };
-          const request = describeApproval(view, memory);
+          // The boundary is read here, from the same request and with the same folders as the gate read it.
+          const request: ApprovalRequest = { ...describeApproval(view, memory), ...(checkBoundaries(view, { protectedDirs }) ? { atPcOnly: true as const } : {}) };
           task.status = "approval";
           publish();
           const action = await new Promise<Decision["action"]>((settle) => {
@@ -1330,6 +1379,47 @@ function readRecordedChange(journal: Journal, id: string, { undoAvailable = true
   return { current, text, canUndo: checkoutAvailable && undoAvailable && journalStatus(journal.state) !== "unknown" && canUndoChange(journal, change) };
 }
 
+/** A change of a task in a remote project: where it stands is asked of the remote machine. */
+async function readRemoteRecorded(command: Extract<WorkerCommand, { type: "read-change" }>): Promise<WorkerEvent> {
+  const reply = { type: "change-diff", requestId: command.requestId } as const;
+  if (active) return { ...reply, inspection: null };
+  let journal: Journal | undefined;
+  try {
+    journal = openRecordedSession(command, command.sourceProject ?? command.project);
+    if (!journal) return { ...reply, inspection: null };
+    return { ...reply, inspection: await inspectRemoteChange(journal, command.recordId, command.project, {
+      clean: (text) => cleanText(text), unknown: journalStatus(journal.state) === "unknown", fixtureAllowed: DESKTOP_FIXTURE_ALLOWED,
+    }) };
+  } catch {
+    return { ...reply, inspection: null };
+  } finally {
+    journal?.release();
+  }
+}
+
+/** Puts one change of a remote task back on the remote machine. */
+async function undoRemoteRecorded(command: Extract<WorkerCommand, { type: "undo-change" }>): Promise<WorkerEvent> {
+  const reply = { type: "change-undone", requestId: command.requestId } as const;
+  if (active || recovery) return { ...reply, result: "unavailable" };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  let undoStarted = false;
+  try {
+    unlockProject = lockProject(command.project);
+    journal = openRecordedSession(command);
+    if (!journal || journalStatus(journal.state) === "unknown") return { ...reply, result: "unavailable" };
+    assertProjectRoot(command.project);
+    undoStarted = true;
+    const outcome = await undoRemoteChange(journal, command.recordId, command.project, { fixtureAllowed: DESKTOP_FIXTURE_ALLOWED });
+    return outcome === "undone" ? { ...reply, result: "undone", changes: journalChanges(journal.state) } : { ...reply, result: outcome };
+  } catch {
+    return { ...reply, result: undoStarted ? "unconfirmed" : "unavailable" };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+  }
+}
+
 function undoRecordedChange(command: Extract<WorkerCommand, { type: "undo-change" }>): WorkerEvent {
   const reply = { type: "change-undone", requestId: command.requestId } as const;
   if (active || recovery) return { ...reply, result: "unavailable" };
@@ -1369,7 +1459,9 @@ function planRecordedRewind(command: Extract<WorkerCommand, { type: "plan-rewind
     const plan = planRewind(journal, command.turn, true);
     return { ...reply, plan: {
       text: cleanText(plan.text), conversationAvailable: plan.conversationAvailable, ...(plan.blocked ? { blocked: true as const } : {}),
-      files: plan.files.slice(0, 40).map((file) => ({ path: cleanText(file.path), kind: file.kind, outcome: file.outcome, ...(file.reason ? { reason: cleanText(file.reason) } : {}) })),
+      files: plan.files.slice(0, 40).map((file) => command.project.remote
+        ? { path: cleanText(file.path), kind: file.kind, outcome: "conflict" as const, reason: "Files of a remote project are put back one change at a time from the change list." }
+        : { path: cleanText(file.path), kind: file.kind, outcome: file.outcome, ...(file.reason ? { reason: cleanText(file.reason) } : {}) }),
       commands: plan.commands.slice(0, 20).map((entry) => cleanText(entry.display)),
     } };
   } catch {
@@ -1384,6 +1476,8 @@ function planRecordedRewind(command: Extract<WorkerCommand, { type: "plan-rewind
 function rewindRecorded(command: Extract<WorkerCommand, { type: "rewind-history" }>): WorkerEvent {
   const reply = { type: "history-rewound", requestId: command.requestId, undone: 0, conflicts: 0 } as const;
   if (active || recovery) return { ...reply, result: "unavailable" };
+  // Files of a remote project are put back one change at a time from the change list; only the conversation can be cut here.
+  if (command.project.remote && command.mode !== "conversation") return { ...reply, result: "unavailable" };
   let journal: Journal | undefined;
   let unlockProject: (() => void) | undefined;
   let started = false;
@@ -1605,6 +1699,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     permissionSetting = { mode: data.mode, home: data.home };
   } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "clean-deleted-history") {
     cleanDeletedHistory(data.protectedRoot);
+  } else if (data.type === "read-change" && data.project.remote) {
+    void readRemoteRecorded(data).then(send);
   } else if (data.type === "read-change") {
     let checkoutAvailable = false;
     try { assertProjectRoot(data.project); checkoutAvailable = true; } catch { /* Only saved snapshots are available. */ }
@@ -1629,6 +1725,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     void compactRecorded(data).then(send);
   } else if (data.type === "cancel-recovery") {
     if (recovery?.requestId === data.requestId) recovery.abort.abort();
+  } else if (data.type === "undo-change" && data.project.remote) {
+    void undoRemoteRecorded(data).then(send);
   } else if (data.type === "undo-change") {
     send(undoRecordedChange(data));
   } else if (data.type === "plan-rewind") {
@@ -1693,6 +1791,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     if (active.browserSnapshot?.requestId === data.requestId) active.browserSnapshot.settle(data.text);
   } else if (data.type === "browser-agent-result" && active?.runId === data.runId) {
     active.browserAgent?.get(data.requestId)?.(data.reply);
+  } else if (data.type === "computer-agent-result" && active?.runId === data.runId) {
+    active.computerAgent?.get(data.requestId)?.(data.reply);
   } else if (data.type === "terminal-read-result" && active?.runId === data.runId) {
     if (active.terminalRead?.requestId === data.requestId) active.terminalRead.settle(data.reply);
   } else if (data.type === "answer" && active?.runId === data.runId) {

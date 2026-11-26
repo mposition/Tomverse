@@ -1,13 +1,16 @@
 import { selectDriveFiles } from "./drive-picker";
 import { desktopResearchAnswerId } from "../../../../lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
+import { createDesktopComputer } from "./computer-wiring";
+import { createFixtureBackend } from "./computer-fixture-backend";
+import type { ComputerBackend } from "./computer-backend";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
@@ -28,6 +31,9 @@ import { createResearchActions } from "./research-host";
 import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
 import { createBillingApi, type BillingApi } from "./billing-api";
+import { createManagedCodeClient } from "./managed-code-client";
+import { createManagedCodeSession, type ManagedCodeSession } from "./managed-code-session";
+import { desktopManagedCodeInput } from "../managed-code-contract";
 import { createBillingWindowHost } from "./billing-window";
 import { desktopBillingInput, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
@@ -82,6 +88,10 @@ import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
 import { localExtensionsCommand } from "../local-extensions-contract";
 import { codeSandboxInput } from "../code-sandbox-contract";
 import { codeSandboxView, readCodeSandboxSettings } from "./code-sandbox";
+import { remoteProjectInput } from "../remote-contract";
+import { createRemoteProjectHost } from "./remote-project-host";
+import { isRemoteShadow, setRemoteShadowBase, sshEnvironmentForRuntime, sshRunnerFor } from "./remote-project";
+import type { SandboxFacts } from "../schedule-policy";
 import { sandboxEnforcement } from "../../../tomverse-cli/src/sandbox.js";
 import { createPluginsHost } from "./plugins-host";
 import { pluginsCommand } from "../plugins-contract";
@@ -119,6 +129,8 @@ import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import { desktopNativeCopy } from "../../../../locales/desktopNative";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import { createRemoteControl } from "./remote-control";
+import { desktopRemoteCopy } from "../../../../locales/desktopRemote";
 
 const origin = DESKTOP_APP_ORIGIN;
 const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA"
@@ -161,6 +173,8 @@ const fixtureSchema = z.object({
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
   browserAgent: z.boolean().optional(),
+  /** A test runs the computer tools against a fake desktop (two windows and a picture). */
+  computerUse: z.boolean().optional(),
   codex: cliFixtureInput.optional(),
   claude: cliFixtureInput.optional(),
   qwen: qwenFixtureInput.optional(),
@@ -171,6 +185,8 @@ const fixtureSchema = z.object({
   minimax: cliFixtureInput.optional(),
   grok: cliFixtureInput.optional(),
   antigravity: cliFixtureInput.optional(),
+  /** A stand-in program for ssh (a test runs its own fake machine through it). Read only where fixtures are allowed. */
+  sshFixture: z.object({ file: z.string().min(1), args: z.array(z.string()) }).strict().optional(),
 }).strict().refine(({ codex, claude, qwen, kimi, vibe, deepseek, zcode, minimax, grok, antigravity }) =>
   [codex, claude, qwen, kimi, vibe, deepseek, zcode, minimax, grok, antigravity].filter(Boolean).length <= 1);
 
@@ -479,7 +495,10 @@ function broadcast() {
   state.codeBrowserAvailable = scope !== null;
   state.codeBrowserInspection = scope !== null && browserTools().inspection;
   state.codeBrowserAgent = browserTools().agent;
+  computer.host.refresh();
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
+  state.remote = remoteHost.snapshot();
+  state.remoteEnabled = remoteHost.enabled();
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.deviceFixtureAvailable = accountPermissionsFixture();
@@ -973,6 +992,7 @@ function stop() {
   if (!runId || !worker || state.task?.status === "stopping") return;
   if (codeBrowser) codeBrowser.grant = undefined;
   browserAgent.abortAll();
+  computer.host.abortAll();
   revokeCodePlugin();
   if (state.task) {
     state.task.status = "stopping";
@@ -1086,6 +1106,7 @@ function onWorkerMessage(event: WorkerEvent) {
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
   if (event.type === "browser-agent") { void browserAgent.handle(event); return; }
+  if (event.type === "computer-agent") { void computer.host.handle(event); return; }
   if (event.type === "terminal-read") { replyToTerminalRead(event); return; }
   if (event.type === "queue-result") {
     if (pendingQueue?.requestId === event.requestId) {
@@ -1121,6 +1142,7 @@ function onWorkerMessage(event: WorkerEvent) {
     const discarded = event.runId === discardedRunId;
     if (discarded && event.type !== "finished") return;
     if ("task" in event && state.task?.worktree?.path === event.task.root) event.task.worktree = state.task.worktree;
+    if ("task" in event && event.task.entries.some((entry) => entry.role === "event" && entry.notice === "remoteLost")) remoteHost.markLost();
     if (event.type === "approval") {
       if (state.task?.status === "stopping") return;
       // While other tasks run too, the card says which task it is from.
@@ -1328,6 +1350,51 @@ function checkpointNativeTurn(task: Task, force = false) {
 
 const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
 const codeSandboxDirectory = () => join(app.getPath("userData"), "code-sandbox");
+const remoteSettingsDirectory = () => join(app.getPath("userData"), "remote-projects");
+/** The empty local folders that stand for remote projects (outside the app's data folder, which no project may be in). */
+const remoteShadowDirectory = () => join(DESKTOP_FIXTURE_ALLOWED && fixture ? dirname(app.getPath("userData")) : app.getPath("appData"), "Tomverse Desktop Remote Projects");
+setRemoteShadowBase(remoteShadowDirectory());
+const remoteSshFixture = () => (DESKTOP_FIXTURE_ALLOWED ? fixture?.sshFixture : undefined);
+const remoteWorkerEnvironment = () => ({
+  TOMVERSE_DESKTOP_REMOTE_PROJECTS: remoteShadowDirectory(), TOMVERSE_DESKTOP_REMOTE_SETTINGS: remoteSettingsDirectory(),
+  TOMVERSE_DESKTOP_SSH_ENV: sshEnvironmentForRuntime(),
+  ...(remoteSshFixture() ? { TOMVERSE_DESKTOP_SSH_FIXTURE: JSON.stringify(remoteSshFixture()) } : {}),
+});
+
+const remoteHost = createRemoteProjectHost({
+  settingsDirectory: remoteSettingsDirectory,
+  runner: () => sshRunnerFor({ forwardedEnvironment: sshEnvironmentForRuntime(), fixture: remoteSshFixture() }),
+  sandboxOn: () => readCodeSandboxSettings(codeSandboxDirectory()).mode !== "off",
+  canChange: () => !state.busy && !pendingMutation && !choosing && !closing && !signingOut && !suspended,
+  open: (project) => chooseRemote(project),
+  current: () => (projectRoot?.remote ? { project: projectRoot, target: projectRoot.remote } : null),
+  changed: () => broadcast(),
+});
+
+/** Makes a remote project the open project. There is no folder to look at on this computer and no Git project: the worktree choice is not offered. */
+async function chooseRemote(project: ProjectRoot) {
+  if (!project.remote || state.busy || pendingMutation || choosing) return false;
+  choosing = true;
+  try {
+    assertProjectRoot(project);
+    if (state.root !== project.path || projectRoot?.identity !== project.identity) {
+      codeReferences.clear();
+      workspaceHandoff = null;
+    }
+    projectRoot = project;
+    codeGitProject = null;
+    codeWorktreeDraft = undefined;
+    state.root = project.path;
+    state.project = `${project.remote.destination}:${project.remote.folder}`;
+    discardTransientTask(state.task);
+    state.task = null;
+    refreshHistory();
+    broadcast();
+    return true;
+  } finally {
+    choosing = false;
+  }
+}
 
 /** One Code runtime process. The open task and every task that runs next to it each get one of their own. */
 function forkRunner() {
@@ -1336,7 +1403,7 @@ function forkRunner() {
   )) as Record<string, string>;
   return utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
     env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
-      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory() },
+      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory(), ...remoteWorkerEnvironment() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
 }
@@ -1456,8 +1523,8 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
   const window = mainWindow;
   const session = chatSession.signal;
   const connection = codeConnection();
-  if (!root || !project || !namespace || !connection || !window || window.isDestroyed() || state.busy || choosing || signingOut || closing) {
-    throw new Error("Open a connected Code project to attach files or folders.");
+  if (!root || !project || project.remote || !namespace || !connection || !window || window.isDestroyed() || state.busy || choosing || signingOut || closing) {
+    throw new Error("Open a connected Code project of this computer to attach files or folders.");
   }
   choosing = true;
   try {
@@ -1896,7 +1963,7 @@ function reviewTarget(): ReviewTarget | null {
   const task = state.task;
   const record = selectedRecord();
   if (!task?.id || !record || record.sessionId !== task.id || task.savedLocally === false || record.storage === null || task.unreadable ||
-      task.execution?.executionMode !== "tomverse_api" || task.continuation || task.cliContinuation) return null;
+      record.project.remote || task.execution?.executionMode !== "tomverse_api" || task.continuation || task.cliContinuation) return null;
   const worktree = "worktree" in record ? record.worktree : undefined;
   try { assertProjectRoot(record.project); } catch { return null; }
   if (worktree?.unavailable) return null;
@@ -2563,6 +2630,26 @@ const browserAgent = createBrowserAgentBridge({
   clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
 });
 
+// The computer tools: one window the person chose for the task (computer-host.ts holds every check; the person's switch is off by default).
+let computerFixture: ComputerBackend | undefined;
+const computer = createDesktopComputer({
+  switchFile: () => join(app.getPath("userData"), "code-computer.txt"),
+  fixtureBackend: () => DESKTOP_FIXTURE_ALLOWED && !!fixture && codeConnection() === fixture && fixture.computerUse === true ? (computerFixture ??= createFixtureBackend()) : null,
+  shortcuts: { register: (accelerator, handler) => globalShortcut.register(accelerator, handler), unregister: (accelerator) => globalShortcut.unregister(accelerator) },
+  send: (computerState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-computer-state", computerState); },
+  run: () => {
+    const scope = currentCodeBrowserScope();
+    const parts = scope ? JSON.parse(scope) as unknown[] : null;
+    return {
+      runId: runId && runId !== discardedRunId ? runId : null, taskId: state.task?.id ?? null,
+      running: Boolean(state.busy && state.task?.status === "running"), apiExecution: state.task?.execution?.executionMode === "tomverse_api",
+      suspended, scope: parts ? JSON.stringify([parts[0], parts[2]]) : null,
+    };
+  },
+  reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "computer-agent-result", runId: replyRunId, requestId, reply }); },
+  clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
+});
+
 function currentCodeBrowserScope() {
   if (!codeConnection() || signingOut || closing) return null;
   const scope = currentHistoryScope();
@@ -2654,7 +2741,7 @@ const terminalHost = new TerminalHost({
 });
 
 function terminalProjectOpen() {
-  return Boolean(projectRoot && currentHistoryScope() && codeConnection() && !signingOut && !invalidatingSession && !closing);
+  return Boolean(projectRoot && !projectRoot.remote && currentHistoryScope() && codeConnection() && !signingOut && !invalidatingSession && !closing);
 }
 
 function terminalAvailable() {
@@ -2690,12 +2777,13 @@ function loadCodeTerminal() {
   try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
   catch { codeTerminalEnabled = false; }
   browserAgentSwitch.load();
+  computer.load();
 }
 
 /** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
 function codeRunTools() {
   const { agent, inspection } = browserTools();
-  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(codeTerminalEnabled ? { terminalRead: true } : {}) };
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
@@ -2834,6 +2922,19 @@ async function billing(value: unknown) {
     }) };
   }
   return billingApi.api.billing(input);
+}
+
+// Managed Code credits share the account session; one reservation per signed-in window, kept alive here in the main process.
+let managedCodeSession: { signal: AbortSignal; session: ManagedCodeSession } | undefined;
+async function managedCode(value: unknown) {
+  const input = desktopManagedCodeInput.parse(value);
+  if (!state.capabilities?.managedCode) throw new Error("Managed Code credits are unavailable.");
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (managedCodeSession?.signal !== signal) {
+    managedCodeSession = { signal, session: createManagedCodeSession({ client: createManagedCodeClient({ send: settings.send, signal }), signal }) };
+  }
+  return managedCodeSession.session.run(input);
 }
 
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
@@ -3193,6 +3294,7 @@ async function signOut() {
   renewal?.controller.abort();
   state.account = { stage: "signing-out" };
   broadcast();
+  await remoteControl.signingOut(active.accessToken);
   try {
     await sessionVault().clear();
     clearTimeout(sessionExpiry);
@@ -3261,7 +3363,7 @@ async function readTaskPullCommand(value: unknown) {
 
 /** The folder the Git panel works on: the open task's own worktree, else the project. Null when it changed since it was chosen. */
 function gitTarget() {
-  if (!projectRoot || closing || signingOut) return null;
+  if (!projectRoot || projectRoot.remote || closing || signingOut) return null;
   try {
     const worktree = state.task?.worktree;
     const scope = currentHistoryScope();
@@ -3326,6 +3428,11 @@ async function replyToGitAction(event: Extract<WorkerEvent, { type: "git-action"
   }
 }
 
+/** The sandbox as a schedule of this project may rely on it: commands of a project on another machine run outside it, so for them it is as good as off. */
+async function scheduleSandboxFactsFor(project?: string | null): Promise<SandboxFacts> {
+  return project && isRemoteShadow(project) ? { mode: "off", available: false, writes: "none" } : scheduleSandboxFacts();
+}
+
 /** What the OS sandbox enforces on this computer for the mode the person set, read now. */
 async function scheduleSandboxFacts() {
   const settings = readCodeSandboxSettings(codeSandboxDirectory());
@@ -3366,7 +3473,7 @@ const parallel = createParallelHost({
     hasAccount: () => codeConnection() !== null && !signingOut && !invalidatingSession && !closing,
     owner: () => { const connection = codeConnection(); return !connection ? null : linkedCode?.connection === connection ? linkedCode.accountId : "fixture"; },
     modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
-    sandbox: scheduleSandboxFacts,
+    sandbox: scheduleSandboxFactsFor,
     launch: (item, run, lanes, approvalWaitMs) => launchScheduledRun({
       protectedRoot: app.getPath("userData"),
       connection: () => (signingOut || invalidatingSession || closing || suspended ? null : codeConnection()),
@@ -3379,8 +3486,53 @@ const parallel = createParallelHost({
       worktreeHome: managedWorktreeHome,
       permissionHome: () => permissionHost.home,
       modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
-      sandbox: scheduleSandboxFacts,
+      sandbox: scheduleSandboxFactsFor,
     }, item, run, lanes, approvalWaitMs),
+  },
+});
+
+/** The window's follow-up handler, bound in registerIpc: a remote follow-up passes exactly the checks of one typed here. */
+let followUpTask: ((value: unknown) => unknown) | undefined;
+
+// Control of this PC from the account's other devices (host/remote-control.ts): off by default, per account. The
+// approval card stays the one on this screen and `answer` stays the only way to answer it.
+const remoteControl = createRemoteControl({
+  userData: app.getPath("userData"),
+  // The same folders the task's own permission gate is given (host/runner-process.ts).
+  protectedDirs: () => [permissionHost.home, app.getPath("userData"), codeProjectLocks()],
+  account: () => {
+    const active = browserSession;
+    if (!active || state.account.stage !== "connected" || signingOut || closing || suspended) return null;
+    const accountId = active.accountId;
+    return { accountId, origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, key: codeConnection()?.key, authorize: async () => {
+      if (signingOut || closing || browserSession?.accountId !== accountId) throw new Error("The Desktop account changed.");
+      if (browserSession.expiresAt <= Date.now() + 30_000) await renewBrowserSession(browserSession);
+      if (signingOut || closing || browserSession?.accountId !== accountId) throw new Error("The Desktop account changed.");
+      return browserSession.accessToken;
+    } };
+  },
+  tasks: () => parallel.parallelView().rows.filter((row) => row.state !== "done").map((row) => {
+    const task = row.kind === "foreground" ? state.task : parallel.lanes.task(row.key);
+    return { key: row.key, kind: row.kind, title: row.title, status: row.status, task, canStop: row.canStop,
+      canFollowUp: row.kind === "foreground" && row.key === runId && task?.status === "running" &&
+        task.execution?.executionMode === "tomverse_api" && sessionId.safeParse(task.id).success && !task.pendingFollowUp };
+  }),
+  card: () => {
+    const request = pending;
+    if (!request || !approvalWindow) return null;
+    const key = parallel.lanes.approvalKey(request.id) ?? (runId && runId !== discardedRunId ? runId : null);
+    return key ? { request, taskKey: key } : null;
+  },
+  answer,
+  stop: (key) => parallel.command({ action: "stop", key }),
+  followUp: async (key, text) => {
+    const task = state.task;
+    if (key !== runId || !task?.id || !followUpTask) return false;
+    return (await followUpTask({ id: task.id, text })) === true;
+  },
+  confirmEnable: () => {
+    const copy = desktopRemoteCopy[state.language ?? "en"];
+    return confirmNative({ title: copy.confirmTitle, message: copy.confirmMessage, detail: copy.sentToServer, accept: copy.confirmAccept, cancel: copy.confirmCancel });
   },
 });
 
@@ -3448,6 +3600,7 @@ function registerIpc() {
     return { ...state, handoff: currentHandoff() };
   });
   main("desktop:code-browser", runCodeBrowser);
+  main("desktop:code-computer", (value) => computer.host.command(value));
   main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
     if (!accountPermissionsFixture()) return false;
@@ -3567,6 +3720,9 @@ function registerIpc() {
     if (route.executionMode !== "tomverse_api") throw new Error("The selected Code execution route is unavailable.");
     if (executionMode && executionMode !== route.executionMode) throw new Error("The Code execution route changed. Check the selected route and try again.");
     const input = { ...draft, prompt: withHandoffExcerpt("code", draft.prompt, handoffId) };
+    if (sourceProject.remote && (!remoteHost.enabled() || route.executionMode !== "tomverse_api" || draft.pluginConnectionId)) {
+      throw new Error(remoteHost.enabled() ? "Remote projects run through the Tomverse API route." : desktopNativeCopy.en.remoteDisabled);
+    }
     if (workspace?.kind === "worktree" && draft.mode !== "agent") throw new Error("Select Agent to start a worktree.");
     assertProjectRoot(sourceProject);
     let worktree: ManagedWorktree | undefined;
@@ -3642,6 +3798,7 @@ function registerIpc() {
   main("desktop:start-parallel", (value) => startTask(value, true));
   main("desktop:parallel", (value) => parallel.command(value));
   main("desktop:schedules", (value) => parallel.schedules(value));
+  main("desktop:remote-control", (value) => remoteControl.command(value));
   main("desktop:permissions", (value) => {
     if (signingOut || closing) return { ok: false, error: "The app is closing." };
     const result = permissionHost.run(permissionCommand.parse(value));
@@ -3663,7 +3820,7 @@ function registerIpc() {
     return true;
   });
   main("desktop:stop", stop);
-  main("desktop:follow-up", (value) => {
+  main("desktop:follow-up", followUpTask = (value) => {
     const { id, text } = followUpInput.parse(value);
     const task = state.task;
     if (typeof id === "string" && task?.status === "clarification") return answerCodeClarification(id, text);
@@ -3734,6 +3891,7 @@ function registerIpc() {
     return localExtensionsReply(projectRoot?.path ?? null, command);
   });
   main("desktop:code-sandbox", (value) => codeSandboxView(codeSandboxDirectory(), codeSandboxInput.parse(value)));
+  main("desktop:remote-project", (value) => remoteHost.run(remoteProjectInput.parse(value)));
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);
     const task = state.task;
@@ -3841,6 +3999,7 @@ function registerIpc() {
   main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
   main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));
   main("desktop:billing", billing);
+  main("desktop:managed-code", managedCode);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
   main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
   main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,
@@ -3956,6 +4115,7 @@ function registerIpc() {
   });
   ipcMain.handle("approval:decide", (event, value: unknown) => {
     trusted(event, approvalWindow, approvalUrl);
+    computer.host.noteApprovalAnswered();
     return answer(decisions.parse(value));
   });
 }
@@ -4118,7 +4278,9 @@ else {
     linkAttempt?.abort();
     renewal?.controller.abort();
     terminalHost.closeAllSync();
+    computer.host.dispose();
     parallel.shutdown();
+    remoteControl.shutdown();
     browserSession = null;
     linkedCode = null;
     clearTimeout(sessionExpiry);
@@ -4187,6 +4349,7 @@ else {
     registerIpc();
     bootWorker();
     parallel.start();
+    remoteControl.start();
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) await restoreBrowserSession();
     accountWindowsReady = true;
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) syncAccountWindow();

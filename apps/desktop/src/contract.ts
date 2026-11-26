@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
 import type { CodeSandboxInput, CodeSandboxView } from "./code-sandbox-contract";
+import type { RemoteProjectInput, RemoteProjectReply, RemoteSnapshot } from "./remote-contract";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
 import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
 import type { AssistantImportAction, AssistantImportInput, AssistantImportResult } from "./assistant-import-contract";
@@ -13,6 +14,7 @@ import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { GitApprovalView, GitCommand, GitResultMap } from "./git-actions-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState, ElementPick } from "./browser-contract";
+import type { ComputerCommand, ComputerResult, ComputerState } from "./computer-contract";
 import type { TerminalCommand, TerminalEvent, TerminalInfo, TerminalListing, TerminalReplayResult } from "./terminal-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
@@ -22,6 +24,7 @@ import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extens
 import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
+import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -37,6 +40,7 @@ import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, t
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
 import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
 import type { LaneKind, ParallelCommand, ParallelView, ScheduleCommand, ScheduleResult, ScheduleView } from "./parallel-contract";
+import type { RemoteControlCommand, RemoteControlView } from "./remote-control-contract";
 
 type DesktopDetail = keyof typeof desktopNativeCopy.en;
 
@@ -399,13 +403,17 @@ export type Snapshot = {
     googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
-    billing?: boolean;
+    billing?: boolean; managedCode?: boolean;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
   parallel?: ParallelView;
   /** Scheduled runs: the schedules, their run records and what the schedule form needs to know. */
   schedules?: ScheduleView;
+  /** The open project is a folder on another machine (SSH): which one, and whether it is reachable. Null for a project of this computer. */
+  remote?: RemoteSnapshot | null;
+  /** The switch for remote projects is on: the start screen offers them. */
+  remoteEnabled?: boolean;
 };
 
 export type ApprovalRequest = {
@@ -414,14 +422,25 @@ export type ApprovalRequest = {
   language?: Language;
   id: string;
   root: string;
+  /** The action is on another machine (SSH), and the card says which. */
+  remote?: { target: string; folder: string };
   tool: string;
   explanation?: string;
   canRemember: boolean;
+  /**
+   * The task's permission boundary leaves this request to a person in every mode (it sends something off this computer,
+   * or names a credential file or the app's own data). Set where the permission gate is, from the request as the gate
+   * read it; remote control answers such a request at this PC only.
+   */
+  atPcOnly?: true;
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
   /** A click or typing in the local browser tab: the site, the page, the element and the text the agent would type. */
   browser?: { action: "click" | "type"; origin: string; url: string; selector: string; text?: string; clear?: boolean; submit?: boolean };
+  /** A click, typing, key or scroll in the one desktop window the person chose for the task. */
+  computer?: { action: "click" | "type" | "key" | "scroll"; window: { title: string; app: string }; x?: number; y?: number; button?: "left" | "right"; double?: boolean;
+    text?: string; key?: string; dx?: number; dy?: number };
   /** A call of a tool of an MCP server on this computer: which server and tool, where the server is defined, and the arguments. */
   mcp?: { server: string; tool: string; scope: "user" | "project"; args: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
@@ -440,6 +459,8 @@ export type DesktopApi = {
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
   git<Type extends GitCommand["type"]>(command: Extract<GitCommand, { type: Type }>): Promise<GitResultMap[Type]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
+  codeComputer: (command: ComputerCommand) => Promise<ComputerResult>;
+  subscribeCodeComputer: (listener: (state: ComputerState) => void) => () => void;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
   subscribeCodeBrowserPick: (listener: (pick: ElementPick) => void) => () => void;
   codeTerminal: (command: TerminalCommand) => Promise<TerminalListing | TerminalInfo | TerminalReplayResult | void>;
@@ -477,11 +498,14 @@ export type DesktopApi = {
   codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
   localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
   codeSandbox(input: CodeSandboxInput): Promise<CodeSandboxView>;
+  remoteProject(input: RemoteProjectInput): Promise<RemoteProjectReply>;
   plugins(command: PluginsCommand): Promise<PluginsView>;
   /** Starts a task next to the open one (its own runtime process), and acts on the tasks in the activity list. */
   startParallel(input: StartInput): Promise<void>;
   parallel(command: ParallelCommand): Promise<boolean>;
   schedules(command: ScheduleCommand): Promise<ScheduleResult>;
+  /** Settings: control of this PC from the account's other devices (remote-control-contract.ts). */
+  remoteControl(command: RemoteControlCommand): Promise<RemoteControlView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;
@@ -505,6 +529,8 @@ export type DesktopApi = {
   billing<Action extends BillingAction>(input: Extract<DesktopBillingInput, { action: Action }>): Promise<BillingResult<Action>>;
   /** The checkout window and this account's purchase records, pushed on every change (see `billing({ action: "purchases" })`). */
   subscribeBilling(listener: (state: BillingState) => void): () => void;
+  /** Managed Code credits: read the catalogue and the reservation, reserve, release. Credit numbers are the server's receipt values. */
+  managedCode(input: DesktopManagedCodeInput): Promise<ManagedCodeView>;
   chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
   exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
   projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;

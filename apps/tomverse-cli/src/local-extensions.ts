@@ -6,6 +6,7 @@ import { McpManager } from "./mcp-client.js";
 import { loadMcpServers } from "./mcp-config.js";
 import { createMcpTools } from "./mcp-tools.js";
 import { BROWSER_ACT_TOOLS } from "./browser-tools.js";
+import { COMPUTER_ACT_TOOLS } from "./computer-tools.js";
 import { hookGate, mcpGate, openProjectTrust } from "./project-trust.js";
 import type { Journal } from "./session.js";
 import type { ToolContext } from "./tools.js";
@@ -27,7 +28,7 @@ export type ExtensionDeps = {
 
 const MAX_RESPONSE_CHARS = 20_000;
 /** Tools the person is asked about before they run; a PreToolUse hook for these is answered before that question. */
-const ASKED_TOOLS = ["apply_patch", "run_command", "web_fetch", ...BROWSER_ACT_TOOLS];
+const ASKED_TOOLS = ["apply_patch", "run_command", "web_fetch", ...BROWSER_ACT_TOOLS, ...COMPUTER_ACT_TOOLS];
 
 const fence = (lines: string[]) => lines.join("\n").replaceAll("</hook-context", "<\\/hook-context");
 

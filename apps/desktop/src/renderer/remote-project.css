@@ -1,0 +1,18 @@
+.remote-settings { margin-top: 24px; }
+.remote-settings h3 { font-size: 20px; line-height: 1.5; }
+.remote-settings > p { margin-block: 8px 12px; }
+.remote-form { display: grid; gap: 12px; margin-block: 12px; max-width: 560px; }
+.remote-form label { display: grid; gap: 4px; font-size: 14px; }
+.remote-form input { width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: var(--raised); font: inherit; }
+.remote-form small, .remote-settings small { color: var(--muted); }
+.remote-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.remote-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 8px; }
+.remote-recent > span { color: var(--muted); font-size: 13px; }
+.remote-current { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.remote-current p { flex-basis: 100%; margin: 0; }
+.remote-picker { display: grid; gap: 12px; justify-items: start; margin-top: 8px; }
+.remote-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.remote-status p { flex-basis: 100%; margin: 0; color: var(--muted); }
+.remote-status p[role="alert"] { color: inherit; font-weight: 600; }
+[data-testid="remote-state"][data-state="connected"] { font-weight: 600; }
+[data-testid="remote-state"][data-state="lost"] { font-weight: 700; }

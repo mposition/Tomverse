@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { BrowserState, ElementPick } from "../browser-contract";
+import type { ComputerState } from "../computer-contract";
 import type { WebViewState } from "../web-view-contract";
 import type { TerminalEvent } from "../terminal-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
@@ -79,6 +80,12 @@ if (trustedWindow) {
       ipcRenderer.on("desktop:code-browser-pick", onPick);
       return () => ipcRenderer.removeListener("desktop:code-browser-pick", onPick);
     },
+    codeComputer: (command: Parameters<DesktopApi["codeComputer"]>[0]) => ipcRenderer.invoke("desktop:code-computer", command),
+    subscribeCodeComputer(listener: (state: ComputerState) => void) {
+      const onState = (_event: Electron.IpcRendererEvent, state: ComputerState) => listener(state);
+      ipcRenderer.on("desktop:code-computer-state", onState);
+      return () => ipcRenderer.removeListener("desktop:code-computer-state", onState);
+    },
     codeTerminal: (command: Parameters<DesktopApi["codeTerminal"]>[0]) => ipcRenderer.invoke("desktop:code-terminal", command),
     subscribeCodeTerminal(listener: (event: TerminalEvent) => void) {
       const onEvent = (_event: Electron.IpcRendererEvent, event: TerminalEvent) => listener(event);
@@ -119,10 +126,12 @@ if (trustedWindow) {
     codeExtensions: (input: Parameters<DesktopApi["codeExtensions"]>[0]) => ipcRenderer.invoke("desktop:code-extensions", input),
     localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),
     codeSandbox: (input: Parameters<DesktopApi["codeSandbox"]>[0]) => ipcRenderer.invoke("desktop:code-sandbox", input),
+    remoteProject: (input: Parameters<DesktopApi["remoteProject"]>[0]) => ipcRenderer.invoke("desktop:remote-project", input),
     plugins: (command: Parameters<DesktopApi["plugins"]>[0]) => ipcRenderer.invoke("desktop:plugins", command),
     startParallel: (input: Parameters<DesktopApi["startParallel"]>[0]) => ipcRenderer.invoke("desktop:start-parallel", input),
     parallel: (command: Parameters<DesktopApi["parallel"]>[0]) => ipcRenderer.invoke("desktop:parallel", command),
     schedules: (command: Parameters<DesktopApi["schedules"]>[0]) => ipcRenderer.invoke("desktop:schedules", command),
+    remoteControl: (command: Parameters<DesktopApi["remoteControl"]>[0]) => ipcRenderer.invoke("desktop:remote-control", command),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),
@@ -131,6 +140,7 @@ if (trustedWindow) {
     accountData: (input: Parameters<DesktopApi["accountData"]>[0]) => ipcRenderer.invoke("desktop:account-data", input),
     assistantImport: (input: Parameters<DesktopApi["assistantImport"]>[0]) => ipcRenderer.invoke("desktop:assistant-import", input),
     billing: (input: Parameters<DesktopApi["billing"]>[0]) => ipcRenderer.invoke("desktop:billing", input),
+    managedCode: (input: Parameters<DesktopApi["managedCode"]>[0]) => ipcRenderer.invoke("desktop:managed-code", input),
     subscribeBilling(listener: (state: BillingState) => void) {
       const onState = (_event: Electron.IpcRendererEvent, state: BillingState) => listener(state);
       ipcRenderer.on("desktop:billing-state", onState);
