@@ -72,7 +72,7 @@ test("a tool sent after another waits out a busy slot twice, and nothing else", 
 });
 
 test("a press requests only what is owed, and every tool only when all are held and on screen", async () => {
-  const { studioToolsToRequest, studioToolFailure, studioToolOutcome, studioToolSequenceStops } = await import("../components/studio/studioGenerationClient.ts");
+  const { studioToolsToRequest, studioToolFailure, studioToolOrder, studioToolOutcome, studioToolSequenceStops } = await import("../components/studio/studioGenerationClient.ts");
   const targets = [{ modelId: "tool-a" }, { modelId: "tool-b" }];
   const ids = (held, shown = held) => studioToolsToRequest(targets, id => held.includes(id), id => shown.includes(id)).map(target => target.modelId);
   assert.deepEqual(ids([]), ["tool-a", "tool-b"]);
@@ -92,6 +92,12 @@ test("a press requests only what is owed, and every tool only when all are held 
   assert.equal(studioToolFailure([changed, shortfall], isShortfall), shortfall);
   assert.equal(studioToolFailure([plain, changed], isShortfall), changed);
   assert.equal(studioToolFailure([plain, new Error("crop")], isShortfall), plain);
+
+  // An unfinished request is resumed before anything new is sent, whatever the quoted order.
+  const order = pending => studioToolOrder(targets, id => pending.includes(id)).map(target => target.modelId);
+  assert.deepEqual(order([]), ["tool-a", "tool-b"]);
+  assert.deepEqual(order(["tool-b"]), ["tool-b", "tool-a"]);
+  assert.deepEqual(order(["tool-a", "tool-b"]), ["tool-a", "tool-b"]);
 
   // After a failure the next tool is sent only when the failure was that tool's alone and finished.
   assert.equal(studioToolSequenceStops(plain, false, isShortfall), false);

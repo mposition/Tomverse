@@ -126,6 +126,16 @@ export const studioToolFailure = (failures: readonly unknown[], isShortfall: (er
 const quoteChanged = (error: unknown) => error instanceof StudioGenerationError && error.status === 409;
 
 /**
+ * The order a press works through the tools: any whose request is unfinished
+ * first, then the rest as quoted. An unfinished request may already be paid
+ * for, so it is resumed before anything new is sent; a refusal of a new
+ * request (a credit shortfall) then finds nothing left to lose and can go to
+ * checkout.
+ */
+export const studioToolOrder = <Target extends { modelId: string }>(targets: readonly Target[], pending: (modelId: string) => boolean): Target[] =>
+  [...targets.filter(target => pending(target.modelId)), ...targets.filter(target => !pending(target.modelId))];
+
+/**
  * Whether the tools after a failed one are still worth sending. Not after a
  * credit shortfall or a changed quote, which hold for every tool, and not
  * while the failed request is unfinished (`pending`): it may already be paid

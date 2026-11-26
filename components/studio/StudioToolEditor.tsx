@@ -12,8 +12,8 @@ import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
 import {
-  createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolOutcome, studioToolQuote, studioToolSequenceStops,
-  studioToolsToRequest, useStudioImageQuote,
+  createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolOrder, studioToolOutcome, studioToolQuote,
+  studioToolSequenceStops, studioToolsToRequest, useStudioImageQuote,
 } from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
@@ -302,7 +302,7 @@ export function StudioToolEditor({ tool, preset }: {
         for (const modelId of requested) toolResults.delete(modelId);
         const fresh: typeof cutouts = [];
         const failures: unknown[] = [];
-        for (const target of quote.targets) {
+        for (const target of studioToolOrder(quote.targets, modelId => Boolean(toolRunners.get(modelId)?.pending()))) {
           const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
           toolRunners.set(target.modelId, runner);
           try {
