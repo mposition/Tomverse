@@ -76,6 +76,7 @@ import { openDocs, useWebViewState, WebViewer } from "./WebViewer";
 import { clearDesktopDrafts, readCodeDraft, writeDesktopDraft } from "./draft-store";
 import { ActivityControl } from "./ActivityPanel";
 import { LaneTaskView } from "./LaneTaskView";
+import { kindLabel } from "./parallel-labels";
 import { desktopParallelCopy } from "../../../../locales/desktopParallel";
 import type { TaskWindowView } from "../parallel-contract";
 import "./styles.css";
@@ -1296,7 +1297,7 @@ function Approval() {
     <header><ShieldCheck size={24} /><h1>{copy.reviewAction}</h1></header>
     <div className="approval-content">
       {request.task && <p className="approval-origin" data-testid="approval-origin">
-        {desktopParallelCopy[language].approvalFrom.replace("{kind}", request.task.kind === "scheduled" ? desktopParallelCopy[language].kindScheduled : desktopParallelCopy[language].kindParallel).replace("{title}", request.task.title)}
+        {desktopParallelCopy[language].approvalFrom.replace("{kind}", kindLabel(desktopParallelCopy[language], request.task.kind)).replace("{title}", request.task.title)}
         <br />{desktopParallelCopy[language].approvalFolder}: <code>{request.task.folder}</code>
       </p>}
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>

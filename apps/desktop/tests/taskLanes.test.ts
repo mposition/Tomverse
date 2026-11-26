@@ -357,3 +357,34 @@ test("browser, terminal and plugin requests of a lane are not answered with anyt
   child.emit({ type: "code-plugin", runId: a.key, requestId: "c", action: {} as never });
   assert.equal(child.sent.length, before);
 });
+
+test("a scheduled run's push is never approved for the person: its card stays down and the push is denied when the wait ends", async () => {
+  const processes: FakeProcess[] = [];
+  let now = 0;
+  const pushed: string[] = [];
+  const lanes = new TaskLanes({
+    spawn: () => { const child = new FakeProcess(); processes.push(child); return child; },
+    now: () => now, limit: () => 3, external: () => [], permissionMessage: () => undefined, changed: () => undefined,
+    async gitAction(lane, _action, ask) {
+      const answer = await ask({ id: uuid(), root: lane.folder, tool: "git push", canRemember: false });
+      if (answer === "once") pushed.push(lane.key);
+      return answer === "once" ? { status: "published", remote: "origin", branch: "b", sha: "s" } : { status: "denied", code: "denied" };
+    },
+  });
+  const key = uuid();
+  lanes.submit({ kind: "scheduled", title: "Nightly", folder: "/work", isolated: true, scheduleId: "s1", approvalWaitMs: 60_000,
+    start: { type: "start", runId: key, project: project("/work"), scope: {} as never, protectedRoot: "/d", connection: { endpoint: "http://x", key: "k" },
+      input: { prompt: "p", mode: "agent", model: "m", effort: "default" } as never, references: [], preference: "tomverse_api" } });
+  const child = processes[0]!;
+  child.emit({ type: "git-action", runId: key, requestId: "push-1", action: { kind: "publish" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lanes.rows()[0]!.state, "approval");
+  assert.equal(lanes.nextApproval(), null, "no card opens for a run nobody is watching");
+  now = 61_000;
+  lanes.tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(pushed, []);
+  assert.deepEqual(child.stops(), [{ type: "stop", runId: key }]);
+  assert.deepEqual(child.sent.filter((message) => message.type === "git-action-result"),
+    [{ type: "git-action-result", runId: key, requestId: "push-1", result: { status: "denied", code: "denied" } }]);
+});

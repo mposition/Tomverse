@@ -64,7 +64,7 @@ const en = {
   entryEvent: "Event",
   changesHeading: "Changed files",
   windowGone: "This task is no longer available.",
-  approvalFrom: "From the {kind} task “{title}”",
+  approvalFrom: "From “{title}” ({kind})",
   approvalFolder: "Folder",
 
   scheduleHeading: "Scheduled runs",
@@ -219,7 +219,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "이벤트",
     changesHeading: "바뀐 파일",
     windowGone: "이 작업을 더 이상 볼 수 없습니다.",
-    approvalFrom: "{kind} 작업 “{title}”의 요청",
+    approvalFrom: "“{title}”({kind})의 요청",
     approvalFolder: "폴더",
 
     scheduleHeading: "예약 실행",
@@ -371,7 +371,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "事件",
     changesHeading: "已更改的文件",
     windowGone: "此任务已不可用。",
-    approvalFrom: "来自{kind}任务“{title}”",
+    approvalFrom: "来自“{title}”（{kind}）",
     approvalFolder: "文件夹",
 
     scheduleHeading: "定时运行",
@@ -523,7 +523,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "事件",
     changesHeading: "已變更的檔案",
     windowGone: "此任務已無法使用。",
-    approvalFrom: "來自{kind}任務「{title}」",
+    approvalFrom: "來自「{title}」（{kind}）",
     approvalFolder: "資料夾",
 
     scheduleHeading: "排程執行",
@@ -675,7 +675,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "Événement",
     changesHeading: "Fichiers modifiés",
     windowGone: "Cette tâche n’est plus disponible.",
-    approvalFrom: "De la tâche {kind} « {title} »",
+    approvalFrom: "De « {title} » ({kind})",
     approvalFolder: "Dossier",
 
     scheduleHeading: "Exécutions planifiées",
@@ -827,7 +827,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "Ereignis",
     changesHeading: "Geänderte Dateien",
     windowGone: "Diese Aufgabe ist nicht mehr verfügbar.",
-    approvalFrom: "Von der Aufgabe „{title}“ ({kind})",
+    approvalFrom: "Von „{title}“ ({kind})",
     approvalFolder: "Ordner",
 
     scheduleHeading: "Geplante Ausführungen",
@@ -979,7 +979,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "Evento",
     changesHeading: "Archivos modificados",
     windowGone: "Esta tarea ya no está disponible.",
-    approvalFrom: "De la tarea {kind} «{title}»",
+    approvalFrom: "De «{title}» ({kind})",
     approvalFolder: "Carpeta",
 
     scheduleHeading: "Ejecuciones programadas",
@@ -1131,7 +1131,7 @@ export const desktopParallelCopy: Record<Language, typeof en> = {
     entryEvent: "Evento",
     changesHeading: "Arquivos alterados",
     windowGone: "Esta tarefa não está mais disponível.",
-    approvalFrom: "Da tarefa {kind} “{title}”",
+    approvalFrom: "De “{title}” ({kind})",
     approvalFolder: "Pasta",
 
     scheduleHeading: "Execuções agendadas",

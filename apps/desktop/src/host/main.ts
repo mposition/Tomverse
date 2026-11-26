@@ -1103,8 +1103,11 @@ function onWorkerMessage(event: WorkerEvent) {
     if ("task" in event && state.task?.worktree?.path === event.task.root) event.task.worktree = state.task.worktree;
     if (event.type === "approval") {
       if (state.task?.status === "stopping") return;
-      if (pending || approvalWindow) foregroundWaiting = { runId: event.runId, request: event.request };
-      else showApproval(event.request);
+      // While other tasks run too, the card says which task it is from.
+      const card: ApprovalRequest = parallel.lanes.busy() && state.task
+        ? { ...event.request, task: { title: state.task.title, folder: state.task.root, kind: "foreground" } } : event.request;
+      if (pending || approvalWindow) foregroundWaiting = { runId: event.runId, request: card };
+      else showApproval(card);
     } else if (event.type === "finished") {
       pendingFollowUp?.resolve(false);
       pendingFollowUp = null;

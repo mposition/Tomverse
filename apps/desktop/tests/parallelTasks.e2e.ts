@@ -80,7 +80,7 @@ test("two tasks run at once in their own worktrees, both show in the activity li
     await decideNativePatch(alphaCard);
     await expect.poll(() => readFile(join(alphaRoot, "alpha.txt"), "utf8").catch(() => ""), { timeout: 20_000 }).toContain("Task Alpha");
     const betaCard = await secondCard;
-    await expect(betaCard.getByTestId("approval-origin")).toContainText("Parallel task");
+    await expect(betaCard.getByTestId("approval-origin")).toContainText("(Parallel)");
     await expect(betaCard.getByTestId("approval-origin")).toContainText("Task Beta");
     await expect(betaCard.getByTestId("approval-origin")).toContainText(betaRoot);
     await expect.poll(async () => (await state()).task?.status, { timeout: 20_000 }).toBe("completed");

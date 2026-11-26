@@ -68,6 +68,7 @@ const emptyState = (): StoredState => ({ version: 1, enabled: false, lastEvaluat
 export class ScheduleEngine {
   private state: StoredState = emptyState();
   private readonly lanes = new Map<string, string>();
+  private readonly starting = new Set<string>();
   private lastPersisted = 0;
   private dirty = false;
   private sandboxFacts: SandboxFacts = { mode: "off", available: false, writes: "none" };
@@ -157,10 +158,17 @@ export class ScheduleEngine {
   }
 
   private async trigger(item: StoredItem, scheduledFor: number): Promise<ScheduleRefusal | null> {
-    if (!mayStartRun(this.deps.activeFor(item.id))) {
+    // A run that is still being started counts as active, so two triggers at once cannot start two runs.
+    if (this.starting.has(item.id) || !mayStartRun(this.deps.activeFor(item.id))) {
       this.addRun(item, scheduledFor, { status: "skipped", reason: "overlap", finishedAt: this.deps.now() });
       return "busy-schedule";
     }
+    this.starting.add(item.id);
+    try { return await this.start(item, scheduledFor); }
+    finally { this.starting.delete(item.id); }
+  }
+
+  private async start(item: StoredItem, scheduledFor: number): Promise<ScheduleRefusal | null> {
     const facts = { sandbox: await this.refreshSandbox(), gitProject: this.deps.gitProject() };
     const problem = scheduleShapeProblem(item, facts);
     // A project other than the open one cannot be checked for Git here; the launch checks the folder itself.
@@ -257,7 +265,7 @@ export class ScheduleEngine {
     if (!this.state.enabled) return refuse("disabled");
     const problem = await this.problem(item, true);
     if (problem) return refuse(problem);
-    if (!mayStartRun(this.deps.activeFor(item.id))) return refuse("busy-schedule");
+    if (this.starting.has(item.id) || !mayStartRun(this.deps.activeFor(item.id))) return refuse("busy-schedule");
     void this.trigger(item, this.deps.now()).then(() => this.deps.changed());
     return { ok: true };
   }

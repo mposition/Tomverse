@@ -109,6 +109,17 @@ test("a due schedule starts one run, and is not started again while that run las
   assert.deepEqual(await w.engine.command({ action: "run-now", id }), { ok: false, reason: "busy-schedule" });
 });
 
+test("two triggers at the same moment start one run", async () => {
+  const w = world();
+  await w.enable();
+  await w.engine.command({ action: "save", input: w.input() });
+  const id = w.idOf();
+  const [first, second] = await Promise.all([w.engine.command({ action: "run-now", id }), w.engine.command({ action: "run-now", id })]);
+  assert.equal([first, second].filter((result) => result.ok).length, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(w.launched.length, 1);
+});
+
 test("what came due while the app was closed is recorded as missed and never run", async () => {
   const store = { text: null as string | null };
   const first = world("2026-12-01T08:00:00Z", store);

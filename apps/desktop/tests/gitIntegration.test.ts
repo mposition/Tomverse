@@ -107,3 +107,36 @@ test("The agent's push is off by default; once switched on it opens the same car
   assert.match(remote(bare), /refs\/heads\/feature/);
   assert.deepEqual(await integration.agent({ kind: "publish", approved: true }), { status: "error" });
 });
+
+test("Two tasks' pushes are approved on cards of their own: an answer releases that task's push and no other", async () => {
+  const one = setup("lane-one");
+  const two = setup("lane-two");
+  await one.integration.handle({ type: "agent-actions", enabled: true });
+  const asked: Array<{ folder: string; request: ApprovalRequest; settle: (action: "once" | "run" | "deny") => void }> = [];
+  const lane = (folder: string) => one.integration.agentFor(() => ({ folder, managed: true }),
+    (request) => new Promise((resolve) => { asked.push({ folder, request, settle: resolve }); }), { kind: "publish" });
+  const first = lane(one.work);
+  const second = lane(two.work);
+  await until(() => asked.length === 2);
+  const cardOf = (folder: string) => asked.find((entry) => entry.folder === folder)!;
+  assert.equal(cardOf(one.work).request.git?.origin, "agent");
+  assert.notEqual(cardOf(one.work).request.id, cardOf(two.work).request.id);
+  assert.notEqual(cardOf(one.work).request.git?.repository, cardOf(two.work).request.git?.repository);
+  assert.equal(remote(one.bare).includes("feature") || remote(two.bare).includes("feature"), false, "nothing is pushed while the cards are open");
+
+  cardOf(two.work).settle("once");
+  assert.equal(((await second) as { status: string }).status, "published");
+  assert.match(remote(two.bare), /refs\/heads\/feature/);
+  assert.equal(remote(one.bare).includes("feature"), false, "the other task's push was not released");
+
+  // "Allow for this run" is not an approval of a git card, and a denial pushes nothing.
+  cardOf(one.work).settle("run");
+  assert.deepEqual(await first, { status: "denied", code: "denied" });
+  assert.equal(remote(one.bare).includes("feature"), false);
+});
+
+test("A task's agent git tool stays off until the person switches it on", async () => {
+  const one = setup("lane-off");
+  assert.deepEqual(await one.integration.agentFor(() => ({ folder: one.work, managed: true }), async () => "once", { kind: "publish" }), { status: "disabled" });
+  assert.equal(remote(one.bare).includes("feature"), false);
+});
