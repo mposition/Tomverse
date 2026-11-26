@@ -1,4 +1,4 @@
-import type { StudioAnalysisReport, StudioColorReport, StudioFaceReport } from "@/lib/studioCreativeAnalysis";
+import { studioReportCrop, type StudioAnalysisReport, type StudioColorReport, type StudioFaceReport } from "@/lib/studioCreativeAnalysis";
 import { canvas, encode, readImage } from "./studioCanvas";
 import { loadStudioReportTypography, type StudioReportTypography } from "./studioReportTypography";
 
@@ -66,7 +66,7 @@ function photo(ctx: CanvasRenderingContext2D, image: HTMLImageElement | HTMLCanv
   region?: Region | null) {
   const iw = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
   const ih = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
-  const [rx, ry, rw, rh] = region ?? [0, 0, 1, 1];
+  const [rx, ry, rw, rh] = region ? studioReportCrop(region, { width: iw, height: ih }, { width: w, height: h }) : [0, 0, 1, 1];
   const sw = iw * rw, sh = ih * rh;
   const scale = Math.max(w / sw, h / sh);
   ctx.save();
@@ -281,11 +281,15 @@ function drawFaceGuides(ctx: CanvasRenderingContext2D, image: HTMLImageElement, 
     label(ctx, names[i], x + 18, center + 3, 15, 75, 650, faceInk);
   });
   ctx.setLineDash([]);
-  guides.markers.forEach(({ label: marker, point: [mx, my] }) => {
+  // Captions are placed top to bottom, each at least its own height below the last, so two nearby
+  // features (nose tip and lips) do not print over each other.
+  let lastCaption = -Infinity;
+  [...guides.markers].sort((first, second) => first.point[1] - second.point[1]).forEach(({ label: marker, point: [mx, my] }) => {
     const anchorX = px(mx), anchorY = py(my);
     if (anchorX <= x || anchorX >= x + w || anchorY < y + 27 || anchorY > y + h - 27) return;
     const captionX = x + w - 142;
-    const captionY = anchorY - 18;
+    const captionY = Math.max(anchorY - 18, lastCaption + 38);
+    lastCaption = captionY;
     ctx.strokeStyle = "#29473e";
     ctx.beginPath();
     ctx.moveTo(anchorX, anchorY);

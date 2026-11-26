@@ -143,12 +143,15 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           const digest = await crypto.subtle.digest("SHA-256", await image.arrayBuffer());
           const key = `${id}/${lang}/${new Uint8Array(digest).join(",")}`;
           let next: StudioAnalysisReport | null = previousReports.current.get(key) ?? null;
-          if (!next) {
+          // The answer is JSON written as free text: one that does not parse is asked for once more.
+          for (let attempt = 0; !next; attempt++) {
             const text = await generateStudioText(studioAnalysisPrompt(id, studioOutputLanguage[lang]), signal, image);
             signal.throwIfAborted();
             try {
               next = parseStudioAnalysis(id, text);
+              if (!next) break;
             } catch {
+              if (attempt === 0) continue;
               report(copy.analysisIncomplete, true);
               return;
             }

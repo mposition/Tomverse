@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { fillStudioStickerCaptions, findStudioTool, studioObjectUrl, STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
-import { parseStudioAnalysis } from "../lib/studioCreativeAnalysis.ts";
+import { parseStudioAnalysis, studioAnalysisPrompt, studioReportCrop } from "../lib/studioCreativeAnalysis.ts";
 import { studioCreativeCopy } from "../locales/studioCreative.ts";
 import { STUDIO_PHOTO_CATEGORIES, studioPresetName, studioPublicationPresets } from "../lib/studioPresetLibrary.ts";
 import {
@@ -125,6 +125,19 @@ test("Every supported language includes Studio labels, examples, and twenty stic
   assert.notEqual(studioCopy.zh.playGroup, studioCopy["zh-Hant"].playGroup);
 });
 
+test("A report card shows the whole named area instead of the middle of a wide one", () => {
+  const image = { width: 880, height: 1168 }, card = { width: 160, height: 121 };
+  const within = (inner, outer) => outer[0] <= inner[0] + 1e-9 && outer[1] <= inner[1] + 1e-9 &&
+    outer[0] + outer[2] >= inner[0] + inner[2] - 1e-9 && outer[1] + outer[3] >= inner[1] + inner[3] - 1e-9;
+  for (const region of [[.30, .355, .41, .08], [.42, .40, .17, .13], [.215, .41, .58, .12], [.16, .025, .69, .26], [.0, .0, 1, .05], [.9, .2, .1, .7]]) {
+    const crop = studioReportCrop(region, image, card);
+    // Both eyes stay in an eye card, and the crop has the card's shape and stays on the photo.
+    assert.ok(within(region, crop), JSON.stringify(region));
+    assert.ok(Math.abs(image.width * crop[2] / (image.height * crop[3]) - card.width / card.height) < .01 || crop[2] === 1 || crop[3] === 1);
+    assert.ok(crop[0] >= 0 && crop[1] >= 0 && crop[0] + crop[2] <= 1 + 1e-9 && crop[1] + crop[3] <= 1 + 1e-9);
+  }
+});
+
 test("Studio renders only schema-checked, bounded analysis data", () => {
   assert.equal(parseStudioAnalysis("face-analysis", '{"status":"retry"}'), null);
   const feature = { color: "#889977", name: "Olive", region: [.2, .3, .4, .1] };
@@ -157,6 +170,39 @@ test("Studio renders only schema-checked, bounded analysis data", () => {
   assert.deepEqual(parseStudioAnalysis("face-analysis", fencedAnswer), partial);
   assert.throws(() => parseStudioAnalysis("face-analysis", JSON.stringify({ ...partial, metrics: [] })));
   assert.equal(parseStudioAnalysis("face-analysis", JSON.stringify({ ...face, guides: { ...face.guides, thirds: [.35, .2, .5, .7] } })).guides, null);
+});
+
+test("Analysis answers in the shapes the model really returns are read, and the overall score is the metrics' mean", () => {
+  // Seen from the default model on 2026-11-26: named objects in a hex palette, a one-iris region a few
+  // percent across, and an overall score that is not the mean of its own metrics.
+  const feature = { color: "#1b1a1b", name: "Black", region: [.385, .38, .045, .026] };
+  const named = Array.from({ length: 10 }, (_, i) => ({ color: "#a64b3" + i, name: "Shade " + i }));
+  const color = parseStudioAnalysis("color-analysis", JSON.stringify({
+    status: "ok", season: "Autumn", summary: "Warm skin", features: { hair: feature, eyes: feature, skin: feature },
+    profile: { undertone: { name: "Warm", color: "#dda88c" }, contrast: { name: "High", colors: ["#1b1a1b", "#d6baa2"] },
+      tone: { name: "Muted", colors: ["#bc855c", "#b6a791", "#657650", "#37505b"] } },
+    recommended: named.slice(0, 6), comparison: named.slice(0, 6), recommendedPalette: named, comparisonPalette: named.map(item => item.color), garment: null,
+  }));
+  assert.deepEqual(color.recommendedPalette, named.map(item => item.color));
+  assert.deepEqual(color.features.eyes.region, [.385, .38, .045, .026]);
+  // The card widens a tiny area before showing it, and keeps the iris inside.
+  const crop = studioReportCrop(color.features.eyes.region, { width: 772, height: 1024 }, { width: 200, height: 99 });
+  assert.ok(crop[2] >= .14 && crop[0] <= .385 && crop[0] + crop[2] >= .43 && crop[1] <= .38 && crop[1] + crop[3] >= .406);
+  const scores = [7, 7.5, 7.5, 7, 7, 7, 7, 7, 8, 8, 7.5];
+  const face = parseStudioAnalysis("face-analysis", JSON.stringify({
+    status: "ok", score: 6.7, summary: "Soft light",
+    metrics: scores.map((score, i) => ({ label: "Metric " + i, score })),
+    observations: Array(6).fill({ label: "Eyes", score: 7, note: "Clear", region: null }),
+    tips: Array(8).fill({ label: "Lighting", note: "Face a window" }), guides: null,
+  }));
+  assert.equal(face.score, 7.3);
+  for (const kind of ["face-analysis", "color-analysis"]) {
+    const prompt = studioAnalysisPrompt(kind, "Korean");
+    assert.match(prompt, /Return an object with exactly these keys: status, (score|season), summary/);
+    assert.match(prompt, /check that every bracket and brace closes/);
+  }
+  // The key the model used when it was only told "the numeric overall score" is not accepted silently.
+  assert.throws(() => parseStudioAnalysis("face-analysis", JSON.stringify({ status: "ok", overall: 7, summary: "x", metrics: [], observations: [], tips: [] })));
 });
 
 test("Random sticker captions fill every supported language to twenty while preserving custom text", () => {
