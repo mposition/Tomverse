@@ -402,3 +402,12 @@ test("a provider-reported cost above an edit's price is charged to the provider 
   assert.equal(reportedEditOverageMicroUsd(10_000, undefined, 25_000), 0);
   assert.equal(reportedEditOverageMicroUsd(null, 0, 25_000), 0);
 });
+
+test("a failed request that the provider billed past its reservation still charges the provider budget", async () => {
+  const { failureReportedOverageMicroUsd } = await import("../lib/imageGenerationService.ts");
+  // The background remover reserves 15,000 (price plus prompt budget). A refused answer that reported 25 units is 10,000 over.
+  assert.equal(failureReportedOverageMicroUsd(15_000, 25_000), 10_000);
+  assert.equal(failureReportedOverageMicroUsd(15_000, 10_000), 0);
+  assert.equal(failureReportedOverageMicroUsd(15_000, 15_000), 0);
+  for (const reported of [null, undefined, Number.NaN]) assert.equal(failureReportedOverageMicroUsd(15_000, reported), 0);
+});

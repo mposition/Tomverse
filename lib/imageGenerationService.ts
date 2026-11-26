@@ -55,6 +55,7 @@ import {
   imageEditCredits,
   imagePhotoToolAdmitted,
   imageThinkingBilling,
+  isImagePhotoTool,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
@@ -1154,6 +1155,20 @@ export const failureIncurredCostMicroUsd = (
   return nonImage + prompt + image;
 };
 
+/**
+ * What a failed request cost past its whole reservation, by the provider's own
+ * report: a refused or unstored answer is still billed, and a failure keeps
+ * the reservation charged, so only the part above it is missing. 0 when
+ * nothing was reported.
+ */
+export const failureReportedOverageMicroUsd = (
+  reservedCostMicroUsd: number,
+  reportedCostMicroUsd: number | null | undefined
+): number =>
+  typeof reportedCostMicroUsd === "number" && Number.isFinite(reportedCostMicroUsd)
+    ? Math.max(0, reportedCostMicroUsd - reservedCostMicroUsd)
+    : 0;
+
 /** Adds spend the reservation did not hold to the windows it was reserved in. */
 export const chargeProviderBudgetOverage = async (
   tx: Prisma.TransactionClient,
@@ -1226,6 +1241,8 @@ const finalizeFailure = async (input: {
     imageCount: number;
     inputTokens?: number;
   };
+  /** The request's cost as the provider reported it, where a reached provider reports one. */
+  reportedCostMicroUsd?: number | null;
   /**
    * Whether this caller may also claim a row already in `settling`, and on
    * what grounds. Omitted means no -- the ordinary failure paths must never
@@ -1303,10 +1320,12 @@ const finalizeFailure = async (input: {
         const incurredCostMicroUsd = input.releaseProviderBudget
           ? null
           : failureIncurredCostMicroUsd(reservation.pricingSnapshot, input.billed);
-        const failureOverageMicroUsd =
+        const failureOverageMicroUsd = input.releaseProviderBudget ? 0 : Math.max(
           incurredCostMicroUsd === null
             ? 0
-            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd));
+            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd)),
+          failureReportedOverageMicroUsd(Number(reservation.reservedCostMicroUsd), input.reportedCostMicroUsd)
+        );
         if (input.releaseProviderBudget) {
           await refundProviderBudget(
             tx,
@@ -1601,6 +1620,7 @@ export const processImageGeneration = async (
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
+        reportedCostMicroUsd: providerError.reportedCostMicroUsd,
         billed: {
           nonImageBillableTokens: providerError.nonImageBillableTokens,
           imageTokens: providerError.billedImageTokens,
@@ -1926,6 +1946,7 @@ export const processImageGeneration = async (
       // would have charged its overage rolled back with this failure.
       ...(answered
         ? {
+            reportedCostMicroUsd: answered.reportedCostMicroUsd,
             billed: {
               nonImageBillableTokens: answered.nonImageBillableTokens,
               imageTokens: answered.billedImageTokens,
@@ -2229,6 +2250,9 @@ export const retryImageGenerationTarget = async (
         ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
         : {}),
       ...(retryEditAttachmentId ? { editSource: { attachmentId: retryEditAttachmentId } } : {}),
+      // A photo tool's target exists only because its feature admitted it; the
+      // id retried is that stored target's, never one the caller sent.
+      ...(isImagePhotoTool(target.modelId) ? { photoTools: [target.modelId] } : {}),
       // The retry stays in the conversation its group already lives in. A
       // chat conversation holds a group only through a Chat image turn
       // (lib/chatImageTurn.ts), so its retry keeps that host -- while the

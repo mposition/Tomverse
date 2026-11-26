@@ -162,6 +162,12 @@ export class ImageProviderError extends Error {
   providerUsage: Record<string, number> | null = null;
 
   /**
+   * What the provider said the refused request cost, where it reports one.
+   * The failure then charges the provider budget anything past the reservation.
+   */
+  reportedCostMicroUsd: number | null = null;
+
+  /**
    * The provider generated (and billed) the image and only fetching or
    * checking it failed, so `status` is the download's, not a refusal of the
    * request. Set on the Qwen asset path; read by the billing measurement.
@@ -1602,6 +1608,7 @@ const removeBackground = async (model: ImageModelProfile, input: ImageRequestInp
   const refuse = (): never => {
     const error = new ImageProviderError("provider_failed", "Background removal returned an unusable image.", 200, answer.providerRequestId, answer.requestParams);
     error.afterGeneration = true;
+    error.reportedCostMicroUsd = answer.reportedCostMicroUsd ?? null;
     throw error;
   };
   const dimensions = answer.bytes.byteLength > 0 && answer.bytes.byteLength <= FAL_MAX_ASSET_BYTES

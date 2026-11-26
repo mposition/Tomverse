@@ -957,11 +957,12 @@ test("the background remover sends only the padded photo and accepts only a same
     const solid = await sharp((await generateImageWithProvider(request)).imageBytes).raw().toBuffer();
     assert.deepEqual([solid[3], solid[4 * 1024 * 512 + 3]], [100, 255]);
 
-    // Billed, then refused: another size, or a picture with no alpha channel.
+    // Billed, then refused: another size, or a picture with no alpha channel. The refusal carries what the
+    // provider said it cost, so a price above the reservation is not lost with the image.
     for (const bytes of [await cutOut(512), await cutOut(1024, 3)]) {
-      answer = async () => ({ credits: 10, image: { b64_json: bytes.toString("base64") } });
+      answer = async () => ({ credits: 25, image: { b64_json: bytes.toString("base64") } });
       await assert.rejects(generateImageWithProvider(request),
-        error => error instanceof ImageProviderError && error.afterGeneration === true);
+        error => error instanceof ImageProviderError && error.afterGeneration === true && error.reportedCostMicroUsd === 25_000);
     }
     answer = async () => ({ credits: 10, image: { url: "https://img.recraft.ai/cut.png" } });
     await assert.rejects(generateImageWithProvider(request), error => error.afterGeneration === true);

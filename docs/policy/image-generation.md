@@ -606,8 +606,11 @@ High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
   `image.url`이 fal CDN의 1024×1024 알파 PNG였고 장당 6~11초였다. 두 도구 모두 불투명 영역의 픽셀이
   입력과 같았다.
 - 공급자가 보고한 비용이 판매 시점의 원가보다 크면 초과분을 공급자 예산에 더 청구한다
-  (`reportedEditOverageMicroUsd`). 보고 비용이 있는 다른 편집 경로에도 같은 규칙이 적용된다. fal은 비용을
-  보고하지 않으므로 Bria는 고정 가격으로 정산한다.
+  (`reportedEditOverageMicroUsd`). 보고 비용이 있는 다른 편집 경로에도 같은 규칙이 적용된다. 과금된 뒤
+  결과를 받지 못했거나 저장하지 못한 실패도 같다. 실패는 예약액을 그대로 남기므로, 보고 비용이 예약액을
+  넘는 만큼만 더 청구한다(`failureReportedOverageMicroUsd`). fal은 비용을 보고하지 않으므로 Bria는 고정
+  가격으로 정산한다.
+- 실패한 사진 도구 대상의 재시도는 저장된 대상의 모델 ID로만 다시 요청한다. 호출자가 보낸 ID는 쓰지 않는다.
 
 [Recraft 배경 제거 API](https://www.recraft.ai/docs/api-reference/tools/remove-background) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing) · [fal Bria RMBG 3.0](https://fal.ai/models/bria/rmbg-3)
 
