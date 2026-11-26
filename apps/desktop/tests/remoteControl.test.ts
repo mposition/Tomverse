@@ -30,7 +30,7 @@ const task = (entries: Task["entries"] = [], changes = 0): Task => ({
 });
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
-type Reply = { status: number; body?: unknown; headers?: Record<string, string> } | Error;
+type Reply = { status: number; body?: unknown; headers?: Record<string, string>; delayMs?: number } | Error;
 
 function setup(options: { enabled?: boolean } = {}) {
   const userData = mkdtempSync(join(tmpdir(), "tomverse-remote-"));
@@ -52,6 +52,7 @@ function setup(options: { enabled?: boolean } = {}) {
     calls.push({ url: String(url), method: init?.method ?? "GET", headers, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     const reply = replies.shift() ?? { status: 200, body: { ok: true, deviceId: "device-1", commands: [] } };
     if (reply instanceof Error) throw reply;
+    now += reply.delayMs ?? 0;
     return new Response(reply.body === undefined ? null : JSON.stringify(reply.body), { status: reply.status, headers: reply.headers });
   }) as typeof fetch;
   const control = createRemoteControl({
@@ -126,6 +127,25 @@ test("a remote answer reaches only the request open on the PC, once", async (t) 
   await s.step(1_000);
   const acks = (s.syncs().at(-1)!.body as { acks: Array<{ result: string; reason?: string }> }).acks;
   assert.deepEqual(acks.map((ack) => ack.reason ?? ack.result), ["not_open", "changed", "device", "expired", "applied", "duplicate", "duplicate"]);
+});
+
+test("an answer that was young at the server and old on arrival is not applied", async (t) => {
+  const s = setup();
+  t.after(s.done);
+  await s.enable();
+  const open = commandCard();
+  s.setTasks([s.running({ status: "approval" })]);
+  s.setCard({ request: open, taskKey: s.foreground });
+  await s.step();
+  // The server handed it over ten seconds before its two minutes ran out; the reply took fifteen to arrive.
+  s.replies.push({ status: 200, delayMs: 15_000, body: { ok: true, deviceId: "device-1", commands: [
+    commandFor(open, { taskKey: s.foreground, ageMs: 2 * 60_000 - 10_000 }),
+  ] } });
+  await s.step(REMOTE_FAST_POLL_MS);
+  assert.deepEqual(s.answers, []);
+  await s.step(1_000);
+  const acks = (s.syncs().at(-1)!.body as { acks: Array<{ result: string; reason?: string }> }).acks;
+  assert.deepEqual(acks.map((ack) => ack.reason ?? ack.result), ["expired"]);
 });
 
 test("requests answered at the PC are never applied from another device", async (t) => {

@@ -291,11 +291,13 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     } catch { /* The server deletes the report when it expires, and hides it once the device signs out. */ }
   }
 
-  async function apply(command: DesktopRemoteCommand, account: RemoteAccount, device: string): Promise<DesktopRemoteAck> {
+  async function apply(command: DesktopRemoteCommand, account: RemoteAccount, device: string, askedAt: number): Promise<DesktopRemoteAck> {
     if (command.deviceId !== device) return refused(command.id, "device");
     if (seen.has(command.id)) return refused(command.id, "duplicate");
     remember(seen, command.id);
-    if (command.ageMs > DESKTOP_REMOTE_COMMAND_TTL_MS) return refused(command.id, "expired");
+    // The server's age stops when it answered this sync. The time since this PC asked covers the way here and the
+    // wait behind earlier answers; counting from the ask can only make an answer look older than it is.
+    if (command.ageMs + Math.max(0, clock() - askedAt) > DESKTOP_REMOTE_COMMAND_TTL_MS) return refused(command.id, "expired");
     if (command.kind === "approval") {
       if (answered.has(command.approvalId)) return refused(command.id, "duplicate");
       const card = deps.card();
@@ -328,7 +330,8 @@ export function createRemoteControl(deps: RemoteControlDeps) {
   async function sync(account: RemoteAccount, snapshot: DesktopRemoteSnapshot, json: string) {
     const run = generation;
     inFlight = true;
-    lastSyncAt = clock();
+    const askedAt = clock();
+    lastSyncAt = askedAt;
     const sending = acks.splice(0, DESKTOP_REMOTE_LIMITS.acks);
     try {
       const response = await request(account, "POST", { snapshot, acks: sending });
@@ -353,7 +356,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
       lastHadTasks = snapshot.tasks.length > 0;
       deviceId = body.deviceId;
       for (const command of body.commands) {
-        const ack = await apply(command, account, body.deviceId);
+        const ack = await apply(command, account, body.deviceId, askedAt);
         if (run !== generation) return;
         acks.push(ack);
       }

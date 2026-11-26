@@ -84,9 +84,15 @@ export async function syncDesktopRemote(identity: DesktopIdentity, body: Desktop
         (EXTRACT(EPOCH FROM (now() - c."createdAt")) * 1000)::float8 AS "ageMs",
         (EXTRACT(EPOCH FROM c."createdAt") * 1000)::float8 AS "createdMs"
     `;
+    // An answer outlives its retention for as long as this PC still reports the request it answered: the row is what
+    // refuses a second answer for it.
     await tx.$executeRaw`
       DELETE FROM "DesktopRemoteCommand"
       WHERE "deviceId" = ${identity.deviceId} AND "createdAt" < now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+        AND NOT ("approvalId" IS NOT NULL AND EXISTS (
+          SELECT 1 FROM "DesktopRemoteDevice" r
+          WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
+        ))
     `;
     const commands: DesktopRemoteCommand[] = [];
     for (const row of [...rows].sort((a, b) => a.createdMs - b.createdMs)) {
@@ -250,11 +256,19 @@ export async function recordDesktopRemoteCommand(input: {
   });
 }
 
-/** Maintenance: reports past their expiry and answers past their retention. Both are short-lived by design. */
+/**
+ * Maintenance: reports past their expiry and answers past their retention. Both are short-lived by design. An answer
+ * for a request its PC still reports is kept, so that request cannot be answered a second time; it goes with the
+ * report once the PC stops reporting.
+ */
 export async function purgeDesktopRemoteControl() {
   const commands = await prisma.$executeRaw`
     DELETE FROM "DesktopRemoteCommand"
     WHERE "createdAt" < now() - (${DESKTOP_REMOTE_COMMAND_RETENTION_MS}::integer * interval '1 millisecond')
+    AND NOT ("approvalId" IS NOT NULL AND EXISTS (
+      SELECT 1 FROM "DesktopRemoteDevice" r
+      WHERE r."deviceId" = "DesktopRemoteCommand"."deviceId" AND r."snapshot"->'approval'->>'id' = "DesktopRemoteCommand"."approvalId"
+    ))
   `;
   const devices = await prisma.$executeRaw`DELETE FROM "DesktopRemoteDevice" WHERE "expiresAt" <= now()`;
   return { commands, devices };

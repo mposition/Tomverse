@@ -303,10 +303,18 @@ test("reports expire and are deleted; turning off and signing the PC out remove 
   assert.deepEqual((await (await listAs(session)).json()).devices, []);
   assert.deepEqual(await count(), { devices: 0, commands: 0 });
 
-  // Maintenance deletes old answers and expired reports with nobody reading.
+  // Maintenance deletes old answers and expired reports with nobody reading. An answer for a request the PC still
+  // reports is kept past its retention, by maintenance and by the PC's own sync, so the request cannot be answered a
+  // second time; it goes once the PC reports the request closed.
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
   await commandAs(session, answer(pc.deviceId));
   await prisma.$executeRaw`UPDATE "DesktopRemoteCommand" SET "createdAt" = now() - interval '16 minutes'`;
+  assert.deepEqual(await purge(), { commands: 0, devices: 0 });
+  await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  assert.deepEqual(await count(), { devices: 1, commands: 1 });
+  const second = await commandAs(session, answer(pc.deviceId, { decision: "deny" }));
+  assert.deepEqual(await second.json(), { ok: false, code: "ALREADY_ANSWERED" });
+  await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "snapshot" = jsonb_set("snapshot", '{approval}', 'null'::jsonb)`;
   assert.deepEqual(await purge(), { commands: 1, devices: 0 });
   await prisma.$executeRaw`UPDATE "DesktopRemoteDevice" SET "expiresAt" = now() - interval '1 second'`;
   assert.deepEqual(await purge(), { commands: 0, devices: 1 });
