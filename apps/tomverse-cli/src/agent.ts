@@ -13,6 +13,7 @@ import { BackgroundCommands, type BackgroundInfo } from "./background.js";
 import { classifyWebUrl, type HostResolver, type WebTransport } from "./web.js";
 import { NestedInstructions } from "./instructions.js";
 import type { ProjectMemory } from "./memory.js";
+import { createGitTools, type GitToolHost } from "./git-tools.js";
 import { createTools, imageMessage, planCommandCall, planPatchCall, READ_TOOLS, trimOldImages, VIEW_IMAGE_MARK, type ImageAttachment, type ToolContext } from "./tools.js";
 import { estimateTokens } from "./tokens.js";
 import { Subagents } from "./subagent.js";
@@ -86,6 +87,8 @@ export type RunnerOptions = {
     captureTransmission?: boolean;
     taskPlan?: "agent" | "plan";
     browserSnapshot?: (signal: AbortSignal) => Promise<string | null>;
+    /** Gives the model commit_changes and publish_changes. The host shows an approval card for each call; the model cannot answer it. */
+    git?: GitToolHost;
     codePlugin?: (action: CodePluginAction, signal: AbortSignal) => Promise<CodePluginReply | null>;
     beforeWrite?: ToolContext["beforeWrite"];
     beforeCommand?: ToolContext["beforeCommand"];
@@ -344,6 +347,9 @@ export class Runner {
             },
         };
         this.tools = createTools(this.toolContext, options.journal.state.readOnly || options.taskPlan === "plan");
+        if (options.git && !options.journal.state.readOnly && options.taskPlan !== "plan") {
+            Object.assign(this.tools, createGitTools(options.git, () => this.effectBlockReason(), () => this.controller.signal));
+        }
         if (options.subagents) {
             this.subagents = new Subagents({
                 journal: options.journal,
@@ -531,6 +537,9 @@ export class Runner {
             ]),
             ...(readOnly || !this.options.backgroundCommands ? [] : [
                 "run_command with background: true keeps a command (a dev server, a watcher) running after the call; it is approved as a background command, has no time limit, and is ended when this task ends. Read its output with read_background_output and stop it with stop_background.",
+            ]),
+            ...(readOnly || !this.tools.commit_changes ? [] : [
+                "commit_changes and publish_changes ask the user to approve a commit or a push on a card that shows exactly what will happen. You cannot approve it. A denied or disabled request is final: do not ask again, say what you would have done. Only commits are pushed, never to the default branch.",
             ]),
             ...this.delegateGuidance(),
             ...this.endedBackgroundNote(),

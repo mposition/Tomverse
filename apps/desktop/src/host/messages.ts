@@ -6,6 +6,7 @@ import type { CodeExecutionMode, NativeFixtureProvider } from "../code-execution
 import type { CodeCliContinuation, CodeContinuation } from "../code-fallback";
 import type { DesktopMcpAction, DesktopMcpReply } from "../../../../lib/desktopCodeMcpContract";
 import type { CliFixtureInput } from "./cli-fixture-input";
+import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
 
 export type Connection = { endpoint: string; key: string };
 export type RecordedSession = { requestId: string; storage: string | null; sessionId: string; project: ProjectRoot;
@@ -31,6 +32,7 @@ export type WorkerCommand =
       continuation?: { segmentId: string; maximumKeyCreditCap: number } } })
   | { type: "code-plugin-result"; runId: string; requestId: string; result: DesktopMcpReply | null }
   | { type: "browser-snapshot-result"; runId: string; requestId: string; text: string | null }
+  | { type: "git-action-result"; runId: string; requestId: string; result: AgentGitResult }
   | { type: "answer"; runId: string; decision: Decision }
   | { type: "follow-up"; runId: string; requestId: string; text: string }
   | { type: "queue"; runId: string; requestId: string; operation: QueueOperation }
@@ -62,6 +64,7 @@ export type WorkerEvent =
   | { type: "code-plugin"; runId: string; requestId: string; action: DesktopMcpAction }
   | { type: "code-plugin-cancel"; runId: string; requestId: string }
   | { type: "browser-snapshot"; runId: string; requestId: string }
+  | { type: "git-action"; runId: string; requestId: string; action: AgentGitAction }
   | { type: "approval"; runId: string; request: ApprovalRequest }
   | { type: "follow-up-queued"; runId: string; requestId: string; queued: boolean }
   | { type: "queue-result"; runId: string; requestId: string; ok: boolean }

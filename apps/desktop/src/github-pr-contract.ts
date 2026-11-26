@@ -16,7 +16,7 @@ export type PullEvidence = z.infer<typeof pullEvidence>;
 export type PullLink = z.infer<typeof pullLink>;
 export const taskPullCommand = z.discriminatedUnion("type", [
   z.object({ type: z.literal("list") }).strict(),
-  z.object({ type: z.enum(["read", "open"]), link: pullLink }).strict(),
+  z.object({ type: z.literal("read"), link: pullLink }).strict(),
 ]);
 
 export function githubPullUrl(url: string) {

@@ -57,7 +57,6 @@ export async function readGhStatus(run: GhRunner | null): Promise<GhStatusResult
 
 /** Text from outside the app: control characters and terminal colour codes removed, so it shows and attaches as plain data. */
 export function cleanExternalText(text: string, limit: number) {
-  // eslint-disable-next-line no-control-regex
   const plain = text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f​-‏‪-‮⁠-⁯﻿]/g, "");
   return plain.length > limit ? plain.slice(0, limit) : plain;
 }

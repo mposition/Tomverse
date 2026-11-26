@@ -28,6 +28,9 @@ const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 type PluginRequest = Extract<WorkerEvent, { type: "code-plugin" }>;
 type PluginResponse = Extract<WorkerCommand, { type: "code-plugin-result" }>;
+import { readAgentGitSwitch } from "./git-agent-switch";
+import type { GitToolAction } from "../../../tomverse-cli/src/git-tools.js";
+import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
 type ActiveRun = {
   runId: string;
   cancelled: boolean;
@@ -35,6 +38,7 @@ type ActiveRun = {
   runner?: Runner;
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
+  gitRequest?: { requestId: string; settle: (result: AgentGitResult | null) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
   queueOperation?: (operation: QueueOperation) => boolean;
   /** Sends the task to the window again (a background command printed something or ended). */
@@ -587,6 +591,24 @@ function requestBrowserSnapshot(control: ActiveRun, signal: AbortSignal) {
   });
 }
 
+/** Asks the main process to commit or push. It opens an approval card the agent cannot answer; no time limit, since a person answers it. */
+function requestGitAction(control: ActiveRun, action: GitToolAction, signal: AbortSignal) {
+  return new Promise<AgentGitResult | null>((resolve) => {
+    const stop = AbortSignal.any([signal, control.abort.signal]);
+    if (control.gitRequest || stop.aborted) { resolve(null); return; }
+    const requestId = randomUUID();
+    const settle = (result: AgentGitResult | null) => {
+      stop.removeEventListener("abort", aborted);
+      control.gitRequest = undefined;
+      resolve(result);
+    };
+    const aborted = () => settle(null);
+    stop.addEventListener("abort", aborted, { once: true });
+    control.gitRequest = { requestId, settle };
+    send({ type: "git-action", runId: control.runId, requestId, action: action as AgentGitAction });
+  });
+}
+
 function requestCodePlugin(control: ActiveRun, action: PluginRequest["action"], signal: AbortSignal) {
   return new Promise<PluginResponse["result"]>((resolve) => {
     const stop = AbortSignal.any([signal, control.abort.signal, AbortSignal.timeout(16_000)]);
@@ -873,6 +895,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
+      git: !usesCodePlugin && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
         /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
         ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
@@ -1519,6 +1542,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     active.approval?.settle("deny");
   } else if (data.type === "code-plugin-result" && active?.runId === data.runId) {
     if (active.pluginRequest?.requestId === data.requestId) active.pluginRequest.settle(data.result);
+  } else if (data.type === "git-action-result" && active?.runId === data.runId) {
+    if (active.gitRequest?.requestId === data.requestId) active.gitRequest.settle(data.result);
   } else if (data.type === "browser-snapshot-result" && active?.runId === data.runId) {
     if (active.browserSnapshot?.requestId === data.requestId) active.browserSnapshot.settle(data.text);
   } else if (data.type === "answer" && active?.runId === data.runId) {

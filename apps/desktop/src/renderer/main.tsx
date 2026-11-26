@@ -33,6 +33,10 @@ import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecut
 import { DraftDictation } from "./DraftDictation";
 import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
+import { GitPanel } from "./GitPanel";
+import { GitApprovalSection } from "./GitApproval";
+import { PromptAttachmentChips } from "./PromptAttachments";
+import { clearPromptAttachments, promptAttachmentsFor, withPromptAttachments } from "./prompt-attachments";
 import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
@@ -459,6 +463,7 @@ function Desktop() {
   }
   const task = snapshot?.task;
   const busy = snapshot?.busy || requesting;
+  const attachmentScope = (snapshot?.draftNamespace ?? "") + ":" + (task?.id ?? "new");
   const cliFixture = snapshot?.antigravityFixtureModel ? antigravityFixtureExecution : snapshot?.grokFixtureModel ? grokFixtureExecution : snapshot?.miniMaxFixtureModel ? miniMaxFixtureExecution : snapshot?.zCodeFixtureModel ? zCodeFixtureExecution : snapshot?.deepSeekFixtureModel ? deepSeekFixtureExecution : snapshot?.vibeFixtureModel ? vibeFixtureExecution : snapshot?.kimiFixtureModel ? kimiFixtureExecution : snapshot?.qwenFixtureModel ? qwenFixtureExecution :
     snapshot?.claudeFixtureModel ? claudeFixtureExecution : codexFixtureExecution;
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
@@ -739,7 +744,8 @@ function Desktop() {
       setRequesting(true);
       nearBottom.current = true;
       await act(async () => {
-        if (!await window.desktop.followUp(followUpTarget, submitted)) throw new Error("The instruction was not confirmed.");
+        if (!await window.desktop.followUp(followUpTarget, withPromptAttachments(submitted, promptAttachmentsFor(attachmentScope)))) throw new Error("The instruction was not confirmed.");
+        clearPromptAttachments(attachmentScope);
         if (previousNamespace.current === namespace && composer.current?.value === submitted) changeDraft("");
       });
       setRequesting(false);
@@ -750,7 +756,7 @@ function Desktop() {
     setRequesting(true);
     nearBottom.current = true;
     await act(async () => {
-      await window.desktop.start({ prompt, model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
+      await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
@@ -758,6 +764,7 @@ function Desktop() {
         ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
+      clearPromptAttachments(attachmentScope);
       setSaveHistory(true);
       setCodePlugin(undefined);
       setWorkspaceSelection(undefined);
@@ -937,7 +944,9 @@ function Desktop() {
             </details>}
           {surface === "code" && task?.id && task.savedLocally && !task.unreadable && !busy &&
             snapshot?.history.some((row) => row.id === task.id) &&
-            <TaskGithubPulls key={snapshot.draftNamespace + task.id} language={language} onVisibilityChange={setGithubDialogOpen} />}
+            <TaskGithubPulls key={snapshot.draftNamespace + task.id} language={language} onVisibilityChange={setGithubDialogOpen} scope={attachmentScope} />}
+          {surface === "code" && snapshot?.project && snapshot.draftNamespace && !busy &&
+            <GitPanel key={"git:" + snapshot.draftNamespace + (task?.id ?? "new")} language={language} onVisibilityChange={setGithubDialogOpen} disabled={Boolean(busy)} />}
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
             aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
             onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
@@ -1031,6 +1040,7 @@ function Desktop() {
                     })}><X size={13} /></button>
                 </li>)}
               </ul>}
+              <PromptAttachmentChips scope={attachmentScope} language={language} disabled={Boolean(busy)} />
             </div>
             <div className="composer-actions">
               {snapshot?.draftNamespace && <details className="model-menu code-attach-menu">
@@ -1241,6 +1251,7 @@ function Approval() {
         </dl>
         <p role="note">{engineCopy.approvalWebNote}</p>
       </section>}
+      {request.git && <GitApprovalSection git={request.git} language={language} />}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>
         <pre>{request.command.display}</pre>

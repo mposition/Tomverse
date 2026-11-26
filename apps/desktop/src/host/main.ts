@@ -69,6 +69,8 @@ import { codeMemoryView } from "./code-memory";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
+import { createGitIntegration } from "./git-integration";
+import type { AgentGitResult } from "../git-actions-contract";
 import { appendTaskPage, nextTaskPage } from "./taskPaging";
 import {
   DesktopSessionRefused, readBrowserAccount, refreshBrowserSession, revokeBrowserSession, signInByDesktopEmail,
@@ -862,12 +864,19 @@ function send(command: WorkerCommand) {
 }
 
 function dismissApproval() {
+  gitIntegration.dismiss();
   const window = approvalWindow;
   approvalWindow = null;
   if (window && !window.isDestroyed()) window.close();
 }
 
 function answer(decision: Decision) {
+  if (gitIntegration.decide(decision)) {
+    const window = approvalWindow;
+    approvalWindow = null;
+    setImmediate(() => { if (window && !window.isDestroyed()) window.close(); });
+    return true;
+  }
   if (!pending || !runId || pending.id !== decision.id || (decision.action === "run" && !pending.canRemember)) return false;
   send({ type: "answer", runId, decision });
   pending = null;
@@ -985,6 +994,7 @@ function showApproval(request: ApprovalRequest) {
 
 function onWorkerMessage(event: WorkerEvent) {
   if (event.type === "code-plugin") { void replyToCodePlugin(event); return; }
+  if (event.type === "git-action") { void replyToGitAction(event); return; }
   if (event.type === "code-plugin-cancel") {
     const scope = codePluginScope;
     if (scope?.runId === event.runId && scope.active?.requestId === event.requestId) scope.active.controller.abort();
@@ -1231,7 +1241,8 @@ function bootWorker() {
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
   const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
-    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory() },
+    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(),
+      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
@@ -2980,24 +2991,20 @@ function taskPulls() {
 
 const taskPullsInFlight = new Set<string>();
 
+function readSavedPulls(file: string) {
+  try {
+    if (!pathIdentity(file, "file") || statSync(file).size > 16_384) return [];
+    return z.array(pullEvidence).max(10).parse(JSON.parse(readFileSync(file, "utf8")))
+      .filter((row) => githubPullUrl(row.url));
+  } catch { return []; }
+}
+
 async function readTaskPullCommand(value: unknown) {
   const command = taskPullCommand.parse(value);
   const location = taskPulls();
   if (!location) return [];
-  const readSaved = () => {
-    try {
-      if (!pathIdentity(location.file, "file") || statSync(location.file).size > 16_384) return [];
-      return z.array(pullEvidence).max(10).parse(JSON.parse(readFileSync(location.file, "utf8")))
-        .filter((row) => githubPullUrl(row.url));
-    } catch { return []; }
-  };
+  const readSaved = () => readSavedPulls(location.file);
   if (command.type === "list") return readSaved();
-  if (command.type === "open") {
-    const link = githubPullUrl(command.link.url);
-    const saved = readSaved();
-    if (link && saved.some((row) => row.url === link.url)) await shell.openExternal(link.url);
-    return saved;
-  }
   if (taskPullsInFlight.has(location.file)) throw new Error("A GitHub check is already running for this task.");
   taskPullsInFlight.add(location.file);
   try {
@@ -3010,6 +3017,56 @@ async function readTaskPullCommand(value: unknown) {
     writeFileAtomic(location.file, JSON.stringify(updated));
     return updated;
   } finally { taskPullsInFlight.delete(location.file); }
+}
+
+/** The folder the Git panel works on: the open task's own worktree, else the project. Null when it changed since it was chosen. */
+function gitTarget() {
+  if (!projectRoot || closing || signingOut) return null;
+  try {
+    const worktree = state.task?.worktree;
+    const scope = currentHistoryScope();
+    const managed = worktree ? (scope ? readManagedWorktree(managedWorktreeHome(scope), worktree.path) : null) : null;
+    if (worktree && !managed) return null;
+    const project = managed?.project ?? projectRoot;
+    assertProjectRoot(project);
+    return { folder: project.path, managed: Boolean(managed) };
+  } catch { return null; }
+}
+
+const gitIntegration = createGitIntegration({
+  userData: app.getPath("userData"),
+  fixtureProfile: DESKTOP_FIXTURE_ALLOWED && fixture ? fixture.profile : null,
+  target: gitTarget,
+  busy: () => state.busy || Boolean(pending) || Boolean(approvalWindow) || pendingMutation !== null || confirmingMutation,
+  canAsk: () => !pending && !approvalWindow && !closing && !signingOut,
+  showApproval,
+  clearPending: (id) => { if (pending?.id === id) pending = null; },
+  savedLinks: () => { const location = taskPulls(); return location ? readSavedPulls(location.file).map(({ url, environment }) => ({ url, environment })) : []; },
+  linkPull: async (url) => { await readTaskPullCommand({ type: "read", link: { url, environment: "" } }); },
+  readPublic: (link) => readGithubPull(link, chatSession.signal),
+  afterBranchChange: () => {
+    const project = projectRoot;
+    if (!project) return;
+    void readGitProject(project).then((git) => {
+      if (projectRoot === project) { codeGitProject = git; refreshWorktreeDraft(); broadcast(); }
+    }, () => undefined);
+  },
+});
+
+/** An agent's commit or push request: the same approval card as the person's, answered only in the approval window. */
+async function replyToGitAction(event: Extract<WorkerEvent, { type: "git-action" }>) {
+  const child = worker;
+  const allowed = () => Boolean(child && worker === child && runId === event.runId && event.runId !== discardedRunId && state.busy && !closing && !signingOut);
+  let result: AgentGitResult = { status: "error" };
+  if (allowed()) {
+    try { result = await gitIntegration.agent(event.action); }
+    catch { result = { status: "error" }; }
+    if (!allowed() && result.status !== "denied") result = { status: "error" };
+  }
+  if (child && child === worker) {
+    try { send({ type: "git-action-result", runId: event.runId, requestId: event.requestId, result }); }
+    catch { /* The task or runtime ended before the reply. */ }
+  }
 }
 
 let dictation: { id: string; session: AbortSignal; expiry: number; mediaGranted: boolean; sent: boolean; controller: AbortController } | undefined;
@@ -3089,6 +3146,7 @@ function registerIpc() {
     finally { if (dictation === active) stopDictation(); }
   });
   main("desktop:task-pulls", readTaskPullCommand);
+  main("desktop:git", (value) => gitIntegration.handle(value));
   main("desktop:language", (value) => setLanguage(z.enum(SUPPORTED_LANGUAGES).parse(value)));
   main("desktop:code-execution-preference", (value) => setCodeExecutionPreference(codeExecutionMode.parse(value)));
   main("desktop:update-code-fallback", (value) => saveCodeFallback(codeFallbackUpdate.parse(value)));

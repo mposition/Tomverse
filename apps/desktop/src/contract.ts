@@ -9,6 +9,7 @@ import type {
 } from "./chat-contract";
 import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, ImageHistory, ImageRequest } from "./images-contract";
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
+import type { GitApprovalView, GitCommand, GitResultMap } from "./git-actions-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState } from "./browser-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
@@ -372,6 +373,8 @@ export type ApprovalRequest = {
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
+  /** A commit or push the main process asks the person to approve: built from the repository, answered only in the approval window. */
+  git?: GitApprovalView;
 };
 
 export type DesktopApi = {
@@ -381,6 +384,7 @@ export type DesktopApi = {
   transcribeDictation: (input: DictationClip) => Promise<DictationReply>;
   subscribeDictationStop: (listener: () => void) => () => void;
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
+  git<Type extends GitCommand["type"]>(command: Extract<GitCommand, { type: Type }>): Promise<GitResultMap[Type]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
   webView: (command: WebViewCommand) => Promise<void>;
