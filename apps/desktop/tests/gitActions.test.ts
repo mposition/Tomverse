@@ -252,6 +252,21 @@ test("Unsupported transports are never pushed to", async () => {
   }
 });
 
+test("A remote with more than one push address is never pushed to: the card could show only one of them", async () => {
+  const { work, bare, ctx } = await repository();
+  await featureCommit(work, ctx);
+  const second = folder("second");
+  git(second, "init", "-q", "--bare");
+  // Git pushes to every push address of a remote, the first one included.
+  git(work, "remote", "set-url", "--add", "--push", "origin", bare);
+  git(work, "remote", "set-url", "--add", "--push", "origin", second);
+  const ask = approvals();
+  assert.deepEqual(await publishBranch(ctx, {}, "user", ask), { status: "error", code: "remote-unsupported" });
+  assert.equal(ask.views.length, 0, "no card is shown for a push that would reach an address it does not name");
+  assert.equal(git(bare, "for-each-ref").includes("feature"), false);
+  assert.equal(git(second, "for-each-ref").includes("feature"), false);
+});
+
 const signedIn: GhRunner = async (args) => (args[0] === "auth" ? { code: 0, stdout: "", stderr: "" } : { code: 1, stdout: "", stderr: "" });
 const draft = { title: "Add feature", body: "Why and how", base: "main", draft: false };
 

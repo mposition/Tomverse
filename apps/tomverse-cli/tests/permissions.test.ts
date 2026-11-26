@@ -312,3 +312,28 @@ test("always allow: becomes an allow rule for the project; boundaries and delete
     assert.equal(plain.remember(argvView("npm", "test")), "same_command");
     assert.equal(plain.match(argvView("npm", "test")), "same_command");
 });
+
+test("a command that leaves the computer is found with options between the program and its subcommand", () => {
+    const egress = (view: ApprovalView) => checkBoundaries(view)?.code;
+    for (const view of [
+        argvView("git", "-C", ".", "push"),
+        argvView("git", "--git-dir=.git", "--work-tree=.", "push", "origin", "main"),
+        shellView("git -C sub push origin HEAD"),
+        shellView("cd sub && git --no-pager -C . push"),
+        argvView("npm", "--registry", "https-less-registry", "publish"),
+        argvView("docker", "--config", "d", "push", "image"),
+        // An alias or a transport program given on the command line hides what git sends.
+        argvView("git", "-c", "alias.up=push", "up"),
+        shellView("git --config-env=core.sshCommand=X fetch"),
+    ]) {
+        assert.equal(egress(view), "egress_command", JSON.stringify(view.input));
+        // No mode and no allow rule runs it without a person.
+        for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+            assert.equal(kindOf(view, mode, [rule("allow", "run_command", "git"), rule("allow", "run_command", "npm"), rule("allow", "run_command", "docker")]), "human");
+        }
+    }
+    // Local git work is not caught.
+    for (const view of [argvView("git", "status"), argvView("git", "-C", ".", "log", "--oneline"), shellView("git diff HEAD~1 && git add -A")]) {
+        assert.equal(egress(view), undefined, JSON.stringify(view.input));
+    }
+});

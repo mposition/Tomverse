@@ -85,7 +85,11 @@ async function remoteChoice(ctx: GitContext, branch: string | null, wanted?: str
   const name = wanted ?? (upstream && upstream !== "." && names.includes(upstream) ? upstream : names.includes("origin") ? "origin" : names.length === 1 ? names[0] : undefined);
   if (!name || !names.includes(name)) return { names, chosen: null };
   const url = await text(ctx, ["remote", "get-url", "--push", name]);
-  return { names, chosen: url ? { name, url } : null };
+  // Git sends a push to every address of the remote (its push addresses, or else its fetch addresses), so a card that showed
+  // one would hide the rest. Counted from the configuration, where each address is its own entry.
+  const entries = async (key: string) => (await text(ctx, ["config", "--get-all", "remote." + name + "." + key]))?.split(String.fromCharCode(10)).filter((line) => line.trim()).length ?? 0;
+  const addresses = (await entries("pushurl")) || (await entries("url"));
+  return { names, chosen: url ? { name, url, addresses } : null };
 }
 
 async function defaultBranchOf(ctx: GitContext, remote: string) {
@@ -192,7 +196,8 @@ async function publishPlan(ctx: GitContext, input: GitPublishInput): Promise<Pub
   if (!head) return fail("no-commits");
   const { chosen } = await remoteChoice(ctx, branch, input.remote);
   if (!chosen) return fail("no-remote");
-  if (!supportedRemote(chosen.url)) return fail("remote-unsupported");
+  // One address only: the card shows it, the approval is bound to it, and nothing else receives the push.
+  if (chosen.addresses !== 1 || !supportedRemote(chosen.url)) return fail("remote-unsupported");
   const remoteBranch = input.remoteBranch ?? branch;
   if ((await ctx.run(["check-ref-format", "refs/heads/" + remoteBranch])).code !== 0) return fail("invalid-name");
   const defaultBranch = await defaultBranchOf(ctx, chosen.name);

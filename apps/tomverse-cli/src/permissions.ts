@@ -264,11 +264,29 @@ const EGRESS_COMMANDS: readonly (readonly string[])[] = [
 ];
 const URL_LITERAL = /(?:\b(?:https?|ftp|sftp|ssh|git|wss?):\/\/|\bgit@[\w.-]+:)/i;
 
+/**
+ * Whether the words of `command` appear in `tokens` in that order, with anything in between: options may sit between a
+ * program and its subcommand (`git -C . push`, `npm --registry x publish`), so adjacency proves nothing. It asks a
+ * person about more than it must (`git commit -m push`), never about less.
+ */
+const namesInOrder = (tokens: string[], command: readonly string[]) => {
+    let at = 0;
+    for (const token of tokens) if (same(token, command[at]!) && ++at === command.length) return true;
+    return false;
+};
+
+/** Options that give git settings for one command: an alias or a transport program the text does not show. */
+const GIT_CONFIG_OPTION = /^(?:-c|--config-env(?:=.*)?|--exec-path(?:=.*)?)$/;
+
 const egressReason = (subject: Extract<Subject, { kind: "command" }>) => {
     for (const words of subject.broad) {
         const lowered = words.map((word) => programName(word));
         for (const word of lowered) if (EGRESS_PROGRAMS.has(word)) return `It runs ${word}, which sends or deploys things outside this computer.`;
-        for (const command of EGRESS_COMMANDS) if (containsWords(lowered, [...command])) return `It runs ${command.join(" ")}, which sends something outside this computer.`;
+        for (const command of EGRESS_COMMANDS) if (namesInOrder(lowered, command)) return `It runs ${command.join(" ")}, which sends something outside this computer.`;
+        const git = lowered.indexOf("git");
+        if (git >= 0 && words.slice(git + 1).some((word) => GIT_CONFIG_OPTION.test(word))) {
+            return "It gives git its own settings for this command (an alias or a transport program), so what it sends cannot be read from the text.";
+        }
     }
     if (URL_LITERAL.test(subject.text)) return "It names a network address, so it may send something outside this computer.";
     return null;
