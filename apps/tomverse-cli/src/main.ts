@@ -470,9 +470,9 @@ const engineExtras = (ctx: Context, root: string) => ({
 });
 
 /** The MCP servers and hooks of this folder and the user (extensions.ts), unless turned off in the config. Reports what is waiting for approval. */
-const localExtensions = async (ctx: Context, root: string, sessionId: () => string) => {
+const localExtensions = async (ctx: Context, root: string, sessionId: () => string, readOnly: boolean) => {
     if (ctx.config.mcp === false && ctx.config.hooks === false) return null;
-    const setup = await startLocalExtensions({ root, sessionId });
+    const setup = await startLocalExtensions({ root, sessionId, connectServers: !readOnly && ctx.config.mcp !== false });
     for (const problem of setup.problems) ctx.output.info(`note: ${safeLine(problem)}`);
     for (const server of setup.mcp.status()) {
         if (server.state === "pending_approval") ctx.output.info(`MCP server ${safeLine(server.id)} (from this project) is waiting for your approval: tomverse mcp approve ${safeLine(server.id)}`);
@@ -568,7 +568,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     if (journal.state.goal) ctx.output.info(`Goal mode: after the model is done, the goal is checked and the task continues until it is verified (at most ${journal.state.goal.maxContinuations} automatic continuations in a row).`);
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");
     const workspace = new Workspace(root);
-    const extensions = await localExtensions(ctx, workspace.root, () => journal.state.id);
+    const extensions = await localExtensions(ctx, workspace.root, () => journal.state.id, journal.state.readOnly);
     const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
@@ -693,7 +693,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) task.allowance = Math.max(task.allowance, task.requests + positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests));
         }
         const workspace = new Workspace(root);
-        const extensions = await localExtensions(ctx, workspace.root, () => state.id);
+        const extensions = await localExtensions(ctx, workspace.root, () => state.id, state.readOnly);
         const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);

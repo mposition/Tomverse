@@ -66,6 +66,8 @@ import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-s
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { codeMemoryView } from "./code-memory";
+import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
+import { localExtensionsCommand } from "../local-extensions-contract";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -1231,7 +1233,7 @@ function bootWorker() {
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
   const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
-    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory() },
+    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
@@ -3305,6 +3307,11 @@ function registerIpc() {
     const input = codeMemoryInput.parse(value);
     if (projectRoot) assertProjectRoot(projectRoot);
     return codeMemoryView(codeMemoryDirectory(), projectRoot, input);
+  });
+  main("desktop:local-extensions", (value) => {
+    const command = localExtensionsCommand.parse(value);
+    if (projectRoot) assertProjectRoot(projectRoot);
+    return localExtensionsReply(projectRoot?.path ?? null, command);
   });
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);

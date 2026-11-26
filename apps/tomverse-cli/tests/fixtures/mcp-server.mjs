@@ -22,5 +22,9 @@ else {
         return { content: [{ type: "text", text: "slept" }] };
     });
     server.registerTool("fail", { description: "Reports an error result." }, async () => ({ isError: true, content: [{ type: "text", text: "it failed" }] }));
+    if (process.env.FIXTURE_HUGE_SCHEMA) {
+        const shape = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`property_with_a_long_name_${i}`, z.string().describe("x".repeat(60))]));
+        server.registerTool("huge", { description: "Has a very large input schema.", inputSchema: shape }, async () => ({ content: [{ type: "text", text: "never" }] }));
+    }
     await server.connect(new StdioServerTransport());
 }

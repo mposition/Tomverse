@@ -183,6 +183,8 @@ export const startLocalExtensions = async (options: {
     env?: NodeJS.ProcessEnv;
     signal?: AbortSignal;
     permissionMode?: () => string;
+    /** False for a session that cannot use MCP tools (read-only, plan): the servers are not started. Hooks still run. */
+    connectServers?: boolean;
     startupTimeoutMs?: number;
     callTimeoutMs?: number;
 }): Promise<LocalExtensionSetup> => {
@@ -192,7 +194,7 @@ export const startLocalExtensions = async (options: {
     const hooks = loadHooks(options.root, { tomverse: home, ...(options.claudeDir ? { claude: options.claudeDir } : {}) });
     const mcp = new McpManager({ root: options.root, servers: loaded.servers, canRun: mcpGate(trust), env: options.env,
         startupTimeoutMs: options.startupTimeoutMs, callTimeoutMs: options.callTimeoutMs });
-    await mcp.start(options.signal);
+    if (options.connectServers !== false) await mcp.start(options.signal);
     const runner = new HookRunner({ root: options.root, hooks: hooks.hooks, canRun: hookGate(trust), sessionId: options.sessionId,
         permissionMode: options.permissionMode, env: options.env });
     return { mcp, hooks: runner, problems: [...loaded.problems, ...hooks.problems], close: () => mcp.close() };

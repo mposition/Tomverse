@@ -60,6 +60,9 @@ export const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
 export const MCP_RESULT_CHARS = 60_000;
 const TOOL_NAME_LIMIT = 64;
+/** A server's tool list is data from another program: a tool with an enormous input schema, or beyond the first 100 tools of a server, is left out so one server cannot fill the model's context. */
+const MAX_TOOLS_PER_SERVER = 100;
+const MAX_SCHEMA_CHARS = 20_000;
 
 const timeoutFromEnv = (value: string | undefined, fallback: number) => {
     const n = Number(value);
@@ -180,7 +183,7 @@ export class McpManager {
             c.pid = (transport as StdioClientTransport).pid ?? null;
             const listed = await client.listTools(undefined, { timeout, signal: stop });
             const taken = new Set(this.byTool.keys());
-            c.tools = listed.tools.slice(0, 200).map((tool) => {
+            c.tools = listed.tools.filter((tool) => JSON.stringify(tool.inputSchema ?? {}).length <= MAX_SCHEMA_CHARS).slice(0, MAX_TOOLS_PER_SERVER).map((tool) => {
                 const name = mcpToolName(c.def.id, tool.name, taken);
                 this.byTool.set(name, { connection: c, tool: tool.name });
                 const schema = tool.inputSchema && typeof tool.inputSchema === "object" ? { ...(tool.inputSchema as Record<string, unknown>) } : {};

@@ -52,6 +52,7 @@ import { PermissionProfileSelect } from "./PermissionProfileSelect";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
 import { ConnectorWorkspace } from "./ConnectorWorkspace";
+import { desktopLocalExtensionsCopy } from "../../../../locales/desktopLocalExtensions";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
 import { ReviewWorkspace, useReviewRun } from "./ReviewWorkspace";
 import { ImageHistoryList, ImageWorkspace, useImageWorkspace } from "./ImageWorkspace";
@@ -1215,6 +1216,7 @@ function Approval() {
   const language = request?.language ?? readLanguage();
   const copy = desktopControlsCopy[language];
   const engineCopy = desktopCodeEngineCopy[language];
+  const extensionsCopy = desktopLocalExtensionsCopy[language];
   useEffect(() => {
     applyTheme(localStorage.getItem("tomverse.theme") === "light" ? "light" : "dark");
     void window.approvalHost.approval().then(setRequest, () => setRequest(null));
@@ -1240,6 +1242,16 @@ function Approval() {
           <dt>{engineCopy.approvalWebAddress}</dt><dd><code>{request.web.url}</code></dd>
         </dl>
         <p role="note">{engineCopy.approvalWebNote}</p>
+      </section>}
+      {request.mcp && <section aria-label={extensionsCopy.approvalHeading}>
+        <h2>{extensionsCopy.approvalHeading}</h2>
+        <dl>
+          <dt>{extensionsCopy.approvalServer}</dt><dd><code>{request.mcp.server}</code></dd>
+          <dt>{extensionsCopy.approvalTool}</dt><dd><code>{request.mcp.tool}</code></dd>
+          <dd>{request.mcp.scope === "project" ? extensionsCopy.approvalScopeProject : extensionsCopy.approvalScopeUser}</dd>
+          <dt>{extensionsCopy.approvalArguments}</dt><dd><pre>{request.mcp.args}</pre></dd>
+        </dl>
+        <p role="note">{extensionsCopy.approvalNote}</p>
       </section>}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>

@@ -376,3 +376,16 @@ test("read-only and plan sessions get no MCP tools", async () => {
 });
 
 
+
+test("a tool with an enormous input schema is left out of what the model is offered", async () => {
+    const root = tempDir("mcp-root");
+    const manager = new McpManager({ root, servers: loadFrom(root, { s: stdio({ env: { FIXTURE_HUGE_SCHEMA: "1" } }) }), canRun: () => "yes", startupTimeoutMs: 10_000 });
+    await manager.start();
+    try {
+        const names = manager.tools().map((t) => t.name);
+        assert.ok(names.includes("mcp__s__echo"));
+        assert.ok(!names.includes("mcp__s__huge"), "the oversized tool is not offered");
+    } finally {
+        await manager.close();
+    }
+});

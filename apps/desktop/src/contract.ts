@@ -15,6 +15,7 @@ import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
+import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
@@ -371,6 +372,8 @@ export type ApprovalRequest = {
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
+  /** A call of a tool of an MCP server on this computer: which server and tool, where the server is defined, and the arguments. */
+  mcp?: { server: string; tool: string; scope: "user" | "project"; args: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
 };
 
@@ -411,6 +414,7 @@ export type DesktopApi = {
   queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
   stopBackground(id: string, handle: string): Promise<boolean>;
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
+  localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

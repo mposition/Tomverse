@@ -160,7 +160,7 @@ const runHookCommand = (command: string, input: string, root: string, env: NodeJ
         try {
             child = spawn(userShell(env), shellArguments(command), {
                 cwd: root,
-                env: { ...commandEnv([], env), CLAUDE_PROJECT_DIR: root },
+                env: commandEnv(["CLAUDE_PROJECT_DIR"], { ...env, CLAUDE_PROJECT_DIR: root }),
                 stdio: ["pipe", "pipe", "pipe"],
                 shell: false,
                 windowsHide: true,
