@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { basename } from "node:path";
 import {
   McpManager, describeMcpServer, hookGate, loadHooks, loadMcpServers, mcpGate, openProjectTrust, tomverseHome,
@@ -17,7 +18,8 @@ export const extensionFolders = (env: NodeJS.ProcessEnv = process.env) => ({ hom
 /** Environment for the task runtime process: where to read the person's own MCP and hook files. */
 export const extensionWorkerEnv = (env: NodeJS.ProcessEnv = process.env) => {
   const { home, claudeDir } = extensionFolders(env);
-  return { TOMVERSE_DESKTOP_EXTENSIONS_HOME: home, TOMVERSE_DESKTOP_CLAUDE_DIR: claudeDir };
+  // The runtime process is not given HOME or USERPROFILE, so the folder skills and commands are read from comes with it.
+  return { TOMVERSE_DESKTOP_EXTENSIONS_HOME: home, TOMVERSE_DESKTOP_CLAUDE_DIR: claudeDir, TOMVERSE_DESKTOP_USER_HOME: homedir() };
 };
 
 const clean = (text: string, n: number) => safeLine(text).slice(0, n);

@@ -352,6 +352,8 @@ export type Snapshot = {
   /** Terminals: available when a project is open, enabled when the person turned them on. They belong to the open task. */
   codeTerminal?: { available: boolean; enabled: boolean };
   codeBrowserInspection?: boolean;
+  /** The agent's browser tools (the browser_* tools) are on: the person's switch, or a test fixture that turned them on. */
+  codeBrowserAgent?: boolean;
   deviceFixtureAvailable?: boolean;
   root: string | null;
   project: string | null;

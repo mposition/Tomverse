@@ -8,7 +8,9 @@ Settings > Execution and limits > Command sandbox.
 
 An operating-system sandbox around the commands the agent runs (`run_command`, foreground and background).
 It does not touch the file tools: `apply_patch` and the read tools are already confined to the working folder
-by the app itself and by the approval step.
+by the app itself and by the approval step. In Desktop the working folder is the folder the agent works in, which for a
+task in a managed worktree is that worktree. The Desktop terminal panel, MCP servers and hooks run outside the sandbox
+with the person's own access (the settings screen says so).
 
 | Setting | Meaning |
 |---|---|

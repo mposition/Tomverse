@@ -85,6 +85,10 @@ import { codeSandboxView } from "./code-sandbox";
 import { createPluginsHost } from "./plugins-host";
 import { pluginsCommand } from "../plugins-contract";
 import { desktopPluginsCopy } from "../../../../locales/desktopPlugins";
+import { createPullLinker } from "./task-pull-links";
+import { createGitDrafter } from "./git-draft";
+import { gitCommand } from "../git-actions-contract";
+import { browserToolsFor, createBrowserAgentSwitch } from "./code-browser-switch";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -215,8 +219,8 @@ let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
-type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" | "review-turn" | "review-reverted" | "review-finished" }>;
-type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" | "review-turn-diff" | "review-revert-hunk" | "review-run" }>;
+type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" | "review-turn" | "review-reverted" | "review-finished" | "git-drafted" }>;
+type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" | "review-turn-diff" | "review-revert-hunk" | "review-run" | "git-draft" }>;
 let pendingInspection: { id: string; type: InspectionCommand["type"]; settle: (event: InspectionEvent | null) => void } | null = null;
 let pendingMutation: { id: string; settle: (event: MutationEvent | null) => void } | null = null;
 let confirmingMutation = false;
@@ -464,7 +468,8 @@ function broadcast() {
   const scope = currentCodeBrowserScope();
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   state.codeBrowserAvailable = scope !== null;
-  state.codeBrowserInspection = scope !== null && fixture?.browserInspection === true;
+  state.codeBrowserInspection = scope !== null && browserTools().inspection;
+  state.codeBrowserAgent = browserTools().agent;
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
@@ -1051,7 +1056,7 @@ function onWorkerMessage(event: WorkerEvent) {
   }
   if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted" ||
       event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked" ||
-      event.type === "review-turn" || event.type === "review-reverted" || event.type === "review-finished") {
+      event.type === "review-turn" || event.type === "review-reverted" || event.type === "review-finished" || event.type === "git-drafted") {
     if (pendingMutation?.id === event.requestId) pendingMutation.settle(event);
     return;
   }
@@ -1107,6 +1112,7 @@ function onWorkerMessage(event: WorkerEvent) {
       pending = null;
       dismissApproval();
       refreshHistory();
+      if (!discarded) void pullLinker.flush(event.task.id);
       if (!discarded) notifyCodeResult(event.task.status);
       if (discarded && browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
       if (closing) app.quit();
@@ -1574,7 +1580,7 @@ function answerCodeClarification(id: string, text: string) {
     state.busy = true;
     state.task = { ...task, status: "starting", canAnswerClarification: false };
     try {
-      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection,
+      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, ...codeRunTools(),
         previous: task, afterClarification: { requestId, text } });
     } catch {
       runId = null;
@@ -1616,7 +1622,7 @@ function resumeQuotaTask(id: string, text: string) {
     state.busy = true;
     state.task = { ...task, status: "starting", canResumeAfterQuota: false };
     try {
-      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection,
+      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, ...codeRunTools(),
         previous: saved, afterQuota: { requestId, refusedRequestId: quota.requestId, text,
           ...(continuation ? { continuation: { segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap } } : {}) } });
     } catch {
@@ -1837,6 +1843,21 @@ function reviewTarget(): ReviewTarget | null {
   if (worktree?.unavailable) return null;
   const { storage, scope, project, sourceProject, sessionId } = record;
   return { taskId: task.id, record: { storage, scope, project, sourceProject, sessionId }, ...(worktree ? { worktreeBase: worktree.base } : {}) };
+}
+
+/** A native question the person answers before something is written or a paid model request is made. Only the main process opens it. */
+async function confirmNative({ title, message, detail, accept, cancel }: { title: string; message: string; detail: string; accept: string; cancel: string }) {
+  const owner = mainWindow;
+  if (!owner || owner.isDestroyed()) return false;
+  confirmingMutation = true;
+  try {
+    const { response } = await dialog.showMessageBox(owner, { type: "warning", title, message, detail, buttons: [cancel, accept], defaultId: 0, cancelId: 0, noLink: true });
+    return response === 1;
+  } finally { confirmingMutation = false; }
+}
+
+function cancelWorkerRequest(requestId: string) {
+  try { send({ type: "cancel-recovery", requestId }); } catch { /* The worker may have exited. */ }
 }
 
 function reviewReady() {
@@ -2448,15 +2469,16 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
   const child = worker;
   const browser = codeBrowser;
   const grant = browser?.grant;
-  const allowed = () => Boolean(DESKTOP_FIXTURE_ALLOWED && child && worker === child && runId === event.runId &&
+  const allowed = () => Boolean(browserTools().inspection && child && worker === child && runId === event.runId &&
     event.runId !== discardedRunId && state.busy && state.task?.status === "running" && !suspended &&
     browser && browser === codeBrowser && browser.scope === currentCodeBrowserScope() &&
     grant && browser.grant === grant && grant.runId === event.runId && browser.visibleTab === grant.tab);
   let text: string | null = null;
   if (allowed() && browser && grant) {
     text = await browser.tabs.get(grant.tab)?.snapshot(grant.url) ?? null;
-    if (!allowed() || !fixture) text = null;
-    else if (text) text = cleanText(text, fixture.key).slice(0, 6_000);
+    const key = codeConnection()?.key;
+    if (!allowed() || !key) text = null;
+    else if (text) text = cleanText(text, key).slice(0, 6_000);
   }
   if (child && child === worker) {
     try { send({ type: "browser-snapshot-result", runId: event.runId, requestId: event.requestId, text }); }
@@ -2466,7 +2488,7 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
 
 // The agent's browser tools and the element picker; the checks that matter are in browser-agent-policy.ts.
 const browserAgent = createBrowserAgentBridge({
-  enabled: () => DESKTOP_FIXTURE_ALLOWED && fixture?.browserAgent === true && codeConnection() === fixture,
+  enabled: () => browserTools().agent,
   run: () => ({
     runId: runId && runId !== discardedRunId ? runId : null, taskId: state.task?.id ?? null,
     running: Boolean(state.busy && state.task?.status === "running"), apiExecution: state.task?.execution?.executionMode === "tomverse_api",
@@ -2478,13 +2500,21 @@ const browserAgent = createBrowserAgentBridge({
   publish: (browserState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-state", browserState); },
   publishPick: (pick) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-pick", pick); },
   reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "browser-agent-result", runId: replyRunId, requestId, reply }); },
-  clean: (text) => fixture ? cleanText(text, fixture.key) : text,
+  clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
 });
 
 function currentCodeBrowserScope() {
-  if (!DESKTOP_FIXTURE_ALLOWED || !fixture || codeConnection() !== fixture || signingOut || closing) return null;
+  if (!codeConnection() || signingOut || closing) return null;
   const scope = currentHistoryScope();
   return scope ? JSON.stringify([scope.home, state.task?.id ?? null, state.account.stage]) : null;
+}
+
+// The panel is always there for a person looking at a local development server; the agent's use of it is the person's switch.
+const browserAgentSwitch = createBrowserAgentSwitch(() => join(app.getPath("userData"), "code-browser-agent.txt"));
+function browserTools() {
+  const fixtureOwned = DESKTOP_FIXTURE_ALLOWED && !!fixture && codeConnection() === fixture;
+  return browserToolsFor({ switchOn: browserAgentSwitch.enabled, fixtureAgent: fixtureOwned && fixture?.browserAgent === true,
+    fixtureInspection: fixtureOwned && fixture?.browserInspection === true });
 }
 
 function closeCodeBrowser() {
@@ -2497,6 +2527,15 @@ function closeCodeBrowser() {
 async function runCodeBrowser(value: unknown) {
   const command = browserCommand.parse(value);
   if (command.type === "close") { closeCodeBrowser(); return; }
+  if (command.type === "agent-tools") {
+    browserAgentSwitch.set(command.enabled);
+    if (!command.enabled) {
+      browserAgent.reset();
+      if (codeBrowser) codeBrowser.grant = undefined;
+    }
+    broadcast();
+    return;
+  }
   if (command.type === "sync" || command.type === "pick" || command.type === "agent-stop" || command.type === "agent-resume") return browserAgent.command(command);
   const owner = mainWindow;
   const scope = currentCodeBrowserScope();
@@ -2507,7 +2546,7 @@ async function runCodeBrowser(value: unknown) {
   const existing = browser.tabs.get(tabId);
   if (command.type === "share" || command.type === "unshare") {
     const url = existing?.shareableUrl();
-    browser.grant = command.type === "share" && fixture?.browserInspection && url && browser.visibleTab === tabId &&
+    browser.grant = command.type === "share" && browserTools().inspection && url && browser.visibleTab === tabId &&
       runId && state.task?.id && state.task.status === "running" && state.task.execution?.executionMode === "tomverse_api" &&
       !suspended ? { tab: tabId, runId, url } : undefined;
     return Boolean(browser.grant);
@@ -2590,6 +2629,13 @@ const terminalApi = createTerminalApi({
 function loadCodeTerminal() {
   try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
   catch { codeTerminalEnabled = false; }
+  browserAgentSwitch.load();
+}
+
+/** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
+function codeRunTools() {
+  const { agent, inspection } = browserTools();
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(codeTerminalEnabled ? { terminalRead: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
@@ -3163,9 +3209,16 @@ function gitTarget() {
     if (worktree && !managed) return null;
     const project = managed?.project ?? projectRoot;
     assertProjectRoot(project);
-    return { folder: project.path, managed: Boolean(managed) };
+    return { folder: project.path, managed: Boolean(managed), project, worktreeBase: state.task?.worktree?.base };
   } catch { return null; }
 }
+
+// A pull request the agent opened is linked to its task when the run ends; one made from the Git panel is linked at once.
+const pullLinker = createPullLinker({
+  currentTask: () => state.task?.id ?? null,
+  ready: () => taskPulls() !== null,
+  link: async (url) => { await readTaskPullCommand({ type: "read", link: { url, environment: "" } }); },
+});
 
 const gitIntegration = createGitIntegration({
   userData: app.getPath("userData"),
@@ -3176,7 +3229,7 @@ const gitIntegration = createGitIntegration({
   showApproval,
   clearPending: (id) => { if (pending?.id === id) pending = null; },
   savedLinks: () => { const location = taskPulls(); return location ? readSavedPulls(location.file).map(({ url, environment }) => ({ url, environment })) : []; },
-  linkPull: async (url) => { await readTaskPullCommand({ type: "read", link: { url, environment: "" } }); },
+  linkPull: (url) => pullLinker.add(url),
   readPublic: (link) => readGithubPull(link, chatSession.signal),
   afterBranchChange: () => {
     const project = projectRoot;
@@ -3185,6 +3238,16 @@ const gitIntegration = createGitIntegration({
       if (projectRoot === project) { codeGitProject = git; refreshWorktreeDraft(); broadcast(); }
     }, () => undefined);
   },
+});
+
+// A model's draft of a commit message or a pull request: a read-only Ask run in the Code runtime, charged like a Code task.
+const gitDrafter = createGitDrafter({
+  target: () => { const target = gitTarget(); return target ? { project: target.project, ...(target.worktreeBase ? { worktreeBase: target.worktreeBase } : {}) } : null; },
+  ready: () => reviewReady() && !pending && !approvalWindow,
+  models: () => state.models, connection: codeConnection, protectedRoot: () => app.getPath("userData"), language: () => state.language ?? "en",
+  request: async (command, timeoutMs) => worker ? (await runRecordedMutation(worker, command, (event) => event, timeoutMs)) ?? "unavailable" : "unavailable",
+  confirm: confirmNative,
+  cancel: cancelWorkerRequest,
 });
 
 /** An agent's commit or push request: the same approval card as the person's, answered only in the approval window. */
@@ -3292,7 +3355,10 @@ function registerIpc() {
     finally { if (dictation === active) stopDictation(); }
   });
   main("desktop:task-pulls", readTaskPullCommand);
-  main("desktop:git", (value) => gitIntegration.handle(value));
+  main("desktop:git", (value) => {
+    const command = gitCommand.parse(value);
+    return command.type === "draft" ? gitDrafter.run(command) : gitIntegration.handle(command);
+  });
   main("desktop:language", (value) => setLanguage(z.enum(SUPPORTED_LANGUAGES).parse(value)));
   main("desktop:code-execution-preference", (value) => setCodeExecutionPreference(codeExecutionMode.parse(value)));
   main("desktop:update-code-fallback", (value) => saveCodeFallback(codeFallbackUpdate.parse(value)));
@@ -3433,10 +3499,8 @@ function registerIpc() {
       (input.mode !== "agent" || codexRunFixture.allowFileEdits) && input.saveHistory !== false &&
       approval?.settings.automaticFrom === "tomverse_api"
       ? { mode: input.mode, project, approval } : undefined;
-    send({ type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
-      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserInspection ? { browserSnapshot: true } : {}),
-      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserAgent ? { browserAgent: true } : {}),
-      ...(codeTerminalEnabled ? { terminalRead: true } : {}) });
+    send({ type: "start", runId: id, project, ...(worktree ? { sourceProject } : {}), scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
+      ...codeRunTools() });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     codeWorktreeDraft = undefined;
@@ -3575,7 +3639,7 @@ function registerIpc() {
     runId = randomUUID();
     state.busy = true;
     state.task = { ...task, status: "starting", canResume: false };
-    send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, previous: task });
+    send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, ...codeRunTools(), previous: task });
     broadcast();
     return true;
   });
@@ -3627,16 +3691,8 @@ function registerIpc() {
     target: reviewTarget, ready: reviewReady, models: () => state.models, connection: codeConnection, protectedRoot: () => app.getPath("userData"),
     language: () => state.language ?? "en",
     request: async (command, timeoutMs) => worker ? (await runRecordedMutation(worker, command, (event) => event, timeoutMs)) ?? "unavailable" : "unavailable",
-    confirm: async ({ title, message, detail, accept, cancel }) => {
-      const owner = mainWindow;
-      if (!owner || owner.isDestroyed()) return false;
-      confirmingMutation = true;
-      try {
-        const { response } = await dialog.showMessageBox(owner, { type: "warning", title, message, detail, buttons: [cancel, accept], defaultId: 0, cancelId: 0, noLink: true });
-        return response === 1;
-      } finally { confirmingMutation = false; }
-    },
-    cancel: (requestId) => { try { send({ type: "cancel-recovery", requestId }); } catch { /* The worker may have exited. */ } },
+    confirm: confirmNative,
+    cancel: cancelWorkerRequest,
     afterRevert: (taskId, changes) => { if (state.task?.id === taskId) { state.task.changes = changes; broadcast(); } },
   }));
   main("desktop:rewind-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return rewindSelectedTurn(id, turn); });

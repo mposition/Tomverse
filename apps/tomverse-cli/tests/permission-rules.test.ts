@@ -135,3 +135,31 @@ test("an 'always' answer on an approval card is saved as a project allow rule th
     assert.equal(memory.remember(command("git push", ["push"])), null);
     assert.equal(store.list().project.length, 1);
 });
+
+test("a worktree takes the confirmation of the project it was made from, but only for the same allow rules", () => {
+    const { home, root: source, env, store: sourceStore } = setup();
+    const worktree = tempDir("rules-worktree");
+    const inherited = new PermissionRuleStore({ root: worktree, env, trustRoot: source });
+    const alone = new PermissionRuleStore({ root: worktree, env });
+    writeProject(source, [allowTest, denyRm]);
+    writeProject(worktree, [allowTest, denyRm]);
+    assert.equal(inherited.trust(), "untrusted", "nothing was confirmed yet");
+    sourceStore.trustProject();
+    assert.equal(inherited.trust(), "trusted");
+    assert.ok(inherited.effective().some((rule) => rule.effect === "allow" && rule.scope === "project"), "the allow rule applies in the worktree");
+    assert.equal(alone.trust(), "untrusted", "a store that names no origin still trusts nothing for a new folder");
+
+    // The worktree's own allow rules are what is compared: a different file is not covered.
+    writeProject(worktree, [allowTest, { effect: "allow", tool: "run_command", pattern: "curl" }, denyRm]);
+    assert.equal(inherited.trust(), "changed");
+    assert.ok(!inherited.effective().some((rule) => rule.effect === "allow"), "an allow rule nobody confirmed does not apply");
+    assert.ok(inherited.effective().some((rule) => rule.effect === "deny"), "deny rules apply as always");
+
+    // What the worktree adds is recorded for the worktree, and the project's own confirmation is left as it was.
+    writeProject(worktree, [allowTest, denyRm]);
+    assert.equal(inherited.add("project", { effect: "allow", tool: "run_command", pattern: "npm run lint" }), true);
+    assert.equal(inherited.trust(), "trusted");
+    const trust = JSON.parse(readFileSync(join(home, "permission-trust.json"), "utf8")).projects as Record<string, string>;
+    assert.equal(Object.keys(trust).length, 2);
+    assert.equal(sourceStore.trust(), "trusted", "the project's confirmation is untouched");
+});

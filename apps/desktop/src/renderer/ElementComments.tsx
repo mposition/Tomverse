@@ -8,8 +8,10 @@ import "./element-comments.css";
 export type Pin = { pick: ElementPick; comment: string };
 
 /** The elements the person picked in the page, each with a comment; they go into the next message together. */
-export function ElementComments({ language, pins, onChange, onAttach }: {
+export function ElementComments({ language, pins, picture, onChange, onAttach }: {
   language: Language;
+  /** The agent can read a picked element's picture (it has the browser tools). */
+  picture: boolean;
   pins: Pin[];
   onChange: (pins: Pin[]) => void;
   onAttach: (block: string) => void;
@@ -32,7 +34,7 @@ export function ElementComments({ language, pins, onChange, onAttach }: {
     </ol>
     {pins.length >= MAX_ELEMENT_COMMENTS && <p role="status">{copy.pinsFull}</p>}
     <button type="button" className="primary" onClick={() => {
-      onAttach(serializeElementComments(pins.map(({ pick, comment }) => ({ pick, comment }))));
+      onAttach(serializeElementComments(pins.map(({ pick, comment }) => ({ pick, comment })), { picture }));
       onChange([]);
     }}>{copy.addToMessage} ({pins.length})</button>
   </section>;

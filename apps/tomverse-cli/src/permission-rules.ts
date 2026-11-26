@@ -46,8 +46,13 @@ const clean = (rule: PermissionRule): PermissionRule => ({
 });
 
 export class PermissionRuleStore {
-    /** `root`: the real path of the work folder; null when no project is open (only user rules exist). */
-    constructor(private readonly options: { root: string | null; env?: NodeJS.ProcessEnv }) {}
+    /**
+     * `root`: the real path of the work folder; null when no project is open (only user rules exist).
+     * `trustRoot`: the project a work folder was made from (a managed worktree). A confirmation recorded for that project also covers
+     * this folder, but only for the very allow rules that were confirmed: the digest still has to match. It is only read; what this
+     * store writes is always recorded under `root`.
+     */
+    constructor(private readonly options: { root: string | null; env?: NodeJS.ProcessEnv; trustRoot?: string | null }) {}
 
     private get home() {
         return tomverseHome(this.options.env ?? process.env);
@@ -104,8 +109,7 @@ export class PermissionRuleStore {
         writeFileAtomic(path, `${JSON.stringify({ version: 1, rules: rules.map(clean) }, null, 2)}\n`);
     }
 
-    private trustKey() {
-        const root = this.options.root;
+    private trustKey(root = this.options.root) {
         if (!root) return null;
         let real = root;
         try {
@@ -134,9 +138,13 @@ export class PermissionRuleStore {
     trust(projectRules = this.read("project")): ProjectTrust {
         if (!projectRules.some((rule) => rule.effect === "allow")) return "not_needed";
         const key = this.trustKey();
-        const recorded = key ? this.readTrust()[key] : undefined;
-        if (!recorded) return "untrusted";
-        return recorded === PermissionRuleStore.allowDigest(projectRules) ? "trusted" : "changed";
+        const origin = this.options.trustRoot ? this.trustKey(this.options.trustRoot) : null;
+        const projects = this.readTrust();
+        const recorded = key ? projects[key] : undefined;
+        const inherited = origin && origin !== key ? projects[origin] : undefined;
+        if (!recorded && !inherited) return "untrusted";
+        const digest = PermissionRuleStore.allowDigest(projectRules);
+        return recorded === digest || inherited === digest ? "trusted" : "changed";
     }
 
     private writeTrust(digest: string | null) {

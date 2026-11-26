@@ -8,11 +8,24 @@ import type { CodeExtensionsInput, CodeExtensionsView } from "../contract";
  */
 
 /**
- * Where a process finds the Tomverse folder, where installed plugins live: the main process has TOMVERSE_HOME (or the default folder),
- * and the task runtime, which gets no such variable, is handed TOMVERSE_DESKTOP_EXTENSIONS_HOME (see extensionWorkerEnv).
+ * Where the skills, commands, agents and installed plugins are read from. The main process has its own HOME and TOMVERSE_HOME.
+ * The task runtime has neither, so it is handed the folders this process resolved (see extensionWorkerEnv): the user's home, the
+ * Claude Code folder and the Tomverse folder, the same ones the settings screens list.
  */
-export const discoverOptions = (env: NodeJS.ProcessEnv = process.env) =>
-  env.TOMVERSE_DESKTOP_EXTENSIONS_HOME ? { env: { ...env, TOMVERSE_HOME: env.TOMVERSE_DESKTOP_EXTENSIONS_HOME } } : {};
+export const discoverOptions = (env: NodeJS.ProcessEnv = process.env) => {
+  const home = env.TOMVERSE_DESKTOP_USER_HOME?.trim();
+  const claude = env.TOMVERSE_DESKTOP_CLAUDE_DIR?.trim();
+  const tomverse = env.TOMVERSE_DESKTOP_EXTENSIONS_HOME?.trim();
+  return {
+    ...(home ? { home } : {}),
+    ...(claude || tomverse ? { env: { ...env, ...(claude ? { CLAUDE_CONFIG_DIR: claude } : {}), ...(tomverse ? { TOMVERSE_HOME: tomverse } : {}) } } : {}),
+  };
+};
+
+/** The skills, commands and agents the task runtime reads. */
+export function discoverForRuntime(root: string, env: NodeJS.ProcessEnv = process.env) {
+  return discoverExtensions(root, discoverOptions(env));
+}
 
 const emptyView = (): CodeExtensionsView => ({ project: false, skills: [], commands: [], agents: [], slash: [], issues: [] });
 
@@ -44,7 +57,7 @@ export function codeExtensionsView(root: string | null, input: CodeExtensionsInp
 export function slashPromptFor(root: string, text: string): { prompt: string; notice: string } | null {
   if (!text.startsWith("/")) return null;
   try {
-    const invocation = expandInvocation(root, discoverExtensions(root, discoverOptions()), text, discoverOptions());
+    const invocation = expandInvocation(root, discoverForRuntime(root), text, discoverOptions());
     if (!invocation) return null;
     return {
       prompt: invocation.prompt,

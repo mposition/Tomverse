@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { GitBranch, X } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { desktopGitCopy } from "../../../../locales/desktopGit";
-import type { GhStatusResult, GitErrorCode, GitStatusResult } from "../git-actions-contract";
+import { gitBranchName, type GhStatusResult, type GitErrorCode, type GitStatusResult } from "../git-actions-contract";
 import "./git-panel.css";
 
 type Ready = Extract<GitStatusResult, { kind: "ready" }>;
@@ -19,12 +19,18 @@ function errorText(copy: Copy, code: GitErrorCode): string {
     "nothing-to-publish": copy.errorNothingToPublish, "gh-missing": copy.ghMissing, "gh-signed-out": copy.ghSignedOut,
     "pr-needs-github": copy.errorPrNeedsGithub, "pr-same-branch": copy.errorPrSameBranch, denied: copy.errorDenied, changed: copy.errorChanged,
     "push-rejected": copy.errorPushRejected, "push-failed": copy.errorPushFailed,
+    "draft-failed": copy.draftFailed, "draft-empty": copy.draftEmpty, "model-unavailable": copy.draftNoModel,
   };
   return map[code] ?? copy.errorUnavailable;
 }
 
 /** Branch, commit and push for the open project or task worktree. A push opens an approval window; nothing leaves the app before it is approved. */
-export function GitPanel({ language, onVisibilityChange, disabled }: { language: Language; onVisibilityChange: (open: boolean) => void; disabled: boolean }) {
+export function GitPanel({ language, onVisibilityChange, disabled, models = [], defaultModelId }: {
+  language: Language; onVisibilityChange: (open: boolean) => void; disabled: boolean;
+  /** The Code model catalogue: a model for the commit message and pull request drafts is chosen from it. */
+  models?: ReadonlyArray<{ id: string; name: string }>;
+  defaultModelId?: string;
+}) {
   const copy = desktopGitCopy[language];
   const dialog = useRef<HTMLDialogElement>(null);
   const [status, setStatus] = useState<GitStatusResult | null>(null);
@@ -39,7 +45,9 @@ export function GitPanel({ language, onVisibilityChange, disabled }: { language:
   const [prBody, setPrBody] = useState("");
   const [prBase, setPrBase] = useState("");
   const [prDraft, setPrDraft] = useState(false);
-  const [working, setWorking] = useState<"" | "commit" | "branch" | "publish">("");
+  const [working, setWorking] = useState<"" | "commit" | "branch" | "publish" | "draft">("");
+  const [draftModel, setDraftModel] = useState(defaultModelId ?? "");
+  const draftModelId = models.some((model) => model.id === draftModel) ? draftModel : models.find((model) => model.id === defaultModelId)?.id ?? models[0]?.id ?? "";
   const [notice, setNotice] = useState<{ text: string; alert: boolean } | null>(null);
 
   async function load() {
@@ -55,7 +63,7 @@ export function GitPanel({ language, onVisibilityChange, disabled }: { language:
     } catch { setStatus({ kind: "unavailable", reason: "error" }); }
   }
   const fail = (code: GitErrorCode) => setNotice({ text: errorText(copy, code), alert: true });
-  async function act(kind: "commit" | "branch" | "publish", run: () => Promise<void>) {
+  async function act(kind: "commit" | "branch" | "publish" | "draft", run: () => Promise<void>) {
     setWorking(kind);
     setNotice(null);
     try { await run(); } catch { setNotice({ text: copy.errorUnavailable, alert: true }); }
@@ -65,6 +73,20 @@ export function GitPanel({ language, onVisibilityChange, disabled }: { language:
   const ready: Ready | null = status?.kind === "ready" ? status : null;
   const locked = disabled || working !== "" || Boolean(ready?.busy);
   const paths = ready ? ready.files.filter((file) => selected.has(file.path)).map((file) => file.path) : [];
+  const canDraft = !locked && Boolean(draftModelId);
+
+  /** The model's text goes into the boxes the person can edit; it is never committed or sent from here. */
+  const draft = (kind: "commit" | "pull-request") => void act("draft", async () => {
+    const base = gitBranchName.safeParse(prBase.trim());
+    const result = kind === "commit"
+      ? await window.desktop.git({ type: "draft", kind, modelId: draftModelId, paths })
+      : await window.desktop.git({ type: "draft", kind, modelId: draftModelId, ...(base.success ? { base: base.data } : {}) });
+    if (result.status === "cancelled") return;
+    if (result.status !== "ok") { fail(result.code); return; }
+    if (result.kind === "commit") setMessage(result.message.slice(0, 4000));
+    else { setPrTitle(result.title.slice(0, 256)); setPrBody(result.body.slice(0, 8000)); }
+    setNotice({ text: copy.draftAdded, alert: false });
+  });
 
   return <>
     <button className="icon" type="button" aria-label={copy.gitButton} title={copy.gitButton}
@@ -103,7 +125,14 @@ export function GitPanel({ language, onVisibilityChange, disabled }: { language:
             <code>{(file.index + file.worktree).trim() || "?"}</code> <span>{file.path}</span>
           </li>)}</ul> : <p>{copy.noChanges}</p>}
           {ready.moreFiles > 0 && <small>{fill(copy.moreFiles, { count: ready.moreFiles })}</small>}
+          <div className="git-draft" data-testid="git-draft">
+            <label>{copy.draftModel}<select value={draftModelId} disabled={locked || !models.length} onChange={(event) => setDraftModel(event.currentTarget.value)}>
+              {models.map((model) => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}
+            </select></label>
+            <small>{copy.draftNote}</small>
+          </div>
           <label>{copy.commitMessage}<textarea value={message} maxLength={4000} onChange={(event) => setMessage(event.currentTarget.value)} /></label>
+          <button type="button" className="soft" disabled={!canDraft || !paths.length} onClick={() => draft("commit")}>{copy.draftWithModel}</button>
           <button type="button" className="soft" disabled={locked || !paths.length || !message.trim()} onClick={() => void act("commit", async () => {
             const result = await window.desktop.git({ type: "commit", message, paths });
             if (result.status === "ok") { setNotice({ text: fill(copy.committed, { sha: result.sha.slice(0, 10) }), alert: false }); setMessage(""); setSelected(new Set()); } else fail(result.code);
@@ -118,6 +147,7 @@ export function GitPanel({ language, onVisibilityChange, disabled }: { language:
             <label>{copy.pullRequestTitle}<input value={prTitle} maxLength={256} onChange={(event) => setPrTitle(event.currentTarget.value)} /></label>
             <label>{copy.pullRequestBody}<textarea value={prBody} maxLength={8000} onChange={(event) => setPrBody(event.currentTarget.value)} /></label>
             <label>{copy.pullRequestBase}<input value={prBase} maxLength={200} onChange={(event) => setPrBase(event.currentTarget.value)} /></label>
+            <button type="button" className="soft" disabled={!canDraft} onClick={() => draft("pull-request")}>{copy.draftWithModel}</button>
             <label className="inline"><input type="checkbox" checked={prDraft} onChange={(event) => setPrDraft(event.currentTarget.checked)} />{copy.pullRequestDraft}</label>
           </>}
           <p className="git-notice">{copy.publishHint}</p>
@@ -131,6 +161,7 @@ export function GitPanel({ language, onVisibilityChange, disabled }: { language:
             setNotice({ text: extra ? base + " " + extra : base, alert: outcome?.state === "failed" });
           })}>{copy.publish}</button>
           {working === "publish" && <p role="status" className="git-notice">{copy.waitingApproval}</p>}
+          {working === "draft" && <p role="status" className="git-notice">{copy.drafting}</p>}
         </section>
         <section aria-label={copy.agentHeading}>
           <label className="inline"><input type="checkbox" checked={agent} onChange={(event) => {

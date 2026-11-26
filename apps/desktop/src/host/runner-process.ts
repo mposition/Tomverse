@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, discoverExtensions, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
@@ -10,7 +10,7 @@ import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session
 import { tomverseHome } from "../../../tomverse-cli/src/config.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import type { TerminalReadReply, TerminalReadRequest } from "../../../tomverse-cli/src/terminal-read.js";
-import { discoverOptions, slashPromptFor } from "./code-extensions";
+import { discoverForRuntime, slashPromptFor } from "./code-extensions";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
@@ -28,6 +28,7 @@ import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
 import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
 import { createReviewWorker } from "./review-worker";
+import { createGitDraftWorker } from "./git-draft-worker";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 
@@ -879,7 +880,9 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     if (instructions?.truncated) addEvent(desktopCodeNotice("instructionClipped"));
     publish();
     const permissionEnv: NodeJS.ProcessEnv = permissionSetting ? { TOMVERSE_HOME: permissionSetting.home } : {};
-    const rulesFor = () => new PermissionRuleStore({ root: workspace.root, env: permissionEnv });
+    // A managed worktree is a new folder: the project allow rules the person confirmed for the project it was made from cover it too,
+    // as long as the rules in the worktree are exactly the ones that were confirmed.
+    const rulesFor = () => new PermissionRuleStore({ root: workspace.root, env: permissionEnv, trustRoot: command.sourceProject?.path ?? null });
     // An "always" answer on the approval card is saved as an allow rule for this project.
     const memory = new ApprovalMemory((rule) => { rulesFor().add("project", rule); });
     const permissions = new PermissionGate({
@@ -907,6 +910,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         if (event.type === "follow_up_included" && typeof event.text === "string") {
           task.pendingFollowUp = undefined;
           task.entries.push({ role: "user", text: clean(event.text) });
+          if (typeof event.notice === "string") addEvent(event.notice);
           if (task.entries.length > 96) task.entries.splice(1, 1);
           publish();
         }
@@ -959,7 +963,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         else if (server.state === "failed" || server.state === "needs_auth") addEvent(`MCP server ${server.id} is not available: ${server.detail ?? server.state}`);
       }
     }
-    sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, command.project.path);
+    // The folder commands may write is the one the agent works in: for a task in a managed worktree, that worktree.
+    sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
     if (sandbox && !sandbox.enforcement.available) addEvent(desktopCodeNotice("sandboxUnavailable"));
     control.runner = new Runner({
       gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), permissions,
@@ -975,20 +980,21 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       nestedInstructions: !continuation && savedCap === undefined,
       // Skills and agent definitions are folder contents like the instruction files: a capped continuation sends none of them.
       // Installed plugins are read from the same Tomverse folder the settings screens use (the worker's own environment has no TOMVERSE_HOME).
-      extensions: !continuation && savedCap === undefined ? discoverExtensions(workspace.root, discoverOptions()) : undefined,
+      extensions: !continuation && savedCap === undefined ? discoverForRuntime(workspace.root) : undefined,
       memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
       git: !usesCodePlugin && readAgentGitSwitch(process.env.TOMVERSE_DESKTOP_GIT_AGENT_SWITCH) ? (action, signal) => requestGitAction(control, action, signal) : undefined,
-      browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
-        /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
-        ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
-      browserAgent: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserAgent &&
-        /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(gateway.endpoint.origin)
-        ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
-      terminalRead: command.type === "start" && command.terminalRead
-        ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
+      // The main process decides which host tools a run gets (the person's settings) and checks every request again; a run that
+      // resumes gets the same tools as one that starts.
+      browserSnapshot: command.browserSnapshot ? (signal) => requestBrowserSnapshot(control, signal) : undefined,
+      browserAgent: command.browserAgent ? (request, signal) => requestBrowserAgent(control, request, signal) : undefined,
+      terminalRead: command.terminalRead ? (request, signal) => requestTerminalRead(control, request, signal) : undefined,
+      expandFollowUp: continuation || savedCap !== undefined ? undefined : (text) => {
+        const slash = slashPromptFor(workspace.root, text);
+        return slash ? { prompt: slash.prompt, notice: slash.notice } : null;
+      },
       prompter: {
         confirm: async () => false,
         approve: async (view) => {
@@ -1582,6 +1588,17 @@ const reviewWorker = createReviewWorker({
   protectedRoots,
 });
 
+const gitDraftWorker = createGitDraftWorker({
+  lock: (project) => lockProject(project),
+  busy: () => Boolean(active || recovery),
+  hold: (requestId, abort) => {
+    recovery = { requestId, abort };
+    return () => { if (recovery?.requestId === requestId) recovery = undefined; };
+  },
+  gateway: (connection, signal) => gatewayFor(connection, signal),
+  protectedRoots,
+});
+
 parent.on("message", ({ data }: { data: WorkerCommand }) => {
   if (data.type === "permissions") {
     permissionSetting = { mode: data.mode, home: data.home };
@@ -1625,6 +1642,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send(reviewWorker.revertHunk(data));
   } else if (data.type === "review-run") {
     void reviewWorker.run(data).then(send);
+  } else if (data.type === "git-draft") {
+    void gitDraftWorker.run(data).then(send);
   } else if (data.type === "delete-history") {
     send(deleteRecordedHistory(data));
   } else if (data.type === "discard-transient") {

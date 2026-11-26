@@ -14,6 +14,7 @@ import { CodeExtensionsSettings } from "./CodeExtensions";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
 import { CodeSandboxSettings } from "./CodeSandboxSettings";
 import { PluginsPanel } from "./PluginsPanel";
+import { CodeBrowserSettings } from "./CodeBrowserSettings";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -210,6 +211,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
         {value === "summary" ? copy.transferSummary : copy.transferChanges}
       </label>)}
     </fieldset>}
+    <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
     <CodeSandboxSettings language={language} />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}
   </section>;

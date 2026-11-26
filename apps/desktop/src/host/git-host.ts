@@ -68,6 +68,8 @@ export function createGitHost(deps: GitHostDeps) {
     if (command.type === "status") return readGitStatus(ctx, deps.busy());
     if (deps.busy()) return fail("busy");
     switch (command.type) {
+      // A draft needs the model runtime, which the main process owns; it never comes through here.
+      case "draft": return fail("unavailable");
       case "create-branch": {
         const result = await createBranch(ctx, command.name);
         if (result.status === "ok") deps.afterBranchChange?.();

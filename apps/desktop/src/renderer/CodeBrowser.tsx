@@ -25,13 +25,15 @@ const tabControls: Record<Language, readonly [string, string, string, string]> =
 };
 export const codeBrowserLabel = (language: Language) => copy[language][0];
 
-export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = false, onAttachComments, onClose }: {
+export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = false, agentTools = false, onAttachComments, onClose }: {
   language: Language;
   hidden: boolean;
   occluded: boolean;
   canShare: boolean;
   /** The task of this panel is running: a tab the agent opened shows who holds it. */
   agentLive?: boolean;
+  /** The agent has the browser tools, so it can read the picture of a picked element. */
+  agentTools?: boolean;
   /** Puts the picked elements and their comments into the next message. */
   onAttachComments?: (block: string) => void;
   onClose: () => void;
@@ -176,7 +178,7 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
         {state.agent === "stopped" ? pickCopy.resumeAgent : pickCopy.stopAgent}</button>
     </p>}
     {state?.picking && <p className="code-browser-hint" role="status">{pickCopy.pickHint}</p>}
-    <ElementComments language={language} pins={pins} onChange={setPins} onAttach={(block) => onAttachComments?.(block)} />
+    <ElementComments language={language} pins={pins} picture={agentTools} onChange={setPins} onAttach={(block) => onAttachComments?.(block)} />
     {canShare && <button type="button" className="soft" aria-pressed={Boolean(sharing)}
       disabled={!state?.url || state.loading || state.failed} onClick={() => {
         void window.desktop.codeBrowser({ type: sharing ? "unshare" : "share", tab }).then((allowed) => {

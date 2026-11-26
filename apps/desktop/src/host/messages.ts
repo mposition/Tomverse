@@ -24,7 +24,7 @@ export type WorkerCommand =
   /** The permission mode (a person's choice in the app) and the folder of the user's permission rules; the runtime asks until it has one. */
   | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
   | { type: "catalog"; requestId: string; connection: Connection }
-  | { type: "start"; runId: string; project: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
+  | { type: "start"; runId: string; project: ProjectRoot; sourceProject?: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
     references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; terminalRead?: boolean;
     continuation?: CodeContinuation & { taskId: string; sourceHome: string; sourceProvider: "openai" | "anthropic" } }
   | (NativeFixtureTask & { type: "start-codex-fixture"; clientVersion: string;
@@ -32,6 +32,7 @@ export type WorkerCommand =
   | (NativeFixtureTask & { type: "start-claude-fixture" })
   | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
+    browserSnapshot?: boolean; browserAgent?: boolean; terminalRead?: boolean;
     afterClarification?: { requestId: string; text: string };
     afterQuota?: { requestId: string; refusedRequestId: string; text: string;
       continuation?: { segmentId: string; maximumKeyCreditCap: number } } })
@@ -67,7 +68,9 @@ export type WorkerCommand =
   | (RecordedSession & { type: "review-turn-diff"; protectedRoot: string })
   | (RecordedSession & { type: "review-revert-hunk"; protectedRoot: string; path: string; status: ReviewFile["status"]; hunk: ReviewHunk })
   | { type: "review-run"; requestId: string; project: ProjectRoot; connection: Connection; protectedRoot: string; scope: ReviewScope;
-    diffText: string; truncated: boolean; models: Array<{ id: string; name: string }> };
+    diffText: string; truncated: boolean; models: Array<{ id: string; name: string }> }
+  | { type: "git-draft"; requestId: string; project: ProjectRoot; connection: Connection; protectedRoot: string; kind: "commit" | "pull-request";
+    diffText: string; truncated: boolean; model: { id: string; name: string }; base?: string };
 
 export type WorkerEvent =
   | { type: "catalog"; requestId: string; models: Model[] }
@@ -94,4 +97,5 @@ export type WorkerEvent =
   | { type: "history-forked"; requestId: string; result: "forked" | "unavailable" | "unconfirmed"; id?: string }
   | { type: "review-turn"; requestId: string; diff: ReviewDiff | null; reason?: "no-turn" | "failed" }
   | { type: "review-reverted"; requestId: string; result: "reverted" | "stale" | "unavailable" | "unconfirmed"; changes?: Change[] }
-  | { type: "review-finished"; requestId: string; status: "done" | "cancelled" | "unavailable"; results: ReviewModelResult[] };
+  | { type: "review-finished"; requestId: string; status: "done" | "cancelled" | "unavailable"; results: ReviewModelResult[] }
+  | { type: "git-drafted"; requestId: string; status: "done" | "cancelled" | "unavailable"; text: string; requests?: number };

@@ -4,6 +4,8 @@ type Copy = {
   slashList: string;
   slashSkill: string;
   slashCommand: string;
+  slashBuiltin: string;
+  slashReviewDescription: string;
   heading: string;
   detail: string;
   noProject: string;
@@ -41,6 +43,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "Skills and commands",
     slashSkill: "skill",
     slashCommand: "command",
+    slashBuiltin: "built in",
+    slashReviewDescription: "Review the changes of this task (turn, branch)",
     heading: "Skills, commands and agents",
     detail: "Read where they are: the project's .claude, .agents and .codex folders and the same folders in your home folder. Their text guides the work; it never grants permissions or approvals.",
     noProject: "Open a project folder to see its skills, commands and agents.",
@@ -76,6 +80,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "스킬과 명령",
     slashSkill: "스킬",
     slashCommand: "명령",
+    slashBuiltin: "기본 제공",
+    slashReviewDescription: "이 작업의 변경 내용 검토 (turn, branch)",
     heading: "스킬, 명령, 에이전트",
     detail: "있는 자리에서 그대로 읽습니다. 프로젝트와 홈 폴더의 .claude, .agents, .codex 폴더입니다. 내용은 작업의 지침일 뿐이며 권한이나 승인을 주지 않습니다.",
     noProject: "프로젝트 폴더를 열면 스킬, 명령, 에이전트가 보입니다.",
@@ -111,6 +117,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "技能和命令",
     slashSkill: "技能",
     slashCommand: "命令",
+    slashBuiltin: "内置",
+    slashReviewDescription: "审查此任务的更改（turn、branch）",
     heading: "技能、命令和代理",
     detail: "就地读取：项目和主目录中的 .claude、.agents、.codex 文件夹。其内容只是工作指引，不会授予权限或批准。",
     noProject: "打开项目文件夹后即可看到技能、命令和代理。",
@@ -146,6 +154,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "技能與指令",
     slashSkill: "技能",
     slashCommand: "指令",
+    slashBuiltin: "內建",
+    slashReviewDescription: "審查此任務的變更（turn、branch）",
     heading: "技能、指令與代理",
     detail: "就地讀取：專案與家目錄中的 .claude、.agents、.codex 資料夾。其內容只是工作指引，不會授予權限或核准。",
     noProject: "開啟專案資料夾後即可看到技能、指令與代理。",
@@ -181,6 +191,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "Skills et commandes",
     slashSkill: "skill",
     slashCommand: "commande",
+    slashBuiltin: "intégrée",
+    slashReviewDescription: "Examiner les modifications de cette tâche (turn, branch)",
     heading: "Skills, commandes et agents",
     detail: "Lus là où ils sont : les dossiers .claude, .agents et .codex du projet et de votre dossier personnel. Leur texte guide le travail ; il n'accorde jamais de permission ni d'approbation.",
     noProject: "Ouvrez un dossier de projet pour voir ses skills, commandes et agents.",
@@ -216,6 +228,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "Skills und Befehle",
     slashSkill: "Skill",
     slashCommand: "Befehl",
+    slashBuiltin: "eingebaut",
+    slashReviewDescription: "Änderungen dieser Aufgabe prüfen (turn, branch)",
     heading: "Skills, Befehle und Agenten",
     detail: "Werden dort gelesen, wo sie liegen: die Ordner .claude, .agents und .codex des Projekts und Ihres Home-Ordners. Ihr Text leitet die Arbeit an; er gibt nie Berechtigungen oder Freigaben.",
     noProject: "Öffnen Sie einen Projektordner, um seine Skills, Befehle und Agenten zu sehen.",
@@ -251,6 +265,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "Skills y comandos",
     slashSkill: "skill",
     slashCommand: "comando",
+    slashBuiltin: "integrado",
+    slashReviewDescription: "Revisar los cambios de esta tarea (turn, branch)",
     heading: "Skills, comandos y agentes",
     detail: "Se leen donde están: las carpetas .claude, .agents y .codex del proyecto y de su carpeta personal. Su texto guía el trabajo; nunca concede permisos ni aprobaciones.",
     noProject: "Abra una carpeta de proyecto para ver sus skills, comandos y agentes.",
@@ -286,6 +302,8 @@ export const desktopCodeExtensionsCopy = {
     slashList: "Skills e comandos",
     slashSkill: "skill",
     slashCommand: "comando",
+    slashBuiltin: "integrado",
+    slashReviewDescription: "Rever as alterações desta tarefa (turn, branch)",
     heading: "Skills, comandos e agentes",
     detail: "Lidos onde estão: as pastas .claude, .agents e .codex do projeto e da sua pasta pessoal. O texto orienta o trabalho; nunca concede permissões nem aprovações.",
     noProject: "Abra uma pasta de projeto para ver seus skills, comandos e agentes.",
