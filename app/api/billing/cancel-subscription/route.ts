@@ -236,7 +236,13 @@ export async function DELETE(req: Request) {
     const stripe = getStripe();
     const current = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
     if (!current.cancel_at_period_end) {
-      // Already renewing: nothing to undo, and saying so is idempotent.
+      // Already renewing: nothing to undo, and saying so is idempotent. The
+      // stored flag is corrected too -- a missed webhook would otherwise keep
+      // showing a cancellation (and this button) after a reload.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { subscriptionCancelAtPeriodEnd: false, subscriptionStatus: current.status },
+      });
       return NextResponse.json({
         success: true,
         cancelAtPeriodEnd: false,
@@ -257,6 +263,43 @@ export async function DELETE(req: Request) {
     const subscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {
       cancel_at_period_end: false,
     });
+
+    // A deletion or refund request may have landed between the checks above
+    // and this write. Account deletion schedules the cancellation at Stripe
+    // and then records pending_deletion, and re-asserts the cancellation after
+    // that record (lib/accountDeletion.ts), so between the two of them the
+    // cancellation always wins: if the record is here now, put it back.
+    const [after, refundAfter] = await Promise.all([
+      prisma.user.findUnique({ where: { id: user.id }, select: { accountStatus: true } }),
+      prisma.refundRequest.findFirst({
+        where: { userId: user.id, status: "pending" },
+        select: { id: true },
+      }),
+    ]);
+    if (after?.accountStatus === "pending_deletion" || refundAfter) {
+      try {
+        await stripe.subscriptions.update(user.stripeSubscriptionId, {
+          cancel_at_period_end: true,
+        });
+      } catch (revertError) {
+        // The one state worth a page: renewal is on for an account that asked
+        // to leave or to be refunded. Not retried blindly -- the outcome of
+        // the write is unknown and is read back by whoever picks this up.
+        console.error("billing.subscription.resume_revert_failed", {
+          userId: user.id,
+          subscriptionId: user.stripeSubscriptionId,
+          errorName: revertError instanceof Error ? revertError.name : "UnknownError",
+        });
+        throw revertError;
+      }
+      return NextResponse.json(
+        after?.accountStatus === "pending_deletion"
+          ? { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." }
+          : { code: "REFUND_REQUEST_PENDING", error: "A refund request is pending." },
+        { status: 409 }
+      );
+    }
+
     const periodEnd = getPeriodEnd(subscription) || user.subscriptionCurrentPeriodEnd;
     await prisma.user.update({
       where: { id: user.id },

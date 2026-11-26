@@ -510,6 +510,11 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 - **계정 삭제 예약(`pending_deletion`)이나 대기 중 환불 요청이 있으면 409**
   (`ACCOUNT_DELETION_PENDING`, `REFUND_REQUEST_PENDING`). 두 흐름 모두 스스로 해지를
   예약했고, 그 밑에서 갱신을 켜면 떠나거나 환불을 요청한 계정에 다음 결제가 납니다.
+  검사와 Stripe 쓰기 사이에 삭제가 끼어드는 경우를 위해, 이 route는 쓴 뒤 계정을
+  다시 읽어 삭제·환불이 보이면 해지를 되돌리고, 삭제 흐름
+  (`scheduleTomverseAccountDeletion`)은 `pending_deletion` 기록 뒤 해지 예약을 한 번
+  더 겁니다. 둘 중 하나는 반드시 해지로 끝납니다.
+- Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
 - 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
 
 ## 11. Admin › Plans & pricing › Plan changes (2026-11-26)

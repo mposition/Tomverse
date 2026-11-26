@@ -39,10 +39,35 @@ test("it decides on the subscription Stripe has now, and is idempotent when alre
   assert.match(source, /RESUMABLE_STATUSES = new Set\(\["active", "trialing"\]\)/);
 });
 
-test("it never touches the plan, the price or a schedule", () => {
-  const update = resume.slice(
-    position("stripe.subscriptions.update("),
-    position("const periodEnd")
+test("a deletion or refund that lands during the write puts the cancellation back", () => {
+  // Account deletion schedules the cancellation at Stripe, then records
+  // pending_deletion, then asserts the cancellation again. This route re-reads
+  // the account after its own write. Between the two, the cancellation wins.
+  const write = position("cancel_at_period_end: false");
+  const recheck = resume.indexOf('after?.accountStatus === "pending_deletion" || refundAfter', write);
+  assert.ok(recheck > write, "no re-read after the write");
+  const revert = resume.indexOf("cancel_at_period_end: true", recheck);
+  assert.ok(revert > recheck, "no revert after the re-read");
+
+  const deletion = readFileSync("lib/accountDeletion.ts", "utf8");
+  const schedule = deletion.slice(deletion.indexOf("export async function scheduleTomverseAccountDeletion"));
+  const record = schedule.indexOf('accountStatus: "pending_deletion"');
+  const reassert = schedule.indexOf("await scheduleStripeSubscriptionCancellation", record);
+  assert.ok(record > 0 && reassert > record, "deletion does not re-assert after its record");
+});
+
+test("an already-renewing subscription corrects a stale stored flag", () => {
+  const branch = resume.slice(
+    position("if (!current.cancel_at_period_end)"),
+    position("RESUMABLE_STATUSES.has(current.status)")
   );
+  assert.match(branch, /subscriptionCancelAtPeriodEnd: false/);
+});
+
+test("it never touches the plan, the price or a schedule", () => {
+  // Every Stripe write in the handler: its parameter object only.
+  const writes = resume.split("stripe.subscriptions.update(").slice(1);
+  assert.equal(writes.length, 2, "the resume and its revert");
+  const update = writes.map((write) => write.slice(0, write.indexOf("});"))).join("\n");
   assert.doesNotMatch(update, /items|price|schedule|proration/);
 });

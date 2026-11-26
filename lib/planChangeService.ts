@@ -705,8 +705,12 @@ export async function confirmPlanChange({
       targetPriceId: stored.targetStripePriceId,
       idempotencyKey,
     });
-    const updated = await prisma.planChangeRequest.update({
-      where: { id: stored.id },
+    // Conditional on the row still being a quote: two confirms racing on one
+    // quote both reach here (Stripe's idempotency key gives them the same
+    // schedule), but only one of them moves the row, and only that one may
+    // queue the confirmation email.
+    const moved = await prisma.planChangeRequest.updateMany({
+      where: { id: stored.id, status: "previewed" },
       data: {
         status: "pending",
         pendingForUserId: userId,
@@ -716,6 +720,12 @@ export async function confirmPlanChange({
         renewalDecision: decision.plan.renewal,
       },
     });
+    const updated = await prisma.planChangeRequest.findUniqueOrThrow({
+      where: { id: stored.id },
+    });
+    if (moved.count !== 1) {
+      return { ok: true, reservation: viewOf(updated) };
+    }
     // The downgrade is decided now (the schedule is attached), so this is the
     // moment to confirm it. An upgrade is confirmed at settlement instead,
     // because it only happens once its invoice is paid.

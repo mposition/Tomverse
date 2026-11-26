@@ -116,6 +116,12 @@ test("each confirmation is queued from the one write that moved the change", () 
     confirm,
     /stripeScheduleId: scheduleId,[\s\S]*?PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE[\s\S]*?return \{ ok: true, reservation: viewOf\(updated\) \};/
   );
+  // Two confirms racing on one quote: only the one whose conditional update
+  // moved the row queues the email.
+  assert.match(
+    confirm,
+    /updateMany\(\{\s*where: \{ id: stored\.id, status: "previewed" \},[\s\S]*?stripeScheduleId: scheduleId,[\s\S]*?if \(moved\.count !== 1\) \{\s*return[\s\S]*?PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE/
+  );
   // The upgrade confirm itself sends nothing: payment has not happened yet.
   const upgradeBranch = confirm.slice(
     confirm.indexOf('if (decision.plan.execution === "immediate_upgrade")'),
