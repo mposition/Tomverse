@@ -54,7 +54,8 @@ export function TaskGithubPulls({ language, onVisibilityChange, scope }: { langu
     try {
       const rows = await window.desktop.taskPulls({ type: "read", link });
       if (!rows.length) throw new Error("Task changed");
-      setNow(Date.now());
+      // The rows were just read, so the newest check time is the present; the clock above keeps it moving.
+      setNow((current) => Math.max(current, ...rows.map((row) => row.checkedAt)));
       setRows(rows);
     } catch { setError(text.error); }
     finally { setPending(false); }
