@@ -135,13 +135,27 @@ export async function stopDeletionPendingDraftRenewals(
   // left for a person (see stopDeletionPendingRenewal) and must not stop the
   // check of the others.
   let stopped = 0;
-  for (const renewal of renewals) {
+  let index = 0;
+  for (; index < renewals.length; index += 1) {
+    const renewal = renewals[index]!;
     const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: renewal.id });
     if (!outcome.pendingDeletion) break;
     if (outcome.invoiceFinalized) finalizedIds.add(renewal.id);
     if (outcome.cancelled) {
       stopped = 1;
+      index += 1;
       break;
+    }
+  }
+  // The rest are re-read once the cancellation has turned off their
+  // collection: one that left draft before it is for a person to check.
+  if (stopped) {
+    for (const renewal of renewals.slice(index)) {
+      if (finalizedIds.has(renewal.id)) continue;
+      const current = await getStripe().invoices.retrieve(renewal.id, {}, {
+        timeout: STRIPE_REQUEST_TIMEOUT_MS,
+      });
+      if (current.status !== "draft") finalizedIds.add(renewal.id);
     }
   }
   // An incomplete scan is a failure for the caller to report: a renewal past

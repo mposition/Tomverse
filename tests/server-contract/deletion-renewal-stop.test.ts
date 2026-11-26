@@ -17,6 +17,8 @@ const state = {
   /** Invoices reported as already paid when re-read (paid after the list). */
   paidAfterList: [] as string[],
   manualDrafts: 100,
+  noOpen: false,
+  secondDraft: false,
   subscriptionStatus: "active",
   failCancel: false,
   cancels: [] as { id: string; params: Record<string, unknown> }[],
@@ -29,6 +31,8 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     invoiceStatus: "draft",
     paidAfterList: [],
     manualDrafts: 100,
+    noOpen: false,
+    secondDraft: false,
     subscriptionStatus: "active",
     failCancel: false,
     cancels: [],
@@ -62,12 +66,14 @@ mock.module(mod("lib/stripe.ts"), {
         // Auto-paginating list: the renewal sits behind a full page of manual drafts.
         list: ({ status }: { status: string }) =>
           (async function* () {
+            if (status === "open" && state.noOpen) return;
             if (status === "open") {
               yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
               return;
             }
             for (let i = 0; i < state.manualDrafts; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
             yield { id: "in_1", status: "draft", billing_reason: "subscription_cycle" };
+            if (state.secondDraft) yield { id: "in_2", status: "draft", billing_reason: "subscription_cycle" };
           })(),
       },
       subscriptions: {
@@ -184,4 +190,11 @@ test("a draft renewal paid before its re-read is counted for a person", async ()
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
   assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 0, finalized: 2 });
   assert.equal(state.cancels.length, 0);
+});
+
+test("after the cancellation the remaining renewals are re-read, and one paid meanwhile is counted", async () => {
+  reset({ noOpen: true, secondDraft: true, paidAfterList: ["in_2"] });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
+  assert.equal(state.cancels.length, 1);
 });
