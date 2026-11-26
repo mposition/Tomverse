@@ -40,7 +40,7 @@ test("Studio does not attempt a fallback after an authentication failure", async
 });
 
 test("each tool of a several-tool feature is submitted with its own price, never the total", async () => {
-  const { studioToolQuote, studioToolsQuote } = await import("../components/studio/studioGenerationClient.ts");
+  const { studioToolQuote } = await import("../components/studio/studioGenerationClient.ts");
   const targets = [
     { modelId: "tool-a", model: "Tool A", credits: 20, pricingVersion: "a-1" },
     { modelId: "tool-b", model: "Tool B", credits: 26, pricingVersion: "b-1" },
@@ -51,11 +51,6 @@ test("each tool of a several-tool feature is submitted with its own price, never
   });
   assert.equal(studioToolQuote(total, targets[0]).credits, 20);
 
-  // What the button shows is what the press charges: only the tools it will request.
-  assert.deepEqual([studioToolsQuote(total, targets).model, studioToolsQuote(total, targets).credits], ["Tool A + Tool B", 46]);
-  assert.deepEqual([studioToolsQuote(total, [targets[1]]).model, studioToolsQuote(total, [targets[1]]).credits], ["Tool B", 26]);
-  // Nothing to request (a held result only needs showing again): no charge.
-  assert.deepEqual([studioToolsQuote(total, []).model, studioToolsQuote(total, []).credits], ["Tool A + Tool B", 0]);
 });
 
 test("a tool sent after another waits out a busy slot twice, and nothing else", async () => {

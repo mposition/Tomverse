@@ -262,7 +262,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           {(result || !busy) && <img className={styles.characterArt} src={result || studioArtworkPath(preset.artwork)}
             alt={copy[preset.label]} />}
           <div className={styles.creativeGenerate}>{generateButton}</div>
-          <StudioQuoteHint {...imageQuote} />
+          <StudioQuoteHint error={imageQuote.error} />
           <StudioStatus status={status} />
         </> : <>
           {!result && <figure className={styles.sampleReport}>
