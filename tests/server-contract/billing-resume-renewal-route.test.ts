@@ -21,6 +21,8 @@ const state: {
   deletionDuringWrite: boolean;
   /** A deletion committed right after the route read the subscription. */
   deletionAfterRead: boolean;
+  /** A deletion committed right after the reconciler found the account active. */
+  deletionAfterReconcile: boolean;
   failResume: boolean;
   failRestore: boolean;
   writes: boolean[];
@@ -32,6 +34,7 @@ const state: {
   subscription: { id: "sub_1", status: "active", cancel_at_period_end: true },
   deletionDuringWrite: false,
   deletionAfterRead: false,
+  deletionAfterReconcile: false,
   failResume: false,
   failRestore: false,
   writes: [],
@@ -46,6 +49,7 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     subscription: { id: "sub_1", status: "active", cancel_at_period_end: true },
     deletionDuringWrite: false,
     deletionAfterRead: false,
+    deletionAfterReconcile: false,
     failResume: false,
     failRestore: false,
     writes: [],
@@ -82,7 +86,10 @@ mock.module(mod("lib/operationalMonitoring.ts"), {
 mock.module(mod("lib/deletionCancellation.ts"), {
   namedExports: {
     keepDeletionCancellation: async () => {
-      if (state.account?.accountStatus !== "pending_deletion") return { pendingDeletion: false, cancelled: false };
+      if (state.account?.accountStatus !== "pending_deletion") {
+        if (state.deletionAfterReconcile && state.account) state.account.accountStatus = "pending_deletion";
+        return { pendingDeletion: false, cancelled: false };
+      }
       if (state.failRestore) throw new Error("stripe down");
       if (state.subscription.cancel_at_period_end) return { pendingDeletion: true, cancelled: false };
       state.writes.push(true);
@@ -220,6 +227,14 @@ test("a cancellation that cannot be restored is an operational incident", async 
 
 test("an already-renewing answer never overwrites the flag of a deletion committed after the read", async () => {
   reset({ subscription: { id: "sub_1", status: "active", cancel_at_period_end: false }, deletionAfterRead: true });
+  const { status, body } = await call();
+  assert.equal(status, 409);
+  assert.equal(body.code, "ACCOUNT_DELETION_PENDING");
+  assert.deepEqual(state.accountUpdates, []);
+});
+
+test("a resume answer never overwrites the flag of a deletion committed after the reconcile", async () => {
+  reset({ deletionAfterReconcile: true });
   const { status, body } = await call();
   assert.equal(status, 409);
   assert.equal(body.code, "ACCOUNT_DELETION_PENDING");

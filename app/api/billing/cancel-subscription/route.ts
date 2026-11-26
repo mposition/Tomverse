@@ -335,14 +335,23 @@ export async function DELETE(req: Request) {
     }
 
     const periodEnd = getPeriodEnd(subscription) || user.subscriptionCurrentPeriodEnd;
-    await prisma.user.update({
-      where: { id: user.id },
+    // Only while the account is still not pending deletion: a deletion that
+    // committed after the reconcile above records its own cancellation (and
+    // re-asserts it at Stripe), and this response is older than that.
+    const recorded = await prisma.user.updateMany({
+      where: { id: user.id, accountStatus: { not: "pending_deletion" } },
       data: {
         subscriptionStatus: subscription.status,
         subscriptionCurrentPeriodEnd: periodEnd,
         subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
       },
     });
+    if (recorded.count !== 1) {
+      return NextResponse.json(
+        { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
+        { status: 409 }
+      );
+    }
     console.info("billing.subscription.renewal_resumed", {
       userId: user.id,
       subscriptionId: subscription.id,

@@ -96,12 +96,12 @@ export async function keepDeletionCancellation(
  * after the commit is stopped by its own webhook. Returns how many were stopped.
  */
 export async function stopDeletionPendingDraftRenewals(subscriptionId: string): Promise<number> {
-  const drafts = await getStripe().invoices.list(
-    { subscription: subscriptionId, status: "draft", limit: 10 },
-    { timeout: STRIPE_REQUEST_TIMEOUT_MS }
-  );
   let stopped = 0;
-  for (const invoice of drafts.data) {
+  // Every page: manual drafts on the subscription must not hide an older renewal.
+  for await (const invoice of getStripe().invoices.list(
+    { subscription: subscriptionId, status: "draft", limit: 100 },
+    { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+  )) {
     if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
     const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
     if (outcome.cancelled) stopped += 1;

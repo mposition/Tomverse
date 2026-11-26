@@ -51,12 +51,12 @@ mock.module(mod("lib/stripe.ts"), {
     getStripe: () => ({
       invoices: {
         retrieve: async () => ({ id: "in_1", status: state.invoiceStatus }),
-        list: async () => ({
-          data: [
-            { id: "in_1", status: "draft", billing_reason: "subscription_cycle" },
-            { id: "in_2", status: "draft", billing_reason: "manual" },
-          ],
-        }),
+        // Auto-paginating list: the renewal sits behind a full page of manual drafts.
+        list: () =>
+          (async function* () {
+            for (let i = 0; i < 100; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
+            yield { id: "in_1", status: "draft", billing_reason: "subscription_cycle" };
+          })(),
       },
       subscriptions: {
         retrieve: async () => ({ id: "sub_1", status: state.subscriptionStatus, cancel_at_period_end: false }),
