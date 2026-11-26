@@ -70,7 +70,7 @@ export const studioLocale = {
   "processedImage": "Processed image",
   "questionExample": "Question example",
   "quizTitle": "Quiz title",
-  "realFace": "Real face",
+  "realFace": "Semi-realistic face",
   "regenerateFromWords": "Regenerate from words",
   "regenerate": "Regenerate",
   "removeBackground": "Remove background",

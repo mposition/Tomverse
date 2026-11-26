@@ -70,7 +70,7 @@ export const studioLocale = {
   "processedImage": "Bearbeitetes Bild",
   "questionExample": "Beispielfrage",
   "quizTitle": "Quiztitel",
-  "realFace": "Echtes Gesicht",
+  "realFace": "Halbrealistisches Gesicht",
   "regenerateFromWords": "Sticker anhand des Textes neu erstellen",
   "regenerate": "Neu erstellen",
   "removeBackground": "Hintergrund entfernen",
