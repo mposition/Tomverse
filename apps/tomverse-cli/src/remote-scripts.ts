@@ -34,6 +34,17 @@ rp() {
   d=$(cd -P -- "$d" 2>/dev/null && pwd -P) || return 1
   if [ "$d" = / ]; then printf '%s\n' "/$b"; else printf '%s\n' "$d/$b"; fi
 }
+# A name from a list is usable only if it is a regular file that is not a link and no folder on its way is a link: a link anywhere
+# in the name makes the real path differ from the name, whatever it points to. Needs root (the real project folder); a run of
+# names in one folder checks the folder once.
+safe() {
+  { [ -f "$1" ] && [ ! -L "$1" ]; } || return 1
+  case $1 in */*) ;; *) return 0;; esac
+  sd=\${1%/*}
+  [ "$sd" = "$sd_ok" ] && return 0
+  [ "$(cd -P -- "$sd" 2>/dev/null && pwd -P)" = "$root/$sd" ] || return 1
+  sd_ok=$sd
+}
 `.replaceAll("\\${", "${");
 
 /**
@@ -98,7 +109,11 @@ cat -- "$p"
 /**
  * Writes one file so a reader sees the old or the new bytes: the content (on stdin) goes to a temporary file in the same
  * folder, is checked for length, and replaces the target with one rename. An update only goes ahead if the file still has the
- * identity it had when it was approved ($3), a create only if there is nothing there yet ($4 = 1).
+ * identity it had when it was approved ($3), a create only if there is nothing there yet ($4 = 1). A create puts the finished
+ * file in place with a hard link, which fails if the name is taken; where hard links are not available the target is created
+ * and filled through one exclusive open (noclobber), so a file that appears at that name in the meantime is never replaced, and
+ * a target that did not get all its content is removed again. An update has to rename over the file, so the identity is checked
+ * as late as the shell allows, but a change in the moment between that check and the rename cannot be excluded.
  * $1 root, $2 path, $3 expected identity, $4 create, $5 size, $6 the approved folder, $7 its approved identity (dev:ino), $8 permissions to set (octal digits) or empty.
  */
 export const WRITE_SCRIPT = PRELUDE + String.raw`root=$1; p=$2; expect=$3; create=$4; size=$5; bound=$6; boundid=$7; setmode=$8
@@ -125,7 +140,14 @@ else
   mode=\${expect##*:}
 fi
 tmp=$(mktemp "$d/.tomverse-XXXXXXXX") || exit 42
-trap 'rm -f "$tmp"' EXIT
+mark=; half=0
+cleanup() {
+  if [ "$half" = 1 ] && [ -s "$mark" ] && [ -f "$p" ] && [ ! -L "$p" ]; then rm -f -- "$p"; fi
+  rm -f -- "$tmp"
+  if [ -n "$mark" ]; then rm -f -- "$mark"; fi
+  return 0
+}
+trap cleanup EXIT
 trap 'exit 45' HUP INT TERM
 cat > "$tmp" || exit 45
 got=$(wc -c < "$tmp" | tr -d ' ')
@@ -135,7 +157,20 @@ chmod "$mode" "$tmp" || exit 45
 if [ "$create" = 1 ]; then
   if ln "$tmp" "$p" 2>/dev/null; then :; else
     { [ -e "$p" ] || [ -L "$p" ]; } && exit 46
-    mv "$tmp" "$p" || exit 45
+    mark=$(mktemp "$d/.tomverse-XXXXXXXX") || exit 42
+    half=1
+    ( umask 077; set -C; { echo c >&3; cat -- "$tmp" || exit 9; } > "$p" ) 3>"$mark" 2>/dev/null
+    rc=$?
+    if [ ! -s "$mark" ]; then
+      half=0
+      { [ -e "$p" ] || [ -L "$p" ]; } && exit 46
+      exit 45
+    fi
+    [ "$rc" = 0 ] || exit 45
+    { [ -f "$p" ] && [ ! -L "$p" ]; } || exit 45
+    [ "$(wc -c < "$p" | tr -d ' ')" = "$size" ] || exit 45
+    chmod "$mode" "$p" || exit 45
+    half=0
   fi
 else
   [ "$(ident "$p")" = "$expect" ] || exit 43
@@ -159,7 +194,11 @@ const skipped = [...SKIPPED_DIRS];
 if (skipped.some((name) => !/^[A-Za-z0-9._-]+$/.test(name))) throw new Error("A skipped folder name is not safe to place in the remote script.");
 const PRUNE = skipped.map((name) => `-name ${name}`).join(" -o ");
 
-/** $1 root, $2 the start folder relative to it ("." for all), $3 1 to prefer git. Prints NUL-separated paths relative to the root. */
+/**
+ * $1 root, $2 the start folder relative to it ("." for all), $3 1 to prefer git. Prints NUL-separated paths relative to the root:
+ * regular files only, never a link and never a name that goes through one (git lists a tracked link as a file, and a tracked
+ * folder may have been replaced by a link since).
+ */
 export const LIST_SCRIPT = PRELUDE + String.raw`root=$1; start=$2; git=$3
 cd -P -- "$root" 2>/dev/null || exit 44
 [ "$(pwd -P)" = "$root" ] || exit 42
@@ -168,7 +207,8 @@ if [ "$start" != . ]; then
   [ "$(cd -P -- "$start" 2>/dev/null && pwd -P)" = "$root/$start" ] || exit 42
 fi
 if [ "$git" = 1 ] && [ -e .git ] && command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
-  GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 git -c core.fsmonitor=false -c core.untrackedCache=false ls-files --cached --others --exclude-standard -z -- "$start"
+  GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 git -c core.fsmonitor=false -c core.untrackedCache=false ls-files --cached --others --exclude-standard -z -- "$start" \
+    | tr '\0' '\n' | while IFS= read -r f; do safe "$f" && printf '%s\n' "$f"; done | tr '\n' '\0'
   exit 0
 fi
 if [ "$start" = . ]; then base=.; else base="./$start"; fi
@@ -176,14 +216,21 @@ find "$base" ! -path "$base" -type d \( ${PRUNE} \) -prune -o -type f -print0
 exit 0
 `;
 
-/** $1 root, $2 F (fixed text) or E (regular expression), $3 i (ignore case) or s, $4 the pattern. The files, NUL-separated and relative to the root, arrive on stdin. */
+/**
+ * $1 root, $2 F (fixed text) or E (regular expression), $3 i (ignore case) or s, $4 the pattern. The files, NUL-separated and
+ * relative to the root, arrive on stdin. They are checked again here with the same rule as the listing (grep follows a link it is
+ * given), so a name that is, or has become, a link is never read. /dev/null keeps xargs from running grep on nothing.
+ */
 export const SEARCH_SCRIPT = PRELUDE + String.raw`root=$1; mode=$2; icase=$3; pat=$4
 cd -P -- "$root" 2>/dev/null || exit 44
 [ "$(pwd -P)" = "$root" ] || exit 42
 fl=-nIH
 if [ "$mode" = F ]; then fl="$fl -F"; else fl="$fl -E"; fi
 [ "$icase" = i ] && fl="$fl -i"
-xargs -0 grep $fl --null -e "$pat" -- 2>/dev/null
+{
+  printf '/dev/null\n'
+  tr '\0' '\n' | while IFS= read -r f; do safe "$f" && printf '%s\n' "$f"; done
+} | tr '\n' '\0' | xargs -0 grep $fl --null -e "$pat" -- 2>/dev/null
 exit 0
 `;
 

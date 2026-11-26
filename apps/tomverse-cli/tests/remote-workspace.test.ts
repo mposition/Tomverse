@@ -4,10 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { PatchError } from "../src/patch.js";
 import { createSshRunner } from "../src/remote-ssh.js";
-import { RemoteError } from "../src/remote-target.js";
+import { SEARCH_SCRIPT } from "../src/remote-scripts.js";
+import { RemoteError, remoteShellCommand } from "../src/remote-target.js";
 import { planRemoteCommand, RemoteWorkspace } from "../src/remote-workspace.js";
 import { PathError } from "../src/workspace.js";
-import { dashShim, HAS_SH, makeFakeRemote, remotePath } from "./remote-fixture.js";
+import { dashShim, HAS_SH, makeFakeRemote, realTool, remotePath, shimFolder } from "./remote-fixture.js";
 
 const skip = !HAS_SH && "needs a POSIX sh (Git for Windows has one)";
 
@@ -586,3 +587,125 @@ test("the remote scripts refuse a real folder or path with a line break before t
     await assert.rejects(through.connect(), (error) => remoteError("invalid-target")(error) && /line break/.test((error as Error).message));
     assert.equal(through.state, "idle");
 });
+
+/** A project with links of every kind (made by the remote sh), and files around them that are fine. Null where this machine cannot make links. */
+const withLinks = (remote: ReturnType<typeof makeFakeRemote>) => {
+    writeFileSync(join(remote.base, "outside.txt"), "needle outside\n");
+    mkdirSync(join(remote.base, "outside-dir"));
+    writeFileSync(join(remote.base, "outside-dir", "o.txt"), "needle in outside folder\n");
+    writeFileSync(join(remote.root, ".env"), "needle=secret\n");
+    writeFileSync(join(remote.root, "plain.txt"), "needle plain\n");
+    mkdirSync(join(remote.root, "real"));
+    writeFileSync(join(remote.root, "real", "r.txt"), "needle real\n");
+    try {
+        remote.sh("ln -s ../outside.txt out-link.txt && ln -s .env env-link.txt && ln -s real folder-link && ln -s ../outside-dir out-folder", remote.root);
+        return remote.sh("[ -L out-link.txt ] && [ -L folder-link ] && echo yes", remote.root).trim() === "yes";
+    } catch {
+        return false;
+    }
+};
+
+const LINKED_NAMES = ["out-link.txt", "env-link.txt", "folder-link", "folder-link/r.txt", "out-folder/o.txt"];
+const FINE_NAMES = ["plain.txt", "real/r.txt"];
+
+test("a listing from git never holds a link, or a name that goes through one: out of the project, at a credential file, or by a folder", { skip }, async (t) => {
+    // `git` here is a stand-in that prints the names a repository could hold (a tracked link is listed like a file), so the check
+    // does not depend on this machine's git being able to store links.
+    const names = [...FINE_NAMES, ...LINKED_NAMES, "gone.txt", "sub-module"];
+    const shims = shimFolder({ git: `case "$*" in *rev-parse*) exit 0;; esac\ncat "$(dirname "$0")/names"` });
+    writeFileSync(join(shims, "names"), `${names.join("\0")}\0`);
+    const remote = makeFakeRemote({ subfolder: "project", path: shims });
+    mkdirSync(join(remote.root, ".git"));
+    mkdirSync(join(remote.root, "sub-module"));
+    if (!withLinks(remote)) { t.skip("this machine cannot make links"); return; }
+    await remote.workspace.connect();
+    assert.deepEqual((await remote.workspace.listFiles(".", 100)).files, [...FINE_NAMES].sort());
+    // What search is given is that same list, and nothing it reads goes through a link.
+    const found = await remote.workspace.searchText({ pattern: "needle", maxResults: 50 });
+    assert.deepEqual(found.matches.sort(), ["plain.txt:1:needle plain", "real/r.txt:1:needle real"]);
+});
+
+test("search checks its files again: a name that is, or has become, a link is not read even if it is handed over", { skip }, async (t) => {
+    const remote = makeFakeRemote({ subfolder: "project" });
+    if (!withLinks(remote)) { t.skip("this machine cannot make links"); return; }
+    await remote.workspace.connect();
+    const names = [...LINKED_NAMES, ...FINE_NAMES, "missing.txt"];
+    const result = await remote.runner({
+        target: remote.target, command: remoteShellCommand(SEARCH_SCRIPT, [remote.workspace.root, "F", "i", "needle"]), stdin: Buffer.from(`${names.join("\0")}\0`), timeoutMs: 30_000,
+    });
+    assert.equal(result.exitCode, 0);
+    const read = new Set(result.stdout.toString("utf8").split("\n").filter(Boolean).map((line) => line.slice(0, line.indexOf("\0"))));
+    assert.deepEqual([...read].sort(), [...FINE_NAMES].sort());
+});
+
+test("in a real git repository a tracked link and a tracked folder replaced by a link are left out of listing and search", { skip }, async (t) => {
+    const remote = makeFakeRemote({ subfolder: "project" });
+    try {
+        remote.sh("git init -q . && git config user.email a@b.c && git config user.name t && git config core.symlinks true", remote.root);
+    } catch {
+        t.skip("no git on this machine");
+        return;
+    }
+    mkdirSync(join(remote.root, "swap"));
+    writeFileSync(join(remote.root, "swap", "s.txt"), "needle swap\n");
+    if (!withLinks(remote)) { t.skip("this machine cannot make links"); return; }
+    remote.sh("git add -A && git commit -q -m one", remote.root);
+    if (!/^120000/.test(remote.sh("git ls-files -s out-link.txt", remote.root))) { t.skip("this git cannot keep links as links"); return; }
+    // A tracked folder that is a link by now.
+    remote.sh("rm -r swap && ln -s ../outside-dir swap", remote.root);
+    await remote.workspace.connect();
+    const listed = (await remote.workspace.listFiles(".", 100)).files;
+    assert.deepEqual(listed.filter((name) => ![".gitignore"].includes(name)), [...FINE_NAMES].sort());
+    const found = await remote.workspace.searchText({ pattern: "needle", maxResults: 50 });
+    assert.deepEqual(found.matches.sort(), ["plain.txt:1:needle plain", "real/r.txt:1:needle real"]);
+});
+
+const left = (folder: string): string[] => readdirSync(folder, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? left(join(folder, entry.name)) : /tomverse-/.test(entry.name) ? [entry.name] : []);
+
+const createPlanned = async (remote: ReturnType<typeof makeFakeRemote>, path: string, content: string) => {
+    await remote.workspace.connect();
+    const [edit] = await remote.workspace.planPatch([{ path, action: "create", content }]);
+    return edit!;
+};
+
+for (const shell of ["sh", "dash"] as const) {
+    const unavailable = !HAS_SH ? "needs a POSIX sh (Git for Windows has one)" : shell === "dash" && dashShim() === null && "dash is not installed here";
+    const noLinks = (extra: Record<string, string> = {}) => shimFolder({ ln: "exit 1", ...extra }, { dash: shell === "dash" });
+
+    test(`where hard links are not available a created file is still written whole, with its mode, and nothing is left behind (${shell})`, { skip: unavailable }, async () => {
+        const remote = makeFakeRemote({ path: noLinks() });
+        const written = await remote.workspace.writeFile(await createPlanned(remote, "new/dir/note.txt", "plain words\n"));
+        assert.equal(readFileSync(join(remote.root, "new", "dir", "note.txt"), "utf8"), "plain words\n");
+        assert.match(written.ident, /:644$/);
+        assert.equal((await remote.workspace.resolve("new/dir/note.txt", "read")).ident, written.ident, "the identity answered is the file's own");
+        const folder = await remote.workspace.resolve("new/dir", "read");
+        const executable = await remote.workspace.writeBytes(`${folder.absolute}/x.sh`, Buffer.from("#!/bin/sh\n"), {
+            create: true, expect: null, folder: folder.folder, directory: folder.folderIdent.split(":").slice(0, 2).join(":"), mode: "755",
+        });
+        assert.match(executable.ident, /:755$/);
+        assert.deepEqual(left(remote.root), []);
+    });
+
+    test(`a file that appears at the name just before the exclusive create is never replaced (${shell})`, { skip: unavailable }, async () => {
+        // The second mktemp is the one the fallback makes right after its last look at the name: the rival file is made there.
+        const shims = noLinks({
+            mktemp: `d=$(dirname "$0")\nn=$(cat "$d/n" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$d/n"\n` +
+                `if [ "$n" = 2 ]; then printf 'theirs\\n' > "$(cat "$d/rival")"; fi\nexec ${realTool("mktemp")} "$@"`,
+        });
+        const remote = makeFakeRemote({ path: shims });
+        writeFileSync(join(shims, "rival"), remotePath(join(remote.root, "n", "x.txt")));
+        const edit = await createPlanned(remote, "n/x.txt", "mine\n");
+        await assert.rejects(remote.workspace.writeFile(edit), remoteError("exists"));
+        assert.equal(readFileSync(join(remote.root, "n", "x.txt"), "utf8"), "theirs\n");
+        assert.deepEqual(left(remote.root), []);
+    });
+
+    test(`a created file that did not get all its content is removed again, and a refused one leaves no temporary file (${shell})`, { skip: unavailable }, async () => {
+        const shims = noLinks({ cat: `if [ "$1" = -- ]; then printf par; exit 1; fi\nexec ${realTool("cat")} "$@"` });
+        const remote = makeFakeRemote({ path: shims });
+        const edit = await createPlanned(remote, "n/half.txt", "the whole content\n");
+        await assert.rejects(remote.workspace.writeFile(edit), remoteError("write-incomplete"));
+        assert.equal(existsSync(join(remote.root, "n", "half.txt")), false, "the half-written target is not left");
+        assert.deepEqual(left(remote.root), []);
+    });
+}

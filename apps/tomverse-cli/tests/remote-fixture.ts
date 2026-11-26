@@ -69,3 +69,15 @@ export const dashShim = () => {
     spawnSync("sh", ["-c", "chmod +x sh"], { cwd: folder, env: withGitTools() });
     return folder;
 };
+
+/** The path of a tool as the remote sh finds it (for a shim that hands over to the real one). */
+export const realTool = (name: string) => spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8", env: withGitTools() }).stdout.trim();
+
+/** A folder of small `sh` programs, to be put in front of PATH on the "remote machine" so a test can make a tool fail or act at a chosen moment. */
+export const shimFolder = (programs: Record<string, string>, options: { dash?: boolean } = {}) => {
+    const folder = tempFolder("shim");
+    for (const [name, body] of Object.entries(programs)) writeFileSync(join(folder, name), `#!/bin/sh\n${body}\n`);
+    if (options.dash) writeFileSync(join(folder, "sh"), '#!/bin/sh\nexec dash "$@"\n');
+    spawnSync("sh", ["-c", "chmod +x *"], { cwd: folder, env: withGitTools() });
+    return folder;
+};
