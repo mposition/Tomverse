@@ -111,9 +111,9 @@ test("Stripe requests inside the lock share one budget that ends before the tran
   const { stripeLockBudget } = await import(mod("lib/deletionCancellation.ts"));
   let clock = 0;
   const budget = stripeLockBudget(15_000, () => clock);
-  assert.deepEqual(budget(), { timeout: 8_000 });
+  assert.deepEqual(budget(), { timeout: 8_000, maxNetworkRetries: 0 });
   clock = 8_000; // the first request used its whole allowance
-  assert.deepEqual(budget(), { timeout: 7_000 });
+  assert.deepEqual(budget(), { timeout: 7_000, maxNetworkRetries: 0 });
   clock = 15_000; // a third request never outlives the lock
   assert.throws(() => budget(), /budget/);
 });

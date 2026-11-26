@@ -25,7 +25,10 @@ export function stripeLockBudget(budgetMs = STRIPE_BUDGET_MS, now: () => number 
     if (remaining <= 0) {
       throw new Error("Stripe request budget inside the account lock is spent.");
     }
-    return { timeout: Math.min(STRIPE_REQUEST_TIMEOUT_MS, remaining) };
+    // No SDK retries: a retry would start its own timeout and could outlive
+    // the lock. A failure throws instead, and each caller has its own retry
+    // (the webhook's redelivery) or reports it.
+    return { timeout: Math.min(STRIPE_REQUEST_TIMEOUT_MS, remaining), maxNetworkRetries: 0 };
   };
 }
 
