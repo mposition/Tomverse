@@ -6,6 +6,7 @@ import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
 import type { BillingState } from "../billing-contract";
 import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
 import type { DesktopLoginState, LoginApi } from "../login-contract";
+import type { TaskWindowView } from "../parallel-contract";
 
 const trustedWindow = location.pathname === "/approval";
 if (trustedWindow) {
@@ -13,6 +14,17 @@ if (trustedWindow) {
     approval: () => ipcRenderer.invoke("approval:read"),
     decide: (input: Parameters<DesktopApi["decide"]>[0]) => ipcRenderer.invoke("approval:decide", input),
   } satisfies Pick<DesktopApi, "approval" | "decide">);
+} else if (location.pathname === "/task") {
+  // A task's own window: it reads and stops the one task the main process bound it to, and the page never says which.
+  contextBridge.exposeInMainWorld("taskHost", {
+    read: () => ipcRenderer.invoke("task-window:read"),
+    stop: () => ipcRenderer.invoke("task-window:stop"),
+    subscribe(listener: (view: TaskWindowView) => void) {
+      const onChange = (_event: Electron.IpcRendererEvent, view: TaskWindowView) => listener(view);
+      ipcRenderer.on("task-window:changed", onChange);
+      return () => ipcRenderer.removeListener("task-window:changed", onChange);
+    },
+  });
 } else if (location.pathname === "/login") {
   contextBridge.exposeInMainWorld("loginHost", {
     state: () => ipcRenderer.invoke("login:state"),
@@ -108,6 +120,9 @@ if (trustedWindow) {
     localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),
     codeSandbox: (input: Parameters<DesktopApi["codeSandbox"]>[0]) => ipcRenderer.invoke("desktop:code-sandbox", input),
     plugins: (command: Parameters<DesktopApi["plugins"]>[0]) => ipcRenderer.invoke("desktop:plugins", command),
+    startParallel: (input: Parameters<DesktopApi["startParallel"]>[0]) => ipcRenderer.invoke("desktop:start-parallel", input),
+    parallel: (command: Parameters<DesktopApi["parallel"]>[0]) => ipcRenderer.invoke("desktop:parallel", command),
+    schedules: (command: Parameters<DesktopApi["schedules"]>[0]) => ipcRenderer.invoke("desktop:schedules", command),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),

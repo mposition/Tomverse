@@ -36,6 +36,7 @@ import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, t
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
 import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
+import type { LaneKind, ParallelCommand, ParallelView, ScheduleCommand, ScheduleResult, ScheduleView } from "./parallel-contract";
 
 type DesktopDetail = keyof typeof desktopNativeCopy.en;
 
@@ -401,9 +402,15 @@ export type Snapshot = {
     billing?: boolean;
   } | null;
   codeKey: CodeKeyState;
+  /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
+  parallel?: ParallelView;
+  /** Scheduled runs: the schedules, their run records and what the schedule form needs to know. */
+  schedules?: ScheduleView;
 };
 
 export type ApprovalRequest = {
+  /** Which task asked, when it is not the open one: set by the main process, never by the task. */
+  task?: { title: string; folder: string; kind: LaneKind };
   language?: Language;
   id: string;
   root: string;
@@ -471,6 +478,10 @@ export type DesktopApi = {
   localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
   codeSandbox(input: CodeSandboxInput): Promise<CodeSandboxView>;
   plugins(command: PluginsCommand): Promise<PluginsView>;
+  /** Starts a task next to the open one (its own runtime process), and acts on the tasks in the activity list. */
+  startParallel(input: StartInput): Promise<void>;
+  parallel(command: ParallelCommand): Promise<boolean>;
+  schedules(command: ScheduleCommand): Promise<ScheduleResult>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;
