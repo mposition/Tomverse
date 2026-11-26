@@ -883,8 +883,9 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     // A managed worktree is a new folder: the project allow rules the person confirmed for the project it was made from cover it too,
     // as long as the rules in the worktree are exactly the ones that were confirmed.
     const rulesFor = () => new PermissionRuleStore({ root: workspace.root, env: permissionEnv, trustRoot: command.sourceProject?.path ?? null });
-    // An "always" answer on the approval card is saved as an allow rule for this project.
-    const memory = new ApprovalMemory((rule) => { rulesFor().add("project", rule); });
+    // "Allow for this run" is remembered for this run only, as the button says. Rules that last are written by the person
+    // in Settings > Task permissions, never as a side effect of an approval card.
+    const memory = new ApprovalMemory();
     const permissions = new PermissionGate({
       mode: () => permissionSetting?.mode ?? "ask",
       rules: () => rulesFor().effective(),
@@ -967,7 +968,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, workspace.root);
     if (sandbox && !sandbox.enforcement.available) addEvent(desktopCodeNotice("sandboxUnavailable"));
     control.runner = new Runner({
-      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), permissions,
+      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), sandboxed: sandbox?.enforcement.available === true, permissions,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),

@@ -639,7 +639,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     const workspace = new Workspace(root);
     const extensions = await localExtensions(ctx, workspace.root, () => journal.state.id, journal.state.readOnly);
     const sandbox = await startSandbox(ctx, workspace.root);
-    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch } : {}) });
+    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch, sandboxed: sandbox.enforcement.available } : {}) });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
     const removeSigint = installSigint(runner, ctx.output);
@@ -774,7 +774,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
         const workspace = new Workspace(root);
         const extensions = await localExtensions(ctx, workspace.root, () => state.id, state.readOnly);
         const sandbox = await startSandbox(ctx, workspace.root);
-        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch } : {}) });
+        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch, sandboxed: sandbox.enforcement.available } : {}) });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);
         for (const note of notes) ctx.output.info(note);

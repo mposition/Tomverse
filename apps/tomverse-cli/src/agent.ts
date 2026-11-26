@@ -54,6 +54,8 @@ export type Outcome = Exclude<keyof typeof EXIT_CODES, "usage">;
 export const SMART_ADAPTIVE = "smart-adaptive";
 
 export type ApprovalView = {
+    /** The host runs this command inside a sandbox it enforces; the approval text then says so. */
+    sandboxed?: boolean;
     approvalId: string;
     toolCallId: string;
     toolName: string;
@@ -1528,6 +1530,7 @@ export class Runner {
                 view.explanation = (request.input as { explanation?: string }).explanation;
             } else if (request.toolName === "run_command") {
                 view.command = planCommandCall(this.toolContext, request.input as never);
+                if (this.options.sandboxed) view.sandboxed = true;
             } else if (request.toolName === "web_fetch" && this.options.web) {
                 const target = classifyWebUrl((request.input as { url?: unknown })?.url);
                 if (!target.ok) view.error = target.reason;

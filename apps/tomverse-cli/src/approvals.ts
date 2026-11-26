@@ -26,9 +26,10 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host" | "brows
  * remembered: a command that sends something out of the computer, names a
  * credential file, or a change that is refused, is asked every time.
  *
- * A host that keeps rules in files (Desktop) gives a `persist` function: an
- * "always" answer is then also saved as an allow rule for the project, which
- * is how the permission rules and this memory are one thing.
+ * A host whose answer really means "always, in this project" may give a `persist`
+ * function: the answer is then also saved as an allow rule for the project.
+ * Desktop gives none: its button reads "Allow for this run", so the answer ends
+ * with the run and lasting rules are written in its settings.
  */
 export class ApprovalMemory {
     /** Workspace roots where file edits were allowed; an edit without a root is always asked. */

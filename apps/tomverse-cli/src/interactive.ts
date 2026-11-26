@@ -62,7 +62,9 @@ export const renderApproval = (view: ApprovalView) => {
         lines.push(`  folder:  ${safeLine(plan.cwd)}`);
         lines.push(plan.background ? "  timeout: none (background)" : `  timeout: ${Math.round(plan.timeoutMs / 1000)} s`);
         lines.push(`  env:     ${plan.envNames.length} variables (${plan.envNames.join(", ")}); your Tomverse key is not passed`);
-        lines.push("  It runs with your account's permissions and is not sandboxed: it can change files outside this folder and use the network.");
+        lines.push(view.sandboxed
+            ? "  It runs inside the command sandbox you turned on. What the sandbox enforces on this computer is listed in its settings."
+            : "  It runs with your account's permissions and is not sandboxed: it can change files outside this folder and use the network.");
     }
     if (view.origin && lines.length) lines.splice(1, 0, `  asked by subagent ${safeLine(view.origin.id)}: ${safeLine(view.origin.title)}`);
     return lines.map((l) => safeText(l)).join("\n");
