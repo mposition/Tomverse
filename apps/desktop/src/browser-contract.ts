@@ -27,7 +27,9 @@ export type BrowserCommand = z.infer<typeof browserCommand>;
 /** local: a loopback development server, pinned to its origin. web: a public https site, checked on every request. */
 export type BrowserKind = "local" | "web";
 export type BrowserState = { tab: string; kind?: BrowserKind; url: string; loading: boolean; failed: boolean; back: boolean; forward: boolean;
-  agent?: "idle" | "working" | "stopped"; picking?: boolean };
+  agent?: "idle" | "working" | "stopped"; picking?: boolean;
+  /** The main process closed this tab (the agent's permission or task ended): the panel drops it. */
+  closed?: boolean };
 
 /** One element the person pointed at: what the page said it is, where it was, and a small picture for the panel. */
 export const elementPickId = /^pick-[0-9a-f]{8}$/;

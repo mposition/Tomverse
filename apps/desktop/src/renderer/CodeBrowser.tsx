@@ -47,7 +47,7 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
   const slot = useRef<HTMLDivElement>(null);
   const [tabList, setTabList] = useState<string[]>(() => [crypto.randomUUID()]);
   const [selected, setSelected] = useState<string>();
-  const tab = selected ?? tabList[0];
+  const tab = selected && tabList.includes(selected) ? selected : tabList[0];
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [states, setStates] = useState<Record<string, BrowserState>>({});
   const [invalidTab, setInvalidTab] = useState<string>();
@@ -69,6 +69,17 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
       setPins((previous) => previous.length >= MAX_ELEMENT_COMMENTS ? previous : [...previous, { pick, comment: "" }]);
     });
     const unsubscribe = window.desktop.subscribeCodeBrowser((next) => {
+      // The main process closed the tab: it leaves the list (the last tab stays, empty).
+      if (next.closed) {
+        adopted.delete(next.tab);
+        addresses.delete(next.tab);
+        const without = <Value,>(previous: Record<string, Value>) => Object.fromEntries(Object.entries(previous).filter(([id]) => id !== next.tab));
+        setTabList((previous) => previous.length > 1 ? previous.filter((id) => id !== next.tab) : previous);
+        setStates(without);
+        setDrafts(without);
+        setShared((previous) => previous?.tab === next.tab ? undefined : previous);
+        return;
+      }
       // A tab the agent opened is new to this panel: show it, once, and bring it forward.
       if (next.agent && !adopted.has(next.tab)) {
         adopted.add(next.tab);

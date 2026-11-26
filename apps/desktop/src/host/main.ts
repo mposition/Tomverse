@@ -12,7 +12,7 @@ import { createDesktopComputer } from "./computer-wiring";
 import { createFixtureBackend } from "./computer-fixture-backend";
 import type { ComputerBackend } from "./computer-backend";
 import { createWebViewHost } from "./web-view-host";
-import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS } from "../browser-contract";
+import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserState } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createConnectorApi } from "./connector-api";
 import { openConnectorOAuthWindow } from "./connector-oauth-window";
@@ -496,7 +496,7 @@ function broadcast() {
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   // The agent's own tab belongs to the task it was opened for; the person's tabs stay when the task or the project changes.
   const staleAgentTab = browserAgent.dropStale();
-  if (staleAgentTab) closeCodeBrowserTab(staleAgentTab);
+  if (staleAgentTab) closeCodeBrowserTab(staleAgentTab, true);
   const tools = browserTools();
   state.codeBrowserAvailable = scope !== null;
   state.codeBrowserInspection = scope !== null && currentCodeBrowserScope() !== null && tools.inspection;
@@ -2691,11 +2691,16 @@ function closeCodeBrowser() {
   for (const view of browser?.tabs.values() ?? []) view.close();
 }
 
-function closeCodeBrowserTab(tab: string) {
+function closeCodeBrowserTab(tab: string, announce = false) {
   const browser = codeBrowser;
   if (browser?.grant?.tab === tab) browser.grant = undefined;
   browser?.tabs.get(tab)?.close();
   browser?.tabs.delete(tab);
+  // A tab the person did not close themself: the panel is told, so it does not keep an address and controls for a page that is gone.
+  if (announce && mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send("desktop:code-browser-state",
+      { tab, url: "", loading: false, failed: false, back: false, forward: false, closed: true } satisfies BrowserState);
+  }
 }
 
 async function runCodeBrowser(value: unknown) {
@@ -2718,7 +2723,7 @@ async function runCodeBrowser(value: unknown) {
       const held = browserAgent.agentTab();
       for (const [id, view] of codeBrowser?.tabs ?? []) {
         if (id !== held || view.kind !== "web") continue;
-        closeCodeBrowserTab(id);
+        closeCodeBrowserTab(id, true);
         browserAgent.reset();
       }
     }

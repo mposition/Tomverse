@@ -318,6 +318,14 @@ test("the agent opens a public site only after the person approves its host, can
     assert.equal(sites.seen.some((entry) => entry.host === SITE_ONE && entry.path === "/"), true);
     const tools = gateway.completions[0]!.body.tools as Array<{ function: { name: string; description: string } }>;
     assert.match(tools.find((tool) => tool.function.name === "browser_navigate")!.function.description, /public https site/);
+
+    // Turning the public-site switch off closes the agent's tab, and the panel drops it instead of keeping a page that is gone.
+    const panelTabs = page.locator(".code-browser-tabs").getByRole("tab");
+    const openTabs = await panelTabs.count();
+    await page.evaluate(() => window.desktop.codeBrowser({ type: "agent-web", enabled: false }));
+    await expect(page.locator(".code-browser-agent")).toHaveCount(0);
+    await expect(panelTabs).toHaveCount(Math.max(1, openTabs - 1));
+    await expect(page.getByRole("textbox", { name: "Address" })).not.toHaveValue(/fixture-web\.com/);
   } finally {
     await app?.close();
     sites.server.close();
