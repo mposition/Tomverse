@@ -201,11 +201,11 @@ const posts = (calls: Call[], path: string) => calls.filter((call) => call.metho
 test("the main process keeps each unconfirmed purchase: another pack or the subscription does not replace pack A's record", async () => {
   const { billing, api, calls, state, setWindowOpen } = fixture(stripe);
   const close = async (outcome: "success" | "cancelled" | "closed") => { setWindowOpen(false); api.checkoutClosed(outcome); await settle(); };
-  // Pack A comes back on the cancel page and the account never shows it.
+  // Pack A's window is closed with no return page and the account never shows it.
   assert.deepEqual(await billing(pack("starter_500")), { ok: true, value: { kind: "window" } });
-  await close("cancelled");
+  await close("closed");
   assert.deepEqual(api.purchases().map(({ item, stage, cancelled }) => [item, stage, cancelled]),
-    [["credits:starter_500", "unconfirmed", true]]);
+    [["credits:starter_500", "unconfirmed", false]]);
   // Pack B lands; A's record stays unconfirmed, because B's credits explain the whole increase.
   assert.deepEqual(await billing(pack("project_1500")), { ok: true, value: { kind: "window" } });
   state.purchased += 1_500;
@@ -229,6 +229,19 @@ test("the main process keeps each unconfirmed purchase: another pack or the subs
   assert.equal(posts(calls, "/api/billing/checkout"), 1);
   // A different pack is a different item and goes ahead.
   assert.deepEqual(await billing(pack("project_1500")), { ok: true, value: { kind: "window" } });
+});
+
+test("a pack that came back on the cancel page opens a new checkout at once, with no warning", async () => {
+  const { billing, api, calls, setWindowOpen } = fixture(stripe);
+  assert.deepEqual(await billing(pack("starter_500")), { ok: true, value: { kind: "window" } });
+  setWindowOpen(false);
+  api.checkoutClosed("cancelled");
+  await settle();
+  assert.deepEqual(api.purchases().map(({ item, stage, cancelled }) => [item, stage, cancelled]),
+    [["credits:starter_500", "unconfirmed", true]]);
+  const before = posts(calls, "/api/billing/credit-packs");
+  assert.deepEqual(await billing(pack("starter_500")), { ok: true, value: { kind: "window" } });
+  assert.equal(posts(calls, "/api/billing/credit-packs"), before + 1);
 });
 
 test("a repeat goes ahead only with the hold the main process issued, once; a made-up hold is answered with a new warning", async () => {

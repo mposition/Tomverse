@@ -237,12 +237,12 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(verification).toContainText("Credits added");
     assert.ok((await usageReads()) - reads >= 3, "the account kept being read after the cancel page");
 
-    // A cancel page and an account that never shows the purchase: not confirmed, with a way to check again.
+    // A return page that says nothing and an account that never shows the purchase: not confirmed, with a way to check again.
     await openPack();
     reads = await usageReads();
-    await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
+    await checkoutView("location.href = 'https://tomverse.app/review'");
     await expect(verification).toHaveAttribute("data-stage", "unconfirmed", { timeout: 30_000 });
-    await expect(verification).toContainText("It looks like you did not finish paying.");
+    await expect(verification).toContainText("Tomverse has not recorded this payment yet.");
     await expect(verification).not.toContainText("has not changed");
     await expect(verification.getByRole("button", { name: "Check again" })).toBeVisible();
     assert.ok((await usageReads()) - reads >= 5, "every read is made before the screen says it is not confirmed");
@@ -271,7 +271,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(page.getByTestId("native-account-plan")).toHaveCount(0);
     await planTab.click();
     await expect(notice("credits:starter_500")).toHaveAttribute("data-stage", "unconfirmed");
-    await expect(notice("credits:starter_500")).toContainText("It looks like you did not finish paying.");
+    await expect(notice("credits:starter_500")).toContainText("Tomverse has not recorded this payment yet.");
     await buy(0).click();
     await expect(repeatNotice).toHaveAttribute("data-item", "credits:starter_500", { timeout: 30_000 });
     assert.equal(await posts("/api/billing/credit-packs"), packPosts);
@@ -290,17 +290,17 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await expect(checkoutWindow).toContainText("checkout.stripe.com");
     assert.equal(await posts("/api/billing/credit-packs"), packPosts + 1);
 
-    // Settings closed while the window is open: the window comes back on the cancel page, the main process still
+    // Settings closed while the window is open: the window comes back on a return page, the main process still
     // reads the account, and the result is there when the Plan tab opens again.
     await rail.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(planTab).toHaveCount(0);
     reads = await usageReads();
     await expect.poll(async () => (await checkoutView(null))?.url).toBe("https://checkout.stripe.com/c/pay/cs_test_fixture");
-    await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
+    await checkoutView("location.href = 'https://tomverse.app/review'");
     await expect.poll(usageReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(reads + 5);
     await openPlan();
     await expect(notice("credits:starter_500").last()).toHaveAttribute("data-stage", "unconfirmed");
-    await expect(notice("credits:starter_500").last()).toContainText("It looks like you did not finish paying.");
+    await expect(notice("credits:starter_500").last()).toContainText("Tomverse has not recorded this payment yet.");
 
     // The repeat added an attempt and kept the first. Two Starter attempts, and the account shows one pack: one
     // attempt is confirmed, the other stays unconfirmed with its start time, and a third purchase still warns.
@@ -315,6 +315,9 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await buy(0).click();
     await expect(repeatNotice).toHaveAttribute("data-item", "credits:starter_500", { timeout: 30_000 });
     assert.equal(await posts("/api/billing/credit-packs"), thirdPosts, "the third attempt waits for the customer's choice");
+    // The same choice is offered beside the pack that was clicked, where the person is looking.
+    await expect(packs.getByTestId("native-billing-pack-repeat")).toHaveCount(1);
+    await expect(packs.getByTestId("native-billing-pack-repeat-start")).toBeVisible();
     assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
 
     // Another account never sees these records, and its own first purchase of the same pack is not held back.
@@ -335,6 +338,23 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     await checkoutWindow.getByRole("button", { name: "Close checkout window" }).click();
     await expect(notice("credits:starter_500")).toHaveAttribute("data-stage", "confirmed", { timeout: 30_000 });
     await expect(notice("credits:starter_500")).toContainText("Credits added");
+
+    // Leaving through Stripe's cancel page says the person did not pay: the record says so, and the next click
+    // on the same pack opens a new checkout at once. An attempt whose window was simply closed holds the third.
+    const projectAttempts = page.locator('[data-testid="native-billing-verification"][data-item="credits:project_1500"][data-stage="unconfirmed"]');
+    await openPack(1);
+    await checkoutView("location.href = 'https://tomverse.app/review?billing=credits-cancelled'");
+    await expect(projectAttempts).toHaveCount(1, { timeout: 30_000 });
+    await expect(projectAttempts).toContainText("It looks like you did not finish paying.");
+    const cancelledPosts = await posts("/api/billing/credit-packs");
+    await openPack(1);
+    assert.equal(await posts("/api/billing/credit-packs"), cancelledPosts + 1);
+    await expect(repeatNotice).toHaveCount(0);
+    await checkoutWindow.getByRole("button", { name: "Close checkout window" }).click();
+    await expect(projectAttempts).toHaveCount(2, { timeout: 30_000 });
+    await buy(1).click();
+    await expect(repeatNotice).toHaveAttribute("data-item", "credits:project_1500", { timeout: 30_000 });
+    assert.equal(await posts("/api/billing/credit-packs"), cancelledPosts + 1);
 
     // A Checkout URL that is not Stripe's is never opened.
     await application.evaluate(() => { (globalThis as Host).checkoutUrl = "https://checkout.stripe.com.example/c/pay/cs_test"; });
