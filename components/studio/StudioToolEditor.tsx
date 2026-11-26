@@ -109,7 +109,8 @@ export function StudioToolEditor({ tool, preset }: {
   // `owed` marks a result whose tool has been asked again: it is kept, and saved with a checkout draft,
   // until the new one is in hand, but it no longer counts as held.
   const [toolResults] = useState(() => new Map<string, { photo: string; blob: Blob; owed?: boolean }>());
-  // Bumped whenever the input or the work changes, so a restore that finishes late does not overwrite it.
+  // Bumped whenever the user changes the photo or presses the button (and by a restore itself), so a
+  // draft that arrives or finishes late does not overwrite what they are doing.
   const inputVersion = useRef(0);
   const { id } = tool;
   const poster = id === "poster";
@@ -182,6 +183,9 @@ export function StudioToolEditor({ tool, preset }: {
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
+    // The draft is read from storage after the editor is usable. Once the user has picked a photo or
+    // pressed the button, what they are doing wins: a draft that arrives late is not applied.
+    if (inputVersion.current !== 0) return;
     urls.release(photo);
     urls.release(result);
     const restoredPhoto = publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo);
@@ -375,9 +379,24 @@ export function StudioToolEditor({ tool, preset }: {
             if (studioToolSequenceStops(error, runner.pending(), isStudioCreditShortfall)) break;
           }
         }
+        const made = fresh.length;
+        // The first arrival cleared the screen. A tool that got no new cut-out in this run (it failed, or
+        // the sequence stopped before it) gets its earlier one back: it was paid for. It stays owed, so the
+        // next press still requests that tool alone.
+        for (const target of made > 0 ? quote.targets : []) {
+          const earlier = toolResults.get(target.modelId);
+          if (earlier?.photo !== photo || fresh.some(cutout => cutout.modelId === target.modelId)) continue;
+          const url = await cropStudioCutout(photo, earlier.blob).then(urls.make, () => undefined);
+          if (signal.aborted) {
+            if (url) urls.release(url);
+            return;
+          }
+          if (url) fresh.push({ modelId: target.modelId, url });
+        }
+        if (fresh.length > made) setCutouts([...fresh]);
         if (failures.length > 0) {
           const outcome = studioToolOutcome({
-            failures, made: fresh.length, isShortfall: isStudioCreditShortfall,
+            failures, made, isShortfall: isStudioCreditShortfall,
             unfinished: quote.targets.some(target => toolRunners.get(target.modelId)?.pending()),
           });
           if (outcome.action === "throw") throw outcome.error;
@@ -528,7 +547,7 @@ export function StudioToolEditor({ tool, preset }: {
       <StudioGenerateButton label={generationLabel} busy={busy}
         disabled={!valid || !imageQuote.quote}
         onClick={() => generate()} />
-      <StudioQuoteHint {...imageQuote} quote={imageQuote.quote && toolsToRequest ? studioToolsQuote(imageQuote.quote, toolsToRequest) : imageQuote.quote} />
+      <StudioQuoteHint {...imageQuote} quote={imageQuote.quote && toolsToRequest !== undefined ? studioToolsQuote(imageQuote.quote, toolsToRequest) : imageQuote.quote} />
       <StudioStatus status={status} />
     </section>
     <section className={styles.panel} aria-busy={busy}>
