@@ -1,10 +1,10 @@
-.shell { --plugin-bg:#f5f7fb; --plugin-surface:#fff; --plugin-text:#182237; --plugin-muted:#4b5c75; --plugin-border:#dce3ee; --plugin-selected:#eaf1ff; --plugin-accent:#2563eb; display:grid; grid-template-columns:80px 220px minmax(0,1fr); min-height:100dvh; background:var(--plugin-bg); color:var(--plugin-text); }
+.shell { --plugin-bg:#f5f7fb; --plugin-surface:#fff; --plugin-text:#182237; --plugin-muted:#4b5c75; --plugin-border:#dce3ee; --plugin-selected:#eaf1ff; --plugin-accent:#2563eb; --review-surface:var(--plugin-surface); --review-raised:var(--plugin-selected); --review-text:var(--plugin-text); --review-muted:var(--plugin-muted); display:grid; grid-template-columns:80px 220px minmax(0,1fr); min-height:100dvh; background:var(--plugin-bg); color:var(--plugin-text); }
 :global(.dark) .shell { --plugin-bg:#10141e; --plugin-surface:#171b25; --plugin-text:#f3f5fb; --plugin-muted:#a5b1c6; --plugin-border:#30394b; --plugin-selected:#253a5d; --plugin-accent:#8bb4ff; }
 .shell :global(.review-navigation) { margin:12px 4px 12px 12px; position:sticky; top:12px; height:calc(100dvh - 24px); }
-.shell button,.shell input,.shell select { font:inherit; }
-.shell button { min-height:44px; border:1px solid var(--plugin-border); border-radius:10px; padding:8px 14px; background:var(--plugin-surface); color:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px; }
-.shell button:disabled { cursor:default; opacity:.5; }
-.shell button:hover:not(:disabled) { background:var(--plugin-selected); }
+.shell button:where(:not(:global(.review-history-drawer) button)),.shell input,.shell select { font:inherit; }
+.shell button:where(:not(:global(.review-history-drawer) button)) { min-height:44px; border:1px solid var(--plugin-border); border-radius:10px; padding:8px 14px; background:var(--plugin-surface); color:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.shell button:disabled:where(:not(:global(.review-history-drawer) button)) { cursor:default; opacity:.5; }
+.shell button:hover:not(:disabled):where(:not(:global(.review-history-drawer) button)) { background:var(--plugin-selected); }
 .shell :global(.review-navigation button),.shell :global(.review-navigation>a) { background:transparent; color:inherit; border:0; padding:4px; flex-direction:column; font-size:.75rem; line-height:1.4; }
 .shell :global(.review-navigation>button>span),.shell :global(.review-navigation>a>span) { white-space:nowrap; }
 .shell :global(.review-navigation [aria-current="page"]) { background:#263757; color:#d5dfff; }

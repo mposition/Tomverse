@@ -119,8 +119,7 @@ export function PluginWorkspace() {
     (tab !== "connected" || inventory.connections.some(conn => conn.serverId === card.id && conn.status !== "disconnected")));
   const selectedProvider = providerId ? mcpProvider(providerId) : undefined;
   return <div className={styles.shell} lang={lang} data-testid="plugin-workspace">
-    <ReviewNavigation product="plugins" onNewChat={() => router.push(`/chat?lang=${lang}`)}
-      sidebar={<div className="p-6"><Link href={`/chat?lang=${lang}`}>Chat</Link></div>} />
+    <ReviewNavigation product="plugins" onNewChat={() => router.push(`/chat?lang=${lang}`)} />
     <aside className={styles.sidebar} aria-label={c.title}>
       <span className={styles.eyebrow}>Tomverse</span><h2>{c.title}</h2>
       <nav>{(["all", "connected", "approvals"] as const).map(key => <button key={key} type="button" aria-current={tab === key ? "page" : undefined} onClick={() => { setTab(key); setLimit(24); }}>

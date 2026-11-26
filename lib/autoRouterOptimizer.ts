@@ -1006,6 +1006,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: routed.pick?.modelId ?? null,
+                        reason: routed.pick?.reason ?? null,
                         ...cost(routerUsagePrices, routed.usage),
                         provider: input.routerModel.provider,
                     };

@@ -304,6 +304,10 @@ export async function searchConversationMessages(input: {
                     LEFT JOIN "ConversationContinuationBridge" b ON b."conversationId" = c.id
                     LEFT JOIN "ExternalConversation" e ON e.id = b."externalConversationId"
                     WHERE c."userId" = ${userId}
+                      -- The only messages in an image conversation are Studio
+                      -- tool requests, which are not conversation history
+                      -- (lib/studioImageReference.ts).
+                      AND c.kind <> 'image'
                       AND (${projectScope}::text IS NULL OR c."projectId" = ${projectScope})
                       AND c.id <> ${excluded}
                       AND NOT (c.id = ANY(${deniedConversationIds}::text[]))

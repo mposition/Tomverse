@@ -21,6 +21,7 @@ import { openAccountSettings } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import { useKeyboardInset } from "./useVisualViewport";
+import { WorkspaceAccountPanel } from "./WorkspaceAccountPanel";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import { reviewProviderName } from "@/lib/reviewProviderName";
@@ -148,7 +149,12 @@ function opensConversation(target: EventTarget, keyboard = false) {
   return action.matches(keyboard ? row : `${row}, ${DRAWER_CLOSING_ACTIONS}`);
 }
 
-export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins" | "studio"; locked?: boolean }) {
+/**
+ * `sidebar` is the drawer content of a workspace that has its own conversation
+ * list (Chat, Review). Without it the drawer shows the shared account panel, so
+ * it is never empty and the Settings buttons always reach the settings modal.
+ */
+export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar?: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins" | "studio"; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const productLabel = (key: ChatWorkspaceProduct) => {
     const item = chatProductUiCopy[lang][key];
@@ -206,7 +212,7 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
         onClick={event => { if (opensConversation(event.target)) setOpen(false); }}
         onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && opensConversation(event.target, true)) setOpen(false); }}>
         <button type="button" className="review-drawer-close" aria-label={c.close} onClick={() => setOpen(false)}><X size={20} /></button>
-        {sidebar}
+        {sidebar ?? <WorkspaceAccountPanel currentProduct={product === "plugins" ? "chat" : product} />}
       </div>
     </div>}
   </>;
