@@ -53,10 +53,15 @@ const reset = () => {
   };
 };
 
-const matches = (row: Row, where: Record<string, unknown>) =>
+const matches = (row: Row, where: Record<string, unknown>): boolean =>
   Object.entries(where).every(([key, expected]) => {
+    if (key === "OR") return (expected as Record<string, unknown>[]).some((branch) => matches(row, branch));
     if (expected && typeof expected === "object" && "in" in (expected as object)) {
       return (expected as { in: unknown[] }).in.includes(row[key]);
+    }
+    if (expected && typeof expected === "object" && "lt" in (expected as object)) {
+      const value = row[key];
+      return value instanceof Date && value < (expected as { lt: Date }).lt;
     }
     return (row[key] ?? null) === expected;
   });
@@ -283,4 +288,20 @@ test("a quote claimed by a confirm that stops before Stripe is spent, not left i
   const retry = await confirmPlanChange({ userId: "user_1", requestId: "pcr_1" });
   assert.notEqual((retry as { code?: string }).code, "PLAN_CHANGE_ALREADY_PENDING");
   assert.equal(world.scheduleCreates, 0);
+});
+
+test("a claim left behind by a confirm that could not clean up expires", async () => {
+  reset();
+  await quoteDowngrade();
+  const { confirmPlanChange } = await load();
+  // Fresh claim: another confirm is (as far as anyone knows) still running.
+  world.rows.get("pcr_1")!.confirmedAt = new Date();
+  const busy = await confirmPlanChange({ userId: "user_1", requestId: "pcr_1" });
+  assert.equal((busy as { code?: string }).code, "PLAN_CHANGE_ALREADY_PENDING");
+  assert.equal(world.scheduleCreates, 0);
+  // Stale claim: taken again, and the change goes through once.
+  world.rows.get("pcr_1")!.confirmedAt = new Date(Date.now() - 10 * 60 * 1000);
+  const result = await confirmPlanChange({ userId: "user_1", requestId: "pcr_1" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(world.scheduleCreates, 1);
 });

@@ -422,6 +422,9 @@ async function enqueuePlanChangeConfirmation({
   });
 }
 
+/** Longer than any confirm's Stripe calls can run; shorter than the quote's own TTL. */
+const PLAN_CHANGE_CLAIM_STALE_MS = 5 * 60 * 1000;
+
 async function loadAccount(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -628,9 +631,20 @@ export async function confirmPlanChange({
   // second, simultaneous confirm of the same quote can neither run its own
   // Stripe call nor read the first one's change as a stale quote and expire
   // it underneath it (docs/policy/plan-change.md, "동시 확정").
+  // A claim older than PLAN_CHANGE_CLAIM_STALE_MS belongs to a confirm that
+  // stopped without spending the quote (its cleanup failed too); it may be
+  // taken again rather than answering "already being confirmed" forever.
+  const claimedAt = new Date();
   const claimed = await prisma.planChangeRequest.updateMany({
-    where: { id: stored.id, status: "previewed", confirmedAt: null },
-    data: { confirmedAt: new Date() },
+    where: {
+      id: stored.id,
+      status: "previewed",
+      OR: [
+        { confirmedAt: null },
+        { confirmedAt: { lt: new Date(claimedAt.getTime() - PLAN_CHANGE_CLAIM_STALE_MS) } },
+      ],
+    },
+    data: { confirmedAt: claimedAt },
   });
   if (claimed.count !== 1) {
     const current = await prisma.planChangeRequest.findUniqueOrThrow({

@@ -4,6 +4,15 @@ import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 
 const RENEWING_STATUSES = new Set(["active", "trialing", "past_due"]);
+/**
+ * Each Stripe request gives up well inside the transaction, so the lock is
+ * never released while this call still waits on Stripe. A request that gave up
+ * may still be applied by Stripe afterwards; that residue only ever errs toward
+ * the cancellation (no charge), and the customer sees it in Settings > Plan and
+ * can turn renewal back on (docs/policy/plan-change.md section 10).
+ */
+const STRIPE_REQUEST_TIMEOUT_MS = 8_000;
+const TRANSACTION_TIMEOUT_MS = 20_000;
 
 export type DeletionCancellationOutcome = {
   /** The account was scheduled for deletion when the row lock was taken. */
@@ -40,17 +49,23 @@ export async function keepDeletionCancellation(
       if (rows.length === 0) return { pendingDeletion: false, cancelled: false };
 
       const stripe = getStripe();
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, {
+        timeout: STRIPE_REQUEST_TIMEOUT_MS,
+      });
       if (subscription.cancel_at_period_end || !RENEWING_STATUSES.has(subscription.status)) {
         return { pendingDeletion: true, cancelled: false };
       }
-      await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+      await stripe.subscriptions.update(
+        subscriptionId,
+        { cancel_at_period_end: true },
+        { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+      );
       console.warn("billing.subscription.deletion_cancellation_restored", {
         userId: rows[0]!.id,
         subscriptionId,
       });
       return { pendingDeletion: true, cancelled: true };
     },
-    { timeout: 20_000 }
+    { timeout: TRANSACTION_TIMEOUT_MS }
   );
 }
