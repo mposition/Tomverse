@@ -179,7 +179,7 @@ type StudioSubmission = { groupId: string };
 type StudioImageRun = { inputKey: string; idempotencyKey: string; uploadId?: string; groupId?: string };
 export function createStudioImageRunner() {
   let current: StudioImageRun | undefined;
-  return async (input: {
+  const run = async (input: {
     inputKey: string;
     prompt: string;
     size: ImageSize;
@@ -250,6 +250,12 @@ export function createStudioImageRunner() {
     }
     throw new StudioGenerationError(504);
   };
+  /**
+   * True while a request this runner sent is unfinished: it may be reserved or
+   * already paid for, and the next call with the same input resumes it under
+   * the same key. False after a result, a refusal or a failed generation.
+   */
+  return Object.assign(run, { pending: () => current !== undefined });
 }
 
 export async function generateStudioText(prompt: string, signal: AbortSignal, reference?: Blob) {

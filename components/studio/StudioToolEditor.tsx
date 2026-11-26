@@ -300,11 +300,11 @@ export function StudioToolEditor({ tool, preset }: {
         const fresh: typeof cutouts = [];
         const failures: unknown[] = [];
         for (const target of quote.targets) {
+          const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
+          toolRunners.set(target.modelId, runner);
           try {
             let blob = held(target.modelId);
             if (!blob) {
-              const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
-              toolRunners.set(target.modelId, runner);
               blob = await runStudioTool(() => runner({ ...run, quote: studioToolQuote(quote, target) }), signal);
               toolResults.set(target.modelId, { photo, blob });
             }
@@ -321,6 +321,10 @@ export function StudioToolEditor({ tool, preset }: {
           } catch (error) {
             if (signal.aborted) return;
             failures.push(error);
+            // An unfinished request may already be paid for, and only this runner can resume it under
+            // the same key. Nothing else is started until it has: a credit shortfall on the next tool
+            // would send the user to checkout and lose it.
+            if (runner.pending()) break;
           }
         }
         if (failures.length > 0) {

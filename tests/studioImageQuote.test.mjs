@@ -93,3 +93,31 @@ test("a press requests only what is owed, and every tool only when all are held 
   assert.equal(studioToolFailure([plain, changed], isShortfall), changed);
   assert.equal(studioToolFailure([plain, new Error("crop")], isShortfall), plain);
 });
+
+test("a runner says when a request it sent is unfinished, and resumes it under the same key", async context => {
+  const { createStudioImageRunner } = await import("../components/studio/studioGenerationClient.ts");
+  const input = { inputKey: "photo", prompt: "p", size: "1024x1024", quote: { ...quote, quality: "medium" }, signal: new AbortController().signal };
+  const posts = [];
+  let post = () => Response.json({ groupId: "group-1" });
+  let download = () => new Response("gone", { status: 500 });
+  context.mock.method(globalThis, "fetch", async (url, init) => {
+    if (url === "/api/studio/images") { posts.push(JSON.parse(init.body).idempotencyKey); return post(); }
+    if (String(url).startsWith("/api/images/groups/")) {
+      return Response.json({ targets: [{ currentGenerationId: "gen-1" }], generations: [{ generationId: "gen-1", status: "succeeded" }] });
+    }
+    return download();
+  });
+  const runner = createStudioImageRunner();
+  assert.equal(runner.pending(), false);
+  // Made and paid for, but the result could not be read: unfinished.
+  await assert.rejects(runner(input), error => error instanceof StudioGenerationError && error.status === 500);
+  assert.equal(runner.pending(), true);
+  // The next call reads the same generation; nothing is submitted again.
+  download = () => new Response(new Blob(["cut"], { type: "image/png" }));
+  assert.equal(await (await runner(input)).text(), "cut");
+  assert.deepEqual([posts.length, runner.pending()], [1, false]);
+  // A refusal reserves nothing and leaves nothing to resume.
+  post = () => Response.json({ code: "CREDITS_REQUIRED" }, { status: 402 });
+  await assert.rejects(runner(input), error => error.status === 402);
+  assert.equal(runner.pending(), false);
+});
