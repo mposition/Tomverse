@@ -4284,7 +4284,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     note: >-
       The latest redacted report one signed-in PC sent about its Code tasks
       (docs/ops/desktop-remote-control.md): task titles, states, a few progress
@@ -4295,8 +4295,8 @@ domains:
       account deletion removes it through MobileDevice. One expired row is
       kept, hidden, until the device's sign-in ends: the report of a request
       that already has an answer, so the request cannot be answered twice.
-      Whether an export taken in those minutes should carry the titles and
-      lines in it has not been decided.
+      Not part of the account export (owner decision 2026-11-26): the lasting
+      record of these tasks is on the person's own PC.
 
   - domain: desktopRemoteCommand
     prismaModel: DesktopRemoteCommand
@@ -4306,16 +4306,16 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     note: >-
       One answer, stop or follow-up the person sent from a signed-in web
       session to their own PC, kept until the PC has picked it up and reported
       what it did with it, then swept on expiry. Removed with its
       DesktopRemoteDevice row, so an account deletion removes it through the
       same cascade. The person's action is also written to the admin audit
-      chain, which has its own row in this registry. A follow-up's text is
-      the person's own words and is not in the audit entry; whether an export
-      should carry it while the row lives has not been decided.
+      chain, which has its own row in this registry. Not part of the account
+      export (owner decision 2026-11-26): a follow-up's text lives on in the
+      task on the person's own PC.
 
   - domain: externalApiKey
     prismaModel: ExternalApiKey
