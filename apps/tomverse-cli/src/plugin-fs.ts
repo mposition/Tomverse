@@ -117,28 +117,18 @@ const listFiles = (dir: string): Array<{ rel: string; path: string; size: number
     return out;
 };
 
-const digestCache = new Map<string, string>();
-
 /**
  * A digest of every path and content in a folder. A hook or server of a plugin is approved for exactly this digest, so a changed
- * script asks again. The full read happens once per unchanged folder (files, sizes and modification times are the cache key).
+ * script asks again. Every call reads every file: an approval may not rest on sizes and modification times, which a changed
+ * file can keep.
  */
 export const treeDigest = (dir: string): string => {
-    const files = listFiles(dir);
-    const fingerprint = createHash("sha256");
-    for (const file of files) fingerprint.update(`${file.rel}\u0000${file.size}\u0000${file.mtimeMs}\n`);
-    const key = `${dir}\u0000${fingerprint.digest("hex")}`;
-    const cached = digestCache.get(key);
-    if (cached) return cached;
     const hash = createHash("sha256");
-    for (const file of files) {
+    for (const file of listFiles(dir)) {
         hash.update(`${file.rel}\u0000${file.size}\n`);
         if (file.size >= 0) hashFile(file.path, hash);
     }
-    const digest = hash.digest("hex");
-    if (digestCache.size > 64) digestCache.clear();
-    digestCache.set(key, digest);
-    return digest;
+    return hash.digest("hex");
 };
 
 export const treeStats = (dir: string): CopyReport => {

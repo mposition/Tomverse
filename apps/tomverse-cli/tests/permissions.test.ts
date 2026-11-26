@@ -355,6 +355,9 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
         "git foo origin status", "git -C sub foo origin log", "npm --prefix app deploy run", "docker --context prod up build",
         // An option this check does not know may take the next word as its value, so the word after that is the subcommand.
         "git --some-new-option status foo origin", "npm --unknown run deploy",
+        // A subcommand with subcommands of its own, and a flag that sends what was built.
+        "docker compose publish registry/app", "docker compose -f x.yml publish app", "docker compose alpha publish", "docker-compose push",
+        "docker build --push -t repo/app .", "docker buildx build -t repo/app .",
         // A line continued over a line break, and a new name for a command.
         "gi\\\nt push", "git pu\\\nsh origin", "alias g=git; g push", "function g { git @args }; g push", "Set-Alias g git; g push", "g() { git \"$@\"; }; g push",
         ". ./deploy-env.sh",
@@ -381,6 +384,7 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
     const plain = [
         '$env:CI = "1"; npm test', "npm run build -- --out $OUT", 'git commit -m "$message"', 'node -e "console.log(1)"', String.raw`dir C:\Users\me\project`,
         'echo "push"', "CI=1 npm test", "git status", "docker build -t $TAG .", "git -C sub status", "git --no-pager log -3", "npm --prefix app run build",
+        "docker compose up -d", "docker compose -f x.yml build", "docker-compose logs web",
     ];
     for (const line of plain) assert.equal(egress(line), undefined, line);
 });

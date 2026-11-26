@@ -3,6 +3,7 @@ import { lookup } from "node:dns/promises";
 import { connect, isIP, type Socket } from "node:net";
 import { rmSync } from "node:fs";
 import type { Duplex } from "node:stream";
+import { isPrivateAddress } from "./web.js";
 
 /**
  * A filtering HTTP proxy for sandboxed commands. A command gets HTTP_PROXY and
@@ -55,24 +56,12 @@ export const hostAllowed = (host: string, allowed: readonly string[]) => {
     return allowed.some((entry) => (entry.startsWith("*.") ? name.endsWith(entry.slice(1)) && name.length > entry.length - 1 : entry === name));
 };
 
-const ipv4Private = (parts: number[]) => {
-    const [a, b] = parts as [number, number, number, number];
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-        (a === 100 && b >= 64 && b <= 127) || a >= 224;
-};
-
-/** True for an address the proxy refuses to connect to unless it was listed by name as an IP address. */
-export const privateAddress = (address: string): boolean => {
-    const version = isIP(address);
-    if (version === 4) return ipv4Private(address.split(".").map(Number));
-    if (version === 6) {
-        const lower = address.toLowerCase();
-        const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-        if (mapped) return ipv4Private(mapped[1]!.split(".").map(Number));
-        return lower === "::" || lower === "::1" || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith("ff");
-    }
-    return true;
-};
+/**
+ * True for an address the proxy refuses to connect to unless it was listed by name as an IP address. The judgement is
+ * web_fetch's (web.ts): it reads an IPv6 address by its groups, so an IPv4 address carried in one (mapped in either
+ * notation, compatible, NAT64, 6to4) is judged as that IPv4 address, and anything outside global unicast is refused.
+ */
+export const privateAddress = (address: string): boolean => isPrivateAddress(address);
 
 export type ProxyDecision = { host: string; port: number; allowed: boolean; reason?: string };
 

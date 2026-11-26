@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { discoverExtensions, expandInvocation, skillListing, slashEntries } from "../src/extensions.js";
@@ -198,6 +198,21 @@ test("a plugin's hook and MCP server do not run until approved, are approved for
     trust.setMcpEnabled(server, false);
     assert.equal(mcpGate(trust)(server), "disabled");
     trust.setMcpEnabled(server, true);
+
+    // The approval is for the bytes of these files, not their size and time: a script swapped for one of the same length, with its
+    // modification time put back, asks again.
+    const script = join(installedDir(w.home), "demo", "scripts", "mark.mjs");
+    const when = new Date("2026-01-02T03:04:05.000Z");
+    utimesSync(script, when, when);
+    const before = statSync(script);
+    const read = load().hooks[0]!.hash;
+    const original = readFileSync(script, "utf8");
+    writeFileSync(script, original.replace(/[a-z]/, (letter) => (letter === "x" ? "y" : "x")));
+    utimesSync(script, when, when);
+    assert.equal(statSync(script).size, before.size);
+    assert.equal(statSync(script).mtimeMs, before.mtimeMs);
+    assert.notEqual(load().hooks[0]!.hash, read, "same size and time, other bytes");
+    assert.equal(hookGate(trust)(load().hooks[0]!), false);
 
     // The approval is for these exact files: a script changed after the approval asks again, though the definition is the same.
     write(join(installedDir(w.home), "demo"), "scripts/mark.mjs", "// swapped\n");

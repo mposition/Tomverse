@@ -280,6 +280,7 @@ const EGRESS_COMMANDS: readonly (readonly string[])[] = [
     ["npm", "publish"], ["npm", "login"], ["npm", "adduser"], ["npm", "token"], ["npm", "dist-tag"], ["npm", "deprecate"], ["npm", "unpublish"],
     ["pnpm", "publish"], ["yarn", "publish"], ["yarn", "npm", "publish"], ["bun", "publish"], ["cargo", "publish"], ["cargo", "login"],
     ["docker", "push"], ["docker", "login"], ["podman", "push"], ["podman", "login"], ["gem", "push"], ["poetry", "publish"],
+    ["docker", "publish"], ["docker", "--push"], ["podman", "--push"], ["docker-compose", "push"], ["docker-compose", "publish"], ["docker-compose", "--push"],
     ["dotnet", "nuget", "push"], ["pub", "publish"], ["flutter", "pub", "publish"],
 ];
 const URL_LITERAL = /(?:\b(?:https?|ftp|sftp|ssh|git|wss?):\/\/|\bgit@[\w.-]+:)/i;
@@ -334,7 +335,10 @@ const LOCAL_SUBCOMMANDS: Record<string, readonly string[]> = {
     yarn: ["run", "test", "install", "add", "remove", "start", "build", "exec", "dlx", "list", "outdated", "audit", "why", "rebuild", "up"],
     bun: ["run", "test", "install", "i", "add", "remove", "build", "x"],
     cargo: ["build", "test", "check", "run", "fmt", "clippy", "bench", "doc", "clean", "add", "update", "tree"],
-    docker: ["build", "run", "ps", "images", "compose", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
+    docker: ["build", "run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
+    // `docker compose` has subcommands of its own, some of which publish; it is read as a program in its own right.
+    "docker compose": ["up", "down", "build", "ps", "logs", "exec", "run", "start", "stop", "restart", "config", "top", "images", "kill", "rm", "create", "pause", "unpause", "ls", "version"],
+    "docker-compose": ["up", "down", "build", "ps", "logs", "exec", "run", "start", "stop", "restart", "config", "top", "images", "kill", "rm", "create", "pause", "unpause", "ls", "version"],
     podman: ["build", "run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
     gem: ["install", "list", "build"],
     poetry: ["install", "run", "add", "build", "lock", "update", "show"],
@@ -357,6 +361,8 @@ const VALUE_OPTIONS: Record<string, readonly string[]> = {
     pnpm: ["-C", "--dir", "-F", "--filter"],
     yarn: ["--cwd"],
     docker: ["--context", "--config", "-H", "--host", "-l", "--log-level"],
+    "docker compose": ["-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory"],
+    "docker-compose": ["-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory"],
     podman: ["--root", "--runroot", "--log-level"],
     cargo: ["--color", "--config"],
 };
@@ -401,6 +407,7 @@ const staysLocal = (program: string, args: string[]) => {
             }
             continue;
         }
+        if (program === "docker" && arg.toLowerCase() === "compose") return staysLocal("docker compose", args.slice(index + 1));
         return local.includes(arg.toLowerCase());
     }
     return false;

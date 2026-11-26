@@ -22,6 +22,10 @@ test("loopback, private and link-local addresses are refused", () => {
     for (const bad of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "0.0.0.0", "::1", "fe80::1", "fd00::1", "::ffff:127.0.0.1"]) {
         assert.equal(privateAddress(bad), true, bad);
     }
+    // An IPv4 address carried inside an IPv6 one is judged as that address, in hexadecimal groups too.
+    for (const carried of ["::ffff:7f00:1", "::ffff:a00:1", "::ffff:c0a8:101", "0:0:0:0:0:ffff:7f00:1", "::7f00:1", "64:ff9b::7f00:1", "2002:7f00:1::"]) {
+        assert.equal(privateAddress(carried), true, carried);
+    }
     for (const fine of ["93.184.216.34", "8.8.8.8", "2606:4700::1111"]) assert.equal(privateAddress(fine), false, fine);
 });
 
