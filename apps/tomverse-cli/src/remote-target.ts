@@ -204,6 +204,7 @@ export const SCRIPT_EXIT = {
     exists: 46,
     unsupported: 47,
     tooLarge: 48,
+    unsupportedName: 49,
 } as const;
 
 export const scriptFailure = (exitCode: number, stderr: string, label: string): RemoteError | null => {
@@ -218,6 +219,7 @@ export const scriptFailure = (exitCode: number, stderr: string, label: string): 
         case SCRIPT_EXIT.exists: return new RemoteError("exists", "The file already exists on the remote machine.");
         case SCRIPT_EXIT.unsupported: return new RemoteError("unsupported-remote", `The remote machine lacks a tool the CLI needs (${note || "stat, cat, mv"}). It needs a POSIX shell with the usual coreutils.`);
         case SCRIPT_EXIT.tooLarge: return new RemoteError("too-large", "The file is too large.");
+        case SCRIPT_EXIT.unsupportedName: return new RemoteError("invalid-target", `A folder name on ${label} contains a line break, which a remote project does not support. Choose a folder whose path has none.`);
         default: return null;
     }
 };

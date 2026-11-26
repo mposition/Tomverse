@@ -14,6 +14,11 @@ import { SKIPPED_DIRS } from "./workspace.js";
 const PRELUDE = String.raw`LC_ALL=C; export LC_ALL
 inside() { case "$1" in "$2"|"$2"/*) return 0;; esac; return 1; }
 ident() { stat -c '%d:%i:%a' "$1" 2>/dev/null || stat -f '%d:%i:%Lp' "$1" 2>/dev/null; }
+NL='
+'
+plain() { case $1 in *"$NL"*) return 1;; esac; return 0; }
+fid() { stat -L -c '%d:%i' "$1" 2>/dev/null || stat -L -f '%d:%i' "$1" 2>/dev/null; }
+same() { [ "$(fid "$1")" = "$(fid "$2")" ]; }
 rp() {
   p=$1; n=0
   while [ -L "$p" ]; do
@@ -31,15 +36,23 @@ rp() {
 }
 `.replaceAll("\\${", "${");
 
+/**
+ * The answers of the scripts that print "key=value" lines (probe, resolve, write) start with this line, and the parser takes the
+ * lines after it. A real path with a line break in it is refused before anything is printed (exit 49), and the parser refuses a
+ * repeated or unknown key, so a name can never write a line of its own.
+ */
+export const FIELDS_MARKER = "@tv-fields";
+
 /** What a probe finds: the real project folder, the home folder (too broad to work in) and the system. */
 export const PROBE_SCRIPT = PRELUDE + String.raw`[ -d "$1" ] || { [ -e "$1" ] && exit 41; exit 40; }
 r=$(cd -P -- "$1" 2>/dev/null && pwd -P) || exit 40
 h=$(cd -P -- "\${HOME:-/}" 2>/dev/null && pwd -P)
+{ plain "$r" && plain "$h" && same "$r" "$1"; } || { echo name >&2; exit 49; }
 for c in cat mv rm mkdir chmod find wc readlink mktemp stat grep xargs tr cut sleep; do
   command -v "$c" >/dev/null 2>&1 || { echo "$c" >&2; exit 47; }
 done
 ident "$r" >/dev/null || { echo stat >&2; exit 47; }
-printf 'root=%s\nhome=%s\nos=%s\n' "$r" "$h" "$(uname -s 2>/dev/null)"
+printf '@tv-fields\nroot=%s\nhome=%s\nos=%s\n' "$r" "$h" "$(uname -s 2>/dev/null)"
 `.replaceAll("\\${", "${");
 
 /**
@@ -52,8 +65,10 @@ inside "$p" "$root" || exit 42
 q=$p
 while [ ! -e "$q" ] && [ ! -L "$q" ]; do q=\${q%/*}; [ -z "$q" ] && { q=/; break; }; done
 r=$(rp "$q") || exit 42
+same "$r" "$q" || exit 42
 if [ "$q" = "$p" ]; then a=$r; ex=1; else a=$r\${p#"$q"}; ex=0; fi
 inside "$a" "$root" || exit 42
+plain "$a" || exit 49
 lk=0; [ -L "$p" ] && lk=1
 kind=none
 if [ "$ex" = 1 ]; then
@@ -61,7 +76,8 @@ if [ "$ex" = 1 ]; then
 fi
 f=\${a%/*}; [ -z "$f" ] && f=/
 while [ ! -d "$f" ]; do f=\${f%/*}; [ -z "$f" ] && f=/; done
-printf 'abs=%s\nexists=%s\nlink=%s\nkind=%s\n' "$a" "$ex" "$lk" "$kind"
+plain "$f" || exit 49
+printf '@tv-fields\nabs=%s\nexists=%s\nlink=%s\nkind=%s\n' "$a" "$ex" "$lk" "$kind"
 [ "$kind" = file ] && printf 'ident=%s\n' "$(ident "$a")"
 printf 'folder=%s\nfident=%s\n' "$f" "$(ident "$f")"
 exit 0
@@ -125,7 +141,7 @@ else
   [ "$(ident "$p")" = "$expect" ] || exit 43
   mv -f "$tmp" "$p" || exit 45
 fi
-printf 'ident=%s\nfident=%s\n' "$(ident "$p")" "$(ident "$d")"
+printf '@tv-fields\nident=%s\nfident=%s\n' "$(ident "$p")" "$(ident "$d")"
 `.replaceAll("\\${", "${");
 
 /** $1 root, $2 path, $3 expected identity. */

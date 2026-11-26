@@ -2,7 +2,7 @@ import { posix } from "node:path";
 import { BoundedCapture, CommandError, UNSHOWABLE_IN_COMMAND, type CommandInput, type CommandPlan, type CommandResult } from "./commands.js";
 import { planEditContent, PatchError, type FileBinding, type PatchEdit, type PlannedEdit } from "./patch.js";
 import {
-    EXEC_MARKER, EXEC_SCRIPT, LIST_SCRIPT, PROBE_SCRIPT, READ_SCRIPT, REMOVE_SCRIPT, RESOLVE_SCRIPT, SEARCH_SCRIPT, WRITE_SCRIPT,
+    EXEC_MARKER, EXEC_SCRIPT, FIELDS_MARKER, LIST_SCRIPT, PROBE_SCRIPT, READ_SCRIPT, REMOVE_SCRIPT, RESOLVE_SCRIPT, SEARCH_SCRIPT, WRITE_SCRIPT,
 } from "./remote-scripts.js";
 import type { SshRunner, SshRunResult } from "./remote-ssh.js";
 import {
@@ -38,14 +38,31 @@ export type RemoteProbe = { root: string; home: string; os: string };
 const READ_LIMIT = 8 * 1024 * 1024;
 const LIST_LIMIT = 20_000;
 
-const keyValues = (text: string) => {
+const UNUSABLE_ANSWER = "The remote machine gave an answer that cannot be used.";
+
+/**
+ * The "key=value" lines a script prints after its marker line. Anything else is refused: a line that is not a known key, a key
+ * twice, a missing key. A name with a line break in it would otherwise write a line of its own and be read as another answer.
+ */
+const parseFields = (text: string, required: readonly string[], optional: readonly string[] = []) => {
+    const lines = text.split("\n");
+    const start = lines.indexOf(FIELDS_MARKER);
+    if (start < 0) throw new RemoteError("protocol", UNUSABLE_ANSWER);
+    const body = lines.slice(start + 1);
+    if (body.at(-1) === "") body.pop();
+    const allowed = new Set([...required, ...optional]);
     const out = new Map<string, string>();
-    for (const line of text.split("\n")) {
+    for (const line of body) {
         const at = line.indexOf("=");
-        if (at > 0) out.set(line.slice(0, at), line.slice(at + 1));
+        const key = at > 0 ? line.slice(0, at) : "";
+        if (!allowed.has(key) || out.has(key)) throw new RemoteError("protocol", UNUSABLE_ANSWER);
+        out.set(key, line.slice(at + 1));
     }
+    if (required.some((key) => !out.has(key))) throw new RemoteError("protocol", UNUSABLE_ANSWER);
     return out;
 };
+
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 const dirIdent = (ident: string) => ident.split(":").slice(0, 2).join(":");
 
@@ -153,16 +170,17 @@ export class RemoteWorkspace {
         // A connect never marks the workspace lost: the person is already being told, and may fix it and try again.
         this.lostReason = null;
         const result = await this.runnerOnce(PROBE_SCRIPT, [this.target.folder], signal);
-        const values = keyValues(result.stdout.toString("utf8"));
-        const root = values.get("root");
-        if (!root || !root.startsWith("/")) throw new RemoteError("protocol", "The remote machine did not describe the folder.");
+        const values = parseFields(result.stdout.toString("utf8"), ["root", "home", "os"]);
+        const root = values.get("root")!;
+        if (!root.startsWith("/")) throw new RemoteError("protocol", "The remote machine did not describe the folder.");
+        if (CONTROL.test(root)) throw new RemoteError("invalid-target", `The folder on ${this.label} has a control character in its real path, which a remote project does not support. Choose another folder.`);
         if (root === "/") throw new RemoteError("folder-too-broad", "The remote root folder is too broad to work in. Choose a project folder.");
         if (isSecretPath(`${root}/`)) throw new RemoteError("folder-too-broad", `${root} is inside a folder that can hold credentials; the CLI does not work there.`);
-        const home = values.get("home") ?? "";
+        const home = values.get("home")!;
         if (home && root === home) throw new RemoteError("folder-too-broad", "The home folder of the remote machine is too broad to work in. Choose a project folder.");
         this.realRoot = root;
         this.lostReason = null;
-        this.info = { root, home, os: values.get("os") ?? "" };
+        this.info = { root, home, os: values.get("os")! };
         return this.info;
     }
 
@@ -186,16 +204,19 @@ export class RemoteWorkspace {
             result = await this.run(RESOLVE_SCRIPT, [root, lexical], { signal });
         } catch (error) {
             if (error instanceof RemoteError && error.code === "outside-root") throw new PathError(`${input} resolves outside the workspace (through a link).`);
+            if (error instanceof RemoteError && error.code === "invalid-target") throw new PathError(`${input} goes through a name with a line break, which a remote project does not support.`);
             throw error;
         }
-        const values = keyValues(result.stdout.toString("utf8"));
-        const absolute = values.get("abs");
-        const folder = values.get("folder");
-        const folderIdent = values.get("fident");
-        const kind = values.get("kind");
-        if (!absolute || !folder || !folderIdent || !kind || (absolute !== root && !absolute.startsWith(`${root}/`))) {
-            throw new RemoteError("protocol", "The remote machine gave an answer about a path that cannot be used.");
-        }
+        const values = parseFields(result.stdout.toString("utf8"), ["abs", "exists", "link", "kind", "folder", "fident"], ["ident"]);
+        const absolute = values.get("abs")!;
+        const folder = values.get("folder")!;
+        const folderIdent = values.get("fident")!;
+        const kind = values.get("kind")!;
+        const unusable = !absolute || !folder || !folderIdent || (absolute !== root && !absolute.startsWith(`${root}/`))
+            || !["file", "dir", "other", "none"].includes(kind) || !/^[01]$/.test(values.get("exists")!) || !/^[01]$/.test(values.get("link")!)
+            || values.has("ident") !== (kind === "file");
+        if (unusable) throw new RemoteError("protocol", "The remote machine gave an answer about a path that cannot be used.");
+        if (CONTROL.test(absolute) || CONTROL.test(folder)) throw new PathError(`${input} goes through a name with a control character, which a remote project does not support.`);
         const relative = posix.relative(root, absolute);
         if (isSecretPath(relative)) {
             throw new PathError(`${relative} can hold credentials, so the CLI does not ${purpose === "read" ? "read" : "change"} it. You can open it yourself.`);
@@ -313,7 +334,7 @@ export class RemoteWorkspace {
         const result = await this.run(WRITE_SCRIPT, [
             this.root, absolute, bound.expect ?? "-", bound.create ? "1" : "0", String(bytes.length), bound.folder, bound.directory, bound.mode ?? "",
         ], { stdin: bytes, signal, timeoutMs: 60_000 + Math.ceil(bytes.length / 20_000) });
-        const values = keyValues(result.stdout.toString("utf8"));
+        const values = parseFields(result.stdout.toString("utf8"), ["ident", "fident"]);
         const ident = values.get("ident");
         const folderIdent = values.get("fident");
         if (!ident || !folderIdent) throw new RemoteError("protocol", "The remote machine did not confirm the write.");

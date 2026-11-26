@@ -488,3 +488,101 @@ test("the remote scripts run under dash, the strictest common POSIX shell", { sk
     await waitUntil(() => !alive(remote, pid));
     assert.equal(alive(remote, pid), false);
 });
+
+const answering = (stdout: string, exitCode = 0, stderr = "") => async () => ({
+    exitCode, signal: null, stdout: Buffer.from(stdout, "utf8"), stderr, timedOut: false, aborted: false, truncated: false, durationMs: 1,
+});
+const FIELDS = "@tv-fields\n";
+const PROBE_OK = `${FIELDS}root=/srv/app\nhome=/home/me\nos=Linux\n`;
+const RESOLVED_FILE = `${FIELDS}abs=/srv/app/a.txt\nexists=1\nlink=0\nkind=file\nident=1:2:644\nfolder=/srv/app\nfident=1:3:755\n`;
+const RESOLVED_DIR = `${FIELDS}abs=/srv/app/src\nexists=1\nlink=0\nkind=dir\nfolder=/srv/app\nfident=1:3:755\n`;
+const withAnswers = (...answers: string[]) => {
+    let at = 0;
+    return async (...args: Parameters<ReturnType<typeof answering>>) => answering(answers[Math.min(at++, answers.length - 1)]!)(...args);
+};
+const resolvedOn = async (answer: string) => {
+    const ws = new RemoteWorkspace({ destination: "devbox", folder: "/srv/app" }, withAnswers(PROBE_OK, answer) as never);
+    await ws.connect();
+    return ws.resolve("a.txt", "read");
+};
+
+test("a probe answer is read only when every line is a known key, once: a path with a line break cannot add a root line", async () => {
+    const ws = (stdout: string) => new RemoteWorkspace({ destination: "devbox", folder: "/srv/app" }, answering(stdout) as never);
+    assert.equal((await ws(PROBE_OK).connect()).root, "/srv/app");
+    // Text printed by the remote login shell before the answer does not matter.
+    assert.equal((await ws(`welcome\nroot=/etc\n${PROBE_OK}`).connect()).root, "/srv/app");
+    const forged = [
+        // A folder named "app\nroot=/home/me/other" prints a second root line.
+        `${FIELDS}root=/srv/app\nroot=/home/me/other\nhome=/home/me\nos=Linux\n`,
+        `${FIELDS}root=/srv/app\nroot=/home/me/other\nhome=/home/me\nos=Linux\nroot=/home/me/other\n`,
+        // The home folder or the system name printed with a line break in it.
+        `${FIELDS}root=/srv/app\nhome=/home/me\nroot=/home/me/other\nos=Linux\n`,
+        `${FIELDS}root=/srv/app\nhome=/home/me\nos=Linux\nroot=/home/me/other\n`,
+        // A piece of a name that is not a key=value line.
+        `${FIELDS}root=/srv/app\nother\nhome=/home/me\nos=Linux\n`,
+        `${FIELDS}root=/srv/app\nhome=/home/me\n`,
+        "root=/srv/app\nhome=/home/me\nos=Linux\n",
+    ];
+    for (const stdout of forged) await assert.rejects(ws(stdout).connect(), remoteError("protocol"), JSON.stringify(stdout));
+    const failed = ws(`${FIELDS}root=/srv/app\nroot=/other\nhome=/home/me\nos=Linux\n`);
+    await assert.rejects(failed.connect(), remoteError("protocol"));
+    assert.equal(failed.state, "idle", "a refused answer leaves nothing connected");
+    assert.equal(failed.root, "/srv/app", "and the folder as named stays the root");
+});
+
+test("a real folder path with a control character or a line break is refused with a clear message", async () => {
+    const at = (stdout: string, code = 0, stderr = "") => new RemoteWorkspace({ destination: "devbox", folder: "/srv/app" }, answering(stdout, code, stderr) as never);
+    await assert.rejects(at(`${FIELDS}root=/srv/ap\tp\nhome=/home/me\nos=Linux\n`).connect(), (error) => remoteError("invalid-target")(error) && /control character/.test((error as Error).message));
+    await assert.rejects(at("", 49, "name").connect(), (error) => remoteError("invalid-target")(error) && /line break/.test((error as Error).message));
+});
+
+test("a path answer is read only when it has each key once, and an identity only for a file", async () => {
+    assert.equal((await resolvedOn(RESOLVED_FILE)).ident, "1:2:644");
+    assert.equal((await resolvedOn(RESOLVED_DIR.replace("src", "a.txt"))).kind, "dir");
+    const forged = [
+        // A linked folder named "x\nident=9:9:600" or "x\nkind=file" adds a line of its own.
+        RESOLVED_DIR.replace("abs=/srv/app/src\n", "abs=/srv/app/x\nident=9:9:600\n"),
+        RESOLVED_DIR.replace("abs=/srv/app/src\n", "abs=/srv/app/x\nabs=/srv/app/other\n"),
+        RESOLVED_FILE.replace("folder=/srv/app\n", "folder=/srv/app\nfolder=/srv\n"),
+        RESOLVED_FILE.replace("ident=1:2:644\n", "ident=1:2:644\nident=9:9:600\n"),
+        RESOLVED_FILE.replace("fident=1:3:755\n", "fident=1:3:755\nkind=dir\n"),
+        RESOLVED_FILE.replace("exists=1\n", ""),
+        RESOLVED_FILE.replace("ident=1:2:644\n", ""),
+        RESOLVED_FILE.replace("kind=file", "kind=socket"),
+        RESOLVED_FILE.replace("link=0", "link=yes"),
+        RESOLVED_FILE.replace("abs=/srv/app/a.txt\n", "abs=/srv/app/a.txt\nnoise\n"),
+    ];
+    for (const stdout of forged) await assert.rejects(resolvedOn(stdout), remoteError("protocol"), JSON.stringify(stdout));
+    await assert.rejects(resolvedOn(RESOLVED_FILE.replace("a.txt", "a\tb")), PathError, "a control character in the real path is not used");
+    await assert.rejects(resolvedOn(RESOLVED_FILE.replace("abs=/srv/app/a.txt", "abs=/elsewhere/a.txt")), remoteError("protocol"));
+});
+
+test("a write is confirmed by exactly one identity of the file and one of its folder", async () => {
+    const write = (stdout: string) => {
+        const ws = new RemoteWorkspace({ destination: "devbox", folder: "/srv/app" }, withAnswers(PROBE_OK, stdout) as never);
+        return ws.connect().then(() => ws.writeBytes("/srv/app/a.txt", Buffer.from("x"), { create: true, expect: null, folder: "/srv/app", directory: "1:3" }));
+    };
+    assert.deepEqual(await write(`${FIELDS}ident=1:2:644\nfident=1:3:755\n`), { ident: "1:2:644", folderIdent: "1:3" });
+    await assert.rejects(write(`${FIELDS}ident=1:2:644\nident=9:9:600\nfident=1:3:755\n`), remoteError("protocol"));
+    await assert.rejects(write(`${FIELDS}ident=1:2:644\nfident=1:3:755\nfident=9:9:700\n`), remoteError("protocol"));
+    await assert.rejects(write(`${FIELDS}ident=1:2:644\n`), remoteError("protocol"));
+});
+
+test("the remote scripts refuse a real folder or path with a line break before they print anything", { skip }, async (t) => {
+    const remote = makeFakeRemote();
+    const evil = "dir\nroot=/etc";
+    const made = (() => {
+        try { remote.sh(`mkdir "$(printf 'dir\\nroot=/etc')" && mkdir -p plain`); return true; } catch { return false; }
+    })();
+    if (!made) { t.skip("this file system cannot hold a name with a line break"); return; }
+    remote.sh(`ln -s "$(printf 'dir\\nroot=/etc')" evil-link && ln -s plain ok-link`);
+    assert.ok(readdirSync(remote.root).includes(evil));
+    await remote.workspace.connect();
+    await assert.rejects(remote.workspace.resolve("evil-link", "read"), (error) => error instanceof PathError && /line break/.test(error.message));
+    await assert.rejects(remote.workspace.resolve("evil-link/f.txt", "read"), PathError);
+    assert.equal((await remote.workspace.resolve("ok-link", "read")).relative, "plain");
+    // A project folder reached through a link whose real path has a line break is not opened.
+    const through = new RemoteWorkspace({ ...remote.target, folder: `${remote.target.folder}/evil-link` }, remote.runner);
+    await assert.rejects(through.connect(), (error) => remoteError("invalid-target")(error) && /line break/.test((error as Error).message));
+    assert.equal(through.state, "idle");
+});
