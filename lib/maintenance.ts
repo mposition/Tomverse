@@ -93,6 +93,7 @@ import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor"
 import { runMarketingRetention } from "@/lib/marketingRetention";
 import { runMarketingWeeklyKpi } from "@/lib/marketingWeeklyKpi";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
+import { purgeDesktopRemoteControl } from "@/lib/desktopRemoteControlStore";
 import {
   GUEST_ATTACHMENT_PREFIX,
   getGuestAttachmentTtlMinutes,
@@ -838,6 +839,9 @@ export async function cleanupExpiredData() {
   await step("chat_router_location_preparations", () =>
     prisma.chatRouterLocationPreparation.deleteMany({ where: { expiresAt: { lt: now } }, limit: 5_000 })
   );
+  // Desktop remote control keeps a PC's report a few minutes and an answer 15 minutes; this deletes what the routes'
+  // own clean-up did not reach (docs/ops/desktop-remote-control.md). Runs with the feature switched off too.
+  await step("desktop_remote_control", () => purgeDesktopRemoteControl());
 
   const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
     prisma.billingPromotionRedemption.updateMany({

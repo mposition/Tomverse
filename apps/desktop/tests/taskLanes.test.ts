@@ -388,3 +388,16 @@ test("a scheduled run's push is never approved for the person: its card stays do
   assert.deepEqual(child.sent.filter((message) => message.type === "git-action-result"),
     [{ type: "git-action-result", runId: key, requestId: "push-1", result: { status: "denied", code: "denied" } }]);
 });
+
+test("a waiting request names the lane that asked, and nothing once it is answered", () => {
+  const world = setup();
+  const a = world.submit("/a");
+  const b = world.submit("/b");
+  const request = approval();
+  world.processOf(b.key).emit({ type: "approval", runId: b.key, request });
+  assert.equal(world.lanes.approvalKey(request.id), b.key);
+  assert.notEqual(world.lanes.approvalKey(request.id), a.key);
+  assert.equal(world.lanes.approvalKey(uuid()), null);
+  assert.equal(world.lanes.decide({ id: request.id, action: "once" }), true);
+  assert.equal(world.lanes.approvalKey(request.id), null);
+});

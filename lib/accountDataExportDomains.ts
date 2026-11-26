@@ -1355,6 +1355,25 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason:
       "The devices the person signed in on: the name they gave each one, whether it is an iPhone or an Android, the app version, when it was registered, when it was last used and whether it has been removed. Withheld: the server-issued device id, which is the value a live refresh token is bound to. Nothing else about the device is collected -- no model name, OS build, advertising identifier, IDFV or ANDROID_ID -- so what is missing from this export is mostly missing from the database.",
   },
+  // Desktop remote control (docs/ops/desktop-remote-control.md). Both rows hold the person's own words for a few
+  // minutes: task titles and progress lines, the command line or paths of a request, the text of a follow-up. Owner
+  // decision 2026-11-26: neither is part of the account export. The lasting record is on the person's own PC.
+  {
+    domain: "desktopRemoteDevice",
+    publicName: "desktop_remote_devices",
+    prismaModel: "DesktopRemoteDevice",
+    state: "excluded",
+    exclusionReason:
+      "Owner decision 2026-11-26: not exported. The latest report one signed-in PC sent about its own Code tasks (task titles, states, a few progress lines and the summary of the request on its screen), kept for a few minutes as a mirror of what is on the person's own PC, where the lasting record is.",
+  },
+  {
+    domain: "desktopRemoteCommand",
+    publicName: "desktop_remote_commands",
+    prismaModel: "DesktopRemoteCommand",
+    state: "excluded",
+    exclusionReason:
+      "Owner decision 2026-11-26: not exported. One answer, stop or follow-up the person sent from the web to their own PC, kept for a few minutes until the PC has picked it up; the task it acted on, with the follow-up in it, is on the person's own PC.",
+  },
   {
     domain: "mobileTokenFamily",
     publicName: "mobile_sessions",

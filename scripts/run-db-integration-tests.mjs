@@ -1121,6 +1121,16 @@ run(
     "--test-concurrency=1", "tests/integration/amuxV22TransferStaging.db.test.mjs"],
   "Running the v22 chunked result transfer, sliced read and staging sweep scenarios",
 );
+// Desktop remote control: one account never reaches another's PC, an answer is
+// recorded once for the reported request and handed over once, and reports
+// expire and are deleted. It drives the real route handlers with the web
+// session replaced through mock.module, so it runs in its own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/desktop-remote-control.db.test.ts"],
+  "Running the Desktop remote control report, answer and expiry scenarios",
+);
 // Native pass redemption uses real promotion/entitlement rows with mocked
 // authentication and email/provider seams. Keep those mocks in their own process.
 run(

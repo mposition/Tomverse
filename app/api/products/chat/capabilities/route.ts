@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled } from "@/lib/nativeBearerGate";
+import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
@@ -79,6 +80,7 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopGoogleDrive: desktopAttachments && desktopDriveEnabled() && Boolean(readGooglePickerConfig()),
     desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
     desktopBilling: desktopBillingEnabled(),
+    desktopManagedCode: desktopManagedCodeEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),

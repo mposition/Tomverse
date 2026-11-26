@@ -23,8 +23,8 @@ export type ScheduleLaunchEnv = {
   worktreeHome(scope: HistoryScope): string;
   permissionHome(): string;
   modelAvailable(model: string): boolean;
-  /** The OS sandbox as this computer enforces it now. */
-  sandbox(): Promise<SandboxFacts>;
+  /** The OS sandbox as this computer enforces it now, for the project of the run (a project on another machine has none). */
+  sandbox(project?: string): Promise<SandboxFacts>;
 };
 
 export async function launchScheduledRun(env: ScheduleLaunchEnv, item: ScheduleItem, run: ScheduleRun, lanes: TaskLanes, approvalWaitMs: number): Promise<LaunchOutcome> {
@@ -33,7 +33,7 @@ export async function launchScheduledRun(env: ScheduleLaunchEnv, item: ScheduleI
   if (!env.modelAvailable(item.model)) return { ok: false, reason: "model-unavailable" };
   if (hasCredential(item.prompt, connection.key)) return { ok: false, reason: "launch-failed" };
   // The last line of defence for "allow all": whatever the engine decided, it does not start without a new worktree and a sandbox that refuses writes.
-  if (item.permission === "allow_all" && (item.workspace !== "worktree" || item.taskMode !== "agent" || !sandboxEnforcesWrites(await env.sandbox()))) {
+  if (item.permission === "allow_all" && (item.workspace !== "worktree" || item.taskMode !== "agent" || !sandboxEnforcesWrites(await env.sandbox(item.project)))) {
     return { ok: false, reason: "sandbox" };
   }
   let source: ProjectRoot;

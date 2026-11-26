@@ -13,8 +13,12 @@ import type { CodeEnginePreference } from "./CodeEngine";
 import { CodeExtensionsSettings } from "./CodeExtensions";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
 import { CodeSandboxSettings } from "./CodeSandboxSettings";
+import { CodeCloudSettings } from "./CodeCloudSettings";
+import { RemoteProjectPanel } from "./RemoteProject";
 import { PluginsPanel } from "./PluginsPanel";
 import { CodeBrowserSettings } from "./CodeBrowserSettings";
+import { CodeComputerSettings } from "./CodeComputerSettings";
+import { RemoteControlSettings } from "./RemoteControlSettings";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -212,7 +216,11 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
       </label>)}
     </fieldset>}
     <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
+    <CodeComputerSettings language={language} />
     <CodeSandboxSettings language={language} />
+    <CodeCloudSettings language={language} enabled={snapshot?.capabilities?.managedCode === true} remoteEnabled={snapshot?.remoteEnabled === true} />
+    <RemoteProjectPanel language={language} withSwitch />
+    <RemoteControlSettings language={language} />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}
   </section>;
 }

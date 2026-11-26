@@ -69,6 +69,9 @@ const en = {
   runStoppedEarly: "Stopped before tool execution.",
   runtimeFailed: "The Code runtime could not start the task.",
   workspaceBusy: "Another Code operation is using this project. Try again when it finishes.",
+  remoteLost: "The connection to the remote machine was lost. Nothing more was done there. Reconnect from the project screen and continue the task.",
+  remoteUnavailable: "The remote project could not be opened. Check the connection on the project screen and try again.",
+  remoteDisabled: "Remote projects are turned off in Settings.",
 };
 
 export const desktopNativeCopy: Record<Language, typeof en> = {
@@ -142,6 +145,9 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "도구를 실행하기 전에 중지됐습니다.",
     runtimeFailed: "Code 런타임이 작업을 시작하지 못했습니다.",
     workspaceBusy: "다른 Code 작업이 이 프로젝트를 사용 중입니다. 완료된 후 다시 시도하세요.",
+    remoteLost: "원격 컴퓨터와의 연결이 끊겼습니다. 그 이후로는 아무것도 실행하지 않았습니다. 프로젝트 화면에서 다시 연결한 뒤 작업을 이어 가세요.",
+    remoteUnavailable: "원격 프로젝트를 열지 못했습니다. 프로젝트 화면에서 연결을 확인한 뒤 다시 시도하세요.",
+    remoteDisabled: "원격 프로젝트가 설정에서 꺼져 있습니다.",
   },
   zh: {
     cancel: "取消",
@@ -212,6 +218,9 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "在执行工具前停止。",
     runtimeFailed: "Code 运行环境未能启动任务。",
     workspaceBusy: "其他 Code 操作正在使用此项目，请在该操作完成后重试。",
+    remoteLost: "与远程计算机的连接已断开，之后没有再执行任何操作。请在项目界面重新连接后继续任务。",
+    remoteUnavailable: "无法打开远程项目。请在项目界面检查连接后重试。",
+    remoteDisabled: "远程项目已在设置中关闭。",
   },
   "zh-Hant": {
     cancel: "取消",
@@ -282,6 +291,9 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "在執行工具前停止。",
     runtimeFailed: "Code 執行環境未能啟動任務。",
     workspaceBusy: "其他 Code 操作正在使用此專案，請在該操作完成後重試。",
+    remoteLost: "與遠端電腦的連線已中斷，之後沒有再執行任何操作。請在專案畫面重新連線後繼續任務。",
+    remoteUnavailable: "無法開啟遠端專案。請在專案畫面檢查連線後重試。",
+    remoteDisabled: "遠端專案已在設定中關閉。",
   },
   fr: {
     cancel: "Annuler",
@@ -352,6 +364,9 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "Arrêt avant l’exécution des outils.",
     runtimeFailed: "Code n’a pas pu démarrer la tâche.",
     workspaceBusy: "Une autre opération Code utilise ce projet. Réessayez une fois qu’elle est terminée.",
+    remoteLost: "La connexion à la machine distante a été perdue. Rien de plus n’y a été fait. Reconnectez-vous depuis l’écran du projet, puis poursuivez la tâche.",
+    remoteUnavailable: "Le projet distant n’a pas pu être ouvert. Vérifiez la connexion sur l’écran du projet, puis réessayez.",
+    remoteDisabled: "Les projets distants sont désactivés dans les paramètres.",
   },
   de: {
     cancel: "Abbrechen",
@@ -422,6 +437,9 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "Vor der Ausführung von Werkzeugen gestoppt.",
     runtimeFailed: "Code konnte die Aufgabe nicht starten.",
     workspaceBusy: "Ein anderer Code-Vorgang verwendet dieses Projekt. Versuche es erneut, sobald er abgeschlossen ist.",
+    remoteLost: "Die Verbindung zum entfernten Rechner wurde unterbrochen. Danach wurde dort nichts mehr ausgeführt. Verbinde dich auf dem Projektbildschirm neu und setze die Aufgabe fort.",
+    remoteUnavailable: "Das entfernte Projekt konnte nicht geöffnet werden. Prüfe die Verbindung auf dem Projektbildschirm und versuche es erneut.",
+    remoteDisabled: "Entfernte Projekte sind in den Einstellungen ausgeschaltet.",
   },
   es: {
     cancel: "Cancelar",
@@ -492,6 +510,9 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "Se detuvo antes de ejecutar herramientas.",
     runtimeFailed: "Code no pudo iniciar la tarea.",
     workspaceBusy: "Otra operación de Code está usando este proyecto. Vuelve a intentarlo cuando termine.",
+    remoteLost: "Se perdió la conexión con el equipo remoto. Después no se hizo nada más allí. Vuelve a conectar desde la pantalla del proyecto y continúa la tarea.",
+    remoteUnavailable: "No se pudo abrir el proyecto remoto. Revisa la conexión en la pantalla del proyecto y vuelve a intentarlo.",
+    remoteDisabled: "Los proyectos remotos están desactivados en Ajustes.",
   },
   pt: {
     cancel: "Cancelar",
@@ -562,5 +583,8 @@ export const desktopNativeCopy: Record<Language, typeof en> = {
     runStoppedEarly: "Interrompida antes de executar ferramentas.",
     runtimeFailed: "O Code não conseguiu iniciar a tarefa.",
     workspaceBusy: "Outra operação do Code está a usar este projeto. Tente novamente quando terminar.",
+    remoteLost: "A ligação ao computador remoto foi perdida. Depois disso nada mais foi feito lá. Volte a ligar a partir do ecrã do projeto e continue a tarefa.",
+    remoteUnavailable: "Não foi possível abrir o projeto remoto. Verifique a ligação no ecrã do projeto e tente novamente.",
+    remoteDisabled: "Os projetos remotos estão desativados nas Configurações.",
   },
 };

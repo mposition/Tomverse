@@ -24,6 +24,8 @@ export { PermissionRuleStore, RuleFileError } from "./permission-rules.js";
 export type { ProjectTrust } from "./permission-rules.js";
 export { browserAgentReply, browserAgentRequest, elementPickId } from "./browser-tools.js";
 export type { BrowserAgentReply, BrowserAgentRequest, BrowserApproval } from "./browser-tools.js";
+export { computerAgentReply, computerAgentRequest, parseComputerKey } from "./computer-tools.js";
+export type { ComputerAgentReply, ComputerAgentRequest, ComputerApproval, ComputerWindowInfo } from "./computer-tools.js";
 export { viewChange, viewChanges, renderChange, undoChange, canUndoChange, UndoError } from "./changes.js";
 export { safeText, safeLine } from "./display.js";
 export type { Output } from "./display.js";

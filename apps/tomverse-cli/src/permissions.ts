@@ -89,6 +89,8 @@ type Subject =
     | { kind: "mcp"; name: string; server: string | null; tool: string | null }
     /** A click or typing in the local browser tab. */
     | { kind: "browser"; origin: string }
+    /** A click, typing, key or scroll in the one desktop window the user chose. */
+    | { kind: "computer"; window: string }
     | { kind: "other" };
 
 const SHELL_META = /[;&|<>`$(){}\n\r]/;
@@ -164,6 +166,7 @@ const subjectOf = (view: ApprovalView): Subject => {
     if (view.mcp) return { kind: "mcp", name: view.toolName, server: view.mcp.server, tool: view.mcp.tool };
     if (view.toolName.startsWith("mcp__")) return { kind: "mcp", name: view.toolName, server: null, tool: null };
     if (view.browser) return { kind: "browser", origin: view.browser.origin };
+    if (view.computer) return { kind: "computer", window: view.computer.window.id };
     return { kind: "other" };
 };
 
@@ -241,6 +244,8 @@ const ruleApplies = (rule: PermissionRule, toolName: string, subject: Subject) =
     if (!toolMatches(rule, toolName, subject)) return false;
     const strict = rule.effect === "allow";
     if (subject.kind === "other" || subject.kind === "browser" || subject.kind === "mcp") return rule.pattern === undefined;
+    // No allow rule reaches a desktop window, whatever a rules file says.
+    if (subject.kind === "computer") return !strict && rule.pattern === undefined;
     if (rule.pattern === undefined) return true;
     if (subject.kind === "web") return hostMatches(rule.pattern, subject.host);
     if (subject.kind === "patch") {
@@ -543,6 +548,9 @@ export const evaluate = (view: ApprovalView, options: EvaluateOptions): Verdict 
     // A click or typing on a page does whatever the page's own code does with it, a request to another service included,
     // and nothing here can read that. A person answers it in every mode; their "Allow for this run" covers the same site.
     if (subject.kind === "browser") return { kind: "human", reason: "A click or typing in the browser tab is always approved by a person.", policy: note("boundary", "browser_action") };
+    // Operating a window of the desktop changes whatever that program does, and nothing here can read that: a person answers it in
+    // every mode, and "Allow for this run" covers the same window only.
+    if (subject.kind === "computer") return { kind: "human", reason: "An action in a desktop window is always approved by a person.", policy: note("boundary", "computer_action") };
     if (mode === "allow_all") return { kind: "allow", policy: note("mode", "allow_all") };
     if (mode === "auto_review") return { kind: "review", policy: note("auto_review", "reviewing") };
     return { kind: "human", reason: "Ask mode.", policy: note("mode", mode) };

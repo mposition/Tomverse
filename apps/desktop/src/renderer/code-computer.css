@@ -1,0 +1,12 @@
+.code-computer { display: grid; gap: 6px; margin: 0 0 8px; padding: 8px 10px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+.code-computer[data-control="working"] { border-color: var(--focus); }
+.code-computer[data-control="stopped"] { color: var(--muted); }
+.code-computer-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.code-computer-heading > span { color: var(--muted); }
+.code-computer-window, .code-computer-notice { margin: 0; overflow-wrap: anywhere; }
+.code-computer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.code-computer-list ul { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; max-height: 220px; overflow: auto; }
+.code-computer-list li button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.code-computer-list li span { color: var(--muted); }
+.code-computer-confirm { grid-column: 1 / -1; display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid var(--focus); border-radius: 10px; background: var(--raised); }
+.code-computer-confirm p { margin: 0; }

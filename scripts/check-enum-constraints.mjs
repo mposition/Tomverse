@@ -696,6 +696,34 @@ const REGISTRY = {
     reason:
       "user_revoked, and deliberately nothing else. Account deletion is the other way a device stops being usable and is absent on purpose: it takes the row with it through the cascade, so a value for it would be one nothing could ever write and a state nobody could query for.",
   },
+  DesktopRemoteCommand_kind_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_COMMAND_KINDS",
+    reason:
+      "What a signed-in web session asked a PC to do: answer the approval request on its screen, stop a task, or send a running task a follow-up. The web route parses the same list; the PC decides whether each still applies.",
+  },
+  DesktopRemoteCommand_decision_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_DECISIONS",
+    reason:
+      "Allow once or deny. \"Allow for this run\" is deliberately absent: a remote answer never widens what the task may do beyond the one request the person saw. NULL for a stop or follow-up.",
+  },
+  DesktopRemoteCommand_result_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_RESULTS",
+    reason:
+      "What the PC reported doing with an answer it received. NULL until the PC reports, and for an answer it never received.",
+  },
+  DesktopRemoteCommand_resultReason_check: {
+    owner: "list",
+    module: "lib/desktopRemoteControlContract.ts",
+    list: "DESKTOP_REMOTE_REFUSALS",
+    reason:
+      "Why the PC refused an answer: the request was no longer open or had changed, it is answered at the PC, a repeat, too old, another device's, or the task could not take it. Written from the PC's sync body, which the route parses with this list.",
+  },
   MobileTokenFamily_revokedReason_check: {
     owner: "list",
     module: "lib/mobileAuthContract.ts",
