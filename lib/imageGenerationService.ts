@@ -275,6 +275,11 @@ export type ImageGenerationRequestInput = {
    */
   editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
   /**
+   * Server-only: runs once inside the reservation transaction of a new request, with the conversation
+   * it belongs to, and rolls back with it. Studio records a photo-less request here.
+   */
+  onReserved?: (tx: Prisma.TransactionClient, conversationId: string) => Promise<unknown>;
+  /**
    * The photo tools this request is for, set only by the server feature that
    * owns them (Studio's transparent PNG). A photo tool's id that is not
    * listed here is refused like an unknown model, whatever the caller attached.
@@ -887,6 +892,7 @@ export const requestImageGeneration = async (
       const editAttachmentId = edit && ("attachmentId" in edit
         ? edit.attachmentId
         : await edit.bindAttachment(tx, conversationId));
+      await input.onReserved?.(tx, conversationId);
       const group = await tx.imageGenerationGroup.create({
         data: {
           userId: input.userId,
