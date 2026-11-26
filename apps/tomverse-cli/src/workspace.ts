@@ -91,9 +91,12 @@ const SKIPPED_DIRS = new Set([
 export type ResolvedPath = { absolute: string; relative: string; exists: boolean };
 export type WorkspaceReference = { path: string; kind: "file" | "folder" };
 
+const IMAGE_REFERENCE = /\.(png|jpe?g|gif|webp)$/i;
+
 export function withWorkspaceReferences(prompt: string, references: readonly WorkspaceReference[]) {
     if (!references.length) return prompt;
-    return `${prompt}\n\nUser-selected project references (workspace-relative path identifiers):\n${JSON.stringify(references)}\nUse normal workspace tools to inspect relevant references.`;
+    const images = references.some((reference) => reference.kind === "file" && IMAGE_REFERENCE.test(reference.path));
+    return `${prompt}\n\nUser-selected project references (workspace-relative path identifiers):\n${JSON.stringify(references)}\nUse normal workspace tools to inspect relevant references.${images ? " Image files among them can be looked at with view_image, when that tool is available to you." : ""}`;
 }
 
 export class Workspace {

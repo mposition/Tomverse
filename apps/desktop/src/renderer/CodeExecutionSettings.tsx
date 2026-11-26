@@ -1,11 +1,13 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Language } from "../../../../lib/language";
 import { desktopCodeExecutionCopy } from "../../../../locales/desktopCodeExecution";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { cliProviders, codeExecutionMode, providerClis } from "../code-execution";
 import { codeFallbackModelAvailable, codeFallbackUpdate, codeTransferScope, defaultCodeFallbackSettings,
   type CodeFallbackUpdate } from "../code-fallback";
-import type { Snapshot } from "../contract";
+import { codeLimitProfile, type CodeLimitProfile, type CodeMemoryInput, type CodeMemoryView, type Snapshot } from "../contract";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import type { CodeEnginePreference } from "./CodeEngine";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -39,10 +41,54 @@ function ApiCap({ credits, disabled, copy, save }: { credits: number | null; dis
   </form>;
 }
 
-export function CodeExecutionSettings({ snapshot, language, actionFailed, act }: {
+/** The agent's notes about the open project: the switch for keeping them, and a list the person can read and delete from. */
+function CodeMemorySettings({ language }: { language: Language }) {
+  const copy = desktopCodeEngineCopy[language];
+  const [view, setView] = useState<CodeMemoryView | null>(null);
+  const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+  async function run(input: CodeMemoryInput) {
+    try { setView(await window.desktop.codeMemory(input)); setFailed(false); }
+    catch { setFailed(true); }
+  }
+  useEffect(() => {
+    let current = true;
+    window.desktop.codeMemory({ action: "read" }).then((loaded) => { if (current) setView(loaded); }, () => { if (current) setFailed(true); });
+    return () => { current = false; };
+  }, []);
+  const entries = view?.entries ?? [];
+  return <>
+    <SettingRow field="code-memory" label={copy.memory} detail={copy.memoryDetail} control={
+      <select id="code-memory" aria-describedby="code-memory-info" value={view?.enabled === false ? "off" : "on"} disabled={!view}
+        onChange={(event) => void run({ action: "set-enabled", enabled: event.currentTarget.value === "on" })}>
+        <option value="on">{copy.on}</option><option value="off">{copy.off}</option>
+      </select>
+    } />
+    <SettingRow label={copy.memoryNotes} detail={view?.project ? copy.memoryCount.replace("{count}", String(entries.length)) : copy.memoryNoProject} control={
+      <button className="soft" type="button" aria-expanded={open} aria-controls="code-memory-notes" disabled={!view?.project}
+        onClick={() => setOpen(!open)}>{open ? copy.memoryHide : copy.memoryView}</button>
+    } />
+    {open && view?.project && <div className="execution-memory" id="code-memory-notes">
+      {entries.length ? <>
+        <ul>{entries.map((entry) => <li key={entry.id}>
+          <span>{entry.text}</span>
+          <button className="soft" type="button" aria-label={copy.memoryRemove} title={copy.memoryRemove}
+            onClick={() => void run({ action: "remove", id: entry.id })}>{copy.memoryRemove}</button>
+        </li>)}</ul>
+        <button className="soft" type="button" onClick={() => void run({ action: "clear" })}>{copy.memoryClear}</button>
+      </> : <p>{copy.memoryEmpty}</p>}
+    </div>}
+    {failed && <p role="alert">{copy.memoryFailed}</p>}
+  </>;
+}
+
+export function CodeExecutionSettings({ snapshot, language, actionFailed, act, engine: taskEngine, changeEngine }: {
   snapshot: Snapshot | null; language: Language; actionFailed: boolean; act: (action: () => Promise<unknown>) => Promise<void>;
+  engine: CodeEnginePreference; changeEngine: (value: CodeEnginePreference) => void;
 }) {
   const copy = desktopCodeExecutionCopy[language];
+  const engineCopy = desktopCodeEngineCopy[language];
+  const limitLabels = { standard: engineCopy.limitsStandard, extended: engineCopy.limitsExtended, unlimited: engineCopy.limitsUnlimited } as const satisfies Record<CodeLimitProfile, string>;
   const [reviewScope, setReviewScope] = useState(false);
   const [writing, setWriting] = useState(false);
   const current = snapshot?.codeFallback;
@@ -88,6 +134,22 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act }:
         <option value="provider_cli">{copy.providerCli}</option>
       </select>
     } />
+    <SettingRow field="code-task-limits" label={engineCopy.limits} detail={engineCopy.limitsDetail} control={
+      <select id="code-task-limits" aria-describedby="code-task-limits-info" value={taskEngine.limits}
+        onChange={(event) => {
+          const next = codeLimitProfile.safeParse(event.currentTarget.value);
+          if (next.success) changeEngine({ ...taskEngine, limits: next.data });
+        }}>
+        {codeLimitProfile.options.map((value) => <option key={value} value={value}>{limitLabels[value]}</option>)}
+      </select>
+    } />
+    <SettingRow field="code-goal-mode" label={engineCopy.goal} detail={engineCopy.goalDetail} control={
+      <select id="code-goal-mode" aria-describedby="code-goal-mode-info" value={taskEngine.goal ? "on" : "off"}
+        onChange={(event) => changeEngine({ ...taskEngine, goal: event.currentTarget.value === "on" })}>
+        <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
+      </select>
+    } />
+    <CodeMemorySettings language={language} />
     <SettingRow field="code-fallback-automatic" label={copy.automatic} detail={automatic ? copy.awaitingVerification : copy.automaticDetail}
       status={automatic} control={
       <select id="code-fallback-automatic" aria-describedby="code-fallback-automatic-info" value={automatic ? "on" : "off"}

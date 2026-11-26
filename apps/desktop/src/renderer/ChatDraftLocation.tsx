@@ -74,12 +74,13 @@ export function ChatDraftLocation(props: {
   setDraft: (value: string) => void;
   disabled: boolean;
   deviceLocation: boolean;
+  tool?: boolean;
   maxLength?: number;
 }) {
   return <LocationDialog key={props.location.scope} {...props} />;
 }
 
-function LocationDialog({ location, language, draft, setDraft, disabled, deviceLocation,
+function LocationDialog({ location, language, draft, setDraft, disabled, deviceLocation, tool,
   maxLength = CHAT_MAX_MESSAGE_CHARACTERS }: Parameters<typeof ChatDraftLocation>[0]) {
   const text = language === "ko" ? copy.ko : copy.en;
   const common = mobileCopy[language];
@@ -91,8 +92,9 @@ function LocationDialog({ location, language, draft, setDraft, disabled, deviceL
   const placeText = place.trim();
   const addition = (draft.trim() ? "\n\n" : "") + text.placePrefix + placeText;
   return <div className="chat-location-control">
-    <button className="icon" type="button" aria-label={title} title={title} disabled={disabled}
-      onClick={() => dialog.current?.showModal()}><MapPin size={17} /></button>
+    <button className={tool ? "composer-tool-row" : "icon"} type="button" aria-label={title} title={title} disabled={disabled}
+      onClick={() => dialog.current?.showModal()}>{tool ? <><span className="composer-tool-icon"><MapPin size={17} /></span>
+        <span><strong>{title}</strong>{deviceLocation && <small>{text.disclosure}</small>}</span></> : <MapPin size={17} />}</button>
     {location.attached && <button type="button" className="soft" aria-label={text.remove} disabled={disabled}
       onClick={location.remove}>{text.attached}<X size={14} /></button>}
     {location.expired && <span role="status">{text.stale}</span>}

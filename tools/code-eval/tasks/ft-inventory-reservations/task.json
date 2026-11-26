@@ -1,0 +1,12 @@
+{
+  "id": "ft-inventory-reservations",
+  "title": "Add expiring stock reservations",
+  "category": "feature",
+  "prompt": "The inventory module in this project tracks stock per SKU. Add reservations as described in README.md: `reserve`, `release`, `commit`, `available`, `reservedQty`, expiry through an injectable clock, and make `remove` respect reserved stock. Existing `add`, `remove` and `onHand` behaviour must stay the same when nothing is reserved. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1500
+}

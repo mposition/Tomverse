@@ -1,0 +1,19 @@
+.answer-sources { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+.answer-sources h4 { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.answer-sources ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.answer-sources li { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 13px; }
+.answer-sources li > a, .answer-sources li > span:not(.answer-source-number) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer-sources small { flex: none; color: var(--muted); font-size: 11px; }
+.answer-source-number { flex: none; color: var(--muted); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.answer-feedback { margin-top: 10px; }
+.answer-feedback form { display: grid; gap: 6px; max-width: 520px; }
+.answer-feedback textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.answer-feedback small { color: var(--muted); font-size: 12px; }
+.answer-feedback .answer-feedback-error { color: var(--text); font-weight: 650; }
+.answer-feedback-open { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; }
+.answer-feedback-open:hover { color: var(--text); background: var(--raised); }
+.answer-feedback-email { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.answer-feedback-actions { display: flex; gap: 8px; }
+.chat-image-offer { display: grid; gap: 8px; max-width: 520px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.chat-image-offer p { margin: 0; color: var(--muted); font-size: 13px; }
+.chat-image-offer-actions { display: flex; flex-wrap: wrap; gap: 8px; }

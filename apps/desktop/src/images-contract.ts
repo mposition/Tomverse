@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { chatId } from "./chat-contract";
+import { CATALOG_IMAGE_SIZES } from "../../../lib/directRasterModels";
 
-export const imageSize = z.enum(["1024x1024", "1536x1024", "1024x1536"]);
+export const imageSize = z.enum(CATALOG_IMAGE_SIZES);
 export const imageQuality = z.enum(["low", "medium", "high"]);
 export const imageCapability = z.object({
   maxModels: z.number().int().min(1).max(8),

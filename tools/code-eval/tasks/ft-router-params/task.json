@@ -1,0 +1,12 @@
+{
+  "id": "ft-router-params",
+  "title": "Add path parameters and wildcards to the router",
+  "category": "feature",
+  "prompt": "The router in this project (`src/router.js`) only matches static paths. Extend it as described in README.md: `:param` segments, a trailing `*` wildcard, route priority (static beats parameter beats wildcard, regardless of the order routes were added), and a parsed `query` on the match result, plus `allowedMethods(url)`. Existing static routing must keep working. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

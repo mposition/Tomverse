@@ -1,0 +1,8 @@
+{
+  "name": "rf-dedupe-formatters",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

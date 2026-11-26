@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
+import { DESKTOP_APP_ORIGIN } from "@/lib/nativeBearerGate";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import { extendChatReservationExpiry } from "@/lib/chatSecurity";
@@ -89,9 +90,11 @@ export async function POST(request: Request) {
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: job.conversationId },
-      select: { userId: true, password: true, passwordVersion: true },
+      select: { userId: true, password: true, passwordVersion: true, productKey: true, kind: true },
     });
-    if (!conversation || conversation.userId !== session.user.id) {
+    const desktop = request.headers.get("origin") === DESKTOP_APP_ORIGIN;
+    if (!conversation || conversation.userId !== session.user.id ||
+        (desktop && (conversation.kind !== "chat" || conversation.productKey !== "chat"))) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
     }
     if (

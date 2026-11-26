@@ -47,6 +47,7 @@ import {
 } from "@/lib/conversationLock";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
+import { DESKTOP_APP_ORIGIN, desktopConversationWriteProduct, desktopReviewAnalysisEnabled } from "@/lib/desktopReadApiContract";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -89,10 +90,14 @@ const authorizeConversation = async (
 ) => {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { id: true, userId: true, password: true, passwordVersion: true, title: true, kind: true },
+    select: { id: true, userId: true, password: true, passwordVersion: true, title: true, kind: true, productKey: true },
   });
   if (!conversation || conversation.userId !== userId) {
     return { response: jsonError("Conversation not found.", "NOT_FOUND", 404) };
+  }
+  if (request.headers.get("origin") === DESKTOP_APP_ORIGIN &&
+      (!desktopReviewAnalysisEnabled() || desktopConversationWriteProduct(conversation) !== "review")) {
+    return { response: jsonError("Review analysis is unavailable.", "REVIEW_ANALYSIS_UNAVAILABLE", 403) };
   }
   if (
     !hasConversationUnlockGrant(

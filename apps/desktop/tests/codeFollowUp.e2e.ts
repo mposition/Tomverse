@@ -47,7 +47,8 @@ test("Code queues a follow-up, checks revised work and preserves the conversatio
           return { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "stale.txt", action: "create", content: "Stale proposal" }] } }] };
         case 5:
           assert.deepEqual(body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
-            ["list_files", "read_file", "search_text", "update_task_plan"]);
+            // The analysis stage: the read tools, the plan, and explore subagents (read-only; a worker is refused until a work item is active).
+            ["delegate", "list_files", "read_file", "search_text", "update_task_plan"]);
           return update(2, revisedRows, "verify");
         case 6: return update(3, revisedRows, null, "verify");
         case 7: return read("keyboard.txt");

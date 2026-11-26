@@ -297,6 +297,7 @@ export function nativeArtifactRevisionBearerRoute(path: string, method: string, 
 export const DESKTOP_APP_ORIGIN = "tomverse://desktop";
 export const DESKTOP_CHAT_CREATE = "/api/products/chat/conversations";
 export const DESKTOP_CHAT_TURN = "/api/chat";
+export const DESKTOP_DEEP_RESEARCH_STATUS = "/api/chat/deep-research/status";
 export const DESKTOP_CHAT_CONTEXT = "/api/chat/context";
 export const DESKTOP_REVIEW_CREATE = "/api/products/review/conversations";
 export const DESKTOP_REVIEW_ROUTING = "/api/review/route";
@@ -333,6 +334,10 @@ export function desktopReviewWriteEnabled() {
   return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED === "true";
 }
 
+export function desktopReviewAnalysisEnabled() {
+  return desktopReviewWriteEnabled() && process.env.TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED === "true";
+}
+
 export function desktopComposerToolsEnabled() {
   return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED === "true";
 }
@@ -341,11 +346,46 @@ export function desktopAttachmentEnabled() {
   return (desktopChatWriteEnabled() || desktopReviewWriteEnabled()) && process.env.TOMVERSE_DESKTOP_ATTACHMENTS_ENABLED === "true";
 }
 
+export function desktopDriveEnabled() {
+  return desktopAttachmentEnabled() && process.env.TOMVERSE_DESKTOP_GOOGLE_DRIVE_ENABLED === "true";
+}
+
+export function desktopDeepResearchEnabled() {
+  return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED === "true";
+}
+
+/**
+ * Desktop's in-app plan and payment screens. A display switch only: Desktop
+ * calls the same billing routes as the web through the account settings
+ * session, so it stays off unless that session is enabled too.
+ */
+export function desktopBillingEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_BILLING_ENABLED === "true";
+}
+
+/**
+ * Desktop's in-app connector management and Chat connector use. A display
+ * switch only: Desktop calls the same /api/mcp routes as the web through the
+ * account settings session, and the connector preview switch still decides
+ * whether those routes offer anything.
+ */
+export function desktopPluginsEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED === "true";
+}
+
 export function desktopWriteApiRoute(path: string, method: string): boolean {
+  if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && desktopChatWriteEnabled();
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
   if (desktopChatWriteEnabled() && desktopChatWriteRoute(path, method)) return true;
   if (!desktopReviewWriteEnabled()) return false;
+  if (desktopReviewAnalysisEnabled() && /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews$/.test(path)) {
+    return method === "GET" || method === "POST";
+  }
   if (path === DESKTOP_CHAT_CREATE || method === "DELETE") return false;
   return desktopChatWriteRoute(path, method) || (method === "POST" &&
     [DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_ROUTING, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_IMAGE_GENERATIONS].includes(path));

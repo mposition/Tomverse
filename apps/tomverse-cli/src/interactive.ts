@@ -42,9 +42,14 @@ export const renderApproval = (view: ApprovalView) => {
             lines.push(`${edit.action.toUpperCase()} ${safeLine(edit.path)}${notes ? ` (${notes})` : ""}`);
             lines.push(renderFileDiff(edit.path, edit.beforeText, edit.afterText));
         }
+    } else if (view.web) {
+        lines.push("── Approval needed: read a web page ──");
+        lines.push(`  site:    ${safeLine(view.web.host)}`, `  address: ${safeLine(view.web.url)}`);
+        lines.push("  A plain request for this address goes to that site: no cookies, no login, nothing from your folder. Its text is sent to the model as untrusted reference material.");
     } else if (view.command) {
         const plan = view.command;
-        lines.push("── Approval needed: run a command ──");
+        lines.push(plan.background ? "── Approval needed: run a command in the BACKGROUND ──" : "── Approval needed: run a command ──");
+        if (plan.background) lines.push("  It keeps running in the background after you approve, with no time limit, until the task ends or the model stops it.");
         if (plan.mode === "argv") lines.push(`  program: ${safeLine(plan.file)}`, `  argv:    ${safeLine(plan.display)}`);
         else {
             // One shown line per real line, so a newline (a second command) is never
@@ -55,7 +60,7 @@ export const renderApproval = (view: ApprovalView) => {
             for (const line of commandLines) lines.push(`    | ${safeText(line)}`);
         }
         lines.push(`  folder:  ${safeLine(plan.cwd)}`);
-        lines.push(`  timeout: ${Math.round(plan.timeoutMs / 1000)} s`);
+        lines.push(plan.background ? "  timeout: none (background)" : `  timeout: ${Math.round(plan.timeoutMs / 1000)} s`);
         lines.push(`  env:     ${plan.envNames.length} variables (${plan.envNames.join(", ")}); your Tomverse key is not passed`);
         lines.push("  It runs with your account's permissions and is not sandboxed: it can change files outside this folder and use the network.");
     }
@@ -64,6 +69,7 @@ export const renderApproval = (view: ApprovalView) => {
 
 /** What is done without asking, shown so the person still sees every action. */
 export const renderRemembered = (view: ApprovalView, rule: RememberedRule) => {
+    if (rule === "web_host") return safeText(`  · reading without asking (you allowed this site for this run): ${safeLine(view.web!.url)}`);
     if (rule === "file_edits") {
         const body = renderApproval(view).split("\n").slice(1).join("\n");
         return [`── Changing ${view.patch!.length} file(s) without asking: you allowed file edits for this run (/approvals clear to stop) ──`, body].join("\n");
@@ -73,6 +79,7 @@ export const renderRemembered = (view: ApprovalView, rule: RememberedRule) => {
 
 /** The question for one approval, with "always" only where it can be remembered. */
 export const approvalQuestion = (view: ApprovalView, canRemember: boolean) => {
+    if (view.web) return "Read this page? [y] yes  [a] yes, and read pages from this site without asking for the rest of this run  [N] no: ";
     if (view.patch) {
         return canRemember
             ? "Apply these changes? [y] yes  [a] yes, and allow file edits without asking for the rest of this run  [N] no: "

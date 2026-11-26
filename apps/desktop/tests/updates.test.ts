@@ -6,11 +6,15 @@ import { runInNewContext } from "node:vm";
 import { build } from "esbuild";
 import type { configureUpdates } from "../src/host/updates";
 
-for (const platform of ["darwin", "win32"] as const) test(`a downloaded update waits for active work on ${platform}`, async () => {
+for (const variant of ["darwin", "win32", "local-dev"] as const) test(variant === "local-dev"
+  ? "Local Dev delegates update checks and restarts to Windows App Installer"
+  : `a downloaded update waits for active work on ${variant}`, async () => {
+  const localDev = variant === "local-dev";
+  const platform = localDev ? "win32" : variant;
   const bundled = await build({
     entryPoints: [fileURLToPath(new URL("../src/host/updates.ts", import.meta.url))],
     bundle: true, write: false, platform: "node", format: "cjs",
-    define: { DESKTOP_UPDATE_ORIGIN: '"https://updates.example.test"' },
+    define: { DESKTOP_UPDATE_ORIGIN: '"https://updates.example.test"', DESKTOP_LOCAL_DEV_PACKAGE: String(localDev) },
     plugins: [{
       name: "electron-update-fixture",
       setup(plugin) {
@@ -62,8 +66,22 @@ for (const platform of ["darwin", "win32"] as const) test(`a downloaded update w
 
   let busy = true;
   const stages: string[] = [];
+  let detail: string | undefined;
   try {
-    const controls = bundleModule.exports.configureUpdates(() => busy, ({ stage }) => stages.push(stage));
+    const controls = bundleModule.exports.configureUpdates(() => busy, state => {
+      stages.push(state.stage);
+      detail = state.detail;
+    });
+    if (localDev) {
+      await controls.check();
+      busy = false;
+      controls.install();
+      assert.deepEqual(stages, ["unavailable"]);
+      assert.equal(detail, "updateWindowsInstaller");
+      assert.equal(feed, "");
+      assert.equal(installs, 0);
+      return;
+    }
     await controls.check();
     assert.equal(stages.at(-1), "failed", "native promise rejection makes the check retryable");
     nativeFailure = false;

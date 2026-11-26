@@ -1,0 +1,12 @@
+{
+  "id": "bf-cart-totals",
+  "title": "Cart totals are off by a few cents",
+  "category": "bugfix",
+  "prompt": "Customers report that checkout totals disagree with the rules in the README: discounted carts are a cent or two off, tax seems to be charged on the full price even when a discount applies, a fixed discount larger than the line value makes the total go down too far, and some discounted carts that should ship free do not (and the other way round). Find and fix the causes. Amounts are integer cents. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 900
+}

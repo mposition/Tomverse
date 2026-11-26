@@ -1,0 +1,12 @@
+{
+  "id": "rf-strategy-pricing",
+  "title": "Replace the tier switch with a strategy registry",
+  "category": "refactor",
+  "prompt": "`priceFor` in `src/pricing.js` is one long `switch` on the customer tier. Refactor it into a strategy registry without changing any result: create `src/strategies.js` exporting `registerStrategy(tier, fn)`, `getStrategy(tier)` and `listTiers()`. A strategy is `fn(subtotalCents)` returning `{ discount, shipping }` (both in cents). `getStrategy` throws `Error(\"unknown tier: <tier>\")` for a tier that is not registered, `registerStrategy` throws `Error(\"tier already registered: <tier>\")` for a tier that already is, and `listTiers()` lists the tiers in registration order. The four existing tiers (standard, silver, gold, staff) are registered when the module loads. After the refactor `priceFor` contains no tier names and works for tiers registered later by callers. Export the new functions from `src/index.js`. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

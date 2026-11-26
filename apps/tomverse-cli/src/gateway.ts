@@ -5,7 +5,8 @@ import type { Endpoint } from "./config.js";
 import { CLI_VERSION } from "./version.js";
 
 /**
- * The only network code in the CLI. Every request goes to the configured
+ * The network code for the Tomverse API (reading public web pages is src/web.ts,
+ * approved per site). Every request goes to the configured
  * endpoint's origin and below its API root; a redirect is never followed, so
  * the key cannot be carried to another address; and the AI SDK is given an
  * explicit provider instance with this base URL, key and fetch, so no

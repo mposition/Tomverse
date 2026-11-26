@@ -1,17 +1,20 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ArrowUp, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
+  ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
   Search, ShieldCheck, SlidersHorizontal, Sparkles, Square, SquareTerminal, Sun, X,
 } from "lucide-react";
 import "@tomverse/ui-tokens/tokens.css";
 import "@tomverse/ui-tokens/wordmark.css";
 import logo from "../../../../public/tomverse-logo.png";
+import { TomverseWordmark } from "../../../../components/chat/TomverseWordmark";
+import { usagePercent } from "../../../../components/chat/UsagePercentGauge";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { ACCOUNT_SETTINGS_TABS, isAccountSettingsTab, type AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
 import { isLanguage, type Language } from "../../../../lib/language";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopCliAccountCopy } from "../../../../locales/desktopCliAccount";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import { desktopCodeExecutionCopy } from "../../../../locales/desktopCodeExecution";
 import { desktopCodeContinuationCopy } from "../../../../locales/desktopCodeQuota";
 import { desktopControlsCopy } from "../../../../locales/desktopControls";
@@ -34,6 +37,7 @@ import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
+import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
 import { EventEntry, EventLogExport } from "./EventLog";
@@ -43,16 +47,18 @@ import { VerificationPanel } from "./VerificationPanel";
 import { TaskList } from "./TaskList";
 import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
-import { ChatConversationActions, ChatHistory, ChatHistorySearch, ChatWorkspace, chatTitle, useChatHistory } from "./ChatWorkspace";
+import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
-import { PluginWorkspace } from "./PluginWorkspace";
+import { ConnectorWorkspace } from "./ConnectorWorkspace";
+import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
 import { ReviewWorkspace, useReviewRun } from "./ReviewWorkspace";
 import { ImageHistoryList, ImageWorkspace, useImageWorkspace } from "./ImageWorkspace";
 import { useAttachmentDraft } from "./AttachmentDraft";
 import { HandoffDraft, useHandoffSelection } from "./WorkspaceHandoff";
 import { ProviderCliSettings } from "./ProviderCliSettings";
+import { openDocs, useWebViewState, WebViewer } from "./WebViewer";
 import { clearDesktopDrafts, readCodeDraft, writeDesktopDraft } from "./draft-store";
 import "./styles.css";
 
@@ -81,9 +87,6 @@ const statusLabels = {
   starting: "starting", running: "running", approval: "approval", stopping: "stopping", completed: "completed",
   clarification: "waiting", blocked: "waiting", stopped: "stopped", unknown: "unconfirmed", failed: "failed",
 } as const satisfies Record<Task["status"], keyof ShellCopy>;
-const effortLabels = {
-  default: "defaultEffort", low: "lowEffort", high: "highEffort",
-} as const satisfies Record<StartInput["effort"], keyof ShellCopy>;
 function readLanguage(): Language {
   const saved = localStorage.getItem(languagePreference);
   return isLanguage(saved) ? saved : "en";
@@ -122,9 +125,12 @@ function CodePlanAnalysis({ analysis, language }: {
   </li>;
 }
 
-function TaskConversation({ task, models, language, openSettings }: { task: Task; models: Model[]; language: Language; openSettings: () => void }) {
+function TaskConversation({ task, models, language, openSettings, engine, onRewound }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode; onRewound?: (text: string) => void }) {
   const copy = desktopShellCopy[language];
   const native = desktopNativeCopy[language];
+  // What happened to the last rewind or fork: kept here, because the message it was started from may be gone after a rewind.
+  const [turnNotice, setTurnNotice] = useState<{ key: string; text: string } | null>(null);
+  const turnKey = `${task.id}:${task.status}`;
   const continuation = task.continuation;
   const reverseContinuation = task.cliContinuation;
   const continuationCopy = desktopCodeContinuationCopy[language];
@@ -151,6 +157,7 @@ function TaskConversation({ task, models, language, openSettings }: { task: Task
           ? <EventEntry text={entry.notice ? native[entry.notice] : entry.text} />
           : entry.role === "assistant" ? <div data-handoff-content="code"><AnswerMessage text={entry.text} language={language} /></div> : <div>
             <div data-handoff-content="code">{entry.text}</div>
+            {entry.turn !== undefined && onRewound && <TurnMenu task={task} turn={entry.turn} language={language} onRewound={onRewound} notify={(text) => setTurnNotice(text ? { key: turnKey, text } : null)} />}
             {index === 0 && !!task.references?.length && <ul className="saved-attachments" aria-label={copy.savedReferences}>
               {task.references.map((reference) => <li key={reference.path}><CodeReferenceLabel reference={reference} copy={copy} /></li>)}
             </ul>}
@@ -172,6 +179,7 @@ function TaskConversation({ task, models, language, openSettings }: { task: Task
         <small className="pending-follow-up" role="status">{copy.queuedFollowUp}</small>
       </li>}
     </ol>
+    {turnNotice?.key === turnKey && <p className="turn-notice" role="status">{turnNotice.text}</p>}
     {task.status === "blocked" && task.quota && <CodeQuotaPanel quota={task.quota} language={language} openSettings={openSettings} />}
     {continued && <details className="code-continuation-details">
       <summary>{continuationCopy.details}</summary>
@@ -190,13 +198,14 @@ function TaskConversation({ task, models, language, openSettings }: { task: Task
       {!continued && apiUsage}
       {hasDiagnostics && task.id && ["completed", "blocked", "failed", "unknown", "stopped"].includes(task.status) && <EventLogExport language={language} />}
     </div>}
+    {engine}
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
       {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language].cliFixture.replace("{cli}", task.execution.cli)}</span>}
       {task.savedLocally === false && <span>{copy.sessionOnly}</span>}
-      {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", copy[effortLabels[task.effort]])}</span>}
-      {task.actual && <span>{copy.appliedEffort.replace("{effort}", copy[effortLabels[task.actual]])}</span>}
+      {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", effortLabel(language, task.effort))}</span>}
+      {task.actual && <span>{copy.appliedEffort.replace("{effort}", effortLabel(language, task.actual))}</span>}
     </footer>
     <AnswerBasis task={task} language={language} />
     <BlockedPanel key={task.id ?? "new"} task={task} language={language} />
@@ -208,6 +217,7 @@ function Desktop() {
   const [workspace, setWorkspace] = useState<Workspace>("code");
   const [openBrowserScope, setOpenBrowserScope] = useState<string | null>(null);
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
+  const webView = useWebViewState();
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
   const surface: Surface = settingsView ? "settings" : workspace;
   const canShowBrowser = surface === "code" && snapshot?.codeBrowserAvailable === true;
@@ -269,7 +279,8 @@ function Desktop() {
   const [historyOpen, setHistoryOpen] = useState(() => !matchMedia(compactHistoryQuery).matches);
   const [imagesOpen, setImagesOpen] = useState(false);
   const [reviewReference, setReviewReference] = useState("");
-  const [historyWidth, setHistoryWidth] = useState(252);
+  const [defaultHistoryWidth, setDefaultHistoryWidth] = useState(252);
+  const [chatHistoryWidth, setChatHistoryWidth] = useState(318);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -280,6 +291,11 @@ function Desktop() {
   const [codeReferences, setCodeReferences] = useState<CodeReference[]>([]);
   const [mode, setMode] = useState<StartInput["mode"]>("agent");
   const [effort, setEffort] = useState<StartInput["effort"]>("default");
+  const [engine, setEngine] = useState<CodeEnginePreference>(readCodeEnginePreference);
+  function changeEngine(value: CodeEnginePreference) {
+    setEngine(value);
+    writeCodeEnginePreference(value);
+  }
   const [modelId, setModelId] = useState("");
   const [notice, setNotice] = useState<ShellNotice | null>(null);
   const [handoffNotice, setHandoffNotice] = useState<HandoffNotice | null>(null);
@@ -463,7 +479,7 @@ function Desktop() {
     ? () => openSettings("imports") : undefined;
   const chatActive = workspace === "chat" && account?.stage === "connected";
   const nativeChat = !settingsView && chatActive;
-  const chat = useChatHistory(chatActive, "chat", accountDraft, language);
+  const chat = useChatHistory(chatActive, "chat", accountDraft, language, snapshot?.capabilities?.deepResearch);
   const reviewActive = workspace === "review" && account?.stage === "connected";
   const nativeReview = !settingsView && reviewActive;
   const codeAskLocation = useChatDraftLocation(JSON.stringify([codeDraft, snapshot?.draftNamespace, task?.id]));
@@ -500,13 +516,50 @@ function Desktop() {
     setImagesOpen(false);
   }
   const chatAttachments = useAttachmentDraft(chat.selected?.id ?? "new",
-    snapshot?.capabilities?.attachments === true && snapshot.capabilities.chatWrite, language);
+    snapshot?.capabilities?.attachments === true && snapshot.capabilities.chatWrite, language, snapshot?.capabilities?.googleDrive);
   const reviewAttachments = useAttachmentDraft(review.selected?.id ?? "new",
-    snapshot?.capabilities?.attachments === true && Boolean(snapshot.capabilities.review), language);
+    snapshot?.capabilities?.attachments === true && Boolean(snapshot.capabilities.review), language, snapshot?.capabilities?.googleDrive);
   const imageCapability = snapshot?.capabilities?.images ?? null;
   const imagesActive = imagesOpen && !!imageCapability && (chatActive || reviewActive);
   const nativeImages = !settingsView && imagesActive;
   const images = useImageWorkspace(imagesActive, language);
+  const chatRail = nativeChat && !nativeImages;
+  const textHistory = (nativeChat || nativeReview) && !nativeImages;
+  const historyWidth = textHistory ? chatHistoryWidth : defaultHistoryWidth;
+  const setHistoryWidth = textHistory ? setChatHistoryWidth : setDefaultHistoryWidth;
+  useEffect(() => {
+    function dismissMenus(event: globalThis.PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.chat-conversation-actions[open], details.model-menu[open]")) {
+        if (!menu.contains(target)) menu.open = false;
+      }
+    }
+    document.addEventListener("pointerdown", dismissMenus, true);
+    return () => document.removeEventListener("pointerdown", dismissMenus, true);
+  }, []);
+  const [usage, setUsage] = useState<{ account: string; value: number | null; plan?: "Free" | "Pro" | "Max" }>();
+  const usageLabel = sidebarCopy[language].currentUsage;
+  const usageValue = usage?.account === accountDraft ? usage?.value : null;
+  useEffect(() => {
+    if (!accountDraft || settingsView || chat.sending || reviewRun.running || images.sending) return;
+    let current = true;
+    const refresh = () => void window.desktop.accountSettings<"usage">({ action: "usage" }).then(({ usage, limits, plan }) => {
+      if (current) setUsage({ account: accountDraft, value: usage && limits ? usagePercent(usage.creditsMonth, limits.creditsMonth) : null,
+        plan: plan === "Free" || plan === "Pro" || plan === "Max" ? plan : undefined });
+    }, () => { if (current) setUsage((last) => ({ account: accountDraft, value: null, plan: last?.account === accountDraft ? last.plan : undefined })); });
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { current = false; window.removeEventListener("focus", refresh); };
+  }, [accountDraft, settingsView, chat.sending, reviewRun.running, images.sending]);
+  function openImageStarter(prompt: string) {
+    setImagesOpen(true);
+    if (!images.prompt && !images.sending) void images.open().then(() => images.setPrompt(prompt));
+  }
+  function openImageModel(modelId: string, prompt: string) {
+    setImagesOpen(true);
+    images.offerImages({ prompt, models: [modelId], quality: "medium", unavailable: [] });
+  }
   const handoff = snapshot?.handoff;
   const codeHandoff = handoff?.target === "code" ? handoff : undefined;
   const nativeTask = task?.nativeSession;
@@ -520,6 +573,9 @@ function Desktop() {
   const canFollowUp = followUpTarget && (snapshot?.busy ? task?.status === "running" :
     pausedByQuota ? task.canResumeAfterQuota : waitingForAnswer && task.canAnswerClarification) &&
     !task?.pendingFollowUp && !codeHandoff && !codeReferences.length;
+  const queueTarget = task?.id && snapshot?.busy && (task.status === "running" || task.status === "approval") &&
+    task.execution?.executionMode === "tomverse_api" && !codeHandoff && !codeReferences.length ? task.id : undefined;
+  const canQueue = !!queueTarget && online && !requesting && !!prompt.trim();
   const codeGit = codeMode === "agent" && codeRoute.executionMode === "tomverse_api" ? snapshot?.codeGitWorkspace : undefined;
   const workspaceKey = JSON.stringify([snapshot?.draftNamespace, codeGit?.kind === "git" ? codeGit.id : codeGit?.kind]);
   const workspaceChoice: CodeWorktreeChoice | undefined = !codeGit ? undefined
@@ -656,8 +712,26 @@ function Desktop() {
     menu?.querySelector("summary")?.focus();
   }
 
+  async function queueDraft() {
+    if (!queueTarget || !canQueue) return;
+    const submitted = prompt;
+    const namespace = previousNamespace.current;
+    setRequesting(true);
+    nearBottom.current = true;
+    await act(async () => {
+      if (!await window.desktop.queueMessage(queueTarget, { kind: "add", text: submitted })) throw new Error("The message was not queued.");
+      if (previousNamespace.current === namespace && composer.current?.value === submitted) changeDraft("");
+    });
+    setRequesting(false);
+  }
+
   async function send(event: FormEvent) {
     event.preventDefault();
+    // One instruction can wait to be sent into the running turn; a second one waits in the queue.
+    if (canQueue && task?.pendingFollowUp) {
+      await queueDraft();
+      return;
+    }
     if (!canSendCode) return;
     if (canFollowUp && followUpTarget) {
       const submitted = prompt;
@@ -680,6 +754,8 @@ function Desktop() {
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
+        ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
+        ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       setSaveHistory(true);
@@ -728,7 +804,7 @@ function Desktop() {
       </div>
       <div className="rail-footer">
         <button className="rail-tool rail-help" type="button" aria-label={controls.help} title={controls.help}
-          onClick={() => void act(() => window.desktop.openWeb("help"))}><CircleHelp size={19} aria-hidden="true" /><span>{controls.help}</span></button>
+          onClick={() => void act(() => openDocs("help"))}><CircleHelp size={19} aria-hidden="true" /><span>{controls.help}</span></button>
         <button ref={settingsTrigger} type="button" className="rail-tool rail-settings" aria-pressed={surface === "settings"} title={common.settings}
           onClick={() => settingsView ? closeSettings() : openSettings()}>
           <SlidersHorizontal size={19} aria-hidden="true" /><span>{common.settings}</span>
@@ -741,7 +817,7 @@ function Desktop() {
           </button>}
       </div>
     </nav>
-    {historyOpen && <aside id="desktop-history" className="history" aria-label={copy.history}
+    {historyOpen && <aside id="desktop-history" className={textHistory ? "history history--chat" : "history"} aria-label={copy.history}
       onBlur={(event) => {
         const next = event.relatedTarget;
         if (next && next !== historyToggle.current && !event.currentTarget.contains(next) && matchMedia(compactHistoryQuery).matches) {
@@ -756,22 +832,24 @@ function Desktop() {
         historyToggle.current?.focus();
       }}>
       <div className="history-header">
-        <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>{names[surface]}</h1>
+        <h1 ref={historyHeading} className={surface === "code" ? "tomverse-wordmark" : undefined} tabIndex={-1}>
+          {chatRail ? <><img src={logo} alt="" /><TomverseWordmark /></> : names[surface]}
+        </h1>
         {surface === "code" && <button ref={historySearchToggle} className="icon" type="button" aria-label={copy.searchHistory} aria-expanded={searchOpen}
           aria-controls={searchOpen ? "code-history-filter" : undefined}
           onClick={() => searchOpen ? closeCodeHistorySearch() : setSearchOpen(true)}><Search size={18} /></button>}
-        {nativeChat && !nativeImages && <ChatHistorySearch chat={chat} />}
-        {nativeReview && !nativeImages && <ChatHistorySearch chat={review} />}
+        {textHistory && <button className="icon" type="button" aria-label={controls.help} title={controls.help}
+          onClick={() => void act(() => openDocs("help"))}><CircleHelp size={17} aria-hidden="true" /></button>}
       </div>
       {nativeImages && <ImageHistoryList workspace={images} onClose={() => setImagesOpen(false)} />}
-      {nativeChat && !nativeImages && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading}
+      {chatRail && <ChatHistory key={`chat:${accountDraft}`} chat={chat} busy={chatAttachments.uploading} canModify={snapshot?.capabilities?.chatWrite === true}
         onImages={imageCapability ? () => setImagesOpen(true) : undefined} onImport={openImportedConversations} />}
       {nativeReview && !nativeImages && <ChatHistory key={`review:${accountDraft}`} chat={review} product="review" busy={reviewRun.running || reviewAttachments.uploading} />}
       {settingsView && <div className="settings-navigation">
         <nav aria-label="Tomverse">
           <span aria-hidden="true">Tomverse</span>
           {ACCOUNT_SETTINGS_TABS.map((tab) => <button key={tab} type="button" data-testid={`desktop-settings-${tab}`}
-            aria-current={tab === settingsView ? "page" : undefined}
+            aria-current={tab === settingsView || (importsOpen && tab === "data") ? "page" : undefined}
             onClick={() => openSettings(tab)}>{settingsCopy[tab]}</button>)}
         </nav>
         <nav aria-label="Tomverse Code">
@@ -863,6 +941,8 @@ function Desktop() {
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
             aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
             onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
+          {(nativeChat || nativeReview) && <button className="soft chat-header-usage" type="button" title={usageLabel}
+            onClick={() => openSettings("plan")}><ChartNoAxesColumnIncreasing size={15} aria-hidden="true" /> {usageLabel} {usageValue == null ? "—" : `${usageValue}%`}</button>}
           <button className="icon" aria-label={theme === "dark" ? copy.useLight : copy.useDark} type="button"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}</button>
           <button ref={historyToggle} className="icon" type="button" aria-label={historyOpen ? copy.hideHistory : copy.showHistory}
@@ -876,6 +956,7 @@ function Desktop() {
               : <button className="icon" type="button" aria-label={copy.desktopSettings} onClick={() => openSettings()}><Ellipsis size={18} /></button>}
         </div>
       </header>
+      {webView && <WebViewer state={webView} language={language} />}
       {handoffNotice && <p className="offline-notice" role="alert">
         {filesCopy[handoffNotice].replace("{limit}", MAX_HANDOFF_EXCERPT_CHARACTERS.toLocaleString(language))}
       </p>}
@@ -892,7 +973,8 @@ function Desktop() {
         }}>
           <div className="content">
             {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} /> : <section className="welcome">
+              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined}
+              engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
                 onClick={(event) => void openCodeProject(event.currentTarget)}>
@@ -904,6 +986,9 @@ function Desktop() {
         </div>
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
+          {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
+          {task && surface === "code" && <SubagentPanel task={task} language={language} />}
+          {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
           <div className="code-readiness">
             <span id="code-readiness" role="status">{needsCodeProject ? copy.chooseProjectToSend : codeStatus}</span>
@@ -975,7 +1060,7 @@ function Desktop() {
               {(composerModelId || !catalogUnavailable) && <details className="model-menu">
                 <summary aria-label={copy.modelEffort}><Sparkles size={15} />
                   <span>{composerModelName}
-                    {composerEffort !== "default" && ` · ${copy[effortLabels[composerEffort]]}`}</span><ChevronDown size={14} />
+                    {composerEffort !== "default" && ` · ${effortLabel(language, composerEffort)}`}</span><ChevronDown size={14} />
                 </summary>
                 <div className="model-popover">
                   <label>{copy.model}<select aria-label={copy.model} value={composerModelId} disabled={busy || pausedForInput || !models.length}
@@ -986,7 +1071,7 @@ function Desktop() {
                   </select></label>
                   <label>{copy.reasoningEffort}<select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
                     onChange={(event) => setEffort(event.currentTarget.value as StartInput["effort"])}>
-                    {Object.entries(effortLabels).map(([value, key]) => <option value={value} key={value}>{copy[key]}</option>)}
+                    {effortOptions(selectedModel?.efforts, composerEffort).map((value) => <option value={value} key={value}>{effortLabel(language, value)}</option>)}
                   </select></label>
                   {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== "smart-adaptive" && !selectedModel.efforts.includes(effort) &&
                     <small>{copy.effortFallback}</small>}
@@ -996,15 +1081,18 @@ function Desktop() {
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
               {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftLocation location={codeAskLocation} language={language}
                 draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} deviceLocation={false} />}
+              {queueTarget && <button className="soft" type="button" disabled={!canQueue} onClick={() => void queueDraft()}>
+                {desktopCodeEngineCopy[language].queueAdd}</button>}
               <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
-                disabled={!canSendCode}><ArrowUp size={19} /></button>
+                title={queueTarget ? desktopCodeEngineCopy[language].sendNow : undefined}
+                disabled={!canSendCode && !(canQueue && !!task?.pendingFollowUp)}><ArrowUp size={19} /></button>
               {snapshot?.busy && <button className="icon stop" type="button" aria-label={copy.stopCode} onClick={() => void act(() => window.desktop.stop())}><Square size={15} /></button>}
             </div>
           </form>
         </div>
       </div>{canShowBrowser && browserOpen && <CodeBrowser language={language}
         canShare={snapshot?.codeBrowserInspection === true && task?.status === "running"}
-        hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen} onClose={() => setOpenBrowserScope(null)} />}
+        hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}
       </div> : nativeImages ? <ImageWorkspace key={images.seedVersion} workspace={images} capability={imageCapability} />
         : nativeChat ? <>{reviewReference && <div className="review-reference" role="status">
           <p>{reviewCopy.referencePrompt}</p>
@@ -1017,18 +1105,21 @@ function Desktop() {
           <button className="soft" type="button" onClick={() => setReviewReference("")}>{reviewHandoff.cancel}</button>
         </div>}<ChatWorkspace chat={chat} chatWrite={snapshot?.capabilities?.chatWrite === true}
         autoOffered={snapshot?.capabilities?.autoSelection === true} preferredModelId={accountModels?.[0]}
+        plan={(usage?.account === accountDraft ? usage?.plan : undefined) ?? snapshot?.capabilities?.review?.plan ?? "Free"}
+        imageCapability={imageCapability} onModelImage={openImageModel}
+        deepResearch={snapshot?.capabilities?.deepResearch} composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
+        connectors={snapshot?.capabilities?.plugins === true} onManageConnectors={() => select("plugins")}
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
         deviceFixture={snapshot?.deviceFixtureAvailable === true}
         handoff={handoff?.target === "chat" ? handoff : undefined} /></> : nativeReview ? <ReviewWorkspace history={review}
           capability={snapshot?.capabilities?.review ?? null} run={reviewRun} preferredModelIds={accountModels}
+          analysisEnabled={snapshot?.capabilities?.reviewAnalysis} searchReadiness={snapshot?.capabilities?.searchReadiness}
+          imageCapability={imageCapability} onModelImage={openImageModel}
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.deviceFixtureAvailable === true}
-          onImageStarter={imageCapability ? (prompt) => {
-            setImagesOpen(true);
-            if (!images.prompt && !images.sending) void images.open().then(() => images.setPrompt(prompt));
-          } : undefined}
+          onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">
         {settingsView ? cliSettingsOpen && cliSettingsEnabled && snapshot
@@ -1036,7 +1127,8 @@ function Desktop() {
             provider={cliSettingsProvider}
             goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable} />
           : settingsView === "execution" ? <CodeExecutionSettings key={snapshot?.codeFallback?.scope ?? "disconnected"}
-            snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act} />
+            snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act}
+            engine={engine} changeEngine={changeEngine} />
           : <section className="execution-settings settings">
           <h2 id={settingsView === "account" ? "desktop-account" : undefined} tabIndex={-1}>{settingsTitle}</h2>
           {settingsView === "permissions" && <div className="desktop-setting-section">
@@ -1070,7 +1162,8 @@ function Desktop() {
             </>}
           </section>}
           {accountPanel && account?.stage === "connected" && <AccountSettings key={settingsAccount}
-            tab={accountPanel} language={language} onApply={applyAccountPreferences} onContinue={openImportedConversation} />}
+            tab={accountPanel} language={language} onApply={applyAccountPreferences} onContinue={openImportedConversation}
+            onOpenImports={() => openSettings("imports")} onBackToData={() => openSettings("data")} />}
           {account?.stage !== "connected" && settingsView === "preferences" &&
             <LocalPreferences language={language} theme={theme} setLanguage={next => void act(() => window.desktop.setLanguage(next))} setTheme={setTheme} />}
           {account?.stage !== "connected" && settingsView === "ai" && <LocalMemoryPrivacy language={language} openHistory={openCodeHistory} />}
@@ -1103,16 +1196,12 @@ function Desktop() {
             </button>
           </section>}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
-          ? <PluginWorkspace key={account.label} language={language} /> : <section className="welcome">
-          <h2>{names[surface]}</h2><p>{copy.webFallback}</p>
+          ? <ConnectorWorkspace key={account.label} language={language} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
+          <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>
+            : surface !== "chat" && <p>{copy.unavailable}</p>}
           {surface === "chat" && snapshot?.capabilities?.autoSelection && <p>{copy.autoOffered}</p>}
-          <div className="web-launcher"><button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb(surface))}>
-            <ExternalLink size={16} /> {copy.openSurface.replace("{surface}", () => names[surface])}</button>
-            {surface === "chat" && <details className="web-launcher-menu">
-              <summary className="soft" aria-label={copy.moreChatActions}><ChevronDown size={16} /></summary>
-              <button className="soft" type="button" onClick={() => void act(() => window.desktop.openWeb("image"))}>{chatCopy.openImagesWeb}</button>
-            </details>}
-          </div>
+          {(surface === "chat" || surface === "settings" || account?.stage !== "connected") &&
+            <button className="soft" type="button" onClick={() => openSettings("account")}>{controls.signIn}</button>}
         </section>}
         {alertText && <p className="notice" role="alert">{alertText}</p>}
       </div></div>}
@@ -1125,6 +1214,7 @@ function Approval() {
   const [answering, setAnswering] = useState(false);
   const language = request?.language ?? readLanguage();
   const copy = desktopControlsCopy[language];
+  const engineCopy = desktopCodeEngineCopy[language];
   useEffect(() => {
     applyTheme(localStorage.getItem("tomverse.theme") === "light" ? "light" : "dark");
     void window.approvalHost.approval().then(setRequest, () => setRequest(null));
@@ -1143,6 +1233,14 @@ function Approval() {
     <div className="approval-content">
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
       {request.explanation && <p>{request.explanation}</p>}
+      {request.web && <section aria-label={engineCopy.approvalWebHeading}>
+        <h2>{engineCopy.approvalWebHeading}</h2>
+        <dl>
+          <dt>{engineCopy.approvalWebHost}</dt><dd><code>{request.web.host}</code></dd>
+          <dt>{engineCopy.approvalWebAddress}</dt><dd><code>{request.web.url}</code></dd>
+        </dl>
+        <p role="note">{engineCopy.approvalWebNote}</p>
+      </section>}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>
         <pre>{request.command.display}</pre>
@@ -1151,8 +1249,9 @@ function Approval() {
           <dt>{copy.arguments}</dt><dd><pre>{JSON.stringify(request.command.args, null, 2)}</pre></dd>
           <dt>{copy.workingDirectory}</dt><dd><code>{request.command.cwd}</code></dd>
           <dt>{copy.environment}</dt><dd><code>{request.command.env.join(", ") || copy.none}</code></dd>
-          <dt>{copy.timeout}</dt><dd>{request.command.timeoutMs} ms</dd>
+          <dt>{copy.timeout}</dt><dd>{request.command.background ? engineCopy.approvalNoTimeout : `${request.command.timeoutMs} ms`}</dd>
         </dl>
+        {request.command.background && <p role="note"><strong>{engineCopy.approvalBackground}</strong></p>}
       </section>}
       {request.files?.map((file) => <section key={file.path} className="diff" aria-label={file.path}>
         <h2>{file.path} · {file.action === "create" || file.action === "update" || file.action === "delete" ? copy[file.action] : file.action}</h2>

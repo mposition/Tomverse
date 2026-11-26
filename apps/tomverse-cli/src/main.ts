@@ -11,12 +11,15 @@ import { userShell } from "./commands.js";
 import { ConfigError, endpointMoveNote, ensureHome, readConfig, resolveEndpoint, tomverseHome, writeConfig, type CliConfig } from "./config.js";
 import { createOutput, safeLine, type Output } from "./display.js";
 import { Gateway, GatewayError, type CatalogModel } from "./gateway.js";
+import { forkThrough, rewindDialog } from "./history-cli.js";
 import { askLine, isInteractive, terminalPrompter } from "./interactive.js";
+import { RewindError } from "./rewind.js";
 import { deleteSession, Journal, JournalError, listSessions, SessionLockedError, sessionsDir } from "./session.js";
 import { CLI_VERSION } from "./version.js";
 import { gitAvailable, normalizeRoot, PathError, ripgrepAvailable, same, Workspace } from "./workspace.js";
 
-import { DEFAULTS, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
+import { memoryFileFor, ProjectMemory } from "./memory.js";
+import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
 const HELP = `tomverse ${CLI_VERSION} -- a coding agent for your own folder, on your Tomverse API key.
@@ -28,19 +31,26 @@ Usage:
   tomverse models [--json]        Models this key can use, with credits per request
   tomverse usage [--session <id>] [--json]
   tomverse sessions list [--json] | sessions delete <session> [--yes]
+  tomverse sessions fork <session> [--turn <n>]
+                                  Copy the conversation (through turn n; all of it by default) into a new session; no file is touched.
+                                  Inside a session: /rewind takes files and conversation back to a turn, /fork [n] copies as above.
   tomverse diff [--session <id>]  Changes this CLI made (and only those)
   tomverse undo <change-id> [--session <id>]
   tomverse doctor [--json]        Checks Node, folder, key and API without a model request
   tomverse trust [folder]         Allow the CLI to work in a folder
-  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env> <value> | unset <key>
+  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory> <value> | unset <key>
+  tomverse memory [show|clear]    The notes the agent kept about this folder (clear asks first, or --yes)
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
-  --effort <level>          Reasoning effort for the next task: low, default, high
+  --effort <level>          Reasoning effort for the next task: default, or a level the model offers (\`tomverse models\`)
   --model <id>              Model from \`tomverse models\` (default: config model)
   --read-only               No file changes or commands: the model can only list, search and read
-  --max-requests <n>        Model requests per task (default ${DEFAULTS.maxRequests})
-  --timeout <minutes>       Active time per task (default ${DEFAULTS.timeoutMinutes})
+  --limits <profile>        Limits per task: standard (${DEFAULTS.maxRequests} requests, ${DEFAULTS.timeoutMinutes} minutes), extended (200 requests, 120 minutes),
+                            unlimited (no request or time limit; stops when you stop it, the API refuses, or the model is done)
+  --goal                    After the model says it is done, check the goal and keep going until it is verified
+  --max-requests <n>        Model requests per task (default ${DEFAULTS.maxRequests}); overrides --limits
+  --timeout <minutes>       Active time per task (default ${DEFAULTS.timeoutMinutes}); overrides --limits
   --command-timeout <s>     Default time limit per command (default ${DEFAULTS.commandTimeoutSeconds})
   --no-persist              Keep the session in memory only (no resume or undo after exit)
   --json                    JSON lines on stdout (exec, models, usage, sessions, doctor)
@@ -60,12 +70,15 @@ const parse = (argv: string[]) =>
             model: { type: "string" },
             effort: { type: "string" },
             "read-only": { type: "boolean" },
+            limits: { type: "string" },
+            goal: { type: "boolean" },
             "max-requests": { type: "string" },
             timeout: { type: "string" },
             "command-timeout": { type: "string" },
             "no-persist": { type: "boolean" },
             json: { type: "boolean" },
             session: { type: "string" },
+            turn: { type: "string" },
             yes: { type: "boolean" },
             help: { type: "boolean", short: "h" },
             version: { type: "boolean", short: "v" },
@@ -73,6 +86,12 @@ const parse = (argv: string[]) =>
     });
 
 type Flags = ReturnType<typeof parse>["values"];
+
+const parseLimitProfile = (value: string | undefined) => {
+    if (value === undefined) return undefined;
+    if (!isLimitProfile(value)) throw new UsageError(`--limits must be one of: ${LIMIT_PROFILES.join(", ")}.`);
+    return value;
+};
 
 const positiveInt = (value: string | undefined, name: string, fallback: number) => {
     if (value === undefined) return fallback;
@@ -83,7 +102,7 @@ const positiveInt = (value: string | undefined, name: string, fallback: number) 
 
 const parseEffort = (value: string | undefined): Effort => {
     if (value === undefined) return "default";
-    if (!isEffort(value)) throw new UsageError("Effort must be low, default, or high.");
+    if (!isEffort(value)) throw new UsageError("Effort must be default or a level the model offers (see `tomverse models`).");
     return value;
 };
 
@@ -285,6 +304,18 @@ const sessions = async (ctx: Context, args: string[]) => {
         ctx.output.info(`Deleted ${target}.`);
         return EXIT_CODES.success;
     }
+    if (sub === "fork") {
+        if (!id) throw new UsageError("sessions fork needs a session id.");
+        const source = Journal.open(home, id);
+        try {
+            const { id: forked, turns } = forkThrough(home, source, ctx.flags.turn);
+            ctx.output.event({ type: "session_forked", session_id: forked, from: id, turns });
+            ctx.output.info(`Forked ${id} (${turns} turn(s)) into ${forked}. No file was touched. Continue it with \`tomverse resume ${forked}\`.`);
+        } finally {
+            source.release();
+        }
+        return EXIT_CODES.success;
+    }
     throw new UsageError(`Unknown sessions command '${sub}'.`);
 };
 
@@ -366,13 +397,16 @@ const configCommand = async (ctx: Context, args: string[]) => {
             config.endpoint = value;
         } else if (key === "model") config.model = value;
         else if (key === "allow-insecure-localhost") config.allowInsecureLocalhost = value === "true";
-        else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
+        else if (key === "memory") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("memory must be on or off.");
+            config.memory = value === "true" || value === "on";
+        } else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
         else throw new UsageError(`Unknown config key '${key}'.`);
         writeConfig(config);
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -414,6 +448,42 @@ const pickModel = async (ctx: Context, catalog: CatalogModel[], prompter: Prompt
 };
 
 const exitFor = (outcome: Outcome) => EXIT_CODES[outcome];
+
+/** The notes kept about a folder, in the CLI's own home next to the sessions. */
+const projectMemory = (ctx: Context, root: string) => new ProjectMemory(memoryFileFor(join(tomverseHome(), "memory"), root), root);
+
+/** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, and project memory unless it is turned off. */
+const engineExtras = (ctx: Context, root: string) => ({
+    web: {},
+    backgroundCommands: true,
+    images: true,
+    subagents: true,
+    nestedInstructions: true,
+    ...(ctx.config.memory === false ? {} : { memory: projectMemory(ctx, root) }),
+});
+
+const memoryCommand = async (ctx: Context, args: string[]) => {
+    const [sub] = args;
+    const root = normalizeRoot(ctx.flags.cwd ?? process.cwd());
+    const memory = projectMemory(ctx, root);
+    if (sub === "show" || sub === undefined) {
+        const entries = memory.list();
+        const lines = entries.length ? entries.map((entry) => `${entry.id}  ${safeLine(entry.text)}`) : ["Nothing is remembered for this folder."];
+        if (ctx.config.memory === false) lines.push("Memory is off (tomverse config set memory true turns it on); nothing is read or written.");
+        process.stdout.write(`${lines.join("\n")}\n`);
+        return EXIT_CODES.success;
+    }
+    if (sub === "clear") {
+        if (!ctx.flags.yes) {
+            if (!isInteractive()) throw new UsageError("Deleting the notes needs confirmation: run in a terminal or add --yes.");
+            if (!(await terminalPrompter().confirm(`Delete everything remembered for ${root}?`))) return EXIT_CODES.cancelled;
+        }
+        memory.clear();
+        ctx.output.info("Deleted the notes kept for this folder.");
+        return EXIT_CODES.success;
+    }
+    throw new UsageError(`Unknown memory command '${sub}'.`);
+};
 
 const installSigint = (runner: Runner, output: Output) => {
     // A second Ctrl+C within a few seconds of the first quits; a later one is a
@@ -465,15 +535,18 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     }
     const journal = createSession(home, {
         root, endpoint, keyPrefix: keyPrefix(key), readOnly: Boolean(ctx.flags["read-only"]), model,
-        limits: {
-            maxRequests: positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests),
-            timeoutMs: positiveInt(ctx.flags.timeout, "timeout", DEFAULTS.timeoutMinutes) * 60_000,
+        limits: resolveLimits(parseLimitProfile(ctx.flags.limits), {
+            ...(ctx.flags["max-requests"] !== undefined ? { maxRequests: positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests) } : {}),
+            ...(ctx.flags.timeout !== undefined ? { timeoutMs: positiveInt(ctx.flags.timeout, "timeout", DEFAULTS.timeoutMinutes) * 60_000 } : {}),
             commandTimeoutMs: positiveInt(ctx.flags["command-timeout"], "command-timeout", DEFAULTS.commandTimeoutSeconds) * 1000,
-        },
+        }),
+        ...(ctx.flags.goal ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
     });
+    if (journal.state.limits.profile === "unlimited") ctx.output.info("Limits: unlimited. A task stops when you stop it, the API refuses a request, or the model is done.");
+    if (journal.state.goal) ctx.output.info(`Goal mode: after the model is done, the goal is checked and the task continues until it is verified (at most ${journal.state.goal.maxContinuations} automatic continuations in a row).`);
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");
     const workspace = new Workspace(root);
-    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace) });
+    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
     const removeSigint = installSigint(runner, ctx.output);
@@ -501,7 +574,7 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         const text = line.trim();
         if (!text) continue;
         if (text === "/help") {
-            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
+            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /rewind  take files and conversation back to a turn   /fork [turn]  copy the conversation into a new session   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
             continue;
         }
         if (text === "/diff") {
@@ -546,6 +619,21 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
             await runner.maybeCompact(true);
             continue;
         }
+        if (text === "/rewind") {
+            await rewindDialog(runner.journal, { ask: askLine, say: (line) => ctx.output.info(line) }, () => runner.historyChanged());
+            continue;
+        }
+        if (text === "/fork" || text.startsWith("/fork ")) {
+            try {
+                if (!runner.journal.persisted) throw new RewindError("A session kept in memory only (--no-persist) cannot be forked.");
+                const { id: forked, turns } = forkThrough(tomverseHome(), runner.journal, text.slice("/fork".length).trim() || undefined);
+                ctx.output.info(`Forked this session (${turns} turn(s)) into ${forked}. No file was touched, and this session goes on as it was. Continue the copy with \`tomverse resume ${forked}\`.`);
+            } catch (error) {
+                if (!(error instanceof RewindError)) throw error;
+                ctx.output.info(error.message);
+            }
+            continue;
+        }
         try {
             runner.assertEffort(effort);
         } catch (error) {
@@ -562,6 +650,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
     const [id, ...rest] = args;
     if (!id) throw new UsageError("resume needs a session id (see `tomverse sessions list`).");
     if (ctx.flags.effort !== undefined) throw new UsageError("Resume keeps the saved task effort. Use /effort for the next task.");
+    if (ctx.flags.limits !== undefined || ctx.flags.goal) throw new UsageError("Resume keeps the saved limits and goal mode. Use --max-requests to allow more requests for the saved task.");
     const prompter = interactive ? terminalPrompter() : null;
     const journal = Journal.open(tomverseHome(), id);
     try {
@@ -580,7 +669,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) task.allowance = Math.max(task.allowance, task.requests + positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests));
         }
         const workspace = new Workspace(root);
-        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace) });
+        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);
         for (const note of notes) ctx.output.info(note);
@@ -671,6 +760,8 @@ export const main = async (argv: string[]): Promise<number> => {
                 return await trust(ctx, args);
             case "config":
                 return await configCommand(ctx, args);
+            case "memory":
+                return await memoryCommand(ctx, args);
             case "resume":
                 return await resume(ctx, args, !flags.json && isInteractive());
             case "exec": {
@@ -697,6 +788,7 @@ export const main = async (argv: string[]): Promise<number> => {
             error instanceof JournalError ||
             error instanceof SessionLockedError ||
             error instanceof UndoError ||
+            error instanceof RewindError ||
             error instanceof GatewayError;
         const message = error instanceof GatewayError ? describeApiError(error) : (error as Error).message;
         output.event({ type: "error", code: error instanceof GatewayError ? (error.extra.code ?? error.kind) : (error as Error).constructor.name, message });

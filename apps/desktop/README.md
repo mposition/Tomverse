@@ -78,6 +78,25 @@ Record distribution signing, the public update feed, and any unverified platform
 
 ## Update channel
 
+### Windows Local Dev
+
+**Tomverse Desktop Local Dev** is a Windows x64 test package that connects to `dev.tomverse.app`. It has its own Windows package identity and app profile. Windows App Installer checks its local `.appinstaller` file at launch. Keep the channel directory at the path registered during installation.
+
+From the repository root on the Windows packaging PC, use PowerShell 7 with Node.js and the Windows SDK x64 MakeAppx and SignTool installed:
+
+```powershell
+$channel = 'H:/Project/tv-desktop-agent-worktrees/local-dev-updates'
+./apps/desktop/scripts/package-local-dev-update.ps1 -Version 0.1.130 -ChannelDirectory $channel
+```
+
+The script signs the new MSIX with the Local Dev key in the Windows current-user certificate store and updates the local channel only after checking the signature, package identity, and version. The private key stays non-exportable in the certificate store. Use `-BuildOnly` to prepare a package before updating the channel.
+
+When creating a channel, the first run exports the public `Tomverse-Desktop-Local-Dev.cer` and stops if it is untrusted. Import that certificate into **Local Computer → Trusted People** with an administrator account, then rerun the build. Open `Tomverse-Desktop-Local-Dev.appinstaller` once on the test PC to enroll the app. After publishing a higher version, close and reopen **Tomverse Desktop Local Dev** to pick up the update.
+
+The Dev server advertises two additional capabilities after their server switches are enabled. `TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED` enables Chat's conversation-scoped web search, assistant and memory controls alongside Desktop Chat writes. `TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED` adds the answer-analysis dialog for two or more saved text answers alongside Desktop Review writes. The analysis uses the existing `GET` and `POST /api/conversations/{conversationId}/comparison-reviews` and keeps its server-side ownership and credit checks.
+
+### Release builds
+
 Release builds can embed a deployment-controlled HTTPS origin through `TOMVERSE_DESKTOP_UPDATE_ORIGIN` at build time. The feed endpoint is `/desktop/updates/{platform}/{arch}/{currentVersion}`. The packaged Windows path requires a signed, directly installed MSIX. Windows App Installer manages updates for packages installed through an App Installer manifest. The macOS path uses Electron’s native updater with a signed app and JSON feed. Linux updates follow the supported distribution package path.
 
 For Windows x64, the stable feed returns HTTP 204 when no update is available. Return an update for a newer numeric `x.y.z` app version with the fields below. Use the exact byte count and lowercase SHA-256 of the final signed MSIX at a direct HTTPS URL on the feed origin. The MSIX uses the corresponding `x.y.z.0` package version. Windows verifies the downloaded signature, and the app checks the signer and package identity against the installed package before staging it with Electron.

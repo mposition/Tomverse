@@ -3,12 +3,16 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled } from "@/lib/nativeBearerGate";
+import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
+import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopComposerToolsEnabled, desktopReviewWriteEnabled } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled, desktopReviewAnalysisEnabled, desktopComposerToolsEnabled } from "@/lib/desktopReadApiContract";
 import {
   getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
-import { CHAT_STARTER_MAX_VISIBLE, selectVisibleStarterCards } from "@/lib/chatStarterAvailability";
+import { CHAT_STARTER_MAX_VISIBLE, parseStarterOrderSeed, selectVisibleStarterCards } from "@/lib/chatStarterAvailability";
 import { chatStarterCatalogFor } from "@/lib/chatStarterCatalog";
 import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
@@ -36,12 +40,12 @@ import { promptRefinerChatExecutionRelease } from
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" };
 
-async function desktopChatCapabilities(userId: string) {
+async function desktopChatCapabilities(userId: string, orderSeed: number | null) {
   const desktopWrite = desktopChatWriteEnabled();
   const desktopReview = desktopReviewWriteEnabled();
   const attachmentAccess = desktopAttachmentEnabled();
   const [startersEnabled, importEnabled, continuationEnabled, plan, attachments] = await Promise.all([
-    desktopWrite ? isChatStarterEnabled().catch(() => false) : false,
+    isChatStarterEnabled().catch(() => false),
     isExternalImportEnabled().catch(() => false),
     isExternalContinuationEnabledCached().catch(() => false),
     desktopWrite || desktopReview || attachmentAccess ? getUserBillingPlan(userId).catch(() => null) : null,
@@ -49,19 +53,6 @@ async function desktopChatCapabilities(userId: string) {
   ]);
   const reviewPlan = desktopReview ? plan : null;
   const desktopAttachments = attachments && plan?.allowAttachments === true;
-  const desktopSearchReadiness = resolveWebSearchBackendReadiness();
-  const modelCapabilities = new Set(resolveChatStarterCapabilities({
-    webSearchBackendReadiness: desktopSearchReadiness,
-  }).filter((capability) => capability === "generated-artifact" ||
-    (desktopAttachments && (capability === "document-attachment" || capability === "image-input"))));
-  const starters = startersEnabled ? selectVisibleStarterCards({
-    signedIn: true, plan: plan?.tier ?? null, enabledFlags: new Set(), knownFlags: new Set(), modelCapabilities,
-  }, chatStarterCatalogFor("chat"), CHAT_STARTER_MAX_VISIBLE).flatMap(({ entry, availability }) => {
-    // Older clients use the fallback copy; current clients localize the ID using the selected device language.
-    const cards = workspaceWelcomeCopy.en.starter.cards;
-    const copy = cards[entry.labelKey.split(".")[2] as keyof typeof cards];
-    return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];
-  }) : [];
   const imageEnabled = reviewPlan && planAllowsFeature(reviewPlan, "imageGeneration") &&
     await isImageGenerationEnabledCached().catch(() => false);
   const catalog = imageEnabled ? await refreshImageModelCatalog().catch(() => []) : [];
@@ -69,8 +60,26 @@ async function desktopChatCapabilities(userId: string) {
     id: model.id, name: model.name, provider: imageModelOwner(model), pricingVersion: model.pricingVersion,
     prices: model.prices.map(({ quality, size, credits }) => ({ quality, size, credits })),
   }));
+  const modelCapabilities = new Set(resolveChatStarterCapabilities({
+    webSearchBackendReadiness: resolveWebSearchBackendReadiness(),
+  }).filter((capability) => (desktopWrite && capability === "generated-artifact") ||
+    (desktopAttachments && (capability === "document-attachment" || capability === "image-input"))));
+  const starters = startersEnabled && (desktopWrite || orderSeed !== null) ? selectVisibleStarterCards({
+    signedIn: true, plan: plan?.tier ?? null, enabledFlags: new Set(),
+    knownFlags: new Set(), modelCapabilities,
+  }, chatStarterCatalogFor("chat"), CHAT_STARTER_MAX_VISIBLE, orderSeed).flatMap(({ entry, availability }) => {
+    const cards = workspaceWelcomeCopy.en.starter.cards;
+    const copy = cards[entry.labelKey.split(".")[2] as keyof typeof cards];
+    return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];
+  }) : [];
   return { desktopWrite, desktopImport: importEnabled && continuationEnabled, desktopStarters: starters,
-    desktopAttachments, desktopComposerTools: desktopComposerToolsEnabled(), desktopSearchReadiness,
+    desktopReviewAnalysis: desktopReviewAnalysisEnabled(), desktopComposerTools: desktopComposerToolsEnabled(),
+    desktopSearchReadiness: resolveWebSearchBackendReadiness(),
+    desktopAttachments,
+    desktopGoogleDrive: desktopAttachments && desktopDriveEnabled() && Boolean(readGooglePickerConfig()),
+    desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
+    desktopBilling: desktopBillingEnabled(),
+    desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };
@@ -151,7 +160,9 @@ export async function GET(request: Request) {
   try {
     const [availability, desktop] = await Promise.all([
       autoAvailabilityFor(session.user.id),
-      request.headers.get("origin") === DESKTOP_APP_ORIGIN ? desktopChatCapabilities(session.user.id) : null,
+      request.headers.get("origin") === DESKTOP_APP_ORIGIN
+        ? desktopChatCapabilities(session.user.id, parseStarterOrderSeed(new URL(request.url).searchParams.get("starterOrder")))
+        : null,
     ]);
     const voice = voiceConversationConfig(process.env);
     return NextResponse.json(

@@ -1,0 +1,12 @@
+{
+  "id": "ft-retry-policy",
+  "title": "Add backoff, jitter and abort to the retry helper",
+  "category": "feature",
+  "prompt": "`retry(fn, options)` in this project retries a failing async function with a constant delay. Extend it as described in README.md: exponential backoff with a cap, optional jitter with an injectable random source, a `shouldRetry` predicate, an `onRetry` hook, and cancellation through an AbortSignal. Existing constant-delay behaviour (when none of the new options is given) must stay the same. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}
