@@ -358,6 +358,11 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
         // A subcommand with subcommands of its own, and a flag that sends what was built.
         "docker compose publish registry/app", "docker compose -f x.yml publish app", "docker compose alpha publish", "docker-compose push",
         "docker build --push -t repo/app .", "docker buildx build -t repo/app .",
+        // A build can publish through its output, and a client pointed at another daemon sends it the build context.
+        "docker build --output type=registry .", "docker build -t app .", "docker -H tcp://example.com:2375 ps", "docker --host prod ps", "docker --context prod ps",
+        "DOCKER_HOST=prod docker ps", "docker compose build",
+        // A registry call that sends what the project depends on.
+        "npm audit", "pnpm audit", "yarn audit",
         // A line continued over a line break, and a new name for a command.
         "gi\\\nt push", "git pu\\\nsh origin", "alias g=git; g push", "function g { git @args }; g push", "Set-Alias g git; g push", "g() { git \"$@\"; }; g push",
         ". ./deploy-env.sh",
@@ -383,8 +388,8 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
     // Ordinary lines with variables, quotes and paths are not caught: a variable after a local subcommand is only its argument.
     const plain = [
         '$env:CI = "1"; npm test', "npm run build -- --out $OUT", 'git commit -m "$message"', 'node -e "console.log(1)"', String.raw`dir C:\Users\me\project`,
-        'echo "push"', "CI=1 npm test", "git status", "docker build -t $TAG .", "git -C sub status", "git --no-pager log -3", "npm --prefix app run build",
-        "docker compose up -d", "docker compose -f x.yml build", "docker-compose logs web",
+        'echo "push"', "CI=1 npm test", "git status", "docker run --rm -e TAG=$TAG app", "git -C sub status", "git --no-pager log -3", "npm --prefix app run build",
+        "docker compose up -d", "docker compose -f x.yml ps", "docker-compose logs web", "docker ps",
     ];
     for (const line of plain) assert.equal(egress(line), undefined, line);
 });

@@ -283,7 +283,7 @@ const EGRESS_COMMANDS: readonly (readonly string[])[] = [
     ["docker", "publish"], ["docker", "--push"], ["podman", "--push"], ["docker-compose", "push"], ["docker-compose", "publish"], ["docker-compose", "--push"],
     ["dotnet", "nuget", "push"], ["pub", "publish"], ["flutter", "pub", "publish"],
 ];
-const URL_LITERAL = /(?:\b(?:https?|ftp|sftp|ssh|git|wss?):\/\/|\bgit@[\w.-]+:)/i;
+const URL_LITERAL = /(?:\b(?:https?|ftp|sftp|ssh|git|wss?|tcp|udp):\/\/|\bgit@[\w.-]+:)/i;
 
 /**
  * Whether the words of `command` appear in `tokens` in that order, with anything in between: options may sit between a
@@ -310,6 +310,8 @@ const egressReason = (subject: Extract<Subject, { kind: "command" }>) => {
         }
     }
     if (URL_LITERAL.test(subject.text)) return "It names a network address, so it may send something outside this computer.";
+    // A docker client pointed at another daemon sends it the build context and everything else it is asked to do.
+    if (/DOCKER_(?:HOST|CONTEXT)/i.test(subject.text)) return "It points docker at another daemon, so what it is given may leave this computer.";
     return unreadableReason(subject);
 };
 
@@ -330,16 +332,16 @@ const ENCODED_COMMAND = /(?:^|\s)[-/](?:e|ec|enc|encodedcommand)(?:\s|$)/i;
 const LOCAL_SUBCOMMANDS: Record<string, readonly string[]> = {
     git: ["status", "diff", "log", "show", "add", "commit", "checkout", "switch", "branch", "merge", "rebase", "stash", "restore", "reset", "tag", "mv", "rm",
         "blame", "grep", "clean", "describe", "init", "worktree", "apply", "cherry-pick", "revert", "rev-parse", "ls-files", "version", "help"],
-    npm: ["run", "run-script", "test", "t", "install", "i", "ci", "start", "build", "exec", "x", "ls", "list", "outdated", "audit", "why", "rebuild", "update"],
-    pnpm: ["run", "test", "install", "i", "add", "remove", "start", "build", "exec", "dlx", "ls", "list", "outdated", "audit", "why", "rebuild", "update"],
-    yarn: ["run", "test", "install", "add", "remove", "start", "build", "exec", "dlx", "list", "outdated", "audit", "why", "rebuild", "up"],
+    npm: ["run", "run-script", "test", "t", "install", "i", "ci", "start", "build", "exec", "x", "ls", "list", "outdated", "why", "rebuild", "update"],
+    pnpm: ["run", "test", "install", "i", "add", "remove", "start", "build", "exec", "dlx", "ls", "list", "outdated", "why", "rebuild", "update"],
+    yarn: ["run", "test", "install", "add", "remove", "start", "build", "exec", "dlx", "list", "outdated", "why", "rebuild", "up"],
     bun: ["run", "test", "install", "i", "add", "remove", "build", "x"],
     cargo: ["build", "test", "check", "run", "fmt", "clippy", "bench", "doc", "clean", "add", "update", "tree"],
-    docker: ["build", "run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
+    docker: ["run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
     // `docker compose` has subcommands of its own, some of which publish; it is read as a program in its own right.
-    "docker compose": ["up", "down", "build", "ps", "logs", "exec", "run", "start", "stop", "restart", "config", "top", "images", "kill", "rm", "create", "pause", "unpause", "ls", "version"],
-    "docker-compose": ["up", "down", "build", "ps", "logs", "exec", "run", "start", "stop", "restart", "config", "top", "images", "kill", "rm", "create", "pause", "unpause", "ls", "version"],
-    podman: ["build", "run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
+    "docker compose": ["up", "down", "ps", "logs", "exec", "run", "start", "stop", "restart", "config", "top", "images", "kill", "rm", "create", "pause", "unpause", "ls", "version"],
+    "docker-compose": ["up", "down", "ps", "logs", "exec", "run", "start", "stop", "restart", "config", "top", "images", "kill", "rm", "create", "pause", "unpause", "ls", "version"],
+    podman: ["run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
     gem: ["install", "list", "build"],
     poetry: ["install", "run", "add", "build", "lock", "update", "show"],
     dotnet: ["build", "test", "run", "restore", "clean", "format", "add", "new"],
@@ -360,7 +362,7 @@ const VALUE_OPTIONS: Record<string, readonly string[]> = {
     npm: ["--prefix", "-w", "--workspace"],
     pnpm: ["-C", "--dir", "-F", "--filter"],
     yarn: ["--cwd"],
-    docker: ["--context", "--config", "-H", "--host", "-l", "--log-level"],
+    docker: ["--config", "-l", "--log-level"],
     "docker compose": ["-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory"],
     "docker-compose": ["-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory"],
     podman: ["--root", "--runroot", "--log-level"],

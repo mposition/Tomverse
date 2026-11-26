@@ -214,6 +214,17 @@ test("a plugin's hook and MCP server do not run until approved, are approved for
     assert.notEqual(load().hooks[0]!.hash, read, "same size and time, other bytes");
     assert.equal(hookGate(trust)(load().hooks[0]!), false);
 
+    // A folder too deep to be read whole cannot be approved: the plugin stays unapproved, whatever is approved while it is there.
+    const deep = join(installedDir(w.home), "demo", ...Array.from({ length: 20 }, (_, level) => `d${level}`));
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, "late.mjs"), "// added after the install\n");
+    const unread = load().hooks[0]!;
+    assert.notEqual(unread.hash, load().hooks[0]!.hash, "no stable digest while part of the plugin is not read");
+    trust.approveHook(unread);
+    assert.equal(hookGate(trust)(load().hooks[0]!), false);
+    assert.equal(listInstalledPlugins(w.home)[0]!.modified, true);
+    rmSync(join(installedDir(w.home), "demo", "d0"), { recursive: true, force: true });
+
     // The approval is for these exact files: a script changed after the approval asks again, though the definition is the same.
     write(join(installedDir(w.home), "demo"), "scripts/mark.mjs", "// swapped\n");
     const [again] = load().hooks;

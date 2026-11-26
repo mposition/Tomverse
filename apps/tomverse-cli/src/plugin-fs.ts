@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, copyFileSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 
@@ -101,16 +101,19 @@ const hashFile = (path: string, hash: ReturnType<typeof createHash>) => {
 };
 
 /** Every file of a folder as sorted relative paths with sizes; links are not followed (an installed folder has none). */
-const listFiles = (dir: string): Array<{ rel: string; path: string; size: number; mtimeMs: number }> => {
-    const out: Array<{ rel: string; path: string; size: number; mtimeMs: number }> = [];
+type FileListing = Array<{ rel: string; path: string; size: number }> & { unread?: boolean };
+
+const listFiles = (dir: string): FileListing => {
+    const out: FileListing = [];
     const walk = (from: string, depth: number) => {
-        if (depth > PLUGIN_LIMITS.depth + 2) return;
+        // A folder deeper than this is not walked, and the listing says so rather than leaving it out silently.
+        if (depth > PLUGIN_LIMITS.depth + 2) { out.unread = true; return; }
         for (const entry of readDirectory(from)) {
             const path = join(from, entry.name);
             const stat = lstatSync(path);
             if (stat.isDirectory()) walk(path, depth + 1);
-            else if (stat.isFile()) out.push({ rel: posix(relative(dir, path)), path, size: stat.size, mtimeMs: stat.mtimeMs });
-            else out.push({ rel: `${posix(relative(dir, path))}\u0000other`, path, size: -1, mtimeMs: stat.mtimeMs });
+            else if (stat.isFile()) out.push({ rel: posix(relative(dir, path)), path, size: stat.size });
+            else out.unread = true;
         }
     };
     walk(dir, 0);
@@ -124,9 +127,15 @@ const listFiles = (dir: string): Array<{ rel: string; path: string; size: number
  */
 export const treeDigest = (dir: string): string => {
     const hash = createHash("sha256");
-    for (const file of listFiles(dir)) {
+    const listing = listFiles(dir);
+    // What cannot be read whole cannot be approved: folders below the depth this walk stops at, and links or special
+    // files, whose content lives elsewhere and can change without a byte here changing. An installed plugin has neither
+    // (the copy refuses them), so they were added later. The digest is then different on every call, which leaves the
+    // plugin's hooks and servers unapproved and shows the plugin as modified.
+    if (listing.unread) return `unread-${randomUUID()}`;
+    for (const file of listing) {
         hash.update(`${file.rel}\u0000${file.size}\n`);
-        if (file.size >= 0) hashFile(file.path, hash);
+        hashFile(file.path, hash);
     }
     return hash.digest("hex");
 };
