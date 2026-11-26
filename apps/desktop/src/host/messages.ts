@@ -1,6 +1,7 @@
 import type { ApprovalRequest, Change, CodeRewindMode, CodeRewindPlan, CompactHistoryResult, ChangeInspection, CodeNativeAssignment, CommandInspection, Decision, DeleteHistoryResult, Model, QueueOperation, RecoveryResult, StartInput, Task, UndoChangeResult } from "../contract";
 import type { WorkspaceReference } from "../../../tomverse-cli/src/runtime";
 import type { BrowserAgentReply, BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
+import type { ComputerAgentReply, ComputerAgentRequest } from "../../../tomverse-cli/src/computer-tools";
 import type { ProjectRoot } from "./project-root";
 import type { HistoryScope } from "./history-scope";
 import type { CodeExecutionMode, NativeFixtureProvider } from "../code-execution";
@@ -25,20 +26,21 @@ export type WorkerCommand =
   | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
   | { type: "catalog"; requestId: string; connection: Connection }
   | { type: "start"; runId: string; project: ProjectRoot; sourceProject?: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
-    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; terminalRead?: boolean;
+    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; computerUse?: boolean; terminalRead?: boolean;
     continuation?: CodeContinuation & { taskId: string; sourceHome: string; sourceProvider: "openai" | "anthropic" } }
   | (NativeFixtureTask & { type: "start-codex-fixture"; clientVersion: string;
     apiSource?: CodeCliContinuation & { scope: HistoryScope; connection: Connection } })
   | (NativeFixtureTask & { type: "start-claude-fixture" })
   | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
-    browserSnapshot?: boolean; browserAgent?: boolean; terminalRead?: boolean;
+    browserSnapshot?: boolean; browserAgent?: boolean; computerUse?: boolean; terminalRead?: boolean;
     afterClarification?: { requestId: string; text: string };
     afterQuota?: { requestId: string; refusedRequestId: string; text: string;
       continuation?: { segmentId: string; maximumKeyCreditCap: number } } })
   | { type: "code-plugin-result"; runId: string; requestId: string; result: DesktopMcpReply | null }
   | { type: "browser-snapshot-result"; runId: string; requestId: string; text: string | null }
   | { type: "browser-agent-result"; runId: string; requestId: string; reply: BrowserAgentReply }
+  | { type: "computer-agent-result"; runId: string; requestId: string; reply: ComputerAgentReply }
   | { type: "terminal-read-result"; runId: string; requestId: string; reply: TerminalReadReply | null }
   | { type: "git-action-result"; runId: string; requestId: string; result: AgentGitResult }
   | { type: "answer"; runId: string; decision: Decision }
@@ -80,6 +82,7 @@ export type WorkerEvent =
   | { type: "code-plugin-cancel"; runId: string; requestId: string }
   | { type: "browser-snapshot"; runId: string; requestId: string }
   | { type: "browser-agent"; runId: string; requestId: string; request: BrowserAgentRequest }
+  | { type: "computer-agent"; runId: string; requestId: string; request: ComputerAgentRequest }
   | { type: "terminal-read"; runId: string; requestId: string; terminal?: number; lines: number }
   | { type: "git-action"; runId: string; requestId: string; action: AgentGitAction }
   | { type: "approval"; runId: string; request: ApprovalRequest }

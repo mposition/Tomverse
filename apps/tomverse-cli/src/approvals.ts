@@ -2,7 +2,7 @@ import type { ApprovalView } from "./agent.js";
 import { checkBoundaries, ruleForApproval, type PermissionRule } from "./permissions.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
-export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool";
+export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window";
 
 /**
  * "Yes, and don't ask again" answers the person gave at the terminal, for the
@@ -18,6 +18,8 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host" | "brows
  *   is asked; the address is judged again on every call.
  * - browser_origin: clicking and typing in the local browser tab, on one site (origin). Another origin is asked; the page and the
  *   element are shown on every call that is asked, and passwords are refused by the host whatever was allowed.
+ * - computer_window: clicking, typing, keys and scrolling in the one desktop window the user chose, for that window only. The host
+ *   checks the window and its position again on every action.
  * - same_command: exactly the same program, arguments, working folder and
  *   environment names, and the same kind of run (background or not); any other
  *   command is asked. The timeout may differ.
@@ -37,6 +39,7 @@ export class ApprovalMemory {
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
     private readonly browserOrigins = new Set<string>();
+    private readonly computerWindows = new Set<string>();
     /** MCP tools answered "always": one tool of one server, for that exact server definition. */
     private readonly mcpTools = new Set<string>();
 
@@ -62,6 +65,7 @@ export class ApprovalMemory {
         if (view.mcp) return true;
         if (view.web) return true;
         if (view.browser) return Boolean(view.browser.origin);
+        if (view.computer) return Boolean(view.computer.window.id);
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
         return Boolean(view.command);
     }
@@ -71,6 +75,7 @@ export class ApprovalMemory {
         if (view.mcp) return this.mcpTools.has(ApprovalMemory.mcpKey(view)!) ? "mcp_tool" : null;
         if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
         if (view.browser) return this.browserOrigins.has(view.browser.origin) ? "browser_origin" : null;
+        if (view.computer) return this.computerWindows.has(view.computer.window.id) ? "computer_window" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
         const key = ApprovalMemory.commandKey(view);
         return key && this.commands.has(key) ? "same_command" : null;
@@ -99,6 +104,10 @@ export class ApprovalMemory {
             this.browserOrigins.add(view.browser.origin);
             return "browser_origin";
         }
+        if (view.computer) {
+            this.computerWindows.add(view.computer.window.id);
+            return "computer_window";
+        }
         if (view.patch) {
             this.fileEdits.add(view.root!);
             return "file_edits";
@@ -113,6 +122,7 @@ export class ApprovalMemory {
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
             ...[...this.browserOrigins].map((origin) => `clicking and typing in the browser tab on ${origin}`),
+            ...[...this.computerWindows].map((id) => `operating the desktop window ${id}`),
             ...[...this.mcpTools].map((key) => { const [server, tool] = JSON.parse(key) as string[]; return `MCP tool ${server}: ${tool}`; }),
         ];
     }
@@ -123,5 +133,6 @@ export class ApprovalMemory {
         this.commands.clear();
         this.webHosts.clear();
         this.browserOrigins.clear();
+        this.computerWindows.clear();
     }
 }

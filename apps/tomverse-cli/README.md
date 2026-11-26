@@ -419,6 +419,10 @@ asks, an allow rule skips the question except where noted).
 - `run_command` is described to the model as not sandboxed unless the host says it runs
   commands in a sandbox it enforces.
 
+### Window tools (a host's choice)
+
+A host that can show the person one window of their desktop (Tomverse Desktop on Windows) may give the runner the `computer_*` tools through the `computerAgent` option (`src/computer-tools.ts`). They exist only for a model that sees pictures, in a session that is not read-only or plan and that has someone to approve: `computer_screenshot` (the chosen window only; no approval; the picture is sent to the model once and never saved in the session), and `computer_click`, `computer_type`, `computer_key`, `computer_scroll`, each approved by a person in every permission mode (read-only refuses; no allow rule applies; "allow for this run" covers the window). The key list is fixed and has no Windows key, Alt or system shortcut; text that `redactText` would change is refused. The host decides what a window is and re-checks everything before it touches one. The `tomverse` command line has no such host.
+
 ## MCP servers and hooks
 
 Both run local commands from configuration files, so each project-defined one waits for your approval.

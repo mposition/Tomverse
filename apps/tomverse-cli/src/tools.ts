@@ -181,7 +181,8 @@ export const endTool = (ctx: ToolContext, toolCallId: string, state: "completed"
     return output;
 };
 
-export type ImageAttachment = { path: string; mediaType: string; base64: string; bytes: number };
+/** `ephemeral`: the picture goes to the model once, in the next request only, and is never written to the session. */
+export type ImageAttachment = { path: string; mediaType: string; base64: string; bytes: number; ephemeral?: boolean };
 
 /** What the CLI writes in front of an image it attached on the model's behalf; hosts that list the conversation leave such a message out. */
 export const VIEW_IMAGE_MARK = "Image from view_image:";

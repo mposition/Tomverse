@@ -58,16 +58,18 @@ const webView = (): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolNam
     web: { url: "https://docs.example.com/x", host: "docs.example.com" } });
 const browserView = (action: "click" | "type" = "click"): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolName: `browser_${action}`, input: { selector: "#add" }, root: ROOT,
     browser: { action, origin: ORIGIN, url: PAGE, selector: "#add", ...(action === "type" ? { text: "hi" } : {}) } });
+const computerView = (action: "click" | "type" | "key" | "scroll" = "click"): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolName: `computer_${action}`, input: { x: 1, y: 2 }, root: ROOT,
+    computer: { action, window: { id: "1a2b:4242", title: "Fixture calculator", app: "fixture-calc" }, x: 1, y: 2 } });
 const mcpView = (server: string, tool: string, name = `mcp__${server}__${tool}`): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolName: name, input: { q: 1 }, root: ROOT,
     mcp: { server, tool, definition: "def-1", scope: "user" } });
 const kindOf = (view: ApprovalView, mode: PermissionMode, rules: ScopedRule[] = []) => evaluate(view, { mode, rules }).kind;
 
 test("decision matrix, requests that ask: each mode against patch, command, web, browser and MCP", () => {
     const expected: Record<PermissionMode, Record<string, string>> = {
-        read_only: { patch: "deny", command: "deny", web: "human", browser: "deny", mcp: "deny" },
-        ask: { patch: "human", command: "human", web: "human", browser: "human", mcp: "human" },
-        auto_review: { patch: "review", command: "review", web: "human", browser: "human", mcp: "human" },
-        allow_all: { patch: "allow", command: "allow", web: "human", browser: "human", mcp: "human" },
+        read_only: { patch: "deny", command: "deny", web: "human", browser: "deny", computer: "deny", mcp: "deny" },
+        ask: { patch: "human", command: "human", web: "human", browser: "human", computer: "human", mcp: "human" },
+        auto_review: { patch: "review", command: "review", web: "human", browser: "human", computer: "human", mcp: "human" },
+        allow_all: { patch: "allow", command: "allow", web: "human", browser: "human", computer: "human", mcp: "human" },
     };
     for (const mode of PERMISSION_MODES) {
         assert.equal(kindOf(patchView(), mode), expected[mode]!.patch, `${mode} patch`);
@@ -75,8 +77,16 @@ test("decision matrix, requests that ask: each mode against patch, command, web,
         assert.equal(kindOf(webView(), mode), expected[mode]!.web, `${mode} web`);
         assert.equal(kindOf(browserView("click"), mode), expected[mode]!.browser, `${mode} browser click`);
         assert.equal(kindOf(browserView("type"), mode), expected[mode]!.browser, `${mode} browser type`);
+        for (const action of ["click", "type", "key", "scroll"] as const) assert.equal(kindOf(computerView(action), mode), expected[mode]!.computer, `${mode} computer ${action}`);
         assert.equal(kindOf(mcpView("github", "list_issues"), mode), expected[mode]!.mcp, `${mode} mcp`);
     }
+});
+
+test("an action in a desktop window is a person's decision in every mode; no rule allows it and it is never put to a reviewer", () => {
+    for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+        assert.equal(kindOf(computerView(), mode, [rule("allow", "computer_click"), rule("allow", "run_command", "**")]), "human", `${mode} with allow rules`);
+    }
+    assert.equal(kindOf(computerView(), "allow_all", [rule("deny", "mcp__x")]), "human");
 });
 
 test("an MCP tool and a web host run without a person only when a rule names them, in every mode; deny and ask rules still win", () => {
