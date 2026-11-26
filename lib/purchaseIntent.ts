@@ -542,7 +542,10 @@ export function resolvePlanCtaState({
   currentPlan: AccountPlanTier | null;
   cardPlan: AccountPlanTier;
   hasActiveSubscription: boolean;
-  /** The interval the live subscription bills on, when it is known. */
+  /**
+   * No longer read: kept so existing callers compile. The change screen sends
+   * the interval itself, or omits it and the server uses Stripe's.
+   */
   currentBillingInterval?: PricingBillingInterval | null;
 }): PricingPlanCtaState {
   if (sessionStatus === "loading") return "loading";

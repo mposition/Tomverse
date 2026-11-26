@@ -235,7 +235,7 @@ const RENEWING_STATUSES = new Set(["active", "trialing", "past_due"]);
  */
 async function keepDeletionCancellation(
   subscription: Stripe.Subscription,
-  redelivered: boolean
+  canRedeliver: boolean
 ) {
   if (subscription.cancel_at_period_end) return;
   if (!RENEWING_STATUSES.has(subscription.status)) return;
@@ -253,7 +253,7 @@ async function keepDeletionCancellation(
     // e.g. a schedule-managed subscription) is a person's job, not a reason to
     // fail every event for this subscription for days. Anything else throws
     // and is redelivered.
-    if (redelivered && (error as { type?: unknown })?.type !== "StripeInvalidRequestError") {
+    if (canRedeliver && (error as { type?: unknown })?.type !== "StripeInvalidRequestError") {
       throw error;
     }
     await reportOperationalIncident({

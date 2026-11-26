@@ -712,35 +712,44 @@ export async function confirmPlanChange({
     // moment to confirm it -- in the same transaction as the row moving. An
     // upgrade is confirmed at settlement instead, because it only happens once
     // its invoice is paid.
-    const moved = await prisma.$transaction(async (tx) => {
-      const result = await tx.planChangeRequest.updateMany({
-        where: { id: stored.id, status: "previewed" },
-        data: {
-          status: "pending",
-          pendingForUserId: userId,
-          confirmedAt: new Date(),
-          stripeScheduleId: scheduleId,
-          appliesAt: decision.plan.effectiveAt,
-          renewalDecision: decision.plan.renewal,
-        },
-      });
-      if (result.count === 1) {
-        await enqueuePlanChangeConfirmation({
-          tx,
-          templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
-          userId,
-          requestId: stored.id,
-          fromTier: decision.plan.fromTier,
-          toTier: decision.plan.toTier,
-          billingInterval: decision.plan.interval,
-          effectiveAt: decision.plan.effectiveAt,
+    // From here on the schedule exists at Stripe. Any way this request fails
+    // to record it releases it, so no schedule moves a plan unrecorded.
+    let moved: { count: number };
+    let updated: Awaited<ReturnType<typeof prisma.planChangeRequest.findUniqueOrThrow>>;
+    try {
+      moved = await prisma.$transaction(async (tx) => {
+        const result = await tx.planChangeRequest.updateMany({
+          where: { id: stored.id, status: "previewed" },
+          data: {
+            status: "pending",
+            pendingForUserId: userId,
+            confirmedAt: new Date(),
+            stripeScheduleId: scheduleId,
+            appliesAt: decision.plan.effectiveAt,
+            renewalDecision: decision.plan.renewal,
+          },
         });
-      }
-      return result;
-    });
-    const updated = await prisma.planChangeRequest.findUniqueOrThrow({
-      where: { id: stored.id },
-    });
+        if (result.count === 1) {
+          await enqueuePlanChangeConfirmation({
+            tx,
+            templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+            userId,
+            requestId: stored.id,
+            fromTier: decision.plan.fromTier,
+            toTier: decision.plan.toTier,
+            billingInterval: decision.plan.interval,
+            effectiveAt: decision.plan.effectiveAt,
+          });
+        }
+        return result;
+      });
+      updated = await prisma.planChangeRequest.findUniqueOrThrow({
+        where: { id: stored.id },
+      });
+    } catch (recordError) {
+      await releaseUnrecordedSchedule(scheduleId, stored.id);
+      throw recordError;
+    }
     if (moved.count !== 1) {
       if (updated.status === "pending" && updated.stripeScheduleId === scheduleId) {
         // The other confirm recorded this same schedule (same idempotency key).
@@ -749,22 +758,8 @@ export async function confirmPlanChange({
       // The other confirm saw this request's schedule, read the quote as stale
       // and expired it. Nothing records the schedule now, so it is released
       // here -- an unrecorded schedule would move the plan at the period end
-      // with no reservation to show or cancel. Release, not cancel: cancel
-      // would end the subscription.
-      try {
-        await getStripe().subscriptionSchedules.release(scheduleId);
-      } catch (releaseError) {
-        // Outcome unknown: a person reads the schedule back at Stripe rather
-        // than this retrying a release blindly.
-        await reportOperationalIncident({
-          code: "PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED",
-          title: "A downgrade schedule with no reservation could not be released",
-          error: releaseError,
-          severity: "error",
-          context: { component: "plan-change", requestId: stored.id, scheduleId },
-        }).catch(() => {});
-        // The customer's answer is the same either way: this quote is spent.
-      }
+      // with no reservation to show or cancel.
+      await releaseUnrecordedSchedule(scheduleId, stored.id);
       return fail(
         "PLAN_CHANGE_PREVIEW_EXPIRED",
         "The quote was confirmed twice at once; request a new one."
@@ -787,6 +782,27 @@ export async function confirmPlanChange({
       "The payment provider refused the change.",
       502
     );
+  }
+}
+
+/**
+ * Hand a subscription back from a downgrade schedule that no reservation
+ * records. Release, not cancel: cancel would end the subscription. If the
+ * release fails its outcome is unknown, so a person reads the schedule back at
+ * Stripe (an operational incident) rather than this retrying it blindly; the
+ * caller's answer to the customer does not depend on it.
+ */
+async function releaseUnrecordedSchedule(scheduleId: string, requestId: string) {
+  try {
+    await getStripe().subscriptionSchedules.release(scheduleId);
+  } catch (releaseError) {
+    await reportOperationalIncident({
+      code: "PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED",
+      title: "A downgrade schedule with no reservation could not be released",
+      error: releaseError,
+      severity: "error",
+      context: { component: "plan-change", requestId, scheduleId },
+    }).catch(() => {});
   }
 }
 

@@ -81,7 +81,7 @@ test("the webhook keeps a deletion's cancellation whatever order the writes land
   assert.match(reconciler, /cancel_at_period_end: true/);
   // Throws for redelivery only on the webhook path (it has one); a direct
   // caller such as the mobile cancel gets a reported incident instead.
-  assert.ok(reconciler.includes('if (redelivered && (error as { type?: unknown })?.type !== "StripeInvalidRequestError")'));
+  assert.ok(reconciler.includes('if (canRedeliver && (error as { type?: unknown })?.type !== "StripeInvalidRequestError")'));
   assert.match(reconciler, /ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED/);
 });
 
