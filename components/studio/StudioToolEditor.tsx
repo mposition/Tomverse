@@ -14,7 +14,7 @@ import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudio
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
 import {
   createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolOrder, studioToolOutcome, studioToolQuote,
-  studioToolSequenceStops, studioToolsQuote, studioToolsToRequest, useStudioImageQuote,
+  studioToolSequenceStops, studioToolsToRequest, useStudioImageQuote,
 } from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
@@ -422,9 +422,6 @@ export function StudioToolEditor({ tool, preset }: {
     }
   });
 
-  const quotedToolName = (modelId: string) =>
-    imageQuote.quote?.targets?.find(target => target.modelId === modelId)?.model ?? copy.result;
-
   const valid = (!publishing || Boolean(title.trim() || posterBrief.trim())) && (id !== "meme" || Boolean(details.trim()));
   const generationLabel = pngTool ? copy.removeBackground : copy.generate;
 
@@ -542,7 +539,7 @@ export function StudioToolEditor({ tool, preset }: {
       <StudioGenerateButton label={generationLabel} busy={busy}
         disabled={!valid || !imageQuote.quote}
         onClick={() => generate()} />
-      <StudioQuoteHint {...imageQuote} quote={imageQuote.quote && toolsToRequest !== undefined ? studioToolsQuote(imageQuote.quote, toolsToRequest) : imageQuote.quote} />
+      <StudioQuoteHint error={imageQuote.error} />
       <StudioStatus status={status} />
     </section>
     <section className={styles.panel} aria-busy={busy}>
@@ -560,9 +557,9 @@ export function StudioToolEditor({ tool, preset }: {
           <figure><figcaption>{copy.original}</figcaption><img src={photo} alt="" /></figure>
           {pngTool && cutouts.length > 0 && !resultIsExample
             // One figure per remover; pressing one makes it the image that is saved and shared.
-            ? cutouts.map(cutout => <figure key={cutout.modelId} className={styles.checker} data-picked={cutout.url === result || undefined}>
-              <figcaption>{quotedToolName(cutout.modelId)}</figcaption>
-              <button type="button" aria-pressed={cutout.url === result} aria-label={quotedToolName(cutout.modelId)}
+            ? cutouts.map((cutout, index) => <figure key={cutout.modelId} className={styles.checker} data-picked={cutout.url === result || undefined}>
+              <figcaption>{copy.result} {index + 1}</figcaption>
+              <button type="button" aria-pressed={cutout.url === result} aria-label={copy.result + " " + (index + 1)}
                 onClick={() => setResult(cutout.url)}>
                 <img src={cutout.url} alt={copy.processedImage} />
               </button>
