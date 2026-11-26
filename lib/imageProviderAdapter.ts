@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_SIZE, type DirectRasterProvider } from "@/lib/directRasterModels";
+import { FAL_BRIA_BACKGROUND_REMOVAL, IMAGE_PHOTO_TOOL_SIZE, imagePhotoToolContract, RECRAFT_BACKGROUND_REMOVAL } from "@/lib/imagePhotoTools";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE, isIdeogramAssetUrl } from "@/lib/ideogramImageRequest";
 
 import {
@@ -19,6 +20,7 @@ import {
   imageDeliveryMimeType,
   imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
+  isImagePhotoTool,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import {
@@ -42,8 +44,10 @@ import {
   falPlatformHeaders,
   falAssetLengthRefused,
   FAL_MAX_ASSET_BYTES,
+  FAL_RUN_URL_BASE,
   isFalAssetUrl,
   parseFalImageResponse,
+  parseFalSingleImageResponse,
 } from "@/lib/falImageRequest";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
@@ -156,6 +160,12 @@ export class ImageProviderError extends Error {
 
   /** The response's numeric usage fields, where a refused response reported any (billing measurement). */
   providerUsage: Record<string, number> | null = null;
+
+  /**
+   * What the provider said the refused request cost, where it reports one.
+   * The failure then charges the provider budget anything past the reservation.
+   */
+  reportedCostMicroUsd: number | null = null;
 
   /**
    * The provider generated (and billed) the image and only fetching or
@@ -558,6 +568,9 @@ const dispatchImageRequest = async (
   model: ImageModelProfile,
   input: ImageRequestInput
 ): Promise<ImageProviderResult> => {
+  if (isImagePhotoTool(model.id)) {
+    return removeBackground(model, input);
+  }
   if (isDirectRasterProvider(model.provider)) {
     return generateWithDirectRaster(model.provider, model, input);
   }
@@ -1545,21 +1558,170 @@ const generateWithDirectRaster = async (
   const b64 = item?.b64_json;
   const bytes = typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : null;
   const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, "image/png") : null;
+  // Recraft reports the request's cost in API units (1,000 micro-USD each); read before the image is judged,
+  // so a billed answer that is then refused still tells the failure what it cost.
+  const units = payload?.credits;
+  const reportedCostMicroUsd = !isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
+    ? units * 1000 : null;
   if (!bytes || !dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) {
     const error = new ImageProviderError("provider_failed", "Direct provider returned an unusable image.", response.status, requestId, requestParams);
     error.afterGeneration = true;
+    error.reportedCostMicroUsd = reportedCostMicroUsd;
     throw error;
   }
-  const units = payload?.credits;
   return {
     imageBytes: bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
     providerRequestId: requestId, provenance: [...model.provenance],
     outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
     providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
-    ...(!isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
-      ? { reportedCostMicroUsd: units * 1000 }
-      : {}),
+    ...(reportedCostMicroUsd === null ? {} : { reportedCostMicroUsd }),
   };
+};
+
+/**
+ * A background remover (lib/imagePhotoTools.ts). The photo is centred on the
+ * white square the tool's one option prices and comes back as a PNG of that
+ * square with the background cleared; the caller takes the photo's own area
+ * back out. No prompt is sent: the user's text never reaches these endpoints.
+ * One attempt, because a lost response can follow a request that was billed.
+ */
+const removeBackground = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {
+  const contract = imagePhotoToolContract(model.id);
+  const price = model.prices.find(option => option.quality === input.quality && option.size === input.size);
+  if (!contract || contract.provider !== model.provider || !input.editImage || input.size !== IMAGE_PHOTO_TOOL_SIZE ||
+      !price || price.outputCostMicroUsd < contract.outputCostMicroUsd) {
+    throw new ImageProviderError("provider_failed", "Unsupported background removal option.");
+  }
+  const side = Number(IMAGE_PHOTO_TOOL_SIZE.split("x")[0]);
+  const photo = await sharp(input.editImage.bytes)
+    .resize(side, side, { fit: "contain", background: "#fff" })
+    .flatten({ background: "#fff" })
+    .png()
+    .toBuffer();
+  // The audit stores only the prepared photo's dimensions, digest and byte count.
+  const audit = editAuditParams({
+    bytes: photo, width: side, height: side, mimeType: "image/png",
+    sha256: createHash("sha256").update(photo).digest("hex"),
+  }, "removeBackground");
+  const imageUrl = `data:image/png;base64,${photo.toString("base64")}`;
+  const answer = contract.modelId === RECRAFT_BACKGROUND_REMOVAL.modelId
+    ? await recraftCutOut(imageUrl, audit)
+    : await falBriaCutOut(imageUrl, audit);
+  // Everything from here follows a request the provider answered and billed.
+  const refuse = (): never => {
+    const error = new ImageProviderError("provider_failed", "Background removal returned an unusable image.", 200, answer.providerRequestId, answer.requestParams);
+    error.afterGeneration = true;
+    error.reportedCostMicroUsd = answer.reportedCostMicroUsd ?? null;
+    throw error;
+  };
+  const dimensions = answer.bytes.byteLength > 0 && answer.bytes.byteLength <= FAL_MAX_ASSET_BYTES
+    ? readImageDimensions(answer.bytes, "image/png") : null;
+  if (!dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) refuse();
+  // A cut-out has an alpha channel; a picture without one is the photo unchanged. Only read here:
+  // the provider's bytes are stored as they came (policy section 9), never re-encoded.
+  const hasAlpha = await sharp(answer.bytes).metadata().then(meta => meta.hasAlpha === true, () => false);
+  if (!hasAlpha) return refuse();
+  return {
+    imageBytes: answer.bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
+    providerRequestId: answer.providerRequestId, provenance: [],
+    outputWidth: dimensions!.width, outputHeight: dimensions!.height, requestParams: answer.requestParams,
+    ...(answer.providerUsage ? { providerUsage: answer.providerUsage } : {}),
+    ...(answer.reportedCostMicroUsd === undefined ? {} : { reportedCostMicroUsd: answer.reportedCostMicroUsd }),
+  };
+};
+
+type CutOutAnswer = {
+  bytes: Buffer;
+  providerRequestId: string | null;
+  requestParams: Record<string, unknown>;
+  providerUsage?: Record<string, number>;
+  reportedCostMicroUsd?: number;
+};
+
+/** Recraft removeBackground: zero data retention, the PNG inline in the response. */
+const recraftCutOut = async (imageUrl: string, audit: Record<string, unknown>): Promise<CutOutAnswer> => {
+  const apiKey = process.env.RECRAFT_API_TOKEN?.trim();
+  if (!apiKey) throw new ImageProviderError("provider_failed", "Image provider API key is not configured.");
+  const params = { response_format: "b64_json", image_format: "png", zdr: true };
+  const requestParams = { ...params, ...audit };
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch("https://external.api.recraft.ai/v1/images/removeBackground", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...params, image_url: imageUrl }),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Background removal request failed.", null, null, requestParams);
+  }
+  const maxEncodedLength = 4 * Math.ceil(FAL_MAX_ASSET_BYTES / 3);
+  const payload = await readResponseToBuffer(response, response.ok ? maxEncodedLength + 64 * 1024 : 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  const rawId = response.headers.get("x-request-id") ?? payload?.image?.image_id;
+  const providerRequestId = typeof rawId === "string" && /^[A-Za-z0-9_.:-]{1,180}$/.test(rawId) ? rawId : null;
+  if (!response.ok || payload?.error) {
+    const phase = /sensitive(content|image)|riskcontrol|content_?moderated/i.test(String(payload?.error?.code ?? ""))
+      ? "provider_moderation_rejected" : response.ok || response.status === 402
+        ? "provider_failed" : classifyImageProviderFailure(response.status, payload);
+    throw new ImageProviderError(phase, "Background removal was rejected.", response.status, providerRequestId, requestParams);
+  }
+  const b64 = payload?.image?.b64_json;
+  const units = payload?.credits;
+  return {
+    // An answer with no image is refused by the caller, as billed.
+    bytes: typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : Buffer.alloc(0),
+    providerRequestId, requestParams,
+    providerUsage: numericUsage({ credits: units }) ?? undefined,
+    ...(Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000) ? { reportedCostMicroUsd: units * 1000 } : {}),
+  };
+};
+
+/**
+ * Bria RMBG 3.0 through fal. The same platform headers as every fal request
+ * (no retry, no stored payload, a 15-minute asset), and the asset is fetched
+ * only from fal's CDN with its size checked before it is read. fal reports no
+ * cost, so this settles at the fixed price.
+ */
+const falBriaCutOut = async (imageUrl: string, audit: Record<string, unknown>): Promise<CutOutAnswer> => {
+  const requestParams = { ...audit };
+  const apiKey = getFalApiKey();
+  const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${FAL_RUN_URL_BASE}/${FAL_BRIA_BACKGROUND_REMOVAL.modelId}`, {
+      method: "POST",
+      headers: { Authorization: falAuthorizationHeader(apiKey), "Content-Type": "application/json", ...falPlatformHeaders() },
+      body: JSON.stringify({ image_url: imageUrl }),
+      redirect: "error",
+      signal,
+    });
+  } catch {
+    throw new ImageProviderError("provider_failed", "Background removal request failed.", null, null, requestParams);
+  }
+  const providerRequestId = response.headers.get("x-fal-request-id");
+  const payload = await readResponseToBuffer(response, 64 * 1024, signal)
+    .then(bytes => JSON.parse(bytes.toString("utf8"))).catch(() => null);
+  if (!response.ok) {
+    throw new ImageProviderError(
+      classifyImageProviderFailure(response.status, payload), imageProviderRejectionDetail(response.status, payload),
+      response.status, providerRequestId, requestParams
+    );
+  }
+  // Billed from here: every failure below leaves an empty answer for the caller to refuse.
+  const empty = { bytes: Buffer.alloc(0), providerRequestId, requestParams };
+  const parsed = parseFalSingleImageResponse(payload);
+  if (!parsed || parsed.mimeType !== "image/png") return empty;
+  // Followed manually so the final host is checked too.
+  const asset = await fetch(parsed.url, { redirect: "manual", signal }).catch(() => null);
+  if (!asset) return empty;
+  if (!asset.ok || !isFalAssetUrl(asset.url) || falAssetLengthRefused(asset.headers.get("content-length"))) {
+    await asset.body?.cancel().catch(() => undefined);
+    return empty;
+  }
+  return { ...empty, bytes: await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES, signal).catch(() => Buffer.alloc(0)) };
 };
 
 const generateWithIdeogram = async (model: ImageModelProfile, input: ImageRequestInput): Promise<ImageProviderResult> => {

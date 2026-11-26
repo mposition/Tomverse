@@ -53,7 +53,9 @@ import {
   getImageModelPrice,
   imageMeasuredOutputLimitBound,
   imageEditCredits,
+  imagePhotoToolAdmitted,
   imageThinkingBilling,
+  isImagePhotoTool,
   maxImageEditRequestCostMicroUsd,
   maxImageRequestCostMicroUsd,
   type ImageModelProvider,
@@ -172,6 +174,23 @@ const promptCostMicroUsd = (inputTokens: number) =>
   );
 
 /**
+ * What a provider-reported request cost adds past what an edit was priced at
+ * (output plus photo). 0 when nothing is reported, the report is within the
+ * price, or the job is not an edit. The provider budget is charged this, so a
+ * provider price that moved under a fixed option still drains the budget the
+ * money leaves from.
+ */
+export const reportedEditOverageMicroUsd = (
+  snapshotOutputCost: number | null,
+  editBudget: unknown,
+  reportedCostMicroUsd: number | null | undefined
+): number =>
+  snapshotOutputCost !== null && typeof editBudget === "number" &&
+  typeof reportedCostMicroUsd === "number" && Number.isFinite(reportedCostMicroUsd)
+    ? Math.max(0, reportedCostMicroUsd - (snapshotOutputCost + editBudget))
+    : 0;
+
+/**
  * What an edit's photo settles at, from the rate and budget its reservation
  * recorded -- never the live constants, which a deploy may have moved since.
  * 0 for a generation; the budget for a photo billed per edit (no rate); the
@@ -255,6 +274,12 @@ export type ImageGenerationRequestInput = {
    * model's edit surcharge (lib/imageGenerationPricing.ts).
    */
   editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
+  /**
+   * The photo tools this request is for, set only by the server feature that
+   * owns them (Studio's transparent PNG). A photo tool's id that is not
+   * listed here is refused like an unknown model, whatever the caller attached.
+   */
+  photoTools?: readonly string[];
 };
 
 export type ImageGenerationTargetResult = {
@@ -419,8 +444,10 @@ export const requestImageGeneration = async (
     const price = getImageModelPrice(modelId, input.quality, input.size);
     return { modelId, model, price };
   });
+  // A photo tool has a price row but is no model a caller may pick.
   const unavailable = targetPlans.filter(
-    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price
+    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price ||
+      !imagePhotoToolAdmitted(plan.modelId, { photoTools: input.photoTools, hasPhoto: Boolean(input.editSource) })
   );
   if (unavailable.length > 0) {
     throw new ChatAccessError(
@@ -1157,6 +1184,20 @@ export const failureIncurredCostMicroUsd = (
   return nonImage + prompt + image;
 };
 
+/**
+ * What a failed request cost past its whole reservation, by the provider's own
+ * report: a refused or unstored answer is still billed, and a failure keeps
+ * the reservation charged, so only the part above it is missing. 0 when
+ * nothing was reported.
+ */
+export const failureReportedOverageMicroUsd = (
+  reservedCostMicroUsd: number,
+  reportedCostMicroUsd: number | null | undefined
+): number =>
+  typeof reportedCostMicroUsd === "number" && Number.isFinite(reportedCostMicroUsd)
+    ? Math.max(0, reportedCostMicroUsd - reservedCostMicroUsd)
+    : 0;
+
 /** Adds spend the reservation did not hold to the windows it was reserved in. */
 export const chargeProviderBudgetOverage = async (
   tx: Prisma.TransactionClient,
@@ -1229,6 +1270,8 @@ const finalizeFailure = async (input: {
     imageCount: number;
     inputTokens?: number;
   };
+  /** The request's cost as the provider reported it, where a reached provider reports one. */
+  reportedCostMicroUsd?: number | null;
   /**
    * Whether this caller may also claim a row already in `settling`, and on
    * what grounds. Omitted means no -- the ordinary failure paths must never
@@ -1306,10 +1349,12 @@ const finalizeFailure = async (input: {
         const incurredCostMicroUsd = input.releaseProviderBudget
           ? null
           : failureIncurredCostMicroUsd(reservation.pricingSnapshot, input.billed);
-        const failureOverageMicroUsd =
+        const failureOverageMicroUsd = input.releaseProviderBudget ? 0 : Math.max(
           incurredCostMicroUsd === null
             ? 0
-            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd));
+            : Math.max(0, incurredCostMicroUsd - Number(reservation.reservedCostMicroUsd)),
+          failureReportedOverageMicroUsd(Number(reservation.reservedCostMicroUsd), input.reportedCostMicroUsd)
+        );
         if (input.releaseProviderBudget) {
           await refundProviderBudget(
             tx,
@@ -1604,6 +1649,7 @@ export const processImageGeneration = async (
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
+        reportedCostMicroUsd: providerError.reportedCostMicroUsd,
         billed: {
           nonImageBillableTokens: providerError.nonImageBillableTokens,
           imageTokens: providerError.billedImageTokens,
@@ -1640,6 +1686,8 @@ export const processImageGeneration = async (
         providerRequestId: result.providerRequestId,
         providerRequestParams: result.requestParams,
         releaseProviderBudget: false,
+        // This path settles its own failure and returns, so the outer catch never sees the answer.
+        reportedCostMicroUsd: result.reportedCostMicroUsd,
         billed: {
           nonImageBillableTokens: result.nonImageBillableTokens,
           imageTokens: result.billedImageTokens,
@@ -1813,19 +1861,15 @@ export const processImageGeneration = async (
       // edit reserved for output and photo together.
       const editBudget = (reservation.pricingSnapshot as { edit?: { inputBudgetMicroUsd?: unknown } } | null)
         ?.edit?.inputBudgetMicroUsd;
-      if (
-        typeof editBudget === "number" &&
-        snapshotOutputCost !== null &&
-        typeof result.reportedCostMicroUsd === "number" &&
-        result.reportedCostMicroUsd > snapshotOutputCost + editBudget
-      ) {
+      const reportedOverage = reportedEditOverageMicroUsd(snapshotOutputCost, editBudget, result.reportedCostMicroUsd);
+      if (reportedOverage > 0) {
         console.error(
           JSON.stringify({
             event: "image_edit_input_over_budget",
             generationId,
             modelId: generation.modelId,
             reportedCostMicroUsd: result.reportedCostMicroUsd,
-            reservedMicroUsd: snapshotOutputCost + editBudget,
+            reservedMicroUsd: (result.reportedCostMicroUsd as number) - reportedOverage,
             timestamp: new Date().toISOString(),
           })
         );
@@ -1846,6 +1890,8 @@ export const processImageGeneration = async (
           ? Number(reservation.reservedCostMicroUsd)
           : snapshotOutputCost +
             extraImageCost +
+            // Reported past the price: the provider budget sees what was actually billed.
+            reportedOverage +
             promptCostMicroUsd(result.inputTokens) +
             editInputCost +
             thinkingCost;
@@ -1931,6 +1977,7 @@ export const processImageGeneration = async (
       // would have charged its overage rolled back with this failure.
       ...(answered
         ? {
+            reportedCostMicroUsd: answered.reportedCostMicroUsd,
             billed: {
               nonImageBillableTokens: answered.nonImageBillableTokens,
               imageTokens: answered.billedImageTokens,
@@ -2234,6 +2281,9 @@ export const retryImageGenerationTarget = async (
         ? { expectedPricingVersions: { [target.modelId]: failedReservation.pricingVersion } }
         : {}),
       ...(retryEditAttachmentId ? { editSource: { attachmentId: retryEditAttachmentId } } : {}),
+      // A photo tool's target exists only because its feature admitted it; the
+      // id retried is that stored target's, never one the caller sent.
+      ...(isImagePhotoTool(target.modelId) ? { photoTools: [target.modelId] } : {}),
       // The retry stays in the conversation its group already lives in. A
       // chat conversation holds a group only through a Chat image turn
       // (lib/chatImageTurn.ts), so its retry keeps that host -- while the

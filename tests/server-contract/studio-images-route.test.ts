@@ -65,7 +65,12 @@ mock.module(url("lib/imageGenerationService.ts"), {
       if (input.editSource && "bindAttachment" in input.editSource) {
         await input.editSource.bindAttachment({} as never, "studio-image-conversation");
       }
-      return { generationId: "studio-image", groupId: "studio-group", status: "pending", reused: false };
+      // One generation per requested model, as the service answers.
+      const targets = (input.modelIds ?? ["default"]).map((modelId, index) => ({
+        targetId: "target-" + index, modelId, provider: "test", status: "pending", reservedCredits: 1,
+        generationId: index === 0 ? "studio-image" : "studio-image-" + (index + 1),
+      }));
+      return { generationId: "studio-image", groupId: "studio-group", status: "pending", reused: false, targets };
     },
     processImageGenerationGroup: async (ids: string[]) => { dispatched.push(ids); },
   },
@@ -87,7 +92,8 @@ const body = {
   modelId: "gpt-image-2", pricingVersion: "outdated-quote",
 };
 
-function quotedSubmission(quote: { modelId: string; pricingVersion: string; quality: string; credits: number; size: string; useCase?: string; requestedSize?: string; squareFallback?: boolean }) {
+type QuotedTarget = { modelId: string; model: string; pricingVersion: string; credits: number };
+function quotedSubmission(quote: { modelId: string; pricingVersion: string; quality: string; credits: number; size: string; useCase?: string; requestedSize?: string; squareFallback?: boolean; targets?: QuotedTarget[] }) {
   return {
     ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion, quality: quote.quality,
     credits: quote.credits, size: quote.size, useCase: quote.useCase, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
@@ -268,6 +274,62 @@ test("both sticker styles require the square Sunburst edit for packs and replace
   assert.equal((await GET(request)).status, 503);
   assert.equal((await post(submission)).status, 409);
   assert.equal(reservations.length, urls.length);
+});
+
+test("a transparent PNG is quoted on every background remover that is on, each submitted as its own request", async context => {
+  const switches = ["IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED", "IMAGE_FAL_BRIA_BACKGROUND_REMOVAL_ENABLED"];
+  context.after(() => {
+    for (const name of [...switches, "STUDIO_IMAGE_ROUTE_PREFERENCES"]) delete process.env[name];
+  });
+  process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
+  // A route preference cannot put an image generator in a remover's place.
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "transparent-png": ["gpt-image-2"] });
+  const request = new Request(base + "?size=1024x1024&edit=true&useCase=transparent-png");
+  assert.equal((await GET(request)).status, 503);
+
+  // One switch: that remover alone.
+  process.env[switches[0]] = "true";
+  const single = await (await GET(request)).json();
+  assert.deepEqual([single.modelId, single.credits, single.targets.map((target: QuotedTarget) => target.modelId)],
+    ["recraft-remove-background", 20, ["recraft-remove-background"]]);
+
+  // Both: two tools, each with its own price, and their total.
+  process.env[switches[1]] = "true";
+  const quote = await (await GET(request)).json();
+  assert.deepEqual([quote.size, quote.quality, quote.credits, quote.useCase], ["1024x1024", "medium", 46, "transparent-png"]);
+  assert.deepEqual(quote.targets.map((target: QuotedTarget) => [target.modelId, target.credits]),
+    [["recraft-remove-background", 20], ["bria/rmbg-3", 26]]);
+  assert.equal((await GET(new Request(request.url.replace("edit=true", "edit=false")))).status, 503);
+  assert.equal((await GET(new Request(request.url.replace("1024x1024", "1536x1024")))).status, 503);
+  // No other feature is offered a tool.
+  const other = await (await GET(quoteRequest())).json();
+  assert.ok(!["recraft-remove-background", "bria/rmbg-3"].includes(other.modelId) && other.targets === undefined);
+
+  // One request per tool, at that tool's own price: never the total, another tool's price or a model that was not quoted.
+  const [recraft, bria] = (quote.targets as QuotedTarget[]).map(target => ({
+    ...quotedSubmission({ ...quote, ...target }), targets: undefined, idempotencyKey: randomUUID(),
+  }));
+  for (const wrong of [
+    { ...recraft, credits: 46 }, { ...bria, credits: 20 }, { ...bria, pricingVersion: recraft.pricingVersion },
+    { ...recraft, modelId: "gpt-image-2" }, { ...recraft, size: "1536x1024" }, { ...recraft, quality: "high" },
+  ]) {
+    assert.equal((await post({ ...wrong, idempotencyKey: randomUUID() })).status, 409, JSON.stringify(wrong));
+  }
+  assert.equal(reservations.length, 0);
+  assert.equal((await post(recraft)).status, 202);
+  assert.equal((await post(bria)).status, 202);
+  assert.deepEqual(reservations.map(row => [row.modelIds, row.photoTools]),
+    [[["recraft-remove-background"], ["recraft-remove-background"]], [["bria/rmbg-3"], ["bria/rmbg-3"]]]);
+  // Each request starts its own generation.
+  assert.equal(scheduled.length, 2);
+  // A tool's id cannot ride on another feature's quote, and another feature never names a tool.
+  assert.equal((await post({ ...quotedSubmission(other), modelId: "bria/rmbg-3", idempotencyKey: randomUUID() })).status, 409);
+  assert.equal((await post({ ...quotedSubmission(other), idempotencyKey: randomUUID() })).status, 202);
+  assert.equal(reservations[2].photoTools, undefined);
+  // Each tool stops with its own switch; the other keeps working.
+  process.env[switches[1]] = "false";
+  assert.equal((await post({ ...bria, idempotencyKey: randomUUID() })).status, 409);
+  assert.equal((await post({ ...recraft, idempotencyKey: randomUUID() })).status, 202);
 });
 
 test("Studio reserves exactly the quoted model, quality, size and credit amount", async context => {
