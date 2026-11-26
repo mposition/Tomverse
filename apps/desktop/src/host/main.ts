@@ -80,7 +80,10 @@ import { codeExtensionsView } from "./code-extensions";
 import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
 import { localExtensionsCommand } from "../local-extensions-contract";
 import { codeSandboxInput } from "../code-sandbox-contract";
-import { codeSandboxView } from "./code-sandbox";
+import { codeSandboxView, readCodeSandboxSettings } from "./code-sandbox";
+import { sandboxEnforcement } from "../../../tomverse-cli/src/sandbox.js";
+import { createParallelHost, IDLE_OPEN_TASK_KEY } from "./parallel-host";
+import { launchScheduledRun } from "./schedule-launch";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -452,7 +455,13 @@ function refreshHistory(more = false) {
   state.moreHistory = page.cursor !== null;
 }
 
+function refreshParallel() {
+  state.parallel = parallel.parallelView();
+  state.schedules = parallel.scheduleView();
+}
+
 function broadcast() {
+  refreshParallel();
   refreshWorktreeDraft();
   if (codePluginScope && !currentCodePlugin(codePluginScope)) revokeCodePlugin();
   const scope = currentCodeBrowserScope();
@@ -889,6 +898,30 @@ function dismissApproval() {
   const window = approvalWindow;
   approvalWindow = null;
   if (window && !window.isDestroyed()) window.close();
+  setImmediate(pumpApprovals);
+}
+
+/** The open task's request that arrived while another card was on screen; it shows next. */
+let foregroundWaiting: { runId: string; request: ApprovalRequest } | null = null;
+
+/** The open task ended or stopped: its card goes away, and a card that belongs to a task running next to it stays. */
+function clearForegroundApproval() {
+  foregroundWaiting = null;
+  if (pending && parallel.lanes.hasApproval(pending.id)) return;
+  pending = null;
+  dismissApproval();
+}
+
+/** Shows the next waiting card (the open task's first, then the tasks that run next to it) when no card is on screen. */
+function pumpApprovals() {
+  if (pending || approvalWindow || closing || signingOut) return;
+  const waiting = foregroundWaiting;
+  if (waiting) {
+    foregroundWaiting = null;
+    if (runId === waiting.runId && waiting.runId !== discardedRunId && state.task?.status === "approval") { showApproval(waiting.request); return; }
+  }
+  const next = parallel.lanes.nextApproval();
+  if (next) showApproval(next);
 }
 
 function answer(decision: Decision) {
@@ -898,12 +931,21 @@ function answer(decision: Decision) {
     setImmediate(() => { if (window && !window.isDestroyed()) window.close(); });
     return true;
   }
+  if (pending && parallel.lanes.hasApproval(pending.id)) {
+    // A task that runs next to the open one: its own lane takes the answer, and no other task can.
+    if (pending.id !== decision.id || !parallel.lanes.decide(decision)) return false;
+    pending = null;
+    const window = approvalWindow;
+    approvalWindow = null;
+    setImmediate(() => { if (window && !window.isDestroyed()) window.close(); pumpApprovals(); });
+    return true;
+  }
   if (!pending || !runId || pending.id !== decision.id || (decision.action === "run" && !pending.canRemember)) return false;
   send({ type: "answer", runId, decision });
   pending = null;
   const window = approvalWindow;
   approvalWindow = null;
-  setImmediate(() => { if (window && !window.isDestroyed()) window.close(); });
+  setImmediate(() => { if (window && !window.isDestroyed()) window.close(); pumpApprovals(); });
   return true;
 }
 
@@ -916,9 +958,8 @@ function stop() {
     state.task.status = "stopping";
     state.task.streamingAnswer = undefined;
   }
-  pending = null;
   send({ type: "stop", runId });
-  dismissApproval();
+  clearForegroundApproval();
   broadcast();
 }
 
@@ -983,14 +1024,15 @@ function requestQuit() {
   if (closing) return;
   closing = true;
   stop();
+  parallel.lanes.stopAll();
   quitTimer = setTimeout(async () => {
-    if ((!state.busy && !pendingMutation) || !closing) return;
+    if ((!state.busy && !pendingMutation && !parallel.lanes.busy()) || !closing) return;
     const copy = nativeCopy();
     const { response } = await dialog.showMessageBox({
       type: "warning", message: copy.quitPrompt, detail: copy.quitDetail,
       buttons: [copy.keepWaiting, copy.quitUnconfirmed], defaultId: 0, cancelId: 0,
     });
-    if ((!state.busy && !pendingMutation) || !closing) return;
+    if ((!state.busy && !pendingMutation && !parallel.lanes.busy()) || !closing) return;
     if (response === 1) {
       // The saved journal remains the source of evidence for the interrupted run.
       state.busy = false;
@@ -1061,7 +1103,8 @@ function onWorkerMessage(event: WorkerEvent) {
     if ("task" in event && state.task?.worktree?.path === event.task.root) event.task.worktree = state.task.worktree;
     if (event.type === "approval") {
       if (state.task?.status === "stopping") return;
-      showApproval(event.request);
+      if (pending || approvalWindow) foregroundWaiting = { runId: event.runId, request: event.request };
+      else showApproval(event.request);
     } else if (event.type === "finished") {
       pendingFollowUp?.resolve(false);
       pendingFollowUp = null;
@@ -1098,8 +1141,8 @@ function onWorkerMessage(event: WorkerEvent) {
       state.busy = false;
       runId = null;
       discardedRunId = null;
-      pending = null;
-      dismissApproval();
+      clearForegroundApproval();
+      parallel.lanes.tick();
       refreshHistory();
       if (!discarded) notifyCodeResult(event.task.status);
       if (discarded && browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
@@ -1262,15 +1305,20 @@ function checkpointNativeTurn(task: Task, force = false) {
 const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
 const codeSandboxDirectory = () => join(app.getPath("userData"), "code-sandbox");
 
-function bootWorker() {
+/** One Code runtime process. The open task and every task that runs next to it each get one of their own. */
+function forkRunner() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
-  const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
+  return utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
     env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
       TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
+}
+
+function bootWorker() {
+  const child = forkRunner();
   worker = child;
   child.postMessage(permissionHost.runtimeMessage());
   child.on("message", onWorkerMessage);
@@ -1283,8 +1331,7 @@ function bootWorker() {
     pendingQueue = null;
     pendingInspection?.settle(null);
     pendingMutation?.settle(null);
-    pending = null;
-    dismissApproval();
+    clearForegroundApproval();
     catalogRequest = null;
     state.models = [];
     state.codeCatalog = codeConnection() ? "failed" : "unavailable";
@@ -2090,6 +2137,7 @@ function clearAccountWorkspace() {
     discardedRunId = runId;
     stop();
   }
+  parallel.lanes.stopAll();
   pendingInspection?.settle(null);
   discardTransientTask(state.task);
   state.task = null;
@@ -3197,6 +3245,59 @@ async function replyToGitAction(event: Extract<WorkerEvent, { type: "git-action"
   }
 }
 
+const parallel = createParallelHost({
+  userData: app.getPath("userData"),
+  origin,
+  fastClock: DESKTOP_FIXTURE_ALLOWED && fixture !== null,
+  fork: forkRunner,
+  permissionMessage: () => permissionHost.runtimeMessage(),
+  language: () => state.language ?? "en",
+  broadcast: () => {
+    broadcast();
+    if (closing && !state.busy && !pendingMutation && !parallel.lanes.busy()) app.quit();
+  },
+  foreground: () => {
+    const task = state.task;
+    if (!task) return null;
+    const busy = Boolean(runId && runId !== discardedRunId && state.busy);
+    const said = [...task.entries].reverse().find((entry) => entry.role !== "user" && entry.role !== "plan" && entry.text.trim());
+    return { key: busy && runId ? runId : IDLE_OPEN_TASK_KEY, busy, folder: task.root, title: task.title, status: task.status, taskId: task.id, changes: task.changes.length,
+      ...(said && "text" in said ? { detail: said.text.replace(/\s+/g, " ").trim().slice(0, 160) } : {}) };
+  },
+  stopForeground: stop,
+  taskSaved: () => refreshHistory(),
+  pumpApprovals: () => setImmediate(pumpApprovals),
+  newWindow,
+  gitAction: (lane, action, ask) => gitIntegration.agentFor(() => {
+    try { assertProjectRoot(lane.project); return { folder: lane.project.path, managed: lane.isolated }; }
+    catch { return null; }
+  }, ask, action),
+  schedule: {
+    openProject: () => projectRoot?.path ?? null,
+    gitProject: () => codeGitProject !== null && codeGitProject !== "unavailable",
+    hasAccount: () => codeConnection() !== null && !signingOut && !invalidatingSession && !closing,
+    modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
+    sandbox: async () => {
+      const settings = readCodeSandboxSettings(codeSandboxDirectory());
+      const found = await sandboxEnforcement(settings.mode, { stateDir: join(codeSandboxDirectory(), "state") });
+      return { mode: settings.mode, available: found.available, writes: found.writes };
+    },
+    launch: (item, run, lanes, approvalWaitMs) => launchScheduledRun({
+      protectedRoot: app.getPath("userData"),
+      connection: () => (signingOut || invalidatingSession || closing || suspended ? null : codeConnection()),
+      scopeFor: (project) => {
+        const connection = codeConnection();
+        if (!connection) return null;
+        const owner = linkedCode?.connection === connection ? linkedCode.accountId : null;
+        return codeHistoryScope(app.getPath("userData"), owner, project, connection);
+      },
+      worktreeHome: managedWorktreeHome,
+      permissionHome: () => permissionHost.home,
+      modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
+    }, item, run, lanes, approvalWaitMs),
+  },
+});
+
 let dictation: { id: string; session: AbortSignal; expiry: number; mediaGranted: boolean; sent: boolean; controller: AbortController } | undefined;
 
 function accountPermissionsFixture() {
@@ -3245,6 +3346,7 @@ function registerIpc() {
   login("login:cancel", () => { loginAttempt?.abort(); });
   login("login:quit", () => { loginAttempt?.abort(); app.quit(); });
   main("desktop:state", () => {
+    refreshParallel();
     refreshCodeFallbackSettings();
     return { ...state, handoff: currentHandoff() };
   });
@@ -3313,7 +3415,7 @@ function registerIpc() {
     }
     broadcast();
   });
-  main("desktop:start", async (value) => {
+  const startTask = async (value: unknown, parallelStart = false) => {
     const { handoffId, executionMode, workspace, ...draft } = startInput.parse(value);
     if (recoveryCheckPending()) throw new Error("Wait for the recovery check to finish.");
     const connection = codeConnection();
@@ -3321,10 +3423,12 @@ function registerIpc() {
     const scope = currentHistoryScope();
     const preference = state.codeExecutionPreference;
     const installingUpdate = () => state.update.stage === "installing";
-    if (!worker || !sourceProject || state.busy || pendingMutation || signingOut || linkAttempt || suspended || closing ||
+    if (!worker || !sourceProject || (state.busy && !parallelStart) || pendingMutation || signingOut || linkAttempt || suspended || closing ||
         installingUpdate() || choosing) {
       throw new Error("Choose an available project and Code connection first.");
     }
+    if (parallelStart ? preference !== "tomverse_api" || draft.pluginConnectionId || !parallel.lanes.mayQueue()
+      : !parallel.lanes.hasRoomForOpenTask()) throw new Error("Too many tasks are running. Wait for one to finish or raise the limit.");
     const references = (draft.referenceIds ?? []).map((referenceId) => {
       const reference = codeReferences.get(referenceId);
       if (!reference) throw new Error("Select the project references again.");
@@ -3400,6 +3504,17 @@ function registerIpc() {
     const taskScope = worktree ? managedScope(scope, project) : scope;
     assertProjectRoot(project);
     const id = randomUUID();
+    if (parallelStart) {
+      parallel.submit({ kind: "parallel", title: cleanText(input.prompt, connection.key).slice(0, 80), folder: project.path, isolated: !!worktree,
+        ...(worktree ? { worktree: worktree.info } : {}),
+        start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference } });
+      if (handoffId) removeWorkspaceHandoff(handoffId);
+      codeReferences.clear();
+      codeWorktreeDraft = undefined;
+      broadcast();
+      return;
+    }
+    if (parallel.lanes.folderBusy(project.path)) throw new Error("Another task is using this folder. Start in a new worktree or wait for it to finish.");
     runId = id;
     revokeCodePlugin();
     if (draft.pluginConnectionId && browserSession) {
@@ -3424,12 +3539,17 @@ function registerIpc() {
     codeReferences.clear();
     codeWorktreeDraft = undefined;
     broadcast();
-  });
+  };
+  main("desktop:start", (value) => startTask(value));
+  main("desktop:start-parallel", (value) => startTask(value, true));
+  main("desktop:parallel", (value) => parallel.command(value));
+  main("desktop:schedules", (value) => parallel.schedules(value));
   main("desktop:permissions", (value) => {
     if (signingOut || closing) return { ok: false, error: "The app is closing." };
     const result = permissionHost.run(permissionCommand.parse(value));
     if (result.ok) {
       worker?.postMessage(permissionHost.runtimeMessage());
+      parallel.permissionChanged();
       broadcast();
     }
     return result;
@@ -3804,10 +3924,11 @@ function createMainWindow() {
     closeCodeBrowser();
     stopDictation();
     stop();
+    parallel.lanes.stopAll();
     void recoverWorkspace(true);
   });
   window.on("close", (event) => {
-    if (state.busy || pendingMutation) {
+    if (state.busy || pendingMutation || parallel.lanes.busy()) {
       event.preventDefault();
       requestQuit();
       return;
@@ -3884,7 +4005,7 @@ else {
     window.focus();
   });
   app.on("before-quit", (event) => {
-    if (state.busy || pendingMutation) {
+    if (state.busy || pendingMutation || parallel.lanes.busy()) {
       event.preventDefault();
       requestQuit();
     }
@@ -3897,6 +4018,7 @@ else {
     linkAttempt?.abort();
     renewal?.controller.abort();
     terminalHost.closeAllSync();
+    parallel.shutdown();
     browserSession = null;
     linkedCode = null;
     clearTimeout(sessionExpiry);
@@ -3916,7 +4038,7 @@ else {
       const address = new URL(request.url);
       if (request.method !== "GET" || address.host !== "desktop" || address.search) return new Response(null, { status: 404 });
       const route = address.pathname;
-      const isPage = route === "/" || route === "/approval" || route === "/login";
+      const isPage = route === "/" || route === "/approval" || route === "/login" || route === "/task";
       if (!isPage && !/^\/assets\/[A-Za-z0-9_.-]+$/.test(route)) return new Response(null, { status: 404 });
       const mime = isPage ? "text/html; charset=utf-8" : assetTypes[extname(route)];
       if (!mime) return new Response(null, { status: 404 });
@@ -3956,6 +4078,7 @@ else {
       geolocationGrant = undefined;
       stopDictation(true);
       stop();
+      parallel.lanes.stopAll();
     });
     powerMonitor.on("resume", () => {
       suspended = false;
@@ -3963,6 +4086,7 @@ else {
     });
     registerIpc();
     bootWorker();
+    parallel.start();
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) await restoreBrowserSession();
     accountWindowsReady = true;
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) syncAccountWindow();

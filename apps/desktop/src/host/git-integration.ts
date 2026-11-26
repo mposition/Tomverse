@@ -59,9 +59,30 @@ export function createGitIntegration(environment: GitIntegrationEnvironment) {
     afterBranchChange: environment.afterBranchChange,
   });
 
+  /**
+   * An agent's commit or push from a task that runs next to the open one: the same host and the same ticket ledger, but on that task's own
+   * folder, and its approval card goes to the shared queue (`ask`) under that task's name. A ticket is granted only by that card's answer.
+   */
+  function agentFor(target: () => { folder: string; managed: boolean } | null, ask: (request: ApprovalRequest) => Promise<Decision["action"]>, value: unknown) {
+    const laneHost = createGitHost({
+      target, busy: () => false, ledger,
+      requestApproval: async (view, ticket) => {
+        const answer = await ask({ id: randomUUID(), root: view.repository, tool: view.kind === "publish" ? "git push" : "git commit", canRemember: false, git: view });
+        if (answer !== "once") return false;
+        return ledger.grant(ticket);
+      },
+      hooksOff: join(environment.userData, "disabled-git-hooks"),
+      gh: (): GhRunner | null => environment.fixtureProfile ? createFixtureGhRunner(ghFixtureFile(environment.fixtureProfile)) : createGhRunner(),
+      savedLinks: () => [], linkPull: async () => undefined, readPublic: async () => null,
+      agentSwitch: { read: () => readAgentGitSwitch(switchFile), write: () => undefined },
+    });
+    return laneHost.agent(value);
+  }
+
   return {
     handle: (value: unknown) => host.handle(value),
     agent: (value: unknown) => host.agent(value),
+    agentFor,
     switchFile,
     /** The approval window's answer. Only "once" approves: a git card cannot be remembered. True when the answer was for a Git card. */
     decide(decision: Decision): boolean {

@@ -74,12 +74,17 @@ import { HandoffDraft, useHandoffSelection } from "./WorkspaceHandoff";
 import { ProviderCliSettings } from "./ProviderCliSettings";
 import { openDocs, useWebViewState, WebViewer } from "./WebViewer";
 import { clearDesktopDrafts, readCodeDraft, writeDesktopDraft } from "./draft-store";
+import { ActivityControl } from "./ActivityPanel";
+import { LaneTaskView } from "./LaneTaskView";
+import { desktopParallelCopy } from "../../../../locales/desktopParallel";
+import type { TaskWindowView } from "../parallel-contract";
 import "./styles.css";
 
 declare global {
   interface Window {
     desktop: Omit<DesktopApi, "approval" | "decide">;
     approvalHost: Pick<DesktopApi, "approval" | "decide">;
+    taskHost: { read(): Promise<TaskWindowView>; stop(): Promise<boolean>; subscribe(listener: (view: TaskWindowView) => void): () => void };
   }
 }
 
@@ -980,6 +985,7 @@ ${text}` : text;
           {surface === "code" && task?.id && task.savedLocally && !task.unreadable && !busy &&
             snapshot?.history.some((row) => row.id === task.id) &&
             <TaskGithubPulls key={snapshot.draftNamespace + task.id} language={language} onVisibilityChange={setGithubDialogOpen} scope={attachmentScope} />}
+          {surface === "code" && snapshot?.project && <ActivityControl snapshot={snapshot} language={language} modelId={selectedModel?.id} effort={effort} onVisibilityChange={setGithubDialogOpen} />}
           {canShowTerminal && <button className="icon" type="button" aria-label={desktopTerminalCopy[language].title}
             aria-expanded={terminalOpen} aria-controls={terminalOpen ? "code-terminal-panel" : undefined}
             onClick={() => setTerminalPanel(!terminalOpen)}><SquareTerminal size={18} /></button>}
@@ -1289,6 +1295,10 @@ function Approval() {
   return <main className="approval">
     <header><ShieldCheck size={24} /><h1>{copy.reviewAction}</h1></header>
     <div className="approval-content">
+      {request.task && <p className="approval-origin" data-testid="approval-origin">
+        {desktopParallelCopy[language].approvalFrom.replace("{kind}", request.task.kind === "scheduled" ? desktopParallelCopy[language].kindScheduled : desktopParallelCopy[language].kindParallel).replace("{title}", request.task.title)}
+        <br />{desktopParallelCopy[language].approvalFolder}: <code>{request.task.folder}</code>
+      </p>}
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
       {request.explanation && <p>{request.explanation}</p>}
       {request.web && <section aria-label={engineCopy.approvalWebHeading}>
@@ -1340,8 +1350,25 @@ function Approval() {
   </main>;
 }
 
+/** A task's own window: one task, read-only, with Stop. The main process decides which task; this page never names one. */
+function DetachedTask() {
+  const [view, setView] = useState<TaskWindowView | null | "gone">(null);
+  useEffect(() => {
+    applyTheme(localStorage.getItem("tomverse.theme") === "light" ? "light" : "dark");
+    void window.taskHost.read().then((next) => setView(next.row || next.task ? next : "gone"), () => setView("gone"));
+    return window.taskHost.subscribe((next) => setView(next.row || next.task ? next : "gone"));
+  }, []);
+  const language = view && view !== "gone" ? view.language : readLanguage();
+  useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
+  if (!view) return <main className="task-window"><p role="status">…</p></main>;
+  if (view === "gone") return <main className="task-window"><p role="alert">{desktopParallelCopy[language].windowGone}</p></main>;
+  return <main className="task-window" data-testid="task-window">
+    <LaneTaskView task={view.task} row={view.row} language={language} onStop={() => void window.taskHost.stop()} />
+  </main>;
+}
+
 const isLoginWindow = location.pathname === "/login";
 if (isLoginWindow) document.documentElement.classList.add("dark", "login-window");
 createRoot(document.getElementById("root")!).render(
-  location.pathname === "/approval" ? <Approval /> : isLoginWindow ? <Login /> : <Desktop />,
+  location.pathname === "/approval" ? <Approval /> : location.pathname === "/task" ? <DetachedTask /> : isLoginWindow ? <Login /> : <Desktop />,
 );
