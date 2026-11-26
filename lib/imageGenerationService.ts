@@ -556,7 +556,6 @@ export const requestImageGeneration = async (
   }
 
   const scope = imageConcurrencyScope(input.userId);
-  const generationId = randomUUID();
   const leaseId = randomUUID();
   const ttlSeconds = resolveLeaseTtlSeconds();
 
@@ -779,54 +778,25 @@ export const requestImageGeneration = async (
         }
       }
 
-      // Add-on credits are reserved once for the whole group and split
-      // across targets proportionally to what each one costs, so a per-target
-      // refund gives back exactly that target's share.
-      const totalMaxCost = [...targetCosts.values()].reduce(
-        (sum, cost) => sum + cost,
-        0
-      );
-      const addOnFundedCostMicroUsd =
-        allocation.addOnCreditsRequired > 0
-          ? Math.ceil(
-              (totalMaxCost * allocation.addOnCreditsRequired) / totalCredits
-            )
-          : 0;
-
-      let entries: AddOnCreditReservationEntry[] = [];
-      if (allocation.addOnCreditsRequired > 0) {
-        entries = await reserveAddOnCredits(tx, {
-          userId: input.userId,
-          reservationId: reservationIdFor(generationId),
-          credits: allocation.addOnCreditsRequired,
-          fundedCostMicroUsd: addOnFundedCostMicroUsd,
-          now,
-        });
-      }
-
-      const editAttachmentId = edit && ("attachmentId" in edit
-        ? edit.attachmentId
-        : await edit.bindAttachment(tx, conversationId));
-      const group = await tx.imageGenerationGroup.create({
-        data: {
-          userId: input.userId,
-          conversationId,
-          groupIdempotencyKey: input.idempotencyKey,
-        },
-        select: { id: true },
-      });
-
       // Plan and add-on credits were allocated for the group as a whole;
-      // each target's reservation records its own slice so settlement and
-      // refunds stay per attempt (policy §11).
+      // each target takes its own slice so settlement and refunds stay per
+      // attempt (policy §11).
       let planCreditsLeft = allocation.planReservedCredits;
       let addOnCreditsLeft = allocation.addOnCreditsRequired;
-      const createdTargets: ImageGenerationTargetResult[] = [];
-
+      let addOnCreditsHeld = 0;
+      let fundedCostHeld = 0;
+      const slices: Array<{
+        generationId: string;
+        planShare: number;
+        addOnShare: number;
+        maxCost: number;
+        fundedCost: number;
+        entries: AddOnCreditReservationEntry[];
+      }> = [];
       for (const [index, target] of resolvedTargets.entries()) {
         const isLast = index === resolvedTargets.length - 1;
         // The last target absorbs the rounding remainder so the per-target
-        // slices always sum back to exactly what was reserved.
+        // slices always sum back to exactly what was allocated.
         const planShare = isLast
           ? planCreditsLeft
           : Math.min(
@@ -842,12 +812,74 @@ export const requestImageGeneration = async (
           : Math.min(addOnCreditsLeft, target.credits - planShare);
         addOnCreditsLeft -= addOnShare;
 
-        const targetMaxCost = targetCosts.get(target.modelId)!;
-        const targetGenerationId = randomUUID();
-        const targetFundedCost =
+        const maxCost = targetCosts.get(target.modelId)!;
+        const fundedCost =
           addOnShare > 0
-            ? Math.ceil((targetMaxCost * addOnShare) / target.credits)
+            ? Math.ceil((maxCost * addOnShare) / target.credits)
             : 0;
+        const targetGenerationId = randomUUID();
+        // Each target reserves its add-on credits under its own reservation
+        // id. The lot payload stored on its row is then exactly what it took,
+        // so its settlement or refund never reaches a sibling's share, and
+        // the ledger's reserve rows carry the id its settle rows will.
+        let entries: AddOnCreditReservationEntry[] = [];
+        if (addOnShare > 0) {
+          try {
+            entries = await reserveAddOnCredits(tx, {
+              userId: input.userId,
+              reservationId: reservationIdFor(targetGenerationId),
+              credits: addOnShare,
+              fundedCostMicroUsd: fundedCost,
+              now,
+            });
+          } catch (error) {
+            // Earlier targets already hold part of the balance in this
+            // transaction; the refusal reports what the user actually has.
+            if (error instanceof AddOnCreditError) {
+              throw new AddOnCreditError(
+                error.code,
+                error.availableCredits + addOnCreditsHeld,
+                error.availableFundedCostMicroUsd + fundedCostHeld
+              );
+            }
+            throw error;
+          }
+          addOnCreditsHeld += addOnShare;
+          fundedCostHeld += fundedCost;
+        }
+        slices.push({
+          generationId: targetGenerationId,
+          planShare,
+          addOnShare,
+          maxCost,
+          fundedCost,
+          entries,
+        });
+      }
+
+      const editAttachmentId = edit && ("attachmentId" in edit
+        ? edit.attachmentId
+        : await edit.bindAttachment(tx, conversationId));
+      const group = await tx.imageGenerationGroup.create({
+        data: {
+          userId: input.userId,
+          conversationId,
+          groupIdempotencyKey: input.idempotencyKey,
+        },
+        select: { id: true },
+      });
+
+      const createdTargets: ImageGenerationTargetResult[] = [];
+
+      for (const [index, target] of resolvedTargets.entries()) {
+        const {
+          generationId: targetGenerationId,
+          planShare,
+          addOnShare,
+          maxCost: targetMaxCost,
+          fundedCost: targetFundedCost,
+          entries,
+        } = slices[index];
 
         const targetRow = await tx.imageGenerationTarget.create({
           data: {
@@ -942,12 +974,9 @@ export const requestImageGeneration = async (
                   }
                 : {}),
             },
-            // The per-lot payload belongs to the group's single add-on
-            // reservation; it is stored on the first target that holds
-            // add-on credits so crash recovery finds it exactly once.
-            reservationPayload: (addOnShare > 0 && index === 0
-              ? entries
-              : []) as unknown as Prisma.InputJsonValue,
+            // The lots this target's own add-on reservation took, so crash
+            // recovery settles or refunds exactly this target's share.
+            reservationPayload: entries as unknown as Prisma.InputJsonValue,
           },
         });
 

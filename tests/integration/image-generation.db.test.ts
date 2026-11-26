@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { after, beforeEach, test } from "node:test";
 
 import {
@@ -16,6 +18,7 @@ import {
   enqueueImageAssetCleanupForConversations,
 } from "@/lib/imageAssetLifecycle";
 import {
+  processImageGeneration,
   reconcileStaleImageGenerations,
   requestImageGeneration,
 } from "@/lib/imageGenerationService";
@@ -1374,4 +1377,363 @@ test("three models at a limit of three fan out as one group of three", async () 
     budgets.map((row) => row.key).sort(),
     ["image-provider:fal", "image-provider:openai", "image-provider:xai"]
   );
+});
+
+/* ------------------------------------------------------------------------- */
+/* Purchased credits in a multi-model group: each target settles its own.    */
+/* ------------------------------------------------------------------------- */
+
+const COMPARISON_MODELS = {
+  openAi: "gpt-image-2", // 70 credits at Standard 1K
+  xai: "grok-imagine-image-quality-20260403", // 75 credits at Standard 1K
+} as const;
+
+const comparisonRequestInput = (userId: string, modelIds: string[]) =>
+  requestInput(userId, { quality: "medium", size: "1024x1024", modelIds });
+
+const spendMonthlyPlanCredits = (userId: string, used: number) => {
+  const now = new Date();
+  return prisma.chatUsageBucket.create({
+    data: {
+      key: getUserChatUsageKey(userId),
+      period: "month",
+      periodStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+      count: used,
+    },
+  });
+};
+
+const createCreditLot = (
+  userId: string,
+  credits: number,
+  fundedCostMicroUsd: number,
+  expiresInDays: number
+) =>
+  prisma.creditLot.create({
+    data: {
+      userId,
+      source: "credit_pack",
+      originalCredits: credits,
+      remainingCredits: credits,
+      originalFundedCostMicroUsd: BigInt(fundedCostMicroUsd),
+      remainingFundedCostMicroUsd: BigInt(fundedCostMicroUsd),
+      status: "active",
+      expiresAt: new Date(Date.now() + expiresInDays * 86_400_000),
+    },
+  });
+
+const purchasedBalance = async (userId: string) => {
+  const lots = await prisma.creditLot.findMany({ where: { userId } });
+  return {
+    credits: lots.reduce((sum, lot) => sum + lot.remainingCredits, 0),
+    fundedCostMicroUsd: lots.reduce(
+      (sum, lot) => sum + Number(lot.remainingFundedCostMicroUsd),
+      0
+    ),
+  };
+};
+
+/** The group's reservations in target order, with what each one's lot payload adds up to. */
+const reservationsInTargetOrder = async (
+  result: Awaited<ReturnType<typeof requestImageGeneration>>
+) => {
+  const rows = [];
+  for (const target of result.targets) {
+    const reservation = await prisma.imageCreditReservation.findUniqueOrThrow({
+      where: { generationId: target.generationId },
+    });
+    const payload = reservation.reservationPayload as Array<{
+      lotId: string;
+      credits: number;
+      fundedCostMicroUsd: number;
+    }>;
+    rows.push({
+      ...reservation,
+      fundedCost: Number(reservation.reservedFundedCostMicroUsd),
+      payload,
+      payloadCredits: payload.reduce((sum, entry) => sum + entry.credits, 0),
+      payloadFundedCost: payload.reduce(
+        (sum, entry) => sum + entry.fundedCostMicroUsd,
+        0
+      ),
+    });
+  }
+  return rows;
+};
+
+/** Makes one attempt look abandoned, so the stale sweep takes it and leaves its siblings. */
+const abandonGeneration = (generationId: string) =>
+  prisma.$executeRaw`
+    UPDATE "ImageGeneration"
+    SET "updatedAt" = (NOW() AT TIME ZONE 'UTC') - INTERVAL '2 hours'
+    WHERE "id" = ${generationId}
+  `;
+
+/**
+ * Stand-ins for the two things a successful attempt reaches outside the
+ * database: the OpenAI image endpoint (through `fetch`) and the bucket the
+ * original is written to (a local server the S3 client is pointed at). With
+ * them the real success settlement runs against the test database.
+ */
+const withImageExecutionStandIns = async <T,>(run: () => Promise<T>): Promise<T> => {
+  const sharp = (await import("sharp")).default;
+  const png = await sharp({
+    create: { width: 1024, height: 1024, channels: 3, background: "#888" },
+  })
+    .png()
+    .toBuffer();
+  const bucket = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { ETag: '"stand-in"' });
+      response.end();
+    });
+  });
+  await new Promise<void>((resolve) => bucket.listen(0, "127.0.0.1", resolve));
+  const overrides: Record<string, string> = {
+    OPENAI_IMAGE_API_KEY: "test-image-key",
+    R2_ACCOUNT_ID: "test-account",
+    R2_ACCESS_KEY_ID: "test-access-key",
+    R2_SECRET_ACCESS_KEY: "test-secret-key",
+    R2_BUCKET_NAME: "test-bucket",
+    R2_ENDPOINT: `http://127.0.0.1:${(bucket.address() as AddressInfo).port}`,
+  };
+  const previous = Object.keys(overrides).map(
+    (name) => [name, process.env[name]] as const
+  );
+  Object.assign(process.env, overrides);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown) => {
+    assert.equal(String(url), "https://api.openai.com/v1/images/generations");
+    return Response.json(
+      {
+        data: [{ b64_json: png.toString("base64") }],
+        usage: { input_tokens: 10, output_tokens: 100 },
+      },
+      { headers: { "x-request-id": "req_stand_in" } }
+    );
+  }) as typeof fetch;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    bucket.closeAllConnections();
+    await new Promise((resolve) => bucket.close(resolve));
+  }
+};
+
+test("each target of a group paid with purchased credits holds its own lot share", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  await spendMonthlyPlanCredits(user.id, 3_000);
+  // Two lots, the first too small for the group: the shares span lots.
+  await createCreditLot(user.id, 100, 150_000, 10);
+  await createCreditLot(user.id, 400, 600_000, 30);
+
+  const result = await requestImageGeneration(
+    comparisonRequestInput(user.id, [COMPARISON_MODELS.openAi, COMPARISON_MODELS.xai])
+  );
+  const [first, second] = await reservationsInTargetOrder(result);
+  assert.equal(first.addOnReservedCredits, 70);
+  assert.equal(second.addOnReservedCredits, 75);
+  for (const reservation of [first, second]) {
+    assert.equal(reservation.payloadCredits, reservation.addOnReservedCredits);
+    assert.equal(reservation.payloadFundedCost, reservation.fundedCost);
+  }
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500 - 145,
+    fundedCostMicroUsd: 750_000 - first.fundedCost - second.fundedCost,
+  });
+  // The ledger names the reservation each lot movement belongs to.
+  const reserveRows = await prisma.creditLedgerEntry.findMany({
+    where: { userId: user.id, type: "reserve" },
+  });
+  for (const reservation of [first, second]) {
+    assert.equal(
+      reserveRows
+        .filter((row) => row.reservationId === reservation.id)
+        .reduce((sum, row) => sum - row.creditsDelta, 0),
+      reservation.addOnReservedCredits
+    );
+  }
+
+  // The first model succeeds while the second is still running: its own
+  // share is consumed and the second's stays held.
+  await withImageExecutionStandIns(() =>
+    processImageGeneration(result.targets[0].generationId)
+  );
+  const succeeded = await prisma.imageGeneration.findUniqueOrThrow({
+    where: { id: result.targets[0].generationId },
+  });
+  assert.equal(succeeded.status, "succeeded");
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500 - 145,
+    fundedCostMicroUsd: 750_000 - first.fundedCost - second.fundedCost,
+  });
+
+  // The second model is abandoned: only its share comes back.
+  const sweep = await reconcileStaleImageGenerations(
+    new Date(Date.now() + 60 * 60 * 1_000)
+  );
+  assert.equal(sweep.refunded, 1);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500 - 70,
+    fundedCostMicroUsd: 750_000 - first.fundedCost,
+  });
+  const ledger = await prisma.creditLedgerEntry.aggregate({
+    where: { userId: user.id },
+    _sum: { creditsDelta: true, fundedCostMicroUsdDelta: true },
+  });
+  assert.equal(ledger._sum.creditsDelta, -70);
+  assert.equal(Number(ledger._sum.fundedCostMicroUsdDelta), -first.fundedCost);
+});
+
+test("a failed first target returns only its share, and the second still pays for its image", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  await spendMonthlyPlanCredits(user.id, 3_000);
+  await createCreditLot(user.id, 500, 750_000, 30);
+
+  const result = await requestImageGeneration(
+    comparisonRequestInput(user.id, [COMPARISON_MODELS.xai, COMPARISON_MODELS.openAi])
+  );
+  const [first, second] = await reservationsInTargetOrder(result);
+  assert.equal(first.addOnReservedCredits, 75);
+  assert.equal(second.addOnReservedCredits, 70);
+
+  await abandonGeneration(result.targets[0].generationId);
+  const sweep = await reconcileStaleImageGenerations(new Date());
+  assert.equal(sweep.refunded, 1);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500 - 70,
+    fundedCostMicroUsd: 750_000 - second.fundedCost,
+  });
+
+  await withImageExecutionStandIns(() =>
+    processImageGeneration(result.targets[1].generationId)
+  );
+  const settled = await prisma.imageCreditReservation.findUniqueOrThrow({
+    where: { id: second.id },
+  });
+  assert.equal(settled.outcome, "completed");
+  assert.equal(settled.settledCredits, 70);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500 - 70,
+    fundedCostMicroUsd: 750_000 - second.fundedCost,
+  });
+  const settleRows = await prisma.creditLedgerEntry.findMany({
+    where: { userId: user.id, type: "settle", reservationId: second.id },
+  });
+  assert.equal(
+    settleRows.reduce(
+      (sum, row) =>
+        sum + Number((row.metadata as { settledCredits?: number }).settledCredits ?? 0),
+      0
+    ),
+    70
+  );
+});
+
+test("purchased credits held only by a later target come back when that target fails", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  // Plan credits cover all but one credit of the 145, and that one falls to
+  // the second target.
+  await spendMonthlyPlanCredits(user.id, 3_000 - 144);
+  await createCreditLot(user.id, 500, 750_000, 30);
+
+  const result = await requestImageGeneration(
+    comparisonRequestInput(user.id, [COMPARISON_MODELS.openAi, COMPARISON_MODELS.xai])
+  );
+  const [first, second] = await reservationsInTargetOrder(result);
+  assert.equal(first.addOnReservedCredits, 0);
+  assert.deepEqual(first.payload, []);
+  assert.equal(second.addOnReservedCredits, 1);
+  assert.equal(second.payloadCredits, 1);
+  assert.equal(second.payloadFundedCost, second.fundedCost);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 499,
+    fundedCostMicroUsd: 750_000 - second.fundedCost,
+  });
+
+  const sweep = await reconcileStaleImageGenerations(
+    new Date(Date.now() + 60 * 60 * 1_000)
+  );
+  assert.equal(sweep.refunded, 2);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500,
+    fundedCostMicroUsd: 750_000,
+  });
+  const monthBucket = await prisma.chatUsageBucket.findFirst({
+    where: { key: getUserChatUsageKey(user.id), period: "month" },
+  });
+  assert.equal(Number(monthBucket?.count ?? 0), 3_000 - 144);
+});
+
+test("a group reserved in the earlier payload shape still settles once and never over-refunds", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  await spendMonthlyPlanCredits(user.id, 3_000);
+  await createCreditLot(user.id, 500, 750_000, 30);
+
+  const result = await requestImageGeneration(
+    comparisonRequestInput(user.id, [COMPARISON_MODELS.openAi, COMPARISON_MODELS.xai])
+  );
+  const [first, second] = await reservationsInTargetOrder(result);
+  // The shape reservations had before each target stored its own share: the
+  // whole group's lot list on the first target, nothing on the others.
+  await prisma.imageCreditReservation.update({
+    where: { id: first.id },
+    data: { reservationPayload: [...first.payload, ...second.payload] },
+  });
+  await prisma.imageCreditReservation.update({
+    where: { id: second.id },
+    data: { reservationPayload: [] },
+  });
+
+  const sweep = await reconcileStaleImageGenerations(
+    new Date(Date.now() + 60 * 60 * 1_000)
+  );
+  assert.equal(sweep.refunded, 2);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500,
+    fundedCostMicroUsd: 750_000,
+  });
+  const again = await reconcileStaleImageGenerations(
+    new Date(Date.now() + 61 * 60 * 1_000)
+  );
+  assert.equal(again.refunded, 0);
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500,
+    fundedCostMicroUsd: 750_000,
+  });
+});
+
+test("a group whose later target cannot be funded is refused whole, reporting the untouched balance", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  await spendMonthlyPlanCredits(user.id, 3_000);
+  // Enough credits for both models, cost allowance for the first only.
+  await createCreditLot(user.id, 500, 60_000, 30);
+
+  await assert.rejects(
+    requestImageGeneration(
+      comparisonRequestInput(user.id, [COMPARISON_MODELS.openAi, COMPARISON_MODELS.xai])
+    ),
+    (error: Error & { code?: string; details?: Record<string, unknown> }) => {
+      assert.equal(error.code, "CREDIT_COST_ALLOWANCE_INSUFFICIENT");
+      assert.equal(error.details?.availableCredits, 500);
+      return true;
+    }
+  );
+  assert.deepEqual(await purchasedBalance(user.id), {
+    credits: 500,
+    fundedCostMicroUsd: 60_000,
+  });
+  assert.equal(await prisma.creditLedgerEntry.count(), 0);
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
 });
