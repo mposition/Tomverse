@@ -104,7 +104,12 @@ test("the shared account menu defaults to Review and accepts the Studio product"
         new URL("../components/studio/StudioWorkspace.tsx", import.meta.url),
         "utf8"
     );
-    assert.match(studio, /<StudioAccount currentProduct="studio"/);
+    assert.match(studio, /<ReviewNavigation product="studio"/);
+    const panel = readFileSync(
+        new URL("../components/chat/WorkspaceAccountPanel.tsx", import.meta.url),
+        "utf8"
+    );
+    assert.match(panel, /<AccountButton currentProduct=\{currentProduct\}/);
     assert.match(authButton, /returnTo=\{accountCallbackUrl\}/);
 });
 

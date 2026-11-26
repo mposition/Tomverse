@@ -286,6 +286,19 @@ test("the query is a literal substring, not a LIKE pattern", async () => {
     assert.deepEqual((await search(user.id, "k\\s")).results.map((r) => r.snippet), ["back\\slash"]);
 });
 
+test("a Studio tool request is not a conversation message to find", async () => {
+    const user = await createUser();
+    await seedConversation(user.id, { messages: ["a poster idea from a chat"] });
+    // What lib/studioImageReference.ts writes: an image conversation carrying the run's request.
+    await prisma.conversation.create({
+        data: {
+            userId: user.id, title: "Design a poster", kind: "image", productKey: "studio", selectedModels: "[]",
+            messages: { create: { role: "user", content: "Design a poster for a jazz night" } },
+        },
+    });
+    assert.deepEqual((await search(user.id, "poster")).results.map((r) => r.snippet), ["a poster idea from a chat"]);
+});
+
 test("one original shown under two continuations is two distinct results", async () => {
     const user = await createUser();
     const source = await seedSnapshot(user.id, ["pelican"]);

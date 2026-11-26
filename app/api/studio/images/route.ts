@@ -17,7 +17,7 @@ import { MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
 import { studioAvailable } from "@/lib/studioAvailability";
-import { bindStudioImageUpload } from "@/lib/studioImageReference";
+import { bindStudioImageUpload, recordStudioRequest } from "@/lib/studioImageReference";
 import { STUDIO_IMAGE_USE_CASES, type StudioImageUseCase } from "@/lib/studioTools";
 
 const sizeSchema = z.enum(CATALOG_IMAGE_SIZES);
@@ -174,13 +174,14 @@ export async function POST(req: Request) {
       expectedPricingVersions: { [body.modelId]: body.pricingVersion },
       // Reached only through the feature's own quote above, never by a model id alone.
       ...(tool ? { photoTools: [tool.modelId] } : {}),
+      // Either way the run's conversation carries its request, which keeps it out of the conversation history.
       ...(uploadId ? {
         editSource: {
           bindAttachment: (tx, conversationId) => bindStudioImageUpload(tx, {
             userId: user.id, email: user.email, conversationId, uploadId, prompt: body.prompt,
           }),
         },
-      } : {}),
+      } : { onReserved: (tx, conversationId) => recordStudioRequest(tx, conversationId, body.prompt) }),
     });
     // Every target, not the first: a second tool left pending is never sent and its reservation waits for the sweep.
     const pending = result.reused ? [] : result.targets.filter(target => target.status === "pending").map(target => target.generationId);

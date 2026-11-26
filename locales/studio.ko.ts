@@ -64,7 +64,6 @@ export const studioLocale = {
   "myStickerPack": "내 이모티콘 팩",
   "newCaption": "새로 넣을 문구",
   "newImage": "새 이미지",
-  "openHistory": "채팅 기록 열기",
   "openingSituation": "첫 상황",
   "originalPhoto": "원본 사진",
   "original": "원본",
