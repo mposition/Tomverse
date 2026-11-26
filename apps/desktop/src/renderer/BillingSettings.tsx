@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Language } from "../../../../lib/language";
 import { en } from "../../../../locales/en";
 import { ko } from "../../../../locales/ko";
@@ -161,6 +161,8 @@ function BillingPlan({ language }: { language: Language }) {
   const [repeat, setRepeat] = useState<Repeat>();
   const [pass, setPass] = useState(false);
   const [failure, setFailure] = useState<string>();
+  // A refused purchase is reported beside the button that started it, so it is never off screen.
+  const [failedKind, setFailedKind] = useState<PurchaseIntent["kind"]>();
   const [starting, setStarting] = useState(false);
   const auth = dictionaries[language].auth;
   const desk = desktopBillingCopy(language);
@@ -191,6 +193,7 @@ function BillingPlan({ language }: { language: Language }) {
     if (starting) return;
     setStarting(true);
     setFailure(undefined);
+    setFailedKind(intent.kind);
     setRepeat(undefined);
     setPass(false);
     try {
@@ -249,7 +252,7 @@ function BillingPlan({ language }: { language: Language }) {
         setRepeat(undefined);
         void billing<"checkPurchase">({ action: "checkPurchase", item }).catch(() => {});
       }} />
-    {failure && <p className="notice" role="alert">{failure}</p>}
+    {failure && failedKind !== "credits" && <p className="notice" role="alert">{failure}</p>}
 
     <section className="desktop-setting-section" data-testid="native-billing-current">
       <h3>{auth.currentPlan}</h3>
@@ -323,7 +326,12 @@ function BillingPlan({ language }: { language: Language }) {
     </section>
 
     <CreditPacks language={language} packs={packs.data} failed={packs.failed} retry={packs.reload}
-      busy={starting || purchaseBusy}
+      busy={starting || purchaseBusy} failure={failedKind === "credits" ? failure : undefined}
+      repeat={repeat} onRepeat={next => void start(next.intent, next.run, next.hold)}
+      onCheckAgain={item => {
+        setRepeat(undefined);
+        void billing<"checkPurchase">({ action: "checkPurchase", item }).catch(() => {});
+      }}
       onBuy={pack => void start({ kind: "credits", packId: pack.id }, repeatHold => billing<"buyCreditPack">(
         withHold({ action: "buyCreditPack" as const, packId: pack.id, currency: pack.currency, language }, repeatHold)))} />
 
@@ -558,22 +566,35 @@ function Checkout({ language, planId, config, interval, onCycle, busy, failure, 
   </form>;
 }
 
-function CreditPacks({ language, packs, failed, retry, busy, onBuy }: {
-  language: Language; packs?: BillingValue<"creditPacks">; failed: boolean; retry(): void; busy: boolean;
+function CreditPacks({ language, packs, failed, retry, busy, failure, repeat, onBuy, onRepeat, onCheckAgain }: {
+  language: Language; packs?: BillingValue<"creditPacks">; failed: boolean; retry(): void; busy: boolean; failure?: string;
+  /** A held repeat of a pack is answered beside that pack, not only in the status list at the top of the page. */
+  repeat?: Repeat; onRepeat(repeat: Repeat): void; onCheckAgain(item: PurchaseItem): void;
   onBuy(pack: BillingValue<"creditPacks">["packs"][number]): void;
 }) {
   const copy = creditPackCopy[language];
+  const desk = desktopBillingCopy(language);
   if (!packs) return failed ? <section className="desktop-setting-section"><h3>{copy.title}</h3><ReadFailure language={language} retry={retry} /></section> : null;
   if (!packs.packs.length) return null;
   return <section className="desktop-setting-section" data-testid="native-billing-credit-packs">
     <h3>{copy.title}</h3>
     <p className="billing-muted">{copy.body}</p>
-    {packs.packs.map(pack => <Row key={pack.id}
+    {packs.packs.map(pack => <Fragment key={pack.id}><Row
       label={<><strong>{pack.name}</strong> · {new Intl.NumberFormat(language).format(pack.credits)} {creditUnit[language]}</>}
       description={copy.expiry.replace("{days}", String(pack.validityDays))}>
       <span>{formatMinor(pack.priceMinor, pack.currency)}</span>
       <button type="button" className="soft" disabled={busy} onClick={() => onBuy(pack)}>{copy.buy}</button>
-    </Row>)}
+    </Row>
+    {repeat?.item === purchaseItem({ kind: "credits", packId: pack.id }) && <div className="billing-notice" role="alert"
+      data-testid="native-billing-pack-repeat">
+      <p><strong>{desk.repeatTitle}</strong></p><p>{desk.repeatBody}</p>
+      <div className="billing-notice-actions">
+        <button type="button" className="soft" disabled={busy} onClick={() => onCheckAgain(repeat.item)}>{desk.checkAgain}</button>
+        <button type="button" className="soft" disabled={busy} data-testid="native-billing-pack-repeat-start"
+          onClick={() => onRepeat(repeat)}>{desk.startAnyway}</button>
+      </div>
+    </div>}</Fragment>)}
+    {failure && <p className="notice" role="alert" data-testid="native-billing-credit-pack-failure">{failure}</p>}
     <p className="billing-notice">{copy.notice}</p>
   </section>;
 }

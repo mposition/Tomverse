@@ -5,12 +5,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { _electron as electron, expect, type ElectronApplication } from "@playwright/test";
+import { _electron as electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 
 const require = createRequire(import.meta.url);
 const executablePath: string = process.env.TOMVERSE_DESKTOP_TEST_ELECTRON ?? require("electron");
 const desktopDir = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 const origin = process.env.DESKTOP_E2E_AUTH_ORIGIN;
+
+async function chooseModels(desktop: Page, names: string[]) {
+  await desktop.getByRole("button", { name: "Professional", exact: true }).click();
+  await desktop.getByRole("button", { name: "Review mode and models", exact: true }).click();
+  const picker = desktop.getByRole("dialog", { name: "Review mode and models" });
+  await picker.getByRole("button", { name: /All models/ }).click();
+  for (const name of names) await picker.getByTestId("model-option").filter({ hasText: name }).click();
+  await picker.getByTestId("model-picker-done").click();
+}
 
 test("Desktop Review handles legacy writes, continuation history, and capped image offers", { timeout: 60_000, skip: !origin }, async (t) => {
   assert.ok(origin);
@@ -145,7 +154,7 @@ test("Desktop Review handles legacy writes, continuation history, and capped ima
       await desktop.getByRole("button", { name: review.title, exact: true }).click();
       const imported = desktop.getByRole("region", { name: "Imported conversation", exact: true });
       await expect(imported.getByText("Latest imported answer")).toBeVisible();
-      await expect(desktop.getByRole("heading", { name: "Tomverse follow-up question" })).toBeVisible();
+      await expect(desktop.getByTestId("review-user-bubble").filter({ hasText: "Tomverse follow-up question" })).toBeVisible();
       assert.ok(await imported.evaluate((section) => !!section.nextElementSibling?.matches(".review-turn")));
       await imported.getByRole("button", { name: "Load earlier imported messages" }).click();
       await expect(imported.getByText("Earlier imported question")).toBeVisible();
@@ -157,15 +166,12 @@ test("Desktop Review handles legacy writes, continuation history, and capped ima
     await t.test("Legacy Review continues with two models and respects a later read-only decision", async () => {
       const row = desktop.getByRole("button", { name: legacy.title, exact: true });
       await row.click();
-      const modes = desktop.getByLabel("Review mode and models");
-      await modes.click();
-      await desktop.getByRole("combobox", { name: "Mode" }).selectOption("professional");
-      for (const provider of providers.slice(0, 2)) await desktop.getByRole("checkbox", { name: provider, exact: true }).check();
-      await modes.click();
+      await chooseModels(desktop, providers.slice(0, 2));
       const prompt = "Continue my previous Review";
       await desktop.getByRole("textbox", { name: "Review question" }).fill(prompt);
       await desktop.getByRole("button", { name: "Send Review question" }).click();
-      await expect(desktop.getByRole("heading", { name: prompt, exact: true })).toBeVisible();
+      await expect(desktop.getByTestId("review-column")).toHaveCount(2);
+      await expect(desktop.getByTestId("review-user-bubble").filter({ hasText: prompt })).toHaveCount(2);
       await expect(desktop.getByText("Follow-up answer from openai-text", { exact: true })).toBeVisible();
       await expect(desktop.getByText("Follow-up answer from anthropic-text", { exact: true })).toBeVisible();
       assert.deepEqual(await app!.evaluate(() => {
@@ -175,18 +181,17 @@ test("Desktop Review handles legacy writes, continuation history, and capped ima
       }), ["configure", "preflight", "save", "anthropic-text", "openai-text"]);
       await desktop.getByRole("button", { name: "New review", exact: true }).click();
       await row.click();
-      await expect(desktop.getByRole("heading", { name: prompt, exact: true })).toBeVisible();
-      await expect(desktop.getByText("Sending is unavailable in this environment.", { exact: true })).toBeVisible();
+      await expect(desktop.getByTestId("review-user-bubble").filter({ hasText: prompt }).first()).toBeVisible();
+      await expect(desktop.getByText("This saved review is read-only in Desktop.", { exact: true })).toBeVisible();
       await expect(desktop.getByRole("textbox", { name: "Review question" })).toHaveCount(0);
       await expect(desktop.getByRole("region", { name: "Imported conversation" })).toHaveCount(0);
     });
 
     await t.test("The image quote and generation use at most two of the three suggested models", async () => {
       await desktop.getByRole("button", { name: "New review", exact: true }).click();
-      await desktop.getByLabel("Review mode and models").click();
-      await desktop.getByRole("combobox", { name: "Mode" }).selectOption("easy");
-      for (const provider of providers) await desktop.getByRole("checkbox", { name: provider, exact: true }).check();
-      await desktop.getByLabel("Review mode and models").click();
+      await desktop.getByRole("button", { name: "Easy", exact: true }).click();
+      const names: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", google: "Google" };
+      for (const provider of providers) await desktop.locator(".review-participants").getByRole("button", { name: names[provider]!, exact: true }).click();
       await desktop.getByRole("textbox", { name: "Review question" }).fill("Draw three city skylines");
       await desktop.getByRole("button", { name: "Send Review question" }).click();
       await desktop.getByRole("button", { name: "Review image options" }).click();

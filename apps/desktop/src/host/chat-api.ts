@@ -348,9 +348,10 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
         prompt: input.prompt, attachments: attachments.map(({ mediaType, size }) => ({ mediaType, size })), webSearchMode: current.webSearchMode,
       }, { turn });
     },
-    async saveQuestion(id: string, input: Pick<ChatTurnInput, "requestId" | "prompt" | "attachmentUploadIds">, turn: AbortSignal) {
+    async saveQuestion(id: string, input: Pick<ChatTurnInput, "requestId" | "prompt" | "attachmentUploadIds"> & { onlyModelId?: string }, turn: AbortSignal) {
       const receipt = await request(pathFor(id) + "/messages", questionReceipt, "POST", {
         messages: [{ clientRequestId: input.requestId, role: "user", content: input.prompt,
+          ...(input.onlyModelId ? { modelId: input.onlyModelId } : {}),
           ...(input.attachmentUploadIds?.length ? { attachmentUploadIds: input.attachmentUploadIds } : {}) }],
       }, { turn });
       const sourceId = receipt.messageMappings.find((mapping) => mapping.requestId === input.requestId)?.messageId;
@@ -366,8 +367,9 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           (input.selectionMode === "manual" && modelId !== input.modelId)) {
         throw new Error("The model selection changed in Tomverse.");
       }
+      // A question put to one other model alone is not part of this model's conversation.
       const messages = fitChatRequestTranscript(current.messages.slice(0, at + 1).filter((message) =>
-        message.role === "user" || (message.role === "assistant" && (!input.review || message.modelId === modelId) &&
+        (message.role === "user" && (!input.review || !message.modelId || message.modelId === modelId)) || (message.role === "assistant" && (!input.review || message.modelId === modelId) &&
           (!message.status || ["normal", "incomplete"].includes(message.status))))
         .map(({ id, role, content, attachments }) => {
           const references = attachments?.map(({ id, attachmentId, name, mediaType, size, kind }) => ({ id, attachmentId, name, mediaType, size, kind }));

@@ -59,7 +59,10 @@ export const reviewTurnInput = z.object({
   choices: z.array(z.string().min(1).max(100)).min(1).max(3).refine((items) => new Set(items).size === items.length),
   effort: chatEffort,
   attachmentUploadIds,
-}).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length));
+  /** A follow-up for one model of a saved Review: only that model answers and the others keep their transcript. */
+  onlyModelId: z.string().min(1).max(100).optional(),
+}).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length))
+  .refine((input) => !input.onlyModelId || (Boolean(input.conversationId) && input.choices.length === 1 && input.choices[0] === input.onlyModelId));
 export const chatHistoryRow = z.object({
   id: chatId,
   title: z.string(),
@@ -101,6 +104,11 @@ export const chatMessage = z.object({
     // Web search sources: only http(s) URLs survive the shared sanitizer, so the renderer never sees another scheme.
     citations: z.unknown().optional().transform((value) => Array.isArray(value)
       ? sanitizeWebSearchCitations(value.filter((entry) => entry && typeof entry === "object")).slice(0, 50) : []),
+    // What the web badge reads to say whether this answer used web search.
+    requested: z.boolean().optional().catch(undefined),
+    supported: z.boolean().optional().catch(undefined),
+    executed: z.boolean().optional().catch(undefined),
+    failureCode: z.string().max(100).optional().catch(undefined),
     // Only the source URLs a Research report already lists in its body, so the list under it can leave them out.
     research: z.object({ sources: z.array(z.object({ url: z.string() })).max(50).optional() }).optional().catch(undefined),
   }).nullish(),

@@ -33,12 +33,16 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host" | "brows
  * Desktop gives none: its button reads "Allow for this run", so the answer ends
  * with the run and lasting rules are written in its settings.
  */
+const LOOPBACK_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/;
+
 export class ApprovalMemory {
     /** Workspace roots where file edits were allowed; an edit without a root is always asked. */
     private readonly fileEdits = new Set<string>();
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
     private readonly browserOrigins = new Set<string>();
+    /** Sites the browser tab was allowed to open for this run: kept apart from web_fetch's, because a page runs its own code. */
+    private readonly browserHosts = new Set<string>();
     private readonly computerWindows = new Set<string>();
     /** MCP tools answered "always": one tool of one server, for that exact server definition. */
     private readonly mcpTools = new Set<string>();
@@ -64,7 +68,8 @@ export class ApprovalMemory {
         if (view.error || checkBoundaries(view)) return false;
         if (view.mcp) return true;
         if (view.web) return true;
-        if (view.browser) return Boolean(view.browser.origin);
+        // A click or typing on a local page may be remembered for the site; on a public site every one is asked.
+        if (view.browser) return LOOPBACK_ORIGIN.test(view.browser.origin);
         if (view.computer) return Boolean(view.computer.window.id);
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
         return Boolean(view.command);
@@ -73,7 +78,7 @@ export class ApprovalMemory {
     match(view: ApprovalView): RememberedRule | null {
         if (view.error || checkBoundaries(view)) return null;
         if (view.mcp) return this.mcpTools.has(ApprovalMemory.mcpKey(view)!) ? "mcp_tool" : null;
-        if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
+        if (view.web) return (view.toolName === "browser_navigate" ? this.browserHosts : this.webHosts).has(view.web.host) ? "web_host" : null;
         if (view.browser) return this.browserOrigins.has(view.browser.origin) ? "browser_origin" : null;
         if (view.computer) return this.computerWindows.has(view.computer.window.id) ? "computer_window" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
@@ -97,7 +102,7 @@ export class ApprovalMemory {
             }
         }
         if (view.web) {
-            this.webHosts.add(view.web.host);
+            (view.toolName === "browser_navigate" ? this.browserHosts : this.webHosts).add(view.web.host);
             return "web_host";
         }
         if (view.browser) {
@@ -121,6 +126,7 @@ export class ApprovalMemory {
             ...[...this.fileEdits].map((root) => `file edits in ${root} (creating and changing files; deleting is still asked)`),
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
+            ...[...this.browserHosts].map((host) => `opening pages of ${host} in the browser tab`),
             ...[...this.browserOrigins].map((origin) => `clicking and typing in the browser tab on ${origin}`),
             ...[...this.computerWindows].map((id) => `operating the desktop window ${id}`),
             ...[...this.mcpTools].map((key) => { const [server, tool] = JSON.parse(key) as string[]; return `MCP tool ${server}: ${tool}`; }),
@@ -133,6 +139,7 @@ export class ApprovalMemory {
         this.commands.clear();
         this.webHosts.clear();
         this.browserOrigins.clear();
+        this.browserHosts.clear();
         this.computerWindows.clear();
     }
 }

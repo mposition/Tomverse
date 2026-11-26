@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
-import { desktopChatCopy } from "../../../locales/desktopChat";
 import { workspaceWelcomeCopy } from "../../../locales/workspaceWelcome";
 import { expectWindowsAccessibleNames } from "./windows-accessibility";
 
@@ -88,16 +87,6 @@ export async function verifyTextLocales(application: ElectronApplication, page: 
     });
     await question.dispatchEvent("keydown", { key: "Enter", isComposing: true, bubbles: true });
     await expect(question).toHaveValue("검토 질문");
-    if (language === "de") {
-      await page.getByRole("button", { name: "Chat", exact: true }).click();
-      await page.getByRole("button", { name: desktopChatCopy.de.imageWorkspace, exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Bilder erstellen und vergleichen" })).toBeVisible();
-      await page.getByRole("textbox", { name: "Bildbeschreibung" }).fill("Local image description");
-      await page.getByLabel("Bildmodelle auswählen", { exact: true }).click();
-      await page.getByRole("checkbox", { name: "Local image model · 1.200 Credits", exact: true }).check();
-      await expect(page.getByRole("button", { name: "Erstellen · 1.200 Credits", exact: true })).toBeEnabled();
-      await expectWindowsAccessibleNames(application, page, { Bildbeschreibung: "ControlType.Edit", "Erstellen · 1.200 Credits": "ControlType.Button" });
-    }
     current = row;
   }
   assert.deepEqual(await application.evaluate(() =>

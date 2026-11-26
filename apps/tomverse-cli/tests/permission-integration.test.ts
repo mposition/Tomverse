@@ -620,3 +620,75 @@ test("no prompter: an approval the rules settled when the batch was looked at bu
         await gateway.stop();
     }
 });
+
+// ── Opening a public site in the browser tab ───────────────────────────────
+
+const SITE = "https://docs.example.com/guide?x=1";
+const navigateView = (): ApprovalView => ({ approvalId: "a", toolCallId: "t", toolName: "browser_navigate", input: { url: SITE }, root: ROOT,
+    web: { url: SITE, host: "docs.example.com" } });
+
+test("opening a public site asks a person in every mode and reaches the browser only after the answer; a local page is never asked", async () => {
+    const calls = [{ name: "browser_navigate", args: { url: SITE } }, { name: "browser_navigate", args: { url: PAGE } }];
+    for (const mode of PERMISSION_MODES) {
+        for (const answer of [true, false]) {
+            const gateway = await new FakeGateway({ script: browserScript(calls) }).start();
+            try {
+                const hostSeen: BrowserAgentRequest[] = [];
+                const seen: ApprovalView[] = [];
+                const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: asking(answer, seen), runner: { browserAgent: fakeBrowser(hostSeen), browserWeb: true, permissions: gateFor(mode) } });
+                assert.equal(await runner.runTask("Look at the guide."), "success");
+                assert.equal(seen.length, 1, `${mode}: one question, for the public site only`);
+                assert.deepEqual([seen[0]!.toolName, seen[0]!.web?.host], ["browser_navigate", "docs.example.com"]);
+                assert.deepEqual(hostSeen.map((request) => request.tool === "navigate" ? request.url : ""), answer ? [SITE, PAGE] : [PAGE], `${mode}/${answer}`);
+                assert.equal(journal.state.generations.filter((g) => g.purpose === "review").length, 0, `${mode}: a reviewer never answers it`);
+                assert.equal(journal.state.approvals[0]!.policy, undefined, `${mode}: no mode or rule answered`);
+            } finally {
+                await gateway.stop();
+            }
+        }
+    }
+});
+
+test("without the second switch the runner asks nothing about a public address: the host refuses it", async () => {
+    const gateway = await new FakeGateway({ script: browserScript([{ name: "browser_navigate", args: { url: SITE } }]) }).start();
+    try {
+        const hostSeen: BrowserAgentRequest[] = [];
+        const seen: ApprovalView[] = [];
+        const refusal = { status: "error", message: "Only an http address on localhost can be opened." };
+        const { runner } = await makeRunner(gateway, makeRepo(), { prompter: asking(true, seen), runner: { browserAgent: fakeBrowser(hostSeen, { navigate: refusal }), permissions: gateFor("ask") } });
+        assert.equal(await runner.runTask("Look at the guide."), "success");
+        assert.deepEqual(seen, []);
+        assert.match(toolMessages(gateway), /Only an http address on localhost/);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("an address that cannot be opened at all (port, IP, credentials) is refused without asking or reaching the browser", async () => {
+    for (const url of ["https://docs.example.com:8443/", "https://192.168.0.1/", "https://user:pw@docs.example.com/", "http://docs.example.com/", "https://intranet/"]) {
+        const gateway = await new FakeGateway({ script: browserScript([{ name: "browser_navigate", args: { url } }]) }).start();
+        try {
+            const hostSeen: BrowserAgentRequest[] = [];
+            const seen: ApprovalView[] = [];
+            const { runner } = await makeRunner(gateway, makeRepo(), { prompter: asking(true, seen), runner: { browserAgent: fakeBrowser(hostSeen), browserWeb: true, permissions: gateFor("allow_all") } });
+            assert.equal(await runner.runTask("Look."), "success");
+            assert.deepEqual([seen.length, hostSeen.length], [0, 0], url);
+        } finally {
+            await gateway.stop();
+        }
+    }
+});
+
+test("rules: a deny or ask rule for a site covers opening it in the browser; an allow rule for web_fetch does not", () => {
+    const allow: ScopedRule = { effect: "allow", tool: "web_fetch", pattern: "docs.example.com", scope: "user" };
+    const deny: ScopedRule = { effect: "deny", tool: "web_fetch", pattern: "*.example.com", scope: "project" };
+    const ask: ScopedRule = { effect: "ask", tool: "web_fetch", pattern: "docs.example.com", scope: "user" };
+    for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+        assert.equal(kindOf(navigateView(), mode), "human", mode);
+        assert.equal(kindOf(navigateView(), mode, [allow]), "human", `${mode}: a web_fetch allow rule does not open the browser`);
+        assert.equal(kindOf(navigateView(), mode, [deny]), "deny", mode);
+        assert.equal(kindOf(navigateView(), mode, [ask]), "human", mode);
+        assert.equal(kindOf(webView(), mode, [allow]), "allow", `${mode}: web_fetch itself is unchanged`);
+    }
+    assert.equal(kindOf(navigateView(), "read_only"), "human", "reading a page is asked about in read-only mode, as web_fetch is");
+});

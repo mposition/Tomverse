@@ -371,6 +371,7 @@ asks, an allow rule skips the question except where noted).
 | File change (`apply_patch`) | refuse | person | review | allow |
 | Command (`run_command`) | refuse | person | review | allow |
 | Web page (`web_fetch`) | person | person | person | person (a rule naming the host skips it) |
+| Opening a public site in the browser tab (`browser_navigate`, Desktop, when the person allowed public sites) | person | person | person | person (no allow rule skips it) |
 | Click or typing in the browser tab | refuse | person | person | person |
 | MCP tool (`mcp__server__tool`) | refuse | person | person | person (a rule naming the tool or server skips it) |
 | `commit_changes`, `publish_changes` (Desktop) | refuse before the host is asked | the host's card | the host's card | the host's card |
@@ -408,9 +409,15 @@ asks, an allow rule skips the question except where noted).
   only if the server definition connected now is the one the approval was made for;
   a project's own server also needs your approval of its definition before it is
   started at all.
-- **Browser clicks and typing** follow the mode as above, on a loopback page only. A
+- **Browser clicks and typing** follow the mode as above. A
   password, one-time-code or card field is refused by the browser host itself, in
-  every mode and whatever was allowed.
+  every mode and whatever was allowed. "Allow for this run" is offered for a loopback
+  page only; on a public site each click or typing is asked on its own.
+- **Opening a public site in the browser tab** (only where the host turned that on) is
+  asked per site (host), like `web_fetch`, in every mode: the address must be
+  `https` on the standard port with no IP address or credentials, and an answer is
+  remembered for this run only, apart from `web_fetch`'s and never saved as a rule. A
+  `web_fetch` allow rule does not open the browser; a deny or ask rule for the host does.
 - **Hooks** can block a call in every mode (a PreToolUse hook that exits 2 answers
   before the gate is asked). Their "allow" output is ignored in every mode: it
   never lifts read only, a rule, a boundary or the question.

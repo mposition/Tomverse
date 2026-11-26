@@ -59,8 +59,8 @@ test("the browser panel needs no fixture flag, the agent's browser tools are the
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const panel = page.getByRole("complementary", { name: "Browser", exact: true });
     await expect(panel).toBeVisible();
-    await panel.getByLabel("Local development URL").fill(href);
-    await panel.getByLabel("Local development URL").press("Enter");
+    await panel.getByLabel("Address").fill(href);
+    await panel.getByLabel("Address").press("Enter");
     await expect.poll(() => app.context().pages().some((candidate) => candidate.url() === href)).toBe(true);
     await expect(panel.getByRole("button", { name: "Select element", exact: true })).toBeEnabled({ timeout: 15_000 });
 
@@ -78,8 +78,18 @@ test("the browser panel needs no fixture flag, the agent's browser tools are the
     await expect(setting.getByLabel("Let Code use the browser panel")).toHaveValue("off");
     await setting.getByLabel("Let Code use the browser panel").selectOption("on");
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).codeBrowserAgent).toBe(true);
+    // Public sites are a second switch under it, off by default, writing a file of its own.
+    const web = page.getByTestId("code-browser-web-setting").getByLabel("Let Code open public websites in the browser panel");
+    await expect(web).toHaveValue("off");
+    assert.equal((await page.evaluate(() => window.desktop.state())).codeBrowserWeb, false);
+    await web.selectOption("on");
+    await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).codeBrowserWeb).toBe(true);
     const userData = await app.evaluate(({ app: electronApp }) => electronApp.getPath("userData"));
     assert.equal(await readFile(join(userData, "code-browser-agent.txt"), "utf8"), "enabled");
+    assert.equal(await readFile(join(userData, "code-browser-web.txt"), "utf8"), "enabled");
+    await web.selectOption("off");
+    await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).codeBrowserWeb).toBe(false);
+    assert.equal(await readFile(join(userData, "code-browser-web.txt"), "utf8"), "disabled");
     await page.getByRole("button", { name: "Code", exact: true }).click();
 
     // The task answers its question and resumes: the resumed run has the browser tools the switch now gives.

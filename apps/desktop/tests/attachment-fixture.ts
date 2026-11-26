@@ -184,11 +184,12 @@ export async function verifyAttachments(application: ElectronApplication, page: 
 
     await page.getByRole("button", { name: "Review", exact: true }).click();
     const review = page.getByRole("form", { name: "Review composer" });
-    await page.getByLabel("Review mode and models").click();
-    await page.getByRole("combobox", { name: "Mode" }).selectOption("professional");
-    await page.getByRole("checkbox", { name: "GPT 6 Luna", exact: true }).check();
-    await page.getByRole("checkbox", { name: "GPT-5.6 Luna", exact: true }).check();
-    await page.getByLabel("Review mode and models").click();
+    await page.getByRole("button", { name: "Professional", exact: true }).click();
+    await page.getByRole("button", { name: "Review mode and models", exact: true }).click();
+    const reviewPicker = page.getByRole("dialog", { name: "Review mode and models" });
+    await reviewPicker.getByRole("button", { name: /All models/ }).click();
+    for (const name of ["GPT 6 Luna", "GPT-5.6 Luna"]) await reviewPicker.getByTestId("model-option").filter({ hasText: name }).click();
+    await reviewPicker.getByTestId("model-picker-done").click();
     await review.locator('input[type="file"]').setInputFiles({ name: "comparison.txt", mimeType: "text/plain", buffer: note });
     await review.getByRole("textbox", { name: "Review question" }).fill("Compare using the attached note.");
     await review.getByRole("button", { name: "Send Review question" }).click();
@@ -197,7 +198,7 @@ export async function verifyAttachments(application: ElectronApplication, page: 
     assert.equal(first.sourceUserMessageId, second.sourceUserMessageId);
     assert.equal(first.messages.at(-1)?.attachments?.[0]?.name, "comparison.txt");
     assert.deepEqual(first.messages.at(-1)?.attachments, second.messages.at(-1)?.attachments);
-    await expect(page.getByRole("list", { name: "Attached files" })).toContainText("comparison.txt");
+    await expect(page.getByRole("list", { name: "Attached files" }).first()).toContainText("comparison.txt");
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

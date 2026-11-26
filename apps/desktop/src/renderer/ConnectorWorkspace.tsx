@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Check, Plus, Puzzle, RefreshCw, ShieldCheck } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, Plus, Puzzle, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
+import { mcpProviderCopy } from "../../../../lib/mcpProviderCopy";
 import { mcpProviderSummary } from "../../../../lib/mcpProviderSummary";
-import { mcpProvider } from "../../../../lib/mcpProviderCatalog";
+import { mcpProvider, type McpProviderCategory } from "../../../../lib/mcpProviderCatalog";
 import { pluginLogo } from "../../../../lib/mcpConnectorClientContract";
 import { PluginScopePicker, initialPluginScopes } from "../../../../components/plugins/PluginScopePicker";
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
@@ -11,6 +13,7 @@ import type { ConnectorConnection, ConnectorInput, ConnectorInventory, Connector
 import { serverSignInRefused } from "../connector-oauth-policy";
 import { describeConnectorResult, type ConnectorMessage } from "./connector-message";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
+import "./connector-workspace.css";
 
 const logos = import.meta.glob<string>("../../../../public/plugins/providers/*.{png,svg}", {
   eager: true, query: "?url", import: "default",
@@ -27,15 +30,19 @@ function ServiceLogo({ id, custom }: { id: string; custom: boolean }) {
 }
 
 type Tab = "all" | "connected" | "approvals";
+const TABS = ["all", "connected", "approvals"] as const;
 type Form = { kind: "server"; serverId: string } | { kind: "custom" };
 const NEW_CUSTOM = { url: "", name: "", auth: "none" as ConnectorServer["auth"] };
 
-export function ConnectorWorkspace({ language }: { language: Language }) {
+// `lane` is the second-lane slot owned by the shell; it is null while the lane is collapsed, and the menu then moves into the body.
+export function ConnectorWorkspace({ language, lane = null }: { language: Language; lane?: HTMLElement | null }) {
   const c = mcpConnectorCopy[language];
+  const p = mcpProviderCopy[language];
   const d = desktopConnectorCopy[language];
   const [inventory, setInventory] = useState<ConnectorInventory>();
   const [tab, setTab] = useState<Tab>("all");
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<McpProviderCategory | "all">("all");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ConnectorMessage>();
   const [form, setForm] = useState<Form>();
@@ -46,6 +53,7 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
   const [checked, setChecked] = useState<string[]>([]);
   const [verified, setVerified] = useState<Record<string, boolean>>({});
   const alive = useRef(true);
+  const detailRef = useRef<HTMLElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -82,14 +90,21 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
   const selected = connections.find(({ id }) => id === selectedId);
   const pending = inventory?.invocations.filter(({ state }) => state === "pending") ?? [];
   const needle = query.trim().toLocaleLowerCase(language);
-  const servers = inventory?.servers.filter(({ id, name }) =>
-    name.toLocaleLowerCase(language).includes(needle) && (tab !== "connected" || connectionOf(id))) ?? [];
-  const customVisible = Boolean(inventory?.customEnabled) && tab === "all" && c.custom.toLocaleLowerCase(language).includes(needle);
+  // A user-entered server is never presented as a catalogued provider, whatever its name.
+  const providerOf = (server: ConnectorServer) => server.custom ? undefined : mcpProvider(server.id) || mcpProvider(server.name);
+  const servers = inventory?.servers.filter((server) => server.name.toLocaleLowerCase(language).includes(needle) &&
+    (category === "all" || providerOf(server)?.category === category) && (tab !== "connected" || connectionOf(server.id))) ?? [];
+  const customVisible = Boolean(inventory?.customEnabled) && tab === "all" && category === "all" && c.custom.toLocaleLowerCase(language).includes(needle);
 
   const choose = (connection: ConnectorConnection) => {
     setForm(undefined);
     setSelectedId(connection.id);
     setChecked(connection.grants.map(({ name }) => name));
+  };
+  const chooseFromLane = (connection: ConnectorConnection) => {
+    if (tab === "approvals") setTab("all");
+    choose(connection);
+    requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "nearest" }));
   };
   const openServer = (server: ConnectorServer) => {
     setForm({ kind: "server", serverId: server.id });
@@ -138,7 +153,27 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
     return connection?.status === "connected" ? c.connected : connection ? c.unavailable : c.notConnected;
   };
 
+  const tabButtons = (current: "page" | "pressed") => TABS.map((key) => <button key={key} type="button" data-testid={`desktop-connector-tab-${key}`}
+    {...(current === "page" ? { "aria-current": tab === key ? "page" as const : undefined } : { "aria-pressed": tab === key })}
+    onClick={() => setTab(key)}>{c[key]}{key === "approvals" && pending.length > 0 ? <span className="desktop-plugins-count">{pending.length}</span> : null}</button>);
+
+  const laneMenu = lane && createPortal(<div className="desktop-plugins-lane" data-testid="desktop-connectors-lane">
+    <nav aria-label={c.title}><span aria-hidden="true">Tomverse</span>{tabButtons("page")}</nav>
+    <div className="desktop-plugins-mine" role="group" aria-label={c.myConnections}>
+      <span aria-hidden="true">{c.myConnections}</span>
+      {connections.map((connection) => {
+        const server = inventory?.servers.find(({ id }) => id === connection.serverId);
+        return <button key={connection.id} type="button" data-testid="desktop-connector-mine" disabled={busy}
+          aria-current={connection.id === selectedId ? "true" : undefined} title={connection.name} onClick={() => chooseFromLane(connection)}>
+          <ServiceLogo id={connection.serverId} custom={server ? Boolean(server.custom) : connection.serverId === "custom" || connection.serverId.startsWith("custom-")} />
+          <span>{connection.name}</span></button>;
+      })}
+      {inventory && !connections.length && <p>{c.setupNotice}</p>}
+    </div>
+  </div>, lane);
+
   return <section className="desktop-plugins" aria-label={c.title} data-testid="desktop-connectors">
+    {laneMenu}
     <div className="desktop-plugins-heading">
       <div><h2>{c.title}</h2><p>{c.subtitle}</p></div>
       <div className="desktop-connector-actions">
@@ -148,13 +183,17 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
           onClick={openCustom}><Plus size={15} />{c.add}</button>
       </div>
     </div>
-    <p className="desktop-connector-disclosure"><ShieldCheck size={16} aria-hidden="true" />{c.disclosure}</p>
     <div className="desktop-plugins-controls">
-      {(["all", "connected", "approvals"] as const).map((key) => <button key={key} type="button" className="soft" aria-pressed={tab === key}
-        onClick={() => setTab(key)}>{c[key]}{key === "approvals" && pending.length > 0 ? ` (${pending.length})` : ""}</button>)}
-      <input type="search" className="history-search" aria-label={c.search} placeholder={c.search} value={query}
-        onChange={(event) => setQuery(event.currentTarget.value)} />
+      <label className="desktop-plugins-search"><Search size={16} aria-hidden="true" />
+        <input type="search" aria-label={c.search} placeholder={c.search} value={query} onChange={(event) => setQuery(event.currentTarget.value)} /></label>
+      {tab !== "approvals" && <select className="desktop-plugins-filter" data-testid="desktop-connector-category" aria-label={p.category} value={category}
+        onChange={(event) => setCategory(event.currentTarget.value as McpProviderCategory | "all")}>
+        <option value="all">{p.any}</option>
+        {Object.entries(p.categories).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+      </select>}
+      {!lane && <nav className="desktop-plugins-tabs" aria-label={c.title}>{tabButtons("pressed")}</nav>}
     </div>
+    <p className="desktop-connector-disclosure"><ShieldCheck size={16} aria-hidden="true" />{c.disclosure}</p>
     {message && <p role={message.tone === "error" ? "alert" : "status"} className="notice">{message.text}</p>}
     {busy && form && <p role="status" className="notice">{d.confirming}</p>}
     {inventory?.enabled === false && <p className="notice">{c.disabled}</p>}
@@ -222,11 +261,12 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
         </article>;
       })}
     </div> : <>
-      {inventory?.enabled && !servers.length && !customVisible && <p className="notice">{needle ? c.missing : tab === "connected" ? c.empty : c.setupNotice}</p>}
+      <div className="desktop-plugins-catalog-heading"><h3>{c[tab]}</h3><span aria-live="polite">{servers.length + (customVisible ? 1 : 0)}</span></div>
+      {inventory?.enabled && !servers.length && !customVisible && <p className="notice">{needle || category !== "all" ? c.missing : tab === "connected" ? c.empty : c.setupNotice}</p>}
       <ul className="desktop-plugin-list">
         {servers.map((server) => {
           const connection = connectionOf(server.id);
-          const provider = server.custom ? undefined : mcpProvider(server.id) || mcpProvider(server.name);
+          const provider = providerOf(server);
           const summary = provider ? mcpProviderSummary(provider, language) : c.customDescription;
           return <li key={server.id} data-testid="desktop-connector-row">
             <ServiceLogo id={server.id} custom={Boolean(server.custom)} />
@@ -248,7 +288,7 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
       </ul>
     </>}
 
-    {selected && tab !== "approvals" && <section className="desktop-connector-detail" aria-label={c.manage} data-testid="desktop-connector-detail">
+    {selected && tab !== "approvals" && <section ref={detailRef} className="desktop-connector-detail" aria-label={c.manage} data-testid="desktop-connector-detail">
       <h3>{selected.name}</h3>
       <p className="desktop-connector-help">{c.sharing}</p>
       {selected.status !== "connected" && <p role="status">{c.expired}</p>}

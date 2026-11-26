@@ -245,7 +245,7 @@ test("Desktop opens the shared model picker, dismisses menus, renders saved imag
     await expect(page.locator("#review-draft-input")).not.toHaveValue("");
     await page.screenshot({ path: join(artifacts, "review-welcome.png") });
     await page.getByRole("button", { name: /Two saved answers/ }).click();
-    const answerList = page.locator(".review-answers").first();
+    const answerList = page.getByTestId("review-columns");
     await expect.poll(() => answerList.evaluate((list) => list.getBoundingClientRect().width)).toBeGreaterThan(1200);
     await expect.poll(() => page.locator(".review-composer-slot").evaluate((slot) => slot.getBoundingClientRect().width)).toBeGreaterThan(1200);
     await page.screenshot({ path: join(artifacts, "review-wide.png") });
