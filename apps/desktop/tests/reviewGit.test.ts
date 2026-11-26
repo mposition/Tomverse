@@ -15,10 +15,14 @@ const gitAvailable = (() => {
   try { return git(tmpdir(), "--version").startsWith("git version"); } catch { return false; }
 })();
 const rows = (count: number) => Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+/** Removes a test's folder. Windows can hold a folder git just used for a moment; a folder left in the temp directory is not a failed test. */
+const discard = (folder: string) => {
+  try { rmSync(folder, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 }); } catch { /* left for the OS to clean */ }
+};
 
 function makeRepo(t: test.TestContext) {
   const temp = realpathSync(mkdtempSync(join(tmpdir(), "tomverse-review-git-")));
-  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 }));
+  t.after(() => discard(temp));
   const root = join(temp, "repo");
   mkdirSync(join(root, "src"), { recursive: true });
   git(root, "init", "-b", "main");
@@ -104,7 +108,7 @@ test("a project folder inside the repository sees only its own files, with paths
 
 test("folders that are not repositories, and repositories with nothing committed, are reported and not guessed at", { skip: !gitAvailable }, async (t) => {
   const temp = realpathSync(mkdtempSync(join(tmpdir(), "tomverse-review-plain-")));
-  t.after(() => rmSync(temp, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 }));
+  t.after(() => discard(temp));
   assert.deepEqual(await readScopeDiff(bindProjectRoot(temp), "uncommitted"), { status: "unavailable", reason: "not-git" });
   git(temp, "init", "-b", "main");
   assert.deepEqual(await readScopeDiff(bindProjectRoot(temp), "uncommitted"), { status: "unavailable", reason: "git-unavailable" });
