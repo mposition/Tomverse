@@ -4,11 +4,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Camera, Download } from "lucide-react";
-import { parseStudioAnalysis, studioAnalysisPrompt, type StudioAnalysisReport } from "@/lib/studioCreativeAnalysis";
+import { studioCheekBoxes, studioSkinColor } from "@/lib/studioColorSeason";
+import { parseStudioAnalysis, studioAnalysisPrompt, studioColorReport, type StudioAnalysisReport } from "@/lib/studioCreativeAnalysis";
 import { STUDIO_CHARACTER_PRESETS, studioCharacterPrompt, type StudioCharacterPresetId } from "@/lib/studioCharacterPrompt";
 import { STUDIO_EXPORT_FORMATS, studioArtworkPath, type StudioCreativeTool } from "@/lib/studioTools";
 import { studioOutputLanguage } from "@/locales/studio";
-import { makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
+import { makeStudioImageReference, readStudioBlob, readStudioRegion, renderStudioImage, saveStudioFile } from "./studioCanvas";
 import { StudioImageShare } from "./StudioImageShare";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
@@ -104,12 +105,25 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           const digest = await crypto.subtle.digest("SHA-256", await image.arrayBuffer());
           const key = `${id}/${lang}/${new Uint8Array(digest).join(",")}`;
           let next: StudioAnalysisReport | null = previousReports.current.get(key) ?? null;
-          if (!next) {
+          // The answer is JSON written as free text: one that does not parse is asked for once more.
+          for (let attempt = 0; !next; attempt++) {
             const text = await generateStudioText(studioAnalysisPrompt(id, studioOutputLanguage[lang]), signal, image);
             signal.throwIfAborted();
             try {
-              next = parseStudioAnalysis(id, text);
+              const answer = parseStudioAnalysis(id, text);
+              if (!answer) break;
+              if ("score" in answer) next = answer;
+              else {
+                // The model boxes the face; both cheeks are sampled here, and the season follows from the sample.
+                const cheeks = await Promise.all(studioCheekBoxes(answer.face, answer.features.eyes.region).map(box => readStudioRegion(photo, box)));
+                const skin = studioSkinColor(cheeks.flatMap(pixels => [...pixels]));
+                const [left, right] = cheeks.map(studioSkinColor);
+                if (!skin || !left || !right) break;
+                // Light that differs sharply between the two cheeks leaves the undertone undecided.
+                next = studioColorReport(answer, skin, copy, Math.abs(left.lab[0] - right.lab[0]) >= 10);
+              }
             } catch {
+              if (attempt === 0) continue;
               report(copy.analysisIncomplete, true);
               return;
             }
@@ -119,9 +133,9 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
             interpretation: copy.photoInterpretation,
             color: {
               title: [copy.colorReportTitleLead, copy.colorReportTitleRest],
-              season: copy.colorSeason, recommended: copy.colorSuggestions, comparison: copy.avoidColors,
+              season: copy.colorSeason, alsoClose: copy.colorAlsoClose, recommended: copy.colorSuggestions, comparison: copy.avoidColors,
               features: [copy.hairColor, copy.eyeColor, copy.skinColor],
-              profile: [copy.colorUndertone, copy.colorContrast, copy.colorOverallTone],
+              profile: [copy.colorUndertone, copy.colorValue, copy.colorChroma],
               palettes: [copy.recommendPalette, copy.comparePalette], basis: copy.colorReportBasis,
             },
             face: {
@@ -245,7 +259,8 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
                 <ul>{analysis.tips.map((tip, index) => <li key={index}>{tip.label}. {tip.note}</li>)}</ul>
               </> : <>
                 <p>{copy.hairColor} {analysis.features.hair.name} · {copy.eyeColor} {analysis.features.eyes.name} · {copy.skinColor} {analysis.features.skin.name}</p>
-                {analysis.profile && <p>{copy.colorUndertone} {analysis.profile.undertone.name} · {copy.colorContrast} {analysis.profile.contrast.name} · {copy.colorOverallTone} {analysis.profile.tone.name}</p>}
+                {analysis.alternative && <p>{copy.colorAlsoClose} {analysis.alternative}</p>}
+                {analysis.profile && <p>{copy.colorUndertone} {analysis.profile.undertone.name} · {copy.colorValue} {analysis.profile.contrast.name} · {copy.colorChroma} {analysis.profile.tone.name}</p>}
                 <p>{copy.colorSuggestions} · {analysis.recommended.map(item => item.name + " " + item.color).join(", ")}</p>
                 <p>{copy.avoidColors} · {analysis.comparison.map(item => item.name + " " + item.color).join(", ")}</p>
               </>}

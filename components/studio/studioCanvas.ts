@@ -128,6 +128,16 @@ function splitCaption(text: string): string[] {
   return [graphemes.slice(0, split).join("").trimEnd(), graphemes.slice(split).join("").trimStart()];
 }
 
+/** The pixels of one named area of a photo, small enough to sort: what a colour is measured from. */
+export async function readStudioRegion(source: string, [x, y, width, height]: readonly [number, number, number, number]) {
+  const image = await readImage(source);
+  const sw = Math.max(1, image.naturalWidth * width), sh = Math.max(1, image.naturalHeight * height);
+  const scale = Math.min(1, 96 / Math.max(sw, sh));
+  const { element, context } = canvas(Math.max(1, Math.round(sw * scale)), Math.max(1, Math.round(sh * scale)));
+  context.drawImage(image, image.naturalWidth * x, image.naturalHeight * y, sw, sh, 0, 0, element.width, element.height);
+  return context.getImageData(0, 0, element.width, element.height).data;
+}
+
 export const STUDIO_STICKER_BACKGROUND = "#fff6e9";
 
 export type StickerComposition = true | "opaque";
