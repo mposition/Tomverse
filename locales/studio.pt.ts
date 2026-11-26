@@ -57,7 +57,6 @@ export const studioLocale = {
   "myStickerPack": "Meu pacote de figurinhas",
   "newCaption": "Novo texto",
   "newImage": "Nova imagem",
-  "openHistory": "Abrir histórico de conversas",
   "openingSituation": "Situação inicial",
   "originalPhoto": "Foto original",
   "original": "Original",

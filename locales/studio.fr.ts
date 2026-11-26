@@ -57,7 +57,6 @@ export const studioLocale = {
   "myStickerPack": "Mon pack de stickers",
   "newCaption": "Nouveau texte",
   "newImage": "Nouvelle image",
-  "openHistory": "Ouvrir l’historique des chats",
   "openingSituation": "Situation de départ",
   "originalPhoto": "Photo d’origine",
   "original": "Original",

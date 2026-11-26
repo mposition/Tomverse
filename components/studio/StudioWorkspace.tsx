@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowRight } from "lucide-react";
 import { ReviewNavigation, WorkspaceTitle, WorkspaceThemeButton, WorkspaceUsageButton } from "@/components/chat/ReviewStudioChrome";
@@ -23,7 +22,6 @@ import { useStudioCopy } from "./StudioControls";
 import "@/components/chat/review-studio.css";
 import styles from "./studio.module.css";
 
-const StudioAccount = dynamic(() => import("@/components/auth/AuthButton").then(module => module.AuthButton));
 
 type StudioBillingOutcome = "success" | "cancelled" | "credits-success" | "credits-cancelled" | "tester-pass";
 
@@ -84,11 +82,7 @@ export function StudioWorkspace({ toolId, preset }: { toolId?: string; preset?: 
   const studioPath = PRODUCT_SURFACE_PATH.studio;
   const tool = toolId ? findStudioTool(toolId) : undefined;
   return <div className={styles.shell} lang={lang} data-testid="studio-workspace">
-    <ReviewNavigation product="studio" onNewChat={() => router.push(`/chat?lang=${lang}`)}
-      sidebar={<aside className={styles.history}>
-        <Link href={{ pathname: "/chat", query: { lang } }}>{copy.openHistory}</Link>
-        <StudioAccount currentProduct="studio" showAnalyticsCookieButton />
-      </aside>} />
+    <ReviewNavigation product="studio" onNewChat={() => router.push(`/chat?lang=${lang}`)} />
     <main className={styles.main}>
       <header className={"review-command-bar " + styles.commandBar} data-testid="studio-command-bar">
         <WorkspaceTitle name="Studio" caption={copy.workspaceCaption} title={tool ? copy[tool.title] : undefined}
