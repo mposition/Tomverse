@@ -55,6 +55,11 @@ const assistantPolicies = {
 const assistantInstructions = z.string().max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters);
 const assistantModels = z.array(z.string().trim().min(1).max(120)).max(ASSISTANT_PROFILE_LIMITS.maxModels);
 const assistantStarters = z.array(z.string().trim().max(ASSISTANT_PROFILE_LIMITS.maxStarterCharacters)).max(ASSISTANT_PROFILE_LIMITS.maxStarters);
+// The literals of lib/modelFinder.ts (a test keeps them equal) and the Review provider id shape.
+export const MODEL_FINDER_TASK_IDS = ["documents", "writing", "coding", "research", "multilingual", "general"] as const;
+export const MODEL_FINDER_PRIORITY_IDS = ["fast", "balanced", "deep", "sources"] as const;
+const reviewProvider = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
+const reviewProviderList = z.array(reviewProvider).min(1).max(3);
 const versionEntry = z.object({ id: accountId, revision: z.number().int().positive(), createdAt: z.string() });
 
 export const accountPreferences = z.object({
@@ -117,6 +122,9 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
     description: z.string().trim().max(ASSISTANT_PROFILE_LIMITS.maxDescriptionCharacters).optional(),
     instructions: z.string().trim().min(1).max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters) }).strict(),
   z.object({ action: z.literal("imports"), offset: z.number().int().min(0).max(100_000) }).strict(),
+  z.object({ action: z.literal("importRuns") }).strict(),
+  z.object({ action: z.literal("importConversation"), id: accountId,
+    offset: z.number().int().min(0).max(1_000_000) }).strict(),
   z.object({ action: z.literal("importCapacity") }).strict(),
   z.object({ action: z.literal("startImport"), provider: z.enum(EXTERNAL_IMPORT_PROVIDERS) }).strict(),
   z.object({ action: z.literal("importStatus"), id: accountId }).strict(),
@@ -134,29 +142,69 @@ export const desktopAccountSettingsInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("renameProject"), id: accountId, name: projectName }).strict(),
   z.object({ action: z.literal("removeProject"), id: accountId }).strict(),
   z.object({ action: z.literal("moveToProject"), id: accountId, projectId: accountId.nullable() }).strict(),
+  z.object({ action: z.literal("changeConversationLock"), id: accountId, values: z.union([
+    z.object({ password: z.string().min(8).max(128) }).strict(),
+    z.object({ password: z.null(), currentPassword: z.string().min(1).max(128) }).strict(),
+  ]) }).strict(),
+  z.object({ action: z.literal("shareConversation"), id: accountId }).strict(),
+  z.object({ action: z.literal("revokeConversationShare"), id: accountId }).strict(),
   z.object({ action: z.literal("keys") }).strict(),
   z.object({ action: z.literal("createKey"), name: z.string().trim().min(1).max(80),
     creditCap: z.number().int().positive().nullable(), expiresInDays: z.number().int().positive().max(365).nullable() }).strict(),
   z.object({ action: z.literal("updateKey"), id: accountId, name: z.string().trim().min(1).max(80),
     creditCap: z.number().int().positive().nullable() }).strict(),
   z.object({ action: z.literal("revokeKey"), id: accountId }).strict(),
+  z.object({ action: z.literal("keyUsage"), id: accountId }).strict(),
   z.object({ action: z.literal("usage") }).strict(),
+  z.object({ action: z.literal("exportHistory") }).strict(),
+  z.object({ action: z.literal("deleteMemory"), id: accountId }).strict(),
+  z.object({ action: z.literal("moveMemoryScope"), id: accountId, expectedRevision: z.number().int().positive(),
+    projectId: accountId.nullable() }).strict(),
+  z.object({ action: z.literal("extractionRuns") }).strict(),
+  z.object({ action: z.literal("cancelExtraction"), id: accountId }).strict(),
+  z.object({ action: z.literal("knowledge"), id: accountId }).strict(),
+  z.object({ action: z.literal("deleteKnowledgeFile"), id: accountId, fileId: accountId }).strict(),
+  z.object({ action: z.literal("deleteAssistant"), id: accountId }).strict(),
+  z.object({ action: z.literal("reviewProviders") }).strict(),
+  z.object({ action: z.literal("saveReviewProviders"), providers: reviewProviderList.nullable() }).strict(),
+  z.object({ action: z.literal("modelFinder") }).strict(),
+  z.object({ action: z.literal("saveModelFinder"), values: z.union([
+    z.object({ mode: z.literal("default") }).strict(),
+    z.object({ mode: z.literal("complete"), tasks: z.array(z.enum(MODEL_FINDER_TASK_IDS)).min(1).max(MODEL_FINDER_TASK_IDS.length),
+      priority: z.enum(MODEL_FINDER_PRIORITY_IDS), modelIds: z.array(z.string().trim().min(1).max(100)).min(1).max(3) }).strict(),
+  ]) }).strict(),
 ]);
 
+const keyRequest = z.object({
+  requestId: z.string().max(200), modelId: z.string().max(200), protocol: z.string().max(40).nullish(), surface: z.string().max(40).nullish(),
+  createdAt: z.string(), status: z.string().max(40), outcome: z.string().max(80).nullable(), heldCredits: z.number(),
+  chargedCredits: z.number().nullable(), usage: z.object({ inputTokens: z.number(), outputTokens: z.number() }).nullable(),
+});
+
 const keySummary = z.object({
+  lastUsedAt: z.string().nullable().optional(),
   id: accountId, name: label, keyPrefix: label, state: z.enum(["active", "expired", "revoked"]),
   expiresAt: z.string().nullable(), creditCap: z.number().int().positive().nullable(), committedCredits: z.number(),
 });
 
 const loginMethod = z.discriminatedUnion("type", [
   z.object({ type: z.literal("oauth"), provider: label, linked: z.boolean() }),
-  z.object({ type: z.literal("email"), enabled: z.boolean() }),
+  z.object({ type: z.literal("email"), enabled: z.boolean(), address: z.string().max(320).optional() }),
 ]);
+
+const extractionRun = z.object({
+  id: accountId, status: z.string().max(40), chunkTotal: z.number().int().nonnegative(),
+  chunkCompleted: z.number().int().nonnegative(), createdAt: z.string(), completedAt: z.string().nullable(),
+});
+const exportHistoryEntry = z.object({
+  id: accountId, status: z.string().max(40), refusalReason: z.string().nullable(), expiresAt: z.string(),
+  consumedAt: z.string().nullable(), byteLength: z.number().int().nonnegative().nullable(), createdAt: z.string(),
+});
 
 export const desktopAccountSettingsOutput = {
   preferences: accountPreferences,
   savePreferences: z.object({ success: z.literal(true) }),
-  loginMethods: z.object({ methods: z.array(loginMethod) }),
+  loginMethods: z.object({ methods: z.array(loginMethod), canRemove: z.boolean().optional() }),
   email: emailSettings,
   saveEmail: emailSettings,
   memory: memoryPreferences.strip(),
@@ -166,7 +214,9 @@ export const desktopAccountSettingsOutput = {
     memories: z.array(memorySummary),
   }),
   memoryDetail: z.object({
-    memory: memorySummary.extend({ evidence: z.array(memoryEvidence) }),
+    // revision and projectId let the scope control move a memory; an older server omits them.
+    memory: memorySummary.extend({ evidence: z.array(memoryEvidence),
+      revision: z.number().int().positive().optional(), projectId: accountId.nullable().optional() }),
     conflicts: z.array(z.object({ id: accountId, statement: z.string() })),
   }),
   updateMemory: z.object({ ok: z.literal(true) }),
@@ -192,7 +242,21 @@ export const desktopAccountSettingsOutput = {
       id: accountId, title: z.string(), provider: z.string(), titleWithheld: z.boolean(), messageCount: z.number(),
     })),
   }),
-  importCapacity: z.object({ remaining: z.object({ normalizedTextBytes: importCount, externalConversations: importCount, externalMessages: importCount }) }),
+  importRuns: z.object({ imports: z.array(z.object({
+    id: accountId, provider: z.string(), status: z.string(), conversationCount: importCount, createdAt: importTimestamp,
+  })).max(50) }),
+  importConversation: z.object({
+    title: z.string(), messageTotal: importCount, limit: importCount.positive(), offset: importCount,
+    messages: z.array(z.object({
+      id: accountId, role: z.enum(["user", "assistant"]), content: z.string(),
+      sourceModelLabel: z.string().nullable(), truncated: z.boolean(),
+    })).max(100),
+  }),
+  importCapacity: z.object({
+    remaining: z.object({ normalizedTextBytes: importCount, externalConversations: importCount, externalMessages: importCount }),
+    usage: z.object({ normalizedTextBytes: importCount, externalConversations: importCount }).optional(),
+    limits: z.object({ maxNormalizedTextBytes: importCount, maxExternalConversations: importCount }).optional(),
+  }),
   startImport: z.object({ importId: accountId }),
   appendImport: z.object({ results: z.array(z.discriminatedUnion("outcome", [
     z.object({ outcome: z.literal("staged"), stagedConversationId: accountId, conversationDigest: importDigest }),
@@ -212,7 +276,19 @@ export const desktopAccountSettingsOutput = {
   renameProject: project,
   removeProject: z.object({ success: z.literal(true) }),
   moveToProject: z.object({ projectId: accountId.nullable() }),
+  changeConversationLock: z.object({ isLocked: z.boolean(), shareEnabled: z.boolean().optional() }),
+  shareConversation: z.object({
+    url: z.url().refine(value => {
+      const url = new URL(value);
+      return url.protocol === "https:" && !url.username && !url.password && /^\/share\/[A-Za-z0-9_-]+$/.test(url.pathname);
+    }),
+    expiresAt: importTimestamp,
+  }),
+  revokeConversationShare: z.object({ success: z.literal(true) }),
+  keyUsage: z.object({ requests: z.array(keyRequest).max(200) }),
   keys: z.object({
+    // The connection addresses and the plan reason come from the same list the web developer tab reads.
+    baseUrl: z.url().optional(), codingBaseUrl: z.url().optional(), reason: z.string().max(80).optional(),
     enabled: z.boolean(), keys: z.array(keySummary),
     limits: z.object({ maxKeys: z.number().int().positive(), maxCreditCap: z.number().int().positive(),
       expiryDays: z.array(z.number().int().positive()) }).optional(),
@@ -220,8 +296,39 @@ export const desktopAccountSettingsOutput = {
   createKey: z.object({ key: z.string().min(1).max(512), summary: keySummary }),
   updateKey: z.object({ key: keySummary }),
   revokeKey: z.object({ revoked: z.literal(true) }),
+  deleteMemory: z.looseObject({ outcome: z.string() }),
+  moveMemoryScope: z.object({ moved: z.boolean(), projectId: accountId.nullable() }),
+  extractionRuns: z.object({ runs: z.array(extractionRun).max(50), activeRunId: accountId.nullable() }),
+  cancelExtraction: z.looseObject({}),
+  knowledge: z.object({
+    files: z.array(z.object({ id: accountId, name: z.string(), bytes: z.number().int().nonnegative(), processingStatus: z.string() })).max(100),
+    capacity: z.object({
+      limits: z.object({ maxFileBytes: z.number().int().positive(), maxFilesPerProfile: z.number().int().positive() }),
+      remaining: z.looseObject({}).optional(),
+    }),
+  }),
+  deleteKnowledgeFile: z.looseObject({}),
+  deleteAssistant: z.looseObject({}),
+  reviewProviders: z.object({
+    // An older server that does not send the options simply has no Review defaults to show.
+    reviewEasyProviderOptions: z.array(z.string()),
+    reviewEasyDefaultProviders: reviewProviderList.nullable().catch(null),
+    reviewEasyPlatformProviders: reviewProviderList.nullable().catch(null),
+    reviewEasyMaxProviders: z.coerce.number().int().min(1).max(3).catch(3),
+    reviewEasyEffectiveProviders: z.array(z.string()).catch([]),
+  }),
+  saveReviewProviders: z.object({ success: z.literal(true) }),
+  modelFinder: z.object({ settings: z.object({
+    preferredTasks: z.array(z.string()), preferredPriority: z.string().nullable(),
+    defaultModelId: z.string(), modelFinderCompletedAt: z.string().nullable(),
+  }) }),
+  saveModelFinder: z.object({ defaultModelId: z.string().min(1), newConversationModelIds: z.array(z.string()).min(1).max(3) })
+    .refine(value => value.newConversationModelIds[0] === value.defaultModelId),
+  exportHistory: z.object({ requests: z.array(exportHistoryEntry).max(200) }),
   usage: z.object({
     plan: label,
+    usage: z.object({ creditsMonth: z.number().nonnegative() }).optional(),
+    limits: z.object({ creditsMonth: z.number().nonnegative() }).optional(),
     balances: z.object({
       dailyRemainingCredits: z.number().nullable(),
       planRemainingCredits: z.number().nullable(),

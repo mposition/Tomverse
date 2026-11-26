@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { estimateDeepResearchInputTokens } from "@/lib/deepResearchModel";
 import { bindJourneyFirstSource, captureJourneyDraft, connectedDraftScope, invalidateJourneyDraft, observeJourneyWorkspace, type ConnectedJourney } from "@/lib/connectedJourneyAnalytics";
 import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
 import { AvailableCreditsProvider } from "@/components/credits/UsageMeter";
@@ -9941,8 +9942,6 @@ export function ChatPageClient({
     "improved" here: changing what is quoted is a pricing-copy decision, and
     this change is not entitled to make it.
   */
-  const estimateDeepResearchInputTokens = (text: string) =>
-    Math.max(1, Math.ceil(new TextEncoder().encode(text).length / 4));
   const deepResearchEstimatedInputTokens =
     estimateDeepResearchInputTokens(inputValue);
 

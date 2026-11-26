@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { encode } from "next-auth/jwt";
 import { consumeApiRateLimit } from "@/lib/apiSecurity";
 import { desktopAuthNoStore, desktopAuthResponse, desktopAuthUnavailable, requireDesktopBearer } from "@/lib/desktopAuthServer";
+import { buildDesktopSettingsClaim, desktopRecentAuthEnabled, readLiveDesktopFamilyCreatedAt } from "@/lib/desktopSettingsSessionCore";
 import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { mobileApiSecurityResponse } from "@/lib/mobileAuthRoute";
 import { prisma } from "@/lib/prisma";
@@ -34,6 +35,15 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
+  // Default off. When on, the claim is the creation time of this device's live
+  // token family (set by the real sign-in; a refresh never moves it). A family
+  // that is not this user's, this device's, or live yields no session at all.
+  const recentAuth = desktopRecentAuthEnabled();
+  let familyCreatedAt: Date | null = null;
+  if (recentAuth) {
+    familyCreatedAt = await readLiveDesktopFamilyCreatedAt(prisma, auth.identity, now);
+    if (!familyCreatedAt) return desktopAuthResponse({ ok: false, code: "UNAUTHORIZED" }, 401);
+  }
   const expiresAt = now.getTime() + settingsSessionSeconds * 1_000;
   const token = await encode({
     secret,
@@ -44,7 +54,10 @@ export async function POST(request: Request) {
       plan: effectivePlanForAccess(account, now),
       sessionIssuedAt: now.getTime(), absoluteExpiresAt: expiresAt,
       // The embedded session follows the Desktop device and token family.
-      desktopSettings: { family: auth.identity.familyId, device: auth.identity.deviceId, id: randomUUID() },
+      desktopSettings: buildDesktopSettingsClaim({
+        familyId: auth.identity.familyId, deviceId: auth.identity.deviceId, tokenId: randomUUID(),
+        familyCreatedAt, enabled: recentAuth,
+      }),
     },
   });
   return desktopAuthResponse({ token, expiresAt });

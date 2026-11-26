@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Runner, type ApprovalView, type Prompter } from "../src/agent.js";
 import { createOutput, type Output } from "../src/display.js";
 import { Gateway } from "../src/gateway.js";
-import { Journal } from "../src/session.js";
+import { Journal, type SessionState } from "../src/session.js";
 import { Workspace } from "../src/workspace.js";
 import { TEST_KEY, type FakeGateway } from "./fakeGateway.js";
 
@@ -64,7 +64,10 @@ export const makeRunner = async (
     gateway: FakeGateway,
     root: string,
     options: { prompter?: Prompter | null; home?: string | null; readOnly?: boolean; model?: string; maxRequests?: number;
-        output?: Output; contextWindow?: number; taskPlan?: "agent" | "plan" } = {}
+        output?: Output; contextWindow?: number; taskPlan?: "agent" | "plan";
+        limits?: SessionState["limits"]; goal?: SessionState["goal"];
+        /** Runner options a test adds on top of the defaults (web, memory, nested instructions, ...). */
+        runner?: Partial<ConstructorParameters<typeof Runner>[0]> } = {}
 ) => {
     const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/code/v1" };
     const client = new Gateway(endpoint, TEST_KEY);
@@ -83,12 +86,13 @@ export const makeRunner = async (
             contextWindowTokens: options.contextWindow ?? model.contextWindowTokens,
             maxOutputTokens: model.maxOutputTokens,
         },
-        limits: { maxRequests: options.maxRequests ?? 20, timeoutMs: 15 * 60_000, commandTimeoutMs: 120_000 },
+        limits: options.limits ?? { maxRequests: options.maxRequests ?? 20, timeoutMs: 15 * 60_000, commandTimeoutMs: 120_000 },
+        ...(options.goal ? { goal: options.goal } : {}),
     });
     if (options.contextWindow) for (const m of catalog) if (m.id === modelId) m.contextWindowTokens = options.contextWindow;
     const output = options.output ?? captureOutput().output;
     const runner = new Runner({ gateway: client, journal, workspace: new Workspace(root), output,
         prompter: options.prompter === undefined ? scriptedPrompter([]) : options.prompter, catalog, commandEnv: [],
-        instructions: null, taskPlan: options.taskPlan });
+        instructions: null, taskPlan: options.taskPlan, ...options.runner });
     return { runner, journal, client };
 };

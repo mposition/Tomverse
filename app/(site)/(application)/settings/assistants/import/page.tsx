@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { getServerSession } from "next-auth";
 import { notFound } from "next/navigation";
 
-import { AssistantPackageImportWizard } from "@/components/assistants/import/AssistantPackageImportWizard";
+import { WebAssistantPackageImport } from "@/components/assistants/import/WebAssistantPackageImport";
 import { isAssistantPackageImportEnabled } from "@/lib/appSettings";
 import { listAssistantProfiles } from "@/lib/assistantProfileService";
 import { listStagingImports } from "@/lib/assistantProfileImportService";
@@ -74,7 +74,7 @@ export default async function AssistantPackageImportPage() {
     }));
     return (
         <main>
-            <AssistantPackageImportWizard
+            <WebAssistantPackageImport
                 mergeTargets={mergeTargets}
                 resumable={waiting}
             />

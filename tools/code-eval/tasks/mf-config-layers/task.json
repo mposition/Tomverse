@@ -1,0 +1,12 @@
+{
+  "id": "mf-config-layers",
+  "title": "Add environment and command-line layers to the config loader",
+  "category": "multi-file",
+  "prompt": "The config loader (`createConfig`) merges built-in defaults with a JSON config file. Add two more layers as described in README.md (\"To add\"): environment variables and command-line arguments, with the precedence defaults < file < env < command line, plus `config.explain(path)` which tells where a value came from. Existing behaviour (defaults, file, `get`, errors) must keep working. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1800
+}

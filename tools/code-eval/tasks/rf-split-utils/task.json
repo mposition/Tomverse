@@ -1,0 +1,12 @@
+{
+  "id": "rf-split-utils",
+  "title": "Split the utils grab-bag into focused modules",
+  "category": "refactor",
+  "prompt": "`src/utils.js` mixes string, array and object helpers. Split it into `src/string.js` (string helpers only), `src/array.js` (array helpers only) and `src/object.js` (object helpers only) with identical function behaviour. `src/utils.js` must stay as a thin module that re-exports every function (the very same function objects), so existing imports keep working, and `src/report.js` must import from the focused modules instead of `./utils.js`. Do not export extra names from the new modules beyond the helpers that belong to them. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

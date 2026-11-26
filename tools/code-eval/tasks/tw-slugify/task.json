@@ -1,0 +1,11 @@
+{
+  "id": "tw-slugify",
+  "title": "Write tests for slugify",
+  "category": "test-writing",
+  "prompt": "Write a thorough automated test suite for `slugify` in `src/slugify.js`, in the file `test/slugify.test.mjs`, using `node:test` and `node:assert/strict`. The behaviour is described in README.md. Do not change anything under `src/`. Your tests are judged by running them against the real implementation (they must all pass) and against several deliberately defective implementations of the same module (each defective one must make at least one of your tests fail), so cover every rule and the edge cases of each rule, not just the happy path. Run them with `npm test`.",
+  "check": [
+    "node",
+    "__check__/check.mjs"
+  ],
+  "timeoutSeconds": 1200
+}

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ArrowUp, Check, ChevronDown, CodeXml, FileText, ImagePlus, Sparkles, Square } from "lucide-react";
+import { ArrowRight, ArrowUp, Check, ChevronDown, CodeXml, FileText, Globe2, ImagePlus, Sparkles, Square } from "lucide-react";
 import { reviewWorkspaceCopy } from "../../../../lib/reviewWorkspaceCopy";
 import { workspaceWelcomeCopy } from "../../../../locales/workspaceWelcome";
 import openaiLogo from "../../../../public/model-icons/chatgpt.png?no-inline";
 import anthropicLogo from "../../../../public/model-icons/claude.png?no-inline";
 import googleLogo from "../../../../public/model-icons/gemini.png?no-inline";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { canUseModelWithPlan } from "../../../../lib/models";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopReviewCopy } from "../../../../locales/desktopReview";
@@ -16,6 +17,13 @@ import { ChatMarkdown, ImportedSource, type useChatHistory } from "./ChatWorkspa
 import { DraftDictation } from "./DraftDictation";
 import { AttachmentDraftStatus, AttachmentPicker, SavedAttachments, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { GeneratedFiles } from "./GeneratedFiles";
+import { AnswerExtras } from "./AnswerExtras";
+import { DesktopModelPicker } from "./DesktopModelPicker";
+import { SavedImageTurn } from "./ImageWorkspace";
+import { ComposerTools } from "./ComposerTools";
+import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
+import { DesktopCompareSummary } from "./DesktopCompareSummary";
+import type { ImageCapability } from "../images-contract";
 
 type Message = ChatConversation["messages"][number];
 type ReviewTurn = { question: Message; answers: Message[] };
@@ -97,12 +105,15 @@ export function useReviewRun(history: History) {
     clearImageOffer: () => setImageOffer(undefined), send };
 }
 
-export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages, onImageStarter, attachments, online, dictation, preferredModelIds }: {
+export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages, onImageStarter, attachments, online, dictation, preferredModelIds,
+  analysisEnabled, searchReadiness, imageCapability, onModelImage }: {
   history: History; capability: ReviewCapability | null; run: ReturnType<typeof useReviewRun>;
   onFollowUp?: (draft: string) => void;
   onImages: (offer: ReviewImageOffer) => void;
   onImageStarter?: (prompt: string) => void;
   attachments: DesktopAttachmentDraft;
+  analysisEnabled?: boolean; searchReadiness?: { brave: boolean };
+  imageCapability: ImageCapability | null; onModelImage(modelId: string, prompt: string): void;
   online: boolean;
   dictation: boolean;
   preferredModelIds?: readonly string[];
@@ -122,7 +133,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   useEffect(() => {
     let active = true;
     void window.desktop.chatModels().then((available) => {
-      if (active) setModels(available);
+      if (active) setModels(available.filter(({ id }) => id !== DEEP_RESEARCH_MODEL_ID));
     }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -146,6 +157,9 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const showOutcome = run.running || run.outcomeId === id;
   const liveAnswers = showOutcome ? Object.entries(run.answers) : [];
   const readOnly = history.conversation?.desktopReviewWritable === false;
+  const latest = turns.at(-1);
+  const completedModels = new Set(latest?.answers.filter((answer) => answer.status === "normal" && !answer.imageTurn && answer.content.trim())
+    .flatMap(({ modelId }) => modelId ? [modelId] : []));
   const showComposer = capability && !readOnly && !history.selected?.isLocked && (!id || history.conversation);
   function seedPrompt(prompt: string) {
     history.setDraft([history.draft.trimEnd(), prompt].filter(Boolean).join("\n\n"));
@@ -153,7 +167,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   }
 
   return <><div className="scroll">
-    <div className="content review-content">
+    <div className={`content review-content${history.selected || run.running ? " review-content--conversation" : ""}`}>
       {!history.selected && !run.running && <section className="desktop-review-welcome" aria-label={welcome.newReview}>
         <div className="desktop-review-intro-bar">
           <span>{welcome.newReview}</span>
@@ -172,32 +186,41 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
             </div>)}
           </div>
         </div>
-        {showComposer && <>
+        <>
           <div className="desktop-review-starter-heading"><strong>{welcome.start}</strong><small>{welcome.seedHint}</small></div>
-          {(attachments.enabled || onImageStarter) && <div className="desktop-review-starter-grid">
-            {attachments.enabled && <button className="desktop-review-document" type="button"
+          <div className="desktop-review-starter-grid">
+            <button className="desktop-review-document" type="button" disabled={!showComposer || !attachments.enabled}
               onClick={() => seedPrompt(starters.documentQuestions.seed)}><FileText size={20} aria-hidden="true" />
               <strong>{welcome.documents}</strong><span>{welcome.documentHint}<ArrowRight size={16} aria-hidden="true" /></span>
-            </button>}
-            {onImageStarter && <button className="desktop-review-image" type="button"
-              onClick={() => onImageStarter(starters.compareImageModels.seed)}><ImagePlus size={20} aria-hidden="true" />
+            </button>
+            <button className="desktop-review-image" type="button" disabled={!showComposer || !onImageStarter}
+              onClick={() => onImageStarter?.(starters.compareImageModels.seed)}><ImagePlus size={20} aria-hidden="true" />
               <span><strong>{welcome.images}</strong><small>{welcome.imageHint}</small></span><ArrowRight size={16} aria-hidden="true" />
-            </button>}
-          </div>}
+            </button>
+            <button className="desktop-review-research" type="button" disabled={!showComposer} onClick={() => seedPrompt(starters.sourcedAnswer.seed)}>
+              <Globe2 size={20} aria-hidden="true" /><span><strong>{welcome.research}</strong><small>{welcome.researchHint}</small></span><ArrowRight size={16} aria-hidden="true" />
+            </button>
+          </div>
           <div className="desktop-review-extra-starters">
-            <button className="soft" type="button" onClick={() => seedPrompt(starters.debugStackTrace.seed)}>
+            <button className="soft" type="button" disabled={!showComposer} onClick={() => seedPrompt(starters.debugStackTrace.seed)}>
               <CodeXml size={16} aria-hidden="true" />{welcome.code}
             </button>
-            {capability.modelLimit >= 3 && <button className="soft" type="button" onClick={() => seedPrompt(starters.compareAnswers.seed)}>
-              <Sparkles size={16} aria-hidden="true" />{starters.compareAnswers.label}
-            </button>}
+            <button className="soft" type="button" disabled={!showComposer} onClick={() => seedPrompt(starters.spreadsheetFromAnswer.seed)}>
+              <FileText size={16} aria-hidden="true" />{welcome.files}
+            </button>
           </div>
-        </>}
-        {!capability && <p role="status">{common.sendUnavailable}</p>}
+          <div className="desktop-review-starter-footer">
+            <p>{workspaceWelcomeCopy[language].starter.hint}</p>
+            <button className="soft" type="button" disabled={!showComposer || (capability?.modelLimit ?? 0) < 3} onClick={() => seedPrompt(starters.compareAnswers.seed)}>
+              <Sparkles size={16} aria-hidden="true" />{starters.compareAnswers.label}
+            </button>
+          </div>
+        </>
+        {!capability && <p role="status">{copy.readOnlyServer}</p>}
       </section>}
       {history.opening && !history.conversation && <p role="status">{common.loadingConversation}</p>}
       {history.notice && <p className="notice" role="status">{history.notice}</p>}
-      {readOnly && <p role="status">{common.sendUnavailable}</p>}
+      {readOnly && <p role="status">{copy.readOnlyConversation}</p>}
       {history.conversation?.surface === "continuation" &&
         <ImportedSource key={history.conversation.id} id={history.conversation.id} language={language} />}
       {history.conversation && !turns.length && !run.running && <p className="notice">{copy.empty}</p>}
@@ -206,9 +229,12 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         <SavedAttachments message={question} language={language} />
         {answers.length > 0 && <ul className="review-answers" aria-label={copy.modelAnswers}>
           {answers.map((answer) => <li className="review-answer" key={answer.id}>
-            <h3>{answer.modelId ? byId.get(answer.modelId) ?? answer.modelId : copy.modelUnavailable}</h3>
-            <ChatMarkdown content={answer.content} />
+            {answer.imageTurn ? <SavedImageTurn key={answer.imageTurn.groupId} turn={answer.imageTurn} language={language} /> : <>
+              <h3>{answer.modelId ? byId.get(answer.modelId) ?? answer.modelId : copy.modelUnavailable}</h3>
+              <ChatMarkdown content={answer.content} />
+            </>}
             <GeneratedFiles artifacts={answer.artifacts} language={language} />
+            <AnswerExtras message={answer} conversationId={history.conversation?.id} language={language} product="review" />
             {answer.searchMetadata?.reasoningEffort?.applied &&
               <small className="chat-effort">{common.reasoningEffort} · {effortNames[answer.searchMetadata.reasoningEffort.applied]}
                 {answer.searchMetadata.reasoningEffort.requested !== answer.searchMetadata.reasoningEffort.applied &&
@@ -244,7 +270,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         onClick={() => void history.more()}>{common.loadMessages}</button>}
     </div>
   </div>
-  {showComposer && <div className="composer-slot chat-composer-slot">
+  {showComposer && <div className="composer-slot chat-composer-slot review-composer-slot">
     <form className="composer chat-composer" aria-label={copy.composer} onSubmit={async (event) => {
       event.preventDefault();
       if (!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || run.running) return;
@@ -262,21 +288,34 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           }
         }} />
       <div className="composer-actions">
-        <AttachmentPicker draft={attachments} busy={run.running} />
+        {attachments.enabled && <ComposerTools language={language} disabled={run.running || attachments.uploading}
+          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}>
+          <AttachmentPicker draft={attachments} busy={run.running} tool />
+        </ComposerTools>}
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
           disabled={run.running || attachments.uploading} draft={history.draft} setDraft={history.setDraft} />}
         <span className="spacer"/>
-        <details className="model-menu">
+        {capability.easy && <label className="desktop-review-mode" title={copy.mode}><select aria-label={copy.mode} value={mode} disabled={run.running}
+          onChange={(event) => setModeChoice(event.currentTarget.value as ReviewMode)}>
+          <option value="easy">{mobileReviewModeLabel(language, "easy")}</option>
+          <option value="professional">{mobileReviewModeLabel(language, "professional")}</option>
+        </select></label>}
+        {mode === "professional" ? <DesktopModelPicker key={id ?? "new"} account={history.account} language={language} label={copy.picker}
+          models={models} choices={choices} limit={Math.min(3, capability.modelLimit)} plan={capability.plan}
+          disabled={run.running || history.writing} onChoose={(choices) => setPicked({ conversationId: id, mode, choices })}
+          imageCapability={imageCapability} onImage={(modelId) => onModelImage(modelId, history.draft)}
+          searchReadiness={searchReadiness} hasImageAttachments={attachments.files.some(({ mediaType }) => mediaType.startsWith("image/"))}
+          effort={levels.length > 0 && <label>{common.reasoningEffort} <select aria-label={common.reasoningEffort} value={actualEffort} disabled={run.running}
+            onChange={(event) => setEffort(event.currentTarget.value as Effort)}><option value="default">{effortNames.default}</option>
+            {levels.map((level) => <option value={level} key={level}>{effortNames[level]}</option>)}
+          </select></label>}>
+          {copy.models} · {choices.length}
+        </DesktopModelPicker> : <details className="model-menu">
           <summary aria-label={copy.picker}>
             {mobileReviewModeLabel(language, mode)}
             {actualEffort !== "default" && ` · ${effortNames[actualEffort]}`} <ChevronDown size={15} />
           </summary>
           <div className="model-popover review-picker">
-            {capability.easy && <label>{copy.mode} <select aria-label={copy.mode} value={mode} disabled={run.running}
-              onChange={(event) => setModeChoice(event.currentTarget.value as ReviewMode)}>
-              <option value="easy">{mobileReviewModeLabel(language, "easy")}</option>
-              <option value="professional">{mobileReviewModeLabel(language, "professional")}</option>
-            </select></label>}
             <fieldset disabled={run.running}>
               <legend>{mode === "easy" ? copy.providers : copy.models}</legend>
               {options.map((option) => <label key={option.id}>
@@ -287,18 +326,18 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
                 {option.name}
               </label>)}
             </fieldset>
-            {levels.length > 0 && <label>{common.reasoningEffort} <select aria-label={common.reasoningEffort} value={actualEffort} disabled={run.running}
-              onChange={(event) => setEffort(event.currentTarget.value as Effort)}>
-              <option value="default">{effortNames.default}</option>
-              {levels.map((level) => <option value={level} key={level}>{effortNames[level]}</option>)}
-            </select></label>}
           </div>
-        </details>
+        </details>}
         {run.running
           ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={16} /></button>
           : <button className="send" type="submit" aria-label={copy.send}
             disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading}><ArrowUp size={18} /></button>}
       </div>
+      {id && !history.selected?.isLocked && <DesktopCompareSummary key={`${history.account ?? ""}:${id}:${latest?.answers.map((answer) => answer.id).join(",")}`} language={language}
+        conversationId={id} ready={online && !run.running && !history.writing && completedModels.size >= 2} />}
+      {analysisEnabled && <DesktopReviewAnalysis key={`${history.account ?? ""}:${id ?? "new"}`} language={language}
+        conversationId={id} scope={JSON.stringify([latest?.question.id, latest?.answers.map(({ id }) => id)])}
+        ready={online && !run.running && !history.writing && completedModels.size >= 2} />}
     </form>
   </div>}
   </>;

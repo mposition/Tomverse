@@ -96,8 +96,9 @@ async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useC
   });
   const quotes = quotesAt(size);
   const squareQuotes = squareFallback && size !== "1024x1024" ? quotesAt("1024x1024") : [];
-  if (useCase === "real-sticker-pack" || useCase === "real-sticker") {
-    // Use the exact photo-edit configuration evaluated for both packs and replacements.
+  if (useCase === "real-sticker-pack" || useCase === "character-sticker-pack" ||
+      useCase === "real-sticker" || useCase === "character-sticker") {
+    // Both sticker styles use the same square photo edit for packs and replacements.
     const square = size === "1024x1024" ? quotes : squareQuotes;
     return edit ? square.find(quote => quote.modelId === "gpt-image-2.6-sunburst" && quote.quality === "medium") ?? null : null;
   }

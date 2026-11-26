@@ -76,7 +76,7 @@ use the npm package.
 
 Revoke or limit a key in Settings > API keys; the CLI has no key management.
 
-The CLI talks only to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
+The CLI talks to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
 unless you set another endpoint with `tomverse config set endpoint <url>` (or
 `TOMVERSE_ENDPOINT`). An endpoint saved before the CLI moved to the coding API
 ends in `/api/v1`; it is read as `/api/code/v1` on the same server.
@@ -84,7 +84,9 @@ It must be https; plain http is accepted only for a loopback development
 server after `tomverse config set allow-insecure-localhost true`. Redirects
 are never followed, so the key cannot be carried to another address. Nothing
 in a repository (AGENTS.md, scripts, model output) can change the endpoint, the
-key or any permission.
+key or any permission. The only other host the CLI itself ever contacts is a
+public web page you approved, through `web_fetch` (below); the key is never
+sent there.
 
 ## Use
 
@@ -96,20 +98,21 @@ tomverse exec --json "explain src/index.ts" --read-only
 
 | Command | What it does |
 |---|---|
-| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
+| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/rewind`, `/fork [turn]`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
 | `tomverse exec <task> [--json]` | One task, no prompts. Stops with exit code 3 at the first action that needs approval. |
 | `tomverse resume <session> [task]` | Continue a saved session (and answer pending approvals in a terminal). |
 | `tomverse models` | Models this key can use. |
 | `tomverse usage [--session <id>]` | Key cap, committed and held credits; or one session's own receipts. |
 | `tomverse sessions list` / `sessions delete <id>` | Local sessions. Delete asks first (or `--yes`). |
+| `tomverse sessions fork <id> [--turn <n>]` | Copy a session's conversation (through turn n) into a new session; no file is touched. |
 | `tomverse diff [--session <id>]` | Changes this CLI made, and only those. |
 | `tomverse undo <change-id>` | Undo one of them (see below). |
 | `tomverse doctor` | Node, folder, key, API and recovery lookup checks. Makes no model request. |
 | `tomverse trust [folder]` | Allow the CLI to work in a folder (asked once in interactive mode). |
 | `tomverse config show/set/unset` | `endpoint`, `model`, `allow-insecure-localhost`, `command-env`. |
 
-Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-requests <n>`,
-`--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
+Options: `--cwd`, `--model`, `--effort default|<level>`, `--read-only`, `--limits <profile>`, `--goal`,
+`--max-requests <n>`, `--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
 
 ### Limits
 
@@ -119,9 +122,30 @@ Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-
 | Active time per task | 15 min (`--timeout`) | Time spent waiting for your approval does not count. |
 | Per command | 120 s (`--command-timeout`) | The model can ask for another value; the approval shows it. Maximum 30 min. |
 
+`--limits <profile>` picks the request and time limits of a task as a set; it is saved with the
+session and kept when you resume it. `--max-requests` and `--timeout` are more specific and win
+over the profile.
+
+| Profile | Requests per task | Active time per task |
+|---|---|---|
+| `standard` (default) | 20 | 15 min |
+| `extended` | 200 | 120 min |
+| `unlimited` | none | none |
+
+`unlimited` has no limit of its own: the task ends when you stop it, when the API refuses a request
+(a key credit limit or quota), or when the model is done. Approvals, the per-command time limit and
+the key's credit limit work as before.
+
+`--goal` turns on goal mode for the session. When the model says it is done, one more request of
+the same model answers whether the goal is verified (for code: a relevant check was run and its
+result shown). If not, its next action is sent to the model as your instruction and the task
+continues, at most 10 automatic continuations in a row; it then stops as "limit reached" and says
+the goal is not verified. Goal mode needs a session that can change files, counts every check as a
+request, and never answers an approval for you.
+
 Use `--effort high` for one task or `/effort low` to set the next interactive task.
 `default` uses the model's existing setting. The coding API advertises the
-available levels for each model. A task keeps its requested level across steps
+available levels for each model; `--effort` takes `default` or any level `tomverse models` lists. A task keeps its requested level across steps
 and resume. Each response records the applied level. A model that does not
 support the request uses its own default.
 
@@ -142,6 +166,15 @@ per task".
   of the folder, `..`, Windows UNC/device paths and alternate data streams are
   refused. Nothing is uploaded in bulk; only what the model asks to read, in
   bounded pieces.
+- **Images (`view_image`):** for a model whose catalogue entry says it takes
+  images, the model can look at a PNG, JPEG, WebP or GIF file of the folder (up
+  to 3 MB; the type is checked on the file's first bytes). It needs no approval
+  and follows the same rules as `read_file`: only inside the folder, never a
+  credential file. The image reaches the model as image data in the next request,
+  so it is part of what the transmission record counts; the newest three
+  images stay attached and older ones are replaced by a note. A model that does
+  not take images is not offered the tool, and an image you select as a
+  reference in Desktop is looked at the same way.
 - **Every change asks:** `apply_patch` shows the full diff of every file in the
   batch. Edits are exact text replacements; an edit whose text is not found
   exactly once is refused, not guessed. BOM and CRLF line endings are kept.
@@ -163,6 +196,52 @@ per task".
   including descendants that moved to their own session — and anything that
   survived is reported. A program that detaches itself after the command has
   already finished is outside what the CLI can see.
+- **Web pages (`web_fetch`):** the model can read a public web page, for
+  documentation. **Every site (host) is asked about first**, with the host and the
+  full address shown; `a` allows that host for the rest of this run, and a
+  redirect to another host is never followed without its own question. The
+  address is judged by fixed rules that no answer or model text changes: https
+  only, port 443, no user name or password, no IP address in any notation, no
+  `localhost`, single-label or internal name (`.local`, `.internal`, …); the
+  name is resolved by the CLI, every address it resolves to must be public (a
+  private, loopback, link-local or reserved one, also inside an IPv6 form, refuses
+  it), and the connection goes to the address that was checked. Every redirect
+  is judged again. The request is a plain GET with no cookies, no login and
+  nothing from your folder; the answer is limited to 2 MB and 20 seconds, only
+  text, HTML, JSON and XML are read, and the text given to the model is marked
+  as untrusted reference material, never instructions. The page text is part of
+  the next model request, and the transmission record lists the address. A
+  `--read-only` session has no `web_fetch` (it has no approvals at all, and the
+  address of a request can itself carry information out), and neither do
+  `exec` runs without a terminal. There is no web search tool.
+- **Background commands:** a command can be approved to keep running after the call
+  returns (a dev server, a watcher). The approval says "background" and "no
+  time limit", and is bound to that: approving a foreground command never
+  approves the same one in the background (an `a` answer does not carry over
+  either). The model gets a handle and can read what it printed since its last
+  read (bounded, stdout and stderr together), check its state and stop it,
+  without a further approval, because only handles the task itself started
+  exist. At most four run at once. They belong to the task: when it ends, is
+  stopped or cancelled, or the CLI exits, every process tree still running is
+  ended the way a timed-out command is (a hard kill of the CLI itself cannot
+  run that cleanup). The session records them; a resumed session tells the
+  model that its earlier background commands are no longer running.
+- **Subagents (`delegate`):** the model can hand self-contained work to subagents that
+  each start with a fresh context of their own and give back only a written report,
+  so a wide search does not fill the main conversation. `explore` subagents can only
+  list, search and read (the same path rules as the model's own reads, `view_image`
+  when the model takes images); up to three run in parallel and need no approval.
+  A `worker` subagent can also change files and run commands, one at a time, and
+  every change and command is asked the same way, through the same prompt and the same
+  "always" answers, as the main agent's own; a worker is not offered in
+  `--read-only`, plan mode or `exec`. A subagent uses the model and reasoning effort of
+  the task (the CLI never picks a cheaper model on its own), cannot start subagents of
+  its own, and is stopped when the task is. Its requests are recorded in the session and
+  in `tomverse usage` like any other and count against the task's request limit: a
+  call that cannot fit what is left starts nothing, and a task starts at most 12. The
+  report is handed to the main agent as unverified information. The session keeps a
+  short record of each run (the task, kind, requests and how it ended, not its
+  conversation); a resumed session tells the model about a run that never reported back.
 - `argv` (a program and its arguments) runs without a shell, so what you
   approve is exactly what runs. On Windows, batch programs such as `npm`/`npx`
   cannot run that way (cmd.exe would re-read the arguments); they run as a
@@ -185,9 +264,29 @@ per task".
   with exit code 3 and the pending actions in the output. Review them with
   `tomverse resume <session>` in a terminal. There is no flag that approves
   everything.
-- `AGENTS.md` at the folder root is given to the model as project
-  information. It cannot grant permissions, and the CLI never runs commands or
+- **Project instructions:** the folder's `AGENTS.md`, its `CLAUDE.md` (a whole-line
+  `@file` in it pulls that file in, inside the folder only, and each file is
+  given once) and the unconditional rules of `.claude/rules/*.md` (a rule whose
+  front matter names `paths` is left out) are given to the model as project
+  information, at most 32,000 characters in all; a cut is marked. When the
+  model first reads or changes a file in a subfolder, that subfolder's own
+  `AGENTS.md` / `CLAUDE.md` come with the result of that read or change, once
+  per folder (again after a compaction), at most 48,000 characters in a task. Files go through the same path check as
+  every read, so a link out of the folder or a credential file is never sent.
+  Instructions cannot grant permissions, and the CLI never runs commands or
   install hooks because a file says so.
+- **Project memory:** the model can keep a short note about the project
+  (`remember_fact`: how the tests run, a decision, a trap) without asking you.
+  Notes are stored in `~/.tomverse/memory/` (or `$TOMVERSE_HOME`), next to the
+  sessions and outside the project, one file per folder, and the file tools
+  never touch that folder. A note is one line of at most 300 characters; at
+  most 40 notes and 8,000 characters are kept, the oldest dropped first; and
+  anything that looks like a key, token or password is refused, not stored. At
+  the start of each task the notes are given to the model after the
+  instructions, marked as unchecked notes that cannot grant anything. A
+  `--read-only` session reads them but cannot add one. `tomverse memory show`
+  lists this folder's notes and `tomverse memory clear` deletes them;
+  `tomverse config set memory off` stops all reading and writing.
 
 ## Sessions, interruption and recovery
 
@@ -270,6 +369,28 @@ first request is pinned for the rest of the session (including compaction and
 resume). Native protocol features (signed thinking, encrypted reasoning state)
 are not used by this CLI.
 
+### Rewind and fork
+
+Every user message of a session is a turn: a task's prompt, or a message you sent while it ran.
+The session records where the conversation and its list of file changes stood just before each one.
+
+- `/rewind` (interactive) lists the turns and asks which one to go back to. It then shows what
+  would be put back, newest change first, which files would conflict, and which commands ran in
+  that part (their effects cannot be undone), and asks what to rewind: `b` files and conversation,
+  `f` files only, `c` conversation only. A file is put back only if it is still exactly what the
+  session wrote, the same check as `tomverse undo`; a file you edited since is left alone and
+  reported as a conflict, and so is an earlier change to the same file that waits behind it. The
+  message that was taken out is shown so you can edit it and send it again. The model is told
+  what was and was not put back, so its next request does not rest on history that no longer
+  matches the folder. A rewind is recorded in the session. It is refused while a task runs,
+  waits for an approval, or has an unknown outcome, and the conversation cannot be cut at a turn
+  that a compaction folded into a summary (the files still can).
+- `/fork [n]` and `tomverse sessions fork <session> [--turn <n>]` copy the conversation through
+  turn `n` (all of it by default) into a new session and touch no file. The original stays as it
+  was; the copy starts with no changes of the original to undo, no requests and no approvals, and
+  continues with `tomverse resume <new id>`. Sessions saved by an older CLI have no turns and
+  cannot be rewound or forked.
+
 ## Support
 
 - Windows (PowerShell), macOS (zsh) and Linux (bash), with Node.js 22 or
@@ -277,8 +398,8 @@ are not used by this CLI.
   tested on every one of these systems before it is published.
 - Terminal text is English; Korean and other Unicode input, file names and
   output work.
-- Not in this version: MCP, plugins or skills, image input, a code index or
-  LSP, parallel agents or worktrees, IDE or desktop apps, background agents.
+- Not in this version: MCP, plugins or skills, a code index or
+  LSP, worktrees, IDE or desktop apps, background agents.
 
 ## Update and roll back
 

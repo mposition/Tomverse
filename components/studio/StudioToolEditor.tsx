@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, ImagePlus } from "lucide-react";
 import { STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, studioArtworkPath as asset, type StudioCreativeTool, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
 import { studioPresetName, studioPublicationPresets, type StudioPublicationPreset } from "@/lib/studioPresetLibrary";
+import { studioOutputLanguage } from "@/locales/studio";
 import { STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets, studioPublishingDesign, studioPublishingPrompt, studioSocialFormat } from "@/lib/studioPublishing";
 import { drawStudioPublishingArtwork, renderStudioPublishingArtwork, type StudioPublishingArtwork } from "./studioPublishingArtwork";
 import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudioImage, saveStudioFile } from "./studioCanvas";
@@ -31,7 +32,6 @@ type ToolCheckoutDraft = {
   posterBrief?: string;
   posterCategory?: string;
   posterStyle?: string;
-  posterHasText?: boolean;
   publicationPreset?: string;
   socialFormatId?: string;
   logo?: StudioDraftImage;
@@ -159,7 +159,6 @@ export function StudioToolEditor({ tool, preset }: {
   const [posterBrief, setPosterBrief] = useState("");
   const [posterCategory, setPosterCategory] = useState("auto");
   const [posterStyle, setPosterStyle] = useState("auto");
-  const [posterHasText, setPosterHasText] = useState(false);
   const [title, setTitle] = useState("");
   const [customDetails, setDetails] = useState<string>();
   const details = customDetails ?? (id === "meme" ? copy.exampleMemeSituation : "");
@@ -173,12 +172,11 @@ export function StudioToolEditor({ tool, preset }: {
   [id, activePreset, posterCategory, posterStyle]);
   const sample = resultIsExample && publishing
     ? publicationChoices.find(option => option.id === design?.presetId) ?? publicationChoices[0] : undefined;
-  const exactTitle = posterHasText ? "" : title.trim() || (sample ? studioPresetName(sample, lang) : "");
-  const artworkSource = sample && !posterHasText ? asset(sample.artwork) : result;
-  const artwork = useMemo<StudioPublishingArtwork | undefined>(() => artworkSource && design ? {
+  const artworkSource = sample ? asset(sample.artwork) : result;
+  const artwork = useMemo<StudioPublishingArtwork | undefined>(() => artworkSource && publishing ? {
     source: artworkSource, logo: logo || undefined, width: dim.width, height: dim.height,
-    design, placement: social ? socialFormat : undefined, title: exactTitle, details, locale: lang,
-  } : undefined, [artworkSource, logo, dim, design, social, socialFormat, exactTitle, details, lang]);
+    placement: social ? socialFormat : undefined, details, locale: lang,
+  } : undefined, [artworkSource, logo, dim, publishing, social, socialFormat, details, lang]);
   const imageQuote = useStudioImageQuote(size, hasReference, true, publishing ? "1024x1024" : undefined, id);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
@@ -224,7 +222,6 @@ export function StudioToolEditor({ tool, preset }: {
     setPosterBrief(saved.posterBrief ?? "");
     setPosterCategory(saved.posterCategory ?? "auto");
     setPosterStyle(saved.posterStyle ?? "auto");
-    setPosterHasText(saved.posterHasText ?? (poster && saved.resultIsExample && saved.result === asset(tool.artwork)));
     setPublicationPreset(saved.publicationPreset ?? "");
     report(copy.checkoutDraftRestored);
   });
@@ -240,7 +237,7 @@ export function StudioToolEditor({ tool, preset }: {
       );
       await checkoutDraft.save({
         photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample: shown.resultIsExample,
-        format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText, publicationPreset, socialFormatId,
+        format, title, details, caption, posterBrief, posterCategory, posterStyle, publicationPreset, socialFormatId,
         toolBlobs: [...toolResults].filter(([, held]) => held.photo === photo)
           .map(([modelId, held]) => ({ modelId, blob: held.blob, owed: held.owed })),
         pickedTool: shown.tool,
@@ -278,7 +275,6 @@ export function StudioToolEditor({ tool, preset }: {
     urls.release(result);
     setResult(asset(option.artwork));
     setResultIsExample(true);
-    setPosterHasText(false);
   }
 
   const imagePrompt = () => {
@@ -304,7 +300,7 @@ export function StudioToolEditor({ tool, preset }: {
       case "social-post":
         return studioPublishingPrompt({
           kind: id, design: design!, placement: social ? socialFormat : undefined,
-          locale: lang, brief: posterBrief, title, details, hasPhoto: hasReference, hasLogo: Boolean(logo),
+          language: studioOutputLanguage[lang], brief: posterBrief, title, details, hasPhoto: hasReference, hasLogo: Boolean(logo),
           category: posterCategory, style: posterStyle,
         });
       case "transparent-png":
@@ -410,7 +406,6 @@ export function StudioToolEditor({ tool, preset }: {
         setResult(urls.make(output));
       }
       setResultIsExample(false);
-      if (publishing) setPosterHasText(!title.trim());
       void checkoutDraft.clear();
     } catch (error) {
       if (signal.aborted) return;

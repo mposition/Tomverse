@@ -1,0 +1,8 @@
+{
+  "name": "tw-money-allocate",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

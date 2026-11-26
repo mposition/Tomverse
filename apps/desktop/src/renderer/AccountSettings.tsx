@@ -1,73 +1,37 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import type { AccountSettingsTab } from "../../../../lib/accountSettingsEvents";
 import { ASSISTANT_PROFILE_LIMITS } from "../../../../lib/assistantProfileVersioning";
 import { CONSENT_REQUIRED_PURPOSES } from "../../../../lib/emailPreferenceCore";
 import { MARKETING_ALLOWED_COUNTRY_CODES } from "../../../../lib/emailJurisdictionCore";
 import { MEMORY_KINDS } from "../../../../lib/memoryValidatorCore";
-import { en } from "../../../../locales/en";
-import { ko } from "../../../../locales/ko";
-import { zh } from "../../../../locales/zh";
-import { zhHant } from "../../../../locales/zhHant";
-import { fr } from "../../../../locales/fr";
-import { de } from "../../../../locales/de";
-import { es } from "../../../../locales/es";
-import { pt } from "../../../../locales/pt";
-import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopControlsCopy } from "../../../../locales/desktopControls";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import type { AccountPreferences, AccountSettingsResult, DesktopAccountSettingsInput } from "../account-settings-contract";
 import type { ChatModel } from "../chat-contract";
-import { ExternalConversationImport } from "./ExternalConversationImport";
+import { desktopImportFilePrivacy, ExternalConversationImport } from "./ExternalConversationImport";
+import { AccountDataPanel, DeleteAccountSection } from "./AccountDataSettings";
+import { AssistantExtras } from "./AssistantExtras";
+import { AssistantPackageImportEntry, AssistantPackageImportPanel } from "./AssistantPackageImport";
+import { LoginMethods } from "./LoginMethodsSettings";
+import { DeveloperOverview, KeyUsage } from "./DeveloperExtras";
+import { ModelFinderPanel, ReviewProviderDefaults } from "./AiSettingsExtras";
+import { DeleteMemory, MemoryDataActions, MemoryScope } from "./MemoryExtras";
+import { AccountSettingRow, ActionStatus, dictionaries, languageLabel, ReadStatus, useSettingsRead, type Common } from "./settings-shared";
+import { BillingSettings } from "./BillingSettings";
 
-const dictionaries = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };
-const languageLabel = (language: Language) => new Intl.DisplayNames(language, { type: "language" }).of(language) ?? language;
-
-export function AccountSettingRow({ label, children, description }: {
-  label: ReactNode; children: ReactNode; description?: ReactNode;
-}) {
-  return <div className="execution-setting-row account-setting-row">
-    <div>{label}{description && <small>{description}</small>}</div>
-    <div className="account-setting-control">{children}</div>
-  </div>;
-}
-
-function useSettingsRead<Data>(load: () => Promise<Data>) {
-  const [state, setState] = useState<{ load: typeof load; attempt: number; data?: Data; failed?: true }>();
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    let current = true;
-    void load().then(
-      data => { if (current) setState({ load, attempt, data }); },
-      () => { if (current) setState({ load, attempt, failed: true }); },
-    );
-    return () => { current = false; };
-  }, [load, attempt]);
-  const visible = state?.load === load && state.attempt === attempt ? state : undefined;
-  return { ...visible, reload: () => setAttempt(value => value + 1), setData: (data: Data) => setState({ load, attempt, data }) };
-}
-
-function ReadStatus({ language, failed, retry }: { language: Language; failed?: boolean; retry(): void }) {
-  return failed ? <div className="desktop-settings-feedback">
-    <p role="alert">{desktopShellCopy[language].actionFailed}</p>
-    <button type="button" className="soft" onClick={retry}>{desktopControlsCopy[language].retrySettings}</button>
-  </div> : <p role="status">{dictionaries[language].auth.loading}</p>;
-}
-
-function ActionStatus({ language, failed }: { language: Language; failed: boolean }) {
-  return failed ? <p className="notice" role="alert">{desktopShellCopy[language].actionFailed}</p> : null;
-}
+export { AccountSettingRow };
 
 const loadPreferences = () => window.desktop.accountSettings<"preferences">({ action: "preferences" });
 const loadEmail = () => window.desktop.accountSettings<"email">({ action: "email" });
 const loadMemory = () => window.desktop.accountSettings<"memory">({ action: "memory" });
 const loadAssistants = () => window.desktop.accountSettings<"assistants">({ action: "assistants" });
-const loadLoginMethods = () => window.desktop.accountSettings<"loginMethods">({ action: "loginMethods" });
 const loadKeys = () => window.desktop.accountSettings<"keys">({ action: "keys" });
 const loadUsage = () => window.desktop.accountSettings<"usage">({ action: "usage" });
+const loadImportCapacity = () => window.desktop.accountSettings<"importCapacity">({ action: "importCapacity" });
+const loadImportRuns = () => window.desktop.accountSettings<"importRuns">({ action: "importRuns" });
 
-type Common = { language: Language };
 
 function Preferences({ language, onApply }: Common & { onApply(settings: AccountPreferences): void }) {
   const copy = dictionaries[language].auth;
@@ -151,19 +115,6 @@ function Preferences({ language, onApply }: Common & { onApply(settings: Account
   </form>;
 }
 
-function LoginMethods({ language }: Common) {
-  const state = useSettingsRead(loadLoginMethods);
-  const copy = dictionaries[language].auth;
-  if (!state.data) return <ReadStatus language={language} failed={state.failed} retry={state.reload} />;
-  const providers: Record<string, string> = { apple: "Apple", google: "Google", "azure-ad": "Microsoft" };
-  return <div data-testid="native-account-login-methods">
-    {state.data.methods.map(method => <AccountSettingRow key={method.type === "email" ? "email" : method.provider}
-      label={method.type === "email" ? copy.emailLoginEmailInputLabel : providers[method.provider] ?? method.provider}>
-      <span>{(method.type === "email" ? method.enabled : method.linked) ? "✓" : "—"}</span>
-    </AccountSettingRow>)}
-  </div>;
-}
-
 function EmailNotifications({ language }: Common) {
   const state = useSettingsRead(loadEmail);
   const copy = dictionaries[language].emailNotifications;
@@ -223,6 +174,7 @@ function Account({ language }: Common) {
       <button className="soft" type="button" aria-expanded={email} onClick={() => setEmail(!email)}>{copy.dataTabOpen}</button>
     </AccountSettingRow>
     {email && <EmailNotifications language={language} />}
+    <DeleteAccountSection language={language} />
   </>;
 }
 
@@ -318,6 +270,9 @@ function MemoryDetail({ id, language, close }: Common & { id: string; close(): v
           <button type="submit" className="primary" disabled={busy || failed || !statement.trim() || statement === memory.statement}>{copy.save}</button>
         </div>
       </form> : <p>{memory.statement}</p>}
+      {memory.status === "active" && memory.revision !== undefined && <MemoryScope language={language} id={id}
+        revision={memory.revision} projectId={memory.projectId ?? null} onMoved={state.reload} />}
+      <DeleteMemory language={language} id={id} onDeleted={close} />
       {memory.evidence.length > 0 && <ul>{memory.evidence.map(evidence => <li key={evidence.id}>
         {evidence.manualContent ? <>{copy.evidenceManual} {evidence.manualContent}</> :
           <>{copy.evidenceExternal}{evidence.sourceTitle && " · " + evidence.sourceTitle}</>}
@@ -366,6 +321,7 @@ function Memory({ language }: Common) {
     </AccountSettingRow>
     {browse && <StoredMemories language={language} />}
     <ActionStatus language={language} failed={failed} />
+    <MemoryDataActions language={language} />
   </div>;
 }
 
@@ -377,8 +333,10 @@ function Assistants({ language }: Common) {
   const [instructions, setInstructions] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [importing, setImporting] = useState(false);
   const copy = dictionaries[language].assistantProfiles;
   if (editing) return <AssistantEditor id={editing} language={language} close={() => { setEditing(undefined); state.reload(); }} />;
+  if (importing) return <AssistantPackageImportPanel language={language} close={() => { setImporting(false); state.reload(); }} />;
   if (!state.data) return <ReadStatus language={language} failed={state.failed} retry={state.reload} />;
   return <div data-testid="native-account-assistants">
     {state.data.profiles.map(profile => <AccountSettingRow key={profile.id} label={profile.name}
@@ -386,6 +344,7 @@ function Assistants({ language }: Common) {
       <button className="soft" type="button" disabled={busy} aria-label={copy.editTitle + " · " + profile.name}
         onClick={() => setEditing(profile.id)}>{copy.editTitle}</button>
     </AccountSettingRow>)}
+    <AssistantPackageImportEntry language={language} onOpen={() => setImporting(true)} />
     <form className="desktop-setting-section account-settings-form" onSubmit={event => {
       event.preventDefault();
       if (!name.trim() || !instructions.trim() || busy) return;
@@ -413,8 +372,11 @@ function AssistantEditor({ id, language, close }: Common & { id: string; close()
     <div className="account-settings-actions">
       <button className="soft" type="button" onClick={close}>{copy.externalImport.back}</button>
     </div>
-    {state.data ? <AssistantEditorForm key={state.data.profile.currentVersion?.id ?? id} profile={state.data.profile}
-      language={language} reload={state.reload} /> : <ReadStatus language={language} failed={state.failed} retry={state.reload} />}
+    {state.data ? <>
+      <AssistantEditorForm key={state.data.profile.currentVersion?.id ?? id} profile={state.data.profile}
+        language={language} reload={state.reload} />
+      <AssistantExtras language={language} id={id} name={state.data.profile.name} reloadProfile={state.reload} onDeleted={close} />
+    </> : <ReadStatus language={language} failed={state.failed} retry={state.reload} />}
   </div>;
 }
 
@@ -537,27 +499,48 @@ function ImportedConversations({ language, onContinue }: Common & { onContinue(i
   const [offset, setOffset] = useState(0);
   const load = useCallback(() => window.desktop.accountSettings<"imports">({ action: "imports", offset }), [offset]);
   const state = useSettingsRead(load);
+  const capacity = useSettingsRead(loadImportCapacity);
+  const runs = useSettingsRead(loadImportRuns);
   const [opening, setOpening] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [viewing, setViewing] = useState<string>();
   const keys = useRef(new Map<string, string>());
   const copy = desktopChatCopy[language];
   const importCopy = dictionaries[language].externalImport;
+  const format = new Intl.NumberFormat(language, { maximumFractionDigits: 1 });
+  if (viewing) return <ImportedConversation language={language} id={viewing} onBack={() => setViewing(undefined)} />;
   if (showImport) return <ExternalConversationImport copy={importCopy} language={language} onClose={saved => {
     setShowImport(false);
     if (saved) {
+      capacity.reload();
+      runs.reload();
       if (offset) setOffset(0);
       else state.reload();
     }
   }} />;
-  if (!state.data) return <ReadStatus language={language} failed={state.failed} retry={state.reload} />;
-  const next = state.data.offset + state.data.limit;
+  const next = state.data && state.data.offset + state.data.limit;
+  const storage = capacity.data;
   return <div data-testid="native-account-imports">
-    <div className="account-settings-actions">
-      <button type="button" className="primary" disabled={opening} onClick={() => setShowImport(true)}>{importCopy.newImportCta}</button>
-    </div>
-    {state.data.conversations.length === 0 && <p>{copy.emptyHistory}</p>}
-    {state.data.conversations.map(conversation => <AccountSettingRow key={conversation.id} label={conversation.title} description={conversation.provider}>
+    <section className="desktop-setting-section" aria-label={importCopy.capacityTitle}>
+      <h3>{importCopy.capacityTitle}</h3>
+      {storage?.usage && storage.limits && <>
+        <p>{importCopy.capacityUsage
+          .replace("{used}", format.format(storage.usage.normalizedTextBytes / (1024 * 1024)) + " MB")
+          .replace("{limit}", format.format(storage.limits.maxNormalizedTextBytes / (1024 * 1024)) + " MB")}</p>
+        <p>{importCopy.capacityConversations.replace("{used}", format.format(storage.usage.externalConversations))
+          .replace("{limit}", format.format(storage.limits.maxExternalConversations))}</p>
+      </>}
+      {!storage && <ReadStatus language={language} failed={capacity.failed} retry={capacity.reload} />}
+      <button type="button" className="primary" disabled={opening || !storage} onClick={() => setShowImport(true)}>{importCopy.newImportCta}</button>
+    </section>
+    <section className="desktop-setting-section" aria-label={importCopy.detailConversations}>
+    <h3>{importCopy.detailConversations}</h3>
+    {!state.data && <ReadStatus language={language} failed={state.failed} retry={state.reload} />}
+    {state.data?.conversations.length === 0 && <p>{importCopy.conversationsEmpty}</p>}
+    {state.data?.conversations.map(conversation => <AccountSettingRow key={conversation.id} label={conversation.title} description={conversation.provider}>
+      <button className="soft" type="button" disabled={opening || conversation.titleWithheld} onClick={() => setViewing(conversation.id)}
+        aria-label={importCopy.viewDetail + " · " + conversation.title}>{importCopy.viewDetail}</button>
       <button className="soft" type="button" disabled={opening || !state.data?.continuationEnabled || conversation.titleWithheld} onClick={() => {
         const key = keys.current.get(conversation.id) ?? crypto.randomUUID();
         keys.current.set(conversation.id, key);
@@ -566,14 +549,51 @@ function ImportedConversations({ language, onContinue }: Common & { onContinue(i
           .then(result => onContinue(result.conversationId)).catch(() => setFailed(true)).finally(() => setOpening(false));
       }}>{copy.continueImported}</button>
     </AccountSettingRow>)}
-    {(offset > 0 || next < state.data.total) && <div className="account-settings-actions">
+    {state.data && next !== undefined && (offset > 0 || next < state.data.total) && <div className="account-settings-actions">
       <button type="button" className="soft" aria-label="Previous page" disabled={opening || offset === 0}
         onClick={() => setOffset(Math.max(0, offset - 50))}>‹</button>
       <button type="button" className="soft" aria-label="Next page" disabled={opening || next >= state.data.total}
         onClick={() => setOffset(next)}>›</button>
     </div>}
+    </section>
+    <section className="desktop-setting-section" aria-label={importCopy.historyTitle}>
+      <h3>{importCopy.historyTitle}</h3>
+      {!runs.data ? <ReadStatus language={language} failed={runs.failed} retry={runs.reload} />
+        : runs.data.imports.length === 0 ? <p>{importCopy.historyEmpty}</p>
+        : runs.data.imports.map(run => <AccountSettingRow key={run.id} label={run.provider}
+          description={new Date(run.createdAt).toLocaleString(language)}>
+          <span>{importCopy.historyConversations.replace("{count}", format.format(run.conversationCount))}</span>
+          <small>{run.status === "completed" ? importCopy.statusCompleted : run.status === "failed" ? importCopy.statusFailed
+            : run.status === "cancelled" ? importCopy.statusCancelled : importCopy.statusStaging}</small>
+        </AccountSettingRow>)}
+    </section>
     <ActionStatus language={language} failed={failed} />
   </div>;
+}
+
+function ImportedConversation({ language, id, onBack }: Common & { id: string; onBack(): void }) {
+  const [offset, setOffset] = useState(0);
+  const load = useCallback(() => window.desktop.accountSettings<"importConversation">({ action: "importConversation", id, offset }), [id, offset]);
+  const state = useSettingsRead(load);
+  const copy = dictionaries[language].externalImport;
+  const data = state.data;
+  return <section className="desktop-setting-section" data-testid="native-import-conversation">
+    <button type="button" className="soft" onClick={onBack}>{copy.backToImports}</button>
+    {!data ? <ReadStatus language={language} failed={state.failed} retry={state.reload} /> : <>
+      <h3>{data.title}</h3>
+      <ol className="thread">{data.messages.map(message => <li key={message.id} className={`entry entry--${message.role}`}>
+        <strong>{message.role === "user" ? copy.viewerRoleUser : copy.viewerRoleAssistant}</strong>
+        <p>{message.content}</p>
+        {message.sourceModelLabel && <small>{copy.viewerSourceModel.replace("{label}", message.sourceModelLabel)}</small>}
+        {message.truncated && <small>{copy.viewerTruncatedNotice}</small>}
+      </li>)}</ol>
+      <div className="account-settings-actions">
+        {offset > 0 && <button type="button" className="soft" aria-label="Previous page"
+          onClick={() => setOffset(Math.max(0, offset - data.limit))}>‹</button>}
+        {offset + data.limit < data.messageTotal && <button type="button" className="soft" onClick={() => setOffset(offset + data.limit)}>{copy.loadMore}</button>}
+      </div>
+    </>}
+  </section>;
 }
 
 function Keys({ language }: Common) {
@@ -596,9 +616,10 @@ function Keys({ language }: Common) {
   const invalidCap = cap !== null && (!Number.isSafeInteger(cap) || cap < 1 || cap > max);
   return <div data-testid="native-account-api-keys">
     <h3>{copy.keysTitle}</h3>
+    <DeveloperOverview language={language} data={state.data} />
     {!enabled && <p>{copy.unavailable}</p>}
     {keys.length === 0 && <p>{copy.noKeys}</p>}
-    {keys.map(key => <AccountSettingRow key={key.id} label={key.name}
+    {keys.map(key => <Fragment key={key.id}><AccountSettingRow label={key.name}
       description={<><code>{key.keyPrefix}</code> · {key.state === "active" ? copy.stateActive
         : key.state === "expired" ? copy.stateExpired : copy.stateRevoked}</>}>
       {key.state === "active" && <div className="account-settings-actions">
@@ -609,7 +630,7 @@ function Keys({ language }: Common) {
         <button type="button" className="soft" disabled={busy}
           onClick={() => { setRevoke(key); setForm(undefined); }}>{copy.revoke}</button>
       </div>}
-    </AccountSettingRow>)}
+    </AccountSettingRow><KeyUsage language={language} keyData={key} /></Fragment>)}
     {revoke && <div className="desktop-setting-section" role="group" aria-label={copy.revoke}>
       <p>{copy.revokeConfirm.replace("{name}", () => revoke.name)}</p>
       <div className="account-settings-actions">
@@ -714,19 +735,36 @@ export function LocalMemoryPrivacy({ language, openHistory }: Common & { openHis
   </section>;
 }
 
-export function AccountSettings({ tab, language, onApply, onContinue }: Common & {
+export function AccountSettings({ tab, language, onApply, onContinue, onOpenImports, onBackToData }: Common & {
   tab: AccountSettingsTab | "imports";
   onApply(settings: AccountPreferences): void;
   onContinue(id: string): Promise<void>;
+  onOpenImports(): void;
+  onBackToData(): void;
 }) {
   switch (tab) {
     case "account": return <Account language={language} />;
     case "preferences": return <Preferences language={language} onApply={onApply} />;
     case "assistants": return <Assistants language={language} />;
-    case "ai": return <Memory language={language} />;
-    case "data":
-    case "imports": return <ImportedConversations language={language} onContinue={onContinue} />;
+    case "ai": return <>
+      <ModelFinderPanel language={language} />
+      <ReviewProviderDefaults language={language} />
+      <Memory language={language} />
+    </>;
+    case "data": {
+      const copy = dictionaries[language].externalImport;
+      return <>
+        <AccountSettingRow label={copy.dataTabTitle} description={desktopImportFilePrivacy[language]}>
+          <button type="button" className="soft" onClick={onOpenImports}>{copy.dataTabOpen}</button>
+        </AccountSettingRow>
+        <AccountDataPanel language={language} />
+      </>;
+    }
+    case "imports": return <>
+      <button type="button" className="soft" onClick={onBackToData}>{dictionaries[language].settingsNav.backToSettings}</button>
+      <ImportedConversations language={language} onContinue={onContinue} />
+    </>;
     case "developer": return <Keys language={language} />;
-    case "plan": return <Plan language={language} />;
+    case "plan": return <BillingSettings language={language} fallback={<Plan language={language} />} />;
   }
 }

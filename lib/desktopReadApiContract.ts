@@ -20,6 +20,7 @@ export {
   desktopChatWriteEnabled,
   desktopComposerToolsEnabled,
   desktopReadApiRoute,
+  desktopReviewAnalysisEnabled,
   desktopReviewWriteEnabled,
   desktopWriteApiRoute,
 } from "./nativeBearerGate";

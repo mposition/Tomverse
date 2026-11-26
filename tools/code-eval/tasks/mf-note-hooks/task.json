@@ -1,0 +1,12 @@
+{
+  "id": "mf-note-hooks",
+  "title": "Add lifecycle hooks to the notes service",
+  "category": "multi-file",
+  "prompt": "Add lifecycle hooks to the notes service as described in README.md (\"To add\"): a new `HookRegistry` in `src/hooks.js`, and hook calls in `NotesService#create`, `#update` and `#remove`. Existing behaviour without hooks must stay the same. Export `HookRegistry` from `src/index.js`. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1800
+}

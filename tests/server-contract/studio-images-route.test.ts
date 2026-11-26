@@ -195,16 +195,16 @@ test("Studio automatically routes a feature to a quoted catalogue model and reje
   const alternate = squareEditModels.find((model: { id: string }) => model.id !== primary?.id);
   assert.ok(primary && alternate);
   process.env[routingEnv] = JSON.stringify({
-    "character-sticker-pack": ["missing-model", alternate.id],
+    "illustration": ["missing-model", alternate.id],
     "live-action-character": "invalid configuration for a different feature",
   });
 
-  const requested = new Request(base + "?size=1024x1024&edit=true&useCase=character-sticker-pack");
+  const requested = new Request(base + "?size=1024x1024&edit=true&useCase=illustration");
   const quote = await (await GET(requested)).json();
-  assert.equal(quote.useCase, "character-sticker-pack");
+  assert.equal(quote.useCase, "illustration");
   assert.equal(quote.modelId, alternate.id);
   assert.equal((await (await GET(quoteRequest())).json()).modelId, primary.id);
-  assert.equal((await GET(new Request(requested.url.replace("character-sticker-pack", "invalid")))).status, 400);
+  assert.equal((await GET(new Request(requested.url.replace("illustration", "invalid")))).status, 400);
   assert.equal((await post(quotedSubmission(quote))).status, 202);
   assert.deepEqual(reservations[0].modelIds, [alternate.id]);
 
@@ -216,14 +216,14 @@ test("Studio automatically routes a feature to a quoted catalogue model and reje
   assert.equal(reservations.length, 1);
 });
 
-test("a verified pack route can choose a square-only model before a landscape fallback", async context => {
+test("a preferred feature route can choose a square-only model before a landscape fallback", async context => {
   const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
   context.after(() => { delete process.env.STUDIO_IMAGE_ROUTE_PREFERENCES; });
   process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
   const grok = registry.getImageModel("grok-imagine-image-quality-20260403");
   assert.ok(grok);
-  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ "character-sticker-pack": [grok.id] });
-  const preferred = new Request(base + "?size=1536x1024&edit=true&useCase=character-sticker-pack&squareFallback=true");
+  process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({ poster: [grok.id] });
+  const preferred = new Request(base + "?size=1536x1024&edit=true&useCase=poster&squareFallback=true");
   const quote = await (await GET(preferred)).json();
   assert.equal(quote.modelId, grok.id);
   assert.equal(quote.size, "1024x1024");
@@ -233,7 +233,7 @@ test("a verified pack route can choose a square-only model before a landscape fa
   assert.equal(reservations[0].quality, quote.quality);
 });
 
-test("real sticker packs and individual edits require the verified square Sunburst edit", async context => {
+test("both sticker styles require the square Sunburst edit for packs and replacements", async context => {
   const registry = requireModule(resolve(root, "lib/imageModelRegistry.ts"));
   const id = "gpt-image-2.6-sunburst";
   const other = registry.getImageModel("gpt-image-2");
@@ -247,14 +247,17 @@ test("real sticker packs and individual edits require the verified square Sunbur
   process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED = "true";
   process.env.STUDIO_IMAGE_ROUTE_PREFERENCES = JSON.stringify({
     "real-sticker-pack": [other.id], "real-sticker": [other.id],
+    "character-sticker-pack": [other.id], "character-sticker": [other.id],
   });
   const price = { ...registry.getImageModelPrice(other.id, "medium", "1024x1024"), credits: 65, outputCostMicroUsd: 43_470 };
   registry.setActiveImageModelCatalog([...models.filter((m: { id: string }) => m.id !== id), {
     ...other, id, apiModelId: id, prices: [price],
   }]);
   const square = base + "?size=1024x1024&edit=true&useCase=";
-  for (const url of [square + "real-sticker-pack", square + "real-sticker",
-    base + "?size=1536x1024&edit=true&useCase=real-sticker-pack&squareFallback=true"]) {
+  const legacy = base + "?size=1536x1024&edit=true&squareFallback=true&useCase=";
+  const urls = [square + "real-sticker-pack", square + "real-sticker", square + "character-sticker-pack",
+    square + "character-sticker", legacy + "real-sticker-pack", legacy + "character-sticker-pack"];
+  for (const url of urls) {
     const response = await GET(new Request(url));
     assert.equal(response.status, 200);
     const quote = await response.json();
@@ -262,14 +265,15 @@ test("real sticker packs and individual edits require the verified square Sunbur
     assert.equal((await post(quotedSubmission(quote))).status, 202);
     assert.deepEqual(reservations.at(-1)?.modelIds, [id]);
   }
-  const request = new Request(square + "real-sticker-pack");
+  const request = new Request(square + "character-sticker-pack");
   const submission = quotedSubmission(await (await GET(request)).json());
   assert.equal((await post({ ...submission, modelId: other.id })).status, 409);
+  assert.equal((await post({ ...submission, uploadId: undefined })).status, 409);
   assert.equal((await GET(new Request(request.url.replace("edit=true", "edit=false")))).status, 503);
   process.env.IMAGE_OPENAI_2_6_EDIT_ENABLED = "false";
   assert.equal((await GET(request)).status, 503);
   assert.equal((await post(submission)).status, 409);
-  assert.equal(reservations.length, 3);
+  assert.equal(reservations.length, urls.length);
 });
 
 test("a transparent PNG is quoted on every background remover that is on, each submitted as its own request", async context => {

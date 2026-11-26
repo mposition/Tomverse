@@ -1,0 +1,12 @@
+{
+  "id": "ft-ini-sections",
+  "title": "Add sections, typed values and stringify to the INI parser",
+  "category": "feature",
+  "prompt": "The INI parser in this project only reads flat `key = value` lines. Extend it as described in README.md: sections (including dotted nested sections), inline comments, typed values, quoted strings, `key[]` arrays, and a new `stringify` function whose output `parse` reads back to the same object. Existing flat parsing must keep working. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1500
+}

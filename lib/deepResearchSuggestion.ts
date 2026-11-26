@@ -53,17 +53,8 @@ import { buildTaskProfile } from "@/lib/taskProfileCore";
  * have to mean the same model, and a string literal repeated in three files is
  * three chances to mean a different one.
  */
-export const DEEP_RESEARCH_MODEL_ID = "perplexity/sonar-deep-research";
-
-/**
- * The scope an expansion runs at.
- *
- * The offer takes no second confirmation -- pressing it starts the run -- so
- * it cannot ask which depth the user wants. It takes the same value
- * `DeepResearchSetupSheet` opens on, and imports it from here so the two
- * cannot drift into offering different amounts of work under one name.
- */
-export const DEEP_RESEARCH_DEFAULT_DEPTH = "standard" as const;
+export { DEEP_RESEARCH_MODEL_ID, DEEP_RESEARCH_DEFAULT_DEPTH } from "./deepResearchModel";
+import { DEEP_RESEARCH_MODEL_ID } from "./deepResearchModel";
 
 /**
  * Below this many characters a turn is not read at all.

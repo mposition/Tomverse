@@ -1,0 +1,12 @@
+{
+  "id": "bf-date-ranges",
+  "title": "Back-to-back bookings reported as conflicts",
+  "category": "bugfix",
+  "prompt": "The scheduling helpers in this project treat time ranges as half-open intervals `[start, end)`: a booking that ends at 10 and one that starts at 10 do not conflict. Reported bugs: `overlaps` says back-to-back ranges conflict; `contains` includes the end instant; `mergeRanges` reorders and even modifies the caller's array and objects, and does not merge ranges that touch; and `freeSlots` returns slots with negative length when several bookings lie after the search window. Fix the causes. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 900
+}

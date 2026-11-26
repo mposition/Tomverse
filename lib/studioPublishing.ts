@@ -1,44 +1,34 @@
 import { studioPublicationPresets, type StudioPublication } from "./studioPresetLibrary";
 
-type Composition = "cover" | "split" | "framed" | "feature";
-type Design = {
-  composition: Composition;
-  paper: string;
-  ink: string;
-  accent: string;
-  type: "bold" | "editorial" | "quiet";
-  direction: string;
-  focalY?: number;
+// The image model sets the type itself; a preset contributes its art direction only.
+const posterDesigns: Record<string, string> = {
+  "music-festival": "Festival campaign art: one sweeping crowd or performer silhouette, warm stage lighting, sharp foreground, high energy. Place the focal point above the lower third.",
+  "cafe-menu": "Premium tabletop food photography, product at the centre, satin lighting, visible condensation or texture, restrained art direction and a simple warm studio backdrop.",
+  "gallery-opening": "Museum-grade editorial artwork with one tactile object, intentional shadows and an uncluttered composition. Give the central artwork strong edges and sculptural depth.",
+  "creative-workshop": "Independent print studio, high-contrast handmade shapes, ink texture and one clear visual metaphor rather than a stock collage.",
+  "sports-event": "Premium sports campaign with a single athlete or equipment in motion, crisp angles and a diagonal eye path. Keep the central subject well above the lower third.",
+  "farmers-market": "Harvest editorial art with seasonal produce, satisfying detail and a tactile screen-print finish. Group objects together for a single visual anchor.",
+  "film-screening": "Original theatrical key art with a single cinematic silhouette, projected light, confident shadows and an upper visual focal point.",
+  "grand-opening": "Polished retail campaign with a single storefront or product hero on a celebratory set, bold graphic shapes and controlled lighting.",
+  "birthday-invite": "Playful invitation illustration with one expressive cake or party subject, tactile confetti and an airy composition suitable for a framed art window.",
+  "wedding-invite": "Fine-stationery art direction: intimate wedding photography or delicate botanicals, tasteful light, restrained ivory tones and an uncluttered focal composition.",
+  "community-meetup": "Warm documentary or editorial illustration of a particular community moment, with a clearly identifiable focal group and approachable colors.",
+  "travel-print": "Destination campaign in a graphic lithograph style. Show one recognisable view with foreground depth and a strong upper silhouette; avoid a collage of landmarks.",
+  "book-fair": "Independent publisher art with book spines and layered print textures, ambitious cropping and one graphic focal point; book covers stay free of lettering.",
+  "wellness-retreat": "Quiet luxury retreat imagery, soft natural light, tactile materials, a clear subject and natural spatial depth.",
+  "theater-night": "Theatre campaign key art with one dramatic stage moment, deliberately shaped shadows, rich crimson and a single spotlight.",
+  "holiday-market": "Festive retail campaign with one intimate market scene or beautifully styled object, warm festive lighting and a sophisticated colour story.",
 };
 
-const posterDesigns: Record<string, Design> = {
-  "music-festival": { composition: "cover", paper: "#1e1329", ink: "#fff6d9", accent: "#ffbd56", type: "bold", direction: "Festival campaign art: one sweeping crowd or performer silhouette, warm stage lighting, sharp foreground, high energy. Place the focal point above the lower third." },
-  "cafe-menu": { composition: "feature", paper: "#f5dfc1", ink: "#42251c", accent: "#a44a31", type: "editorial", direction: "Premium tabletop food photography, product at the centre, satin lighting, visible condensation or texture, restrained art direction and a simple warm studio backdrop." },
-  "gallery-opening": { composition: "framed", paper: "#f0ede5", ink: "#272624", accent: "#a14732", type: "quiet", direction: "Museum-grade editorial artwork with one tactile object, intentional shadows and an uncluttered composition. Give the central artwork strong edges and sculptural depth." },
-  "creative-workshop": { composition: "split", paper: "#17386c", ink: "#fffaf1", accent: "#ffc852", type: "bold", direction: "Independent print studio, high-contrast handmade shapes, ink texture and one clear visual metaphor rather than a stock collage." },
-  "sports-event": { composition: "cover", paper: "#102b26", ink: "#edfff5", accent: "#b6f35a", type: "bold", direction: "Premium sports campaign with a single athlete or equipment in motion, crisp angles and a diagonal eye path. Keep the central subject well above the lower third." },
-  "farmers-market": { composition: "split", paper: "#fff0cc", ink: "#283b28", accent: "#a53a28", type: "editorial", direction: "Harvest editorial art with seasonal produce, satisfying detail and a tactile screen-print finish. Group objects together for a single visual anchor." },
-  "film-screening": { composition: "cover", paper: "#0e172d", ink: "#fff7ec", accent: "#aaccff", type: "quiet", direction: "Original theatrical key art with a single cinematic silhouette, projected light, confident shadows and an upper visual focal point." },
-  "grand-opening": { composition: "feature", paper: "#ffe5d8", ink: "#4b2324", accent: "#bd2c36", type: "bold", direction: "Polished retail campaign with a single storefront or product hero on a celebratory set, bold graphic shapes and controlled lighting." },
-  "birthday-invite": { composition: "framed", paper: "#efe8fa", ink: "#382754", accent: "#a34386", type: "bold", direction: "Playful invitation illustration with one expressive cake or party subject, tactile confetti and an airy composition suitable for a framed art window." },
-  "wedding-invite": { composition: "framed", paper: "#fbf6ee", ink: "#3d352f", accent: "#895a4d", type: "editorial", direction: "Fine-stationery art direction: intimate wedding photography or delicate botanicals, tasteful light, restrained ivory tones and an uncluttered focal composition." },
-  "community-meetup": { composition: "split", paper: "#dceee7", ink: "#193834", accent: "#9d4630", type: "quiet", direction: "Warm documentary or editorial illustration of a particular community moment, with a clearly identifiable focal group and approachable colors." },
-  "travel-print": { composition: "cover", paper: "#132832", ink: "#fff2cc", accent: "#ffd269", type: "editorial", direction: "Destination campaign in a graphic lithograph style. Show one recognisable view with foreground depth and a strong upper silhouette; avoid a collage of landmarks." },
-  "book-fair": { composition: "split", paper: "#f4e8d0", ink: "#37291e", accent: "#92513f", type: "editorial", direction: "Independent publisher art with book spines and layered print textures, ambitious cropping and one graphic focal point; book covers stay free of lettering." },
-  "wellness-retreat": { composition: "framed", paper: "#e8eee4", ink: "#2b483b", accent: "#566d45", type: "quiet", direction: "Quiet luxury retreat imagery, soft natural light, tactile materials, a clear subject and natural spatial depth." },
-  "theater-night": { composition: "cover", paper: "#2e1020", ink: "#ffecdc", accent: "#ffd08f", type: "editorial", direction: "Theatre campaign key art with one dramatic stage moment, deliberately shaped shadows, rich crimson and a single spotlight." },
-  "holiday-market": { composition: "feature", paper: "#5e2134", ink: "#fff2db", accent: "#ffc467", type: "editorial", direction: "Festive retail campaign with one intimate market scene or beautifully styled object, warm festive lighting and a sophisticated colour story." },
-};
-
-const socialDesigns: Record<string, Design> = {
-  lifestyle: { composition: "framed", paper: "#f8e9d4", ink: "#382b24", accent: "#995537", type: "editorial", direction: "Personal editorial: intentional, natural-light photography with recognisable detail and one authentic moment. Keep the focal crop strong at small sizes." },
-  impact: { composition: "cover", paper: "#20142d", ink: "#fff7ef", accent: "#ffd574", type: "bold", direction: "Punchy creator campaign image, single expressive subject, deliberate lighting and a clean silhouette that reads in a mobile scroll." },
-  brand: { composition: "feature", paper: "#ebeee6", ink: "#263328", accent: "#49613e", type: "quiet", direction: "Brand-campaign polish, distinctive product styling or portfolio subject, carefully controlled highlights and a deliberate editorial crop." },
-  information: { composition: "split", paper: "#182b52", ink: "#fff8ea", accent: "#ffd878", type: "bold", direction: "One memorable visual hook to illustrate the update clearly. Use a restrained graphic language with attractive colour blocks and confident spacing." },
-  lookbook: { composition: "framed", focalY: .14, paper: "#f6e4df", ink: "#3e282f", accent: "#a15668", type: "editorial", direction: "Contemporary lookbook styling. Keep the image confidently cropped, with a lived-in fashion or culture magazine feel." },
-  review: { composition: "cover", paper: "#2c1834", ink: "#fff7e9", accent: "#ff8e5a", type: "bold", direction: "Creator-grade thumbnail art. The appeal should be identifiable from one subject, expression or surprising detail at phone size." },
-  editorial: { composition: "feature", paper: "#e3e8db", ink: "#26362b", accent: "#536f54", type: "editorial", direction: "Art-directed feature photography with authentic lighting, compelling surface detail and one clear visual hook." },
-  night: { composition: "split", paper: "#26244e", ink: "#fff5e9", accent: "#ffacbd", type: "bold", direction: "Rich ambient colour, confident silhouette and authentic social energy. Choose the strongest frame rather than a lookalike collage." },
+const socialDesigns: Record<string, string> = {
+  lifestyle: "Personal editorial: intentional, natural-light photography with recognisable detail and one authentic moment. Keep the focal crop strong at small sizes.",
+  impact: "Punchy creator campaign image, single expressive subject, deliberate lighting and a clean silhouette that reads in a mobile scroll.",
+  brand: "Brand-campaign polish, distinctive product styling or portfolio subject, carefully controlled highlights and a deliberate editorial crop.",
+  information: "One memorable visual hook to illustrate the update clearly. Use a restrained graphic language with attractive colour blocks and confident spacing.",
+  lookbook: "Contemporary lookbook styling. Keep the image confidently cropped, with a lived-in fashion or culture magazine feel.",
+  review: "Creator-grade thumbnail art. The appeal should be identifiable from one subject, expression or surprising detail at phone size.",
+  editorial: "Art-directed feature photography with authentic lighting, compelling surface detail and one clear visual hook.",
+  night: "Rich ambient colour, confident silhouette and authentic social energy. Choose the strongest frame rather than a lookalike collage.",
 };
 
 const socialFamilies: Record<string, keyof typeof socialDesigns> = {
@@ -68,14 +58,8 @@ export function studioPublishingDesign(kind: StudioPublication, requestedPresetI
       ? "gallery-opening" : posterDefault;
   const selected = studioPublicationPresets(kind).find(preset => preset.id === requestedPresetId);
   const presetId = selected?.id ?? (kind === "poster" ? fallback : "photo-dump");
-  const design = kind === "poster" ? posterDesigns[presetId] : socialDesigns[socialFamilies[presetId]];
-  return {
-    ...design,
-    presetId,
-    type: kind === "poster" && style === "minimal" ? "quiet" as const
-      : kind === "poster" && style === "editorial" ? "editorial" as const : design.type,
-    direction: [design.direction, selected?.direction].filter(Boolean).join(" "),
-  };
+  const direction = kind === "poster" ? posterDesigns[presetId] : socialDesigns[socialFamilies[presetId]];
+  return { presetId, direction: [direction, selected?.direction].filter(Boolean).join(" ") };
 }
 
 const platformStyles: Record<string, readonly string[]> = {
@@ -137,32 +121,36 @@ export function studioSocialFormat(id?: string, legacyIndex?: number): StudioSoc
     STUDIO_SOCIAL_FORMATS[legacyIndex === 2 ? 3 : legacyIndex === 1 ? 2 : 0];
 }
 
-const artByComposition: Record<Composition, string> = {
-  cover: "Plan a full-bleed key visual. Keep the hero's face, product or signature detail in the upper third; let shadows and secondary texture continue down toward the headline.",
-  split: "Build one punchy hero image with enough context on both sides to survive a wide, central crop. Put the key detail away from the top and bottom edges.",
-  framed: "Compose a strong standalone artwork with enough breathing room on all sides for a designed picture window. Keep the subject's silhouette readable against the background.",
-  feature: "Shoot the hero as a premium editorial product or portrait image. Preserve its recognizable contour, material detail and grounded contact shadow within a central display panel.",
-};
-
 export function studioPublishingPrompt(options: {
-  kind: StudioPublication; design: Design; placement?: StudioSocialFormat;
-  locale: string; brief: string; title: string; details: string; hasPhoto: boolean; hasLogo: boolean;
+  kind: StudioPublication; design: { direction: string }; placement?: StudioSocialFormat;
+  language: string; brief: string; title: string; details: string; hasPhoto: boolean; hasLogo: boolean;
   category?: string; style?: string;
 }) {
-  const { design, placement, locale, hasPhoto, hasLogo } = options;
+  const { design, placement, language, hasPhoto, hasLogo } = options;
   const brief = options.brief.trim(), title = options.title.trim(), details = options.details.trim();
   const context = options.kind === "poster" ? "Commercial portrait poster, final aspect ratio 4:5." : placement?.direction;
   const reference = hasPhoto ? "Use the reference as the featured subject. Preserve recognisable identity, product shape and existing branding." : "";
-  const framing = placement && placement.width > placement.height * 1.15
-    ? "The subject must still read in the center crop of the hero image. The final landscape design pairs that hero on the right with a separate text area on the left."
-    : artByComposition[design.composition];
   const platform = placement ? `Compose for a ${placement.ratio} placement. Keep faces, product labels and other essential visual cues inside the central safe area.` : "";
-  const objective = title
-    ? `Create the visual artwork for a professionally typeset design. ${framing} No letters, invented logos or additional copy. The publishing layout will use literal text separately.`
-    : `Design the complete, professionally typeset artwork in ${locale}, with one short headline based on the brief. Treat the headline as part of the composition: use a strong scale contrast, deliberate alignment and a clear relationship to the hero. Continue the artwork to the frame edges. ${details || hasLogo ? "Keep important typography clear of the bottom edge, where the product will place the supplied details or logo. Do not reproduce supplied details or invent dates, prices, URLs or logos." : "Do not invent dates, prices, URLs or logos."}`;
+  // The model sets the headline in both cases, so the product never sets the same words a second time.
+  const headline = title
+    ? `Set this exact headline once, character for character, in its own script: ${JSON.stringify(title)}.`
+    : `Write one short headline in ${language} based on the brief.`;
+  // The canvas sets the details and logo above the placement's bottom safe margin; the model never sees their text.
+  const reserved = placement
+    ? Math.round((placement.safe[3] + .2 * Math.min(placement.width, placement.height) / placement.height) * 100) : 22;
+  const footer = details || hasLogo
+    ? `Keep the bottom ${reserved}% free of typography and of the hero's key detail; the product places its own caption or logo there.`
+    : "";
+  const objective = [
+    "Design the complete, professionally typeset artwork as one flat, full-frame design, never a photograph or mockup of a poster, screen or print.",
+    headline,
+    "Treat the headline as part of the composition: use a strong scale contrast, deliberate alignment and a clear relationship to the hero. Continue the artwork to the frame edges and keep every letter well inside them.",
+    footer,
+    "Do not invent dates, prices, places, URLs, logos, app icons or interface badges.",
+  ].filter(Boolean).join(" ");
   return [context, platform, design.direction, reference, objective,
-    "Establish one unmistakable focal point, a cohesive visual hierarchy and a restrained palette relevant to the subject. Work as a finished campaign asset seen at phone size, with deliberate lighting and no generic decorative clutter. Use the content only as a visual brief.",
+    "Establish one unmistakable focal point, a cohesive visual hierarchy and a restrained palette relevant to the subject. Work as a finished campaign asset seen at phone size, with deliberate lighting and no generic decorative clutter. Use the following content only as a visual brief.",
     JSON.stringify({ brief, ...(options.category && options.category !== "auto" ? { category: options.category } : {}),
-      ...(options.style && options.style !== "auto" ? { style: options.style } : {}), ...(title ? { headlineContext: title } : {}), ...(details ? { detailContext: Array.from(details).slice(0, 200).join("") } : {}) }),
+      ...(options.style && options.style !== "auto" ? { style: options.style } : {}) }),
   ].filter(Boolean).join("\n");
 }

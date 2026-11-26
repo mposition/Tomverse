@@ -1,12 +1,21 @@
 import { z } from "zod";
+import { DEEP_RESEARCH_DEPTHS } from "../../../lib/deepResearchModel";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
-import type { ModelMinimumPlan } from "../../../lib/models";
+import type { AiModel } from "../../../lib/models";
+import type { McpProgressState } from "../../../lib/mcpConnectorProgress";
 import { attachmentRead, attachmentUploadIds } from "./attachment-contract";
+import type { ChatImageOffer } from "./chat-extras-contract";
+import { sanitizeWebSearchCitations } from "../../../lib/webSearchCitations";
 import { ARTIFACT_LIMITS, isSupportedArtifactFormat, parseChatStreamArtifacts } from "../../../lib/generatedArtifactCore";
 
 export const chatId = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
+export const reviewAnalysisRequest = z.object({
+  conversationId: chatId, promptMessageId: z.uuid(),
+  assistantMessageIds: z.array(z.uuid()).min(2).max(3).refine((ids) => new Set(ids).size === ids.length),
+}).strict();
+export type ReviewAnalysisRequest = z.infer<typeof reviewAnalysisRequest>;
 export const desktopTextProduct = z.enum(["chat", "review"]);
 export const chatSearch = z.string().trim().min(2).max(80);
 export const chatHistorySearchInput = z.object({ query: chatSearch, product: desktopTextProduct.optional() }).strict();
@@ -14,6 +23,14 @@ export const chatPageInput = z.object({ id: chatId, cursor: chatId.optional(), p
 export const chatSourceInput = z.object({ id: chatId, offset: z.number().int().nonnegative().optional() }).strict();
 export const chatRenameInput = z.object({ id: chatId, title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH) }).strict();
 export const chatEffort = z.enum(["low", "default", "high"]);
+export const composerOptions = z.object({
+  webSearchMode: z.enum(["off", "always"]).optional(),
+  memoryMode: z.enum(["inherit", "on", "off"]).optional(),
+  assistantProfileId: chatId.nullable().optional(),
+}).strict();
+export type ComposerOptions = z.infer<typeof composerOptions>;
+export const deepResearchDepth = z.enum(DEEP_RESEARCH_DEPTHS);
+export type DeepResearchDepth = z.infer<typeof deepResearchDepth>;
 export const chatTurnInput = z.object({
   requestId: z.uuid(),
   conversationId: chatId.optional(),
@@ -24,6 +41,12 @@ export const chatTurnInput = z.object({
   attachmentUploadIds,
   handoffId: z.uuid().optional(),
   currentLocation: z.unknown().transform((value) => parseChatLocation(value)).optional(),
+  tools: composerOptions.optional(),
+  deepResearchDepth: deepResearchDepth.optional(),
+  /** The plugin connection the user chose for this conversation; the server re-checks that it is theirs. */
+  mcpConnectionId: chatId.optional(),
+  /** Binds a new conversation to a project; the server reads the project from the saved conversation. */
+  projectId: chatId.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length || input.handoffId));
 export const reviewCapability = z.object({
   easy: z.boolean(), modelLimit: z.number().int().positive(), plan: z.enum(["Free", "Pro", "Max"]),
@@ -51,6 +74,7 @@ export const chatHistoryRow = z.object({
   projectId: chatId.nullish(),
   selectedModels: z.array(z.string()).optional(),
   sourceTitle: z.string().nullish(),
+  sourceState: z.string().nullish(),
 });
 export const chatHistoryHit = z.object({
   id: z.string(),
@@ -70,22 +94,32 @@ export type SaveArtifactInput = z.infer<typeof saveArtifactInput>;
 
 export const chatMessage = z.object({
   id: chatId, role: z.string(), content: z.string(), status: z.string().optional(), modelId: z.string().nullish(), createdAt: z.string().optional(),
+  pendingJobId: z.string().nullish(),
   memoryUsedCount: z.int().positive().nullish().catch(undefined),
   searchMetadata: z.object({
     reasoningEffort: z.object({ requested: chatEffort, applied: chatEffort.optional() }).optional(),
+    // Web search sources: only http(s) URLs survive the shared sanitizer, so the renderer never sees another scheme.
+    citations: z.unknown().optional().transform((value) => Array.isArray(value)
+      ? sanitizeWebSearchCitations(value.filter((entry) => entry && typeof entry === "object")).slice(0, 50) : []),
   }).nullish(),
   attachments: z.array(attachmentRead).optional(),
   artifacts: z.unknown().optional().transform((value) => parseChatStreamArtifacts(value) ?? []),
+  imageTurn: z.object({ groupId: chatId, modelIds: z.array(z.string()) }).optional(),
 });
 export const chatConversation = chatHistoryRow.extend({
   desktopReviewWritable: z.boolean().optional(),
   messages: z.array(chatMessage),
+  responseAttempts: z.array(z.object({
+    assistantMessageId: chatId, actualModelId: z.string().nullish(), provider: z.string().nullish(),
+  })).optional(),
   messagePage: z.object({ nextCursor: chatId.nullable() }),
   selectionMode: z.enum(["auto", "manual"]),
   selectedModels: z.array(z.string()),
   storedSelectedModels: z.array(z.string()).optional(),
   autoSelection: z.object({ offered: z.boolean() }),
   webSearchMode: z.enum(["off", "always"]).catch("off"),
+  memoryMode: composerOptions.shape.memoryMode.catch(undefined),
+  assistantProfile: z.object({ profileId: chatId, name: z.string() }).nullish(),
 });
 
 export type ChatHistoryRow = z.infer<typeof chatHistoryRow>;
@@ -93,45 +127,60 @@ export type ChatHistoryHit = z.infer<typeof chatHistoryHit>;
 export type ChatConversation = z.infer<typeof chatConversation>;
 export type ChatPageInput = z.infer<typeof chatPageInput>;
 export type DesktopTextProduct = z.infer<typeof desktopTextProduct>;
+const importedSourceBody = z.object({
+  status: z.enum(["available", "locked", "deleted"]),
+  messages: z.array(z.object({ id: chatId, role: z.string(), content: z.string() })).optional(),
+  offset: z.number().optional(),
+  messageTotal: z.number().optional(),
+});
+/** What the renderer gets. A locked original says only whether a password can open it here. */
 export const chatImportedSource = z.object({
   provider: z.string(),
-  source: z.object({
-    status: z.enum(["available", "locked", "deleted"]),
-    messages: z.array(z.object({ id: chatId, role: z.string(), content: z.string() })).optional(),
-    offset: z.number().optional(),
-    messageTotal: z.number().optional(),
-  }),
+  source: importedSourceBody.extend({ unlockable: z.boolean().optional() }),
 });
+/** What the server sends: the snapshot id stays in the main process and never reaches the renderer. */
+export const chatImportedSourceWire = z.object({
+  provider: z.string(),
+  source: importedSourceBody.extend({ externalConversationId: chatId.optional() }),
+});
+export const chatUnlockImportedInput = z.object({ id: chatId, password: z.string().min(1).max(128) }).strict();
+export const chatUnlockImportedResult = z.object({
+  status: z.enum(["unlocked", "wrong", "limited", "unavailable", "failed"]),
+  retryAfterSeconds: z.number().int().positive().max(86_400).optional(),
+}).strict();
+export type ChatUnlockImportedInput = z.infer<typeof chatUnlockImportedInput>;
+export type ChatUnlockImportedResult = z.infer<typeof chatUnlockImportedResult>;
+export type ChatImportedSourceWire = z.infer<typeof chatImportedSourceWire>;
 export type ChatSourceInput = z.infer<typeof chatSourceInput>;
 export type ChatImportedSource = z.infer<typeof chatImportedSource>;
 export type ChatRenameInput = z.infer<typeof chatRenameInput>;
 export type ChatTurnInput = z.infer<typeof chatTurnInput>;
-export type ChatModel = {
-  id: string;
-  name: string;
-  provider: string;
-  minimumPlan: ModelMinimumPlan;
-  reasoningEfforts?: Array<"low" | "high">;
-};
+export type ChatModel = AiModel;
 export type ChatStarter = { id: string; label: string; outcome: string; seed: string };
 export type ChatTurnProgress = {
   requestId: string;
   conversationId: string;
   savedPrompt?: string;
   text?: string;
+  modelId?: string;
   applied?: z.infer<typeof chatEffort>;
+  /** Where the selected plugin stands in this turn, as the server reports it in the stream. */
+  mcpProgress?: McpProgressState;
 };
 export type ChatTurnResult = {
   conversation: ChatConversation | null;
   savedQuestion: boolean;
-  status: "saved" | "partial" | "stopped" | "failed" | "unconfirmed";
+  status: "saved" | "researching" | "partial" | "stopped" | "failed" | "unconfirmed";
   partial: string;
+  modelId?: string;
   applied?: z.infer<typeof chatEffort>;
   contextChanged?: boolean;
+  /** The server judged this saved question an image request; Desktop asks before anything is charged. */
+  imageOffer?: ChatImageOffer;
 };
 export type ReviewCapability = z.infer<typeof reviewCapability>;
 export type ReviewTurnInput = z.infer<typeof reviewTurnInput>;
-export type ReviewTurnProgress = ChatTurnProgress & { modelId?: string };
+export type ReviewTurnProgress = ChatTurnProgress;
 export type ReviewImageOffer = {
   prompt: string;
   models: string[];
@@ -141,7 +190,7 @@ export type ReviewImageOffer = {
 export type ReviewTurnResult = {
   conversation: ChatConversation | null;
   savedQuestion: boolean;
-  status: ChatTurnResult["status"];
+  status: Exclude<ChatTurnResult["status"], "researching">;
   partial: Array<{ modelId: string; text: string }>;
   imageOffer?: ReviewImageOffer;
 };

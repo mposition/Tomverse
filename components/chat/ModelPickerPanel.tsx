@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -10,7 +12,6 @@ import {
   type MutableRefObject,
   type RefObject,
 } from "react";
-import dynamic from "next/dynamic";
 import {
   ArrowLeft,
   Boxes,
@@ -67,20 +68,9 @@ import {
  * them. Loading the catalogue on demand keeps opening the picker cheap instead
  * of merely hiding the list with CSS.
  */
-const ModelCatalogue = dynamic(
-  () => import("@/components/chat/ModelCatalogue").then((module) => module.ModelCatalogue),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        data-testid="model-catalogue-loading"
-        className="flex min-h-32 flex-1 items-center justify-center px-4 py-8 text-xs text-zinc-400"
-      >
-        <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      </div>
-    ),
-  }
-);
+const ModelCatalogue = lazy(() => import("@/components/chat/ModelCatalogue").then(
+  ({ ModelCatalogue }) => ({ default: ModelCatalogue }),
+));
 
 export type ModelPickerAnalyticsEvent =
   | "model_picker_all_opened"
@@ -858,6 +848,11 @@ export function ModelPickerPanel({
       )}
 
       {showCatalogue ? (
+        <Suspense fallback={
+        <div data-testid="model-catalogue-loading" className="flex min-h-32 flex-1 items-center justify-center px-4 py-8 text-xs text-zinc-400">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        </div>
+      }>
         <ModelCatalogue
           models={models}
           lang={language}
@@ -884,6 +879,7 @@ export function ModelPickerPanel({
             void selectModel(model, trigger);
           }}
         />
+        </Suspense>
       ) : (
         <div
           data-testid="model-picker-scroll-region"

@@ -7,6 +7,8 @@ Follow the [dev, Test, and production release lanes](dev-test-lanes.md). Deploy 
 | `TOMVERSE_DESKTOP_AUTH_ENABLED` | Enables Desktop authentication routes and requires a ready native keyring. |
 | `TOMVERSE_DESKTOP_EMAIL_LOGIN_ENABLED` | Enables requesting and verifying codes and serving the Turnstile page. |
 | `TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED` | Enables the separate in-app account settings session. |
+| `TOMVERSE_DESKTOP_BILLING_ENABLED` | Shows Desktop's in-app plan, purchase, plan-change, cancellation and refund screens (`desktopBilling` capability). Requires the account settings session. It is a display switch: the billing routes already accept that session as they accept a web session. Off, Desktop's Plan tab shows balances only. |
+| `TOMVERSE_DESKTOP_PLUGINS_ENABLED` | Shows Desktop's in-app connector management and the Chat connector picker (`desktopPlugins` capability). Requires the account settings session and `MCP_CONNECTOR_PREVIEW_ENABLED`. It is a display switch: the `/api/mcp` routes already accept that session as they accept a web session. |
 
 Verify the deployed commit and migration in Test. With the two login flags off, an originless `POST /api/auth/desktop/email` with `{}` returns HTTP 503 and `NOT_AVAILABLE`. With both flags on and the native keyring ready, the same invalid request reaches validation and returns HTTP 400 without sending mail. Requests with cookies or an `Origin` header must be refused, and `/auth/desktop/email-proof` must load with the configured Turnstile site key.
 

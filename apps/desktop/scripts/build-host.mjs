@@ -4,7 +4,8 @@ import { bundledDependencyNotices } from "../../../scripts/bundled-dependency-no
 
 const packagedTaskQa = process.argv.includes("--packaged-task-qa");
 const packaged = packagedTaskQa || process.argv.includes("--packaged");
-const updateOrigin = packagedTaskQa ? "" : process.env.TOMVERSE_DESKTOP_UPDATE_ORIGIN ?? "";
+const localDev = packaged && !packagedTaskQa && process.env.TOMVERSE_DESKTOP_LOCAL_DEV_UPDATE === "true";
+const updateOrigin = packagedTaskQa || localDev ? "" : process.env.TOMVERSE_DESKTOP_UPDATE_ORIGIN ?? "";
 const outdir = packagedTaskQa ? "dist/host-task-qa" : "dist/host";
 const testAuthOrigin = packaged ? "" : process.env.TOMVERSE_DESKTOP_AUTH_TEST_ORIGIN ?? "";
 const cliProtocolCheckAllowed = packaged
@@ -33,8 +34,9 @@ const host = await build({
     DESKTOP_UPDATE_ORIGIN: JSON.stringify(updateOrigin),
     DESKTOP_FIXTURE_ALLOWED: String(!packaged || packagedTaskQa),
     DESKTOP_PACKAGED_TASK_QA: String(packagedTaskQa),
-    DESKTOP_AUTH_ALLOWED: String(!packagedTaskQa && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true"),
-    DESKTOP_LOGIN_WINDOW_REQUIRED: String(!packagedTaskQa && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    DESKTOP_LOCAL_DEV_PACKAGE: String(localDev),
+    DESKTOP_AUTH_ALLOWED: String(!packagedTaskQa && (localDev || process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true")),
+    DESKTOP_LOGIN_WINDOW_REQUIRED: String(!packagedTaskQa && (localDev || process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true") &&
       (packaged || (!!testAuthOrigin && process.env.TOMVERSE_DESKTOP_LOGIN_FIXTURE === "true"))),
     DESKTOP_AUTH_FIXTURE_ORIGIN: JSON.stringify(testAuthOrigin),
     DESKTOP_ACCOUNT_DEVICE_FIXTURE_ALLOWED: String(!packaged && !!testAuthOrigin && process.env.TOMVERSE_DESKTOP_DEVICE_FIXTURE === "true"),

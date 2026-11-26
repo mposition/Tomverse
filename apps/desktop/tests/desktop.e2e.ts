@@ -32,7 +32,11 @@ test("Code shows only its task receipts and preserves Smart Adaptive pin and app
   await Promise.all([mkdir(root), mkdir(profile)]);
   await writeFile(join(root, "marker.txt"), "This file was read after model pinning.");
   const gateway = await new FakeGateway({
-    models: [...DEFAULT_MODELS, { ...DEFAULT_MODELS[0], id: "legacy-coder", tomverse: { ...DEFAULT_MODELS[0]!.tomverse, reasoning_efforts: undefined } }],
+    // fake-small keeps its credits and provider but gets a window a real model has: with the 6,000-token window of the stock fixture the
+    // request's fixed reserve alone leaves the system prompt about 500 tokens, so any growth of that prompt makes the engine compact a
+    // three-message conversation, and this test counts the task's own requests.
+    models: [...DEFAULT_MODELS.map((model) => model.id === "fake-small" ? { ...model, tomverse: { ...model.tomverse, context_window_tokens: 128_000, max_output_tokens: 8_000 } } : model),
+      { ...DEFAULT_MODELS[0], id: "legacy-coder", tomverse: { ...DEFAULT_MODELS[0]!.tomverse, reasoning_efforts: undefined } }],
     routedModel: "fake-small",
     script(body) {
       const conversation = JSON.stringify(body.messages);
@@ -413,8 +417,9 @@ setTimeout(() => process.exit(0), 35000).unref();
     assert.doesNotMatch(firstReferenceRequest.content, /marker\.txt|check\.mjs|outside\.txt|sample-project|\.env/);
     assert.ok(gateway.completions.slice(requestsBeforeAttach).some((request) => JSON.stringify(request.body.messages).includes("fixtures/marker.txt")));
     assert.equal(await page.getByTestId("model-markup-probe").count(), 0);
+    // Ask mode: the read tools, and delegate for explore subagents (read-only too; there is no worker where nothing can change).
     assert.deepEqual(gateway.completions.at(-1)?.body.tools.map((tool: { function: { name: string } }) => tool.function.name).sort(),
-      ["list_files", "read_file", "search_text"]);
+      ["delegate", "list_files", "read_file", "search_text"]);
     assert.ok(gateway.completions.slice(requestsBeforeAttach).some((request) =>
       request.body.messages.some((message: { role: string; content: string }) =>
         message.role === "tool" && message.content.includes("Read this only when needed."))));

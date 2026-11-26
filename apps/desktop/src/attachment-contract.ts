@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHAT_MAX_ATTACHMENT_BYTES, CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "../../../lib/chatAttachmentLimits";
+import { CHAT_MAX_ATTACHMENT_BYTES, CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../lib/chatAttachmentLimits";
 import { MESSAGE_ATTACHMENT_KINDS } from "../../../lib/messageAttachmentCore";
 
 const attachmentId = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
@@ -19,5 +19,12 @@ export const attachmentRead = attachmentUpload.omit({ uploadId: true }).extend({
 });
 export const attachmentUploadIds = z.array(attachmentId).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
   .refine((items) => new Set(items).size === items.length).optional();
+export const driveImportInput = z.object({
+  requestId: z.uuid(),
+  slots: z.number().int().min(1).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE),
+  remainingBytes: z.number().int().min(1).max(CHAT_MAX_TOTAL_ATTACHMENT_BYTES),
+}).strict();
+export type DriveImportInput = z.infer<typeof driveImportInput>;
+
 export type AttachmentBytesInput = z.infer<typeof attachmentBytesInput>;
 export type AttachmentUpload = z.infer<typeof attachmentUpload>;

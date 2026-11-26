@@ -1,0 +1,12 @@
+{
+  "id": "bf-semver-order",
+  "title": "Version sorting puts pre-releases in the wrong place",
+  "category": "bugfix",
+  "prompt": "The version helpers in this project (parse, compare, range matching, sorting) follow semantic versioning but have bugs. `1.0.0-alpha` must sort before `1.0.0`; numeric pre-release identifiers compare as numbers (`1.0.0-alpha.2` is lower than `1.0.0-alpha.10`) and are lower than alphanumeric ones; a longer pre-release is higher than its prefix (`1.0.0-alpha` < `1.0.0-alpha.1`); and caret ranges for 0.x versions must stay inside the leftmost non-zero part (`^0.2.3` means `>=0.2.3 <0.3.0`, `^0.0.3` means `>=0.0.3 <0.0.4`). Build metadata (`+build`) must keep being ignored when comparing. Fix the causes. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 900
+}

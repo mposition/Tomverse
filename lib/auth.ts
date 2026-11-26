@@ -13,6 +13,7 @@ import { appUrl } from "@/lib/accountEmails";
 import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
 import { addressProofForSignIn } from "@/lib/emailPreferenceCore";
 import { authorizeMobileSession } from "@/lib/mobileSessionAuthorization";
+import { desktopRecentAuthEnabled, readDesktopAuthenticatedAt } from "@/lib/adminAuthCore";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -317,6 +318,9 @@ export const authOptions: NextAuthOptions = {
             session.user.plan = token.plan;
             session.user.createdAt = token.createdAt;
             session.user.authenticatedAt = token.authenticatedAt;
+            // A Desktop device's sign-in time reaches account-sensitive routes
+            // only; it is never `authenticatedAt`, which the admin console reads.
+            session.user.desktopAuthenticatedAt = readDesktopAuthenticatedAt(desktop, desktopRecentAuthEnabled());
             session.user.accountCreatedBySignIn = token.accountCreatedBySignIn === true;
             session.user.signupEmailLoginAttemptId = token.signupEmailLoginAttemptId;
             session.user.addressProof = token.addressProof;

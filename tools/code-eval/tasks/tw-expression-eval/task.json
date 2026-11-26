@@ -1,0 +1,11 @@
+{
+  "id": "tw-expression-eval",
+  "title": "Write tests for an arithmetic expression evaluator",
+  "category": "test-writing",
+  "prompt": "Write a thorough automated test suite for `evaluate` (and its tokenizer) in `src/evaluate.js` and `src/tokenize.js`, in the file `test/evaluate.test.mjs`, using `node:test` and `node:assert/strict`. The behaviour is described in README.md. Do not change anything under `src/`. Your tests are judged by running them against the real implementation (they must all pass) and against several deliberately defective implementations of the same modules (each defective one must make at least one of your tests fail), so cover every rule and the edge cases of each rule, not just the happy path. Run them with `npm test`.",
+  "check": [
+    "node",
+    "__check__/check.mjs"
+  ],
+  "timeoutSeconds": 1500
+}
