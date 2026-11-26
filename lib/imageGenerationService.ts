@@ -1657,6 +1657,8 @@ export const processImageGeneration = async (
         providerRequestId: result.providerRequestId,
         providerRequestParams: result.requestParams,
         releaseProviderBudget: false,
+        // This path settles its own failure and returns, so the outer catch never sees the answer.
+        reportedCostMicroUsd: result.reportedCostMicroUsd,
         billed: {
           nonImageBillableTokens: result.nonImageBillableTokens,
           imageTokens: result.billedImageTokens,

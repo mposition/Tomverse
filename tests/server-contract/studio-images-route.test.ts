@@ -65,7 +65,12 @@ mock.module(url("lib/imageGenerationService.ts"), {
       if (input.editSource && "bindAttachment" in input.editSource) {
         await input.editSource.bindAttachment({} as never, "studio-image-conversation");
       }
-      return { generationId: "studio-image", groupId: "studio-group", status: "pending", reused: false };
+      // One generation per requested model, as the service answers.
+      const targets = (input.modelIds ?? ["default"]).map((modelId, index) => ({
+        targetId: "target-" + index, modelId, provider: "test", status: "pending", reservedCredits: 1,
+        generationId: index === 0 ? "studio-image" : "studio-image-" + (index + 1),
+      }));
+      return { generationId: "studio-image", groupId: "studio-group", status: "pending", reused: false, targets };
     },
     processImageGenerationGroup: async (ids: string[]) => { dispatched.push(ids); },
   },
@@ -314,6 +319,10 @@ test("a transparent PNG is quoted on every background remover that is on, and on
   assert.equal((await post(submit)).status, 202);
   const tools = ["recraft-remove-background", "bria/rmbg-3"];
   assert.deepEqual([reservations[0].modelIds, reservations[0].photoTools, Object.keys(reservations[0].expectedPricingVersions ?? {})], [tools, tools, tools]);
+  // Both tools are sent to the executor: a second target left pending would never run.
+  assert.equal(scheduled.length, 1);
+  await scheduled[0]();
+  assert.deepEqual(dispatched, [["studio-image", "studio-image-2"]]);
   // Every other feature reserves without naming a tool, so the service refuses a tool's id for it; and it cannot add targets.
   assert.equal((await post({ ...quotedSubmission(other), targets: submit.targets, idempotencyKey: randomUUID() })).status, 409);
   assert.equal((await post({ ...quotedSubmission(other), idempotencyKey: randomUUID() })).status, 202);

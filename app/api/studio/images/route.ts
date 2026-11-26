@@ -194,9 +194,11 @@ export async function POST(req: Request) {
         },
       } : {}),
     });
-    if (!result.reused && result.status === "pending") {
-      after(() => processImageGenerationGroup([result.generationId]).catch(() => {
-        console.error("Studio image processing failed", { generationId: result.generationId });
+    // Every target, not the first: a second tool left pending is never sent and its reservation waits for the sweep.
+    const pending = result.reused ? [] : result.targets.filter(target => target.status === "pending").map(target => target.generationId);
+    if (pending.length > 0) {
+      after(() => processImageGenerationGroup(pending).catch(() => {
+        console.error("Studio image processing failed", { generationIds: pending });
       }));
     }
     return Response.json({ groupId: result.groupId }, { status: result.reused ? 200 : 202 });
