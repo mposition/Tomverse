@@ -31,9 +31,11 @@ test("every refusal comes before the one Stripe write", () => {
 
 test("it decides on the subscription Stripe has now, and is idempotent when already renewing", () => {
   const retrieve = position("stripe.subscriptions.retrieve(");
+  const status = position("RESUMABLE_STATUSES.has(current.status)");
   const alreadyRenewing = position("if (!current.cancel_at_period_end)");
   const write = position("cancel_at_period_end: false");
-  assert.ok(retrieve < alreadyRenewing && alreadyRenewing < write);
+  // Status before "already renewing": a canceled subscription is not renewing.
+  assert.ok(retrieve < status && status < alreadyRenewing && alreadyRenewing < write);
   // Only active and trialing subscriptions renew from here.
   assert.match(source, /RESUMABLE_STATUSES = new Set\(\["active", "trialing"\]\)/);
 });
@@ -53,16 +55,16 @@ test("a deletion that lands during the write puts the cancellation back", () => 
   const record = schedule.indexOf('accountStatus: "pending_deletion"');
   const reassert = schedule.indexOf("await scheduleStripeSubscriptionCancellation", record);
   assert.ok(record > 0 && reassert > record, "deletion does not re-assert after its record");
-  // And its failure is not swallowed: in the race it is the only write that
-  // restores the cancellation.
-  const reassertCall = schedule.slice(reassert, schedule.indexOf(";", reassert) + 1);
-  assert.doesNotMatch(reassertCall, /\.catch\(/);
+  // A failure of that second write is raised as an operational incident for a
+  // person to verify -- not swallowed, and not retried blindly.
+  const afterReassert = schedule.slice(reassert, schedule.indexOf("revokeAllUserSessions", reassert));
+  assert.match(afterReassert, /ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED/);
 });
 
 test("an already-renewing subscription corrects a stale stored flag", () => {
   const branch = resume.slice(
     position("if (!current.cancel_at_period_end)"),
-    position("RESUMABLE_STATUSES.has(current.status)")
+    position("const subscription = await stripe.subscriptions.update(")
   );
   assert.match(branch, /subscriptionCancelAtPeriodEnd: false/);
 });

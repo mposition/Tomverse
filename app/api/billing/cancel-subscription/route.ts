@@ -225,6 +225,17 @@ export async function DELETE(req: Request) {
     // flag, which a missed webhook can leave stale.
     const stripe = getStripe();
     const current = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+    // Status first: a canceled or unpaid subscription reports
+    // cancel_at_period_end false too, and "renewal is on" would be untrue.
+    if (!RESUMABLE_STATUSES.has(current.status)) {
+      return NextResponse.json(
+        {
+          code: "SUBSCRIPTION_NOT_CHANGEABLE",
+          error: `A subscription in status "${current.status}" cannot be renewed here.`,
+        },
+        { status: 409 }
+      );
+    }
     if (!current.cancel_at_period_end) {
       // Already renewing: nothing to undo, and saying so is idempotent. The
       // stored flag is corrected too -- a missed webhook would otherwise keep
@@ -239,15 +250,6 @@ export async function DELETE(req: Request) {
         currentPeriodEnd: getPeriodEnd(current)?.toISOString() || null,
         status: current.status,
       });
-    }
-    if (!RESUMABLE_STATUSES.has(current.status)) {
-      return NextResponse.json(
-        {
-          code: "SUBSCRIPTION_NOT_CHANGEABLE",
-          error: `A subscription in status "${current.status}" cannot be renewed here.`,
-        },
-        { status: 409 }
-      );
     }
 
     const subscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {

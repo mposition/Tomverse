@@ -504,17 +504,20 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 것으로 보지 않는다"와 같은 원칙으로, **자기 label을 가진 별도 버튼**입니다(웹 설정 ·
 데스크톱 결제 설정의 해지 카드).
 
-- 판단은 저장된 flag가 아니라 **Stripe에서 다시 읽은 구독**으로 합니다. 이미
-  갱신 중이면 성공으로 그대로 답합니다(멱등).
-- `active` · `trialing`이 아니면 409 `SUBSCRIPTION_NOT_CHANGEABLE`.
+- 판단은 저장된 flag가 아니라 **Stripe에서 다시 읽은 구독**으로 합니다. 먼저
+  `active` · `trialing`이 아니면 409 `SUBSCRIPTION_NOT_CHANGEABLE`(해지 완료된 구독도
+  `cancel_at_period_end`가 false라서 순서가 중요합니다). 그 다음 이미 갱신 중이면
+  성공으로 그대로 답합니다(멱등). `past_due` 구독에는 버튼을 보이지 않습니다.
 - **계정 삭제 예약(`pending_deletion`)이면 409** (`ACCOUNT_DELETION_PENDING`). 삭제
   흐름이 스스로 해지를 예약했고, 그 밑에서 갱신을 켜면 떠나려는 계정에 다음 결제가
   납니다. (환불 요청은 그 자체로 해지를 예약하지 않고 승인 시 구독을 정리하므로 거부
   사유가 아닙니다.) 검사와 Stripe 쓰기 사이에 삭제가 끼어드는 경우를 위해, 이 route는
   쓴 뒤 계정을 다시 읽어 삭제가 보이면 해지를 되돌리고, 삭제 흐름
   (`scheduleTomverseAccountDeletion`)은 `pending_deletion` 기록 뒤 해지 예약을 한 번
-  더 겁니다(실패하면 삭제 요청도 실패로 돌아가 재시도합니다). 둘 중 하나는 반드시
-  해지로 끝납니다.
+  더 겁니다. 둘 중 하나는 반드시 해지로 끝납니다. 삭제 흐름의 두 번째 호출이
+  실패하면 삭제는 그대로 진행하고(이미 기록됐으므로 실패로 보고하지 않음) 운영 사고
+  `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올려 사람이 Stripe 상태를
+  확인합니다. 유예 기간 끝의 영구 삭제는 어떤 경우든 구독을 즉시 해지합니다.
 - Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
 - 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
 

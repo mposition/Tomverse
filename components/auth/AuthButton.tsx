@@ -2268,7 +2268,8 @@ export function AuthButton({
                                                             {t("auth.cancelPlanNotice")}
                                                         </p>
                                                     )}
-                                                    {subscriptionCancelAtPeriodEnd && hasLiveWebSubscription && (
+                                                    {subscriptionCancelAtPeriodEnd &&
+                                                        ["active", "trialing"].includes(accountUsage?.subscription?.status ?? "") && (
                                                         <button
                                                             type="button"
                                                             data-testid="account-resume-renewal"

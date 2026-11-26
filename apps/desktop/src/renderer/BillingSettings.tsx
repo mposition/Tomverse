@@ -715,6 +715,8 @@ function CancelSubscription({ language, account, periodEnd, onSettled }: {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; failed: boolean }>();
   const scheduled = account.subscription.cancelAtPeriodEnd;
+  // The server renews only active and trialing subscriptions; past_due settles the invoice first.
+  const resumable = account.subscription.status === "active" || account.subscription.status === "trialing";
   return <section className="desktop-setting-section" data-testid="native-billing-cancel">
     <h3>{auth.cancelPlanTitle}</h3>
     <p>{fillBillingCopy(auth.cancelPlanDescription, { date: periodEnd || auth.cancelPlanFallbackDate })}</p>
@@ -734,7 +736,7 @@ function CancelSubscription({ language, account, periodEnd, onSettled }: {
       });
     }}>{scheduled ? auth.cancelPlanButtonScheduled : busy ? auth.cancelPlanProcessing : armed ? desk.cancelConfirm : auth.cancelPlanButton}</button>
     {scheduled && <p className="billing-muted">{auth.cancelPlanNotice}</p>}
-    {scheduled && <button type="button" className="primary" disabled={busy} data-testid="native-billing-resume-renewal" onClick={() => {
+    {scheduled && resumable && <button type="button" className="primary" disabled={busy} data-testid="native-billing-resume-renewal" onClick={() => {
       setBusy(true);
       setMessage(undefined);
       void billing<"resumeRenewal">({ action: "resumeRenewal" }).then(result => {

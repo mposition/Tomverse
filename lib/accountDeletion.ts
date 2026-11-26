@@ -9,6 +9,7 @@ import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { requestGa4UserIdDeletion } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
@@ -101,10 +102,28 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   // before this record and wrote to Stripe after the first call above would
   // otherwise leave this account renewing; that route re-reads the account
   // after its own write, so one of the two always ends with the cancellation.
-  // Fatal like the first call: in the race this is the only write that puts
-  // the cancellation back, so the request must not report success without it.
-  // Retrying the deletion repeats the same idempotent cancellation.
-  await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
+  //
+  // Not fatal: the deletion is recorded and committed, so failing the request
+  // here would tell the customer it did not happen while it did. The first call
+  // already scheduled the cancellation; this one only matters in that race,
+  // and if it fails a person verifies the subscription at Stripe (an unknown
+  // write outcome is checked, never blindly retried). The permanent deletion
+  // at the end of the grace period cancels the subscription outright either way.
+  try {
+    await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
+  } catch (error) {
+    await reportOperationalIncident({
+      code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
+      title: "Account deletion: re-asserting the Stripe cancellation failed",
+      error,
+      severity: "error",
+      context: {
+        component: "account-deletion",
+        userId: user.id,
+        subscriptionId: user.stripeSubscriptionId,
+      },
+    }).catch(() => {});
+  }
   await revokeAllUserSessions(user.id);
   return {
     scheduled: true as const,
