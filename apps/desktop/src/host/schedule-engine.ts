@@ -33,12 +33,12 @@ const storedRun = z.object({
   taskId: z.string().nullable(), laneKey: z.string().optional(),
 }).strict();
 const storedState = z.object({
-  version: z.literal(1), enabled: z.boolean(), lastEvaluated: z.number(), items: z.array(storedItem), runs: z.array(storedRun),
+  version: z.literal(1), enabled: z.boolean(), owner: z.string().nullable().default(null), lastEvaluated: z.number(), items: z.array(storedItem), runs: z.array(storedRun),
 }).strict();
 type StoredState = z.infer<typeof storedState>;
 type StoredItem = z.infer<typeof storedItem>;
 
-export type LaunchOutcome = { ok: true; key: string } | { ok: false; reason: Extract<ScheduleRun["reason"], "no-account" | "model-unavailable" | "worktree" | "project-changed" | "launch-failed"> };
+export type LaunchOutcome = { ok: true; key: string } | { ok: false; reason: Extract<ScheduleRun["reason"], "no-account" | "model-unavailable" | "worktree" | "project-changed" | "launch-failed" | "sandbox"> };
 
 export type ScheduleEngineDeps = {
   now(): number;
@@ -52,6 +52,8 @@ export type ScheduleEngineDeps = {
   openProject(): string | null;
   modelAvailable(model: string): boolean;
   hasAccount(): boolean;
+  /** Who is signed in (the account id), or null. Schedules belong to the account that turned them on and never run for another. */
+  owner(): string | null;
   /** Starts the run as a lane (in the folder or a new worktree) and returns its key. The lane's settled result comes back through `settled`. */
   launch(item: ScheduleItem, run: ScheduleRun): Promise<LaunchOutcome>;
   activeFor(scheduleId: string): number;
@@ -63,11 +65,10 @@ export type ScheduleEngineDeps = {
   persistEveryMs?: number;
 };
 
-const emptyState = (): StoredState => ({ version: 1, enabled: false, lastEvaluated: 0, items: [], runs: [] });
+const emptyState = (): StoredState => ({ version: 1, enabled: false, owner: null, lastEvaluated: 0, items: [], runs: [] });
 
 export class ScheduleEngine {
   private state: StoredState = emptyState();
-  private readonly lanes = new Map<string, string>();
   private readonly starting = new Set<string>();
   private lastPersisted = 0;
   private dirty = false;
@@ -93,7 +94,7 @@ export class ScheduleEngine {
         run.finishedAt = now;
       }
     }
-    if (this.state.enabled && this.state.lastEvaluated > 0) {
+    if (this.state.enabled && !this.foreign() && this.state.lastEvaluated > 0) {
       for (const item of this.state.items) if (item.enabled && !item.disabledBy) this.evaluate(item, this.state.lastEvaluated, now, true);
     }
     this.state.lastEvaluated = now;
@@ -127,7 +128,7 @@ export class ScheduleEngine {
     const now = this.deps.now();
     const from = this.state.lastEvaluated;
     this.state.lastEvaluated = now;
-    if (this.state.enabled) {
+    if (this.state.enabled && !this.foreign()) {
       const due: Array<[StoredItem, number]> = [];
       for (const item of this.state.items) {
         if (!item.enabled || item.disabledBy) continue;
@@ -169,11 +170,9 @@ export class ScheduleEngine {
   }
 
   private async start(item: StoredItem, scheduledFor: number): Promise<ScheduleRefusal | null> {
-    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.deps.gitProject() };
+    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.gitFor(item.project) };
     const problem = scheduleShapeProblem(item, facts);
-    // A project other than the open one cannot be checked for Git here; the launch checks the folder itself.
-    const ignorable = problem === "needs-git" && this.deps.openProject() !== item.project;
-    if (problem && !ignorable) {
+    if (problem) {
       this.finishRun(item, this.addRun(item, scheduledFor, { status: "failed" }), "failed", problem === "needs-sandbox" ? "sandbox" : "worktree");
       return problem;
     }
@@ -190,7 +189,6 @@ export class ScheduleEngine {
       return null;
     }
     run.laneKey = outcome.key;
-    this.lanes.set(outcome.key, run.id);
     this.dirty = true;
     return null;
   }
@@ -217,15 +215,22 @@ export class ScheduleEngine {
 
   /** A lane of a schedule ended: the run record gets its outcome. */
   settled(result: LaneResult) {
-    const runId = this.lanes.get(result.key);
-    this.lanes.delete(result.key);
-    const run = this.state.runs.find((entry) => entry.id === runId);
+    // The lane's key is the run's id, so a lane that ends while it is still being started finds its record too.
+    const run = this.state.runs.find((entry) => entry.id === result.key || entry.laneKey === result.key);
     const item = run && this.state.items.find((entry) => entry.id === run.scheduleId);
     if (!run || !item) return;
     if (result.outcome === "completed") this.finishRun(item, run, "completed", undefined, result);
     else if (result.outcome === "stopped" || result.outcome === "cancelled") this.finishRun(item, run, "stopped", undefined, result);
     else if (result.outcome === "approval-timeout") this.finishRun(item, run, "failed", "approval-timeout", result);
     else this.finishRun(item, run, "failed", result.outcome === "launch-failed" ? "launch-failed" : result.outcome === "crashed" ? "crashed" : undefined, result);
+  }
+
+  /**
+   * Whether the Git check can use the open project. For a schedule of another project (or none open) Git is not known here, so the check
+   * passes and the launch reads the folder itself; the rules that follow it (allow all needs a worktree and a sandbox) still apply.
+   */
+  private gitFor(project: string | null) {
+    return project !== null && project === this.deps.openProject() ? this.deps.gitProject() : true;
   }
 
   private async refreshSandbox() {
@@ -237,6 +242,13 @@ export class ScheduleEngine {
     const refuse = (reason: ScheduleRefusal): ScheduleResult => ({ ok: false, reason });
     if (command.action === "enable") {
       if (command.enabled && command.acknowledged !== true) return refuse("needs-acknowledgement");
+      if (command.enabled) {
+        const owner = this.deps.owner();
+        if (owner === null) return refuse("no-account");
+        // Schedules belong to the account that turned them on: another account starts from nothing, and reads nothing of the first one's.
+        if (this.foreign()) { this.state = emptyState(); }
+        this.state.owner = owner;
+      }
       if (command.enabled === this.state.enabled) return { ok: true };
       this.state.enabled = command.enabled;
       // Turning schedules on starts the clock now: what came due while they were off is neither run nor missed.
@@ -244,15 +256,17 @@ export class ScheduleEngine {
       return this.done();
     }
     if (command.action === "refresh") { await this.refreshSandbox(); this.deps.changed(); return { ok: true }; }
+    if (this.foreign()) return refuse("disabled");
     if (command.action === "save") return this.save(command.input);
     const item = this.state.items.find((entry) => entry.id === command.id);
     if (!item) return refuse("not-found");
     if (command.action === "delete") {
-      if (this.deps.activeFor(item.id) > 0) return refuse("busy-schedule");
+      if (this.deps.activeFor(item.id) > 0 || this.starting.has(item.id)) return refuse("busy-schedule");
       this.state.items = this.state.items.filter((entry) => entry !== item);
       return this.done();
     }
     if (command.action === "toggle") {
+      if (this.starting.has(item.id)) return refuse("busy-schedule");
       if (command.enabled) {
         const problem = await this.problem(item);
         if (problem) return refuse(problem);
@@ -277,10 +291,8 @@ export class ScheduleEngine {
       const bad = timingProblem(timing, this.deps.now());
       if (bad) return bad;
     }
-    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.deps.gitProject() };
-    const problem = scheduleShapeProblem(item, facts);
-    if (problem === "needs-git" && stored && this.deps.openProject() !== stored.project) return null;
-    return problem;
+    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.gitFor(stored?.project ?? this.deps.openProject()) };
+    return scheduleShapeProblem(item, facts);
   }
 
   private async save(raw: ScheduleInput): Promise<ScheduleResult> {
@@ -296,13 +308,13 @@ export class ScheduleEngine {
     if (!this.deps.modelAvailable(input.model)) return { ok: false, reason: "model-unavailable" };
     const bad = timingProblem(input.timing, this.deps.now());
     if (bad) return { ok: false, reason: bad };
-    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.deps.gitProject() };
+    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.gitFor(project) };
     const problem = scheduleShapeProblem(input, facts);
-    if (problem && !(problem === "needs-git" && existing && this.deps.openProject() !== project)) return { ok: false, reason: problem };
+    if (problem) return { ok: false, reason: problem };
     const fields = { name: input.name, prompt: input.prompt, timing: input.timing, workspace: input.workspace, taskMode: input.taskMode,
       permission: input.permission, model: input.model, limits: input.limits };
     if (existing) {
-      if (this.deps.activeFor(existing.id) > 0) return { ok: false, reason: "busy-schedule" };
+      if (this.deps.activeFor(existing.id) > 0 || this.starting.has(existing.id)) return { ok: false, reason: "busy-schedule" };
       Object.assign(existing, fields, { failures: 0 });
       if (existing.disabledBy === "finished") { existing.enabled = true; existing.disabledBy = undefined; }
     } else {
@@ -318,7 +330,13 @@ export class ScheduleEngine {
     return { ok: true };
   }
 
+  /** Schedules saved by another account than the one signed in now: they do not run, and the window does not see them. */
+  private foreign() {
+    return this.state.owner !== null && this.state.owner !== this.deps.owner();
+  }
+
   view(): ScheduleView {
+    if (this.foreign()) return { enabled: false, failureLimit: this.failureLimit, approvalWaitMinutes: this.approvalWaitMinutes, items: [], runs: [], sandboxEnforced: false, gitProject: this.deps.gitProject() };
     const rows = new Map(this.deps.rows().map((row) => [row.key, row]));
     const runs = this.state.runs.map((run): ScheduleRun => {
       const row = run.laneKey ? rows.get(run.laneKey) : undefined;

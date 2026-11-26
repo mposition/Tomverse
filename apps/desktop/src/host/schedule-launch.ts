@@ -7,6 +7,7 @@ import type { Connection } from "./messages";
 import { assertProjectRoot, bindProjectRoot, type ProjectRoot } from "./project-root";
 import type { LaunchOutcome } from "./schedule-engine";
 import type { TaskLanes } from "./task-lanes";
+import { sandboxEnforcesWrites, type SandboxFacts } from "../schedule-policy";
 
 /**
  * Starts a scheduled run as a lane: binds the schedule's project folder again (it may have moved since the schedule was saved), makes a
@@ -22,6 +23,8 @@ export type ScheduleLaunchEnv = {
   worktreeHome(scope: HistoryScope): string;
   permissionHome(): string;
   modelAvailable(model: string): boolean;
+  /** The OS sandbox as this computer enforces it now. */
+  sandbox(): Promise<SandboxFacts>;
 };
 
 export async function launchScheduledRun(env: ScheduleLaunchEnv, item: ScheduleItem, run: ScheduleRun, lanes: TaskLanes, approvalWaitMs: number): Promise<LaunchOutcome> {
@@ -29,6 +32,10 @@ export async function launchScheduledRun(env: ScheduleLaunchEnv, item: ScheduleI
   if (!connection) return { ok: false, reason: "no-account" };
   if (!env.modelAvailable(item.model)) return { ok: false, reason: "model-unavailable" };
   if (hasCredential(item.prompt, connection.key)) return { ok: false, reason: "launch-failed" };
+  // The last line of defence for "allow all": whatever the engine decided, it does not start without a new worktree and a sandbox that refuses writes.
+  if (item.permission === "allow_all" && (item.workspace !== "worktree" || item.taskMode !== "agent" || !sandboxEnforcesWrites(await env.sandbox()))) {
+    return { ok: false, reason: "sandbox" };
+  }
   let source: ProjectRoot;
   try {
     source = bindProjectRoot(item.project);

@@ -22,6 +22,9 @@ function world(start = "2026-12-01T08:00:00Z", store: { text: string | null } = 
   const active = new Map<string, number>();
   let rows: LaneRow[] = [];
   let launchResult: LaunchOutcome | null = null;
+  let openProject: string | null = "/project";
+  let owner: string | null = "acct-1";
+  let settleInLaunch: LaneResult["outcome"] | null = null;
   let counter = 0;
   const engine = new ScheduleEngine({
     now: () => now,
@@ -29,13 +32,19 @@ function world(start = "2026-12-01T08:00:00Z", store: { text: string | null } = 
     save: (text) => { store.text = text; },
     sandbox: async () => sandbox,
     gitProject: () => git,
-    openProject: () => "/project",
+    openProject: () => openProject,
+    owner: () => owner,
     modelAvailable: (model) => model === "model-a",
     hasAccount: () => account,
     async launch(item, run) {
       launched.push({ item, run });
       active.set(item.id, (active.get(item.id) ?? 0) + 1);
-      return launchResult ?? { ok: true, key: `lane-${++counter}` };
+      if (settleInLaunch) {
+        // The lane ended while it was still being started (its process could not start).
+        active.set(item.id, 0);
+        engine.settled(result(run.id, settleInLaunch));
+      }
+      return launchResult ?? { ok: true, key: settleInLaunch ? run.id : `lane-${++counter}` };
     },
     activeFor: (id) => active.get(id) ?? 0,
     rows: () => rows,
@@ -60,6 +69,9 @@ function world(start = "2026-12-01T08:00:00Z", store: { text: string | null } = 
     setAccount: (value: boolean) => { account = value; },
     setRows: (value: LaneRow[]) => { rows = value; },
     setLaunch: (value: LaunchOutcome | null) => { launchResult = value; },
+    setOpenProject: (value: string | null) => { openProject = value; },
+    setOwner: (value: string | null) => { owner = value; },
+    settleInLaunch: (value: LaneResult["outcome"] | null) => { settleInLaunch = value; },
     finish(item: ScheduleItem) { active.set(item.id, 0); },
     async enable() { await engine.startup(); return engine.command({ action: "enable", enabled: true, acknowledged: true }); },
     idOf: () => engine.view().items[0]!.id,
@@ -311,4 +323,57 @@ test("policy: failure counting and the allow-all condition", () => {
   assert.equal(sandboxEnforcesWrites({ mode: "read-only", available: true, writes: "os" }), true);
   assert.equal(sandboxEnforcesWrites({ mode: "off", available: true, writes: "os" }), false);
   assert.equal(scheduleShapeProblem({ taskMode: "agent", permission: "ask", workspace: "folder" }, { sandbox: notEnforced, gitProject: false }), null);
+});
+
+test("an allow-all schedule is checked again at every run, whichever project is open", async () => {
+  const w = world();
+  await w.enable();
+  const allowAll = w.input({ taskMode: "agent", permission: "allow_all", workspace: "worktree" });
+  assert.deepEqual(await w.engine.command({ action: "save", input: allowAll }), { ok: true });
+  // No project is open (the app was just started, or another project is): Git is read by the launch, but the sandbox rule is not skipped.
+  w.setOpenProject(null);
+  w.setSandbox(notEnforced);
+  w.set("2026-12-01T09:00:10Z");
+  await w.engine.tick();
+  assert.equal(w.launched.length, 0);
+  assert.equal(w.engine.view().runs[0]!.reason, "sandbox");
+  const id = w.idOf();
+  assert.deepEqual(await w.engine.command({ action: "toggle", id, enabled: true }), { ok: false, reason: "needs-sandbox" });
+  assert.deepEqual(await w.engine.command({ action: "run-now", id }), { ok: false, reason: "needs-sandbox" });
+  assert.deepEqual(await w.engine.command({ action: "save", input: { ...allowAll, id } }), { ok: false, reason: "needs-sandbox" });
+  w.setSandbox(enforced);
+  assert.deepEqual(await w.engine.command({ action: "toggle", id, enabled: true }), { ok: true });
+});
+
+test("a run whose process cannot even start still counts as a failure", async () => {
+  const w = world();
+  await w.enable();
+  await w.engine.command({ action: "save", input: w.input({ timing: { cadence: { kind: "interval", everyMinutes: 5, anchor: utc("2026-12-01T08:00:00Z") }, timeZone: "UTC" } }) });
+  w.settleInLaunch("launch-failed");
+  for (let step = 0; step < 3; step += 1) {
+    w.advance(5 * 60_000);
+    await w.engine.tick();
+  }
+  const item = w.engine.view().items[0]!;
+  assert.equal(item.failures, 3);
+  assert.equal(item.enabled, false);
+  assert.deepEqual(w.engine.view().runs.map((run) => run.status), ["failed", "failed", "failed"]);
+});
+
+test("schedules belong to the account that turned them on", async () => {
+  const w = world();
+  await w.enable();
+  await w.engine.command({ action: "save", input: w.input() });
+  w.setOwner("acct-2");
+  w.set("2026-12-01T09:00:10Z");
+  await w.engine.tick();
+  assert.equal(w.launched.length, 0, "another account's schedules do not run for this one");
+  const view = w.engine.view();
+  assert.deepEqual([view.enabled, view.items.length, view.runs.length], [false, 0, 0], "and it cannot read them");
+  assert.deepEqual(await w.engine.command({ action: "save", input: w.input() }), { ok: false, reason: "disabled" });
+  assert.deepEqual(await w.engine.command({ action: "enable", enabled: true }), { ok: false, reason: "needs-acknowledgement" });
+  assert.deepEqual(await w.engine.command({ action: "enable", enabled: true, acknowledged: true }), { ok: true });
+  assert.deepEqual([w.engine.view().enabled, w.engine.view().items.length], [true, 0], "the new account starts from nothing");
+  w.setOwner(null);
+  assert.deepEqual(await w.engine.command({ action: "enable", enabled: true, acknowledged: true }), { ok: false, reason: "no-account" }, "nobody signed in cannot turn them on");
 });

@@ -43,6 +43,7 @@ export type ParallelEnv = {
     openProject(): string | null;
     gitProject(): boolean;
     hasAccount(): boolean;
+    owner(): string | null;
     modelAvailable(model: string): boolean;
     sandbox(): Promise<SandboxFacts>;
     launch(item: ScheduleItem, run: ScheduleRun, lanes: TaskLanes, approvalWaitMs: number): Promise<LaunchOutcome>;
@@ -112,6 +113,7 @@ export function createParallelHost(env: ParallelEnv) {
     openProject: env.schedule.openProject,
     modelAvailable: env.schedule.modelAvailable,
     hasAccount: env.schedule.hasAccount,
+    owner: env.schedule.owner,
     launch: (item, run) => env.schedule.launch(item, run, lanes, engine.approvalWaitMinutes * 60_000),
     activeFor: (id) => lanes.activeFor(id),
     rows: () => lanes.rows(),

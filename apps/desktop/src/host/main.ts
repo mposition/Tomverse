@@ -903,6 +903,8 @@ function dismissApproval() {
 
 /** The open task's request that arrived while another card was on screen; it shows next. */
 let foregroundWaiting: { runId: string; request: ApprovalRequest } | null = null;
+/** The id of the card of a task that runs next to the open one, while it is on screen. */
+let shownLaneCard: string | null = null;
 
 /** The open task ended or stopped: its card goes away, and a card that belongs to a task running next to it stays. */
 function clearForegroundApproval() {
@@ -914,6 +916,12 @@ function clearForegroundApproval() {
 
 /** Shows the next waiting card (the open task's first, then the tasks that run next to it) when no card is on screen. */
 function pumpApprovals() {
+  if (shownLaneCard && !parallel.lanes.hasApproval(shownLaneCard)) {
+    // The task that asked ended (stopped, crashed, timed out) while its card was on screen: the card goes with it.
+    const gone = shownLaneCard;
+    shownLaneCard = null;
+    if (pending?.id === gone) { pending = null; dismissApproval(); return; }
+  }
   if (pending || approvalWindow || closing || signingOut) return;
   const waiting = foregroundWaiting;
   if (waiting) {
@@ -921,7 +929,7 @@ function pumpApprovals() {
     if (runId === waiting.runId && waiting.runId !== discardedRunId && state.task?.status === "approval") { showApproval(waiting.request); return; }
   }
   const next = parallel.lanes.nextApproval();
-  if (next) showApproval(next);
+  if (next) { shownLaneCard = next.id; showApproval(next); }
 }
 
 function answer(decision: Decision) {
@@ -935,6 +943,7 @@ function answer(decision: Decision) {
     // A task that runs next to the open one: its own lane takes the answer, and no other task can.
     if (pending.id !== decision.id || !parallel.lanes.decide(decision)) return false;
     pending = null;
+    shownLaneCard = null;
     const window = approvalWindow;
     approvalWindow = null;
     setImmediate(() => { if (window && !window.isDestroyed()) window.close(); pumpApprovals(); });
@@ -3248,6 +3257,13 @@ async function replyToGitAction(event: Extract<WorkerEvent, { type: "git-action"
   }
 }
 
+/** What the OS sandbox enforces on this computer for the mode the person set, read now. */
+async function scheduleSandboxFacts() {
+  const settings = readCodeSandboxSettings(codeSandboxDirectory());
+  const found = await sandboxEnforcement(settings.mode, { stateDir: join(codeSandboxDirectory(), "state") });
+  return { mode: settings.mode, available: found.available, writes: found.writes };
+}
+
 const parallel = createParallelHost({
   userData: app.getPath("userData"),
   origin,
@@ -3279,12 +3295,9 @@ const parallel = createParallelHost({
     openProject: () => projectRoot?.path ?? null,
     gitProject: () => codeGitProject !== null && codeGitProject !== "unavailable",
     hasAccount: () => codeConnection() !== null && !signingOut && !invalidatingSession && !closing,
+    owner: () => { const connection = codeConnection(); return !connection ? null : linkedCode?.connection === connection ? linkedCode.accountId : "fixture"; },
     modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
-    sandbox: async () => {
-      const settings = readCodeSandboxSettings(codeSandboxDirectory());
-      const found = await sandboxEnforcement(settings.mode, { stateDir: join(codeSandboxDirectory(), "state") });
-      return { mode: settings.mode, available: found.available, writes: found.writes };
-    },
+    sandbox: scheduleSandboxFacts,
     launch: (item, run, lanes, approvalWaitMs) => launchScheduledRun({
       protectedRoot: app.getPath("userData"),
       connection: () => (signingOut || invalidatingSession || closing || suspended ? null : codeConnection()),
@@ -3297,6 +3310,7 @@ const parallel = createParallelHost({
       worktreeHome: managedWorktreeHome,
       permissionHome: () => permissionHost.home,
       modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
+      sandbox: scheduleSandboxFacts,
     }, item, run, lanes, approvalWaitMs),
   },
 });
