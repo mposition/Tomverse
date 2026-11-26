@@ -107,6 +107,17 @@ test("an already ended subscription is not cancelled again", async () => {
   assert.equal(state.cancels.length, 0);
 });
 
+test("Stripe requests inside the lock share one budget that ends before the transaction", async () => {
+  const { stripeLockBudget } = await import(mod("lib/deletionCancellation.ts"));
+  let clock = 0;
+  const budget = stripeLockBudget(15_000, () => clock);
+  assert.deepEqual(budget(), { timeout: 8_000 });
+  clock = 8_000; // the first request used its whole allowance
+  assert.deepEqual(budget(), { timeout: 7_000 });
+  clock = 15_000; // a third request never outlives the lock
+  assert.throws(() => budget(), /budget/);
+});
+
 test("a Stripe failure throws so the webhook answers 500 and the draft waits for redelivery", async () => {
   reset({ failCancel: true });
   await assert.rejects(call(), /timeout/);

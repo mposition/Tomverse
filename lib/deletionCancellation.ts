@@ -5,14 +5,29 @@ import { getStripe } from "@/lib/stripe";
 
 const RENEWING_STATUSES = new Set(["active", "trialing", "past_due"]);
 /**
- * Each Stripe request gives up well inside the transaction, so the lock is
- * never released while this call still waits on Stripe. A request that gave up
- * may still be applied by Stripe afterwards; that residue only ever errs toward
- * the cancellation (no charge), and the customer sees it in Settings > Plan and
- * can turn renewal back on (docs/policy/plan-change.md section 10).
+ * Every Stripe request inside the lock draws on one budget that ends well
+ * before the transaction does, so the lock is never released while this call
+ * still waits on Stripe -- however many requests it makes and however slow the
+ * first ones were. A request that gave up may still be applied by Stripe
+ * afterwards; that residue only ever errs toward the cancellation (no charge),
+ * and the customer sees it in Settings > Plan (docs/policy/plan-change.md
+ * section 10).
  */
 const STRIPE_REQUEST_TIMEOUT_MS = 8_000;
+const STRIPE_BUDGET_MS = 15_000;
 const TRANSACTION_TIMEOUT_MS = 20_000;
+
+/** Request options for the next Stripe call, or a throw once the budget is spent. */
+export function stripeLockBudget(budgetMs = STRIPE_BUDGET_MS, now: () => number = Date.now) {
+  const deadline = now() + budgetMs;
+  return () => {
+    const remaining = deadline - now();
+    if (remaining <= 0) {
+      throw new Error("Stripe request budget inside the account lock is spent.");
+    }
+    return { timeout: Math.min(STRIPE_REQUEST_TIMEOUT_MS, remaining) };
+  };
+}
 
 export type DeletionCancellationOutcome = {
   /** The account was scheduled for deletion when the row lock was taken. */
@@ -41,6 +56,8 @@ export async function keepDeletionCancellation(
 ): Promise<DeletionCancellationOutcome> {
   return prisma.$transaction(
     async (tx) => {
+      // Started with the transaction, so waiting for the row lock counts too.
+      const budget = stripeLockBudget();
       const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "User"
         WHERE "stripeSubscriptionId" = ${subscriptionId}
@@ -49,16 +66,14 @@ export async function keepDeletionCancellation(
       if (rows.length === 0) return { pendingDeletion: false, cancelled: false };
 
       const stripe = getStripe();
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, {
-        timeout: STRIPE_REQUEST_TIMEOUT_MS,
-      });
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, budget());
       if (subscription.cancel_at_period_end || !RENEWING_STATUSES.has(subscription.status)) {
         return { pendingDeletion: true, cancelled: false };
       }
       await stripe.subscriptions.update(
         subscriptionId,
         { cancel_at_period_end: true },
-        { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+        budget()
       );
       console.warn("billing.subscription.deletion_cancellation_restored", {
         userId: rows[0]!.id,
@@ -104,6 +119,8 @@ export async function stopDeletionPendingRenewal({
 }): Promise<DeletionRenewalOutcome> {
   return prisma.$transaction(
     async (tx) => {
+      // Started with the transaction, so waiting for the row lock counts too.
+      const budget = stripeLockBudget();
       const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "User"
         WHERE "stripeSubscriptionId" = ${subscriptionId}
@@ -114,9 +131,7 @@ export async function stopDeletionPendingRenewal({
       }
 
       const stripe = getStripe();
-      const invoice = await stripe.invoices.retrieve(invoiceId, {}, {
-        timeout: STRIPE_REQUEST_TIMEOUT_MS,
-      });
+      const invoice = await stripe.invoices.retrieve(invoiceId, {}, budget());
       const invoiceFinalized = invoice.status !== "draft";
       // A renewal that was already paid is a refund for a person to decide,
       // not something to cancel over: ending the subscription now would take
@@ -124,16 +139,14 @@ export async function stopDeletionPendingRenewal({
       if (invoice.status === "paid") {
         return { pendingDeletion: true, cancelled: false, invoiceFinalized };
       }
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, {
-        timeout: STRIPE_REQUEST_TIMEOUT_MS,
-      });
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId, {}, budget());
       if (subscription.status === "canceled") {
         return { pendingDeletion: true, cancelled: false, invoiceFinalized };
       }
       await stripe.subscriptions.cancel(
         subscriptionId,
         { prorate: false, invoice_now: false },
-        { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+        budget()
       );
       console.warn("billing.subscription.deletion_renewal_stopped", {
         userId: rows[0]!.id,
