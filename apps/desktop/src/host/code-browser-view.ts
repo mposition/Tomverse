@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { session, WebContentsView, type BrowserWindow } from "electron";
-import { loopbackBrowserUrl, webHostKey, type BrowserCommand, type BrowserKind, type BrowserState } from "../browser-contract";
+import { loopbackBrowserUrl, onApprovedSite, type BrowserCommand, type BrowserKind, type BrowserState } from "../browser-contract";
 import { allowsSubresource, linkViewUrl } from "../web-view-contract";
 import { createBrowserDriver } from "./code-browser-driver";
 import { createResolvedHostGate, gatedRequestFilter } from "./resolved-host-gate";
@@ -46,8 +46,9 @@ export function createCodeBrowserView(owner: BrowserWindow, target: { kind: Brow
     if (!linkViewUrl(address)) return false;
     const limit = limitHosts();
     if (!limit) return true;
-    const allowed = limit.has(webHostKey(new URL(address)));
-    if (!allowed) blockedHost = new URL(address).hostname;
+    // The same rule as the agent's own navigation: an approved name on the standard port, never another port of it.
+    const allowed = onApprovedSite(limit, address);
+    if (!allowed) blockedHost = new URL(address).host;
     return allowed;
   };
   const addresses = web ? createResolvedHostGate((host) => isolated.resolveHost(host)) : null;

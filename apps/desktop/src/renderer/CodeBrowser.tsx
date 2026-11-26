@@ -166,7 +166,7 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
           send({ type: "open", url: url.href, tab });
         }
       }}>
-        <input type="url" spellCheck={false} aria-label={address} placeholder="https://example.com, localhost:3000" value={draft}
+        <input type="text" inputMode="url" autoCapitalize="off" autoComplete="off" spellCheck={false} aria-label={address} placeholder="https://example.com, localhost:3000" value={draft}
           aria-invalid={invalidUrl || undefined} onChange={(event) => { changeAddress(event.currentTarget.value); setInvalidTab(undefined); }} />
       </form>
       <button type="button" className="icon" aria-label={focusPage} disabled={!state?.url || state?.failed}

@@ -71,6 +71,12 @@ export function agentWebUrl(value: string): URL | null {
   return target;
 }
 
+/** Whether an address is a page the agent may be on: a public https page on the standard port of a site it was given. */
+export function onApprovedSite(hosts: ReadonlySet<string>, address: string): boolean {
+  const target = agentWebUrl(address);
+  return target !== null && hosts.has(webHostKey(target));
+}
+
 export function loopbackBrowserUrl(value: string, origin?: string): URL | null {
   try {
     const target = new URL(value);

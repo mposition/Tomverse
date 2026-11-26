@@ -97,6 +97,8 @@ export function createBrowserAgentBridge(deps: BridgeDeps) {
     }
     const view = agent && deps.tab(agent.tab);
     if (!view) return fail("The browser tab was closed. Open the page again with browser_navigate.");
+    // The second switch is read on every request: once it is off, a public page is not read or acted on, whoever held the tab meanwhile.
+    if (view.kind === "web" && !deps.webEnabled()) return fail("Public websites are turned off for the agent. Only a local page can be used.");
     // A web tab the person moved on (or a page that moved by itself) is on a site the agent was not given: nothing is read or done there.
     if (!agentMayUsePage(view.kind === "web" ? agent!.hosts : undefined, view.driver.where().url)) {
       return fail("The tab is no longer on a site you opened for this task. Open the page again with browser_navigate.");
@@ -120,6 +122,9 @@ export function createBrowserAgentBridge(deps: BridgeDeps) {
     hostsFor(tab: string): ReadonlySet<string> | null {
       return agent?.tab === tab && agent.control === "active" && agent.hosts.size > 0 ? agent.hosts : null;
     },
+
+    /** The tab the agent opened, whoever is steering it right now. */
+    agentTab(): string | undefined { return agent?.tab; },
 
     /** The agent's tab when it belongs to another task or scope than the current one (the host closes it); the person's own tabs stay. */
     dropStale(): string | undefined {

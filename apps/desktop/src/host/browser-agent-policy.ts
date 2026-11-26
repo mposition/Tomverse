@@ -1,4 +1,4 @@
-import { agentWebUrl, loopbackBrowserUrl, webHostKey, type BrowserKind } from "../browser-contract";
+import { agentWebUrl, loopbackBrowserUrl, onApprovedSite, type BrowserKind } from "../browser-contract";
 
 /**
  * The decisions the host takes before the agent touches the browser, kept apart from Electron so they can be tested. The agent never
@@ -66,7 +66,7 @@ export function agentNavigateTarget(value: string, options: { web?: boolean } = 
  */
 export function agentMayUsePage(approvedHosts: ReadonlySet<string> | undefined, pageUrl: string): boolean {
   if (!approvedHosts) return true;
-  try { return approvedHosts.has(webHostKey(new URL(pageUrl))); } catch { return false; }
+  return onApprovedSite(approvedHosts, pageUrl);
 }
 
 /** A click or typing is bound to the site the person approved: the page must still be on it. */

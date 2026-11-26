@@ -385,6 +385,9 @@ test("a tab of the agent on a public site is used only on the sites the person a
   assert.equal(agentMayUsePage(hosts, "https://www.example.com/"), false, "another name is another site");
   assert.equal(agentMayUsePage(hosts, "https://example.com.evil.test/"), false);
   assert.equal(agentMayUsePage(hosts, "not a url"), false);
+  assert.equal(agentMayUsePage(hosts, "https://example.com:8443/"), false, "another port of an approved name is not the approved site");
+  assert.equal(agentMayUsePage(hosts, "https://example.com:443/a"), true);
+  assert.equal(agentMayUsePage(hosts, "http://example.com/"), false);
   assert.equal(agentMayUsePage(undefined, "http://localhost:3000/"), true, "a local tab is pinned to its origin by the tab itself");
 });
 
@@ -417,6 +420,21 @@ test("the bridge opens a public site only with the switch on, approves its host 
   assert.equal(h.bridge.hostsFor(tab!), null, "a tab the person took is not limited");
   await h.bridge.command({ type: "agent-resume", tab: tab! });
   assert.notEqual(h.bridge.hostsFor(tab!), null);
+});
+
+test("turning the public-site switch off ends the agent's use of a web page, also after the person took the tab and gave it back", async () => {
+  const options = { web: true };
+  const h = harness(options);
+  assert.equal((await h.ask({ tool: "navigate", url: "https://example.com/" }))?.status, "ok");
+  const [tab] = [...h.tabs.keys()] as string[];
+  await h.bridge.command({ type: "agent-stop", tab: tab! });
+  assert.equal(h.bridge.agentTab(), tab, "the tab is still the agent's while the person steers it");
+  options.web = false;
+  await h.bridge.command({ type: "agent-resume", tab: tab! });
+  for (const request of [{ tool: "read", mode: "text" }, { tool: "console", clear: true }, { tool: "screenshot" },
+    { tool: "click", selector: "#a", origin: "https://example.com" }]) {
+    assert.match(((await h.ask(request)) as { message: string }).message, /turned off for the agent/, JSON.stringify(request));
+  }
 });
 
 test("the agent's tab ends with its task; the person's other tabs are not the bridge's", async () => {

@@ -2714,8 +2714,10 @@ async function runCodeBrowser(value: unknown) {
     browserWebSwitch.set(command.enabled);
     // The agent's tab on a public site ends with the permission; a local page of its own stays.
     if (!command.enabled) {
+      // Also while the person is steering it: taking the tab back does not keep it open for the agent.
+      const held = browserAgent.agentTab();
       for (const [id, view] of codeBrowser?.tabs ?? []) {
-        if (view.kind !== "web" || !browserAgent.hostsFor(id)) continue;
+        if (id !== held || view.kind !== "web") continue;
         closeCodeBrowserTab(id);
         browserAgent.reset();
       }
