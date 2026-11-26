@@ -69,6 +69,16 @@ export const REVIEW_PRODUCT_KEY: ConversationProductKey = "review";
 export const STUDIO_PRODUCT_KEY: ConversationProductKey = "studio";
 
 /**
+ * A Studio tool run, as a conversation filter. A run is a one-off: its result is shown and saved in the
+ * tool and nothing resumes it, so it is not part of the conversation history. It still has a conversation
+ * row, which the image tables hang from, and is told apart by the request message Studio writes into it
+ * (lib/studioImageReference.ts). Nothing else writes a message into an image conversation: the image
+ * workspace keeps its prompts on the generation rows. Kept here, free of server imports, so the list route
+ * and its tests can name it.
+ */
+export const STUDIO_RUN_CONVERSATION = { kind: "image", messages: { some: {} } } as const;
+
+/**
  * The modality each product runs in.
  *
  * Image generation is Studio; Chat and Review are both `kind: "chat"`. Held

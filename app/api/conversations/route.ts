@@ -28,8 +28,7 @@ import {
 } from "@/lib/conversationLock";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
-import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
-import { STUDIO_RUN_CONVERSATION } from "@/lib/studioImageReference";
+import { REVIEW_PRODUCT_KEY, STUDIO_RUN_CONVERSATION } from "@/lib/conversationProduct";
 
 
 const safeParse = (data: unknown, fallback: string[]) => {

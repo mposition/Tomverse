@@ -30,7 +30,8 @@ import { imageAssetR2Key } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { accountAttachmentPrefix, MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
-import { bindStudioImageUpload, recordStudioRequest, STUDIO_RUN_CONVERSATION } from "@/lib/studioImageReference";
+import { STUDIO_RUN_CONVERSATION } from "@/lib/conversationProduct";
+import { bindStudioImageUpload, recordStudioRequest } from "@/lib/studioImageReference";
 
 const resetImageTestData = () =>
   prisma.$executeRawUnsafe(`
