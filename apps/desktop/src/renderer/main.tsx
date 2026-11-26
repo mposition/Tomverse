@@ -1193,6 +1193,7 @@ ${text}` : text;
           imageCapability={imageCapability} onModelImage={openImageModel}
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.deviceFixtureAvailable === true}
+          composerTools={snapshot?.capabilities?.composerTools} deviceLocation={snapshot?.chatLocationAvailable === true}
           onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">

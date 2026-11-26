@@ -387,6 +387,17 @@ export function desktopPluginsEnabled() {
     process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED === "true";
 }
 
+const DESKTOP_CHAT_TURN_FIELDS: ReadonlySet<string> = new Set(["messages", "modelId", "conversationId", "assistantMessageId",
+  "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth", "currentLocation"]);
+
+/**
+ * Whether the body of a Desktop turn may carry this field. The device position is the person's own choice for each
+ * message ("Current location"), as on the web. A chosen plugin needs the plugins switch; the route keeps it to Chat.
+ */
+export function desktopChatTurnField(key: string): boolean {
+  return DESKTOP_CHAT_TURN_FIELDS.has(key) || (key === "mcpConnectionId" && desktopPluginsEnabled());
+}
+
 export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();

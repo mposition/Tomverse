@@ -145,6 +145,59 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
       await column(grok!).getByRole("button", { name: /^Resume panel \d, Grok 4\.5/ }).click();
       await expect(desktop.locator(".review-setup .review-chip")).toHaveCount(3);
     });
+
+    await t.test('the "+" menu turns web search on for the Review and each model gets the position with the next question', async () => {
+      // The device's own position service is replaced: one read, one fixed answer.
+      await desktop.evaluate(`void Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+        getCurrentPosition(done) { done({ coords: { latitude: -27.46551, longitude: 153.025879, accuracy: 23 }, timestamp: Date.now() }); },
+      } })`);
+      const composer = desktop.locator(".review-composer-slot form");
+      const before = await columnsState(app);
+      await composer.locator(".composer-tools > summary").click();
+      const search = composer.getByTestId("tools-web-search-row");
+      await expect(search).toHaveAttribute("aria-checked", "false");
+      await search.click();
+      await expect(search).toHaveAttribute("aria-checked", "true");
+      const position = composer.getByTestId("tools-location-row");
+      await position.click();
+      await expect(position).toHaveAttribute("aria-checked", "true");
+      await desktop.keyboard.press("Escape");
+      await expect(composer.getByTestId("chat-location-status")).toBeVisible();
+      assert.equal((await columnsState(app)).updates.length, before.updates.length, "nothing is saved until a question is sent");
+
+      await desktop.getByRole("textbox", { name: "Review question" }).fill("What is open near me right now?");
+      await desktop.getByRole("button", { name: "Send Review question" }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(before.dispatches.length + 3);
+      const sent = await columnsState(app);
+      assert.equal(sent.updates.at(-1)!.webSearchMode, "always");
+      assert.equal(sent.webSearchMode, "always");
+      for (const dispatch of sent.dispatches.slice(-3)) {
+        assert.equal(dispatch.webSearchMode, "always", dispatch.modelId);
+        assert.deepEqual({ ...(dispatch.currentLocation as object), timestamp: 0 },
+          { latitude: -27.466, longitude: 153.026, accuracy: 150, timestamp: 0 }, dispatch.modelId);
+      }
+      await expect(desktop.getByRole("textbox", { name: "Review question" })).toHaveValue("");
+      await composer.locator(".composer-tools > summary").click();
+      await expect(search).toHaveAttribute("aria-checked", "true");
+      await desktop.keyboard.press("Escape");
+
+      // A question for one model carries the position too and changes nothing about the Review.
+      await column(gemini!).getByRole("textbox", { name: `Ask only ${gemini!.name}` }).fill("And the closest one?");
+      await column(gemini!).getByRole("button", { name: `Send only to this model · ${gemini!.name}` }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(sent.dispatches.length + 1);
+      const alone = await columnsState(app);
+      assert.equal(alone.dispatches.at(-1)!.modelId, gemini!.id);
+      assert.equal((alone.dispatches.at(-1)!.currentLocation as { accuracy: number }).accuracy, 150);
+      assert.equal(alone.updates.length, sent.updates.length);
+
+      // Switched off, the next question carries no position.
+      await composer.getByTestId("chat-location-disable").click();
+      await expect(composer.getByTestId("chat-location-status")).toHaveCount(0);
+      await column(gemini!).getByRole("textbox", { name: `Ask only ${gemini!.name}` }).fill("Thanks.");
+      await column(gemini!).getByRole("button", { name: `Send only to this model · ${gemini!.name}` }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(alone.dispatches.length + 1);
+      assert.equal((await columnsState(app)).dispatches.at(-1)!.currentLocation, undefined);
+    });
   } finally {
     await closeReviewColumns(session);
   }

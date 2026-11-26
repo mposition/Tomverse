@@ -36,6 +36,26 @@ test("Desktop saves the visible replacement for a retired manual model", async (
   assert.deepEqual(updates, [{ selectionMode: "manual", selectedModels: [modelId] }]);
 });
 
+test("a Review saves the \"+\" menu's choices with its models, and alone when the models did not change", async (t) => {
+  const updates: unknown[] = [];
+  t.mock.method(globalThis, "fetch", async (url: URL, request: RequestInit) => {
+    assert.equal(url.pathname, "/api/conversations/owned-chat");
+    assert.equal(request.method, "PATCH");
+    updates.push(JSON.parse(String(request.body)));
+    return Response.json({ id: current.id });
+  });
+  const signal = new AbortController().signal;
+  const api = desktopChatApi("fixture-bearer", signal, origin);
+  await api.configureReview(current, [modelId], signal);
+  await api.configureReview(current, [modelId], signal, {});
+  await api.configureReview(current, [modelId], signal, { webSearchMode: "always" });
+  await api.configureReview(current, [modelId, "gemini-4-argon"], signal, { memoryMode: "off", assistantProfileId: null });
+  await api.configureReview(current, ["gemini-4-argon"], signal);
+  assert.deepEqual(updates, [{ webSearchMode: "always" },
+    { selectedModels: [modelId, "gemini-4-argon"], selectionMode: "manual", memoryMode: "off", assistantProfileId: null },
+    { selectedModels: ["gemini-4-argon"], selectionMode: "manual" }]);
+});
+
 test("Desktop prepares the saved Chat context and retries one stale refusal without changing turn identity", async (t) => {
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   const responses = [Response.json({ ok: true, contextBundle: "first-bundle" }), stale(),
@@ -61,7 +81,7 @@ test("Desktop prepares the saved Chat context and retries one stale refusal with
   assert.equal(progress.at(-1), "A test answer");
 });
 
-test("Desktop shares only a fresh coarse location with the selected Chat stream", async (t) => {
+test("Desktop shares only a fresh coarse location, with the selected Chat stream and with each model of a Review", async (t) => {
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   t.mock.method(globalThis, "fetch", async (url: URL, request: RequestInit) => {
     calls.push({ path: url.pathname, body: JSON.parse(String(request.body)) });
@@ -77,8 +97,10 @@ test("Desktop shares only a fresh coarse location with the selected Chat stream"
   await api.stream(current, { ...input, review: true, currentLocation: location },
     "saved-question", "review-answer", signal, () => {});
   assert.deepEqual(calls.map(({ path }) => path), ["/api/chat/context", "/api/chat", "/api/chat/context", "/api/chat", "/api/chat"]);
-  assert.deepEqual(calls[1]?.body.currentLocation, { latitude: -27.466, longitude: 153.026, accuracy: 150, timestamp: now });
-  assert.deepEqual([0, 2, 3, 4].map((index) => calls[index]?.body.currentLocation), [undefined, undefined, undefined, undefined]);
+  const coarse = { latitude: -27.466, longitude: 153.026, accuracy: 150, timestamp: now };
+  assert.deepEqual(calls[1]?.body.currentLocation, coarse);
+  assert.deepEqual(calls[4]?.body.currentLocation, coarse);
+  assert.deepEqual([0, 2, 3].map((index) => calls[index]?.body.currentLocation), [undefined, undefined, undefined]);
 });
 
 test("Desktop leaves a second stale refusal unresolved and keeps Review on its shared admission", async (t) => {

@@ -337,10 +337,11 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
         { title: Array.from(prompt.replace(/\s+/g, " ").trim()).slice(0, 80).join("") || "New review", selectedModels: models }, { turn });
       return id;
     },
-    async configureReview(current: ChatConversation, models: string[], turn: AbortSignal) {
-      if (current.selectedModels.join("\n") === models.join("\n")) return;
+    async configureReview(current: ChatConversation, models: string[], turn: AbortSignal, tools?: ReviewTurnInput["tools"]) {
+      const changed = current.selectedModels.join("\n") !== models.join("\n");
+      if (!changed && !(tools && Object.keys(tools).length)) return;
       await request(pathFor(current.id), z.object({ id: chatId }), "PATCH",
-        { selectedModels: models, selectionMode: "manual" }, { turn });
+        { ...(changed ? { selectedModels: models, selectionMode: "manual" } : {}), ...tools }, { turn });
     },
     async admitReview(current: ChatConversation, input: ReviewTurnInput, modelIds: string[], turn: AbortSignal, attachments: readonly AttachmentUpload[]) {
       return request(DESKTOP_REVIEW_PREFLIGHT, reviewAdmission, "POST", {
@@ -396,7 +397,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       const watchdog = createChatLivenessWatchdog({ onExpire: () => timeout.abort() });
       try {
         const stream = (bundle?: string | null) => {
-          const currentLocation = input.review ? null : parseChatLocation(input.currentLocation);
+          const currentLocation = parseChatLocation(input.currentLocation);
           return send(DESKTOP_CHAT_TURN, "POST", {
             ...(currentLocation ? { currentLocation } : {}),
             conversationId: current.id, assistantMessageId: assistantId, sourceUserMessageId: sourceId,

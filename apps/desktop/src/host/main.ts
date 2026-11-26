@@ -3097,9 +3097,11 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
 async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   const attachments = resolveStagedAttachments(input.attachmentUploadIds);
   const capability = state.capabilities?.review;
-  if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy)) {
+  if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy) ||
+      (input.tools && !state.capabilities?.composerTools)) {
     throw new Error("The selected Review options are unavailable.");
   }
+  const currentLocation = chatLocationAllowed() ? input.currentLocation : undefined;
   return withChatAccount(async (api) => {
     const window = mainWindow;
     const turn = new AbortController();
@@ -3147,8 +3149,11 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
         }
         if (!id) {
           id = await api.createReview(modelIds, input.prompt, signal);
+          if (input.tools && Object.keys(input.tools).length) {
+            await api.configureReview(await api.conversation({ id, product: "review" }, true, signal), modelIds, signal, input.tools);
+          }
         } else if (current && !only) {
-          await api.configureReview(current, modelIds, signal);
+          await api.configureReview(current, modelIds, signal, input.tools);
         }
         current = await api.conversation({ id, product: "review" }, true, signal);
         if (!only && current.selectedModels.length !== modelIds.length || !modelIds.every((modelId) => current!.selectedModels.includes(modelId))) {
@@ -3165,7 +3170,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
           const assistant = { id: randomUUID(), text: "" };
           responses.set(modelId, assistant);
           let lastProgressAt = 0;
-          await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission },
+          await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, currentLocation },
             sourceId, assistant.id, signal, (text) => {
               assistant.text = text;
               const now = Date.now();
