@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
+import type { CodeSandboxInput, CodeSandboxView } from "./code-sandbox-contract";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
 import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
 import type { AssistantImportAction, AssistantImportInput, AssistantImportResult } from "./assistant-import-contract";
@@ -9,25 +10,33 @@ import type {
 } from "./chat-contract";
 import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, ImageHistory, ImageRequest } from "./images-contract";
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
+import type { GitApprovalView, GitCommand, GitResultMap } from "./git-actions-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
-import type { BrowserCommand, BrowserState } from "./browser-contract";
+import type { BrowserCommand, BrowserState, ElementPick } from "./browser-contract";
+import type { TerminalCommand, TerminalEvent, TerminalInfo, TerminalListing, TerminalReplayResult } from "./terminal-contract";
 import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
+import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
+import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
+import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
 import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
+import type { CodeOrchestration } from "./orchestrate-contract";
 import type { Language } from "../../../lib/language";
 import type { desktopNativeCopy } from "../../../locales/desktopNative";
 import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider,
   type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
+import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
+import type { LaneKind, ParallelCommand, ParallelView, ScheduleCommand, ScheduleResult, ScheduleView } from "./parallel-contract";
 
 type DesktopDetail = keyof typeof desktopNativeCopy.en;
 
@@ -69,6 +78,8 @@ export const startInput = z.object({
   executionMode: codeExecutionMode.optional(),
   limits: codeLimitProfile.optional(),
   goal: z.boolean().optional(),
+  /** Subagent orchestration for this task (parallel subtasks with write scopes and verification). Off unless the person turned it on. */
+  orchestrate: z.boolean().optional(),
   permissionProfile: codePermissionProfile.optional(),
   saveHistory: z.boolean().optional(),
   handoffId: z.uuid().optional(),
@@ -111,6 +122,30 @@ export const codeMemoryInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set-enabled"), enabled: z.boolean() }).strict(),
 ]);
 export type CodeMemoryInput = z.infer<typeof codeMemoryInput>;
+/** Skills, commands and agent definitions of the open project and the user's own folders, and the import from Claude Code / Codex. */
+export const codeExtensionsInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("list") }).strict(),
+  z.object({ action: z.literal("import-preview") }).strict(),
+  z.object({ action: z.literal("import-apply"), ids: z.array(z.string().regex(/^i-[0-9a-f]{12}$/)).min(1).max(50) }).strict(),
+]);
+export type CodeExtensionsInput = z.infer<typeof codeExtensionsInput>;
+export type CodeExtensionsImportItem = {
+  id: string; kind: "instructions" | "skill" | "command" | "agent" | "mcp"; tool: "claude" | "codex" | "agents"; name: string; source: string;
+  scope: "project" | "user"; status: "in-use" | "importable" | "imported" | "conflict" | "unsupported"; detail?: string;
+  /** MCP servers: the kind of server and what it runs, with every secret-looking value hidden. */
+  mcp?: { transport: "stdio" | "http"; summary: string; values: Array<{ key: string; value: string }> };
+};
+export type CodeExtensionsView = {
+  project: boolean;
+  skills: Array<{ name: string; description: string; source: string; scope: "project" | "user"; implicit: boolean; ignored: string[] }>;
+  commands: Array<{ name: string; description: string; argumentHint?: string; source: string; scope: "project" | "user"; ignored: string[] }>;
+  agents: Array<{ name: string; description: string; source: string; scope: "project" | "user"; base: "explore" | "worker"; model?: string; ignored: string[] }>;
+  /** What the composer's / list offers besides the built-in commands. */
+  slash: Array<{ name: string; kind: "skill" | "command"; description: string; argumentHint?: string }>;
+  issues: string[];
+  importItems?: CodeExtensionsImportItem[];
+  imported?: { written: string[]; skipped: number };
+};
 /** The agent's notes about the open project, and whether Code keeps notes at all. */
 export type CodeMemoryView = { enabled: boolean; project: boolean; entries: Array<{ id: string; text: string; at: string }> };
 export const decisions = z.object({
@@ -289,6 +324,8 @@ export type Task = {
   canRewind?: true;
   /** Subagents the model started in this task, newest last. */
   subagents?: CodeSubagent[];
+  /** Orchestration: the limits this task runs with and the subtasks of its delegate calls. Absent when it is off. */
+  orchestration?: CodeOrchestration;
   /** The saved limit profile when it is not the standard one. */
   limits?: Exclude<CodeLimitProfile, "standard">;
   goal?: CodeGoalState;
@@ -313,7 +350,11 @@ export type CodeKeyState = ({ stage: "missing" | "checking" } | { stage: "connec
 export type Snapshot = {
   codeGitWorkspace?: CodeGitWorkspace;
   codeBrowserAvailable?: boolean;
+  /** Terminals: available when a project is open, enabled when the person turned them on. They belong to the open task. */
+  codeTerminal?: { available: boolean; enabled: boolean };
   codeBrowserInspection?: boolean;
+  /** The agent's browser tools (the browser_* tools) are on: the person's switch, or a test fixture that turned them on. */
+  codeBrowserAgent?: boolean;
   deviceFixtureAvailable?: boolean;
   root: string | null;
   project: string | null;
@@ -332,6 +373,8 @@ export type Snapshot = {
   codeNotifications: { available: boolean; enabled: boolean };
   codeExecutionPreference: CodeExecutionMode;
   projectPermissionProfile?: CodePermissionProfile;
+  /** The permission mode and the allow, ask and deny rules (permission-contract.ts). */
+  permissions?: PermissionsView;
   codeFallback: { scope: string; settings: CodeFallbackSettings } | null;
   codeFallbackCliModels: CodeFallbackCliModels;
   cliPaths: CliPaths;
@@ -359,9 +402,15 @@ export type Snapshot = {
     billing?: boolean;
   } | null;
   codeKey: CodeKeyState;
+  /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
+  parallel?: ParallelView;
+  /** Scheduled runs: the schedules, their run records and what the schedule form needs to know. */
+  schedules?: ScheduleView;
 };
 
 export type ApprovalRequest = {
+  /** Which task asked, when it is not the open one: set by the main process, never by the task. */
+  task?: { title: string; folder: string; kind: LaneKind };
   language?: Language;
   id: string;
   root: string;
@@ -371,7 +420,15 @@ export type ApprovalRequest = {
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
+  /** A click or typing in the local browser tab: the site, the page, the element and the text the agent would type. */
+  browser?: { action: "click" | "type"; origin: string; url: string; selector: string; text?: string; clear?: boolean; submit?: boolean };
+  /** A call of a tool of an MCP server on this computer: which server and tool, where the server is defined, and the arguments. */
+  mcp?: { server: string; tool: string; scope: "user" | "project"; args: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
+  /** The subagent or subtask this request is for: a worker's change or command, asked one at a time. */
+  origin?: { id: string; title: string };
+  /** A commit or push the main process asks the person to approve: built from the repository, answered only in the approval window. */
+  git?: GitApprovalView;
 };
 
 export type DesktopApi = {
@@ -381,12 +438,17 @@ export type DesktopApi = {
   transcribeDictation: (input: DictationClip) => Promise<DictationReply>;
   subscribeDictationStop: (listener: () => void) => () => void;
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
+  git<Type extends GitCommand["type"]>(command: Extract<GitCommand, { type: Type }>): Promise<GitResultMap[Type]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
+  subscribeCodeBrowserPick: (listener: (pick: ElementPick) => void) => () => void;
+  codeTerminal: (command: TerminalCommand) => Promise<TerminalListing | TerminalInfo | TerminalReplayResult | void>;
+  subscribeCodeTerminal: (listener: (event: TerminalEvent) => void) => () => void;
   webView: (command: WebViewCommand) => Promise<void>;
   subscribeWebView: (listener: (state: WebViewState | null) => void) => () => void;
   state(): Promise<Snapshot>;
   setProjectPermissionProfile(profile: CodePermissionProfile): Promise<boolean>;
+  permissions(command: PermissionCommand): Promise<PermissionResult>;
   setLanguage(language: Language): Promise<void>;
   setCodeExecutionPreference(mode: CodeExecutionMode): Promise<void>;
   updateCodeFallback(input: CodeFallbackUpdate): Promise<void>;
@@ -410,7 +472,16 @@ export type DesktopApi = {
   followUp(id: FollowUpTarget, text: string): Promise<boolean>;
   queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
   stopBackground(id: string, handle: string): Promise<boolean>;
+  stopSubagents(id: string, subtask?: string): Promise<boolean>;
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
+  codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
+  localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
+  codeSandbox(input: CodeSandboxInput): Promise<CodeSandboxView>;
+  plugins(command: PluginsCommand): Promise<PluginsView>;
+  /** Starts a task next to the open one (its own runtime process), and acts on the tasks in the activity list. */
+  startParallel(input: StartInput): Promise<void>;
+  parallel(command: ParallelCommand): Promise<boolean>;
+  schedules(command: ScheduleCommand): Promise<ScheduleResult>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;
@@ -418,6 +489,8 @@ export type DesktopApi = {
   moreHistory(): Promise<void>;
   readChange(id: string): Promise<ChangeInspection | null>;
   undoChange(id: string): Promise<UndoChangeResult>;
+  /** The review panel: the diff of a scope, taking one hunk back, and asking other models to review it. */
+  review<Action extends ReviewAction>(input: Extract<ReviewInput, { action: Action }>): Promise<ReviewOutcome<Action>>;
   rewindTurn(taskId: string, turn: number): Promise<RewindTurnResult>;
   forkTurn(taskId: string, turn: number): Promise<ForkTurnResult>;
   readCommand(id: string): Promise<CommandInspection | null>;

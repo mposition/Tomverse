@@ -1,0 +1,18 @@
+.composer:has(.slash-menu) { position: relative; }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 20; display: grid; gap: 2px; max-height: 260px; margin: 0; padding: 6px; overflow: auto; list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgb(10 16 32 / 18%); }
+.slash-menu li { display: block; }
+.slash-menu button { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; gap: 4px 10px; width: 100%; padding: 6px 8px; text-align: left; background: transparent; border: 0; border-radius: 8px; }
+.slash-menu button.active, .slash-menu button:hover { background: var(--raised); }
+.slash-name { font-family: var(--font-code); font-size: 13px; }
+.slash-kind { color: var(--muted); font-size: 12px; }
+.slash-menu small { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.code-extensions, .code-extensions-import { display: grid; gap: 8px; padding-block: 16px; border-bottom: 1px solid var(--line); }
+.code-extensions-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.code-extensions-head small, .code-extensions small { display: block; margin-top: 2px; color: var(--muted); overflow-wrap: anywhere; }
+.code-extensions h4 { margin: 8px 0 4px; font-size: 13px; }
+.code-extensions ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.code-extensions li { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.code-extensions li > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.code-extensions code { overflow-wrap: anywhere; font-family: var(--font-code); font-size: 12px; }
+.code-extensions-status { color: var(--muted); font-size: 12px; }
+.code-extensions-status[data-status="importable"] { color: var(--action); }

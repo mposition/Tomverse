@@ -19,6 +19,16 @@ import { CLI_VERSION } from "./version.js";
 import { gitAvailable, normalizeRoot, PathError, ripgrepAvailable, same, Workspace } from "./workspace.js";
 
 import { memoryFileFor, ProjectMemory } from "./memory.js";
+import { PERMISSIONS_HELP, PermissionsUsageError, permissionsCommand } from "./permission-cli.js";
+import { PermissionGate } from "./permissions.js";
+import { PermissionRuleStore } from "./permission-rules.js";
+import { discoverExtensions, describeRegistry, expandInvocation, ExtensionError } from "./extensions.js";
+import { startLocalExtensions } from "./local-extensions.js";
+import { extensionsCommand } from "./extensions-cli.js";
+import { normalizeAllowedDomains } from "./net-proxy.js";
+import { createSandboxRuntime, normalizeSandboxSettings, sandboxModes, type SandboxMode, type SandboxRuntime } from "./sandbox.js";
+import { pluginCommand } from "./plugin-cli.js";
+import { ORCHESTRATION_BOUNDS, describeOrchestration, normalizeOrchestration } from "./runtime.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -38,8 +48,12 @@ Usage:
   tomverse undo <change-id> [--session <id>]
   tomverse doctor [--json]        Checks Node, folder, key and API without a model request
   tomverse trust [folder]         Allow the CLI to work in a folder
-  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory> <value> | unset <key>
+  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory|mcp|hooks|sandbox|sandbox-domains|sandbox-localhost> <value> | unset <key>
   tomverse memory [show|clear]    The notes the agent kept about this folder (clear asks first, or --yes)
+${PERMISSIONS_HELP.map((line) => `  ${line}`).join("\n")}
+  tomverse mcp [list|approve|enable|disable] [name]   MCP servers (mcp.json in the CLI folder, .mcp.json in the project); a project's server needs your approval at a terminal
+  tomverse hooks [list|approve|enable|disable] [n]    Hooks (hooks.json, Claude Code settings.json, the project's .claude/settings.json); a project's hook needs your approval
+  tomverse plugin [list|install|update|remove|enable|disable|marketplace] ...   Plugins (skills, commands, agents, hooks, MCP servers in one folder) and the marketplaces they come from; installing needs you at a terminal, and a plugin's hooks and servers need your approval
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
@@ -80,6 +94,10 @@ const parse = (argv: string[]) =>
             session: { type: "string" },
             turn: { type: "string" },
             yes: { type: "boolean" },
+            project: { type: "boolean" },
+            user: { type: "boolean" },
+            exact: { type: "boolean" },
+            revoke: { type: "boolean" },
             help: { type: "boolean", short: "h" },
             version: { type: "boolean", short: "v" },
         },
@@ -374,6 +392,8 @@ const trust = async (ctx: Context, args: string[]) => {
     return EXIT_CODES.success;
 };
 
+const orchestrationFrom = (config: CliConfig) => normalizeOrchestration({ maxSubagents: config.orchestrateMaxSubagents, maxRequests: config.orchestrateMaxRequests });
+
 const configCommand = async (ctx: Context, args: string[]) => {
     const [sub, key, value] = args;
     const config = { ...ctx.config };
@@ -400,13 +420,36 @@ const configCommand = async (ctx: Context, args: string[]) => {
         else if (key === "memory") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("memory must be on or off.");
             config.memory = value === "true" || value === "on";
+        } else if (key === "agent-models") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("agent-models must be on or off.");
+            config.agentModels = value === "true" || value === "on";
+        } else if (key === "orchestrate") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("orchestrate must be on or off.");
+            config.orchestrate = value === "true" || value === "on";
+            if (config.orchestrate) process.stdout.write(`Orchestration is on for new sessions: ${describeOrchestration(orchestrationFrom(config))}. Change the numbers with orchestrate-max-subagents and orchestrate-max-requests.\n`);
+        } else if (key === "orchestrate-max-subagents" || key === "orchestrate-max-requests") {
+            const number = Number(value);
+            const bounds = key === "orchestrate-max-subagents" ? ORCHESTRATION_BOUNDS.maxSubagents : ORCHESTRATION_BOUNDS.maxRequests;
+            if (!Number.isInteger(number) || number < bounds.min || number > bounds.max) throw new UsageError(`${key} must be a whole number from ${bounds.min} to ${bounds.max}.`);
+            if (key === "orchestrate-max-subagents") config.orchestrateMaxSubagents = number;
+            else config.orchestrateMaxRequests = number;
+        } else if (key === "mcp" || key === "hooks") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError(`${key} must be on or off.`);
+            config[key] = value === "true" || value === "on";
         } else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
-        else throw new UsageError(`Unknown config key '${key}'.`);
+        else if (key === "sandbox") {
+            if (!sandboxModes.includes(value as SandboxMode)) throw new UsageError(`sandbox must be one of: ${sandboxModes.join(", ")}.`);
+            config.sandbox = value;
+        } else if (key === "sandbox-domains") config.sandboxDomains = normalizeAllowedDomains(value.split(","));
+        else if (key === "sandbox-localhost") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("sandbox-localhost must be on or off.");
+            config.sandboxLocalhost = value === "true" || value === "on";
+        } else throw new UsageError(`Unknown config key '${key}'.`);
         writeConfig(config);
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", orchestrate: "orchestrate", "orchestrate-max-subagents": "orchestrateMaxSubagents", "orchestrate-max-requests": "orchestrateMaxRequests", mcp: "mcp", hooks: "hooks", sandbox: "sandbox", "sandbox-domains": "sandboxDomains", "sandbox-localhost": "sandboxLocalhost" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -449,18 +492,64 @@ const pickModel = async (ctx: Context, catalog: CatalogModel[], prompter: Prompt
 
 const exitFor = (outcome: Outcome) => EXIT_CODES[outcome];
 
+/** The operating-system sandbox the config asks for, started for this working folder; null when it is off. One that cannot be built still comes back: it refuses every command. */
+const startSandbox = async (ctx: Context, root: string): Promise<SandboxRuntime | null> => {
+    const settings = normalizeSandboxSettings({ mode: ctx.config.sandbox, allowedDomains: ctx.config.sandboxDomains, allowLocalhost: ctx.config.sandboxLocalhost });
+    const runtime = await createSandboxRuntime({ settings, workspaceRoot: root, stateDir: join(tomverseHome(), "sandbox") });
+    if (!runtime) return null;
+    const { enforcement } = runtime;
+    ctx.output.info(enforcement.available
+        ? `Sandbox ${settings.mode}: writes ${enforcement.writes === "os" ? "limited by the operating system" : "not limited"}, network ${enforcement.network}.`
+        : `Sandbox ${settings.mode} cannot be created here (${enforcement.detail}); commands are refused until it is changed with: tomverse config set sandbox off`);
+    return runtime;
+};
+
 /** The notes kept about a folder, in the CLI's own home next to the sessions. */
 const projectMemory = (ctx: Context, root: string) => new ProjectMemory(memoryFileFor(join(tomverseHome(), "memory"), root), root);
 
-/** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, and project memory unless it is turned off. */
+/** `/name args` of a skill or command from the project or the user's own folders, as the prompt it stands for. Other text comes back as it is; null when the file cannot be read. */
+const withSlashPrompt = (ctx: Context, root: string, text: string): string | null => {
+    if (!text.startsWith("/")) return text;
+    try {
+        const invocation = expandInvocation(root, discoverExtensions(root), text);
+        if (!invocation) return text;
+        ctx.output.info(`Running ${invocation.kind} /${invocation.name} (${invocation.source})${invocation.ignored.length ? `; not applied: ${invocation.ignored.join(", ")}` : ""}.`);
+        return invocation.prompt;
+    } catch (error) {
+        if (!(error instanceof ExtensionError)) throw error;
+        ctx.output.info(error.message);
+        return null;
+    }
+};
+
+/** What a session in a terminal gets besides the basics: reading approved web pages, subfolder instructions, skills and agent definitions, and project memory unless it is turned off. */
 const engineExtras = (ctx: Context, root: string) => ({
+    extensions: discoverExtensions(root),
+    agentModels: ctx.config.agentModels === true,
     web: {},
     backgroundCommands: true,
     images: true,
     subagents: true,
     nestedInstructions: true,
     ...(ctx.config.memory === false ? {} : { memory: projectMemory(ctx, root) }),
+    // The permission rules (tomverse permissions): deny rules refuse, ask rules always ask, allow rules skip the question.
+    permissions: new PermissionGate({ mode: "ask", rules: () => new PermissionRuleStore({ root }).effective(), protectedDirs: [tomverseHome()] }),
 });
+
+/** The MCP servers and hooks of this folder and the user (extensions.ts), unless turned off in the config. Reports what is waiting for approval. */
+const localExtensions = async (ctx: Context, root: string, sessionId: () => string, readOnly: boolean) => {
+    if (ctx.config.mcp === false && ctx.config.hooks === false) return null;
+    const setup = await startLocalExtensions({ root, sessionId, connectServers: !readOnly && ctx.config.mcp !== false });
+    for (const problem of setup.problems) ctx.output.info(`note: ${safeLine(problem)}`);
+    for (const server of setup.mcp.status()) {
+        if (server.state === "pending_approval") ctx.output.info(`MCP server ${safeLine(server.id)} (from this project) is waiting for your approval: tomverse mcp approve ${safeLine(server.id)}`);
+        else if (server.state === "failed" || server.state === "needs_auth") ctx.output.info(`MCP server ${safeLine(server.id)}: ${safeLine(server.detail ?? server.state)}`);
+    }
+    return { close: setup.close, options: {
+        ...(ctx.config.mcp === false ? {} : { mcp: setup.mcp }),
+        ...(ctx.config.hooks === false ? {} : { lifecycleHooks: setup.hooks }),
+    } };
+};
 
 const memoryCommand = async (ctx: Context, args: string[]) => {
     const [sub] = args;
@@ -541,26 +630,33 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
             commandTimeoutMs: positiveInt(ctx.flags["command-timeout"], "command-timeout", DEFAULTS.commandTimeoutSeconds) * 1000,
         }),
         ...(ctx.flags.goal ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
+        ...(ctx.config.orchestrate === true ? { orchestrate: orchestrationFrom(ctx.config) } : {}),
     });
+    if (journal.state.orchestrate) ctx.output.info(`Orchestration: ${describeOrchestration(journal.state.orchestrate)}. Subtasks run in parallel with their own write scopes, are verified, and share these requests with the task's own limit.`);
     if (journal.state.limits.profile === "unlimited") ctx.output.info("Limits: unlimited. A task stops when you stop it, the API refuses a request, or the model is done.");
     if (journal.state.goal) ctx.output.info(`Goal mode: after the model is done, the goal is checked and the task continues until it is verified (at most ${journal.state.goal.maxContinuations} automatic continuations in a row).`);
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");
     const workspace = new Workspace(root);
-    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
+    const extensions = await localExtensions(ctx, workspace.root, () => journal.state.id, journal.state.readOnly);
+    const sandbox = await startSandbox(ctx, workspace.root);
+    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch, sandboxed: sandbox.enforcement.available } : {}) });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
     const removeSigint = installSigint(runner, ctx.output);
     try {
         let outcome: Outcome = "success";
-        if (task) {
-            outcome = await runner.runTask(task, parseEffort(ctx.flags.effort));
+        const first = task ? withSlashPrompt(ctx, root, task) : null;
+        if (task && first !== null) {
+            outcome = await runner.runTask(first, parseEffort(ctx.flags.effort));
             await finalEvent(ctx, runner, gateway, outcome);
         }
         if (interactive) outcome = await repl(ctx, runner, gateway, outcome, prompter?.memory ?? null, task ? "default" : parseEffort(ctx.flags.effort));
         return exitFor(outcome);
     } finally {
         removeSigint();
+        await extensions?.close();
         journal.release();
+        await sandbox?.close();
     }
 };
 
@@ -574,7 +670,12 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         const text = line.trim();
         if (!text) continue;
         if (text === "/help") {
-            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /rewind  take files and conversation back to a turn   /fork [turn]  copy the conversation into a new session   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
+            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /rewind  take files and conversation back to a turn   /fork [turn]  copy the conversation into a new session   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /skills  skills, commands and agents found   /<name> [arguments]  run a skill or command   /exit");
+            continue;
+        }
+        if (text === "/skills") {
+            const lines = describeRegistry(discoverExtensions(runner.journal.state.workspace.root));
+            ctx.output.info(lines.length ? lines.map((line) => safeLine(line)).join("\n") : "No skills, commands or agent definitions found (.claude/, .agents/, .codex/ in this folder or your home).");
             continue;
         }
         if (text === "/diff") {
@@ -640,7 +741,9 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
             ctx.output.info((error as Error).message);
             continue;
         }
-        last = await runner.runTask(text, effort);
+        const prompt = withSlashPrompt(ctx, runner.journal.state.workspace.root, text);
+        if (prompt === null) continue;
+        last = await runner.runTask(prompt, effort);
         effort = "default";
         await finalEvent(ctx, runner, gateway, last);
     }
@@ -669,7 +772,9 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) task.allowance = Math.max(task.allowance, task.requests + positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests));
         }
         const workspace = new Workspace(root);
-        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
+        const extensions = await localExtensions(ctx, workspace.root, () => state.id, state.readOnly);
+        const sandbox = await startSandbox(ctx, workspace.root);
+        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch, sandboxed: sandbox.enforcement.available } : {}) });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);
         for (const note of notes) ctx.output.info(note);
@@ -714,6 +819,8 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             return exitFor(outcome);
         } finally {
             removeSigint();
+            await extensions?.close();
+            await sandbox?.close();
         }
     } finally {
         journal.release();
@@ -762,6 +869,22 @@ export const main = async (argv: string[]): Promise<number> => {
                 return await configCommand(ctx, args);
             case "memory":
                 return await memoryCommand(ctx, args);
+            case "permissions":
+                return await permissionsCommand(args, normalizeRoot(flags.cwd ?? process.cwd()), flags, {
+                    write: (text) => void process.stdout.write(text), interactive: isInteractive(), confirm: (question) => terminalPrompter().confirm(question),
+                });
+            case "mcp":
+            case "hooks": {
+                const done = await extensionsCommand(command, args, normalizeRoot(flags.cwd ?? process.cwd()), { interactive: isInteractive(), confirm: (q) => terminalPrompter().confirm(q) });
+                process.stdout.write(`${done.lines.join("\n")}\n`);
+                return done.ok ? EXIT_CODES.success : EXIT_CODES.error;
+            }
+            case "plugin": {
+                const root = normalizeRoot(flags.cwd ?? process.cwd());
+                const done = await pluginCommand(args, { interactive: isInteractive(), confirm: (q) => terminalPrompter().confirm(q), root });
+                process.stdout.write(`${done.lines.join("\n")}\n`);
+                return done.ok ? EXIT_CODES.success : EXIT_CODES.error;
+            }
             case "resume":
                 return await resume(ctx, args, !flags.json && isInteractive());
             case "exec": {
@@ -782,6 +905,7 @@ export const main = async (argv: string[]): Promise<number> => {
     } catch (error) {
         const known =
             error instanceof UsageError ||
+            error instanceof PermissionsUsageError ||
             error instanceof ConfigError ||
             error instanceof AuthError ||
             error instanceof PathError ||
@@ -793,6 +917,6 @@ export const main = async (argv: string[]): Promise<number> => {
         const message = error instanceof GatewayError ? describeApiError(error) : (error as Error).message;
         output.event({ type: "error", code: error instanceof GatewayError ? (error.extra.code ?? error.kind) : (error as Error).constructor.name, message });
         output.info(known ? message : `Unexpected error: ${message}`);
-        return error instanceof UsageError ? EXIT_CODES.usage : EXIT_CODES.error;
+        return error instanceof UsageError || error instanceof PermissionsUsageError ? EXIT_CODES.usage : EXIT_CODES.error;
     }
 };

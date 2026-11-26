@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { BrowserState } from "../browser-contract";
+import type { BrowserState, ElementPick } from "../browser-contract";
 import type { WebViewState } from "../web-view-contract";
+import type { TerminalEvent } from "../terminal-contract";
 import type { DesktopApi, FollowUpTarget, Snapshot } from "../contract";
 import type { BillingState } from "../billing-contract";
 import type { ChatTurnProgress, DesktopTextProduct, ReviewTurnProgress } from "../chat-contract";
 import type { DesktopLoginState, LoginApi } from "../login-contract";
+import type { TaskWindowView } from "../parallel-contract";
 
 const trustedWindow = location.pathname === "/approval";
 if (trustedWindow) {
@@ -12,6 +14,17 @@ if (trustedWindow) {
     approval: () => ipcRenderer.invoke("approval:read"),
     decide: (input: Parameters<DesktopApi["decide"]>[0]) => ipcRenderer.invoke("approval:decide", input),
   } satisfies Pick<DesktopApi, "approval" | "decide">);
+} else if (location.pathname === "/task") {
+  // A task's own window: it reads and stops the one task the main process bound it to, and the page never says which.
+  contextBridge.exposeInMainWorld("taskHost", {
+    read: () => ipcRenderer.invoke("task-window:read"),
+    stop: () => ipcRenderer.invoke("task-window:stop"),
+    subscribe(listener: (view: TaskWindowView) => void) {
+      const onChange = (_event: Electron.IpcRendererEvent, view: TaskWindowView) => listener(view);
+      ipcRenderer.on("task-window:changed", onChange);
+      return () => ipcRenderer.removeListener("task-window:changed", onChange);
+    },
+  });
 } else if (location.pathname === "/login") {
   contextBridge.exposeInMainWorld("loginHost", {
     state: () => ipcRenderer.invoke("login:state"),
@@ -54,11 +67,23 @@ if (trustedWindow) {
       return () => ipcRenderer.removeListener("desktop:dictation-stop", onStop);
     },
     taskPulls: (command: Parameters<DesktopApi["taskPulls"]>[0]) => ipcRenderer.invoke("desktop:task-pulls", command),
+    git: (command: unknown) => ipcRenderer.invoke("desktop:git", command),
     codeBrowser: (command: Parameters<DesktopApi["codeBrowser"]>[0]) => ipcRenderer.invoke("desktop:code-browser", command),
     subscribeCodeBrowser(listener: (state: BrowserState) => void) {
       const onState = (_event: Electron.IpcRendererEvent, state: BrowserState) => listener(state);
       ipcRenderer.on("desktop:code-browser-state", onState);
       return () => ipcRenderer.removeListener("desktop:code-browser-state", onState);
+    },
+    subscribeCodeBrowserPick(listener: (pick: ElementPick) => void) {
+      const onPick = (_event: Electron.IpcRendererEvent, pick: ElementPick) => listener(pick);
+      ipcRenderer.on("desktop:code-browser-pick", onPick);
+      return () => ipcRenderer.removeListener("desktop:code-browser-pick", onPick);
+    },
+    codeTerminal: (command: Parameters<DesktopApi["codeTerminal"]>[0]) => ipcRenderer.invoke("desktop:code-terminal", command),
+    subscribeCodeTerminal(listener: (event: TerminalEvent) => void) {
+      const onEvent = (_event: Electron.IpcRendererEvent, event: TerminalEvent) => listener(event);
+      ipcRenderer.on("desktop:code-terminal-event", onEvent);
+      return () => ipcRenderer.removeListener("desktop:code-terminal-event", onEvent);
     },
     webView: (command: Parameters<DesktopApi["webView"]>[0]) => ipcRenderer.invoke("desktop:web-view", command),
     subscribeWebView(listener: (state: WebViewState | null) => void) {
@@ -80,6 +105,7 @@ if (trustedWindow) {
     moreHistory: () => ipcRenderer.invoke("desktop:more-history"),
     readChange: (id: string) => ipcRenderer.invoke("desktop:read-change", id),
     undoChange: (id: string) => ipcRenderer.invoke("desktop:undo-change", id),
+    review: (input) => ipcRenderer.invoke("desktop:review", input),
     rewindTurn: (id: string, turn: number) => ipcRenderer.invoke("desktop:rewind-turn", { id, turn }),
     forkTurn: (id: string, turn: number) => ipcRenderer.invoke("desktop:fork-turn", { id, turn }),
     readCommand: (id: string) => ipcRenderer.invoke("desktop:read-command", id),
@@ -88,7 +114,15 @@ if (trustedWindow) {
     queueMessage: (id: string, operation: Parameters<DesktopApi["queueMessage"]>[1]) => ipcRenderer.invoke("desktop:queue", { id, operation }),
     compactTask: (id: string) => ipcRenderer.invoke("desktop:compact-task", id),
     stopBackground: (id: string, handle: string) => ipcRenderer.invoke("desktop:stop-background", { id, handle }),
+    stopSubagents: (id: string, subtask?: string) => ipcRenderer.invoke("desktop:stop-subagents", { id, ...(subtask ? { subtask } : {}) }),
     codeMemory: (input: Parameters<DesktopApi["codeMemory"]>[0]) => ipcRenderer.invoke("desktop:code-memory", input),
+    codeExtensions: (input: Parameters<DesktopApi["codeExtensions"]>[0]) => ipcRenderer.invoke("desktop:code-extensions", input),
+    localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),
+    codeSandbox: (input: Parameters<DesktopApi["codeSandbox"]>[0]) => ipcRenderer.invoke("desktop:code-sandbox", input),
+    plugins: (command: Parameters<DesktopApi["plugins"]>[0]) => ipcRenderer.invoke("desktop:plugins", command),
+    startParallel: (input: Parameters<DesktopApi["startParallel"]>[0]) => ipcRenderer.invoke("desktop:start-parallel", input),
+    parallel: (command: Parameters<DesktopApi["parallel"]>[0]) => ipcRenderer.invoke("desktop:parallel", command),
+    schedules: (command: Parameters<DesktopApi["schedules"]>[0]) => ipcRenderer.invoke("desktop:schedules", command),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),
@@ -110,6 +144,7 @@ if (trustedWindow) {
     installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
     setProjectPermissionProfile: (profile: Parameters<DesktopApi["setProjectPermissionProfile"]>[0]) =>
       ipcRenderer.invoke("desktop:permission-profile", profile),
+    permissions: (command: Parameters<DesktopApi["permissions"]>[0]) => ipcRenderer.invoke("desktop:permissions", command),
     setCodeNotifications: (enabled: boolean) => ipcRenderer.invoke("desktop:code-notifications", enabled),
     signIn: () => ipcRenderer.invoke("desktop:sign-in"),
     signOut: () => ipcRenderer.invoke("desktop:sign-out"),

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
@@ -33,13 +33,27 @@ import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecut
 import { DraftDictation } from "./DraftDictation";
 import { ChatDraftLocation, useChatDraftLocation } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
+import { GitPanel } from "./GitPanel";
+import { GitApprovalSection } from "./GitApproval";
+import { PromptAttachmentChips } from "./PromptAttachments";
+import { clearPromptAttachments, promptAttachmentsFor, withPromptAttachments } from "./prompt-attachments";
 import { CodeBrowser, codeBrowserLabel } from "./CodeBrowser";
+import { ApprovalBrowser } from "./ApprovalBrowser";
+import { appendElementComments } from "../element-comment";
+import { useAgentBrowserReveal } from "./useAgentBrowserReveal";
+import { CodeTerminal } from "./CodeTerminal";
+import { desktopTerminalCopy } from "../../../../locales/desktopTerminal";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
+import { SlashMenu, useSlashMenu, type SlashItem } from "./CodeExtensions";
+import { ApprovalOrigin, OrchestrationPanel } from "./OrchestrationPanel";
+import { desktopCodeExtensionsCopy } from "../../../../locales/desktopCodeExtensions";
 import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
+import { ReviewPanel, canReview } from "./ReviewPanel";
+import { REVIEW_OPEN_EVENT, parseReviewCommand } from "../review-contract";
 import { EventEntry, EventLogExport } from "./EventLog";
 import { BlockedPanel, CodeQuotaPanel } from "./BlockedPanel";
 import { NativeUsagePanel, TransmissionPanel } from "./TransmissionPanel";
@@ -49,9 +63,11 @@ import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
+import { PermissionModeBadge, PermissionSettings } from "./PermissionSettings";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
 import { ConnectorWorkspace } from "./ConnectorWorkspace";
+import { desktopLocalExtensionsCopy } from "../../../../locales/desktopLocalExtensions";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
 import { ReviewWorkspace, useReviewRun } from "./ReviewWorkspace";
 import { ImageHistoryList, ImageWorkspace, useImageWorkspace } from "./ImageWorkspace";
@@ -60,12 +76,18 @@ import { HandoffDraft, useHandoffSelection } from "./WorkspaceHandoff";
 import { ProviderCliSettings } from "./ProviderCliSettings";
 import { openDocs, useWebViewState, WebViewer } from "./WebViewer";
 import { clearDesktopDrafts, readCodeDraft, writeDesktopDraft } from "./draft-store";
+import { ActivityControl } from "./ActivityPanel";
+import { LaneTaskView } from "./LaneTaskView";
+import { kindLabel } from "./parallel-labels";
+import { desktopParallelCopy } from "../../../../locales/desktopParallel";
+import type { TaskWindowView } from "../parallel-contract";
 import "./styles.css";
 
 declare global {
   interface Window {
     desktop: Omit<DesktopApi, "approval" | "decide">;
     approvalHost: Pick<DesktopApi, "approval" | "decide">;
+    taskHost: { read(): Promise<TaskWindowView>; stop(): Promise<boolean>; subscribe(listener: (view: TaskWindowView) => void): () => void };
   }
 }
 
@@ -125,7 +147,7 @@ function CodePlanAnalysis({ analysis, language }: {
   </li>;
 }
 
-function TaskConversation({ task, models, language, openSettings, engine, onRewound }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode; onRewound?: (text: string) => void }) {
+function TaskConversation({ task, models, language, openSettings, engine, onRewound, insertReview }: { task: Task; models: Model[]; language: Language; openSettings: () => void; engine?: ReactNode; onRewound?: (text: string) => void; insertReview?: (text: string) => boolean }) {
   const copy = desktopShellCopy[language];
   const native = desktopNativeCopy[language];
   // What happened to the last rewind or fork: kept here, because the message it was started from may be gone after a rewind.
@@ -198,6 +220,7 @@ function TaskConversation({ task, models, language, openSettings, engine, onRewo
       {!continued && apiUsage}
       {hasDiagnostics && task.id && ["completed", "blocked", "failed", "unknown", "stopped"].includes(task.status) && <EventLogExport language={language} />}
     </div>}
+    {insertReview && canReview(task) && <ReviewPanel key={`review-${task.id}`} task={task} models={models} language={language} insert={insertReview} />}
     {engine}
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
@@ -216,6 +239,7 @@ function Desktop() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [workspace, setWorkspace] = useState<Workspace>("code");
   const [openBrowserScope, setOpenBrowserScope] = useState<string | null>(null);
+  const [terminalPanel, setTerminalPanel] = useState(false);
   const [githubDialogOpen, setGithubDialogOpen] = useState(false);
   const webView = useWebViewState();
   const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
@@ -223,6 +247,10 @@ function Desktop() {
   const canShowBrowser = surface === "code" && snapshot?.codeBrowserAvailable === true;
   const browserScope = JSON.stringify([snapshot?.draftNamespace, snapshot?.task?.id]);
   const browserOpen = canShowBrowser && openBrowserScope === browserScope;
+  useAgentBrowserReveal(canShowBrowser, () => setOpenBrowserScope(browserScope));
+  const terminalTask = snapshot?.task?.id ?? null;
+  const canShowTerminal = surface === "code" && snapshot?.codeTerminal?.available === true;
+  const terminalOpen = canShowTerminal && terminalPanel;
   const accountSettingsTab = isAccountSettingsTab(settingsView) ? settingsView : null;
   const importsOpen = settingsView === "imports";
   const accountPanel = importsOpen ? "imports" : accountSettingsTab;
@@ -459,6 +487,7 @@ function Desktop() {
   }
   const task = snapshot?.task;
   const busy = snapshot?.busy || requesting;
+  const attachmentScope = (snapshot?.draftNamespace ?? "") + ":" + (task?.id ?? "new");
   const cliFixture = snapshot?.antigravityFixtureModel ? antigravityFixtureExecution : snapshot?.grokFixtureModel ? grokFixtureExecution : snapshot?.miniMaxFixtureModel ? miniMaxFixtureExecution : snapshot?.zCodeFixtureModel ? zCodeFixtureExecution : snapshot?.deepSeekFixtureModel ? deepSeekFixtureExecution : snapshot?.vibeFixtureModel ? vibeFixtureExecution : snapshot?.kimiFixtureModel ? kimiFixtureExecution : snapshot?.qwenFixtureModel ? qwenFixtureExecution :
     snapshot?.claudeFixtureModel ? claudeFixtureExecution : codexFixtureExecution;
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
@@ -672,6 +701,12 @@ function Desktop() {
     }
   }
 
+  // /review is the one command the composer handles itself, and only where it works: a saved task whose changes can be reviewed.
+  const slashBuiltins = useMemo<SlashItem[]>(() => task && canReview(task) ? [{
+    name: "review", kind: "builtin", argumentHint: "[turn|branch]", description: desktopCodeExtensionsCopy[language].slashReviewDescription,
+  }] : [], [task, language]);
+  const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus(), builtins: slashBuiltins });
+
   function changeSaveHistory(value: boolean) {
     setSaveHistory(value);
     if (snapshot?.draftNamespace) writeDesktopDraft(codeDraft, `code:${snapshot.draftNamespace}`, value ? prompt : "");
@@ -725,8 +760,25 @@ function Desktop() {
     setRequesting(false);
   }
 
+  /** Adds text (review comments, a finding to fix) after what is already typed in the instruction box. */
+  function insertIntoDraft(text: string) {
+    const next = prompt.trimEnd() ? `${prompt.trimEnd()}
+
+${text}` : text;
+    if (next.length > MAX_CODE_PROMPT_CHARACTERS) return false;
+    changeDraft(next);
+    return true;
+  }
+
   async function send(event: FormEvent) {
     event.preventDefault();
+    // /review opens the review panel; it is a command for the app, not an instruction for the agent.
+    const reviewCommand = parseReviewCommand(prompt);
+    if (reviewCommand && task && canReview(task)) {
+      window.dispatchEvent(new CustomEvent(REVIEW_OPEN_EVENT, { detail: reviewCommand }));
+      changeDraft("");
+      return;
+    }
     // One instruction can wait to be sent into the running turn; a second one waits in the queue.
     if (canQueue && task?.pendingFollowUp) {
       await queueDraft();
@@ -739,7 +791,8 @@ function Desktop() {
       setRequesting(true);
       nearBottom.current = true;
       await act(async () => {
-        if (!await window.desktop.followUp(followUpTarget, submitted)) throw new Error("The instruction was not confirmed.");
+        if (!await window.desktop.followUp(followUpTarget, withPromptAttachments(submitted, promptAttachmentsFor(attachmentScope)))) throw new Error("The instruction was not confirmed.");
+        clearPromptAttachments(attachmentScope);
         if (previousNamespace.current === namespace && composer.current?.value === submitted) changeDraft("");
       });
       setRequesting(false);
@@ -750,14 +803,16 @@ function Desktop() {
     setRequesting(true);
     nearBottom.current = true;
     await act(async () => {
-      await window.desktop.start({ prompt, model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
+      await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
         ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
         ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
+        ...(!cliFixtureModel && engine.orchestrate && executionMode === "tomverse_api" ? { orchestrate: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
+      clearPromptAttachments(attachmentScope);
       setSaveHistory(true);
       setCodePlugin(undefined);
       setWorkspaceSelection(undefined);
@@ -937,7 +992,14 @@ function Desktop() {
             </details>}
           {surface === "code" && task?.id && task.savedLocally && !task.unreadable && !busy &&
             snapshot?.history.some((row) => row.id === task.id) &&
-            <TaskGithubPulls key={snapshot.draftNamespace + task.id} language={language} onVisibilityChange={setGithubDialogOpen} />}
+            <TaskGithubPulls key={snapshot.draftNamespace + task.id} language={language} onVisibilityChange={setGithubDialogOpen} scope={attachmentScope} />}
+          {surface === "code" && snapshot?.project && <ActivityControl snapshot={snapshot} language={language} modelId={selectedModel?.id} effort={effort} onVisibilityChange={setGithubDialogOpen} />}
+          {canShowTerminal && <button className="icon" type="button" aria-label={desktopTerminalCopy[language].title}
+            aria-expanded={terminalOpen} aria-controls={terminalOpen ? "code-terminal-panel" : undefined}
+            onClick={() => setTerminalPanel(!terminalOpen)}><SquareTerminal size={18} /></button>}
+          {surface === "code" && snapshot?.project && snapshot.draftNamespace && !busy &&
+            <GitPanel key={"git:" + snapshot.draftNamespace + (task?.id ?? "new")} language={language} onVisibilityChange={setGithubDialogOpen} disabled={Boolean(busy)}
+              models={snapshot.models ?? []} defaultModelId={selectedModel?.id} />}
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
             aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
             onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
@@ -973,7 +1035,7 @@ function Desktop() {
         }}>
           <div className="content">
             {task ? <TaskConversation task={task} models={task.continuation?.stage === "started" ? snapshot?.models ?? [] : models}
-              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined}
+              language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined} insertReview={surface === "code" ? insertIntoDraft : undefined}
               engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
               <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
@@ -984,9 +1046,13 @@ function Desktop() {
             </section>}
           </div>
         </div>
+        {terminalOpen && <CodeTerminal key={terminalTask ?? "new"} language={language} task={terminalTask}
+          enabled={snapshot?.codeTerminal?.enabled === true} onClose={() => setTerminalPanel(false)}
+          onAddToPrompt={(text) => changeDraft(prompt.trimEnd() ? prompt.trimEnd() + "\n\n" + text : text)} />}
         <div className="composer-slot">
           {alertText && <p className="notice" role="alert">{alertText}</p>}
           {task && surface === "code" && <BackgroundPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
+          {task && surface === "code" && <OrchestrationPanel task={task} language={language} live={!!snapshot?.busy && task.execution?.executionMode === "tomverse_api"} />}
           {task && surface === "code" && <SubagentPanel task={task} language={language} />}
           {task && surface === "code" && <QueuePanel task={task} language={language} live={!!queueTarget} />}
           {historyDraft && !busy && !waitingForAnswer && <p className="notice">{copy.newHistoryRequest}</p>}
@@ -1011,12 +1077,14 @@ function Desktop() {
               </button>}
           </div>
           <form className="composer" onSubmit={send} aria-label={copy.codeComposer}>
+            <SlashMenu menu={slashMenu} language={language} />
             <div className="code-composer-body">
               {codeHandoff && <HandoffDraft handoff={codeHandoff} busy={Boolean(busy)} language={language} />}
               <textarea ref={composer} aria-label={copy.codeRequest} aria-describedby={online ? "code-readiness" : "desktop-offline"}
                 placeholder={task ? copy.followUp : copy.firstRequest} value={prompt}
                 onChange={(event) => changeDraft(event.currentTarget.value)} maxLength={MAX_CODE_PROMPT_CHARACTERS}
                 onKeyDown={(event) => {
+                  if (slashMenu.onKeyDown(event)) return;
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
                     event.preventDefault(); event.currentTarget.form?.requestSubmit();
                   }
@@ -1031,6 +1099,7 @@ function Desktop() {
                     })}><X size={13} /></button>
                 </li>)}
               </ul>}
+              <PromptAttachmentChips scope={attachmentScope} language={language} disabled={Boolean(busy)} />
             </div>
             <div className="composer-actions">
               {snapshot?.draftNamespace && <details className="model-menu code-attach-menu">
@@ -1053,6 +1122,7 @@ function Desktop() {
               {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api"
                 ? <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />
                 : <span className="permission"><ShieldCheck size={15} /> {copy.manual}</span>}
+              {codeMode === "agent" && codeRoute.executionMode === "tomverse_api" && <PermissionModeBadge mode={snapshot?.permissions?.mode} language={language} />}
               {codeHistoryControl}
               {pluginNamespace && <CodePluginPicker key={pluginNamespace} language={language} value={pluginConnectionId ?? ""}
                 disabled={Boolean(busy || pausedForInput || canFollowUp)} select={(id) => setCodePlugin(id ? { id, namespace: pluginNamespace } : undefined)} />}
@@ -1092,6 +1162,9 @@ function Desktop() {
         </div>
       </div>{canShowBrowser && browserOpen && <CodeBrowser language={language}
         canShare={snapshot?.codeBrowserInspection === true && task?.status === "running"}
+        agentTools={snapshot?.codeBrowserAgent === true}
+        agentLive={task?.status === "running" || task?.status === "approval"}
+        onAttachComments={(block) => changeDraft(appendElementComments(prompt, block).slice(0, MAX_CODE_PROMPT_CHARACTERS))}
         hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}
       </div> : nativeImages ? <ImageWorkspace key={images.seedVersion} workspace={images} capability={imageCapability} />
         : nativeChat ? <>{reviewReference && <div className="review-reference" role="status">
@@ -1135,6 +1208,7 @@ function Desktop() {
             {snapshot?.projectPermissionProfile
               ? <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy} act={act} />
               : <span className="permission"><ShieldCheck size={15} aria-hidden="true" /> {copy.manual}</span>}
+            <PermissionSettings view={snapshot?.permissions} language={language} act={act} />
           </div>}
           {settingsView === "local-history" && <div className="execution-setting-row">
             <div>{codeHistoryControl}<small>{privacyCopy.historyDetail}</small></div>
@@ -1215,6 +1289,7 @@ function Approval() {
   const language = request?.language ?? readLanguage();
   const copy = desktopControlsCopy[language];
   const engineCopy = desktopCodeEngineCopy[language];
+  const extensionsCopy = desktopLocalExtensionsCopy[language];
   useEffect(() => {
     applyTheme(localStorage.getItem("tomverse.theme") === "light" ? "light" : "dark");
     void window.approvalHost.approval().then(setRequest, () => setRequest(null));
@@ -1231,8 +1306,13 @@ function Approval() {
   return <main className="approval">
     <header><ShieldCheck size={24} /><h1>{copy.reviewAction}</h1></header>
     <div className="approval-content">
+      {request.task && <p className="approval-origin" data-testid="approval-origin">
+        {desktopParallelCopy[language].approvalFrom.replace("{kind}", kindLabel(desktopParallelCopy[language], request.task.kind)).replace("{title}", request.task.title)}
+        <br />{desktopParallelCopy[language].approvalFolder}: <code>{request.task.folder}</code>
+      </p>}
       <p><strong>{request.tool}</strong></p><p><code>{request.root}</code></p>
       {request.explanation && <p>{request.explanation}</p>}
+      {request.origin && <ApprovalOrigin origin={request.origin} language={language} />}
       {request.web && <section aria-label={engineCopy.approvalWebHeading}>
         <h2>{engineCopy.approvalWebHeading}</h2>
         <dl>
@@ -1241,6 +1321,18 @@ function Approval() {
         </dl>
         <p role="note">{engineCopy.approvalWebNote}</p>
       </section>}
+      {request.browser && <ApprovalBrowser browser={request.browser} copy={engineCopy} />}
+      {request.mcp && <section aria-label={extensionsCopy.approvalHeading}>
+        <h2>{extensionsCopy.approvalHeading}</h2>
+        <dl>
+          <dt>{extensionsCopy.approvalServer}</dt><dd><code>{request.mcp.server}</code></dd>
+          <dt>{extensionsCopy.approvalTool}</dt><dd><code>{request.mcp.tool}</code></dd>
+          <dd>{request.mcp.scope === "project" ? extensionsCopy.approvalScopeProject : extensionsCopy.approvalScopeUser}</dd>
+          <dt>{extensionsCopy.approvalArguments}</dt><dd><pre>{request.mcp.args}</pre></dd>
+        </dl>
+        <p role="note">{extensionsCopy.approvalNote}</p>
+      </section>}
+      {request.git && <GitApprovalSection git={request.git} language={language} />}
       {request.command && <section aria-label={copy.commandDetails}>
         <h2>{copy.exactCommand}</h2>
         <pre>{request.command.display}</pre>
@@ -1270,8 +1362,25 @@ function Approval() {
   </main>;
 }
 
+/** A task's own window: one task, read-only, with Stop. The main process decides which task; this page never names one. */
+function DetachedTask() {
+  const [view, setView] = useState<TaskWindowView | null | "gone">(null);
+  useEffect(() => {
+    applyTheme(localStorage.getItem("tomverse.theme") === "light" ? "light" : "dark");
+    void window.taskHost.read().then((next) => setView(next.row || next.task ? next : "gone"), () => setView("gone"));
+    return window.taskHost.subscribe((next) => setView(next.row || next.task ? next : "gone"));
+  }, []);
+  const language = view && view !== "gone" ? view.language : readLanguage();
+  useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
+  if (!view) return <main className="task-window"><p role="status">…</p></main>;
+  if (view === "gone") return <main className="task-window"><p role="alert">{desktopParallelCopy[language].windowGone}</p></main>;
+  return <main className="task-window" data-testid="task-window">
+    <LaneTaskView task={view.task} row={view.row} language={language} onStop={() => void window.taskHost.stop()} />
+  </main>;
+}
+
 const isLoginWindow = location.pathname === "/login";
 if (isLoginWindow) document.documentElement.classList.add("dark", "login-window");
 createRoot(document.getElementById("root")!).render(
-  location.pathname === "/approval" ? <Approval /> : isLoginWindow ? <Login /> : <Desktop />,
+  location.pathname === "/approval" ? <Approval /> : location.pathname === "/task" ? <DetachedTask /> : isLoginWindow ? <Login /> : <Desktop />,
 );

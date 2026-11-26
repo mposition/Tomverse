@@ -7,7 +7,14 @@ import { codeFallbackModelAvailable, codeFallbackUpdate, codeTransferScope, defa
   type CodeFallbackUpdate } from "../code-fallback";
 import { codeLimitProfile, type CodeLimitProfile, type CodeMemoryInput, type CodeMemoryView, type Snapshot } from "../contract";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import { desktopOrchestrateCopy } from "../../../../locales/desktopOrchestrate";
+import { ORCHESTRATION_DEFAULTS } from "../orchestrate-contract";
 import type { CodeEnginePreference } from "./CodeEngine";
+import { CodeExtensionsSettings } from "./CodeExtensions";
+import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
+import { CodeSandboxSettings } from "./CodeSandboxSettings";
+import { PluginsPanel } from "./PluginsPanel";
+import { CodeBrowserSettings } from "./CodeBrowserSettings";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -88,6 +95,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
 }) {
   const copy = desktopCodeExecutionCopy[language];
   const engineCopy = desktopCodeEngineCopy[language];
+  const orchestrateCopy = desktopOrchestrateCopy[language];
   const limitLabels = { standard: engineCopy.limitsStandard, extended: engineCopy.limitsExtended, unlimited: engineCopy.limitsUnlimited } as const satisfies Record<CodeLimitProfile, string>;
   const [reviewScope, setReviewScope] = useState(false);
   const [writing, setWriting] = useState(false);
@@ -149,7 +157,17 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
         <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
       </select>
     } />
+    <SettingRow field="code-orchestrate" label={orchestrateCopy.setting}
+      detail={orchestrateCopy.settingDetail.replace("{agents}", String(ORCHESTRATION_DEFAULTS.maxSubagents)).replace("{requests}", String(ORCHESTRATION_DEFAULTS.maxRequests))} control={
+      <select id="code-orchestrate" aria-describedby="code-orchestrate-info" value={taskEngine.orchestrate ? "on" : "off"}
+        onChange={(event) => changeEngine({ ...taskEngine, orchestrate: event.currentTarget.value === "on" })}>
+        <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
+      </select>
+    } />
     <CodeMemorySettings language={language} />
+    <CodeExtensionsSettings language={language} />
+    <PluginsPanel language={language} />
+    <LocalExtensionsPanel language={language} />
     <SettingRow field="code-fallback-automatic" label={copy.automatic} detail={automatic ? copy.awaitingVerification : copy.automaticDetail}
       status={automatic} control={
       <select id="code-fallback-automatic" aria-describedby="code-fallback-automatic-info" value={automatic ? "on" : "off"}
@@ -193,6 +211,8 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
         {value === "summary" ? copy.transferSummary : copy.transferChanges}
       </label>)}
     </fieldset>}
+    <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
+    <CodeSandboxSettings language={language} />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}
   </section>;
 }

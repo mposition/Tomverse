@@ -51,7 +51,14 @@ export type CommandResult = {
     spawnError?: string;
 };
 
-export type CommandLaunch = (file: string, args: readonly string[]) => { file: string; args: readonly string[] };
+/**
+ * Wraps the program a command starts: a supervisor, a sandbox. `context` is what the wrapper needs to build its arguments (the working folder
+ * and the environment the command would get). `env` is added to that environment. A wrapper that cannot do its job throws, and the command
+ * is not started: a sandbox never falls back to running without itself.
+ */
+export type CommandLaunchContext = { cwd: string; env: Record<string, string> };
+export type CommandLaunchResult = { file: string; args: readonly string[]; env?: Record<string, string> };
+export type CommandLaunch = (file: string, args: readonly string[], context?: CommandLaunchContext) => CommandLaunchResult;
 
 export class CommandError extends Error {}
 
@@ -290,10 +297,10 @@ const posixDescendants = async (pid: number): Promise<number[] | null> => {
 
 /** Starts the planned program with the small command environment, as its own process group on POSIX so the whole tree can be ended. */
 export const spawnPlanned = (plan: CommandPlan, extraEnv: string[] = [], launchCommand?: CommandLaunch): ChildProcess => {
-    const launch = launchCommand?.(plan.file, plan.args) ?? plan;
+    const launch: CommandLaunchResult = launchCommand?.(plan.file, plan.args, { cwd: plan.cwd, env: commandEnv(extraEnv) }) ?? plan;
     return spawn(launch.file, launch.args, {
         cwd: plan.cwd,
-        env: commandEnv(extraEnv),
+        env: commandEnv(extraEnv, process.env, launch.env),
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: true,

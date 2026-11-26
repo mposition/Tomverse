@@ -1,0 +1,8 @@
+.local-extensions { margin: 16px 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.local-extensions h3, .local-extensions h4 { margin: 12px 0 4px; }
+.local-extensions ul { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.local-extensions li { display: flex; gap: 12px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.local-extensions .local-extension-summary { flex: 1 1 auto; min-width: 0; }
+.local-extensions .local-extension-summary p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.local-extensions .local-extension-summary code { font-family: var(--font-code); font-size: 0.86em; }
+.local-extensions .local-extension-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

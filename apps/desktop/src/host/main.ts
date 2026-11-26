@@ -7,6 +7,7 @@ import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
+import { createBrowserAgentBridge } from "./browser-agent-bridge";
 import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
@@ -39,8 +40,11 @@ import { tmpdir } from "node:os";
 import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
+import { permissionCommand } from "../permission-contract";
+import { subagentStopInput } from "../orchestrate-contract";
+import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeExtensionsInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
@@ -65,10 +69,34 @@ import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeH
 import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-scope";
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
+import { same } from "../../../tomverse-cli/src/runtime.js";
+import { createRequire } from "node:module";
+import { TerminalHost } from "./terminal-host";
+import { createTerminalApi } from "./terminal-api";
+import { createTerminalLaunch } from "./terminal-session";
+import { terminalEnv } from "./terminal-env";
 import { codeMemoryView } from "./code-memory";
+import { createReviewActions, type ReviewTarget } from "./review-host";
+import { codeExtensionsView } from "./code-extensions";
+import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
+import { localExtensionsCommand } from "../local-extensions-contract";
+import { codeSandboxInput } from "../code-sandbox-contract";
+import { codeSandboxView, readCodeSandboxSettings } from "./code-sandbox";
+import { sandboxEnforcement } from "../../../tomverse-cli/src/sandbox.js";
+import { createPluginsHost } from "./plugins-host";
+import { pluginsCommand } from "../plugins-contract";
+import { desktopPluginsCopy } from "../../../../locales/desktopPlugins";
+import { createPullLinker } from "./task-pull-links";
+import { createGitDrafter } from "./git-draft";
+import { gitCommand } from "../git-actions-contract";
+import { browserToolsFor, createBrowserAgentSwitch } from "./code-browser-switch";
+import { createParallelHost, IDLE_OPEN_TASK_KEY } from "./parallel-host";
+import { launchScheduledRun } from "./schedule-launch";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
+import { createGitIntegration } from "./git-integration";
+import type { AgentGitResult } from "../git-actions-contract";
 import { appendTaskPage, nextTaskPage } from "./taskPaging";
 import {
   DesktopSessionRefused, readBrowserAccount, refreshBrowserSession, revokeBrowserSession, signInByDesktopEmail,
@@ -130,6 +158,9 @@ const fixtureSchema = z.object({
   endpoint: z.url().regex(/^http:\/\/127\.0\.0\.1:[0-9]+\/api\/code\/v1$/),
   key: z.literal("tvk_abcdefgh_" + "A".repeat(43)),
   browserInspection: z.boolean().optional(),
+  /** A test chooses this folder where the Plugins screen would open a folder dialog. */
+  pluginFolder: z.string().min(1).optional(),
+  browserAgent: z.boolean().optional(),
   codex: cliFixtureInput.optional(),
   claude: cliFixtureInput.optional(),
   qwen: qwenFixtureInput.optional(),
@@ -191,8 +222,8 @@ let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
-type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" }>;
-type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" }>;
+type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" | "review-turn" | "review-reverted" | "review-finished" | "git-drafted" }>;
+type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" | "review-turn-diff" | "review-revert-hunk" | "review-run" | "git-draft" }>;
 let pendingInspection: { id: string; type: InspectionCommand["type"]; settle: (event: InspectionEvent | null) => void } | null = null;
 let pendingMutation: { id: string; settle: (event: MutationEvent | null) => void } | null = null;
 let confirmingMutation = false;
@@ -276,6 +307,7 @@ const updates = () => configureUpdates(
 );
 const codeNotificationsPath = () => join(app.getPath("userData"), "code-notifications.txt");
 const codeExecutionPreferencePath = () => join(app.getPath("userData"), "code-execution-preference.txt");
+const permissionHost = new DesktopPermissions({ modeFile: () => join(app.getPath("userData"), "permission-mode.txt"), root: () => projectRoot?.path ?? null });
 const codeFallbackFile = (scope: string) => join(app.getPath("userData"), `code-fallback-${scope}.json`);
 const cliPathsFile = () => join(app.getPath("userData"), "provider-cli-paths.json");
 const storedCliPaths = z.partialRecord(cliProvider, cliFilePath);
@@ -433,19 +465,30 @@ function refreshHistory(more = false) {
   state.moreHistory = page.cursor !== null;
 }
 
+function refreshParallel() {
+  state.parallel = parallel.parallelView();
+  state.schedules = parallel.scheduleView();
+}
+
 function broadcast() {
+  refreshParallel();
   refreshWorktreeDraft();
   if (codePluginScope && !currentCodePlugin(codePluginScope)) revokeCodePlugin();
   const scope = currentCodeBrowserScope();
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   state.codeBrowserAvailable = scope !== null;
-  state.codeBrowserInspection = scope !== null && fixture?.browserInspection === true;
+  state.codeBrowserInspection = scope !== null && browserTools().inspection;
+  state.codeBrowserAgent = browserTools().agent;
+  state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
+  // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
+  void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.deviceFixtureAvailable = accountPermissionsFixture();
   if (!state.deviceFixtureAvailable) stopDictation(true);
   refreshCodeFallbackSettings();
   state.draftNamespace = workspaceNamespace();
   state.handoff = currentHandoff();
   state.projectPermissionProfile = readProjectPermissionProfile();
+  state.permissions = permissionHost.view();
   if (accountWindowsReady && DESKTOP_LOGIN_WINDOW_REQUIRED) syncAccountWindow();
   if (loginWindow && !loginWindow.isDestroyed() && !loginWindow.webContents.isDestroyed()) {
     loginWindow.webContents.send("login:changed", { account: state.account, language: state.language });
@@ -862,32 +905,81 @@ function send(command: WorkerCommand) {
 }
 
 function dismissApproval() {
+  gitIntegration.dismiss();
   const window = approvalWindow;
   approvalWindow = null;
   if (window && !window.isDestroyed()) window.close();
+  setImmediate(pumpApprovals);
+}
+
+/** The open task's request that arrived while another card was on screen; it shows next. */
+let foregroundWaiting: { runId: string; request: ApprovalRequest } | null = null;
+/** The id of the card of a task that runs next to the open one, while it is on screen. */
+let shownLaneCard: string | null = null;
+
+/** The open task ended or stopped: its card goes away, and a card that belongs to a task running next to it stays. */
+function clearForegroundApproval() {
+  foregroundWaiting = null;
+  if (pending && parallel.lanes.hasApproval(pending.id)) return;
+  pending = null;
+  dismissApproval();
+}
+
+/** Shows the next waiting card (the open task's first, then the tasks that run next to it) when no card is on screen. */
+function pumpApprovals() {
+  if (shownLaneCard && !parallel.lanes.hasApproval(shownLaneCard)) {
+    // The task that asked ended (stopped, crashed, timed out) while its card was on screen: the card goes with it.
+    const gone = shownLaneCard;
+    shownLaneCard = null;
+    if (pending?.id === gone) { pending = null; dismissApproval(); return; }
+  }
+  if (pending || approvalWindow || closing || signingOut) return;
+  const waiting = foregroundWaiting;
+  if (waiting) {
+    foregroundWaiting = null;
+    if (runId === waiting.runId && waiting.runId !== discardedRunId && state.task?.status === "approval") { showApproval(waiting.request); return; }
+  }
+  const next = parallel.lanes.nextApproval();
+  if (next) { shownLaneCard = next.id; showApproval(next); }
 }
 
 function answer(decision: Decision) {
+  if (gitIntegration.decide(decision)) {
+    const window = approvalWindow;
+    approvalWindow = null;
+    setImmediate(() => { if (window && !window.isDestroyed()) window.close(); });
+    return true;
+  }
+  if (pending && parallel.lanes.hasApproval(pending.id)) {
+    // A task that runs next to the open one: its own lane takes the answer, and no other task can.
+    if (pending.id !== decision.id || !parallel.lanes.decide(decision)) return false;
+    pending = null;
+    shownLaneCard = null;
+    const window = approvalWindow;
+    approvalWindow = null;
+    setImmediate(() => { if (window && !window.isDestroyed()) window.close(); pumpApprovals(); });
+    return true;
+  }
   if (!pending || !runId || pending.id !== decision.id || (decision.action === "run" && !pending.canRemember)) return false;
   send({ type: "answer", runId, decision });
   pending = null;
   const window = approvalWindow;
   approvalWindow = null;
-  setImmediate(() => { if (window && !window.isDestroyed()) window.close(); });
+  setImmediate(() => { if (window && !window.isDestroyed()) window.close(); pumpApprovals(); });
   return true;
 }
 
 function stop() {
   if (!runId || !worker || state.task?.status === "stopping") return;
   if (codeBrowser) codeBrowser.grant = undefined;
+  browserAgent.abortAll();
   revokeCodePlugin();
   if (state.task) {
     state.task.status = "stopping";
     state.task.streamingAnswer = undefined;
   }
-  pending = null;
   send({ type: "stop", runId });
-  dismissApproval();
+  clearForegroundApproval();
   broadcast();
 }
 
@@ -952,14 +1044,15 @@ function requestQuit() {
   if (closing) return;
   closing = true;
   stop();
+  parallel.lanes.stopAll();
   quitTimer = setTimeout(async () => {
-    if ((!state.busy && !pendingMutation) || !closing) return;
+    if ((!state.busy && !pendingMutation && !parallel.lanes.busy()) || !closing) return;
     const copy = nativeCopy();
     const { response } = await dialog.showMessageBox({
       type: "warning", message: copy.quitPrompt, detail: copy.quitDetail,
       buttons: [copy.keepWaiting, copy.quitUnconfirmed], defaultId: 0, cancelId: 0,
     });
-    if ((!state.busy && !pendingMutation) || !closing) return;
+    if ((!state.busy && !pendingMutation && !parallel.lanes.busy()) || !closing) return;
     if (response === 1) {
       // The saved journal remains the source of evidence for the interrupted run.
       state.busy = false;
@@ -985,12 +1078,15 @@ function showApproval(request: ApprovalRequest) {
 
 function onWorkerMessage(event: WorkerEvent) {
   if (event.type === "code-plugin") { void replyToCodePlugin(event); return; }
+  if (event.type === "git-action") { void replyToGitAction(event); return; }
   if (event.type === "code-plugin-cancel") {
     const scope = codePluginScope;
     if (scope?.runId === event.runId && scope.active?.requestId === event.requestId) scope.active.controller.abort();
     return;
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
+  if (event.type === "browser-agent") { void browserAgent.handle(event); return; }
+  if (event.type === "terminal-read") { replyToTerminalRead(event); return; }
   if (event.type === "queue-result") {
     if (pendingQueue?.requestId === event.requestId) {
       pendingQueue.resolve(event.ok && event.runId === runId && event.runId !== discardedRunId);
@@ -1010,7 +1106,8 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted" ||
-      event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked") {
+      event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked" ||
+      event.type === "review-turn" || event.type === "review-reverted" || event.type === "review-finished" || event.type === "git-drafted") {
     if (pendingMutation?.id === event.requestId) pendingMutation.settle(event);
     return;
   }
@@ -1026,7 +1123,11 @@ function onWorkerMessage(event: WorkerEvent) {
     if ("task" in event && state.task?.worktree?.path === event.task.root) event.task.worktree = state.task.worktree;
     if (event.type === "approval") {
       if (state.task?.status === "stopping") return;
-      showApproval(event.request);
+      // While other tasks run too, the card says which task it is from.
+      const card: ApprovalRequest = parallel.lanes.busy() && state.task
+        ? { ...event.request, task: { title: state.task.title, folder: state.task.root, kind: "foreground" } } : event.request;
+      if (pending || approvalWindow) foregroundWaiting = { runId: event.runId, request: card };
+      else showApproval(card);
     } else if (event.type === "finished") {
       pendingFollowUp?.resolve(false);
       pendingFollowUp = null;
@@ -1063,9 +1164,10 @@ function onWorkerMessage(event: WorkerEvent) {
       state.busy = false;
       runId = null;
       discardedRunId = null;
-      pending = null;
-      dismissApproval();
+      clearForegroundApproval();
+      parallel.lanes.tick();
       refreshHistory();
+      if (!discarded) void pullLinker.flush(event.task.id);
       if (!discarded) notifyCodeResult(event.task.status);
       if (discarded && browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
       if (closing) app.quit();
@@ -1225,16 +1327,24 @@ function checkpointNativeTurn(task: Task, force = false) {
 }
 
 const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
+const codeSandboxDirectory = () => join(app.getPath("userData"), "code-sandbox");
 
-function bootWorker() {
+/** One Code runtime process. The open task and every task that runs next to it each get one of their own. */
+function forkRunner() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
-  const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
-    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory() },
+  return utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
+    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
+      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
+}
+
+function bootWorker() {
+  const child = forkRunner();
   worker = child;
+  child.postMessage(permissionHost.runtimeMessage());
   child.on("message", onWorkerMessage);
   child.once("exit", () => {
     if (worker !== child) return;
@@ -1245,8 +1355,7 @@ function bootWorker() {
     pendingQueue = null;
     pendingInspection?.settle(null);
     pendingMutation?.settle(null);
-    pending = null;
-    dismissApproval();
+    clearForegroundApproval();
     catalogRequest = null;
     state.models = [];
     state.codeCatalog = codeConnection() ? "failed" : "unavailable";
@@ -1530,7 +1639,7 @@ function answerCodeClarification(id: string, text: string) {
     state.busy = true;
     state.task = { ...task, status: "starting", canAnswerClarification: false };
     try {
-      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection,
+      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, ...codeRunTools(),
         previous: task, afterClarification: { requestId, text } });
     } catch {
       runId = null;
@@ -1572,7 +1681,7 @@ function resumeQuotaTask(id: string, text: string) {
     state.busy = true;
     state.task = { ...task, status: "starting", canResumeAfterQuota: false };
     try {
-      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection,
+      send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, ...codeRunTools(),
         previous: saved, afterQuota: { requestId, refusedRequestId: quota.requestId, text,
           ...(continuation ? { continuation: { segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap } } : {}) } });
     } catch {
@@ -1780,6 +1889,39 @@ async function undoSelectedChange(changeId: string): Promise<UndoChangeResult> {
   } finally {
     confirmingMutation = false;
   }
+}
+
+/** The saved Tomverse API task the review panel is for: its record, and where a worktree was started from. */
+function reviewTarget(): ReviewTarget | null {
+  const task = state.task;
+  const record = selectedRecord();
+  if (!task?.id || !record || record.sessionId !== task.id || task.savedLocally === false || record.storage === null || task.unreadable ||
+      task.execution?.executionMode !== "tomverse_api" || task.continuation || task.cliContinuation) return null;
+  const worktree = "worktree" in record ? record.worktree : undefined;
+  try { assertProjectRoot(record.project); } catch { return null; }
+  if (worktree?.unavailable) return null;
+  const { storage, scope, project, sourceProject, sessionId } = record;
+  return { taskId: task.id, record: { storage, scope, project, sourceProject, sessionId }, ...(worktree ? { worktreeBase: worktree.base } : {}) };
+}
+
+/** A native question the person answers before something is written or a paid model request is made. Only the main process opens it. */
+async function confirmNative({ title, message, detail, accept, cancel }: { title: string; message: string; detail: string; accept: string; cancel: string }) {
+  const owner = mainWindow;
+  if (!owner || owner.isDestroyed()) return false;
+  confirmingMutation = true;
+  try {
+    const { response } = await dialog.showMessageBox(owner, { type: "warning", title, message, detail, buttons: [cancel, accept], defaultId: 0, cancelId: 0, noLink: true });
+    return response === 1;
+  } finally { confirmingMutation = false; }
+}
+
+function cancelWorkerRequest(requestId: string) {
+  try { send({ type: "cancel-recovery", requestId }); } catch { /* The worker may have exited. */ }
+}
+
+function reviewReady() {
+  return !!worker && !!mainWindow && !mainWindow.isDestroyed() && !state.busy && !pendingMutation && !recoveryCheckPending() && !confirmingMutation &&
+    !choosing && !signingOut && !closing && !suspended && state.update.stage !== "installing";
 }
 
 /** Whether a saved task can be taken back or forked right now, and the record it lives in. */
@@ -2034,6 +2176,7 @@ function clearAccountWorkspace() {
     discardedRunId = runId;
     stop();
   }
+  parallel.lanes.stopAll();
   pendingInspection?.settle(null);
   discardTransientTask(state.task);
   state.task = null;
@@ -2386,15 +2529,16 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
   const child = worker;
   const browser = codeBrowser;
   const grant = browser?.grant;
-  const allowed = () => Boolean(DESKTOP_FIXTURE_ALLOWED && child && worker === child && runId === event.runId &&
+  const allowed = () => Boolean(browserTools().inspection && child && worker === child && runId === event.runId &&
     event.runId !== discardedRunId && state.busy && state.task?.status === "running" && !suspended &&
     browser && browser === codeBrowser && browser.scope === currentCodeBrowserScope() &&
     grant && browser.grant === grant && grant.runId === event.runId && browser.visibleTab === grant.tab);
   let text: string | null = null;
   if (allowed() && browser && grant) {
     text = await browser.tabs.get(grant.tab)?.snapshot(grant.url) ?? null;
-    if (!allowed() || !fixture) text = null;
-    else if (text) text = cleanText(text, fixture.key).slice(0, 6_000);
+    const key = codeConnection()?.key;
+    if (!allowed() || !key) text = null;
+    else if (text) text = cleanText(text, key).slice(0, 6_000);
   }
   if (child && child === worker) {
     try { send({ type: "browser-snapshot-result", runId: event.runId, requestId: event.requestId, text }); }
@@ -2402,21 +2546,57 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
   }
 }
 
+// The agent's browser tools and the element picker; the checks that matter are in browser-agent-policy.ts.
+const browserAgent = createBrowserAgentBridge({
+  enabled: () => browserTools().agent,
+  run: () => ({
+    runId: runId && runId !== discardedRunId ? runId : null, taskId: state.task?.id ?? null,
+    running: Boolean(state.busy && state.task?.status === "running"), apiExecution: state.task?.execution?.executionMode === "tomverse_api",
+    suspended, scope: currentCodeBrowserScope(),
+  }),
+  tab: (id) => codeBrowser?.tabs.get(id),
+  tabs: () => [...(codeBrowser?.tabs ?? [])],
+  open: (tab, url) => runCodeBrowser({ type: "open", tab, url }),
+  publish: (browserState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-state", browserState); },
+  publishPick: (pick) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-pick", pick); },
+  reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "browser-agent-result", runId: replyRunId, requestId, reply }); },
+  clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
+});
+
 function currentCodeBrowserScope() {
-  if (!DESKTOP_FIXTURE_ALLOWED || !fixture || codeConnection() !== fixture || signingOut || closing) return null;
+  if (!codeConnection() || signingOut || closing) return null;
   const scope = currentHistoryScope();
   return scope ? JSON.stringify([scope.home, state.task?.id ?? null, state.account.stage]) : null;
+}
+
+// The panel is always there for a person looking at a local development server; the agent's use of it is the person's switch.
+const browserAgentSwitch = createBrowserAgentSwitch(() => join(app.getPath("userData"), "code-browser-agent.txt"));
+function browserTools() {
+  const fixtureOwned = DESKTOP_FIXTURE_ALLOWED && !!fixture && codeConnection() === fixture;
+  return browserToolsFor({ switchOn: browserAgentSwitch.enabled, fixtureAgent: fixtureOwned && fixture?.browserAgent === true,
+    fixtureInspection: fixtureOwned && fixture?.browserInspection === true });
 }
 
 function closeCodeBrowser() {
   const browser = codeBrowser;
   codeBrowser = undefined;
+  browserAgent.reset();
   for (const view of browser?.tabs.values() ?? []) view.close();
 }
 
 async function runCodeBrowser(value: unknown) {
   const command = browserCommand.parse(value);
   if (command.type === "close") { closeCodeBrowser(); return; }
+  if (command.type === "agent-tools") {
+    browserAgentSwitch.set(command.enabled);
+    if (!command.enabled) {
+      browserAgent.reset();
+      if (codeBrowser) codeBrowser.grant = undefined;
+    }
+    broadcast();
+    return;
+  }
+  if (command.type === "sync" || command.type === "pick" || command.type === "agent-stop" || command.type === "agent-resume") return browserAgent.command(command);
   const owner = mainWindow;
   const scope = currentCodeBrowserScope();
   if (!scope || !owner || owner.isDestroyed()) return;
@@ -2426,7 +2606,7 @@ async function runCodeBrowser(value: unknown) {
   const existing = browser.tabs.get(tabId);
   if (command.type === "share" || command.type === "unshare") {
     const url = existing?.shareableUrl();
-    browser.grant = command.type === "share" && fixture?.browserInspection && url && browser.visibleTab === tabId &&
+    browser.grant = command.type === "share" && browserTools().inspection && url && browser.visibleTab === tabId &&
       runId && state.task?.id && state.task.status === "running" && state.task.execution?.executionMode === "tomverse_api" &&
       !suspended ? { tab: tabId, runId, url } : undefined;
     return Boolean(browser.grant);
@@ -2447,7 +2627,7 @@ async function runCodeBrowser(value: unknown) {
     const view = createCodeBrowserView(owner, target.origin, tabId, (next) => {
       if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
       if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
-        owner.webContents.send("desktop:code-browser-state", next);
+        owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
       }
     });
     browser.tabs.set(tabId, view);
@@ -2459,6 +2639,77 @@ async function runCodeBrowser(value: unknown) {
     for (const [id, view] of browser.tabs) if (id !== tabId) view.hide();
   }
   existing?.apply(command);
+}
+
+// Terminals are off until the person turns them on. The host owns the shells and decides the folder from the open task.
+const codeTerminalPath = () => join(app.getPath("userData"), "code-terminal.txt");
+let codeTerminalEnabled = false;
+const terminalHost = new TerminalHost({
+  launch: createTerminalLaunch(() => { try { return createRequire(__filename)("node-pty"); } catch { return null; } }),
+  env: () => terminalEnv(),
+  emit: (event) => {
+    const window = mainWindow;
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send("desktop:code-terminal-event", event);
+  },
+});
+
+function terminalProjectOpen() {
+  return Boolean(projectRoot && currentHistoryScope() && codeConnection() && !signingOut && !invalidatingSession && !closing);
+}
+
+function terminalAvailable() {
+  return Boolean(state.task?.id && terminalProjectOpen());
+}
+
+function terminalWorkspace() {
+  const task = state.task;
+  const scope = currentHistoryScope();
+  const root = projectRoot;
+  if (!task?.id || !scope || !root || !terminalAvailable()) return null;
+  let project: ProjectRoot | null = null;
+  if (same(task.root, root.path)) project = root;
+  else {
+    const worktree = readManagedWorktree(managedWorktreeHome(scope), task.root);
+    if (worktree && !worktree.info.unavailable) project = worktree.project;
+  }
+  if (!project) return null;
+  try { assertProjectRoot(project); } catch { return null; }
+  return { task: task.id, cwd: project.path };
+}
+
+const terminalApi = createTerminalApi({
+  host: terminalHost, workspace: terminalWorkspace, enabled: () => codeTerminalEnabled,
+  setEnabled: (enabled) => {
+    writeFileAtomic(codeTerminalPath(), enabled ? "enabled" : "disabled");
+    codeTerminalEnabled = enabled;
+    broadcast();
+  },
+});
+
+function loadCodeTerminal() {
+  try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
+  catch { codeTerminalEnabled = false; }
+  browserAgentSwitch.load();
+}
+
+/** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
+function codeRunTools() {
+  const { agent, inspection } = browserTools();
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(codeTerminalEnabled ? { terminalRead: true } : {}) };
+}
+
+// The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
+function replyToTerminalRead(event: Extract<WorkerEvent, { type: "terminal-read" }>) {
+  const child = worker;
+  const live = Boolean(child && runId === event.runId && event.runId !== discardedRunId && state.busy &&
+    state.task?.status === "running" && !suspended);
+  let reply = live ? terminalApi.read({ lines: event.lines, ...(event.terminal === undefined ? {} : { terminal: event.terminal }) }) : null;
+  const key = codeConnection()?.key;
+  if (reply && key) reply = { ...reply, text: cleanText(reply.text, key) };
+  if (child && child === worker) {
+    try { send({ type: "terminal-read-result", runId: event.runId, requestId: event.requestId, reply }); }
+    catch { /* The task or runtime ended before the reply. */ }
+  }
 }
 
 let accountSettingsApi: { signal: AbortSignal; request: ReturnType<typeof createAccountSettingsApi> } | undefined;
@@ -2980,24 +3231,20 @@ function taskPulls() {
 
 const taskPullsInFlight = new Set<string>();
 
+function readSavedPulls(file: string) {
+  try {
+    if (!pathIdentity(file, "file") || statSync(file).size > 16_384) return [];
+    return z.array(pullEvidence).max(10).parse(JSON.parse(readFileSync(file, "utf8")))
+      .filter((row) => githubPullUrl(row.url));
+  } catch { return []; }
+}
+
 async function readTaskPullCommand(value: unknown) {
   const command = taskPullCommand.parse(value);
   const location = taskPulls();
   if (!location) return [];
-  const readSaved = () => {
-    try {
-      if (!pathIdentity(location.file, "file") || statSync(location.file).size > 16_384) return [];
-      return z.array(pullEvidence).max(10).parse(JSON.parse(readFileSync(location.file, "utf8")))
-        .filter((row) => githubPullUrl(row.url));
-    } catch { return []; }
-  };
+  const readSaved = () => readSavedPulls(location.file);
   if (command.type === "list") return readSaved();
-  if (command.type === "open") {
-    const link = githubPullUrl(command.link.url);
-    const saved = readSaved();
-    if (link && saved.some((row) => row.url === link.url)) await shell.openExternal(link.url);
-    return saved;
-  }
   if (taskPullsInFlight.has(location.file)) throw new Error("A GitHub check is already running for this task.");
   taskPullsInFlight.add(location.file);
   try {
@@ -3011,6 +3258,131 @@ async function readTaskPullCommand(value: unknown) {
     return updated;
   } finally { taskPullsInFlight.delete(location.file); }
 }
+
+/** The folder the Git panel works on: the open task's own worktree, else the project. Null when it changed since it was chosen. */
+function gitTarget() {
+  if (!projectRoot || closing || signingOut) return null;
+  try {
+    const worktree = state.task?.worktree;
+    const scope = currentHistoryScope();
+    const managed = worktree ? (scope ? readManagedWorktree(managedWorktreeHome(scope), worktree.path) : null) : null;
+    if (worktree && !managed) return null;
+    const project = managed?.project ?? projectRoot;
+    assertProjectRoot(project);
+    return { folder: project.path, managed: Boolean(managed), project, worktreeBase: state.task?.worktree?.base };
+  } catch { return null; }
+}
+
+// A pull request the agent opened is linked to its task when the run ends; one made from the Git panel is linked at once.
+const pullLinker = createPullLinker({
+  currentTask: () => state.task?.id ?? null,
+  ready: () => taskPulls() !== null,
+  link: async (url) => { await readTaskPullCommand({ type: "read", link: { url, environment: "" } }); },
+});
+
+const gitIntegration = createGitIntegration({
+  userData: app.getPath("userData"),
+  fixtureProfile: DESKTOP_FIXTURE_ALLOWED && fixture ? fixture.profile : null,
+  target: gitTarget,
+  busy: () => state.busy || Boolean(pending) || Boolean(approvalWindow) || pendingMutation !== null || confirmingMutation,
+  canAsk: () => !pending && !approvalWindow && !closing && !signingOut,
+  showApproval,
+  clearPending: (id) => { if (pending?.id === id) pending = null; },
+  savedLinks: () => { const location = taskPulls(); return location ? readSavedPulls(location.file).map(({ url, environment }) => ({ url, environment })) : []; },
+  linkPull: (url) => pullLinker.add(url),
+  readPublic: (link) => readGithubPull(link, chatSession.signal),
+  afterBranchChange: () => {
+    const project = projectRoot;
+    if (!project) return;
+    void readGitProject(project).then((git) => {
+      if (projectRoot === project) { codeGitProject = git; refreshWorktreeDraft(); broadcast(); }
+    }, () => undefined);
+  },
+});
+
+// A model's draft of a commit message or a pull request: a read-only Ask run in the Code runtime, charged like a Code task.
+const gitDrafter = createGitDrafter({
+  target: () => { const target = gitTarget(); return target ? { project: target.project, ...(target.worktreeBase ? { worktreeBase: target.worktreeBase } : {}) } : null; },
+  ready: () => reviewReady() && !pending && !approvalWindow,
+  models: () => state.models, connection: codeConnection, protectedRoot: () => app.getPath("userData"), language: () => state.language ?? "en",
+  request: async (command, timeoutMs) => worker ? (await runRecordedMutation(worker, command, (event) => event, timeoutMs)) ?? "unavailable" : "unavailable",
+  confirm: confirmNative,
+  cancel: cancelWorkerRequest,
+});
+
+/** An agent's commit or push request: the same approval card as the person's, answered only in the approval window. */
+async function replyToGitAction(event: Extract<WorkerEvent, { type: "git-action" }>) {
+  const child = worker;
+  const allowed = () => Boolean(child && worker === child && runId === event.runId && event.runId !== discardedRunId && state.busy && !closing && !signingOut);
+  let result: AgentGitResult = { status: "error" };
+  if (allowed()) {
+    try { result = await gitIntegration.agent(event.action); }
+    catch { result = { status: "error" }; }
+    if (!allowed() && result.status !== "denied") result = { status: "error" };
+  }
+  if (child && child === worker) {
+    try { send({ type: "git-action-result", runId: event.runId, requestId: event.requestId, result }); }
+    catch { /* The task or runtime ended before the reply. */ }
+  }
+}
+
+/** What the OS sandbox enforces on this computer for the mode the person set, read now. */
+async function scheduleSandboxFacts() {
+  const settings = readCodeSandboxSettings(codeSandboxDirectory());
+  const found = await sandboxEnforcement(settings.mode, { stateDir: join(codeSandboxDirectory(), "state") });
+  return { mode: settings.mode, available: found.available, writes: found.writes };
+}
+
+const parallel = createParallelHost({
+  userData: app.getPath("userData"),
+  origin,
+  fastClock: DESKTOP_FIXTURE_ALLOWED && fixture !== null,
+  fork: forkRunner,
+  permissionMessage: () => permissionHost.runtimeMessage(),
+  language: () => state.language ?? "en",
+  broadcast: () => {
+    broadcast();
+    if (closing && !state.busy && !pendingMutation && !parallel.lanes.busy()) app.quit();
+  },
+  foreground: () => {
+    const task = state.task;
+    if (!task) return null;
+    const busy = Boolean(runId && runId !== discardedRunId && state.busy);
+    const said = [...task.entries].reverse().find((entry) => entry.role !== "user" && entry.role !== "plan" && entry.text.trim());
+    return { key: busy && runId ? runId : IDLE_OPEN_TASK_KEY, busy, folder: task.root, title: task.title, status: task.status, taskId: task.id, changes: task.changes.length,
+      ...(said && "text" in said ? { detail: said.text.replace(/\s+/g, " ").trim().slice(0, 160) } : {}) };
+  },
+  stopForeground: stop,
+  taskSaved: () => refreshHistory(),
+  pumpApprovals: () => setImmediate(pumpApprovals),
+  newWindow,
+  gitAction: (lane, action, ask) => gitIntegration.agentFor(() => {
+    try { assertProjectRoot(lane.project); return { folder: lane.project.path, managed: lane.isolated }; }
+    catch { return null; }
+  }, ask, action),
+  schedule: {
+    openProject: () => projectRoot?.path ?? null,
+    gitProject: () => codeGitProject !== null && codeGitProject !== "unavailable",
+    hasAccount: () => codeConnection() !== null && !signingOut && !invalidatingSession && !closing,
+    owner: () => { const connection = codeConnection(); return !connection ? null : linkedCode?.connection === connection ? linkedCode.accountId : "fixture"; },
+    modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
+    sandbox: scheduleSandboxFacts,
+    launch: (item, run, lanes, approvalWaitMs) => launchScheduledRun({
+      protectedRoot: app.getPath("userData"),
+      connection: () => (signingOut || invalidatingSession || closing || suspended ? null : codeConnection()),
+      scopeFor: (project) => {
+        const connection = codeConnection();
+        if (!connection) return null;
+        const owner = linkedCode?.connection === connection ? linkedCode.accountId : null;
+        return codeHistoryScope(app.getPath("userData"), owner, project, connection);
+      },
+      worktreeHome: managedWorktreeHome,
+      permissionHome: () => permissionHost.home,
+      modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
+      sandbox: scheduleSandboxFacts,
+    }, item, run, lanes, approvalWaitMs),
+  },
+});
 
 let dictation: { id: string; session: AbortSignal; expiry: number; mediaGranted: boolean; sent: boolean; controller: AbortController } | undefined;
 
@@ -3043,6 +3415,17 @@ function mayRequestDictation(contents: Electron.WebContents | null) {
     contents === mainWindow.webContents && contents.getURL() === shellUrl);
 }
 
+const pluginsHost = createPluginsHost({
+  pickFolder: async () => fixture?.pluginFolder ?? (!mainWindow ? null : (await dialog.showOpenDialog(mainWindow, { title: nativeCopy().openFolder, properties: ["openDirectory"] })).filePaths[0] ?? null),
+  confirmFetch: async (address) => {
+    if (fixture) return true;
+    const copy = desktopPluginsCopy[state.language ?? "en"];
+    const question = { type: "question" as const, title: copy.fetchTitle, message: copy.fetchMessage, detail: address, buttons: [copy.fetchCancel, copy.fetchAllow], cancelId: 0, defaultId: 0, noLink: true };
+    const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, question) : await dialog.showMessageBox(question);
+    return response === 1;
+  },
+});
+
 function registerIpc() {
   const update = updates();
   const main = (name: string, action: (input: unknown) => unknown) => ipcMain.handle(name, (event, input: unknown) => {
@@ -3060,10 +3443,12 @@ function registerIpc() {
   login("login:cancel", () => { loginAttempt?.abort(); });
   login("login:quit", () => { loginAttempt?.abort(); app.quit(); });
   main("desktop:state", () => {
+    refreshParallel();
     refreshCodeFallbackSettings();
     return { ...state, handoff: currentHandoff() };
   });
   main("desktop:code-browser", runCodeBrowser);
+  main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
     if (!accountPermissionsFixture()) return false;
     geolocationGrant = { session: chatSession.signal, expiry: Date.now() + 12_000 };
@@ -3089,6 +3474,10 @@ function registerIpc() {
     finally { if (dictation === active) stopDictation(); }
   });
   main("desktop:task-pulls", readTaskPullCommand);
+  main("desktop:git", (value) => {
+    const command = gitCommand.parse(value);
+    return command.type === "draft" ? gitDrafter.run(command) : gitIntegration.handle(command);
+  });
   main("desktop:language", (value) => setLanguage(z.enum(SUPPORTED_LANGUAGES).parse(value)));
   main("desktop:code-execution-preference", (value) => setCodeExecutionPreference(codeExecutionMode.parse(value)));
   main("desktop:update-code-fallback", (value) => saveCodeFallback(codeFallbackUpdate.parse(value)));
@@ -3126,7 +3515,7 @@ function registerIpc() {
     }
     broadcast();
   });
-  main("desktop:start", async (value) => {
+  const startTask = async (value: unknown, parallelStart = false) => {
     const { handoffId, executionMode, workspace, ...draft } = startInput.parse(value);
     if (recoveryCheckPending()) throw new Error("Wait for the recovery check to finish.");
     const connection = codeConnection();
@@ -3134,10 +3523,12 @@ function registerIpc() {
     const scope = currentHistoryScope();
     const preference = state.codeExecutionPreference;
     const installingUpdate = () => state.update.stage === "installing";
-    if (!worker || !sourceProject || state.busy || pendingMutation || signingOut || linkAttempt || suspended || closing ||
+    if (!worker || !sourceProject || (state.busy && !parallelStart) || pendingMutation || signingOut || linkAttempt || suspended || closing ||
         installingUpdate() || choosing) {
       throw new Error("Choose an available project and Code connection first.");
     }
+    if (parallelStart ? preference !== "tomverse_api" || draft.pluginConnectionId || !parallel.lanes.mayQueue()
+      : !parallel.lanes.hasRoomForOpenTask()) throw new Error("Too many tasks are running. Wait for one to finish or raise the limit.");
     const references = (draft.referenceIds ?? []).map((referenceId) => {
       const reference = codeReferences.get(referenceId);
       if (!reference) throw new Error("Select the project references again.");
@@ -3213,6 +3604,17 @@ function registerIpc() {
     const taskScope = worktree ? managedScope(scope, project) : scope;
     assertProjectRoot(project);
     const id = randomUUID();
+    if (parallelStart) {
+      parallel.submit({ kind: "parallel", title: cleanText(input.prompt, connection.key).slice(0, 80), folder: project.path, isolated: !!worktree,
+        ...(worktree ? { worktree: worktree.info } : {}),
+        start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference } });
+      if (handoffId) removeWorkspaceHandoff(handoffId);
+      codeReferences.clear();
+      codeWorktreeDraft = undefined;
+      broadcast();
+      return;
+    }
+    if (parallel.lanes.folderBusy(project.path)) throw new Error("Another task is using this folder. Start in a new worktree or wait for it to finish.");
     runId = id;
     revokeCodePlugin();
     if (draft.pluginConnectionId && browserSession) {
@@ -3229,12 +3631,26 @@ function registerIpc() {
       (input.mode !== "agent" || codexRunFixture.allowFileEdits) && input.saveHistory !== false &&
       approval?.settings.automaticFrom === "tomverse_api"
       ? { mode: input.mode, project, approval } : undefined;
-    send({ type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
-      ...(DESKTOP_FIXTURE_ALLOWED && connection === fixture && fixture?.browserInspection ? { browserSnapshot: true } : {}) });
+    send({ type: "start", runId: id, project, ...(worktree ? { sourceProject } : {}), scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
+      ...codeRunTools() });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     codeWorktreeDraft = undefined;
     broadcast();
+  };
+  main("desktop:start", (value) => startTask(value));
+  main("desktop:start-parallel", (value) => startTask(value, true));
+  main("desktop:parallel", (value) => parallel.command(value));
+  main("desktop:schedules", (value) => parallel.schedules(value));
+  main("desktop:permissions", (value) => {
+    if (signingOut || closing) return { ok: false, error: "The app is closing." };
+    const result = permissionHost.run(permissionCommand.parse(value));
+    if (result.ok) {
+      worker?.postMessage(permissionHost.runtimeMessage());
+      parallel.permissionChanged();
+      broadcast();
+    }
+    return result;
   });
   main("desktop:permission-profile", (value) => {
     const profile = codePermissionProfile.parse(value);
@@ -3306,6 +3722,18 @@ function registerIpc() {
     if (projectRoot) assertProjectRoot(projectRoot);
     return codeMemoryView(codeMemoryDirectory(), projectRoot, input);
   });
+  main("desktop:code-extensions", (value) => {
+    const input = codeExtensionsInput.parse(value);
+    if (projectRoot) assertProjectRoot(projectRoot);
+    return codeExtensionsView(projectRoot?.path ?? null, input);
+  });
+  main("desktop:plugins", (value) => pluginsHost.reply(pluginsCommand.parse(value), projectRoot?.path ?? null));
+  main("desktop:local-extensions", (value) => {
+    const command = localExtensionsCommand.parse(value);
+    if (projectRoot) assertProjectRoot(projectRoot);
+    return localExtensionsReply(projectRoot?.path ?? null, command);
+  });
+  main("desktop:code-sandbox", (value) => codeSandboxView(codeSandboxDirectory(), codeSandboxInput.parse(value)));
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);
     const task = state.task;
@@ -3313,6 +3741,15 @@ function registerIpc() {
     if (!worker || !activeRunId || activeRunId === discardedRunId || !state.busy || task?.id !== id ||
         task.execution?.executionMode !== "tomverse_api" || suspended || closing || signingOut) return false;
     try { send({ type: "stop-background", runId: activeRunId, handle }); return true; }
+    catch { return false; }
+  });
+  main("desktop:stop-subagents", (value) => {
+    const { id, subtask } = subagentStopInput.parse(value);
+    const task = state.task;
+    const activeRunId = runId;
+    if (!worker || !activeRunId || activeRunId === discardedRunId || !state.busy || task?.id !== id ||
+        task.execution?.executionMode !== "tomverse_api" || suspended || closing || signingOut) return false;
+    try { send({ type: "stop-subagent", runId: activeRunId, ...(subtask ? { subtask } : {}) }); return true; }
     catch { return false; }
   });
   main("desktop:resume", (value) => {
@@ -3339,7 +3776,7 @@ function registerIpc() {
     runId = randomUUID();
     state.busy = true;
     state.task = { ...task, status: "starting", canResume: false };
-    send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, previous: task });
+    send({ ...record, type: "resume", runId, protectedRoot: app.getPath("userData"), connection, ...codeRunTools(), previous: task });
     broadcast();
     return true;
   });
@@ -3387,6 +3824,14 @@ function registerIpc() {
   main("desktop:check-recovery", (id) => checkSelectedRecovery(sessionId.parse(id)));
   main("desktop:compact-task", (id) => compactSelectedTask(sessionId.parse(id)));
   main("desktop:undo-change", (id) => undoSelectedChange(z.string().min(1).max(128).parse(id)));
+  main("desktop:review", createReviewActions({
+    target: reviewTarget, ready: reviewReady, models: () => state.models, connection: codeConnection, protectedRoot: () => app.getPath("userData"),
+    language: () => state.language ?? "en",
+    request: async (command, timeoutMs) => worker ? (await runRecordedMutation(worker, command, (event) => event, timeoutMs)) ?? "unavailable" : "unavailable",
+    confirm: confirmNative,
+    cancel: cancelWorkerRequest,
+    afterRevert: (taskId, changes) => { if (state.task?.id === taskId) { state.task.changes = changes; broadcast(); } },
+  }));
   main("desktop:rewind-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return rewindSelectedTurn(id, turn); });
   main("desktop:fork-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return forkSelectedTurn(id, turn); });
   main("desktop:export-diagnostics", exportDiagnostics);
@@ -3579,10 +4024,11 @@ function createMainWindow() {
     closeCodeBrowser();
     stopDictation();
     stop();
+    parallel.lanes.stopAll();
     void recoverWorkspace(true);
   });
   window.on("close", (event) => {
-    if (state.busy || pendingMutation) {
+    if (state.busy || pendingMutation || parallel.lanes.busy()) {
       event.preventDefault();
       requestQuit();
       return;
@@ -3659,7 +4105,7 @@ else {
     window.focus();
   });
   app.on("before-quit", (event) => {
-    if (state.busy || pendingMutation) {
+    if (state.busy || pendingMutation || parallel.lanes.busy()) {
       event.preventDefault();
       requestQuit();
     }
@@ -3671,6 +4117,8 @@ else {
     loginAttempt?.abort();
     linkAttempt?.abort();
     renewal?.controller.abort();
+    terminalHost.closeAllSync();
+    parallel.shutdown();
     browserSession = null;
     linkedCode = null;
     clearTimeout(sessionExpiry);
@@ -3690,7 +4138,7 @@ else {
       const address = new URL(request.url);
       if (request.method !== "GET" || address.host !== "desktop" || address.search) return new Response(null, { status: 404 });
       const route = address.pathname;
-      const isPage = route === "/" || route === "/approval" || route === "/login";
+      const isPage = route === "/" || route === "/approval" || route === "/login" || route === "/task";
       if (!isPage && !/^\/assets\/[A-Za-z0-9_.-]+$/.test(route)) return new Response(null, { status: 404 });
       const mime = isPage ? "text/html; charset=utf-8" : assetTypes[extname(route)];
       if (!mime) return new Response(null, { status: 404 });
@@ -3720,14 +4168,17 @@ else {
     session.defaultSession.on("will-download", (event) => event.preventDefault());
     loadLanguage();
     loadCodeExecutionPreference();
+    permissionHost.load();
     loadCliPaths();
     loadCodeNotifications();
+    loadCodeTerminal();
     powerMonitor.on("suspend", () => {
       cliInspection?.controller.abort();
       suspended = true;
       geolocationGrant = undefined;
       stopDictation(true);
       stop();
+      parallel.lanes.stopAll();
     });
     powerMonitor.on("resume", () => {
       suspended = false;
@@ -3735,6 +4186,7 @@ else {
     });
     registerIpc();
     bootWorker();
+    parallel.start();
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) await restoreBrowserSession();
     accountWindowsReady = true;
     if (DESKTOP_LOGIN_WINDOW_REQUIRED) syncAccountWindow();

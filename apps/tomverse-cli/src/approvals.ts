@@ -1,7 +1,8 @@
 import type { ApprovalView } from "./agent.js";
+import { checkBoundaries, ruleForApproval, type PermissionRule } from "./permissions.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
-export type RememberedRule = "file_edits" | "same_command" | "web_host";
+export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool";
 
 /**
  * "Yes, and don't ask again" answers the person gave at the terminal, for the
@@ -15,15 +16,35 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host";
  *   given (another folder is asked). Deleting a file is always asked.
  * - web_host: reading public web pages from one site (host). Any other site
  *   is asked; the address is judged again on every call.
+ * - browser_origin: clicking and typing in the local browser tab, on one site (origin). Another origin is asked; the page and the
+ *   element are shown on every call that is asked, and passwords are refused by the host whatever was allowed.
  * - same_command: exactly the same program, arguments, working folder and
  *   environment names, and the same kind of run (background or not); any other
  *   command is asked. The timeout may differ.
+ *
+ * Nothing the permission boundaries (permissions.ts) leave to a person is ever
+ * remembered: a command that sends something out of the computer, names a
+ * credential file, or a change that is refused, is asked every time.
+ *
+ * A host whose answer really means "always, in this project" may give a `persist`
+ * function: the answer is then also saved as an allow rule for the project.
+ * Desktop gives none: its button reads "Allow for this run", so the answer ends
+ * with the run and lasting rules are written in its settings.
  */
 export class ApprovalMemory {
     /** Workspace roots where file edits were allowed; an edit without a root is always asked. */
     private readonly fileEdits = new Set<string>();
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
+    private readonly browserOrigins = new Set<string>();
+    /** MCP tools answered "always": one tool of one server, for that exact server definition. */
+    private readonly mcpTools = new Set<string>();
+
+    private static mcpKey(view: ApprovalView) {
+        return view.mcp ? JSON.stringify([view.mcp.server, view.mcp.tool, view.mcp.definition]) : null;
+    }
+
+    constructor(private readonly persist?: (rule: PermissionRule) => void) {}
 
     private static commandKey(view: ApprovalView) {
         const c = view.command;
@@ -37,15 +58,19 @@ export class ApprovalMemory {
 
     /** Whether "always" can be offered for this request. */
     canRemember(view: ApprovalView) {
-        if (view.error) return false;
+        if (view.error || checkBoundaries(view)) return false;
+        if (view.mcp) return true;
         if (view.web) return true;
+        if (view.browser) return Boolean(view.browser.origin);
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
         return Boolean(view.command);
     }
 
     match(view: ApprovalView): RememberedRule | null {
-        if (view.error) return null;
+        if (view.error || checkBoundaries(view)) return null;
+        if (view.mcp) return this.mcpTools.has(ApprovalMemory.mcpKey(view)!) ? "mcp_tool" : null;
         if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
+        if (view.browser) return this.browserOrigins.has(view.browser.origin) ? "browser_origin" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
         const key = ApprovalMemory.commandKey(view);
         return key && this.commands.has(key) ? "same_command" : null;
@@ -53,9 +78,26 @@ export class ApprovalMemory {
 
     remember(view: ApprovalView): RememberedRule | null {
         if (!this.canRemember(view)) return null;
+        // An MCP answer is bound to the server's exact definition, so it stays in this process and is never written as a rule.
+        if (view.mcp) {
+            this.mcpTools.add(ApprovalMemory.mcpKey(view)!);
+            return "mcp_tool";
+        }
+        const rule = this.persist ? ruleForApproval(view) : null;
+        if (rule) {
+            try {
+                this.persist!(rule);
+            } catch {
+                // The answer still holds for this run; a file that cannot be written only means it is asked again next time.
+            }
+        }
         if (view.web) {
             this.webHosts.add(view.web.host);
             return "web_host";
+        }
+        if (view.browser) {
+            this.browserOrigins.add(view.browser.origin);
+            return "browser_origin";
         }
         if (view.patch) {
             this.fileEdits.add(view.root!);
@@ -70,12 +112,16 @@ export class ApprovalMemory {
             ...[...this.fileEdits].map((root) => `file edits in ${root} (creating and changing files; deleting is still asked)`),
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
+            ...[...this.browserOrigins].map((origin) => `clicking and typing in the browser tab on ${origin}`),
+            ...[...this.mcpTools].map((key) => { const [server, tool] = JSON.parse(key) as string[]; return `MCP tool ${server}: ${tool}`; }),
         ];
     }
 
     clear() {
+        this.mcpTools.clear();
         this.fileEdits.clear();
         this.commands.clear();
         this.webHosts.clear();
+        this.browserOrigins.clear();
     }
 }

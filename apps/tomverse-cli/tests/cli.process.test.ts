@@ -24,7 +24,9 @@ const run = (args: string[], options: { cwd: string; env?: Record<string, string
     new Promise<Run>((resolve) => {
         const env: Record<string, string> = {};
         for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(TOMVERSE_|OPENAI_|AI_GATEWAY)/.test(k)) env[k] = v;
-        Object.assign(env, { TOMVERSE_HOME: options.home }, options.env ?? {});
+        // The person's own ~/.claude, ~/.agents and ~/.codex (skills, agents) must not change what a test sees.
+        delete env.CLAUDE_CONFIG_DIR;
+        Object.assign(env, { TOMVERSE_HOME: options.home, HOME: options.home, USERPROFILE: options.home }, options.env ?? {});
         for (const [k, v] of Object.entries(options.env ?? {})) if (v === undefined) delete env[k];
         const child = spawn(PROGRAM, [...PROGRAM_ARGS, ...args], { cwd: options.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";

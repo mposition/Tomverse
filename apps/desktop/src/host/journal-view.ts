@@ -88,7 +88,7 @@ export function journalPendingFollowUp(state: SessionState, key?: string): strin
 }
 
 /** Limits, goal mode and held messages of a saved task: cheap, so it is read on every publish. */
-export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued" | "subagents"> {
+export function journalEngine(state: SessionState, key?: string): Pick<Task, "limits" | "goal" | "queued" | "subagents" | "orchestration"> {
   const task = state.tasks.at(-1);
   const profile = state.limits.profile;
   const last = task?.goalChecks?.at(-1);
@@ -100,6 +100,33 @@ export function journalEngine(state: SessionState, key?: string): Pick<Task, "li
     } : undefined,
     queued: task?.queued?.length ? task.queued.map(({ id, text }) => ({ id, text: cleanText(text.slice(0, 24_000), key) })) : undefined,
     subagents: journalSubagents(state, key),
+    orchestration: journalOrchestration(state, key),
+  };
+}
+
+/** The orchestrated subtasks of a session for the Code screen. One still marked under way in a session that is not running is one that was cut off. */
+export function journalOrchestration(state: SessionState, key?: string): Task["orchestration"] {
+  const limits = state.orchestrate;
+  if (!limits) return undefined;
+  const live = state.status === "running";
+  const clean = (text: string, max: number) => cleanText(text, key).slice(0, max);
+  const all = state.subtasks ?? [];
+  return {
+    maxSubagents: limits.maxSubagents, maxRequests: limits.maxRequests, used: all.reduce((sum, record) => sum + record.requests, 0),
+    subtasks: all.slice(-24).map((record) => {
+      const cutOff = !live && (record.state === "queued" || record.state === "running" || record.state === "verifying");
+      return {
+        id: record.id, title: clean(record.title, 80), kind: record.kind, ...(record.agent ? { agent: clean(record.agent, 80) } : {}),
+        ...(record.paths?.length ? { paths: record.paths.slice(0, 20).map((path) => clean(path, 200)) } : {}),
+        ...(record.criteria ? { criteria: clean(record.criteria, 400) } : {}),
+        state: cutOff ? "failed" as const : record.state,
+        ...(cutOff ? { reason: "The task ended while this subtask was under way." } : record.reason ? { reason: clean(record.reason, 400) } : {}),
+        attempts: record.attempts, requests: record.requests,
+        ...(record.activity && !cutOff && (record.state === "queued" || record.state === "running" || record.state === "verifying") ? { activity: clean(record.activity, 160) } : {}),
+        ...(record.filesChanged?.length ? { filesChanged: record.filesChanged.slice(0, 30).map((path) => clean(path, 200)) } : {}),
+        ...(record.verification ? { verification: { ...record.verification, reason: clean(record.verification.reason, 600) } } : {}),
+      };
+    }),
   };
 }
 
