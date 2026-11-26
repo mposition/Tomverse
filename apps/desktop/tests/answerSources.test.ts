@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chatMessage } from "../src/chat-contract";
 import { sourceRows } from "../src/answer-sources";
+import { citationsOutsideResearchBody } from "../../../lib/researchCitationDisplay";
 
 const message = (searchMetadata: unknown) => chatMessage.parse({ id: "m1", role: "assistant", content: "Answer [1]", searchMetadata });
 
@@ -27,6 +28,23 @@ test("missing or malformed citations become an empty list instead of failing the
   assert.deepEqual(message({}).searchMetadata?.citations, []);
   assert.deepEqual(message({ citations: "nope" }).searchMetadata?.citations, []);
   assert.equal(chatMessage.parse({ id: "m2", role: "user", content: "hi" }).searchMetadata, undefined);
+});
+
+test("a saved Research report keeps its body source URLs so the list under it shows only the rest", () => {
+  const parsed = message({
+    citations: [
+      { url: "https://example.org/a", title: "In the report body", referenceNumber: 1 },
+      { url: "https://drive.example.com/doc", title: "Connector doc" },
+    ],
+    research: { version: 1, mode: "preview", outcome: "complete", sources: [{ sourceId: "R1", referenceNumber: 1, url: "https://example.org/a" }] },
+  });
+  assert.deepEqual(parsed.searchMetadata?.research, { sources: [{ url: "https://example.org/a" }] });
+  assert.deepEqual(citationsOutsideResearchBody(parsed.searchMetadata?.citations, parsed.searchMetadata?.research)
+    .map(({ url }) => url), ["https://drive.example.com/doc"]);
+  // Malformed Research metadata never hides a source: the answer keeps its full list.
+  const malformed = message({ citations: [{ url: "https://example.org/a" }], research: { sources: "nope" } });
+  assert.equal(malformed.searchMetadata?.research, undefined);
+  assert.equal(citationsOutsideResearchBody(malformed.searchMetadata?.citations, malformed.searchMetadata?.research).length, 1);
 });
 
 test("source rows open only public https pages in the viewer and label the rest by host", () => {

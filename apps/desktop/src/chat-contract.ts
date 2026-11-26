@@ -101,6 +101,8 @@ export const chatMessage = z.object({
     // Web search sources: only http(s) URLs survive the shared sanitizer, so the renderer never sees another scheme.
     citations: z.unknown().optional().transform((value) => Array.isArray(value)
       ? sanitizeWebSearchCitations(value.filter((entry) => entry && typeof entry === "object")).slice(0, 50) : []),
+    // Only the source URLs a Research report already lists in its body, so the list under it can leave them out.
+    research: z.object({ sources: z.array(z.object({ url: z.string() })).max(50).optional() }).optional().catch(undefined),
   }).nullish(),
   attachments: z.array(attachmentRead).optional(),
   artifacts: z.unknown().optional().transform((value) => parseChatStreamArtifacts(value) ?? []),
