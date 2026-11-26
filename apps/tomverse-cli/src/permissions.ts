@@ -350,15 +350,58 @@ const LOCAL_SUBCOMMANDS: Record<string, readonly string[]> = {
  */
 const PLAIN_WORD = /^[A-Za-z0-9_.,:=@+/\\-]+$/;
 
+/** Options of the program itself that take their value as the next word, so that word is not the subcommand. */
+const VALUE_OPTIONS: Record<string, readonly string[]> = {
+    git: ["-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--attr-source"],
+    npm: ["--prefix", "-w", "--workspace"],
+    pnpm: ["-C", "--dir", "-F", "--filter"],
+    yarn: ["--cwd"],
+    docker: ["--context", "--config", "-H", "--host", "-l", "--log-level"],
+    podman: ["--root", "--runroot", "--log-level"],
+    cargo: ["--color", "--config"],
+};
+
+/** Options of the program itself that take no value. Any other option before the subcommand leaves the line to a person. */
+const PLAIN_FLAGS: Record<string, readonly string[]> = {
+    git: ["--no-pager", "-p", "--paginate", "--no-replace-objects", "--bare", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+        "--icase-pathspecs", "--no-optional-locks", "--no-advice"],
+    npm: ["--silent", "-s", "--quiet", "-q", "--yes", "-y", "--no-color", "--json"],
+    pnpm: ["--silent", "-s", "--no-color", "-r", "--recursive"],
+    yarn: ["--silent", "-s", "--no-color", "--json"],
+    bun: ["--silent"],
+    cargo: ["-q", "--quiet", "-v", "--verbose", "--locked", "--offline", "--frozen"],
+    docker: ["-D", "--debug"],
+    dotnet: [],
+};
+
 /**
- * Whether the words after a subcommand-sensitive program say, as written, that the work stays on this computer: only
- * plain words up to a subcommand of the local list. A word that is not plain, or no local subcommand at all, does not.
+ * Whether the words after a subcommand-sensitive program say, as written, that the work stays on this computer: the
+ * subcommand itself, which is the first word that is not an option or an option's value, is one of the local list, and
+ * every word up to it is plain. A later word that happens to be a subcommand's name (a branch called `status`) is only
+ * an argument and proves nothing.
  */
 const staysLocal = (program: string, args: string[]) => {
     const local = LOCAL_SUBCOMMANDS[program] ?? [];
-    for (const arg of args) {
+    const takesValue = VALUE_OPTIONS[program] ?? [];
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index]!;
         if (!PLAIN_WORD.test(arg)) return false;
-        if (arg === "--version" || arg === "--help" || local.includes(arg.toLowerCase())) return true;
+        if (arg === "--version" || arg === "--help") return true;
+        if (arg.startsWith("-")) {
+            // Only options this list knows are stepped over: an unknown one may take the next word as its value, and
+            // then the word after it, not this one, is the subcommand. `-C dir` skips its value; `--name=value` carries it.
+            const name = arg.split("=")[0]!;
+            if (takesValue.includes(name)) {
+                if (!arg.includes("=")) {
+                    index += 1;
+                    if (index < args.length && !PLAIN_WORD.test(args[index]!)) return false;
+                }
+            } else if (!(PLAIN_FLAGS[program] ?? []).includes(arg)) {
+                return false;
+            }
+            continue;
+        }
+        return local.includes(arg.toLowerCase());
     }
     return false;
 };

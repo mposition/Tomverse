@@ -351,6 +351,10 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
         // Quoting forms and globs that still spell the word for the shell, and a program name hidden behind a wrapper.
         "git $'push' origin main", "git $\"push\"", "gi$''t push", "env gi$''t push", "/usr/bin/gi? push", "git pus[h] origin", "git {push,} origin",
         "git fetch-pack x", "git up",
+        // The subcommand is the first word that is not an option: a later word named like a local subcommand is only an argument.
+        "git foo origin status", "git -C sub foo origin log", "npm --prefix app deploy run", "docker --context prod up build",
+        // An option this check does not know may take the next word as its value, so the word after that is the subcommand.
+        "git --some-new-option status foo origin", "npm --unknown run deploy",
         // A line continued over a line break, and a new name for a command.
         "gi\\\nt push", "git pu\\\nsh origin", "alias g=git; g push", "function g { git @args }; g push", "Set-Alias g git; g push", "g() { git \"$@\"; }; g push",
         ". ./deploy-env.sh",
@@ -376,7 +380,7 @@ test("a shell line that hides an outbound command behind quotes, escapes or run-
     // Ordinary lines with variables, quotes and paths are not caught: a variable after a local subcommand is only its argument.
     const plain = [
         '$env:CI = "1"; npm test', "npm run build -- --out $OUT", 'git commit -m "$message"', 'node -e "console.log(1)"', String.raw`dir C:\Users\me\project`,
-        'echo "push"', "CI=1 npm test", "git status", "docker build -t $TAG .",
+        'echo "push"', "CI=1 npm test", "git status", "docker build -t $TAG .", "git -C sub status", "git --no-pager log -3", "npm --prefix app run build",
     ];
     for (const line of plain) assert.equal(egress(line), undefined, line);
 });
