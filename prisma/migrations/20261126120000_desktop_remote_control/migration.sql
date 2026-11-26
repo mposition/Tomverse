@@ -13,6 +13,12 @@
 --                         server never applies it. Deleted 15 minutes after
 --                         it was made, and with its device.
 --
+-- One exception to both periods: the answer to an approval request is kept
+-- for as long as the PC's report still shows that request, and so is that
+-- report after it expires (hidden, and unable to receive anything), until
+-- the PC reports the request closed or the device's sign-in ends. The row is
+-- what refuses a second answer for the same request.
+--
 -- Both are reached from MobileDevice by cascade, so deleting a device, or the
 -- account that owns it, deletes them.
 --
