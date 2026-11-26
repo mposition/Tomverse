@@ -84,7 +84,7 @@ export const studioLocale = {
   "stickerReplaced": "Le sticker sélectionné a été remplacé.",
   "exampleMemeSituation": "Ils ont dit cinq minutes, mais je suis arrivé avant tout le monde.",
   "taskFailed": "Impossible de terminer cette étape. Vérifiez l’image ou réessayez.",
-  "cutoutMissing": "L’un des deux résultats n’a pas pu être créé. Il ne vous a pas été facturé.",
+  "cutoutMissing": "L’un des deux résultats n’a pas pu être créé. Appuyez de nouveau pour ne relancer que celui-ci.",
   "exampleRoleplay": "À l’aéroport de Jeju, on trouve une robe de mariée qui porte nos noms.",
   "exampleQuizQuestion": "Que mettez-vous en premier dans votre valise ?",
   "exampleQuizTitle": "Quel rôle jouez-vous dans notre voyage de groupe ?",

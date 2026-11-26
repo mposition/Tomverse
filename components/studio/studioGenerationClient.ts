@@ -98,6 +98,17 @@ export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = tr
 }
 
 /**
+ * Which tools of a several-tool feature a press of the button requests. A tool
+ * whose result for this photo is already held is not requested again while
+ * another is still missing: it was paid for, and only the missing one is owed.
+ * With every result held the press means "make them again", so all are.
+ */
+export const studioToolsToRequest = <Target extends { modelId: string }>(targets: readonly Target[], held: (modelId: string) => boolean): Target[] => {
+  const missing = targets.filter(target => !held(target.modelId));
+  return missing.length === 0 ? [...targets] : missing;
+};
+
+/**
  * Runs one tool of a several-tool feature after another has finished. The
  * slot the previous request held is given back a moment after its result
  * becomes readable, so a refusal for a busy slot is waited out twice before it

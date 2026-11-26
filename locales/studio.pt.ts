@@ -84,7 +84,7 @@ export const studioLocale = {
   "stickerReplaced": "A figurinha selecionada foi substituída.",
   "exampleMemeSituation": "Disseram cinco minutos e eu cheguei antes de todo mundo.",
   "taskFailed": "Não foi possível concluir esta etapa. Verifique a imagem ou tente de novo.",
-  "cutoutMissing": "Não foi possível criar um dos dois resultados. Você não foi cobrado por ele.",
+  "cutoutMissing": "Não foi possível criar um dos dois resultados. Toque de novo para tentar apenas esse.",
   "exampleRoleplay": "No aeroporto de Jeju, encontramos um vestido de noiva com nossos nomes.",
   "exampleQuizQuestion": "O que você coloca na mala primeiro antes de viajar?",
   "exampleQuizTitle": "Que personagem é você na nossa viagem em grupo?",

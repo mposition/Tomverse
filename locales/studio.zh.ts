@@ -84,7 +84,7 @@ export const studioLocale = {
   "stickerReplaced": "已替换所选贴图。",
   "exampleMemeSituation": "他们都说五分钟到，结果只有我先到了。",
   "taskFailed": "未能完成操作。请检查图片或重试。",
-  "cutoutMissing": "两个结果中有一个未能生成，这一项不会收费。",
+  "cutoutMissing": "两个结果中有一个未能生成。再次点击只会重试这一项。",
   "exampleRoleplay": "我们在济州机场发现一件写着我们名字的婚纱。",
   "exampleQuizQuestion": "旅行前你最先收拾什么？",
   "exampleQuizTitle": "在我们的旅行中，你是哪种角色？",

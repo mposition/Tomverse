@@ -11,7 +11,7 @@ import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudi
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
-import { createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolQuote, useStudioImageQuote } from "./studioGenerationClient";
+import { createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolQuote, studioToolsToRequest, useStudioImageQuote } from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
@@ -32,6 +32,8 @@ type ToolCheckoutDraft = {
   publicationPreset?: string;
   socialFormatId?: string;
   logo?: StudioDraftImage;
+  /** Background remover results already paid for, so a return from checkout does not request them again. */
+  toolBlobs?: { modelId: string; blob: Blob }[];
 };
 
 const posterCategories = [["autoStyle", "auto"], ["eventCategory", "event"], ["productCategory", "product"], ["announcementCategory", "announcement"]] as const;
@@ -97,6 +99,9 @@ export function StudioToolEditor({ tool, preset }: {
   const [runImage] = useState(createStudioImageRunner);
   // One runner per background remover: each tool is its own request, with its own retry state.
   const [toolRunners] = useState(() => new Map<string, ReturnType<typeof createStudioImageRunner>>());
+  // What each remover returned for a photo, held until the photo changes: a result already paid for is
+  // never requested again because the other tool, or its own cropping, failed.
+  const [toolResults] = useState(() => new Map<string, { photo: string; blob: Blob }>());
   const { id } = tool;
   const poster = id === "poster";
   const social = id === "social-post";
@@ -170,7 +175,10 @@ export function StudioToolEditor({ tool, preset }: {
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
     urls.release(photo);
     urls.release(result);
-    setPhoto(publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo));
+    const restoredPhoto = publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo);
+    setPhoto(restoredPhoto);
+    toolResults.clear();
+    for (const held of saved.toolBlobs ?? []) toolResults.set(held.modelId, { photo: restoredPhoto, blob: held.blob });
     setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
     setCustomPhoto(saved.customPhoto);
     setResultIsExample(saved.resultIsExample);
@@ -197,6 +205,7 @@ export function StudioToolEditor({ tool, preset }: {
       await checkoutDraft.save({
         photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample,
         format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText, publicationPreset, socialFormatId,
+        toolBlobs: [...toolResults].filter(([, held]) => held.photo === photo).map(([modelId, held]) => ({ modelId, blob: held.blob })),
       });
       setDraftSaved(true);
     } catch {
@@ -282,13 +291,20 @@ export function StudioToolEditor({ tool, preset }: {
       if (quote.targets) {
         // Each remover is its own request, sent one after the other: a user may have one image request
         // running at a time. Each cut-out is shown as it arrives and the first is picked until the user chooses.
+        const held = (modelId: string) => toolResults.get(modelId)?.photo === photo ? toolResults.get(modelId)!.blob : undefined;
+        const requested = new Set(studioToolsToRequest(quote.targets, modelId => Boolean(held(modelId))).map(target => target.modelId));
         const fresh: typeof cutouts = [];
         let failure: unknown;
         for (const target of quote.targets) {
-          const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
-          toolRunners.set(target.modelId, runner);
           try {
-            const url = urls.make(await cropStudioCutout(photo, await runStudioTool(() => runner({ ...run, quote: studioToolQuote(quote, target) }), signal)));
+            let blob = requested.has(target.modelId) ? undefined : held(target.modelId);
+            if (!blob) {
+              const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
+              toolRunners.set(target.modelId, runner);
+              blob = await runStudioTool(() => runner({ ...run, quote: studioToolQuote(quote, target) }), signal);
+              toolResults.set(target.modelId, { photo, blob });
+            }
+            const url = urls.make(await cropStudioCutout(photo, blob));
             if (signal.aborted) return urls.release(url);
             if (fresh.length === 0) {
               urls.release(result);
@@ -303,9 +319,13 @@ export function StudioToolEditor({ tool, preset }: {
             failure ??= error;
           }
         }
-        // Nothing made is a failure; one of two made is said so, because the quote named both.
-        if (fresh.length === 0 && failure) throw failure;
-        if (failure) report(copy.cutoutMissing, true);
+        if (failure) {
+          // Nothing made is a failure. A shortfall or a changed quote is handled as for any tool (credit
+          // recovery, a fresh quote) and what was made stays on screen. Otherwise one of two is said so.
+          if (fresh.length === 0 || isStudioCreditShortfall(failure) ||
+              (failure instanceof StudioGenerationError && failure.status === 409)) throw failure;
+          report(copy.cutoutMissing, true);
+        }
       } else {
         const generated = await runImage({ ...run, quote });
         const output = pngTool ? await cropStudioCutout(photo, generated) : generated;

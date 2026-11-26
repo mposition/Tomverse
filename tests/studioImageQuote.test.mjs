@@ -70,3 +70,15 @@ test("a tool sent after another waits out a busy slot twice, and nothing else", 
     assert.equal(calls, 1);
   }
 });
+
+test("a press requests only the tool whose result is missing, and every tool once all are held", async () => {
+  const { studioToolsToRequest } = await import("../components/studio/studioGenerationClient.ts");
+  const targets = [{ modelId: "tool-a" }, { modelId: "tool-b" }];
+  const ids = held => studioToolsToRequest(targets, id => held.includes(id)).map(target => target.modelId);
+  assert.deepEqual(ids([]), ["tool-a", "tool-b"]);
+  // The paid result is never requested again while the other is still owed.
+  assert.deepEqual(ids(["tool-a"]), ["tool-b"]);
+  assert.deepEqual(ids(["tool-b"]), ["tool-a"]);
+  // Both held: the press means make them again.
+  assert.deepEqual(ids(["tool-a", "tool-b"]), ["tool-a", "tool-b"]);
+});
