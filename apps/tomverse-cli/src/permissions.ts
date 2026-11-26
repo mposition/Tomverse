@@ -83,7 +83,7 @@ const caseInsensitive = process.platform === "win32" || process.platform === "da
 
 type Subject =
     | { kind: "patch"; paths: string[]; deletes: boolean }
-    | { kind: "command"; strict: string[] | null; broad: string[][]; text: string }
+    | { kind: "command"; strict: string[] | null; broad: string[][]; text: string; shellParts: string[] }
     | { kind: "web"; host: string }
     /** A tool of an MCP server. `server` and `tool` are null when the request carries no server information. */
     | { kind: "mcp"; name: string; server: string | null; tool: string | null }
@@ -122,6 +122,9 @@ export const tokenize = (text: string): string[] | null => {
 
 const programName = (token: string) => basename(token.replaceAll("\\", "/")).replace(/\.(?:exe|cmd|bat|com|ps1)$/i, "").toLowerCase();
 
+/** A shell line with quotes and the escape characters of sh, cmd and PowerShell removed, the way a shell joins a word. */
+const joinedWords = (part: string) => part.replace(/["'`^\\]/g, "").replace(/[()]/g, " ");
+
 const subjectOf = (view: ApprovalView): Subject => {
     if (view.patch) return { kind: "patch", paths: view.patch.map((edit) => edit.path), deletes: view.patch.some((edit) => edit.action === "delete") };
     if (view.web) return { kind: "web", host: view.web.host.toLowerCase() };
@@ -133,13 +136,19 @@ const subjectOf = (view: ApprovalView): Subject => {
         const strict = plan.mode === "argv"
             ? (given ?? [programName(plan.file), ...plan.args])
             : SHELL_META.test(text) ? null : tokenize(text);
-        // Words of every part of the line, quotes dropped: what a deny or ask rule and the egress check read.
-        const parts = (plan.mode === "argv" ? [text] : text.split(/[;&|\n\r]+/)).map((part) => part.replace(/["'`()]/g, " ").split(/\s+/).filter(Boolean));
+        // Words of every part of the line: what a deny or ask rule and the egress check read. A shell line is read twice,
+        // once with quotes as spaces and once with quotes and escape characters removed, because a shell joins what they
+        // split: empty quotes, a backslash, a caret or a backtick inside `push` all still run `push`.
+        const shellParts = plan.mode === "argv" ? [] : text.split(/[;&|\n\r]+/);
+        const wordsOf = (line: string) => line.split(/\s+/).filter(Boolean);
+        const parts = plan.mode === "argv"
+            ? [wordsOf(text.replace(/["'`()]/g, " "))]
+            : shellParts.flatMap((part) => [wordsOf(part.replace(/["'`()]/g, " ")), wordsOf(joinedWords(part))]);
         const broad = parts.flatMap((words) => {
             const first = words[0];
             return first ? [words, [programName(first), ...words.slice(1)]] : [];
         });
-        return { kind: "command", strict, broad, text };
+        return { kind: "command", strict, broad, text, shellParts };
     }
     if (view.mcp) return { kind: "mcp", name: view.toolName, server: view.mcp.server, tool: view.mcp.tool };
     if (view.toolName.startsWith("mcp__")) return { kind: "mcp", name: view.toolName, server: null, tool: null };
@@ -289,6 +298,72 @@ const egressReason = (subject: Extract<Subject, { kind: "command" }>) => {
         }
     }
     if (URL_LITERAL.test(subject.text)) return "It names a network address, so it may send something outside this computer.";
+    return unreadableReason(subject);
+};
+
+/** A variable or a command substitution: text that becomes something else when the shell runs the line. */
+const RUN_TIME_TEXT = /\$[({A-Za-z_?]|`[^`]*`|%[A-Za-z_][A-Za-z0-9_]*%|![A-Za-z_][A-Za-z0-9_]*!/;
+/** Programs that send something out only with a particular subcommand: their arguments decide. */
+const SUBCOMMAND_PROGRAMS = new Set(EGRESS_COMMANDS.map((command) => command[0]!));
+/** Words that run text as a command, or hand a program its arguments from somewhere else. */
+const COMMAND_BUILDERS = new Set(["eval", "iex", "invoke-expression", "xargs", "invoke-command", "icm", "start-process", "saps", "start"]);
+const TEXT_RUNNERS = new Set(["eval", "iex", "invoke-expression"]);
+const SHELL_PROGRAMS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "powershell", "pwsh"]);
+/** Subcommands that keep the work on this computer. Once one of them is read, later run-time text is only its argument. */
+const LOCAL_SUBCOMMANDS: Record<string, readonly string[]> = {
+    git: ["status", "diff", "log", "show", "add", "commit", "checkout", "switch", "branch", "merge", "rebase", "stash", "restore", "reset", "tag", "mv", "rm",
+        "blame", "grep", "clean", "describe", "init", "worktree", "apply", "cherry-pick", "revert", "rev-parse", "ls-files"],
+    npm: ["run", "run-script", "test", "t", "install", "i", "ci", "start", "build", "exec", "x", "ls", "list", "outdated", "audit", "why", "rebuild", "update"],
+    pnpm: ["run", "test", "install", "i", "add", "remove", "start", "build", "exec", "dlx", "ls", "list", "outdated", "audit", "why", "rebuild", "update"],
+    yarn: ["run", "test", "install", "add", "remove", "start", "build", "exec", "dlx", "list", "outdated", "audit", "why", "rebuild", "up"],
+    bun: ["run", "test", "install", "i", "add", "remove", "build", "x"],
+    cargo: ["build", "test", "check", "run", "fmt", "clippy", "bench", "doc", "clean", "add", "update", "tree"],
+    docker: ["build", "run", "ps", "images", "compose", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
+    podman: ["build", "run", "ps", "images", "exec", "logs", "stop", "start", "rm", "rmi", "inspect"],
+    gem: ["install", "list", "build"],
+    poetry: ["install", "run", "add", "build", "lock", "update", "show"],
+    dotnet: ["build", "test", "run", "restore", "clean", "format", "add", "new"],
+    pub: ["get", "run", "build", "test"],
+    flutter: ["run", "build", "test", "analyze", "format"],
+};
+
+/** Whether run-time text sits where the program's subcommand or one of its own options is read: before a local subcommand. */
+const subcommandUnread = (program: string, args: string[]) => {
+    const local = LOCAL_SUBCOMMANDS[program] ?? [];
+    for (const arg of args) {
+        if (RUN_TIME_TEXT.test(arg) || arg.includes("`")) return true;
+        if (local.includes(joinedWords(arg).trim().toLowerCase())) return false;
+    }
+    return false;
+};
+const ENCODED_COMMAND = /(?:^|\s)[-/](?:e|ec|enc|encodedcommand)(?:\s|$)/i;
+
+/**
+ * Shell lines whose words do not say what will run, so the check above cannot clear them: a program name worked out
+ * when the line runs, a subcommand-sensitive program (git, npm, docker ...) given a variable or a substitution, text
+ * run as a command, or a shell started on text that is built or encoded. A person decides those.
+ * What stays unread, and the README says so: what a script or a repository alias does once it runs.
+ */
+const unreadableReason = (subject: Extract<Subject, { kind: "command" }>) => {
+    for (const part of subject.shellParts) {
+        const raw = part.trim();
+        if (!raw) continue;
+        const tokens = raw.replace(/[()]/g, " ").split(/\s+/).filter(Boolean);
+        const words = tokens.map((token) => programName(joinedWords(token)));
+        const assignment = /^\$?[A-Za-z_][\w:.{}]*\s*=/.test(raw);
+        if (!assignment && /^(?:\$|`|\(|["']\s*\$)/.test(raw)) return "The program it starts is worked out when it runs, so what it sends cannot be read from the text.";
+        const dynamic = RUN_TIME_TEXT.test(raw);
+        const at = words.findIndex((word) => SUBCOMMAND_PROGRAMS.has(word));
+        const sensitive = at < 0 ? undefined : words[at];
+        if (sensitive && dynamic && subcommandUnread(sensitive, tokens.slice(at + 1))) {
+            return `It runs ${sensitive} with a subcommand or an option that is worked out when it runs, so what it sends cannot be read from the text.`;
+        }
+        const builder = words.find((word) => COMMAND_BUILDERS.has(word));
+        // eval and its PowerShell forms run whatever text they are given, joined from pieces or not.
+        if (builder && (dynamic || sensitive || TEXT_RUNNERS.has(builder))) return `It uses ${builder} to build a command, so what it sends cannot be read from the text.`;
+        const shell = words.find((word) => SHELL_PROGRAMS.has(word));
+        if (shell && (dynamic || ENCODED_COMMAND.test(raw))) return `It starts ${shell} on text that is built or encoded, so what it sends cannot be read from the text.`;
+    }
     return null;
 };
 

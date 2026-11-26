@@ -337,3 +337,26 @@ test("a command that leaves the computer is found with options between the progr
         assert.equal(egress(view), undefined, JSON.stringify(view.input));
     }
 });
+
+test("a shell line that hides an outbound command behind quotes, escapes or run-time text is left to a person", () => {
+    const egress = (line: string) => checkBoundaries(shellView(line))?.code;
+    const hidden = [
+        // What a shell joins: empty quotes or an escape character inside the word.
+        'git pu""sh origin branch', "git pu''sh origin branch", String.raw`git pu\sh origin branch`, "git pu^sh origin branch", "git pu`sh origin branch",
+        '"git" "push"', String.raw`g\it push`,
+        // Run-time text: the program or the subcommand is not in the line.
+        "$g push origin main", "g=git; $g push", "git $verb origin", "git -C sub $verb", "git $(echo push)", "git `echo push`", "git %VERB% origin", "& $tool push",
+        "npm $what", "echo push | xargs git", 'iex ("gi" + "t pu" + "sh")', 'eval "$cmd"', 'bash -c "$line"', "powershell -enc ZwBpAHQA", "cmd /c %LINE%",
+        "git config alias.up push",
+    ];
+    for (const line of hidden) {
+        assert.equal(egress(line), "egress_command", line);
+        for (const mode of ["auto_review", "allow_all"] as const) assert.equal(kindOf(shellView(line), mode, [rule("allow", "run_command", "git")]), "human", line);
+    }
+    // Ordinary lines with variables, quotes and paths are not caught: a variable after a local subcommand is only its argument.
+    const plain = [
+        '$env:CI = "1"; npm test', "npm run build -- --out $OUT", 'git commit -m "$message"', 'node -e "console.log(1)"', String.raw`dir C:\Users\me\project`,
+        'echo "push"', "CI=1 npm test", "git status", "docker build -t $TAG .",
+    ];
+    for (const line of plain) assert.equal(egress(line), undefined, line);
+});
