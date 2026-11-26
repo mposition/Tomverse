@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { buildBillingWelcomeEmail, buildPlanChangeEmail } from "../lib/billingEmails.ts";
@@ -104,19 +103,5 @@ test("both templates are transactional billing mail with no unsubscribe link", (
   }
 });
 
-test("each confirmation has exactly one place that queues it", () => {
-  // A count, not a position: the standard lane does not dedupe by reference,
-  // so a second call site would be a second email for one change. Where each
-  // one sits (after the conditional update that moved the row) is described
-  // in docs/policy/plan-change.md section 9.
-  const source = readFileSync("lib/planChangeService.ts", "utf8");
-  const count = (needle) => source.split(needle).length - 1;
-  assert.equal(count("await enqueuePlanChangeConfirmation({"), 2);
-  assert.equal(count("templateKey: PLAN_CHANGE_UPGRADED_TEMPLATE,"), 1);
-  assert.equal(count("templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,"), 1);
-  // Both are written in the same transaction as the conditional update that
-  // moved the row, and only when it matched.
-  assert.equal(source.match(/tx,\s+templateKey: PLAN_CHANGE_/g)?.length, 2);
-  assert.equal(count("if (result.count === 1) {"), 1);
-  assert.equal(count('if (result.count > 0 && next === "applied" && row.execution === "immediate_upgrade") {'), 1);
-});
+// Where each confirmation is queued (once, in the transaction that moves the
+// row) is exercised in tests/server-contract/plan-change-confirm-emails.test.ts.

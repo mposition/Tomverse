@@ -542,9 +542,16 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 
 ### 동시 확정 (2026-11-26 보강)
 
-같은 견적으로 confirm 두 개가 겹치면, 먼저 schedule을 붙인 쪽의 변화를 나중 쪽이 보고
-견적을 `expired`로 만들 수 있습니다. 그러면 먼저 쪽의 조건부 update가 0건이 되고, 아무
-행도 그 schedule을 기록하지 않습니다. 이 경우 먼저 쪽이 **schedule을 release**하고
-`PLAN_CHANGE_PREVIEW_EXPIRED`로 답합니다 — 기록되지 않은 schedule은 보여 줄 수도 취소할
-수도 없는 채로 기간 말에 플랜을 바꾸기 때문입니다. release가 실패하면 운영 사고
-`PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED`를 올려 사람이 Stripe에서 확인합니다.
+- **견적 선점.** confirm은 Stripe를 부르기 전에 견적 행을 `confirmedAt` 조건부 기록
+  (`status = 'previewed' AND confirmedAt IS NULL`)으로 선점합니다. 같은 견적의 두 번째
+  confirm은 Stripe까지 가지 않고, 이미 예약됐으면 그 예약을, 아니면
+  `PLAN_CHANGE_ALREADY_PENDING`을 받습니다. 판정이 거부되면 선점한 견적은 `failed`가 되어
+  재시도는 새 견적부터 합니다.
+- **기록되지 않은 schedule은 남기지 않습니다.** schedule을 붙인 뒤 기록(행 이동 + 메일
+  outbox 트랜잭션)이 실패하면, 행을 다시 읽어 그 schedule이 기록되지 않았음을 확인한 뒤
+  **release**합니다. 기록되지 않은 schedule은 보여 줄 수도 취소할 수도 없는 채로 기간 말에
+  플랜을 바꾸기 때문입니다. 다시 읽기조차 실패하면 release하지 않고 운영 사고
+  `PLAN_CHANGE_SCHEDULE_RECORD_UNKNOWN`을, release가 실패하면
+  `PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED`를 올려 사람이 Stripe에서 확인합니다.
+- 검증: `tests/server-contract/plan-change-confirm-emails.test.ts`(동시 확정 1회, 기록 실패 시
+  release, 메일이 트랜잭션 안에서 한 번), `tests/server-contract/billing-resume-renewal-route.test.ts`.

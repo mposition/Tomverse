@@ -624,6 +624,27 @@ export async function confirmPlanChange({
     return { ok: true, reservation: viewOf(stored) };
   }
 
+  // One confirm per quote goes on to Stripe. Claimed before anything else so a
+  // second, simultaneous confirm of the same quote can neither run its own
+  // Stripe call nor read the first one's change as a stale quote and expire
+  // it underneath it (docs/policy/plan-change.md, "동시 확정").
+  const claimed = await prisma.planChangeRequest.updateMany({
+    where: { id: stored.id, status: "previewed", confirmedAt: null },
+    data: { confirmedAt: new Date() },
+  });
+  if (claimed.count !== 1) {
+    const current = await prisma.planChangeRequest.findUniqueOrThrow({
+      where: { id: stored.id },
+    });
+    if (current.status !== "previewed") {
+      return { ok: true, reservation: viewOf(current) };
+    }
+    return fail(
+      "PLAN_CHANGE_ALREADY_PENDING",
+      "This quote is already being confirmed."
+    );
+  }
+
   const context = await loadContext(userId);
   if ("ok" in context) return context;
 
@@ -667,7 +688,14 @@ export async function confirmPlanChange({
     reservation: context.reservation,
     resumeRenewal,
   });
-  if (!decision.allowed) return fail(decision.code, decision.reason);
+  if (!decision.allowed) {
+    // The claimed quote is spent: a retry starts from a new preview.
+    await prisma.planChangeRequest.updateMany({
+      where: { id: stored.id, status: "previewed" },
+      data: { status: "failed", failureCode: decision.code },
+    });
+    return fail(decision.code, decision.reason);
+  }
 
   const idempotencyKey = planChangeIdempotencyKey(stored.id);
   // The row is the durable record; this line is what makes a change findable
