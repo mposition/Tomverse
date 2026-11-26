@@ -19,6 +19,8 @@ const state: {
   subscription: Subscription;
   /** Applied to the account right after the resume write reaches Stripe: a deletion landing mid-request. */
   deletionDuringWrite: boolean;
+  /** A deletion committed right after the route read the subscription. */
+  deletionAfterRead: boolean;
   failResume: boolean;
   failRestore: boolean;
   writes: boolean[];
@@ -29,6 +31,7 @@ const state: {
   account: null,
   subscription: { id: "sub_1", status: "active", cancel_at_period_end: true },
   deletionDuringWrite: false,
+  deletionAfterRead: false,
   failResume: false,
   failRestore: false,
   writes: [],
@@ -42,6 +45,7 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     account: { id: "user_1", accountStatus: "active", stripeSubscriptionId: "sub_1", subscriptionCurrentPeriodEnd: null },
     subscription: { id: "sub_1", status: "active", cancel_at_period_end: true },
     deletionDuringWrite: false,
+    deletionAfterRead: false,
     failResume: false,
     failRestore: false,
     writes: [],
@@ -96,6 +100,11 @@ mock.module(mod("lib/prisma.ts"), {
           state.accountUpdates.push(data);
           return {};
         },
+        updateMany: async ({ where, data }: { where: { accountStatus?: { not?: string } }; data: Record<string, unknown> }) => {
+          if (where.accountStatus?.not && state.account?.accountStatus === where.accountStatus.not) return { count: 0 };
+          state.accountUpdates.push(data);
+          return { count: 1 };
+        },
       },
     },
   },
@@ -105,7 +114,10 @@ mock.module(mod("lib/stripe.ts"), {
     isStripeConfigured: () => true,
     getStripe: () => ({
       subscriptions: {
-        retrieve: async () => ({ ...state.subscription }),
+        retrieve: async () => {
+          if (state.deletionAfterRead && state.account) state.account.accountStatus = "pending_deletion";
+          return { ...state.subscription };
+        },
         update: async (_id: string, params: { cancel_at_period_end: boolean }) => {
           const resume = params.cancel_at_period_end === false;
           if (resume && state.failResume) {
@@ -204,4 +216,12 @@ test("a cancellation that cannot be restored is an operational incident", async 
   const { status } = await call();
   assert.equal(status, 500);
   assert.deepEqual(state.incidents, ["BILLING_RESUME_RENEWAL_DELETION_CONFLICT"]);
+});
+
+test("an already-renewing answer never overwrites the flag of a deletion committed after the read", async () => {
+  reset({ subscription: { id: "sub_1", status: "active", cancel_at_period_end: false }, deletionAfterRead: true });
+  const { status, body } = await call();
+  assert.equal(status, 409);
+  assert.equal(body.code, "ACCOUNT_DELETION_PENDING");
+  assert.deepEqual(state.accountUpdates, []);
 });

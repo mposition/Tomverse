@@ -551,6 +551,12 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
     구독 인보이스는 삭제할 수 없으므로 이것이 청구를 막는 방법입니다. 떠나려는 계정이라
     새 기간을 줄 이유가 없고, 유예 끝의 영구 삭제도 어차피 즉시 해지합니다.
   - 복원이 먼저 커밋됐으면 행이 맞지 않아 갱신은 그대로 진행됩니다.
+  - 삭제 요청 직전에 이미 만들어진 갱신 인보이스는 그 `invoice.created`가 계정이 활성일 때
+    처리됐으므로, 삭제 흐름이 `pending_deletion` 커밋 뒤에 그 구독의 draft 갱신 인보이스를
+    찾아 같은 방법으로 막습니다(`stopDeletionPendingDraftRenewals()`). 실패하면 삭제는 그대로
+    두고 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`를 올립니다.
+  - 갱신 재개 route가 "이미 갱신 중"으로 답하며 저장된 flag를 고칠 때도 계정이
+    `pending_deletion`이 아닐 때만 씁니다. 그 사이 커밋된 삭제가 있으면 409입니다.
   - 실패는 throw → 500 → 재전송이고, 그동안 인보이스는 청구되지 않은 draft로 남습니다.
     Stripe가 매번 거부할 요청이면 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`도 올립니다.
   - 그 인보이스가 이미 draft를 벗어났으면(72시간 뒤 강제 확정 등) 운영 사고

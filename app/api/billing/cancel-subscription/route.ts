@@ -277,11 +277,19 @@ export async function DELETE(req: Request) {
     if (!current.cancel_at_period_end) {
       // Already renewing: nothing to undo, and saying so is idempotent. The
       // stored flag is corrected too -- a missed webhook would otherwise keep
-      // showing a cancellation (and this button) after a reload.
-      await prisma.user.update({
-        where: { id: user.id },
+      // showing a cancellation (and this button) after a reload. Written only
+      // while the account is not pending deletion: a deletion committed after
+      // the check above records its own cancellation, and this read is older.
+      const corrected = await prisma.user.updateMany({
+        where: { id: user.id, accountStatus: { not: "pending_deletion" } },
         data: { subscriptionCancelAtPeriodEnd: false, subscriptionStatus: current.status },
       });
+      if (corrected.count !== 1) {
+        return NextResponse.json(
+          { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({
         success: true,
         cancelAtPeriodEnd: false,

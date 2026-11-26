@@ -49,7 +49,15 @@ mock.module(mod("lib/prisma.ts"), {
 mock.module(mod("lib/stripe.ts"), {
   namedExports: {
     getStripe: () => ({
-      invoices: { retrieve: async () => ({ id: "in_1", status: state.invoiceStatus }) },
+      invoices: {
+        retrieve: async () => ({ id: "in_1", status: state.invoiceStatus }),
+        list: async () => ({
+          data: [
+            { id: "in_1", status: "draft", billing_reason: "subscription_cycle" },
+            { id: "in_2", status: "draft", billing_reason: "manual" },
+          ],
+        }),
+      },
       subscriptions: {
         retrieve: async () => ({ id: "sub_1", status: state.subscriptionStatus, cancel_at_period_end: false }),
         update: async () => {
@@ -122,4 +130,13 @@ test("a Stripe failure throws so the webhook answers 500 and the draft waits for
   reset({ failCancel: true });
   await assert.rejects(call(), /timeout/);
   assert.equal(state.cancels.length, 0);
+});
+
+test("the deletion flow stops a renewal drafted before pending_deletion was committed", async () => {
+  reset();
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  assert.equal(await stopDeletionPendingDraftRenewals("sub_1"), 1);
+  // Only the renewal is looked at; other drafts are not reasons to cancel.
+  assert.equal(state.cancels.length, 1);
+  assert.equal(state.locked, 1);
 });

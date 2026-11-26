@@ -88,6 +88,27 @@ export async function keepDeletionCancellation(
   );
 }
 
+/**
+ * Run by the deletion flow once pending_deletion is committed. A renewal
+ * invoice created before that commit had its `invoice.created` handled while
+ * the account was still active, so nothing stopped it; the drafts still open on
+ * the subscription are looked up now and stopped the same way. One created
+ * after the commit is stopped by its own webhook. Returns how many were stopped.
+ */
+export async function stopDeletionPendingDraftRenewals(subscriptionId: string): Promise<number> {
+  const drafts = await getStripe().invoices.list(
+    { subscription: subscriptionId, status: "draft", limit: 10 },
+    { timeout: STRIPE_REQUEST_TIMEOUT_MS }
+  );
+  let stopped = 0;
+  for (const invoice of drafts.data) {
+    if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
+    const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
+    if (outcome.cancelled) stopped += 1;
+  }
+  return stopped;
+}
+
 export type DeletionRenewalOutcome = {
   /** The account was scheduled for deletion when the row lock was taken. */
   pendingDeletion: boolean;

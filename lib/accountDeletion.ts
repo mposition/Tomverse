@@ -10,7 +10,10 @@ import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentS
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
-import { keepDeletionCancellation } from "@/lib/deletionCancellation";
+import {
+  keepDeletionCancellation,
+  stopDeletionPendingDraftRenewals,
+} from "@/lib/deletionCancellation";
 import { requestGa4UserIdDeletion } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
@@ -119,6 +122,25 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
       await reportOperationalIncident({
         code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
         title: "Account deletion: reconciling the Stripe cancellation failed",
+        error,
+        severity: "error",
+        context: {
+          component: "account-deletion",
+          userId: user.id,
+          subscriptionId: user.stripeSubscriptionId,
+        },
+      }).catch(() => {});
+    }
+    // A renewal invoice created before the commit above slipped past its own
+    // invoice.created (the account was still active then); it is stopped here
+    // so it is never collected (docs/policy/plan-change.md section 10). Not
+    // fatal for the same reason; a person checks the draft at Stripe.
+    try {
+      await stopDeletionPendingDraftRenewals(user.stripeSubscriptionId);
+    } catch (error) {
+      await reportOperationalIncident({
+        code: "ACCOUNT_DELETION_RENEWAL_STOP_FAILED",
+        title: "Account deletion: a renewal invoice already drafted could not be stopped",
         error,
         severity: "error",
         context: {
