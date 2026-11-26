@@ -324,3 +324,43 @@ test("turning the switch off ends the choice and releases the stop key", async (
   assert.equal(r.hasStopHandler(), false);
   assert.match(errorOf(await r.ask({ tool: "screenshot" })), /not turned on/);
 });
+
+test("the stop key, Take control and revoking the window abort the input that is being sent and the agent is told it was stopped", async () => {
+  for (const how of ["stop-key", "take", "revoke"] as const) {
+    const r = rig();
+    await choose(r);
+    await r.ask({ tool: "screenshot" });
+    let seen: AbortSignal | undefined;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    // A backend that is in the middle of sending input and ends only when it is told to stop.
+    r.backend.act = (_window, _size, _action, _handBackFrom, signal) => {
+      seen = signal;
+      entered();
+      return new Promise((_resolve, reject) => signal!.addEventListener("abort", () => reject(signal!.reason), { once: true }));
+    };
+    const pending = r.ask({ tool: "click", window: FIXTURE_WINDOW.id, x: 10, y: 10, button: "left", double: true });
+    await started;
+    assert.ok(seen, `${how}: the backend is given the abort signal`);
+    assert.equal(seen.aborted, false);
+    if (how === "stop-key") r.stop();
+    else if (how === "take") await r.host.command({ type: "take" });
+    else await r.host.command({ type: "revoke" });
+    assert.equal(seen.aborted, true, `${how}: the signal is aborted at once`);
+    assert.match(errorOf(await pending), /stopped/, how);
+  }
+});
+
+test("a request that is already stopped never reaches the backend's input", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  let called = 0;
+  r.backend.act = async () => { called += 1; return { performed: true }; };
+  const idle = r.backend.idleMs.bind(r.backend);
+  // The stop key is pressed while the host is still reading the person's last input.
+  r.backend.idleMs = async () => { r.stop(); return idle(); };
+  const replies = await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" });
+  assert.equal(replies[0]!.status, "error");
+  assert.equal(called, 0);
+});

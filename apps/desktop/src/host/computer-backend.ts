@@ -42,9 +42,10 @@ export interface ComputerBackend {
   /**
    * Does the action only if, at that moment and in the same call, the window is the same one, not minimized, the same size as at the
    * last picture (`size`), in front, and (for a point) the window itself is under the point. `handBackFrom`: when the foreground
-   * window belongs to that process (Tomverse itself), the window may be brought to the front first.
+   * window belongs to that process (Tomverse itself), the window may be brought to the front first. `signal`: when it aborts, the
+   * backend stops what it is sending at once (no further input goes out) and the call rejects.
    */
-  act(window: WindowRef, size: { width: number; height: number }, action: BackendAction, handBackFrom: number): Promise<ActOutcome>;
+  act(window: WindowRef, size: { width: number; height: number }, action: BackendAction, handBackFrom: number, signal?: AbortSignal): Promise<ActOutcome>;
   /** Brings the window forward: only when the person has just chosen it. */
   bringToFront(window: WindowRef): Promise<boolean>;
   /** Milliseconds since the last mouse or keyboard input of the person (or of any program). */

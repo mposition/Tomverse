@@ -27,7 +27,8 @@ export function parseWindowId(id: string): { hwnd: string; pid: number } {
 }
 const ref = (window: WindowRef) => ({ ...parseWindowId(window.id), cls: window.cls });
 
-export function createWindowsBackend(options: { powershell?: string } = {}): ComputerBackend {
+/** `args` replaces the PowerShell arguments; only a test that runs a stand-in program sets it. */
+export function createWindowsBackend(options: { powershell?: string; args?: string[] } = {}): ComputerBackend {
   const powershell = options.powershell ?? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   let child: ChildProcessWithoutNullStreams | undefined;
   let folder: string | undefined;
@@ -39,8 +40,9 @@ export function createWindowsBackend(options: { powershell?: string } = {}): Com
     const running = child;
     child = undefined;
     ready = undefined;
-    for (const [id, entry] of pending) { clearTimeout(entry.timer); entry.reject(new Error(reason)); pending.delete(id); }
+    // Only the process this backend started is ended, through its own handle, and first, so nothing more is sent to the desktop.
     if (running) { try { running.kill(); } catch { /* Already gone. */ } }
+    for (const [id, entry] of pending) { clearTimeout(entry.timer); entry.reject(new Error(reason)); pending.delete(id); }
     if (folder) { try { rmSync(folder, { recursive: true, force: true }); } catch { /* Best effort; it holds only the script. */ } folder = undefined; }
   };
 
@@ -52,7 +54,7 @@ export function createWindowsBackend(options: { powershell?: string } = {}): Com
       const script = join(folder, "host.ps1");
       writeFileSync(script, WINDOWS_COMPUTER_SCRIPT, "utf8");
       // The script is run from its text, not as a file, so a machine whose execution policy blocks scripts still runs it.
-      const proc = spawn(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "& ([ScriptBlock]::Create([IO.File]::ReadAllText($env:TOMVERSE_COMPUTER_SCRIPT)))"], {
+      const proc = spawn(powershell, options.args ?? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "& ([ScriptBlock]::Create([IO.File]::ReadAllText($env:TOMVERSE_COMPUTER_SCRIPT)))"], {
         env: { ...process.env, TOMVERSE_COMPUTER_SCRIPT: script }, windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       });
       child = proc;
@@ -89,16 +91,24 @@ export function createWindowsBackend(options: { powershell?: string } = {}): Com
     return ready;
   }
 
-  async function call(op: string, payload: Record<string, unknown> = {}, timeoutMs = CALL_TIMEOUT_MS): Promise<Record<string, unknown>> {
+  /** `signal`: when it aborts, the PowerShell process is ended at once, so a request in progress sends nothing more. */
+  async function call(op: string, payload: Record<string, unknown> = {}, timeoutMs = CALL_TIMEOUT_MS, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    signal?.throwIfAborted();
     await start();
+    signal?.throwIfAborted();
     const proc = child;
     if (!proc) throw new Error("PowerShell is not running.");
     const id = nextId++;
-    const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => { pending.delete(id); stop(`The ${op} request timed out.`); reject(new Error(`The ${op} request timed out.`)); }, timeoutMs);
-      pending.set(id, { resolve, reject, timer });
-      proc.stdin.write(asciiJson({ id, op, ...payload }) + "\n");
-    });
+    const onAbort = () => stop(`The ${op} request was stopped.`);
+    let answer: Record<string, unknown>;
+    try {
+      answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => { pending.delete(id); stop(`The ${op} request timed out.`); reject(new Error(`The ${op} request timed out.`)); }, timeoutMs);
+        pending.set(id, { resolve, reject, timer });
+        signal?.addEventListener("abort", onAbort, { once: true });
+        proc.stdin.write(asciiJson({ id, op, ...payload }) + "\n");
+      });
+    } finally { signal?.removeEventListener("abort", onAbort); }
     if (answer.ok !== true) throw new Error(String(answer.error ?? "The window request failed.").slice(0, 300));
     return answer;
   }
@@ -127,8 +137,8 @@ export function createWindowsBackend(options: { powershell?: string } = {}): Com
         imageWidth: Number(answer.imageW), imageHeight: Number(answer.imageH), width: Number(answer.physW), height: Number(answer.physH) };
       return { status: current, image };
     },
-    async act(window, size, action: BackendAction, handBackFrom): Promise<ActOutcome> {
-      const answer = await call("act", { ...ref(window), w: size.width, h: size.height, allowPid: handBackFrom, ...action });
+    async act(window, size, action: BackendAction, handBackFrom, signal?: AbortSignal): Promise<ActOutcome> {
+      const answer = await call("act", { ...ref(window), w: size.width, h: size.height, allowPid: handBackFrom, ...action }, CALL_TIMEOUT_MS, signal);
       return { performed: answer.performed === true, ...(typeof answer.reason === "string" ? { reason: answer.reason } : {}),
         ...(typeof answer.typed === "number" ? { typed: answer.typed } : {}), ...(typeof answer.idleMs === "number" ? { idleMs: answer.idleMs } : {}) };
     },

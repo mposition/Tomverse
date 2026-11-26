@@ -28,7 +28,8 @@ export function createFixtureBackend(): FixtureComputer {
       const image: WindowImage = { mediaType: "image/png", base64: PIXEL, imageWidth: 200, imageHeight: 120, width: 400, height: 240 };
       return { status: status(), image };
     },
-    async act(window, _size, action): Promise<ActOutcome> {
+    async act(window, _size, action, _handBackFrom, signal): Promise<ActOutcome> {
+      signal?.throwIfAborted();
       if (!known(window)) return { performed: false, reason: "gone" };
       if (!state.foreground) return { performed: false, reason: "not-front" };
       done.push({ window: window.id, action });

@@ -141,7 +141,8 @@ export function createComputerHost(deps: ComputerHostDeps) {
       return fail("The user used the mouse or keyboard, so the agent stopped. Wait for the user to hand control back.");
     }
     const size = shot && (request.tool === "click" || request.tool === "scroll") ? { width: shot.width, height: shot.height } : { width: current.width, height: current.height };
-    const outcome: ActOutcome = await os.act(target, size, action, process.pid);
+    signal.throwIfAborted();
+    const outcome: ActOutcome = await os.act(target, size, action, process.pid, signal);
     baseline = deps.now();
     signal.throwIfAborted();
     const window = info(chosen, current.title);

@@ -89,6 +89,9 @@ export function refusalText(reason: string): string {
     case "covered": return "Another window is over the window, so nothing was done (input could land in it). Ask the user to bring the window to the front.";
     case "outside": return "That point is outside the window. Nothing was done.";
     case "covered-point": return "Another window is over that point. Nothing was done; ask the user to bring the window to the front.";
+    case "moved": return "The window moved since the last screenshot. Nothing more was sent; take a new screenshot to see what happened.";
+    case "cursor-moved": return "The mouse pointer was moved away from the target, so the input was stopped. Take a screenshot to see what happened.";
+    case "cursor-failed": return "The mouse pointer could not be placed on the target. Nothing was done.";
     case "focus-lost": return "The window lost the focus while typing. Typing stopped; take a screenshot to see what was typed.";
     default: return "The action was not done.";
   }

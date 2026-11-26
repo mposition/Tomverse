@@ -5,7 +5,8 @@
  * It lists top-level windows, reads one window's state, captures ONE window with PrintWindow (so another window in front of it never
  * ends up in the picture) and sends mouse and keyboard input with SendInput. Every input operation re-checks, inside the same call
  * and right before the input is sent, that the window is still the same one, is not minimized, is the foreground window, and (for a
- * point) that the window itself is what sits under that point. The C# is C# 5: that is what Windows PowerShell 5.1 compiles.
+ * point) that the pointer is on the target and the window itself is what sits under it; a double click checks again before its
+ * second click, and a scroll before each wheel input. The host ends this process when the person stops the agent. The C# is C# 5: that is what Windows PowerShell 5.1 compiles.
  *
  * The text is ASCII: non-ASCII characters travel as \uXXXX escapes in both directions, so no console code page can change them.
  */
@@ -51,6 +52,7 @@ public static class Cu {
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
   [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] inputs, int size);
   [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
   [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
@@ -221,6 +223,19 @@ public static class Cu {
     return null;
   }
 
+  // The last look before a mouse input: the window is still the same, in front and in the same place, the pointer is where it was
+  // put, and the window itself is under it. The pointer can be moved by the person or by another program after it was set.
+  static string PointCheck(IntPtr h, Dictionary<string, object> r, RECT origin, int px, int py) {
+    if (Find(r) != h) return "gone";
+    string why = Check(h, r);
+    if (why != null) return why;
+    RECT f = Frame(h);
+    if (Math.Abs(f.Left - origin.Left) > 1 || Math.Abs(f.Top - origin.Top) > 1) return "moved";
+    POINT c;
+    if (!GetCursorPos(out c) || Math.Abs(c.X - px) > 1 || Math.Abs(c.Y - py) > 1) return "cursor-moved";
+    return AtPoint(h, f, px, py);
+  }
+
   static int IdleMs() { var i = new LASTINPUTINFO(); i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)); GetLastInputInfo(ref i); return (int)((uint)Environment.TickCount - i.dwTime); }
 
   static Dictionary<string, object> Act(Dictionary<string, object> r) {
@@ -244,17 +259,30 @@ public static class Cu {
       why = AtPoint(h, f, px, py);
       if (why == null && !IsFront(h)) why = "not-front";
       if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
-      SetCursorPos(px, py);
+      if (!SetCursorPos(px, py)) { d["performed"] = false; d["reason"] = "cursor-failed"; return d; }
       Thread.Sleep(20);
       if (kind == "click") {
         bool right = (string)r["button"] == "right";
         uint down = right ? 0x8u : 0x2u, up = right ? 0x10u : 0x4u;
         int times = (bool)r["double"] ? 2 : 1;
-        for (int i = 0; i < times; i++) { Send(Mouse(down, 0), Mouse(up, 0)); if (i + 1 < times) Thread.Sleep(60); }
+        for (int i = 0; i < times; i++) {
+          why = PointCheck(h, r, f, px, py);
+          if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
+          Send(Mouse(down, 0), Mouse(up, 0));
+          if (i + 1 < times) Thread.Sleep(60);
+        }
       } else {
         int dx = Convert.ToInt32(r["dx"]), dy = Convert.ToInt32(r["dy"]);
-        if (dy != 0) Send(Mouse(0x800, unchecked((uint)(-dy * 120))));
-        if (dx != 0) Send(Mouse(0x1000, unchecked((uint)(dx * 120))));
+        if (dy != 0) {
+          why = PointCheck(h, r, f, px, py);
+          if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
+          Send(Mouse(0x800, unchecked((uint)(-dy * 120))));
+        }
+        if (dx != 0) {
+          why = PointCheck(h, r, f, px, py);
+          if (why != null) { d["performed"] = false; d["reason"] = why; return d; }
+          Send(Mouse(0x1000, unchecked((uint)(dx * 120))));
+        }
       }
       d["performed"] = true;
     } else if (kind == "key") {
