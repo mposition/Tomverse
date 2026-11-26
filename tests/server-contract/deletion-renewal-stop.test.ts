@@ -14,6 +14,9 @@ const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const state = {
   accountStatus: "pending_deletion",
   invoiceStatus: "draft",
+  /** Invoices reported as already paid when re-read (paid after the list). */
+  paidAfterList: [] as string[],
+  manualDrafts: 100,
   subscriptionStatus: "active",
   failCancel: false,
   cancels: [] as { id: string; params: Record<string, unknown> }[],
@@ -24,6 +27,8 @@ const reset = (overrides: Partial<typeof state> = {}) => {
   Object.assign(state, {
     accountStatus: "pending_deletion",
     invoiceStatus: "draft",
+    paidAfterList: [],
+    manualDrafts: 100,
     subscriptionStatus: "active",
     failCancel: false,
     cancels: [],
@@ -50,7 +55,10 @@ mock.module(mod("lib/stripe.ts"), {
   namedExports: {
     getStripe: () => ({
       invoices: {
-        retrieve: async (id: string) => ({ id, status: id === "in_open" ? "open" : state.invoiceStatus }),
+        retrieve: async (id: string) => ({
+          id,
+          status: state.paidAfterList.includes(id) ? "paid" : id === "in_open" ? "open" : state.invoiceStatus,
+        }),
         // Auto-paginating list: the renewal sits behind a full page of manual drafts.
         list: ({ status }: { status: string }) =>
           (async function* () {
@@ -58,7 +66,7 @@ mock.module(mod("lib/stripe.ts"), {
               yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
               return;
             }
-            for (let i = 0; i < 100; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
+            for (let i = 0; i < state.manualDrafts; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
             yield { id: "in_1", status: "draft", billing_reason: "subscription_cycle" };
           })(),
       },
@@ -146,4 +154,18 @@ test("the deletion flow stops a renewal drafted before pending_deletion was comm
   // Only renewals are looked at; other invoices are not reasons to cancel.
   assert.equal(state.cancels.length, 1);
   assert.equal(state.locked, 1);
+});
+
+test("a renewal paid after the lookup does not stop the check of the others", async () => {
+  reset({ paidAfterList: ["in_open"] });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
+  assert.equal(state.cancels.length, 1);
+});
+
+test("a lookup cut off by the scan limit is a failure, after stopping what it found", async () => {
+  reset({ manualDrafts: 600 });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  await assert.rejects(stopDeletionPendingDraftRenewals("sub_1"), /scan limit/);
+  assert.equal(state.cancels.length, 1);
 });

@@ -109,6 +109,7 @@ export async function stopDeletionPendingDraftRenewals(
 ): Promise<{ stopped: number; finalized: number }> {
   const renewals: { id: string; status: string }[] = [];
   let scanned = 0;
+  let complete = true;
   scan: for (const status of ["open", "draft"] as const) {
     // Every page: manual invoices on the subscription must not hide a renewal.
     for await (const invoice of getStripe().invoices.list(
@@ -116,19 +117,34 @@ export async function stopDeletionPendingDraftRenewals(
       { timeout: STRIPE_REQUEST_TIMEOUT_MS }
     )) {
       scanned += 1;
-      if (scanned > RENEWAL_SCAN_LIMIT) break scan;
+      if (scanned > RENEWAL_SCAN_LIMIT) {
+        complete = false;
+        break scan;
+      }
       if (invoice.billing_reason === "subscription_cycle" && invoice.id) {
         renewals.push({ id: invoice.id, status });
       }
     }
   }
   const finalized = renewals.filter((renewal) => renewal.status === "open").length;
-  if (renewals.length === 0) return { stopped: 0, finalized };
-  const outcome = await stopDeletionPendingRenewal({
-    subscriptionId,
-    invoiceId: renewals[0]!.id,
-  });
-  return { stopped: outcome.cancelled ? 1 : 0, finalized };
+  // Each renewal until one ends the subscription: one paid in the meantime is
+  // left for a person (see stopDeletionPendingRenewal) and must not stop the
+  // check of the others.
+  let stopped = 0;
+  for (const renewal of renewals) {
+    const outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: renewal.id });
+    if (!outcome.pendingDeletion) break;
+    if (outcome.cancelled) {
+      stopped = 1;
+      break;
+    }
+  }
+  // An incomplete scan is a failure for the caller to report: a renewal past
+  // the limit may still be collected.
+  if (!complete) {
+    throw new Error("Uncollected invoices on the subscription exceed the scan limit.");
+  }
+  return { stopped, finalized };
 }
 
 export type DeletionRenewalOutcome = {
