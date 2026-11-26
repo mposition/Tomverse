@@ -46,7 +46,8 @@ export async function DELETE(request: Request) {
   const { userId, deviceId, familyId } = auth.identity;
   try {
     const body = await readLimitedJson(request, 1024, desktopRemoteWithdrawRequest);
-    await withdrawDesktopRemote({ userId, deviceId, familyId }, body.seq);
+    const withdrawn = await withdrawDesktopRemote({ userId, deviceId, familyId }, body.seq);
+    if (withdrawn.stale) return desktopAuthResponse({ ok: false, code: "STALE_SYNC", seq: withdrawn.seq }, 409);
     return desktopAuthNoStore(new Response(null, { status: 204 }));
   } catch (error) {
     return desktopAuthNoStore(mobileApiSecurityResponse(error) ?? desktopAuthResponse({ ok: false, code: "WITHDRAW_FAILED" }, 500));

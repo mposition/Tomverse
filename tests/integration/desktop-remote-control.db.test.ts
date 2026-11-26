@@ -366,6 +366,26 @@ test("reports expire and are deleted; turning off and signing the PC out remove 
   }));
   assert.equal(unnumbered.status, 400);
 
+  // Off and on again: the withdrawal of the first arrives after a sync of the second. It was sent earlier, so it changes
+  // nothing: the live report and the answer waiting for it stay.
+  const earlierOff = ++seq;
+  await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  assert.equal((await commandAs(session, answer(pc.deviceId))).status, 201);
+  const lateOff = await withdrawAs(pc.token, { seq: earlierOff });
+  assert.equal(lateOff.status, 409);
+  assert.equal((await lateOff.json()).code, "STALE_SYNC");
+  assert.deepEqual(await count(), { devices: 1, commands: 1 });
+  assert.equal((await (await listAs(session)).json()).devices.length, 1);
+  // An answer recorded while the PC turns remote control off never outlives the withdrawal: whichever of the two takes
+  // the row first, no answer is left for a PC that is turned on again.
+  const racing = await Promise.all([
+    commandAs(session, { kind: "stop", deviceId: pc.deviceId, taskKey: TASK }),
+    withdrawAs(pc.token),
+  ]);
+  assert.equal(racing[1].status, 204);
+  assert.ok([201, 404].includes(racing[0].status), String(racing[0].status));
+  assert.deepEqual(await count(), { devices: 1, commands: 0 });
+
   // Signing the PC out revokes its token family: the report is no longer shown and is deleted, and nothing can be sent to it.
   await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
   await commandAs(session, answer(pc.deviceId));

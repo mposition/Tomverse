@@ -197,14 +197,16 @@ public static class Cu {
   static INPUT Mouse(uint flags, uint data) {
     var i = new INPUT(); i.type = 0; i.u.mi.dwFlags = flags; i.u.mi.mouseData = data; return i;
   }
-  // The system tick right after the last input this process sent, and whether this request sent any. Input is stamped on the same
+  // The system tick read just before the last input this process sent, and whether this request sent any. Read before, so that
+  // nothing that happens after the input went out, however long this thread is held up, can be taken for the agent's own. Input is stamped on the same
   // clock (GetLastInputInfo and Environment.TickCount are both timer ticks), so the host can tell later input from the agent's own.
   static uint LastSent;
   static bool Sent;
 
   static void Send(params INPUT[] inputs) {
+    uint before = (uint)Environment.TickCount;
     uint n = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
-    if (n > 0) { LastSent = (uint)Environment.TickCount; Sent = true; }
+    if (n > 0) { LastSent = before; Sent = true; }
     if (n != (uint)inputs.Length) throw new Exception("The input was not accepted by Windows.");
   }
   static bool IsExtended(int vk) { return (vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E; }
@@ -220,8 +222,8 @@ public static class Cu {
   }
 
   static void Activate(IntPtr h) {
-    keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
     LastSent = (uint)Environment.TickCount; Sent = true;
+    keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
     SetForegroundWindow(h);
   }
 

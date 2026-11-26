@@ -118,21 +118,32 @@ export async function syncDesktopRemote(identity: DesktopIdentity, body: Desktop
 /**
  * The PC turned remote control off (or is signing out): its report and every answer waiting for it go now. What stays
  * for a short while is an empty, hidden marker with the number of this request, so that a sync the PC sent before it
- * and that arrives after it is refused instead of putting the report back.
+ * and that arrives after it is refused instead of putting the report back. The withdrawal obeys the same order: one
+ * whose number is not higher than the last request taken from this PC was sent before that request, arrives late, and
+ * changes nothing.
  */
-export async function withdrawDesktopRemote(identity: DesktopIdentity, seq: number) {
+export async function withdrawDesktopRemote(identity: DesktopIdentity, seq: number): Promise<{ stale: false } | { stale: true; seq: number | null }> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      DELETE FROM "DesktopRemoteCommand" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
-    `;
-    return tx.$executeRaw`
+    // The marker is written first. Writing it takes the row's lock, so an answer that is being recorded for this PC has
+    // either committed, and is removed below, or waits for this and then finds no report it could answer.
+    const won = await tx.$executeRaw`
       INSERT INTO "DesktopRemoteDevice" ("deviceId", "userId", "familyId", "snapshot", "revision", "createdAt", "updatedAt", "expiresAt", "withdrawnAt")
       VALUES (${identity.deviceId}, ${identity.userId}, ${identity.familyId}, '{"tasks":[],"approval":null}'::jsonb, ${seq}::bigint, now(), now(), now(), now())
       ON CONFLICT ("deviceId") DO UPDATE SET
-        "snapshot" = EXCLUDED."snapshot", "revision" = GREATEST("DesktopRemoteDevice"."revision", EXCLUDED."revision"),
+        "snapshot" = EXCLUDED."snapshot", "revision" = EXCLUDED."revision",
         "updatedAt" = now(), "expiresAt" = now(), "withdrawnAt" = now()
-      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId}
+      WHERE "DesktopRemoteDevice"."userId" = ${identity.userId} AND EXCLUDED."revision" > "DesktopRemoteDevice"."revision"
     `;
+    if (won !== 1) {
+      const held = await tx.$queryRaw<Array<{ seq: string }>>`
+        SELECT "revision"::text AS "seq" FROM "DesktopRemoteDevice" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+      `;
+      return { stale: true as const, seq: held[0] ? Number(held[0].seq) : null };
+    }
+    await tx.$executeRaw`
+      DELETE FROM "DesktopRemoteCommand" WHERE "deviceId" = ${identity.deviceId} AND "userId" = ${identity.userId}
+    `;
+    return { stale: false as const };
   });
 }
 

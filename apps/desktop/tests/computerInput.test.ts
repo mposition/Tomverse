@@ -181,11 +181,13 @@ test("between the parts of one action the script looks for input that is not its
 
 test("the script stamps the agent's own input on the system tick clock and hands the host both ticks", () => {
   const send = WINDOWS_COMPUTER_SCRIPT.slice(WINDOWS_COMPUTER_SCRIPT.indexOf("static void Send("), WINDOWS_COMPUTER_SCRIPT.indexOf("static bool IsExtended("));
-  assert.match(send, /LastSent = \(uint\)Environment\.TickCount; Sent = true;/, "every input path goes through Send, which records the tick right after SendInput");
-  assert.ok(send.indexOf("SendInput(") < send.indexOf("LastSent ="));
+  // The tick is read before the input goes out: input of the person after it, however late this thread runs on, is never the agent's.
+  assert.match(send, /uint before = \(uint\)Environment\.TickCount;\s+uint n = SendInput\(/);
+  assert.match(send, /if \(n > 0\) \{ LastSent = before; Sent = true; \}/);
+  assert.doesNotMatch(send, /LastSent = \(uint\)Environment\.TickCount/);
   // Every mouse and keyboard input of the action is sent by Send (and the hand-back key press stamps itself).
   assert.equal([...actSection.matchAll(/SendInput\(/g)].length, 0);
-  assert.match(WINDOWS_COMPUTER_SCRIPT, /static void Activate\(IntPtr h\) \{[^}]*LastSent = \(uint\)Environment\.TickCount; Sent = true;/);
+  assert.match(WINDOWS_COMPUTER_SCRIPT, /static void Activate\(IntPtr h\) \{\s+LastSent = \(uint\)Environment\.TickCount; Sent = true;\s+keybd_event\(/);
   // act: the tick of the last input that went out, only when one did; the old idle time is no longer part of the answer.
   assert.match(WINDOWS_COMPUTER_SCRIPT, /Sent = false;\s+foreach \(var kv in Act\(req\)\) res\[kv\.Key\] = kv\.Value;\s+if \(Sent\) res\["sentTick"\] = \(long\)LastSent;/);
   assert.doesNotMatch(actSection, /idleMs/);
