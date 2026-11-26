@@ -11,7 +11,7 @@ import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudi
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
-import { createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolQuote, studioToolsToRequest, useStudioImageQuote } from "./studioGenerationClient";
+import { createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolFailure, studioToolQuote, studioToolsToRequest, useStudioImageQuote } from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
@@ -292,12 +292,16 @@ export function StudioToolEditor({ tool, preset }: {
         // Each remover is its own request, sent one after the other: a user may have one image request
         // running at a time. Each cut-out is shown as it arrives and the first is picked until the user chooses.
         const held = (modelId: string) => toolResults.get(modelId)?.photo === photo ? toolResults.get(modelId)!.blob : undefined;
-        const requested = new Set(studioToolsToRequest(quote.targets, modelId => Boolean(held(modelId))).map(target => target.modelId));
+        const shown = (modelId: string) => !resultIsExample && cutouts.some(cutout => cutout.modelId === modelId);
+        const requested = studioToolsToRequest(quote.targets, modelId => Boolean(held(modelId)), shown).map(target => target.modelId);
+        // What is about to be requested is no longer held: if it fails, the next press owes that tool alone,
+        // not a result from an earlier run.
+        for (const modelId of requested) toolResults.delete(modelId);
         const fresh: typeof cutouts = [];
-        let failure: unknown;
+        const failures: unknown[] = [];
         for (const target of quote.targets) {
           try {
-            let blob = requested.has(target.modelId) ? undefined : held(target.modelId);
+            let blob = held(target.modelId);
             if (!blob) {
               const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
               toolRunners.set(target.modelId, runner);
@@ -316,12 +320,14 @@ export function StudioToolEditor({ tool, preset }: {
             setCutouts([...fresh]);
           } catch (error) {
             if (signal.aborted) return;
-            failure ??= error;
+            failures.push(error);
           }
         }
-        if (failure) {
-          // Nothing made is a failure. A shortfall or a changed quote is handled as for any tool (credit
-          // recovery, a fresh quote) and what was made stays on screen. Otherwise one of two is said so.
+        if (failures.length > 0) {
+          // Nothing made is a failure. A shortfall or a changed quote on any tool is handled as for any
+          // feature (credit recovery, a fresh quote) and what was made stays on screen. Otherwise one of
+          // two is said so.
+          const failure = studioToolFailure(failures, isStudioCreditShortfall);
           if (fresh.length === 0 || isStudioCreditShortfall(failure) ||
               (failure instanceof StudioGenerationError && failure.status === 409)) throw failure;
           report(copy.cutoutMissing, true);

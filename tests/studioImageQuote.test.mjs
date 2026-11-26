@@ -71,14 +71,25 @@ test("a tool sent after another waits out a busy slot twice, and nothing else", 
   }
 });
 
-test("a press requests only the tool whose result is missing, and every tool once all are held", async () => {
-  const { studioToolsToRequest } = await import("../components/studio/studioGenerationClient.ts");
+test("a press requests only what is owed, and every tool only when all are held and on screen", async () => {
+  const { studioToolsToRequest, studioToolFailure } = await import("../components/studio/studioGenerationClient.ts");
   const targets = [{ modelId: "tool-a" }, { modelId: "tool-b" }];
-  const ids = held => studioToolsToRequest(targets, id => held.includes(id)).map(target => target.modelId);
+  const ids = (held, shown = held) => studioToolsToRequest(targets, id => held.includes(id), id => shown.includes(id)).map(target => target.modelId);
   assert.deepEqual(ids([]), ["tool-a", "tool-b"]);
   // The paid result is never requested again while the other is still owed.
   assert.deepEqual(ids(["tool-a"]), ["tool-b"]);
   assert.deepEqual(ids(["tool-b"]), ["tool-a"]);
-  // Both held: the press means make them again.
+  // Both held and both on screen: the press means make them again.
   assert.deepEqual(ids(["tool-a", "tool-b"]), ["tool-a", "tool-b"]);
+  // Both returned but one never reached the screen (its cropping failed, or a draft was restored): nothing is bought.
+  assert.deepEqual(ids(["tool-a", "tool-b"], ["tool-a"]), []);
+  assert.deepEqual(ids(["tool-a", "tool-b"], []), []);
+
+  // The failure that decides: a shortfall from either tool, then a changed quote, then the first.
+  const plain = new StudioGenerationError(502), shortfall = new StudioGenerationError(402, "CREDITS_REQUIRED"), changed = new StudioGenerationError(409);
+  const isShortfall = error => error === shortfall;
+  assert.equal(studioToolFailure([plain, shortfall], isShortfall), shortfall);
+  assert.equal(studioToolFailure([changed, shortfall], isShortfall), shortfall);
+  assert.equal(studioToolFailure([plain, changed], isShortfall), changed);
+  assert.equal(studioToolFailure([plain, new Error("crop")], isShortfall), plain);
 });

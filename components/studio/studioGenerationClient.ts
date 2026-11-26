@@ -98,15 +98,32 @@ export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = tr
 }
 
 /**
- * Which tools of a several-tool feature a press of the button requests. A tool
- * whose result for this photo is already held is not requested again while
- * another is still missing: it was paid for, and only the missing one is owed.
- * With every result held the press means "make them again", so all are.
+ * Which tools of a several-tool feature a press of the button requests.
+ *
+ * A tool whose result for this photo is held was paid for, so it is not
+ * requested again while anything is still owed: another tool's result
+ * (`held` false), or its own cut-out, which was returned but is not on screen
+ * (`shown` false) and only needs cropping again. Only when every result is
+ * both held and shown does a press mean "make them again".
  */
-export const studioToolsToRequest = <Target extends { modelId: string }>(targets: readonly Target[], held: (modelId: string) => boolean): Target[] => {
+export const studioToolsToRequest = <Target extends { modelId: string }>(
+  targets: readonly Target[], held: (modelId: string) => boolean, shown: (modelId: string) => boolean
+): Target[] => {
   const missing = targets.filter(target => !held(target.modelId));
-  return missing.length === 0 ? [...targets] : missing;
+  if (missing.length > 0) return missing;
+  return targets.every(target => shown(target.modelId)) ? [...targets] : [];
 };
+
+/**
+ * The failure that decides what happens next when one or more tools failed: a
+ * credit shortfall first (it opens credit recovery), then a changed quote (it
+ * reloads the quote), then whichever came first. A later tool's shortfall must
+ * not be lost behind an earlier tool's ordinary error.
+ */
+export const studioToolFailure = (failures: readonly unknown[], isShortfall: (error: unknown) => boolean): unknown =>
+  failures.find(isShortfall) ??
+  failures.find(error => error instanceof StudioGenerationError && error.status === 409) ??
+  failures[0];
 
 /**
  * Runs one tool of a several-tool feature after another has finished. The
