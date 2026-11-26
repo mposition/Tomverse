@@ -41,6 +41,7 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand } from "../permission-contract";
+import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
   MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeExtensionsInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
@@ -3539,6 +3540,15 @@ function registerIpc() {
     if (!worker || !activeRunId || activeRunId === discardedRunId || !state.busy || task?.id !== id ||
         task.execution?.executionMode !== "tomverse_api" || suspended || closing || signingOut) return false;
     try { send({ type: "stop-background", runId: activeRunId, handle }); return true; }
+    catch { return false; }
+  });
+  main("desktop:stop-subagents", (value) => {
+    const { id, subtask } = subagentStopInput.parse(value);
+    const task = state.task;
+    const activeRunId = runId;
+    if (!worker || !activeRunId || activeRunId === discardedRunId || !state.busy || task?.id !== id ||
+        task.execution?.executionMode !== "tomverse_api" || suspended || closing || signingOut) return false;
+    try { send({ type: "stop-subagent", runId: activeRunId, ...(subtask ? { subtask } : {}) }); return true; }
     catch { return false; }
   });
   main("desktop:resume", (value) => {

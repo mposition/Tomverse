@@ -102,6 +102,7 @@ if (trustedWindow) {
     queueMessage: (id: string, operation: Parameters<DesktopApi["queueMessage"]>[1]) => ipcRenderer.invoke("desktop:queue", { id, operation }),
     compactTask: (id: string) => ipcRenderer.invoke("desktop:compact-task", id),
     stopBackground: (id: string, handle: string) => ipcRenderer.invoke("desktop:stop-background", { id, handle }),
+    stopSubagents: (id: string, subtask?: string) => ipcRenderer.invoke("desktop:stop-subagents", { id, ...(subtask ? { subtask } : {}) }),
     codeMemory: (input: Parameters<DesktopApi["codeMemory"]>[0]) => ipcRenderer.invoke("desktop:code-memory", input),
     codeExtensions: (input: Parameters<DesktopApi["codeExtensions"]>[0]) => ipcRenderer.invoke("desktop:code-extensions", input),
     localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),

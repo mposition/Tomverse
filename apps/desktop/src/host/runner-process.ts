@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, discoverExtensions, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, discoverExtensions, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
@@ -52,7 +52,7 @@ type ActiveRun = {
   queueOperation?: (operation: QueueOperation) => boolean;
   /** Sends the task to the window again (a background command printed something or ended). */
   refresh?: () => void;
-  approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
+  approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void; /** The subtask or subagent that asked, when one did. */ origin?: string };
 };
 let active: ActiveRun | undefined;
 /** What the main process last said: the permission mode and where the user's rules are. Ask until it says otherwise. */
@@ -581,6 +581,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
       ...(command.background ? { background: true } : {}),
     },
+    ...(view.origin ? { origin: { id: clean(view.origin.id), title: clean(view.origin.title).slice(0, 120) } } : {}),
     files: view.patch?.map((edit) => ({
       path: clean(edit.path), action: edit.action, eol: edit.eol, bom: edit.bom, preimage: edit.preimage,
       postimage: edit.postimage, before: edit.beforeText === null ? null : clean(edit.beforeText),
@@ -857,6 +858,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         codePermission,
         limits: resolveLimits(command.input.limits),
         ...(command.input.goal && command.input.mode === "agent" ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
+        ...(command.input.orchestrate ? { orchestrate: normalizeOrchestration() } : {}),
         ...(continuation && { sessionId: continuation.taskId, codeContinuation: {
           segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap,
         } }),
@@ -915,6 +917,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           return;
         }
+        if (event.type === "subtask_updated" || event.type === "orchestration") control.refresh?.();
         if ((event.type === "goal_check" || event.type === "queued_follow_up_started" || event.type === "subagent_started" || event.type === "subagent_finished") && journal) publish();
         if (event.type === "response" && journal) {
           Object.assign(task, journalApiUsage(journal.state, command.connection.key));
@@ -1009,7 +1012,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           task.status = "approval";
           publish();
           const action = await new Promise<Decision["action"]>((settle) => {
-            control.approval = { id: request.id, canRemember: request.canRemember, settle };
+            control.approval = { id: request.id, canRemember: request.canRemember, settle, ...(view.origin ? { origin: view.origin.id } : {}) };
             send({ type: "approval", runId: command.runId, request });
           });
           control.approval = undefined;
@@ -1648,6 +1651,15 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
   } else if (data.type === "stop-background" && active?.runId === data.runId) {
     const runner = active.runner;
     if (runner && /^bg-[0-9a-f]{6}$/.test(data.handle)) void runner.background.stop(data.handle).then(() => active?.refresh?.(), () => undefined);
+  } else if (data.type === "stop-subagent" && active?.runId === data.runId) {
+    // One subtask, or all of them; a question one of them is waiting on is answered "no" so the card does not stay up for a stopped subtask.
+    const runner = active.runner;
+    if (runner && (data.subtask === undefined || /^st-[0-9a-f]{6}$/.test(data.subtask))) {
+      runner.stopSubagents(data.subtask);
+      const asking = active.approval?.origin;
+      if (asking && (data.subtask === undefined || asking === data.subtask)) active.approval?.settle("deny");
+      active.refresh?.();
+    }
   } else if (data.type === "stop" && active?.runId === data.runId) {
     active.cancelled = true;
     active.abort.abort();

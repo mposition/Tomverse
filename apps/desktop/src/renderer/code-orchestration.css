@@ -1,0 +1,9 @@
+.code-orchestration { display: grid; gap: 4px; margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+.code-orchestration small { color: var(--muted); overflow-wrap: anywhere; }
+.code-orchestration ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.code-orchestration li { display: grid; gap: 2px; }
+.code-orchestration li > div, .code-orchestration-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.code-orchestration-heading { justify-content: space-between; }
+.code-orchestration-activity { font-style: italic; }
+.code-orchestration-verdict[data-verdict="passed"] strong { color: var(--action); }
+.code-orchestration-verdict[data-verdict="failed"] strong, .code-orchestration-verdict[data-verdict="unverified"] strong { color: var(--text); text-decoration: underline; }

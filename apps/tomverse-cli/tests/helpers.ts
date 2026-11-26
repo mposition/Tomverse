@@ -65,7 +65,7 @@ export const makeRunner = async (
     root: string,
     options: { prompter?: Prompter | null; home?: string | null; readOnly?: boolean; model?: string; maxRequests?: number;
         output?: Output; contextWindow?: number; taskPlan?: "agent" | "plan";
-        limits?: SessionState["limits"]; goal?: SessionState["goal"];
+        limits?: SessionState["limits"]; goal?: SessionState["goal"]; orchestrate?: SessionState["orchestrate"];
         /** Runner options a test adds on top of the defaults (web, memory, nested instructions, ...). */
         runner?: Partial<ConstructorParameters<typeof Runner>[0]> } = {}
 ) => {
@@ -88,6 +88,7 @@ export const makeRunner = async (
         },
         limits: options.limits ?? { maxRequests: options.maxRequests ?? 20, timeoutMs: 15 * 60_000, commandTimeoutMs: 120_000 },
         ...(options.goal ? { goal: options.goal } : {}),
+        ...(options.orchestrate ? { orchestrate: options.orchestrate } : {}),
     });
     if (options.contextWindow) for (const m of catalog) if (m.id === modelId) m.contextWindowTokens = options.contextWindow;
     const output = options.output ?? captureOutput().output;

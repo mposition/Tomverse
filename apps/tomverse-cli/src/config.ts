@@ -27,6 +27,13 @@ export type CliConfig = {
     memory?: boolean;
     /** Lets an agent definition's model name pick the model of its subagent runs. Off unless set to true: it is a billing choice. */
     agentModels?: boolean;
+    /**
+     * Subagent orchestration for new sessions: parallel subtasks with write scopes and verification. Off unless set to true, because it
+     * can use several times the requests of a plain task. The two numbers are how many subagents run at once and how many requests they share.
+     */
+    orchestrate?: boolean;
+    orchestrateMaxSubagents?: number;
+    orchestrateMaxRequests?: number;
     /** MCP servers and hooks (mcp.json, hooks.json and the folder's own files). On unless set to false. */
     mcp?: boolean;
     hooks?: boolean;
@@ -75,6 +82,9 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): CliConfig => {
     if (Array.isArray(value.commandEnv)) config.commandEnv = value.commandEnv.filter((v): v is string => typeof v === "string");
     if (typeof value.memory === "boolean") config.memory = value.memory;
     if (typeof value.agentModels === "boolean") config.agentModels = value.agentModels;
+    if (typeof value.orchestrate === "boolean") config.orchestrate = value.orchestrate;
+    if (typeof value.orchestrateMaxSubagents === "number") config.orchestrateMaxSubagents = value.orchestrateMaxSubagents;
+    if (typeof value.orchestrateMaxRequests === "number") config.orchestrateMaxRequests = value.orchestrateMaxRequests;
     if (typeof value.mcp === "boolean") config.mcp = value.mcp;
     if (typeof value.hooks === "boolean") config.hooks = value.hooks;
     if (Array.isArray(value.trustedRoots)) config.trustedRoots = value.trustedRoots.filter((v): v is string => typeof v === "string");

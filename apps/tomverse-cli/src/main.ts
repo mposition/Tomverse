@@ -28,6 +28,7 @@ import { extensionsCommand } from "./extensions-cli.js";
 import { normalizeAllowedDomains } from "./net-proxy.js";
 import { createSandboxRuntime, normalizeSandboxSettings, sandboxModes, type SandboxMode, type SandboxRuntime } from "./sandbox.js";
 import { pluginCommand } from "./plugin-cli.js";
+import { ORCHESTRATION_BOUNDS, describeOrchestration, normalizeOrchestration } from "./runtime.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -391,6 +392,8 @@ const trust = async (ctx: Context, args: string[]) => {
     return EXIT_CODES.success;
 };
 
+const orchestrationFrom = (config: CliConfig) => normalizeOrchestration({ maxSubagents: config.orchestrateMaxSubagents, maxRequests: config.orchestrateMaxRequests });
+
 const configCommand = async (ctx: Context, args: string[]) => {
     const [sub, key, value] = args;
     const config = { ...ctx.config };
@@ -420,6 +423,16 @@ const configCommand = async (ctx: Context, args: string[]) => {
         } else if (key === "agent-models") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("agent-models must be on or off.");
             config.agentModels = value === "true" || value === "on";
+        } else if (key === "orchestrate") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("orchestrate must be on or off.");
+            config.orchestrate = value === "true" || value === "on";
+            if (config.orchestrate) process.stdout.write(`Orchestration is on for new sessions: ${describeOrchestration(orchestrationFrom(config))}. Change the numbers with orchestrate-max-subagents and orchestrate-max-requests.\n`);
+        } else if (key === "orchestrate-max-subagents" || key === "orchestrate-max-requests") {
+            const number = Number(value);
+            const bounds = key === "orchestrate-max-subagents" ? ORCHESTRATION_BOUNDS.maxSubagents : ORCHESTRATION_BOUNDS.maxRequests;
+            if (!Number.isInteger(number) || number < bounds.min || number > bounds.max) throw new UsageError(`${key} must be a whole number from ${bounds.min} to ${bounds.max}.`);
+            if (key === "orchestrate-max-subagents") config.orchestrateMaxSubagents = number;
+            else config.orchestrateMaxRequests = number;
         } else if (key === "mcp" || key === "hooks") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError(`${key} must be on or off.`);
             config[key] = value === "true" || value === "on";
@@ -436,7 +449,7 @@ const configCommand = async (ctx: Context, args: string[]) => {
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", mcp: "mcp", hooks: "hooks", sandbox: "sandbox", "sandbox-domains": "sandboxDomains", "sandbox-localhost": "sandboxLocalhost" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", orchestrate: "orchestrate", "orchestrate-max-subagents": "orchestrateMaxSubagents", "orchestrate-max-requests": "orchestrateMaxRequests", mcp: "mcp", hooks: "hooks", sandbox: "sandbox", "sandbox-domains": "sandboxDomains", "sandbox-localhost": "sandboxLocalhost" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -617,7 +630,9 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
             commandTimeoutMs: positiveInt(ctx.flags["command-timeout"], "command-timeout", DEFAULTS.commandTimeoutSeconds) * 1000,
         }),
         ...(ctx.flags.goal ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
+        ...(ctx.config.orchestrate === true ? { orchestrate: orchestrationFrom(ctx.config) } : {}),
     });
+    if (journal.state.orchestrate) ctx.output.info(`Orchestration: ${describeOrchestration(journal.state.orchestrate)}. Subtasks run in parallel with their own write scopes, are verified, and share these requests with the task's own limit.`);
     if (journal.state.limits.profile === "unlimited") ctx.output.info("Limits: unlimited. A task stops when you stop it, the API refuses a request, or the model is done.");
     if (journal.state.goal) ctx.output.info(`Goal mode: after the model is done, the goal is checked and the task continues until it is verified (at most ${journal.state.goal.maxContinuations} automatic continuations in a row).`);
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");

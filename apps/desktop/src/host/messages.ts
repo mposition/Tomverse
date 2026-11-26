@@ -44,6 +44,7 @@ export type WorkerCommand =
   | { type: "follow-up"; runId: string; requestId: string; text: string }
   | { type: "queue"; runId: string; requestId: string; operation: QueueOperation }
   | { type: "stop-background"; runId: string; handle: string }
+  | { type: "stop-subagent"; runId: string; subtask?: string }
   | { type: "stop"; runId: string }
   | (RecordedItem & { type: "read-change" })
   | { type: "read-native-change"; requestId: string; taskId: string; recordId: string; directory: string; project: ProjectRoot;

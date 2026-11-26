@@ -7,6 +7,8 @@ import { codeFallbackModelAvailable, codeFallbackUpdate, codeTransferScope, defa
   type CodeFallbackUpdate } from "../code-fallback";
 import { codeLimitProfile, type CodeLimitProfile, type CodeMemoryInput, type CodeMemoryView, type Snapshot } from "../contract";
 import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
+import { desktopOrchestrateCopy } from "../../../../locales/desktopOrchestrate";
+import { ORCHESTRATION_DEFAULTS } from "../orchestrate-contract";
 import type { CodeEnginePreference } from "./CodeEngine";
 import { CodeExtensionsSettings } from "./CodeExtensions";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
@@ -92,6 +94,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
 }) {
   const copy = desktopCodeExecutionCopy[language];
   const engineCopy = desktopCodeEngineCopy[language];
+  const orchestrateCopy = desktopOrchestrateCopy[language];
   const limitLabels = { standard: engineCopy.limitsStandard, extended: engineCopy.limitsExtended, unlimited: engineCopy.limitsUnlimited } as const satisfies Record<CodeLimitProfile, string>;
   const [reviewScope, setReviewScope] = useState(false);
   const [writing, setWriting] = useState(false);
@@ -150,6 +153,13 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
     <SettingRow field="code-goal-mode" label={engineCopy.goal} detail={engineCopy.goalDetail} control={
       <select id="code-goal-mode" aria-describedby="code-goal-mode-info" value={taskEngine.goal ? "on" : "off"}
         onChange={(event) => changeEngine({ ...taskEngine, goal: event.currentTarget.value === "on" })}>
+        <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
+      </select>
+    } />
+    <SettingRow field="code-orchestrate" label={orchestrateCopy.setting}
+      detail={orchestrateCopy.settingDetail.replace("{agents}", String(ORCHESTRATION_DEFAULTS.maxSubagents)).replace("{requests}", String(ORCHESTRATION_DEFAULTS.maxRequests))} control={
+      <select id="code-orchestrate" aria-describedby="code-orchestrate-info" value={taskEngine.orchestrate ? "on" : "off"}
+        onChange={(event) => changeEngine({ ...taskEngine, orchestrate: event.currentTarget.value === "on" })}>
         <option value="off">{engineCopy.off}</option><option value="on">{engineCopy.on}</option>
       </select>
     } />

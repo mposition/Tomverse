@@ -28,6 +28,7 @@ import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
 import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
+import type { CodeOrchestration } from "./orchestrate-contract";
 import type { Language } from "../../../lib/language";
 import type { desktopNativeCopy } from "../../../locales/desktopNative";
 import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider,
@@ -76,6 +77,8 @@ export const startInput = z.object({
   executionMode: codeExecutionMode.optional(),
   limits: codeLimitProfile.optional(),
   goal: z.boolean().optional(),
+  /** Subagent orchestration for this task (parallel subtasks with write scopes and verification). Off unless the person turned it on. */
+  orchestrate: z.boolean().optional(),
   permissionProfile: codePermissionProfile.optional(),
   saveHistory: z.boolean().optional(),
   handoffId: z.uuid().optional(),
@@ -320,6 +323,8 @@ export type Task = {
   canRewind?: true;
   /** Subagents the model started in this task, newest last. */
   subagents?: CodeSubagent[];
+  /** Orchestration: the limits this task runs with and the subtasks of its delegate calls. Absent when it is off. */
+  orchestration?: CodeOrchestration;
   /** The saved limit profile when it is not the standard one. */
   limits?: Exclude<CodeLimitProfile, "standard">;
   goal?: CodeGoalState;
@@ -411,6 +416,8 @@ export type ApprovalRequest = {
   /** A call of a tool of an MCP server on this computer: which server and tool, where the server is defined, and the arguments. */
   mcp?: { server: string; tool: string; scope: "user" | "project"; args: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
+  /** The subagent or subtask this request is for: a worker's change or command, asked one at a time. */
+  origin?: { id: string; title: string };
   /** A commit or push the main process asks the person to approve: built from the repository, answered only in the approval window. */
   git?: GitApprovalView;
 };
@@ -456,6 +463,7 @@ export type DesktopApi = {
   followUp(id: FollowUpTarget, text: string): Promise<boolean>;
   queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
   stopBackground(id: string, handle: string): Promise<boolean>;
+  stopSubagents(id: string, subtask?: string): Promise<boolean>;
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
   codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
   localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
