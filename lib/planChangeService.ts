@@ -747,6 +747,27 @@ export async function confirmPlanChange({
         where: { id: stored.id },
       });
     } catch (recordError) {
+      // Released only once it is known that nothing records it: the
+      // transaction may have committed before a later read failed, or the
+      // other confirm may have recorded the same schedule. If even that cannot
+      // be read, the schedule is left alone and a person looks.
+      const recorded = await prisma.planChangeRequest
+        .findUnique({ where: { id: stored.id } })
+        .then((row) => ({ readable: true as const, row }))
+        .catch(() => ({ readable: false as const, row: null }));
+      if (!recorded.readable) {
+        await reportOperationalIncident({
+          code: "PLAN_CHANGE_SCHEDULE_RECORD_UNKNOWN",
+          title: "A downgrade schedule was attached but whether it was recorded is unknown",
+          error: recordError,
+          severity: "error",
+          context: { component: "plan-change", requestId: stored.id, scheduleId },
+        }).catch(() => {});
+        throw recordError;
+      }
+      if (recorded.row?.status === "pending" && recorded.row.stripeScheduleId === scheduleId) {
+        return { ok: true, reservation: viewOf(recorded.row) };
+      }
       await releaseUnrecordedSchedule(scheduleId, stored.id);
       throw recordError;
     }

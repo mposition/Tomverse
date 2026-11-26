@@ -322,7 +322,7 @@ export async function DELETE(req: Request) {
     if (await restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")) {
       await prisma.user.update({
         where: { id: user.id },
-        data: { subscriptionCancelAtPeriodEnd: true },
+        data: { subscriptionCancelAtPeriodEnd: true, subscriptionStatus: subscription.status },
       });
       return NextResponse.json(
         { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
