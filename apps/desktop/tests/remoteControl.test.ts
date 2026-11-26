@@ -196,6 +196,14 @@ test("requests answered at the PC are never applied from another device", async 
   const vault = commandCard("type \"C:/Users/dev/AppData/Roaming/Tomverse Desktop/session-vault.json\"");
   assert.equal(remoteAnswerable(vault, KEY), true);
   assert.equal(remoteAnswerable(vault, KEY, [APP_DATA]), false);
+  // An argument list is read with its program path, as the task's own gate reads it.
+  const tool: ApprovalRequest = { ...commandCard("tool.exe --version"), command: { mode: "argv", file: "C:/Users/dev/AppData/Roaming/Tomverse Desktop/bin/tool.exe",
+    args: ["--version"], cwd: "/work/app", display: "tool.exe --version", env: [], timeoutMs: 60_000 } };
+  assert.equal(remoteAnswerable(tool, KEY), true);
+  assert.equal(remoteAnswerable(tool, KEY, [APP_DATA]), false);
+  // What the task's gate left to a person is answered at the PC, whatever this check would read.
+  assert.equal(remoteAnswerable({ ...commandCard("npm test"), atPcOnly: true }, KEY), false);
+  assert.equal(remoteAnswerable({ ...fileCard(), atPcOnly: true }, KEY), false);
   assert.equal(remoteAnswerable(commandCard("npm test -- --watch=false"), KEY), true);
   assert.equal(remoteAnswerable(fileCard(["src/a.ts", "README.md"]), KEY), true);
 

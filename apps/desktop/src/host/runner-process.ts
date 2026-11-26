@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
@@ -930,10 +930,11 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     // "Allow for this run" is remembered for this run only, as the button says. Rules that last are written by the person
     // in Settings > Task permissions, never as a side effect of an approval card.
     const memory = new ApprovalMemory();
+    const protectedDirs = [tomverseHome(permissionEnv), ...protectedRoots(command.protectedRoot)];
     const permissions = new PermissionGate({
       mode: () => permissionSetting?.mode ?? "ask",
       rules: () => rulesFor().effective(),
-      protectedDirs: [tomverseHome(permissionEnv), ...protectedRoots(command.protectedRoot)],
+      protectedDirs,
     });
     const output: Output = {
       json: false,
@@ -1062,7 +1063,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           const remembered = memory.match(view);
           if (remembered) return { approved: true, remembered };
-          const request = describeApproval(view, memory);
+          // The boundary is read here, from the same request and with the same folders as the gate read it.
+          const request: ApprovalRequest = { ...describeApproval(view, memory), ...(checkBoundaries(view, { protectedDirs }) ? { atPcOnly: true as const } : {}) };
           task.status = "approval";
           publish();
           const action = await new Promise<Decision["action"]>((settle) => {

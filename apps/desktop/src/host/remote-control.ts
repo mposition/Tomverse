@@ -150,10 +150,12 @@ export function remoteApprovalKind(request: ApprovalRequest): DesktopRemoteAppro
  * Whether another device may answer this request. Deterministic and checked again when an answer arrives: the person
  * there must see the whole of what they approve, and nothing that leaves this computer is approved from elsewhere. A
  * request of a project on another machine (SSH) acts there, and the report has no room to say where: it is answered at
- * the PC, whose card names the machine.
+ * the PC, whose card names the machine. So is a request the task's own permission boundary left to a person: the task
+ * read the request whole, and says so in `atPcOnly`. The check below reads the same boundary again from what the card
+ * holds, for a request that carries no such mark.
  */
 export function remoteAnswerable(request: ApprovalRequest, key?: string, protectedDirs: readonly string[] = []): boolean {
-  if (request.remote) return false;
+  if (request.remote || request.atPcOnly) return false;
   const kind = remoteApprovalKind(request);
   if (kind === "files") {
     const files = request.files ?? [];
@@ -165,7 +167,8 @@ export function remoteAnswerable(request: ApprovalRequest, key?: string, protect
   // The CLI's own boundary: a command it leaves to a person in every mode (it sends something off this computer, names
   // a credential file or the app's data folder) is never answered from another device.
   const boundary = checkBoundaries({
-    approvalId: request.id, toolCallId: request.id, toolName: request.tool, input: null, root: request.root,
+    // An argument list is read with its program as the card shows it, path and all.
+    approvalId: request.id, toolCallId: request.id, toolName: request.tool, input: command.mode === "argv" ? { argv: [command.file, ...command.args] } : null, root: request.root,
     command: { mode: command.mode, file: command.file, args: command.args, display: command.display, shell: null, cwd: command.cwd,
       timeoutMs: command.timeoutMs, envNames: command.env, ...(command.background ? { background: true } : {}) },
   }, { protectedDirs });
@@ -258,6 +261,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
   let generation = 0;
   /** The sync on the wire now. Turning off and signing out wait for it, so it cannot write the report back after the delete. */
   let running: Promise<void> | null = null;
+  let cancelSync: AbortController | null = null;
   let acks: DesktopRemoteAck[] = [];
   const seen = new Set<string>();
   const answered = new Set<string>();
@@ -282,12 +286,13 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     answered.clear();
   }
 
-  const request = async (account: RemoteAccount, method: "POST" | "DELETE", body?: object, timeoutMs = 10_000) => {
+  const request = async (account: RemoteAccount, method: "POST" | "DELETE", body?: object, timeoutMs = 10_000, cancel?: AbortSignal) => {
     const token = await account.authorize();
+    cancel?.throwIfAborted();
     return transport(new URL(DESKTOP_REMOTE_SYNC, account.origin), {
       method, ...(body ? { body: JSON.stringify(body) } : {}),
       headers: { Authorization: "Bearer " + token, Origin: DESKTOP_APP_ORIGIN, ...(body ? { "Content-Type": "application/json" } : {}) },
-      credentials: "omit", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(timeoutMs),
+      credentials: "omit", redirect: "error", cache: "no-store", signal: cancel ? AbortSignal.any([AbortSignal.timeout(timeoutMs), cancel]) : AbortSignal.timeout(timeoutMs),
     });
   };
 
@@ -340,8 +345,10 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     const askedAt = clock();
     lastSyncAt = askedAt;
     const sending = acks.splice(0, DESKTOP_REMOTE_LIMITS.acks);
+    const cancel = new AbortController();
+    cancelSync = cancel;
     try {
-      const response = await request(account, "POST", { snapshot, acks: sending });
+      const response = await request(account, "POST", { snapshot, acks: sending }, 10_000, cancel.signal);
       if (run !== generation) { await response.body?.cancel().catch(() => {}); return; }
       if (!response.ok) {
         const detail = await response.json().catch(() => null) as { code?: unknown } | null;
@@ -405,13 +412,19 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     running = started;
   }
 
-  /** Waits for the sync on the wire to end, at most this long. */
+  /** Waits for the sync on the wire to end, at most this long; one that has not ended by then is cancelled, so it is not sent later. */
   async function settled(maxMs: number) {
     const current = running;
     if (!current) return;
-    let handle: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([current, new Promise<void>((resolve) => { handle = setTimeout(resolve, maxMs); handle.unref?.(); })]);
-    clearTimeout(handle);
+    const ended = async (ms: number) => {
+      let handle: ReturnType<typeof setTimeout> | undefined;
+      const done = await Promise.race([current.then(() => true), new Promise<boolean>((resolve) => { handle = setTimeout(() => resolve(false), ms); handle.unref?.(); })]);
+      clearTimeout(handle);
+      return done;
+    };
+    if (await ended(maxMs)) return;
+    cancelSync?.abort();
+    await ended(1_000);
   }
 
   function view(): RemoteControlView {

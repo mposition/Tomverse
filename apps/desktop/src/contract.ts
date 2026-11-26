@@ -427,6 +427,12 @@ export type ApprovalRequest = {
   tool: string;
   explanation?: string;
   canRemember: boolean;
+  /**
+   * The task's permission boundary leaves this request to a person in every mode (it sends something off this computer,
+   * or names a credential file or the app's own data). Set where the permission gate is, from the request as the gate
+   * read it; remote control answers such a request at this PC only.
+   */
+  atPcOnly?: true;
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
