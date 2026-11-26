@@ -7,7 +7,7 @@ import { studioCreativeCopy } from "../locales/studioCreative.ts";
 import { STUDIO_PHOTO_CATEGORIES, studioPresetName, studioPublicationPresets } from "../lib/studioPresetLibrary.ts";
 import {
   STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets,
-  studioPublishingDesign, studioPublishingPrompt, studioSocialFormat,
+  STUDIO_PUBLISHING_MIN_KEPT, studioPublishingDesign, studioPublishingPrompt, studioPublishingTrim, studioSocialFormat,
 } from "../lib/studioPublishing.ts";
 
 test("Studio lists the new creative tools in Everyday creations and isolates poster publishing", () => {
@@ -82,6 +82,43 @@ test("Poster briefs use the selected art direction and have the model set the he
   assert.match(automatic, /never a photograph or mockup of a poster/);
   assert.doesNotMatch(automatic, /Keep the bottom/);
   assert.doesNotMatch(automatic, /Use the reference as the featured subject/);
+  assert.match(automatic, /Do not invent ratings, reviews, quotes, statistics, hashtags, small print, dates, prices/);
+});
+
+test("A design drawn in a nearby shape fills its placement, and the model is told what is trimmed", () => {
+  const tall = { width: 1024, height: 1536 }, wide = { width: 1536, height: 1024 }, square = { width: 1024, height: 1024 };
+  assert.equal(studioPublishingTrim(tall, studioSocialFormat("pinterest-pin")), null);
+  assert.equal(studioPublishingTrim(square, studioSocialFormat("instagram-square")), null);
+  for (const [drawn, id, sides, percent] of [
+    [tall, "instagram-feed", "top and bottom", 8], [tall, "instagram-tall", "top and bottom", 6], [tall, "instagram-story", "left and right", 8],
+    [wide, "youtube-thumbnail", "top and bottom", 8], [wide, "linkedin-landscape", "top and bottom", 11],
+  ]) {
+    const trim = studioPublishingTrim(drawn, studioSocialFormat(id));
+    assert.deepEqual([trim.sides, Math.round(trim.each * 100), trim.fills], [sides, percent, true], id);
+  }
+  // A square drawn for a story or a wide banner would lose too much: it is shown whole instead.
+  assert.equal(studioPublishingTrim(square, studioSocialFormat("instagram-story")).fills, false);
+  assert.equal(studioPublishingTrim(square, studioSocialFormat("x-feed")).fills, false);
+  assert.ok(STUDIO_PUBLISHING_MIN_KEPT <= studioPublishingTrim(wide, studioSocialFormat("linkedin-landscape")).kept);
+
+  const input = {
+    kind: "social-post", design: studioPublishingDesign("social-post", "travel-story"), language: "Korean",
+    brief: "제주 여행", title: "제주 3박 4일", details: "@tomverse", hasPhoto: false, hasLogo: false,
+  };
+  const story = studioPublishingPrompt({ ...input, placement: studioSocialFormat("instagram-story"), drawn: tall, finished: studioSocialFormat("instagram-story") });
+  assert.match(story, /trimmed to 9:16: 8% is cut off each of the left and right edges/);
+  assert.match(story, /Keep the bottom 35% free of typography/);
+  assert.doesNotMatch(story, /central safe area/);
+  // Trimmed from the bottom, the footer band is counted on the taller image the model draws.
+  const feed = studioPublishingPrompt({ ...input, placement: studioSocialFormat("instagram-feed"), drawn: tall, finished: studioSocialFormat("instagram-feed") });
+  assert.match(feed, /trimmed to 4:5: 8% is cut off each of the top and bottom edges/);
+  assert.match(feed, /Keep the bottom 28% free of typography/);
+  const poster = studioPublishingPrompt({ ...input, kind: "poster", design: studioPublishingDesign("poster", "cafe-menu"), drawn: tall, finished: STUDIO_EXPORT_FORMATS[0] });
+  assert.match(poster, /trimmed to 4:5: 8% is cut off each of the top and bottom edges/);
+  assert.match(poster, /Keep the bottom 27% free of typography/);
+  const fallback = studioPublishingPrompt({ ...input, placement: studioSocialFormat("instagram-story"), drawn: square, finished: studioSocialFormat("instagram-story") });
+  assert.match(fallback, /Compose for a 9:16 placement/);
+  assert.doesNotMatch(fallback, /trimmed to/);
 });
 
 test("Social placements have their own dimensions, safe areas and recommended styles", () => {

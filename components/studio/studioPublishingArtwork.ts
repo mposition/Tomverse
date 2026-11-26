@@ -1,4 +1,4 @@
-import type { StudioSocialFormat } from "@/lib/studioPublishing";
+import { studioPublishingTrim, type StudioSocialFormat } from "@/lib/studioPublishing";
 import { canvas as scratchCanvas, readImage, encode } from "./studioCanvas";
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -8,6 +8,8 @@ export type StudioPublishingArtwork = {
   width: number;
   height: number;
   placement?: StudioSocialFormat;
+  /** A generated design was composed for trimming; a preset sample was not and is always shown whole. */
+  generated?: boolean;
   details: string;
   locale: string;
 };
@@ -46,9 +48,10 @@ function linesFor(context: CanvasRenderingContext2D, text: string, width: number
 }
 
 /**
- * The image model designs and typesets the whole piece, so the canvas keeps
- * all of it: nothing is cropped, shrunk into a frame or lettered a second
- * time. Only the supplied details and logo are added, along the bottom.
+ * The image model designs and typesets the whole piece, and is told what share
+ * of its edges the placement trims. A generated design therefore fills the
+ * canvas; nothing is shrunk into a frame or lettered a second time. Only the
+ * supplied details and logo are added, along the bottom.
  */
 export async function drawStudioPublishingArtwork(canvas: HTMLCanvasElement, opts: StudioPublishingArtwork) {
   const { width, height, locale, placement } = opts;
@@ -71,13 +74,14 @@ export async function drawStudioPublishingArtwork(canvas: HTMLCanvasElement, opt
   if (!ctx) throw new Error("Canvas unavailable");
   ctx.imageSmoothingQuality = "high";
   const all: Box = { x: 0, y: 0, w: width, h: height };
-  if (Math.abs(image.naturalWidth / image.naturalHeight - width / height) > .01) {
-    // A placement of another shape gets a soft copy of the design behind it, in place of blank bars.
+  const trim = studioPublishingTrim({ width: image.naturalWidth, height: image.naturalHeight }, { width, height });
+  if (trim && !(opts.generated && trim.fills)) {
+    // Shown whole: a sample, or a shape too far from the placement. A soft copy of the design sits behind it, in place of blank bars.
     const soft = scratchCanvas(16, Math.max(1, Math.round(16 * height / width)));
     imageIn(soft.context, image, { x: 0, y: 0, w: soft.element.width, h: soft.element.height }, "cover");
     ctx.drawImage(soft.element, 0, 0, width, height);
-  }
-  imageIn(ctx, image, all, "contain");
+    imageIn(ctx, image, all, "contain");
+  } else imageIn(ctx, image, all, "cover");
   if (!details && !logo) return;
 
   const unit = Math.min(width, height);

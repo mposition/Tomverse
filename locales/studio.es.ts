@@ -33,7 +33,6 @@ export const studioLocale = {
   "posterMobile": "Póster, publicación, historia",
   "samplePack": "20 stickers con imágenes de ejemplo",
   "exampleEventDetails": "15 de agosto · Aewol, Jeju",
-  "backgroundArtwork": "Imagen de fondo",
   "changeImage": "Cambiar imagen",
   "changePhoto": "Cambiar foto",
   "invalidImage": "Elige una imagen PNG, JPEG o WebP de hasta 12 MB.",
