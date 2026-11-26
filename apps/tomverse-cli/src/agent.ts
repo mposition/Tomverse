@@ -97,7 +97,7 @@ export type RunnerOptions = {
     catalog: CatalogModel[];
     commandEnv: string[];
     launchCommand?: CommandLaunch;
-    /** The host confirms commands run in a sandbox it enforces (sandbox.ts): run_command's description says so. Leave it out and commands are described as not sandboxed. */
+    /** The host confirms commands run in a sandbox it enforces: run_command's description says so. Leave it out and commands are described as not sandboxed. */
     sandboxed?: boolean;
     instructions: string | null;
     instructionsTruncated?: boolean;

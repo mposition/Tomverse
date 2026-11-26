@@ -190,8 +190,8 @@ const nameSafe = (text: string) => text.replace(/[^A-Za-z0-9_-]/g, "_");
 /**
  * An MCP rule names a server (`mcp__server`, `mcp__server__*`) or one of its tools (`mcp__server__tool`). It is compared with the
  * server and tool the request is for, not by text prefix: a server id may itself hold `__`, so `mcp__a__*` must not reach the
- * tools of a server called `a__b`. A tool whose function name was shortened (over 64 characters, a hash is added) matches by its
- * own name, its name with unusable characters replaced, or the function name the model sees.
+ * tools of a server called `a__b`. An allow rule names the tool by the function name the model sees (shortened with a hash over
+ * 64 characters) or the whole server; a deny or ask rule may also use the tool's own name, and reads broadly.
  */
 const toolMatches = (rule: PermissionRule, toolName: string, subject: Subject) => {
     if (!rule.tool.startsWith("mcp__")) return rule.tool === toolName;
@@ -202,7 +202,13 @@ const toolMatches = (rule: PermissionRule, toolName: string, subject: Subject) =
     }
     if (rule.tool === subject.name) return true;
     const server = `mcp__${subject.server}`;
-    return rule.tool === server || rule.tool === `${server}__*` || rule.tool === `${server}__${subject.tool}` || rule.tool === `${server}__${nameSafe(subject.tool)}`;
+    // `mcp__a__b` can read as tool b of server a or as the whole server a__b: the bare server form is taken only for a server id
+    // without "__", and a server whose id holds one is opened as a whole only by `mcp__<id>__*`.
+    if (rule.tool === `${server}__*` || (rule.tool === server && !subject.server.includes("__"))) return true;
+    if (rule.effect === "allow") return false;
+    // A deny or ask rule errs on the restrictive side: it also covers the tool by its own name, and anything that starts with its server.
+    const own = rule.tool === `${server}__${subject.tool}` || rule.tool === `${server}__${nameSafe(subject.tool)}`;
+    return own || rule.tool === server || subject.name.startsWith(rule.tool.endsWith("__*") ? rule.tool.slice(0, -1) : `${rule.tool}__`);
 };
 
 /**

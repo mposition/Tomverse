@@ -104,10 +104,14 @@ test("MCP rules compare the server and the tool of the request: a long tool name
     const functionName = mcpToolName("server", longTool, taken);
     assert.ok(functionName.length <= 64 && functionName !== `mcp__server__${longTool}`, "a shortened function name carries a hash");
     const long = mcpView("server", longTool, functionName);
-    for (const tool of [`mcp__server__${longTool}`, functionName, "mcp__server__*", "mcp__server"]) {
+    for (const tool of [functionName, "mcp__server__*", "mcp__server"]) {
         assert.equal(kindOf(long, "ask", [rule("allow", tool)]), "allow", tool);
         assert.equal(kindOf(long, "allow_all", [rule("deny", tool)]), "deny", `deny ${tool}`);
     }
+    // The tool's own long name is enough to deny or ask about it, but it never allows (only the name the model sees does).
+    assert.equal(kindOf(long, "allow_all", [rule("deny", `mcp__server__${longTool}`)]), "deny");
+    assert.equal(kindOf(long, "allow_all", [rule("ask", `mcp__server__${longTool}`)]), "human");
+    assert.equal(kindOf(long, "allow_all", [rule("allow", `mcp__server__${longTool}`)]), "human");
     assert.equal(kindOf(long, "ask", [rule("allow", `mcp__server__${"a".repeat(99)}`)]), "human", "a different tool name");
     const odd = mcpView("server", "read file!", mcpToolName("server", "read file!", new Set()));
     assert.equal(kindOf(odd, "ask", [rule("allow", "mcp__server__read_file_")]), "allow", "the name as the model sees it");
@@ -116,8 +120,17 @@ test("MCP rules compare the server and the tool of the request: a long tool name
     assert.equal(kindOf(nested, "ask", [rule("allow", "mcp__a__*")]), "human");
     assert.equal(kindOf(nested, "ask", [rule("allow", "mcp__a")]), "human");
     assert.equal(kindOf(nested, "ask", [rule("allow", "mcp__a__b__*")]), "allow");
-    assert.equal(kindOf(nested, "ask", [rule("allow", "mcp__a__b")]), "allow", "the whole server a__b");
+    assert.equal(kindOf(nested, "ask", [rule("allow", "mcp__a__b")]), "human", "the bare form of a server id that holds __ is not read as the whole server");
     assert.equal(kindOf(mcpView("a", "b__tool"), "ask", [rule("allow", "mcp__a__b__*")]), "human", "and the reverse");
+    // A narrow rule for one tool never opens another server whose id happens to continue its text.
+    assert.equal(kindOf(mcpView("github__list_issues", "delete_repo"), "allow_all", [rule("allow", "mcp__github__list_issues")]), "human");
+    assert.equal(kindOf(mcpView("github", "list_issues"), "allow_all", [rule("allow", "mcp__github__list_issues")]), "allow");
+    assert.equal(kindOf(mcpView("a", "b__x"), "allow_all", [rule("allow", "mcp__a__b__x")]), "allow", "the function name the model sees");
+    assert.equal(kindOf(mcpView("a__b", "x"), "allow_all", [rule("allow", "mcp__a__b__x")]), "allow", "the same function name, the same rule");
+    assert.equal(kindOf(mcpView("a__b", "y"), "allow_all", [rule("allow", "mcp__a__b__x")]), "human");
+    // A deny or ask rule errs on the restrictive side: it still reaches the tools of a server whose id continues its text.
+    assert.equal(kindOf(nested, "allow_all", [rule("deny", "mcp__a__*")]), "deny");
+    assert.equal(kindOf(nested, "allow_all", [rule("ask", "mcp__a")]), "human");
 });
 
 // ── MCP through a Runner ───────────────────────────────────────────────────
@@ -579,5 +592,21 @@ test("run_command says it is not sandboxed unless the host says it is", async ()
         } finally {
             await gateway.stop();
         }
+    }
+});
+
+test("no prompter: an approval the rules settled when the batch was looked at but that needs a person when it is decided is refused, never approved", async () => {
+    const gateway = await new FakeGateway({ script: oneCall("run_command", { argv: ["node", "--version"] }) }).start();
+    try {
+        // The rules file reads fine when the batch is looked at and cannot be read when the approval is decided.
+        let reads = 0;
+        const gate = new PermissionGate({ mode: "ask", rules: () => { reads += 1; if (reads > 1) throw new Error("unreadable"); return [rule("allow", "run_command", "node --version")]; } });
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter: null, runner: { permissions: gate } });
+        assert.equal(await runner.runTask("Do it."), "success");
+        assert.equal(journal.state.approvals[0]!.decision, "denied");
+        assert.equal(journal.state.tools.some((t) => t.state === "completed"), false, "nothing ran");
+        assert.match(toolMessages(gateway), /No one is available to approve this/);
+    } finally {
+        await gateway.stop();
     }
 });

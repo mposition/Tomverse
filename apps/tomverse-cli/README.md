@@ -352,10 +352,12 @@ asks, an allow rule skips the question except where noted).
   person's answer on that card lets it run.
 - **MCP tools** are other programs that can send what they are given anywhere, so
   allow all and auto review treat them like a web host: only a rule that names the
-  tool (`mcp__server__tool`) or its server (`mcp__server__*`, `mcp__server`) runs one without
+  tool (`mcp__server__tool`, as the model sees the name) or its server (`mcp__server__*`, or
+  `mcp__server` for a server whose name holds no `__`) runs one without
   asking. A rule is compared with the server and tool the call is for, not with
-  text, so a long tool name (shortened with a hash) and a server whose name holds
-  `__` are matched exactly. An "always" answer is remembered for this CLI process
+  text: a server whose name holds `__` is opened as a whole only by `mcp__<name>__*`,
+  and a rule for one tool never reaches another server. Deny and ask rules read more
+  broadly (the tool's own name, anything that starts with the server's name). An "always" answer is remembered for this CLI process
   and that exact server definition only. Even when a rule allowed the call, it runs
   only if the server definition connected now is the one the approval was made for;
   a project's own server also needs your approval of its definition before it is
