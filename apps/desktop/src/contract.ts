@@ -1,15 +1,24 @@
 import { z } from "zod";
+import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
+import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
+import type { AssistantImportAction, AssistantImportInput, AssistantImportResult } from "./assistant-import-contract";
 import type {
   ChatConversation, ChatHistoryHit, ChatHistoryRow, ChatImportedSource, ChatModel, ChatPageInput, ChatRenameInput, ChatSourceInput, ChatStarter,
-  ChatTurnInput, ChatTurnProgress, ChatTurnResult, DesktopTextProduct, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
+  ChatTurnInput, ChatTurnProgress, ChatTurnResult, ChatUnlockImportedInput, ChatUnlockImportedResult, DesktopTextProduct, ReviewAnalysisRequest, ReviewCapability, ReviewTurnInput, ReviewTurnProgress, ReviewTurnResult, SaveArtifactInput,
 } from "./chat-contract";
 import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, ImageHistory, ImageRequest } from "./images-contract";
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
 import type { BrowserCommand, BrowserState } from "./browser-contract";
+import type { WebViewCommand, WebViewState } from "./web-view-contract";
+import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
+import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
+import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
+import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
+import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { WorkspaceReference } from "../../tomverse-cli/src/runtime";
 import type { TaskPlan, TaskPlanEvidence } from "../../tomverse-cli/src/task-plan";
 import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
@@ -46,14 +55,20 @@ export type CodeWorktree = {
 export type CodeGitWorkspace = { kind: "unavailable" } | {
   kind: "git"; id: string; path: string; branch: string; bases: CodeWorktreeBase[];
 };
+/** "default", or a reasoning level id the coding API's model catalog names for the model (low, high, and any it adds). */
+export const codeEffort = z.string().regex(/^(?:default|[a-z][a-z0-9_-]{0,23})$/);
+export const codeLimitProfile = z.enum(["standard", "extended", "unlimited"]);
+export type CodeLimitProfile = z.infer<typeof codeLimitProfile>;
 export const startInput = z.object({
   pluginConnectionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
   workspace: codeWorktreeChoice.optional(),
   prompt: z.string().trim().max(MAX_CODE_PROMPT_CHARACTERS),
   mode: z.enum(["ask", "agent", "plan"]),
   model: z.string().min(1).max(240),
-  effort: z.enum(["default", "low", "high"]),
+  effort: codeEffort,
   executionMode: codeExecutionMode.optional(),
+  limits: codeLimitProfile.optional(),
+  goal: z.boolean().optional(),
   permissionProfile: codePermissionProfile.optional(),
   saveHistory: z.boolean().optional(),
   handoffId: z.uuid().optional(),
@@ -76,20 +91,41 @@ export const workspaceHandoffInput = z.discriminatedUnion("target", [
   z.object({ target: z.literal("code"), excerpt: handoffExcerpt }).strict(),
   z.object({ target: z.literal("chat"), excerpt: handoffExcerpt, sourceTaskId: sessionId }).strict(),
 ]);
+const queueItemId = z.string().regex(/^q-[0-9a-f]{8}$/);
+const queueText = z.string().trim().min(1).max(MAX_CODE_PROMPT_CHARACTERS);
+/** What the person can do with the messages held for after the current turn. */
+export const queueOperation = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("add"), text: queueText }).strict(),
+  z.object({ kind: z.literal("edit"), itemId: queueItemId, text: queueText }).strict(),
+  z.object({ kind: z.literal("remove"), itemId: queueItemId }).strict(),
+  z.object({ kind: z.literal("move"), itemId: queueItemId, direction: z.union([z.literal(-1), z.literal(1)]) }).strict(),
+]);
+export const queueInput = z.object({ id: z.string().regex(/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/), operation: queueOperation }).strict();
+export type QueueOperation = z.infer<typeof queueOperation>;
+const backgroundHandle = z.string().regex(/^bg-[0-9a-f]{6}$/);
+export const backgroundInput = z.object({ id: z.string().regex(/^s-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/), handle: backgroundHandle }).strict();
+export const codeMemoryInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("read") }).strict(),
+  z.object({ action: z.literal("clear") }).strict(),
+  z.object({ action: z.literal("remove"), id: z.string().regex(/^m-[0-9a-f]{8}$/) }).strict(),
+  z.object({ action: z.literal("set-enabled"), enabled: z.boolean() }).strict(),
+]);
+export type CodeMemoryInput = z.infer<typeof codeMemoryInput>;
+/** The agent's notes about the open project, and whether Code keeps notes at all. */
+export type CodeMemoryView = { enabled: boolean; project: boolean; entries: Array<{ id: string; text: string; at: string }> };
 export const decisions = z.object({
   id: z.uuid(),
   action: z.enum(["once", "run", "deny"]),
 }).strict();
-export const webDestination = z.enum(["chat", "review", "plugins", "settings", "image", "keys", "imports", "memory", "privacy", "help"]);
 export type StartInput = z.infer<typeof startInput>;
 export type WorkspaceHandoffInput = z.infer<typeof workspaceHandoffInput>;
 export type WorkspaceHandoff = { id: string; target: WorkspaceHandoffInput["target"]; excerpt: string; project: string };
 export type Decision = z.infer<typeof decisions>;
-export type WebDestination = z.infer<typeof webDestination>;
-export type Model = { id: string; name: string; provider: string; efforts: Array<"low" | "high"> };
+export type Model = { id: string; name: string; provider: string; efforts: string[] };
 export type RunStatus = "starting" | "running" | "approval" | "stopping" | "completed" | "clarification" | "blocked" | "stopped" | "unknown" | "failed";
 export type CodeEventEntry = { role: "event"; text: string; notice?: DesktopDetail };
-export type Entry = { role: "user" | "assistant"; text: string } | { role: "plan" } | CodeEventEntry;
+/** turn: the position of a user message among the turns of a saved task, for rewinding and forking there. */
+export type Entry = { role: "user" | "assistant"; text: string; turn?: number } | { role: "plan" } | CodeEventEntry;
 export const kimiNativeSessionId = z.string().regex(/^session_[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i);
 export const zCodeNativeSessionId = z.string().regex(/^sess_[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i);
 export const miniMaxNativeSessionId = z.string().regex(/^mvs_[a-f\d]{32}$/);
@@ -124,6 +160,16 @@ export function asProposedCodePlan(plan: CodeTaskPlan): CodeTaskPlan {
 }
 export type Change = { id: string; path: string; kind: string; current: string };
 export type ChangeInspection = { text: string | null; current: string; canUndo: boolean };
+export type CompactHistoryResult = "compacted" | "nothing" | "failed" | "unavailable";
+export type CodeRewindMode = "both" | "files" | "conversation";
+/** What a rewind to a turn would do, for the confirmation: the files newest first, the commands that cannot be undone, and what can be chosen. */
+export type CodeRewindPlan = {
+  text: string; files: Array<{ path: string; kind: string; outcome: "will_undo" | "conflict"; reason?: string }>;
+  commands: string[]; conversationAvailable: boolean; blocked?: true;
+};
+export type RewindTurnResult = { result: "rewound" | "cancelled" | "unavailable" | "unconfirmed"; text?: string; undone?: number; conflicts?: number };
+export const historyTurnInput = z.object({ id: sessionId, turn: z.int().min(0).max(100_000) }).strict();
+export type ForkTurnResult = { result: "forked" | "cancelled" | "unavailable" | "unconfirmed" };
 export type UndoChangeResult = "undone" | "cancelled" | "conflict" | "unavailable" | "unconfirmed";
 export type DeleteHistoryResult = "deleted" | "cancelled" | "locked" | "unavailable" | "unconfirmed";
 export type CodeNativeRecoverySummary = { turn: "running" | "completed" | "stopped" | "failed" | "unconfirmed"; passed: number; failed: number; unconfirmed: number };
@@ -190,7 +236,21 @@ export type Transmission = {
     projectInstructions: boolean; projectInstructionsTruncated?: boolean; messageCount: number; toolResultCount: number;
     commandOutput?: { results: number; truncated: number };
     listedPathCount?: number; truncatedListingCount?: number;
-    fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number };
+    fileReads: Array<{ path: string; truncated: boolean }>; moreFileReads: number;
+    webReads?: Array<{ url: string; truncated: boolean }>; moreWebReads?: number; imageCount?: number; projectMemory?: boolean };
+};
+/** A command the task keeps running in the background: what it is, whether it still runs, and the newest of what it printed. */
+export type CodeBackgroundCommand = {
+  handle: string; command: string; state: "running" | "exited" | "stopped"; exitCode?: number | null; startedAt: string; output: string;
+};
+/** A run the model handed to a subagent (explore or worker): what it was asked, and how it is going or ended. */
+export type CodeSubagent = {
+  id: string; kind: "explore" | "worker"; task: string; requests: number;
+  state: "running" | "completed" | "failed" | "cancelled" | "limit" | "unknown"; summary?: string;
+};
+export type CodeGoalState = {
+  maxContinuations: number; continuations: number;
+  last?: { met: boolean; summary: string; next?: string };
 };
 export type CodeApiUsage = { requestCount: number; settled: number; held: number; unknown: number };
 export type Task = {
@@ -221,6 +281,19 @@ export type Task = {
   canResumeAfterQuota?: boolean;
   canAnswerClarification?: boolean;
   pendingFollowUp?: string;
+  /** Messages held for after the model finishes, in the order they will run. */
+  queued?: Array<{ id: string; text: string }>;
+  /** Commands this task keeps running in the background; they end with the task. */
+  background?: CodeBackgroundCommand[];
+  /** The saved task can be taken back to the start of one of its turns, or forked. */
+  canRewind?: true;
+  /** Subagents the model started in this task, newest last. */
+  subagents?: CodeSubagent[];
+  /** The saved limit profile when it is not the standard one. */
+  limits?: Exclude<CodeLimitProfile, "standard">;
+  goal?: CodeGoalState;
+  /** An estimate of the conversation the next request would carry, against the model's context window. */
+  context?: { tokens: number; window: number };
   unreadable?: true;
   savedLocally?: boolean;
   readOnly?: boolean;
@@ -280,7 +353,10 @@ export type Snapshot = {
   account: AccountState;
   capabilities: {
     autoSelection: boolean; chatWrite: boolean; chatImport: boolean; chatStarters: ChatStarter[];
+    googleDrive?: boolean; deepResearch?: boolean;
+    reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
+    billing?: boolean;
   } | null;
   codeKey: CodeKeyState;
 };
@@ -292,7 +368,9 @@ export type ApprovalRequest = {
   tool: string;
   explanation?: string;
   canRemember: boolean;
-  command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number };
+  command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
+  /** A public web page the task asks to read: the address, and the site the approval is for. */
+  web?: { url: string; host: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
 };
 
@@ -305,6 +383,8 @@ export type DesktopApi = {
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
   subscribeCodeBrowser: (listener: (state: BrowserState) => void) => () => void;
+  webView: (command: WebViewCommand) => Promise<void>;
+  subscribeWebView: (listener: (state: WebViewState | null) => void) => () => void;
   state(): Promise<Snapshot>;
   setProjectPermissionProfile(profile: CodePermissionProfile): Promise<boolean>;
   setLanguage(language: Language): Promise<void>;
@@ -328,20 +408,34 @@ export type DesktopApi = {
   start(input: StartInput): Promise<void>;
   resume(id: string): Promise<boolean>;
   followUp(id: FollowUpTarget, text: string): Promise<boolean>;
+  queueMessage(id: string, operation: QueueOperation): Promise<boolean>;
+  stopBackground(id: string, handle: string): Promise<boolean>;
+  codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;
+  compactTask(id: string): Promise<CompactHistoryResult>;
   moreHistory(): Promise<void>;
   readChange(id: string): Promise<ChangeInspection | null>;
   undoChange(id: string): Promise<UndoChangeResult>;
+  rewindTurn(taskId: string, turn: number): Promise<RewindTurnResult>;
+  forkTurn(taskId: string, turn: number): Promise<ForkTurnResult>;
   readCommand(id: string): Promise<CommandInspection | null>;
   checkRecovery(id: string): Promise<RecoveryResult>;
   exportDiagnostics(): Promise<boolean>;
   copyDiagnostics(): Promise<boolean>;
-  openWeb(destination: WebDestination): Promise<void>;
   accountSettings<Action extends AccountSettingsAction>(
     input: Extract<DesktopAccountSettingsInput, { action: Action }>,
   ): Promise<AccountSettingsResult<Action>>;
+  accountData(input: DesktopAccountDataInput): Promise<DesktopAccountDataResult>;
+  assistantImport<Action extends AssistantImportAction>(input: Extract<AssistantImportInput, { action: Action }>): Promise<AssistantImportResult<Action>>;
+  billing<Action extends BillingAction>(input: Extract<DesktopBillingInput, { action: Action }>): Promise<BillingResult<Action>>;
+  /** The checkout window and this account's purchase records, pushed on every change (see `billing({ action: "purchases" })`). */
+  subscribeBilling(listener: (state: BillingState) => void): () => void;
+  chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
+  exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
+  projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;
+  research<Action extends DesktopResearchAction>(input: Extract<DesktopResearchInput, { action: Action }>): Promise<DesktopResearchOutcome<Action>>;
   checkUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   setCodeNotifications(enabled: boolean): Promise<void>;
@@ -353,10 +447,14 @@ export type DesktopApi = {
   chatSearch(query: string, product?: DesktopTextProduct): Promise<ChatHistoryHit[]>;
   chatConversation(input: ChatPageInput): Promise<ChatConversation>;
   chatImportedSource(input: ChatSourceInput): Promise<ChatImportedSource>;
-  openChatContinuation(id: string): Promise<void>;
+  chatUnlockImportedSource(input: ChatUnlockImportedInput): Promise<ChatUnlockImportedResult>;
   renameChat(input: ChatRenameInput): Promise<{ title: string }>;
   removeChat(id: string): Promise<boolean>;
   chatModels(): Promise<ChatModel[]>;
+  prepareReviewAnalysis(id: string): Promise<ReviewSetup>;
+  runReviewAnalysis(input: ReviewAnalysisRequest): Promise<ComparisonReview>;
+  copyChatText(text: string): Promise<void>;
+  exportChat(input: { id: string; title: string; includeSource: boolean }): Promise<boolean>;
   sendChat(input: ChatTurnInput): Promise<ChatTurnResult>;
   stopChat(): Promise<void>;
   subscribeChat(listener: (progress: ChatTurnProgress) => void): () => void;
@@ -370,6 +468,10 @@ export type DesktopApi = {
   saveImage(input: { id: string; modelId: string }): Promise<boolean>;
   saveArtifact(input: SaveArtifactInput): Promise<boolean>;
   pluginInventory(): Promise<DesktopPluginInventory>;
+  connectorInventory(): Promise<ConnectorInventory>;
+  connectorAction(input: ConnectorInput): Promise<ConnectorResult>;
+  importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
+  checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;
   uploadAttachment(input: AttachmentBytesInput): Promise<AttachmentUpload>;
   cancelAttachmentUpload(requestId: string): Promise<void>;
   discardAttachment(uploadId: string): Promise<void>;

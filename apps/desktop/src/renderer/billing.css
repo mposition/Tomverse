@@ -1,0 +1,29 @@
+.billing-plans { display: grid; gap: 10px; margin-top: 12px; }
+.billing-card { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.billing-card header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.billing-card-action { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.billing-price { font-size: 17px; font-weight: 700; }
+.billing-badge { padding: 3px 10px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 12px; font-weight: 650; }
+.billing-muted { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.billing-notice { display: grid; gap: 6px; margin: 12px 0; padding: 10px 12px; border-radius: 8px; background: var(--raised); font-size: 12px; line-height: 1.55; }
+.billing-notice p { margin: 0; }
+.billing-notice .soft { justify-self: start; }
+.billing-notice-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.billing-segment { display: inline-flex; gap: 4px; padding: 3px; border-radius: 9px; background: var(--raised); }
+.billing-segment button { padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+.billing-segment button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 650; }
+.billing-checkout, .billing-change { display: grid; gap: 12px; max-width: 560px; }
+.billing-back { justify-self: start; }
+.billing-cycle { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.billing-cycle legend { margin-bottom: 6px; font-weight: 650; }
+.account-settings-form .billing-cycle-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.billing-cycle-option input { margin-top: 3px; accent-color: var(--action); }
+.billing-promo { display: flex; gap: 8px; }
+.billing-promo input { flex: 1; min-width: 0; }
+.billing-summary { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.billing-summary > div { display: flex; justify-content: space-between; gap: 12px; }
+.billing-due { font-size: 18px; font-weight: 750; }
+.billing-link { padding: 0; color: var(--action); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
+.dark .billing-link { color: var(--focus); }
+.billing-check { display: flex; align-items: flex-start; gap: 8px; font-weight: 650; }
+.billing-check input { margin-top: 2px; accent-color: var(--action); }

@@ -1,0 +1,12 @@
+{
+  "id": "mf-i18n-plurals",
+  "title": "Add plural rules, locale fallback and number formatting to i18n",
+  "category": "multi-file",
+  "prompt": "The tiny i18n module in this project only looks up string messages for the current locale. Extend it as described in README.md (\"To add\"): plural messages selected with `Intl.PluralRules`, a locale fallback chain, and locale-aware number formatting in interpolation. Existing behaviour for plain string messages must stay. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1800
+}

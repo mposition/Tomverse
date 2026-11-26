@@ -33,6 +33,8 @@ import { decodePassages, PASSAGE_HEADER, type Passage } from "@/lib/continuation
 import type { Prisma } from "@prisma/client";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { desktopImportUnlockEnabled, lockedContinuationSource, type LockedContinuationSource } from "@/lib/desktopImportUnlockCore";
+import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { isExternalContinuationEnabled } from "@/lib/appSettings";
 import {
@@ -523,7 +525,9 @@ export type ContinuationTimeline = {
         // they differ only in what the screen says and in whether a password
         // brings the transcript back.
         | { status: "deleted"; deletedAt: string | null }
-        | { status: "locked" };
+        // `externalConversationId` rides only the Desktop app's owner read while
+        // its switch is on (lib/desktopImportUnlockCore.ts).
+        | LockedContinuationSource;
     /**
      * Present only when the read asked for a message by id (`around`).
      * `found: false` answers an id that is not in this snapshot, not this
@@ -645,7 +649,14 @@ export async function getContinuationTimeline(
             snapshot.password == null ? null : snapshot.passwordVersion
         )
     ) {
-        return { ...base, source: { status: "locked" } };
+        return {
+            ...base,
+            source: lockedContinuationSource({
+                snapshotId: snapshot.id,
+                enabled: desktopImportUnlockEnabled(),
+                desktopRequest: options.request.headers.get("origin") === DESKTOP_APP_ORIGIN,
+            }),
+        };
     }
 
     const limit = clampTimelinePageSize(options.limit);

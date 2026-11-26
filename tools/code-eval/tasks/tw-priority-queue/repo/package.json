@@ -1,0 +1,8 @@
+{
+  "name": "tw-priority-queue",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

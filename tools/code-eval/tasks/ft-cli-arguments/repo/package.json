@@ -1,0 +1,8 @@
+{
+  "name": "ft-cli-arguments",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

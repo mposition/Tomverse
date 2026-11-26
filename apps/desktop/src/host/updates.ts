@@ -4,6 +4,7 @@ import { prepareMacUpdate } from "./mac-update";
 import { prepareWindowsUpdate } from "./windows-update";
 
 declare const DESKTOP_UPDATE_ORIGIN: string;
+declare const DESKTOP_LOCAL_DEV_PACKAGE: boolean;
 const CHECK_INTERVAL = 6 * 60 * 60_000;
 
 export function configureUpdates(isBusy: () => boolean, publish: (state: UpdateState) => void) {
@@ -53,6 +54,10 @@ export function configureUpdates(isBusy: () => boolean, publish: (state: UpdateS
       set("failed", "updateInstallFailure");
     }
   };
+  if (DESKTOP_LOCAL_DEV_PACKAGE && windows && process.windowsStore) {
+    set("unavailable", "updateWindowsInstaller");
+    return { check, install };
+  }
   if (!app.isPackaged || !DESKTOP_UPDATE_ORIGIN || process.platform === "linux") {
     set("unavailable", process.platform === "linux" ? "updateLinux" : "updateNoFeed");
     return { check, install };

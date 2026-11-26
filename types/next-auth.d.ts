@@ -9,6 +9,12 @@ declare module "next-auth" {
             plan?: "Free" | "Pro" | "Max";
             createdAt?: string;
             authenticatedAt?: string;
+            /**
+             * When the Desktop device's token family was created by a real
+             * sign-in. Read by account-sensitive routes only, never by the
+             * admin console (lib/desktopSettingsSessionCore.ts).
+             */
+            desktopAuthenticatedAt?: string;
             /** This session's sign-in created the account (sign-up consent, S4). */
             accountCreatedBySignIn?: boolean;
             /** The login row an email sign-up spent; the consent choice binds to it. */
@@ -36,7 +42,7 @@ declare module "next-auth/jwt" {
          * `exp` to the normal session length (lib/sessionRevocationCore.ts).
          */
         absoluteExpiresAt?: number;
-        desktopSettings?: { family: string; device: string; id: string };
+        desktopSettings?: { family: string; device: string; id: string; authenticatedAt?: string };
         /**
          * True only on the token of the sign-in that created the account. The
          * sign-up screen's choice is consumed by that session and no other: an

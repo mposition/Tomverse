@@ -1,12 +1,35 @@
+import { selectDriveFiles } from "./drive-picker";
+import { desktopResearchAnswerId } from "../../../../lib/desktopResearchAnswerId";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
 import { createCodeBrowserView } from "./code-browser-view";
+import { createWebViewHost } from "./web-view-host";
 import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
+import { createConnectorApi } from "./connector-api";
+import { openConnectorOAuthWindow } from "./connector-oauth-window";
+import { connectorInput } from "../connector-contract";
+import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
+import { createAccountDataApi, type AccountDataApi } from "./account-data-api";
+import { createImportedSourceUnlock, type ImportedSourceUnlock } from "./imported-source-unlock";
+import { AccountDataRefusal } from "./account-data-refusal";
+import { desktopAccountDataInput } from "../account-data-contract";
+import { createAssistantImportApi, type AssistantImportApi } from "./assistant-import-api";
+import { assistantImportInput } from "../assistant-import-contract";
+import { reviewExportFile, runChatExtras, startImageTurn } from "./chat-extras";
+import { imageTurnFromOffer } from "../image-turn-request";
+import { createProjectActions } from "./project-host";
+import { createResearchActions } from "./research-host";
+import { sanitizeFileName } from "../../../../lib/exportConversation";
 import { desktopAccountSettingsInput } from "../account-settings-contract";
+import { createBillingApi, type BillingApi } from "./billing-api";
+import { createBillingWindowHost } from "./billing-window";
+import { desktopBillingInput, type BillingState } from "../billing-contract";
+import { desktopBillingCopy } from "../../../../locales/desktopBilling";
 import { solveEmailLoginChallenge } from "./login-challenge";
 import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, type DesktopLoginEmail } from "../login-contract";
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
@@ -17,9 +40,9 @@ import { z } from "zod";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
-  MAX_HANDOFF_EXCERPT_CHARACTERS, followUpInput, sessionId, startInput, webDestination, workspaceHandoffInput,
-  type ApprovalRequest, type CodeReference, type DeleteHistoryResult,
-  type Decision, type RecoveryResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
+  MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
+  type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
+  type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
   type NativeFixtureProvider,
   type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
@@ -30,11 +53,11 @@ import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPat
 import { probeIsolatedClaudeAccount } from "./claude-account";
 import { probeIsolatedAcpAccount, probeIsolatedCliProtocol, probeIsolatedCodexAccount } from "./cli-protocol";
 import {
-  chatId, chatHistorySearchInput, chatPageInput, chatRenameInput, chatSourceInput, chatTurnInput, desktopTextProduct, reviewTurnInput, saveArtifactInput,
+  chatId, chatHistorySearchInput, chatPageInput, chatRenameInput, chatSourceInput, chatTurnInput, chatUnlockImportedInput, desktopTextProduct, reviewAnalysisRequest, reviewTurnInput, saveArtifactInput,
   type ChatTurnInput, type ChatTurnProgress, type ChatTurnResult, type DesktopTextProduct,
   type ReviewTurnInput, type ReviewTurnProgress, type ReviewTurnResult, type SaveArtifactInput,
 } from "../chat-contract";
-import { canAnswerClarification, canResumeJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
+import { canAnswerClarification, canResumeJournal, canRewindJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
 import { codeDiagnostics } from "./code-diagnostics";
 import { cliFixtureInput, qwenFixtureInput, zCodeFixtureInput } from "./cli-fixture-input";
 import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeHistory, matchesNativeContinuation, readNativeCheckpoint, readNativeHistory,
@@ -42,6 +65,7 @@ import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeH
 import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-scope";
 import type { Connection, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, bindProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
+import { codeMemoryView } from "./code-memory";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -57,20 +81,21 @@ import { DESKTOP_LIVE_ORIGIN, type DesktopIdentityProvider } from "../../../../l
 import { DESKTOP_APP_ORIGIN } from "../../../../lib/desktopReadApiContract";
 import { DesktopChatContextChanged, desktopChatApi } from "./chat-api";
 import { desktopCodeNotice } from "./desktop-notice";
-import { continuationPath } from "../../../../lib/continuationRoutes";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { imageRequest } from "../images-contract";
 import { imageDownloadExtension, imageDownloadFilename } from "../../../../lib/imageAssetDownload";
 import { IMAGE_QUALITY_BY_PRESET } from "../../../../lib/imageGenerationPricing";
-import { attachmentBytesInput, type AttachmentBytesInput, type AttachmentUpload } from "../attachment-contract";
+import { attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentUpload, type DriveImportInput } from "../attachment-contract";
 import { CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../../lib/chatAttachmentLimits";
 import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib/generatedArtifactCore";
-import { settingsSectionHref } from "../../../../lib/settingsNavigation";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
 import { desktopNativeCopy } from "../../../../locales/desktopNative";
+import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 
 const origin = DESKTOP_APP_ORIGIN;
-const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA" : "Tomverse Desktop";
+const desktopName = DESKTOP_PACKAGED_TASK_QA ? "Tomverse Desktop Task QA"
+  : DESKTOP_LOCAL_DEV_PACKAGE ? "Tomverse Desktop Local Dev" : "Tomverse Desktop";
+const webOrigin = DESKTOP_LOCAL_DEV_PACKAGE ? "https://dev.tomverse.app" : DESKTOP_LIVE_ORIGIN;
 const packagedTaskQa = DESKTOP_PACKAGED_TASK_QA && app.isPackaged;
 const windowsTaskbarId = process.platform === "win32" && !process.windowsStore
   ? packagedTaskQa ? "app.tomverse.desktop.task-qa" : app.isPackaged ? "app.tomverse.desktop" : "app.tomverse.desktop.dev"
@@ -90,11 +115,9 @@ const unsafeSwitches = [
   "remote-debugging-address",
   "no-sandbox", "disable-setuid-sandbox", "disable-web-security", "allow-running-insecure-content", "ignore-certificate-errors",
 ];
-const webPaths = { chat: "/chat", review: "/review", plugins: "/plugins", settings: "/chat", keys: "/settings/api",
-  image: "/studio", imports: "/settings/imports", memory: settingsSectionHref("memory", "chat"), privacy: "/privacy",
-  help: "/support/help-centre" } as const;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
 declare const DESKTOP_PACKAGED_TASK_QA: boolean;
+declare const DESKTOP_LOCAL_DEV_PACKAGE: boolean;
 declare const DESKTOP_AUTH_ALLOWED: boolean;
 declare const DESKTOP_LOGIN_WINDOW_REQUIRED: boolean;
 declare const DESKTOP_ACCOUNT_DEVICE_FIXTURE_ALLOWED: boolean;
@@ -164,11 +187,12 @@ let worker: Electron.UtilityProcess | null = null;
 let runId: string | null = null;
 let discardedRunId: string | null = null;
 let pendingFollowUp: { requestId: string; resolve: (queued: boolean) => void } | null = null;
+let pendingQueue: { requestId: string; resolve: (done: boolean) => void } | null = null;
 type InspectionEvent = Extract<WorkerEvent, { type: "change-diff" | "command-detail" | "recovery-detail" }>;
 type InspectionRequest = { type: "read-change" | "read-command"; recordId: string } | { type: "check-recovery" };
 type InspectionCommand = Extract<WorkerCommand, { type: InspectionRequest["type"] | "check-native-recovery" | "read-native-change" }>;
-type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" }>;
-type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" }>;
+type MutationEvent = Extract<WorkerEvent, { type: "change-undone" | "history-deleted" | "history-compacted" | "rewind-planned" | "history-rewound" | "history-forked" }>;
+type MutationRequest = Extract<WorkerCommand, { type: "undo-change" | "delete-history" | "compact-history" | "plan-rewind" | "rewind-history" | "fork-history" }>;
 let pendingInspection: { id: string; type: InspectionCommand["type"]; settle: (event: InspectionEvent | null) => void } | null = null;
 let pendingMutation: { id: string; settle: (event: MutationEvent | null) => void } | null = null;
 let confirmingMutation = false;
@@ -262,7 +286,8 @@ const windowBounds = z.object({
   x: z.int().min(-1_000_000).max(1_000_000), y: z.int().min(-1_000_000).max(1_000_000),
   width: z.int().positive().max(100_000), height: z.int().positive().max(100_000),
 });
-const accountOrigin = !app.isPackaged && DESKTOP_AUTH_FIXTURE_ORIGIN ? DESKTOP_AUTH_FIXTURE_ORIGIN : undefined;
+const accountOrigin = DESKTOP_LOCAL_DEV_PACKAGE ? webOrigin
+  : !app.isPackaged && DESKTOP_AUTH_FIXTURE_ORIGIN ? DESKTOP_AUTH_FIXTURE_ORIGIN : undefined;
 const sessionVault = () => createSessionVault(join(app.getPath("userData"), "desktop-session.dat"), safeStorage, process.platform);
 const codeKeyVault = (accountId: string) => createCodeKeyVault(join(app.getPath("userData"),
   "code-key-" + createHash("sha256").update(accountId).digest("hex") + ".dat"), safeStorage, process.platform, accountId);
@@ -628,6 +653,46 @@ const cliAuthGuides = {
   zhipu: "https://zcode.z.ai/en/docs/install",
 } satisfies Record<CliProvider, string>;
 
+const webViewHost = createWebViewHost({
+  owner: () => mainWindow,
+  origin: new URL(webOrigin).origin,
+  guideUrls: Object.values(cliAuthGuides),
+  language: () => state.language ?? "en",
+  publish: (next) => {
+    const owner = mainWindow;
+    if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:web-view-state", next);
+  },
+});
+
+// The checkout window and the account's purchase records, as one state the Plan tab draws. The records
+// belong to the account session's billing API, so they outlive the Plan tab and the Settings screen.
+let billingApi: { request: ReturnType<typeof createAccountSettingsApi>; signal: AbortSignal; api: BillingApi } | undefined;
+let billingWindow: BillingState["window"] = null;
+let billingVersion = 0;
+
+const currentBilling = () => billingApi && billingApi.signal === chatSession.signal && !billingApi.signal.aborted
+  ? billingApi.api : undefined;
+const billingState = (): BillingState => ({ version: billingVersion, window: billingWindow, purchases: currentBilling()?.purchases() ?? [] });
+
+function publishBilling() {
+  billingVersion += 1;
+  const owner = mainWindow;
+  if (owner && !owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("desktop:billing-state", billingState());
+}
+
+const billingWindowHost = createBillingWindowHost({
+  parent: () => mainWindow,
+  returnOrigins: () => [...new Set([accountOrigin ?? DESKTOP_LIVE_ORIGIN, webOrigin].map((value) => new URL(value).origin))],
+  language: () => state.language ?? "en",
+  title: () => desktopBillingCopy(state.language ?? "en").windowTitle,
+  publish: (next) => {
+    billingWindow = next.stage === "open" ? next : null;
+    // A window the account session closed has no account left to check; the records went with the session.
+    if (next.stage === "closed" && !closing) currentBilling()?.checkoutClosed(next.outcome);
+    publishBilling();
+  },
+});
+
 function loadCodeNotifications() {
   let enabled = false;
   try { enabled = readFileSync(codeNotificationsPath(), "utf8") === "enabled"; }
@@ -926,6 +991,13 @@ function onWorkerMessage(event: WorkerEvent) {
     return;
   }
   if (event.type === "browser-snapshot") { void replyToBrowserSnapshot(event); return; }
+  if (event.type === "queue-result") {
+    if (pendingQueue?.requestId === event.requestId) {
+      pendingQueue.resolve(event.ok && event.runId === runId && event.runId !== discardedRunId);
+      pendingQueue = null;
+    }
+    return;
+  }
   if (event.type === "follow-up-queued") {
     if (pendingFollowUp?.requestId === event.requestId) {
       pendingFollowUp.resolve(event.queued && event.runId === runId && event.runId !== discardedRunId);
@@ -937,7 +1009,8 @@ function onWorkerMessage(event: WorkerEvent) {
     if (pendingInspection?.id === event.requestId) pendingInspection.settle(event);
     return;
   }
-  if (event.type === "change-undone" || event.type === "history-deleted") {
+  if (event.type === "change-undone" || event.type === "history-deleted" || event.type === "history-compacted" ||
+      event.type === "rewind-planned" || event.type === "history-rewound" || event.type === "history-forked") {
     if (pendingMutation?.id === event.requestId) pendingMutation.settle(event);
     return;
   }
@@ -957,6 +1030,8 @@ function onWorkerMessage(event: WorkerEvent) {
     } else if (event.type === "finished") {
       pendingFollowUp?.resolve(false);
       pendingFollowUp = null;
+      pendingQueue?.resolve(false);
+      pendingQueue = null;
       if (discarded) discardTransientTask(event.task);
       const reverse = pendingCliContinuation;
       pendingCliContinuation = undefined;
@@ -1149,12 +1224,14 @@ function checkpointNativeTurn(task: Task, force = false) {
   } catch { /* The startup checkpoint still blocks an implicit retry. */ }
 }
 
+const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
+
 function bootWorker() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
   const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
-    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks() },
+    env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
@@ -1164,6 +1241,8 @@ function bootWorker() {
     worker = null;
     pendingFollowUp?.resolve(false);
     pendingFollowUp = null;
+    pendingQueue?.resolve(false);
+    pendingQueue = null;
     pendingInspection?.settle(null);
     pendingMutation?.settle(null);
     pending = null;
@@ -1411,7 +1490,9 @@ function readTaskHistory(id: string, apiOnly = false): Task | null {
     canResume: available && record.storage === record.scope.home && canResumeJournal(saved),
     canResumeAfterQuota: available && record.storage === record.scope.home && canResumeQuotaJournal(saved),
     canAnswerClarification: available && record.storage === record.scope.home && canAnswerClarification(saved),
+    canRewind: available && record.storage === record.scope.home ? canRewindJournal(saved) : undefined,
     pendingFollowUp: journalPendingFollowUp(saved, key),
+    ...journalEngine(saved, key), context: journalContext(saved),
   };
   if (apiOnly || record.worktree) return task;
   if (DESKTOP_FIXTURE_ALLOWED && saved.codeContinuation) {
@@ -1639,7 +1720,7 @@ async function checkSelectedRecovery(taskId: string): Promise<RecoveryResult> {
   return recovery ?? { status: "unavailable" };
 }
 
-function runRecordedMutation<T>(runtime: Electron.UtilityProcess, command: MutationRequest, receive: (event: MutationEvent | null) => T) {
+function runRecordedMutation<T>(runtime: Electron.UtilityProcess, command: MutationRequest, receive: (event: MutationEvent | null) => T, timeoutMs = 15_000) {
   const id = command.requestId;
   return new Promise<T | "unconfirmed" | "unavailable">((resolve) => {
     const timer = setTimeout(() => {
@@ -1648,7 +1729,7 @@ function runRecordedMutation<T>(runtime: Electron.UtilityProcess, command: Mutat
       if (pendingMutation?.id === id && worker === runtime) {
         try { runtime.kill(); } catch { /* The operation may still be running. */ }
       }
-    }, 15_000);
+    }, timeoutMs);
     pendingMutation = { id, settle: (event) => {
       clearTimeout(timer);
       pendingMutation = null;
@@ -1699,6 +1780,127 @@ async function undoSelectedChange(changeId: string): Promise<UndoChangeResult> {
   } finally {
     confirmingMutation = false;
   }
+}
+
+/** Whether a saved task can be taken back or forked right now, and the record it lives in. */
+function historyEditTarget(taskId: string) {
+  const task = state.task;
+  const record = selectedRecord();
+  const owner = mainWindow;
+  const runtime = worker;
+  if (!record || !owner || !runtime || task?.id !== taskId || !task.canRewind || task.savedLocally === false || task.execution?.executionMode !== "tomverse_api" ||
+      task.continuation || task.cliContinuation || record.storage === null || record.storage !== record.scope.home || record.worktree?.unavailable ||
+      state.busy || pendingMutation || recoveryCheckPending() || confirmingMutation || choosing || signingOut || closing || suspended ||
+      state.update.stage === "installing" || owner.isDestroyed()) return null;
+  return { task, record, owner, runtime, sourceProject: projectRoot, session: chatSession.signal };
+}
+
+/** Still the same task in the same project after the person was asked something. */
+function historyEditStillHolds(target: NonNullable<ReturnType<typeof historyEditTarget>>) {
+  const { task, record, owner, runtime, sourceProject, session } = target;
+  return !owner.isDestroyed() && owner === mainWindow && runtime === worker && !session.aborted && !signingOut && !closing && !state.busy && !pendingMutation &&
+    !recoveryCheckPending() && !choosing && state.update.stage !== "installing" && state.task?.id === task.id && projectRoot === sourceProject &&
+    currentHistoryScope()?.home === record.scope.home;
+}
+
+/**
+ * Takes a saved task back to the start of one of its turns, after showing what would be put back (newest first), which files would
+ * conflict, and which commands ran and cannot be undone. The person chooses files and conversation, or only one of them.
+ */
+async function rewindSelectedTurn(taskId: string, turn: number): Promise<RewindTurnResult> {
+  const target = historyEditTarget(taskId);
+  if (!target) return { result: "unavailable" };
+  const { record, owner, runtime } = target;
+  confirmingMutation = true;
+  try {
+    const planned = await runRecordedMutation(runtime, { type: "plan-rewind", requestId: randomUUID(), ...record, turn },
+      (event) => event?.type === "rewind-planned" ? event.plan : null);
+    if (!planned || planned === "unconfirmed" || planned === "unavailable" || planned.blocked) return { result: "unavailable" };
+    const copy = desktopCodeEngineCopy[state.language ?? "en"];
+    const native = nativeCopy();
+    const line = (text: string) => text.replaceAll("\n", "\\n").slice(0, 200);
+    const detail = [
+      `"${line(planned.text)}"`,
+      planned.files.length ? [copy.rewindFiles, ...planned.files.slice(0, 12).map((file) =>
+        `  ${file.outcome === "will_undo" ? copy.rewindPutBack : copy.rewindConflict} ${line(file.path)}`),
+      ...(planned.files.length > 12 ? [`  … ${planned.files.length - 12}`] : [])].join("\n") : copy.rewindNoFiles,
+      ...(planned.files.some((file) => file.outcome === "conflict") ? [copy.rewindConflictNote] : []),
+      ...(planned.commands.length ? [[copy.rewindCommands, ...planned.commands.slice(0, 6).map((command) => `  ${line(command)}`),
+        ...(planned.commands.length > 6 ? [`  … ${planned.commands.length - 6}`] : [])].join("\n")] : []),
+    ].join("\n\n");
+    const modes = planned.conversationAvailable
+      ? [["both", copy.rewindBoth], ["files", copy.rewindFilesOnly], ["conversation", copy.rewindConversationOnly]] as const
+      : [["files", copy.rewindFilesOnly]] as const;
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "warning", title: copy.rewindTitle, message: copy.rewindPrompt, detail,
+      buttons: [native.cancel, ...modes.map(([, label]) => label)], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    const mode = modes[response - 1]?.[0];
+    if (!mode) return { result: "cancelled" };
+    if (!historyEditStillHolds(target)) return { result: "unavailable" };
+    const done = await runRecordedMutation(runtime, { type: "rewind-history", requestId: randomUUID(), ...record, turn, mode },
+      (event) => event?.type === "history-rewound" ? event : null);
+    if (done === "unconfirmed") return { result: "unconfirmed" };
+    if (done === "unavailable" || !done || done.result !== "rewound") return { result: done && done !== "unavailable" ? done.result : "unavailable" };
+    if (historyEditStillHolds(target)) {
+      const updated = readTaskHistory(taskId);
+      if (updated) { state.task = updated; refreshHistory(); broadcast(); }
+    }
+    return { result: "rewound", ...(mode === "files" ? {} : { text: done.text }), undone: done.undone, conflicts: done.conflicts };
+  } finally {
+    confirmingMutation = false;
+  }
+}
+
+/** Copies a saved task's conversation through a turn into a new saved task and opens it. No file is touched. */
+async function forkSelectedTurn(taskId: string, turn: number): Promise<ForkTurnResult> {
+  const target = historyEditTarget(taskId);
+  if (!target) return { result: "unavailable" };
+  const { record, owner, runtime } = target;
+  confirmingMutation = true;
+  try {
+    const copy = desktopCodeEngineCopy[state.language ?? "en"];
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "question", title: copy.forkTitle, message: copy.forkPrompt, detail: copy.forkDetail,
+      buttons: [nativeCopy().cancel, copy.forkAccept], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response !== 1) return { result: "cancelled" };
+    if (!historyEditStillHolds(target)) return { result: "unavailable" };
+    const created = await runRecordedMutation(runtime, { type: "fork-history", requestId: randomUUID(), ...record, turn },
+      (event) => event?.type === "history-forked" ? event : null);
+    if (created === "unconfirmed") return { result: "unconfirmed" };
+    if (created === "unavailable" || !created) return { result: "unavailable" };
+    if (created.result === "forked" && created.id && historyEditStillHolds(target)) {
+      refreshHistory();
+      loadHistory(created.id);
+    }
+    return { result: created.result };
+  } finally {
+    confirmingMutation = false;
+  }
+}
+
+/** Summarizes the earlier part of a saved, idle Tomverse API task: one paid request the person asked for. */
+async function compactSelectedTask(taskId: string): Promise<CompactHistoryResult> {
+  const task = state.task;
+  const record = selectedRecord();
+  const connection = codeConnection();
+  const runtime = worker;
+  if (!record || !connection || !runtime || task?.id !== taskId || task.savedLocally === false || task.execution?.executionMode !== "tomverse_api" ||
+      task.continuation || task.cliContinuation || record.storage !== record.scope.home || record.worktree?.unavailable ||
+      state.busy || pendingMutation || recoveryCheckPending() || confirmingMutation || choosing || signingOut || closing || suspended ||
+      state.update.stage === "installing") return "unavailable";
+  const sourceProject = projectRoot;
+  const { scope } = record;
+  assertProjectRoot(record.project);
+  const result = await runRecordedMutation(runtime, { type: "compact-history", requestId: randomUUID(), ...record, connection,
+    protectedRoot: app.getPath("userData") }, (event) => event?.type === "history-compacted" ? event.result : "failed" as const, 200_000);
+  if (result === "unconfirmed") return "failed";
+  if (state.task?.id === taskId && projectRoot === sourceProject && currentHistoryScope()?.home === scope.home && !state.busy) {
+    const updated = readTaskHistory(taskId);
+    if (updated) { state.task = updated; broadcast(); }
+  }
+  return result;
 }
 
 async function deleteSelectedHistory(taskId: string): Promise<DeleteHistoryResult> {
@@ -2100,6 +2302,60 @@ async function uploadAttachment(input: AttachmentBytesInput) {
   }
 }
 
+async function importDriveAttachments(input: DriveImportInput) {
+  if (!state.capabilities?.attachments || !state.capabilities.googleDrive || !browserSession || signingOut ||
+      closing || attachmentTransfer || chatWriting || state.update.stage === "installing") {
+    throw new Error("Google Drive attachments are unavailable.");
+  }
+  const accountSignal = chatSession.signal;
+  const transfer = { requestId: input.requestId, controller: new AbortController() };
+  const signal = AbortSignal.any([accountSignal, transfer.controller.signal]);
+  const files: AttachmentUpload[] = [];
+  attachmentTransfer = transfer;
+  try {
+    const selection = await selectDriveFiles({
+      origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, language: state.language ?? "en", slots: input.slots, signal,
+      openExternal: (url) => shell.openExternal(url),
+    });
+    signal.throwIfAborted();
+    if (!selection) return { files, incomplete: false };
+    const active = browserSession;
+    if (!active) throw new Error("The Desktop account changed.");
+    if (active.expiresAt <= Date.now() + 60_000) await renewBrowserSession(active);
+    signal.throwIfAborted();
+    let remaining = input.remainingBytes;
+    let incomplete = false;
+    return await withChatAccount(async (api) => {
+      for (const file of selection.files) {
+        try {
+          signal.throwIfAborted();
+          const receipt = await api.importDriveAttachment(file, selection.accessToken, signal);
+          if (signal.aborted || receipt.size > remaining) {
+            await api.discardAttachment(receipt.uploadId).catch(() => {});
+            incomplete = true;
+            continue;
+          }
+          remaining -= receipt.size;
+          attachmentReceipts.set(receipt.uploadId, receipt);
+          files.push(receipt);
+        } catch {
+          incomplete = true;
+          if (signal.aborted) break;
+        }
+      }
+      if (signal.aborted) {
+        for (const receipt of files.splice(0)) {
+          attachmentReceipts.delete(receipt.uploadId);
+          await api.discardAttachment(receipt.uploadId).catch(() => {});
+        }
+      }
+      return { files, incomplete };
+    }, "attachments");
+  } finally {
+    if (attachmentTransfer === transfer) attachmentTransfer = null;
+  }
+}
+
 async function removeChat(id: string) {
   return withChatAccount(async (api) => {
     const owner = browserSession?.accountId;
@@ -2207,13 +2463,9 @@ async function runCodeBrowser(value: unknown) {
 
 let accountSettingsApi: { signal: AbortSignal; request: ReturnType<typeof createAccountSettingsApi> } | undefined;
 
-async function accountSettings(value: unknown) {
-  const input = desktopAccountSettingsInput.parse(value);
+function connectedSettingsApi() {
   const active = browserSession;
   if (!active || state.account.stage !== "connected" || signingOut || closing) throw new Error("Connect your Tomverse account first.");
-  if (input.action === "pinConversation" && input.accountScope !== state.account.draftNamespace) {
-    return { kind: "refused" } as const;
-  }
   const signal = chatSession.signal;
   if (accountSettingsApi?.signal !== signal) {
     const accountId = active.accountId;
@@ -2229,12 +2481,123 @@ async function accountSettings(value: unknown) {
       }, signal),
     };
   }
-  return accountSettingsApi.request(input);
+  return accountSettingsApi.request;
+}
+
+async function accountSettings(value: unknown) {
+  const input = desktopAccountSettingsInput.parse(value);
+  const request = connectedSettingsApi();
+  if (input.action === "pinConversation" && (state.account.stage !== "connected" || input.accountScope !== state.account.draftNamespace)) {
+    return { kind: "refused" } as const;
+  }
+  return request(input);
+}
+
+let connectorApi: { settings: ReturnType<typeof connectedSettingsApi>; api: ReturnType<typeof createConnectorApi> } | undefined;
+
+// Connector management shares the account settings session; the renderer only names typed actions.
+function connectors() {
+  if (!state.capabilities?.plugins) throw new Error("Plugins are unavailable.");
+  const settings = connectedSettingsApi();
+  if (connectorApi?.settings !== settings) {
+    const origin = accountOrigin ?? DESKTOP_LIVE_ORIGIN;
+    const signal = chatSession.signal;
+    connectorApi = { settings, api: createConnectorApi({
+      send: settings.send, signal,
+      authorize: (url) => openConnectorOAuthWindow({ owner: mainWindow, url, accountOrigin: new URL(origin).origin, signal,
+        language: state.language ?? "en", title: (host) => desktopConnectorCopy[state.language ?? "en"].windowTitle.replace("{host}", () => host) }),
+    }) };
+  }
+  return connectorApi.api;
+}
+
+let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
+let importedUnlockApi: { signal: AbortSignal; api: ImportedSourceUnlock } | undefined;
+
+// Unlock grants for imported originals live in this object only, and end with the account session.
+function connectedImportedUnlock() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (importedUnlockApi?.signal !== signal) importedUnlockApi = { signal, api: createImportedSourceUnlock({ settings, signal }) };
+  return importedUnlockApi.api;
+}
+
+async function pickLocalFile({ extensions, maxBytes }: { extensions: readonly string[]; maxBytes: number }) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || closing) return null;
+  const result = await dialog.showOpenDialog(window, { properties: ["openFile", "dontAddToRecent"],
+    filters: [{ name: "Files", extensions: [...extensions] }] });
+  const path = result.filePaths[0];
+  if (result.canceled || !path || closing || !isAbsolute(path)) return null;
+  if (!statSync(path).isFile() || statSync(path).size > maxBytes) throw new AccountDataRefusal("failed", "FILE_TOO_LARGE");
+  return { name: basename(path), bytes: await readFile(path) };
+}
+
+function connectedAccountData() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (accountDataApi?.signal !== signal) {
+    accountDataApi = {
+      signal,
+      api: createAccountDataApi({
+        settings,
+        save: (file) => saveGeneratedFile(async () => ({ bytes: await file.load(), suggestedName: file.suggestedName, extension: file.extension }),
+          nativeCopy().saveGenerated, file.filterName, { suggestedName: file.suggestedName, extension: file.extension }),
+        afterAccountDeleted: signOut,
+        language: () => state.language ?? "en",
+        origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN,
+        pickFile: pickLocalFile,
+      }),
+    };
+  }
+  return accountDataApi.api;
+}
+
+let assistantImportApi: { signal: AbortSignal; api: AssistantImportApi } | undefined;
+
+// The package wizard runs in the window; its requests and its file dialog stay here, bound to the account.
+function connectedAssistantImport() {
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (assistantImportApi?.signal !== signal) {
+    assistantImportApi = { signal, api: createAssistantImportApi({ settings, origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, pickFile: pickLocalFile }) };
+  }
+  return assistantImportApi.api;
+}
+
+async function billing(value: unknown) {
+  const input = desktopBillingInput.parse(value);
+  if (input.action === "closeCheckout") return { ok: true, value: { closed: billingWindowHost.close() } };
+  if (!state.capabilities?.billing) throw new Error("Billing is unavailable.");
+  // A Plan tab that mounts later asks for the current state once; only the connected account's records are in it.
+  if (input.action === "purchases") return { ok: true, value: billingState() };
+  const request = connectedSettingsApi();
+  if (billingApi?.request !== request) {
+    const signal = chatSession.signal;
+    billingApi = { request, signal, api: createBillingApi(request, {
+      accountSignal: signal,
+      timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+      checkoutOpen: billingWindowHost.isOpen,
+      openCheckout: (url, purpose) => billingWindowHost.open(url, purpose, signal),
+      purchasesChanged: publishBilling,
+    }) };
+  }
+  return billingApi.api.billing(input);
 }
 
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
+  if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
+    if (!state.capabilities?.deepResearch || !draft.deepResearchDepth || draft.modelId !== DEEP_RESEARCH_MODEL_ID ||
+        draft.selectionMode !== "manual" || !draft.prompt.trim() || handoffId) {
+      throw new Error("Deep Research is unavailable for this draft.");
+    }
+  }
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
+  if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
+  if (draft.mcpConnectionId && (!state.capabilities?.plugins || draft.deepResearchDepth || handoffId)) {
+    throw new Error("Plugins are unavailable for this draft.");
+  }
   const attachments = resolveStagedAttachments(draft.attachmentUploadIds);
   return withChatAccount(async (api) => {
     const input = { ...draft, prompt: withHandoffExcerpt("chat", draft.prompt, handoffId),
@@ -2244,15 +2607,19 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     chatTurn = turn;
     const signal = turn.signal;
     const accountSignal = chatSession.signal;
-    const assistantId = randomUUID();
+    let assistantId: string = randomUUID();
     let id = input.conversationId;
     let sourceId: string | undefined;
     let partial = "";
+    let modelId: string | undefined;
     let applied: ChatTurnResult["applied"];
     let streamStarted = false;
     let failed = false;
     let contextChanged = false;
+    let researchSubmitted = false;
+    let imageOffer: ChatTurnResult["imageOffer"];
     let lastProgressAt = 0;
+    let lastMcpProgress: ChatTurnProgress["mcpProgress"];
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
       if (!id || !window || window.isDestroyed() || window.webContents.isDestroyed() || window !== mainWindow ||
           accountSignal.aborted || signal.aborted || signingOut || closing) return;
@@ -2261,15 +2628,25 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     try {
       try {
         if (id) await api.configure(await api.conversation({ id }, true, signal), input, signal);
-        else id = await api.create(input, signal);
+        else {
+          id = await api.create(input, signal);
+          if (input.tools && Object.keys(input.tools).length) {
+            await api.configure(await api.conversation({ id }, true, signal), input, signal);
+          }
+        }
         publish({});
         sourceId = await api.saveQuestion(id, input, signal);
+        if (input.deepResearchDepth) assistantId = desktopResearchAnswerId(id, sourceId);
         if (handoffId) removeWorkspaceHandoff(handoffId);
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);
         publish({ savedPrompt: input.prompt });
         const saved = await api.conversation({ id }, true, signal);
         streamStarted = true;
-        const result = await api.stream(saved, input, sourceId, assistantId, signal, (text) => {
+        const result = await api.stream(saved, input, sourceId, assistantId, signal, (text, mcpState) => {
+          if (mcpState && mcpState !== lastMcpProgress) {
+            lastMcpProgress = mcpState;
+            publish({ mcpProgress: mcpState });
+          }
           if (text === partial) return;
           partial = text;
           const now = Date.now();
@@ -2277,7 +2654,17 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
             lastProgressAt = now;
             publish({ text });
           }
+        }, (id) => {
+          modelId = id;
+          publish({ modelId: id });
         });
+        researchSubmitted = Boolean(result && "deepResearch" in result);
+        if (result && "imageTurn" in result && result.imageTurn && sourceId) {
+          // As on the web, the server's judgement starts the image at once; only a failed start is kept for a retry.
+          const offer = { conversationId: id, sourceUserMessageId: sourceId, assistantMessageId: assistantId, modelId: input.modelId, request: result.imageTurn };
+          const started = signal.aborted ? { ok: true as const } : await startImageTurn(connectedSettingsApi(), imageTurnFromOffer(offer)).catch(() => ({ ok: false as const }));
+          if (!started.ok) imageOffer = offer;
+        }
         applied = result?.appliedReasoningEffort;
         if (applied) publish({ applied });
       } catch (error) {
@@ -2290,10 +2677,14 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         : null;
       const answer = conversation?.messages.find((message) => message.id === assistantId);
       const status = answer?.status === "normal" ? "saved"
-        : signal.aborted ? "stopped"
+        : input.deepResearchDepth && (answer?.status === "pending" || researchSubmitted && !answer) ? "researching"
+          : signal.aborted ? "stopped"
+          : input.deepResearchDepth && answer?.status === "error" ? "failed"
+          : input.deepResearchDepth && answer?.status === "incomplete" ? "unconfirmed"
           : answer || partial ? "partial" : contextChanged ? "failed"
             : streamStarted ? "unconfirmed" : failed ? "failed" : "unconfirmed";
-      return { conversation, status, partial: answer ? "" : partial, applied, savedQuestion: Boolean(sourceId),
+      return { conversation, status, partial: answer ? "" : partial, modelId, applied, savedQuestion: Boolean(sourceId),
+        ...(imageOffer && !answer ? { imageOffer } : {}),
         ...(contextChanged && status === "failed" ? { contextChanged: true } : {}) };
     } finally {
       if (chatTurn === turn) chatTurn = null;
@@ -2399,8 +2790,10 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   }, "review");
 }
 
+// `named` asks for the destination before `load` runs, for a download that cannot be repeated
+// (a single-use link): cancelling the dialog then spends nothing.
 async function saveGeneratedFile(load: () => Promise<{ bytes: Uint8Array; suggestedName: string; extension: string }>,
-  title: string, filterName: string) {
+  title: string, filterName: string, named?: { suggestedName: string; extension: string }) {
   const window = mainWindow;
   const accountSignal = chatSession.signal;
   const owner = browserSession?.accountId;
@@ -2410,12 +2803,15 @@ async function saveGeneratedFile(load: () => Promise<{ bytes: Uint8Array; sugges
   if (!current() || savingGenerated || state.update.stage === "installing") return false;
   savingGenerated = true;
   try {
-    const { bytes, suggestedName, extension } = await load();
+    const loaded = named ? undefined : await load();
     if (!current()) return false;
     const target = await dialog.showSaveDialog(window, {
-      title, defaultPath: suggestedName, filters: [{ name: filterName, extensions: [extension] }],
+      title, defaultPath: (named ?? loaded!).suggestedName,
+      filters: [{ name: filterName, extensions: [(named ?? loaded!).extension] }],
     });
     if (target.canceled || !target.filePath || !isAbsolute(target.filePath) || !current()) return false;
+    const { bytes } = loaded ?? await load();
+    if (!current()) return false;
     const staging = join(dirname(target.filePath), `.tomverse-save-${randomUUID()}.tmp`);
     const file = await open(staging, "wx", 0o600);
     try {
@@ -2707,7 +3103,8 @@ function registerIpc() {
     const kind = z.enum(["account", "protocol"]).parse(value);
     if (cliInspection?.kind === kind) cliInspection.controller.abort();
   });
-  main("desktop:open-cli-auth-guide", (value) => shell.openExternal(cliAuthGuides[cliProvider.parse(value)]));
+  main("desktop:open-cli-auth-guide", (value) => webViewHost.openGuide(cliAuthGuides[cliProvider.parse(value)]));
+  main("desktop:web-view", (value) => webViewHost.run(value));
   main("desktop:choose-root", chooseRoot);
   main("desktop:retry-code-catalog", retryCodeCatalog);
   main("desktop:confirm-handoff", (value) => confirmWorkspaceHandoff(workspaceHandoffInput.parse(value)));
@@ -2880,6 +3277,44 @@ function registerIpc() {
       }
     });
   });
+  main("desktop:queue", (value) => {
+    const { id, operation } = queueInput.parse(value);
+    const task = state.task;
+    const connection = codeConnection();
+    const activeRunId = runId;
+    if (!worker || !connection || !projectRoot || !activeRunId || activeRunId === discardedRunId || !state.busy ||
+        task?.id !== id || task.execution?.executionMode !== "tomverse_api" || (task.status !== "running" && task.status !== "approval") ||
+        pendingQueue || suspended || closing || signingOut || ("text" in operation && hasCredential(operation.text, connection.key))) return false;
+    assertProjectRoot(projectRoot);
+    if (task.worktree) {
+      const scope = currentHistoryScope();
+      const activeWorktree = scope && readManagedWorktree(managedWorktreeHome(scope), task.root);
+      if (!activeWorktree || activeWorktree.info.unavailable) return false;
+    }
+    return new Promise<boolean>((resolve) => {
+      const requestId = randomUUID();
+      pendingQueue = { requestId, resolve };
+      try { send({ type: "queue", runId: activeRunId, requestId, operation }); }
+      catch {
+        pendingQueue = null;
+        resolve(false);
+      }
+    });
+  });
+  main("desktop:code-memory", (value) => {
+    const input = codeMemoryInput.parse(value);
+    if (projectRoot) assertProjectRoot(projectRoot);
+    return codeMemoryView(codeMemoryDirectory(), projectRoot, input);
+  });
+  main("desktop:stop-background", (value) => {
+    const { id, handle } = backgroundInput.parse(value);
+    const task = state.task;
+    const activeRunId = runId;
+    if (!worker || !activeRunId || activeRunId === discardedRunId || !state.busy || task?.id !== id ||
+        task.execution?.executionMode !== "tomverse_api" || suspended || closing || signingOut) return false;
+    try { send({ type: "stop-background", runId: activeRunId, handle }); return true; }
+    catch { return false; }
+  });
   main("desktop:resume", (value) => {
     const session = sessionId.parse(value);
     const task = state.task;
@@ -2950,12 +3385,23 @@ function registerIpc() {
       ? readSelectedRecord({ type: "read-command", recordId: id }, (event) => event.type === "command-detail" ? event.inspection : null) : null;
   });
   main("desktop:check-recovery", (id) => checkSelectedRecovery(sessionId.parse(id)));
+  main("desktop:compact-task", (id) => compactSelectedTask(sessionId.parse(id)));
   main("desktop:undo-change", (id) => undoSelectedChange(z.string().min(1).max(128).parse(id)));
+  main("desktop:rewind-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return rewindSelectedTurn(id, turn); });
+  main("desktop:fork-turn", (input) => { const { id, turn } = historyTurnInput.parse(input); return forkSelectedTurn(id, turn); });
   main("desktop:export-diagnostics", exportDiagnostics);
   main("desktop:copy-diagnostics", copyDiagnostics);
   main("desktop:code-notifications", (value) => setCodeNotifications(z.boolean().parse(value)));
-  main("desktop:web", (destination) => shell.openExternal("https://tomverse.app" + webPaths[webDestination.parse(destination)]));
   main("desktop:account-settings", accountSettings);
+  main("desktop:account-data", (value) => connectedAccountData().handle(desktopAccountDataInput.parse(value)));
+  main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));
+  main("desktop:billing", billing);
+  main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
+  main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
+  main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,
+    window: () => mainWindow, language: () => state.language ?? "en", saveFile: saveGeneratedFile, saveTitle: () => nativeCopy().saveGenerated }));
+  main("desktop:research", createResearchActions({ settings: connectedSettingsApi, withChat: (action) => withChatAccount(action, "chat"),
+    saveFile: saveGeneratedFile, saveTitle: () => nativeCopy().saveGenerated }));
   main("desktop:check-update", update.check);
   main("desktop:install-update", update.install);
   main("desktop:sign-in", () => signIn());
@@ -2966,6 +3412,8 @@ function registerIpc() {
     if (!state.capabilities?.plugins) return { enabled: false, servers: [], connections: [] };
     return withChatAccount((api) => api.pluginInventory());
   });
+  main("desktop:connector-inventory", () => connectors().inventory());
+  main("desktop:connector-action", (value) => connectors().run(connectorInput.parse(value)));
   main("chat:history", (value) => {
     const product = desktopTextProduct.default("chat").parse(value);
     return withChatAccount((api) => api.history(product));
@@ -2980,19 +3428,44 @@ function registerIpc() {
   });
   main("chat:imported-source", (value) => {
     const input = chatSourceInput.parse(value);
-    return withChatAccount((api) => api.importedSource(input));
+    return connectedImportedUnlock().read(input, () => withChatAccount((api) => api.importedSource(input)));
   });
-  main("chat:open-continuation", (value) =>
-    shell.openExternal(DESKTOP_LIVE_ORIGIN + continuationPath(chatId.parse(value))));
+  main("chat:unlock-imported-source", (value) => {
+    const input = chatUnlockImportedInput.parse(value);
+    return connectedImportedUnlock().unlock(input.id, input.password);
+  });
   main("chat:rename", (value) => {
     const input = chatRenameInput.parse(value);
     return withChatAccount((api) => api.rename(input), "chat");
   });
   main("chat:remove", (value) => removeChat(chatId.parse(value)));
   main("chat:models", () => withChatAccount((api) => api.models()));
+  main("chat:copy-text", (value) => clipboard.writeText(z.string().min(1).max(1_000_000).parse(value)));
+  main("chat:export", (value) => {
+    const input = z.object({ id: chatId, title: z.string().max(500), includeSource: z.boolean() }).strict().parse(value);
+    const request = connectedSettingsApi();
+    return saveGeneratedFile(async () => ({
+      bytes: await request.exportConversation(input.id, input.includeSource),
+      suggestedName: sanitizeFileName(input.title) + ".txt",
+      extension: "txt",
+    }), nativeCopy().saveGenerated, "TXT");
+  });
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
+  main("chat:research-status", (value) => {
+    if (!state.capabilities?.deepResearch) throw new Error("Deep Research is unavailable.");
+    return withChatAccount((api) => api.checkDeepResearch(chatId.parse(value)));
+  });
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));
+  main("review:analysis-setup", (value) => {
+    if (!state.capabilities?.reviewAnalysis) throw new Error("Review analysis is unavailable.");
+    return withChatAccount((api) => api.prepareReviewAnalysis(chatId.parse(value)), "review");
+  });
+  main("review:analysis-run", (value) => {
+    if (!state.capabilities?.reviewAnalysis) throw new Error("Review analysis is unavailable.");
+    return withChatAccount((api) => api.runReviewAnalysis(reviewAnalysisRequest.parse(value)), "review");
+  });
+  main("attachment:drive", (value) => importDriveAttachments(driveImportInput.parse(value)));
   main("attachment:upload", (value) => uploadAttachment(attachmentBytesInput.parse(value)));
   main("attachment:cancel", (value) => {
     if (attachmentTransfer?.requestId === z.uuid().parse(value)) attachmentTransfer.controller.abort();

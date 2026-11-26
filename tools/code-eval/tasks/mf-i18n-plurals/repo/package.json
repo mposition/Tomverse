@@ -1,0 +1,8 @@
+{
+  "name": "mf-i18n-plurals",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

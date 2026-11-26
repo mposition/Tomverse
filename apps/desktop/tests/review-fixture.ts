@@ -17,7 +17,8 @@ export async function installReviewCapabilities(application: ElectronApplication
     const fetchReal = globalThis.fetch;
     globalThis.fetch = async (target, init) => {
       const response = await fetchReal(target, init);
-      if (String(target) !== fixture.origin + "/api/products/chat/capabilities" || !response.ok) return response;
+      const url = new URL(String(target));
+      if (url.origin !== fixture.origin || url.pathname !== "/api/products/chat/capabilities" || !response.ok) return response;
       return Response.json({ ...(await response.json()), desktopImages: { maxModels: 3, models: [fixture.image] } });
     };
   }, { origin, image: imageFixture });
@@ -57,7 +58,7 @@ export async function verifyReviewAndImages(application: ElectronApplication, de
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: config.imageFile });
       globalThis.fetch = async (target, init) => {
         const url = String(target);
-        if (host.imagePosts && url === config.origin + "/api/products/chat/capabilities") {
+        if (host.imagePosts && url.split("?")[0] === config.origin + "/api/products/chat/capabilities") {
           const response = await realFetch(target, init);
           if (!response.ok) return response;
           const capabilities = await response.json();

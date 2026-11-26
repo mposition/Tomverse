@@ -1,0 +1,12 @@
+{
+  "id": "bf-lru-cache",
+  "title": "LRU cache evicts the wrong entries",
+  "category": "bugfix",
+  "prompt": "This project has a small LRU cache (`src/lru.js`) with a `memoize` helper and hit statistics. Reported problems: recently read entries are still evicted first; overwriting a key that is already cached throws away another entry even though there is room; `memoize` recomputes results that are falsy (0, \"\", false, null) every time; and `stats().hitRate` is NaN before the first lookup (it should be 0). Find the causes and fix them. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 600
+}

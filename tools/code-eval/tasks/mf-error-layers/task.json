@@ -1,0 +1,12 @@
+{
+  "id": "mf-error-layers",
+  "title": "Introduce typed errors across repo, service and HTTP layers",
+  "category": "multi-file",
+  "prompt": "Errors in this small user service are all plain `Error`s, so the HTTP layer answers every failure with status 500 and the raw message. Introduce typed errors as described in README.md: create `src/errors.js`, make the repository and the service throw them, and make the HTTP handler turn them into the documented status codes and JSON bodies. Successful responses stay exactly as they are. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 1800
+}

@@ -37,6 +37,24 @@ test("Desktop settings follow the account tab order and return to the workspace 
     await expect(codeTitle).toHaveCSS("font-family", '"Tomverse Wordmark", sans-serif');
     assert.equal(await page.evaluate(async () => (await document.fonts.load('650 16px "Tomverse Wordmark"')).length), 1);
     await rail.getByRole("button", { name: "Help", exact: true }).click();
+    const docs = page.getByTestId("desktop-web-view");
+    await expect(docs).toBeVisible();
+    await expect(docs.getByRole("navigation", { name: "Contents", exact: true })).toBeVisible();
+    await docs.getByTestId("desktop-docs-privacy").click();
+    await expect(docs.getByTestId("desktop-docs-privacy")).toHaveAttribute("aria-current", "page");
+    const documentViews = await application.evaluate(async ({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      const views = window.contentView.children.flatMap((child) => "webContents" in child ? [child as Electron.WebContentsView] : []);
+      return Promise.all(views.map(async (view) => ({
+        globals: await view.webContents.executeJavaScript("[typeof window.desktop, typeof require, typeof process].join()"),
+        persistent: view.webContents.session.isPersistent(), shared: view.webContents.session === window.webContents.session,
+      })));
+    });
+    assert.deepEqual(documentViews, [{ globals: "undefined,undefined,undefined", persistent: false, shared: false }]);
+    await assert.rejects(page.evaluate(() => window.desktop.webView({ type: "open-link", url: "http://127.0.0.1:1/" })));
+    await assert.rejects(page.evaluate(() => window.desktop.webView({ type: "open-docs", section: "chat" as "help" })));
+    await docs.getByTestId("desktop-web-view-close").click();
+    await expect(docs).toHaveCount(0);
     await rail.getByRole("button", { name: "Review", exact: true }).click();
     await entry.click();
     await expect(account.getByRole("button")).toHaveText([
@@ -69,7 +87,7 @@ test("Desktop settings follow the account tab order and return to the workspace 
     }
     const targets = await application.evaluate(() =>
       (globalThis as typeof globalThis & { settingsTargets: string[] }).settingsTargets);
-    assert.deepEqual(targets, ["https://tomverse.app/support/help-centre"]);
+    assert.deepEqual(targets, []);
     await assert.rejects(page.evaluate(() => window.desktop.accountSettings({ action: "other" as "preferences" })));
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByRole("main").getByRole("heading", { name: "Review", exact: true })).toBeVisible();
@@ -107,10 +125,19 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     application = await electron.launch({
       executablePath, args: [desktopDir, `--user-data-dir=${profile}`, "--use-fake-device-for-media-stream"], timeout: 20_000,
     });
-    await application.evaluate(async ({ shell }, { origin, chat }) => {
-      const host = globalThis as typeof globalThis & { clips?: number; sent?: number; importRequests: string[]; pinWrites: boolean[] };
+    const exportPath = join(profile, "chat-export.txt");
+    await application.evaluate(async ({ shell, clipboard, dialog }, { origin, chat, exportPath }) => {
+      const host = globalThis as typeof globalThis & {
+        clips?: number; sent?: number; mcpSent?: string[]; decided?: boolean[]; oauthCallbacks?: string[]; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
+        pauseTranscript?: boolean; finishTranscript?: () => void; lockFromAnotherDevice?: () => void;
+      };
       host.importRequests = [];
       host.pinWrites = [];
+      clipboard.writeText = async (value) => { host.copied = value; };
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: exportPath });
+      const newChatId = "sent-chat-fixture";
+      let question = "";
+      let assistantId: string | undefined;
       const conversationDigest = "a".repeat(64);
       let importCompleted = false;
       let emailEnabled = true;
@@ -122,8 +149,13 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       const memory = { id: "memory-1", kind: "preference", statement: "The user prefers short answers.", pinned: false,
         status: "active", expiresAt: null, sensitivity: "standard" };
       let pinState = { pinned: false, pinSeq: 0 };
+      let pendingApproval = false;
+      let linearConnected = false;
       let projectName = "";
       let projectId: string | null = null;
+      let shareEnabled = false;
+      let isLocked = false;
+      host.lockFromAnotherDevice = () => { isLocked = true; shareEnabled = true; };
       const keySummary = { id: "test-key", name: "Fixture key", keyPrefix: "tv_test", state: "active",
         creditCap: 400, committedCredits: 0, expiresAt: null };
       const preferences = { theme: "dark", language: "en", timeZone: "Australia/Brisbane",
@@ -148,6 +180,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         if (target.pathname === "/api/auth/desktop/session") {
           return Response.json({ ok: true, account: { id: "fixture-account", name: "Settings Fixture", email: null } });
         }
+        if (target.pathname === "/api/auth/desktop/logout") return Response.json({ ok: true });
         if (target.pathname === "/api/auth/desktop/settings-session") {
           if (options?.method !== "POST" || new Headers(options.headers).get("authorization") !== "Bearer fixture-access") {
             return Response.json({}, { status: 401 });
@@ -158,12 +191,28 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           "/api/user/email-preferences", "/api/assistant-profiles", "/api/external-conversations", "/api/user/api-keys",
           "/api/memories", "/api/memories/memory-1", `/api/conversations/${chat.id}/pin`].includes(target.pathname)
           || target.pathname.startsWith("/api/assistant-profiles/")
+          || target.pathname === "/api/external-conversations/fixture-import"
+          || target.pathname === `/api/conversations/${chat.id}/export`
+          || target.pathname === `/api/conversations/${chat.id}/share`
           || target.pathname.startsWith("/api/projects")
           || (target.pathname === `/api/conversations/${chat.id}` && options?.method === "PATCH")
           || target.pathname.startsWith("/api/imports/external")) {
           const headers = new Headers(options?.headers);
           if (headers.get("cookie") !== "next-auth.session-token=fixture..settings.web.session" ||
               headers.get("origin") !== origin || headers.has("authorization")) throw new Error("Invalid settings credential transport");
+          if (target.pathname === `/api/conversations/${chat.id}/export`) {
+            return new Response("Exported Desktop conversation.\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+          }
+          if (target.pathname === `/api/conversations/${chat.id}/share`) {
+            if (options?.method === "POST") {
+              shareEnabled = true;
+              return Response.json({ url: "https://example.invalid/share/fixture", expiresAt: new Date().toISOString() });
+            }
+            if (options?.method === "DELETE") {
+              shareEnabled = false;
+              return Response.json({ success: true });
+            }
+          }
           if (target.pathname === "/api/projects") {
             if (options?.method === "POST") {
               projectName = JSON.parse(String(options.body)).name;
@@ -184,7 +233,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
             }
           }
           if (target.pathname === `/api/conversations/${chat.id}`) {
-            projectId = JSON.parse(String(options?.body)).projectId;
+            const body = JSON.parse(String(options?.body));
+            if (Object.hasOwn(body, "password")) {
+              if (body.password !== "FixturePass!" && (body.password !== null || body.currentPassword !== "FixturePass!")) {
+                return Response.json({ success: false }, { status: 403 });
+              }
+              isLocked = body.password !== null;
+              return Response.json({ isLocked, shareEnabled });
+            }
+            projectId = body.projectId;
             return Response.json({ projectId });
           }
           if (target.pathname === `/api/conversations/${chat.id}/pin`) {
@@ -197,12 +254,16 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
             return Response.json(pinState);
           }
           if (target.pathname.startsWith("/api/imports/external")) {
-            host.importRequests.push(target.pathname);
+            if (options?.method === "POST" || target.pathname.endsWith("/capacity")) host.importRequests.push(target.pathname);
             const body = options?.body ? JSON.parse(String(options.body)) : undefined;
             switch (target.pathname) {
               case "/api/imports/external/capacity":
-                return Response.json({ remaining: { normalizedTextBytes: 1_000_000, externalConversations: 20, externalMessages: 500 } });
+                return Response.json({ remaining: { normalizedTextBytes: 1_000_000, externalConversations: 20, externalMessages: 500 },
+                  usage: { normalizedTextBytes: 24, externalConversations: 1 },
+                  limits: { maxNormalizedTextBytes: 52_428_800, maxExternalConversations: 2000 } });
               case "/api/imports/external":
+                if (!body) return Response.json({ imports: [{ id: "fixture-run", provider: "ChatGPT", status: "completed",
+                  conversationCount: 1, createdAt: new Date().toISOString() }] });
                 if (body.provider !== "claude" || typeof body.parserVersion !== "string") throw new Error("Invalid native import");
                 return Response.json({ importId: "fixture-import-id" }, { status: 201 });
               case "/api/imports/external/fixture-import-id/batches":
@@ -272,6 +333,11 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           if (target.pathname === "/api/external-conversations") return Response.json({ total: 1, offset: 0, limit: 50,
             continuationEnabled: true, conversations: [{ id: "fixture-import", title: "Saved external conversation",
               provider: "ChatGPT", titleWithheld: false, messageCount: 3 }] });
+          if (target.pathname === "/api/external-conversations/fixture-import") return Response.json({
+            title: "Saved external conversation", offset: 0, limit: 100, messageTotal: 1,
+            messages: [{ id: "imported-fixture-message", role: "user", sourceModelLabel: null, truncated: false,
+              content: "<script>Private imported text</script>" }],
+          });
           if (target.pathname === "/api/user/api-keys") {
             if (options?.method === "POST") return Response.json({ key: "synthetic-test-key", summary: keySummary }, { status: 201 });
             return Response.json({ enabled: true, keys: [keySummary], limits: { maxKeys: 10, maxCreditCap: 10000, expiryDays: [7, 30, 90, 365] } });
@@ -304,12 +370,24 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
               { id: "evidence-1", manualContent: "Manual preference fixture", externalConversationId: null, sourceTitle: null },
             ] }, conflicts: [] });
           }
-          return Response.json({ plan: "Free", balances: { dailyRemainingCredits: 3, planRemainingCredits: 63, purchasedRemainingCredits: 0 } });
+          return Response.json({ plan: "Free", usage: { creditsMonth: 13 }, limits: { creditsMonth: 100 },
+            balances: { dailyRemainingCredits: 3, planRemainingCredits: 63, purchasedRemainingCredits: 0 } });
         }
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
-          autoSelection: { offered: false }, desktopWrite: true, desktopPlugins: true,
+          autoSelection: { offered: false }, desktopWrite: !host.readOnly, desktopImport: true, desktopPlugins: true,
           desktopReview: { easy: true, plan: "Pro", modelLimit: 3 },
+          desktopStarters: [
+            { id: "debug-stack-trace", label: "Debug a stack trace", seed: "Help me debug this stack trace.", outcome: "Understand the error." },
+            { id: "plan-a-week", label: "Plan my week", seed: "Help me plan my week.", outcome: "Make a weekly plan." },
+            { id: "summarize-text", label: "Summarize long text", seed: "Summarize the text I paste.", outcome: "Get the key points." },
+            { id: "draft-reply", label: "Draft a reply", seed: "Help me write a reply.", outcome: "Draft a response." },
+            { id: "explain-code", label: "Explain how code works", seed: "Explain this code.", outcome: "Understand the code." },
+            { id: "learn-a-concept", label: "Learn a concept", seed: "Explain a concept.", outcome: "Learn with examples." },
+          ],
         });
+        if (target.pathname === "/api/models/catalog") return Response.json({ models: [
+          { id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", minimumPlan: "Guest", enabled: true, status: "enabled" },
+        ] });
         if (target.pathname === "/api/chat/voice-transcription") {
           const headers = new Headers(options?.headers);
           if (options?.method !== "POST" || headers.get("origin") !== "tomverse://desktop" ||
@@ -321,23 +399,92 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           host.clips = (host.clips ?? 0) + 1;
           return Response.json({ transcript: "fixture transcript" });
         }
-        if (target.pathname === "/api/chat" && options?.method === "POST") host.sent = (host.sent ?? 0) + 1;
-        if (target.pathname === "/api/mcp/connections") return Response.json({ enabled: true,
-          servers: [{ id: "github", name: "GitHub", custom: false }, { id: "custom-1", name: "Custom GitHub", custom: true }],
-          connections: [{ id: "test-connection", serverId: "github", name: "GitHub", status: "connected", tools: 3, granted: 1 }],
+        if (target.pathname === "/api/products/chat/conversations" && options?.method === "POST") return Response.json({ id: newChatId });
+        if (target.pathname === `/api/conversations/${newChatId}/messages` && options?.method === "POST") {
+          const { messages: [message] } = JSON.parse(String(options.body));
+          question = message.content;
+          return Response.json({ messageMappings: [{ requestId: message.clientRequestId, messageId: "saved-question" }] });
+        }
+        if (target.pathname === "/api/chat/context") return Response.json({ ok: true, contextBundle: null });
+        if (target.pathname === "/api/chat" && options?.method === "POST") {
+          host.sent = (host.sent ?? 0) + 1;
+          const turnBody = JSON.parse(String(options.body));
+          assistantId = turnBody.assistantMessageId;
+          // A chosen plugin turn asks for approval before anything leaves Tomverse.
+          if (turnBody.mcpConnectionId) {
+            (host.mcpSent ??= []).push(turnBody.mcpConnectionId + ":" + String(turnBody.contextBundle));
+            pendingApproval = true;
+            return new Response(String.fromCharCode(0) + "TOMVERSE_MCP_PROGRESS" + JSON.stringify({ state: "approval_required" }) + "Sent by the desktop test.",
+              { headers: { "X-Chat-Routed-Model": "gpt-5-4-mini" } });
+          }
+          return new Response("Sent by the desktop test.", { headers: { "X-Chat-Routed-Model": "gpt-5-4-mini" } });
+        }
+        if (target.pathname === `/api/conversations/${newChatId}`) return Response.json({
+          ...chat, id: newChatId, title: question, selectionMode: "manual", autoSelection: { offered: false },
+          messages: [
+            { id: "saved-question", role: "user", content: question, status: "normal" },
+            ...(assistantId ? [{ id: assistantId, role: "assistant", status: "normal", modelId: "gpt-5-4-mini", content: "Sent by the desktop test." }] : []),
+          ],
+          messagePage: { nextCursor: null },
         });
-        if (target.pathname === "/api/conversations") return Response.json([{ ...chat, ...pinState, projectId }, {
+        if (target.pathname === "/api/mcp/invocations/inv-1" && options?.method === "POST") {
+          const decision = JSON.parse(String(options.body));
+          (host.decided ??= []).push(decision.approve);
+          pendingApproval = false;
+          return Response.json({ status: "ok" });
+        }
+        if (target.pathname === "/api/mcp/oauth/start" && options?.method === "POST") {
+          return Response.json({ status: "authorization_required", authorizationUrl: "https://provider.org/authorize?state=" + "S".repeat(43) });
+        }
+        if (target.pathname === "/api/mcp/oauth/callback") {
+          const callbackHeaders = new Headers(options?.headers);
+          if (callbackHeaders.get("cookie") !== "next-auth.session-token=fixture..settings.web.session") throw new Error("Invalid OAuth callback transport");
+          (host.oauthCallbacks ??= []).push(target.search);
+          linearConnected = true;
+          return new Response(null, { status: 303, headers: { Location: origin + "/plugins?oauth=connected" } });
+        }
+        if (target.pathname === "/api/mcp/connections") {
+          const headers = new Headers(options?.headers);
+          if (headers.get("cookie") !== "next-auth.session-token=fixture..settings.web.session" ||
+              headers.get("origin") !== origin || headers.has("authorization")) throw new Error("Invalid connector credential transport");
+          return Response.json({ enabled: true, customEnabled: true,
+            servers: [{ id: "github", name: "GitHub", auth: "oauth", origin: "https://api.githubcopilot.com" },
+              { id: "custom-1", name: "Custom GitHub", auth: "bearer", origin: "https://mcp.example.com", custom: true },
+              { id: "google-drive", name: "Google Drive", auth: "oauth", origin: "https://drivemcp.googleapis.com" },
+              { id: "linear", name: "Linear", auth: "oauth", origin: "https://mcp.linear.app" }],
+            connections: [{ id: "test-connection", serverId: "github", name: "GitHub", status: "connected", version: 1,
+              catalog: [{ name: "search_issues", mode: "read" }, { name: "issue_read", mode: "read" }, { name: "create_issue", mode: "confirm" }],
+              grants: [{ name: "search_issues", mode: "read" }] },
+              ...(linearConnected ? [{ id: "linear-connection", serverId: "linear", name: "Linear", status: "connected", version: 1,
+                catalog: [{ name: "list_issues", mode: "read" }], grants: [] }] : [])],
+            invocations: pendingApproval ? [{ id: "inv-1", connectionId: "test-connection", toolName: "create_issue", state: "pending",
+              arguments: { title: "Fixture issue" }, expiresAt: new Date(Date.now() + 600_000).toISOString() }] : [] });
+        }
+        if (target.pathname === "/api/conversations") return Response.json([{ ...chat, ...pinState, projectId, shareEnabled, isLocked }, {
           ...chat, id: "older-shared-chat", title: "An older shared chat", updatedAt: "2025-01-01T09:00:00Z",
           shareEnabled: true, selectedModels: ["gpt-5-4-mini"],
+        }, {
+          ...chat, id: "continued-test-chat", title: "Chat with a locked original", surface: "continuation", sourceState: "locked",
         }]);
-        if (target.pathname === `/api/conversations/${chat.id}`) return Response.json({ ...chat, messages: Array.from({ length: 48 }, (_, index) => ({
-          id: `message-${index + 1}`, role: index % 2 === 0 ? "user" : "assistant", status: "normal", content: `Saved transcript message ${index + 1}.`, artifacts: [],
+        if (target.pathname === `/api/conversations/${chat.id}`) {
+          const response = Response.json({ ...chat, messages: Array.from({ length: 48 }, (_, index) => ({
+          id: `message-${index + 1}`, role: index % 2 === 0 ? "user" : "assistant", status: "normal",
+          content: `Saved transcript message ${index + 1}.` + (index === 47 ? "\n\n```python\nfor i in range(3):\n    print(i)\n```"
+            : index === 46 ? "\n\nfor i in range(5):\n    print(i)" : ""),
+          modelId: index === 47 ? "gpt-6-luna" : undefined, artifacts: [],
         })),
-          messagePage: { nextCursor: null }, selectionMode: "manual", selectedModels: [], autoSelection: { offered: false },
-        });
+          responseAttempts: [{ assistantMessageId: "message-48", actualModelId: "gpt-5-4-mini", provider: "openai" }],
+            messagePage: { nextCursor: null }, selectionMode: "auto", selectedModels: [], autoSelection: { offered: true },
+          });
+          if (host.pauseTranscript) {
+            host.pauseTranscript = false;
+            await new Promise<void>(resolve => { host.finishTranscript = resolve; });
+          }
+          return response;
+        }
         return Response.json({}, { status: 404 });
       };
-    }, { origin: authOrigin, chat: conversation });
+    }, { origin: authOrigin, chat: conversation, exportPath });
     const page = await application.firstWindow();
     const rail = page.getByRole("navigation", { name: "Workspaces" });
     const settings = rail.getByRole("button", { name: "Settings", exact: true });
@@ -347,6 +494,18 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       .toMatchObject({ stage: "connected", label: "Settings Fixture" });
     await expect(rail.locator(".rail-footer button")).toHaveText(["Help", "Settings", "S"]);
     await rail.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByTestId("tomverse-wordmark")).toBeVisible();
+    await expect(page.getByRole("searchbox", { name: "Search conversation history" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Imported chats", exact: true })).toBeVisible();
+    await expect(page.locator("[data-starter-id]")).toHaveCount(6);
+    await expect(page.getByRole("button", { name: "Current usage 13%" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open Chat", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Debug a stack trace" }).click();
+    await expect(page.getByRole("textbox", { name: "Chat message", exact: true })).toHaveValue("Help me debug this stack trace.");
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 0);
+    await page.getByRole("textbox", { name: "Chat message", exact: true }).fill("");
+    const chatQa = process.env.TOMVERSE_DESKTOP_CHAT_QA;
+    if (chatQa) await page.screenshot({ path: join(chatQa, "home.png"), animations: "disabled" });
     const chat = page.getByRole("button", { name: conversation.title, exact: true });
     const older = page.getByRole("button", { name: "An older shared chat", exact: true });
     await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("button", { name: conversation.title })).toBeVisible();
@@ -363,11 +522,45 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await modelFilter.click();
     await expect(older).toBeVisible();
     await page.getByRole("button", { name: /Organizer tools/ }).click();
+    const continuationMenu = page.getByLabel("Conversation actions · Chat with a locked original", { exact: true });
+    await continuationMenu.click();
+    await expect(page.getByRole("button", { name: "Share", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Download with the original (.txt)", exact: true })).toBeDisabled();
+    await continuationMenu.click();
     await page.getByRole("button", { name: "New chat", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Chat message", exact: true })).toBeFocused();
     await chat.click();
+    const olderActions = page.getByLabel("Conversation actions · An older shared chat", { exact: true });
+    await olderActions.click();
+    await expect(page.getByRole("button", { name: "Pin chat", exact: true })).toBeVisible();
+    await expect(chat).toHaveAttribute("aria-current", "page");
+    await olderActions.click();
     const actions = page.getByLabel("Conversation actions", { exact: true });
     await actions.click();
+    await page.getByRole("button", { name: "Download (.txt)", exact: true }).click();
+    await expect.poll(() => readFile(exportPath, "utf8").catch(() => null)).toBe("Exported Desktop conversation.\n");
+    const chatMenu = page.locator(".header .chat-action-menu");
+    await chatMenu.getByRole("button", { name: "Share", exact: true }).click();
+    await expect(chatMenu.getByText("Create a read-only share page?")).toBeVisible();
+    await chatMenu.getByRole("button", { name: "Create share link", exact: true }).click();
+    await expect(chatMenu.getByRole("textbox", { name: "Share", exact: true })).toHaveValue("https://example.invalid/share/fixture");
+    await chatMenu.getByRole("button", { name: "Stop sharing", exact: true }).click();
+    await chatMenu.getByRole("button", { name: "Stop sharing", exact: true }).click();
+    await expect(chatMenu.getByRole("button", { name: "Share", exact: true })).toBeVisible();
+    const lockLabel = "Enter a password to set the lock:";
+    await chatMenu.getByRole("button", { name: "Lock Chat", exact: true }).click();
+    await chatMenu.getByLabel(lockLabel).fill("FixturePass!");
+    await chatMenu.getByRole("button", { name: "Lock Chat", exact: true }).click();
+    await expect(page.locator(".long-thread")).toHaveCount(0);
+    await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
+    const unlockInput = chatMenu.getByLabel(/This chat is locked/);
+    await unlockInput.fill("WrongPass!");
+    await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
+    await expect(chatMenu.getByRole("alert")).toBeVisible();
+    await expect(page.locator(".long-thread")).toHaveCount(0);
+    await unlockInput.fill("FixturePass!");
+    await chatMenu.getByRole("button", { name: "Unlock", exact: true }).click();
+    await expect(page.locator(".long-thread").getByRole("listitem")).toHaveCount(48);
     await page.getByRole("button", { name: "Pin chat", exact: true }).click();
     const pinWrites = () => application!.evaluate(() => (globalThis as typeof globalThis & { pinWrites: boolean[] }).pinWrites);
     await expect.poll(pinWrites).toEqual([true]);
@@ -376,6 +569,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect.poll(pinWrites).toEqual([true, false]);
     await expect(page.getByRole("region", { name: "Today", exact: true }).getByRole("button", { name: conversation.title })).toBeVisible();
     await actions.click();
+    await page.getByRole("button", { name: /Organizer tools/ }).click();
     const projects = page.locator(".chat-history-projects");
     await projects.locator("summary").click();
     await projects.getByRole("button", { name: "Create first project", exact: true }).click();
@@ -384,7 +578,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     const project = projects.getByRole("button", { name: "Fixture project", exact: true });
     await expect(project).toBeVisible();
     await actions.click();
-    const projectPicker = page.getByLabel("Move to project", { exact: true });
+    const projectPicker = page.locator(".header").getByLabel("Move to project", { exact: true });
     await projectPicker.selectOption("test-project");
     await expect(projectPicker).toHaveValue("test-project");
     await actions.click();
@@ -401,9 +595,22 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(chat).toBeVisible();
     await expect(older).toBeVisible();
     const transcript = page.locator(".long-thread");
+    await expect(page.locator(".chat-auto-banner")).toContainText("Smart Adaptive");
     await expect(transcript.getByRole("listitem")).toHaveCount(48);
     await expect(transcript.getByRole("listitem").last()).toHaveCSS("content-visibility", "auto");
     await expect(transcript.getByText("Saved transcript message 48.", { exact: true })).toBeVisible();
+    const lastAnswer = transcript.getByRole("listitem").last();
+    await expect(lastAnswer.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
+    await expect(lastAnswer.locator(".hljs-keyword").first()).toHaveText("for");
+    const lastQuestion = transcript.getByRole("listitem").nth(46);
+    await expect(lastQuestion.locator(".hljs-keyword").first()).toHaveText("for");
+    await lastQuestion.getByRole("button", { name: "Copy code", exact: true }).click();
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { copied?: string }).copied),
+      "for i in range(5):\n    print(i)");
+    await lastAnswer.getByRole("button", { name: "Copy code", exact: true }).click();
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { copied?: string }).copied),
+      "for i in range(3):\n    print(i)");
+    if (chatQa) await page.screenshot({ path: join(chatQa, "thread.png"), animations: "disabled" });
     const message = page.getByRole("textbox", { name: "Chat message", exact: true });
     await message.fill("A draft for the selected conversation");
     if (accountDevicesFixture) {
@@ -429,6 +636,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       }), [1, 0]);
       await message.fill("A draft for the selected conversation");
       const location = page.getByRole("button", { name: "Use current location", exact: true });
+      await page.locator(".composer-tools summary").click();
       await page.evaluate(`Object.defineProperty(navigator.geolocation, "getCurrentPosition", {
         configurable: true, value: (_success, failure) => failure({ code: 1 }),
       })`);
@@ -453,6 +661,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       await expect(removeLocation).toHaveCount(0);
     } else {
       await expect(page.getByRole("button", { name: "Record voice input" })).toHaveCount(0);
+      await page.locator(".composer-tools summary").click();
       await page.getByRole("button", { name: "Add a place", exact: true }).click();
       const placeDialog = page.getByRole("dialog", { name: "Add a place", exact: true });
       await expect(placeDialog.getByRole("button", { name: "Attach current location" })).toHaveCount(0);
@@ -516,7 +725,18 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await expect(assistants).toContainText("Renamed fixture assistant");
     await page.getByTestId("desktop-settings-data").click();
+    await page.getByRole("button", { name: "Manage imports", exact: true }).click();
     await expect(page.getByTestId("native-account-imports")).toContainText("Saved external conversation");
+    await expect(page.getByRole("region", { name: "Import storage" })).toContainText("1 of 2,000 imported conversations");
+    await expect(page.getByRole("region", { name: "Imported exports" })).toContainText("Completed");
+    if (chatQa) await page.screenshot({ path: join(chatQa, "native-imports.png"), animations: "disabled" });
+    await page.getByRole("button", { name: "View · Saved external conversation" }).click();
+    const nativeSource = page.getByTestId("native-import-conversation");
+    await expect(nativeSource).toContainText("<script>Private imported text</script>");
+    await expect(nativeSource.locator("script")).toHaveCount(0);
+    await nativeSource.getByRole("button", { name: "Back to imports", exact: true }).click();
+    const priorCapacityReads = await application.evaluate(() =>
+      (globalThis as typeof globalThis & { importRequests: string[] }).importRequests.length);
     await page.getByRole("button", { name: "Start a new import" }).click();
     const importDialog = page.getByRole("region", { name: "Import conversations from another AI service" });
     const rawExport = [
@@ -527,8 +747,9 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       name: "conversations.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(rawExport)),
     });
     await expect(importDialog.getByRole("heading", { name: "Choose conversations to import" })).toBeVisible();
-    assert.deepEqual(await application.evaluate(() =>
-      (globalThis as typeof globalThis & { importRequests: string[] }).importRequests), ["/api/imports/external/capacity"]);
+    const requestsBeforeSelection = await application.evaluate((_electron, from) =>
+      (globalThis as typeof globalThis & { importRequests: string[] }).importRequests.slice(from), priorCapacityReads);
+    assert.ok(requestsBeforeSelection.length > 0 && requestsBeforeSelection.every(path => path === "/api/imports/external/capacity"));
     await importDialog.getByRole("checkbox", { name: /Selected conversation/ }).check();
     await importDialog.getByRole("button", { name: "Review the selection" }).click();
     await expect(importDialog.getByRole("heading", { name: "Check what will be imported" })).toBeVisible();
@@ -570,6 +791,74 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await plugins.getByRole("searchbox", { name: "Search plugins" }).fill("custom");
     await expect(connected).toHaveCount(0);
     await expect(custom).toBeVisible();
+    await plugins.getByRole("searchbox", { name: "Search plugins" }).fill("");
+    await connected.getByRole("button", { name: "Manage access", exact: true }).click();
+    const detail = plugins.getByTestId("desktop-connector-detail");
+    await expect(detail.getByRole("checkbox", { name: /search_issues/ })).toBeChecked();
+    await expect(detail.getByRole("checkbox", { name: /create_issue/ })).not.toBeChecked();
+    // A provider that blocks sign-in inside an app window is reported, not handed to the system browser.
+    await plugins.getByRole("listitem").filter({ hasText: "Google Drive" }).getByRole("button", { name: "Connect", exact: true }).click();
+    await expect(plugins.getByRole("alert")).toContainText("drivemcp.googleapis.com");
+    await expect(plugins.getByTestId("desktop-connector-submit")).toBeDisabled();
+    // OAuth runs in an app-owned window that names its host and never holds the account cookie.
+    await plugins.getByRole("listitem").filter({ hasText: "Linear" }).getByRole("button", { name: "Connect", exact: true }).click();
+    await plugins.getByTestId("desktop-connector-submit").click();
+    const signIn = () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
+      .filter((window) => window.getTitle().startsWith("provider.org")).length);
+    await expect.poll(signIn).toBe(1);
+    assert.deepEqual(await application.evaluate(async ({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      return { cookies: (await window.webContents.session.cookies.get({})).length, title: window.getTitle(), modal: window.isModal() };
+    }), { cookies: 0, title: "provider.org · Tomverse connection", modal: true });
+    // Tomverse's callback is answered by the app, not loaded in the window.
+    await application.evaluate(async ({ BrowserWindow }, callback) => {
+      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      await window.webContents.loadURL(callback).catch(() => {});
+    }, authOrigin + "/api/mcp/oauth/callback?state=" + "S".repeat(43) + "&code=provider-code");
+    await expect.poll(signIn).toBe(0);
+    await expect(plugins.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
+    await expect(plugins.getByTestId("desktop-connector-detail")).toContainText("Linear");
+    assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { oauthCallbacks?: string[] }).oauthCallbacks),
+      ["?state=" + "S".repeat(43) + "&code=provider-code"]);
+    await rail.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("button", { name: "New chat", exact: true }).click();
+    await page.getByTestId("desktop-chat-connector").click();
+    await page.getByTestId("desktop-chat-connector-select").selectOption({ label: "GitHub" });
+    await message.fill("Send from the Desktop composer.");
+    await page.getByRole("button", { name: "Send Chat message", exact: true }).click();
+    await expect(page.getByText("Sent by the desktop test.", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("desktop-chat-answer-model")).toHaveText("GPT-5.4 mini");
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 1);
+    // The chosen plugin travelled with the turn (no signed context) and its pending action waits for approval.
+    const approval = page.getByTestId("desktop-chat-approval");
+    await expect(approval).toContainText("create_issue");
+    await expect(approval).toContainText("Fixture issue");
+    assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { mcpSent?: string[] }).mcpSent), ["test-connection:undefined"]);
+    await approval.getByRole("button", { name: "Approve this action", exact: true }).click();
+    await expect(approval).toHaveCount(0);
+    assert.deepEqual(await application.evaluate(() => (globalThis as typeof globalThis & { decided?: boolean[] }).decided), [true]);
+    await application.evaluate(() => { (globalThis as typeof globalThis & { pauseTranscript?: boolean }).pauseTranscript = true; });
+    await chat.click();
+    await expect.poll(() => application!.evaluate(() =>
+      typeof (globalThis as typeof globalThis & { finishTranscript?: () => void }).finishTranscript)).toBe("function");
+    await application.evaluate(() => (globalThis as typeof globalThis & { lockFromAnotherDevice?: () => void }).lockFromAnotherDevice?.());
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Choose Unlock in the conversation menu and enter its password.")).toBeVisible();
+    await application.evaluate(() => (globalThis as typeof globalThis & { finishTranscript?: () => void }).finishTranscript?.());
+    await actions.click();
+    await expect(chatMenu.getByRole("button", { name: "Stop sharing", exact: true })).toBeDisabled();
+    await expect(page.locator(".long-thread")).toHaveCount(0);
+    await application.evaluate(() => { (globalThis as typeof globalThis & { readOnly?: boolean }).readOnly = true; });
+    await page.evaluate(() => window.desktop.signOut());
+    await page.evaluate(() => window.desktop.signIn());
+    await expect.poll(() => page.evaluate(async () => (await window.desktop.state()).capabilities?.chatWrite)).toBe(false);
+    await rail.getByRole("button", { name: "Chat", exact: true }).click();
+    await message.fill("Draft in a read-only environment.");
+    const send = page.getByRole("button", { name: "Send Chat message", exact: true });
+    await expect(send).toBeDisabled();
+    await message.press("Enter");
+    await expect(message).toHaveValue("Draft in a read-only environment.");
+    assert.equal(await application.evaluate(() => (globalThis as typeof globalThis & { sent?: number }).sent ?? 0), 1);
   } finally {
     await application?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5 });
@@ -684,7 +973,8 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
       };
     });
     assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.approvalHost]), ["undefined", "undefined"]);
-    await assert.rejects(page.evaluate(() => window.desktop.openWeb("https://example.invalid" as "chat")));
+    // Desktop no longer offers a way to send a workspace to the web: the bridge has no such call.
+    assert.equal(await page.evaluate(() => typeof (window.desktop as unknown as { openWeb?: unknown }).openWeb), "undefined");
     assert.equal(await page.evaluate(() => typeof window.open("https://example.invalid")?.document), "undefined");
 
     const frame = "desktop-frame-probe";
@@ -710,13 +1000,15 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
 
     const tools = page.getByRole("navigation", { name: "Workspaces" });
     await tools.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("button", { name: "Open Chat", exact: true }).click();
-    await page.getByLabel("More Chat actions").click();
-    await page.getByRole("button", { name: "Open image workspace on the web" }).click();
+    await expect(page.getByRole("button", { name: "Open Chat", exact: true })).toHaveCount(0);
     await tools.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "Open Review", exact: true }).click();
+    const unavailable = page.getByTestId("desktop-surface-unavailable");
+    await expect(unavailable.getByText("This feature isn’t available right now.", { exact: true })).toBeVisible();
+    await expect(unavailable.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open Review", exact: true })).toHaveCount(0);
     await tools.getByRole("button", { name: "Plugins", exact: true }).click();
-    await page.getByRole("button", { name: "Open Plugins", exact: true }).click();
+    // Plugins stay inside Desktop: there is no web launcher for them.
+    await expect(page.getByRole("button", { name: "Open Plugins", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Desktop settings" }).click();
     await page.getByTestId("desktop-settings-ai").click();
     await expect(page.getByRole("heading", { name: "Memory and privacy" })).toBeVisible();
@@ -729,10 +1021,7 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await page.getByRole("button", { name: "Manage history", exact: true }).click();
     await expect(page.getByRole("heading", { name: "What shall we build?" })).toBeVisible();
     assert.deepEqual(await application.evaluate(() =>
-      (globalThis as typeof globalThis & { desktopDestinations: string[] }).desktopDestinations), [
-      "https://tomverse.app/chat", "https://tomverse.app/studio",
-      "https://tomverse.app/review", "https://tomverse.app/plugins",
-    ]);
+      (globalThis as typeof globalThis & { desktopDestinations: string[] }).desktopDestinations), []);
     assert.equal(await tools.getByRole("button", { name: "Image", exact: true }).count(), 0);
     await application.evaluate(({ BrowserWindow }) => {
       const state = globalThis as typeof globalThis & { desktopBlockedNavigation?: boolean };

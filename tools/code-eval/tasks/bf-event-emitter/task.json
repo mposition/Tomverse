@@ -1,0 +1,12 @@
+{
+  "id": "bf-event-emitter",
+  "title": "Event emitter skips handlers",
+  "category": "bugfix",
+  "prompt": "The event emitter in this project (`src/emitter.js`) and its namespaced wrapper (`src/namespaced.js`) have bugs. Handlers registered with `once` cause the handler after them to be skipped during the same emit; if one handler throws, the remaining handlers are never called (all handlers must run, and the first error is then rethrown); `emit` returns false when the only handler was a `once` handler (it must return whether any handler ran); and `scope(...).clear()` forgets handlers that were added with `once`. Fix these. Run the tests with `npm test`.",
+  "check": [
+    "node",
+    "--test",
+    "__check__/*.test.mjs"
+  ],
+  "timeoutSeconds": 600
+}

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { commandEnv } from "./env.js";
 export { commandEnv } from "./env.js";
 import { readProcess } from "./readprocess.js";
@@ -18,7 +18,7 @@ import { basename, delimiter, extname, isAbsolute, join, resolve } from "node:pa
  * `command` form is the way to run it.
  */
 
-export type CommandInput = { argv?: string[]; command?: string; cwd?: string; timeoutSeconds?: number };
+export type CommandInput = { argv?: string[]; command?: string; cwd?: string; timeoutSeconds?: number; background?: boolean };
 
 export type CommandPlan = {
     mode: "argv" | "shell";
@@ -28,8 +28,11 @@ export type CommandPlan = {
     display: string;
     shell: string | null;
     cwd: string;
+    /** 0 for a background command, which has no time limit of its own. */
     timeoutMs: number;
     envNames: string[];
+    /** Keeps running after the call returns; ended when the task ends or the model stops it. */
+    background?: boolean;
 };
 
 export type CommandResult = {
@@ -94,7 +97,9 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
     if (hasArgv === hasCommand) throw new CommandError("Give exactly one of argv (a program and its arguments) or command (a shell line).");
     const requested = input.timeoutSeconds;
     if (requested !== undefined && (!Number.isFinite(requested) || requested <= 0)) throw new CommandError("timeoutSeconds must be a positive number.");
-    const timeoutMs = Math.min(MAX_TIMEOUT_MS, requested ? Math.round(requested * 1000) : defaultTimeoutMs);
+    const background = input.background === true;
+    if (background && requested !== undefined) throw new CommandError("A background command has no time limit: leave out timeoutSeconds, and stop it with stop_background.");
+    const timeoutMs = background ? 0 : Math.min(MAX_TIMEOUT_MS, requested ? Math.round(requested * 1000) : defaultTimeoutMs);
     const env = commandEnv(extraEnv);
     const envNames = Object.keys(env).sort();
     if (hasArgv) {
@@ -126,7 +131,7 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
             });
             if (hit) file = hit;
         }
-        return { mode: "argv", file, args: argv.slice(1), display: argv.map(quoteForDisplay).join(" "), shell: null, cwd, timeoutMs, envNames };
+        return { mode: "argv", file, args: argv.slice(1), display: argv.map(quoteForDisplay).join(" "), shell: null, cwd, timeoutMs, envNames, ...(background ? { background } : {}) };
     }
     const shell = userShell();
     const command = input.command!;
@@ -134,7 +139,7 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
     if (UNSHOWABLE_IN_COMMAND.test(command.replaceAll("\n", ""))) {
         throw new CommandError("The command contains control, invisible or bidi characters (or CR), so the approval could not show exactly what runs.");
     }
-    return { mode: "shell", file: shell, args: shellArgs(shell, command), display: command, shell, cwd, timeoutMs, envNames };
+    return { mode: "shell", file: shell, args: shellArgs(shell, command), display: command, shell, cwd, timeoutMs, envNames, ...(background ? { background } : {}) };
 };
 
 const LIMIT = 32 * 1024;
@@ -283,6 +288,33 @@ const posixDescendants = async (pid: number): Promise<number[] | null> => {
     return out;
 };
 
+/** Starts the planned program with the small command environment, as its own process group on POSIX so the whole tree can be ended. */
+export const spawnPlanned = (plan: CommandPlan, extraEnv: string[] = [], launchCommand?: CommandLaunch): ChildProcess => {
+    const launch = launchCommand?.(plan.file, plan.args) ?? plan;
+    return spawn(launch.file, launch.args, {
+        cwd: plan.cwd,
+        env: commandEnv(extraEnv),
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+        // Its own process group on POSIX, so the whole tree can be ended.
+        detached: process.platform !== "win32",
+    });
+};
+
+/** Ends a process tree at once and without waiting, for the moment the CLI itself is exiting (an exit handler cannot await). */
+export const killTreeSync = (pid: number) => {
+    try {
+        if (process.platform === "win32") {
+            spawnSync(join(windowsSystemRoot(), "System32", "taskkill.exe"), ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 5000, stdio: "ignore" });
+        } else {
+            process.kill(-pid, "SIGKILL");
+        }
+    } catch {
+        // already gone
+    }
+};
+
 export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void,
     extraEnv: string[] = [], launchCommand?: CommandLaunch) =>
     new Promise<CommandResult>((resolve) => {
@@ -296,16 +328,7 @@ export const runCommand = (plan: CommandPlan, signal: AbortSignal, onOutput?: (s
         let killing: Promise<void> | null = null;
         let child: ChildProcess;
         try {
-            const launch = launchCommand?.(plan.file, plan.args) ?? plan;
-            child = spawn(launch.file, launch.args, {
-                cwd: plan.cwd,
-                env: commandEnv(extraEnv),
-                stdio: ["ignore", "pipe", "pipe"],
-                shell: false,
-                windowsHide: true,
-                // Its own process group on POSIX, so the whole tree can be ended.
-                detached: process.platform !== "win32",
-            });
+            child = spawnPlanned(plan, extraEnv, launchCommand);
         } catch (error) {
             resolve({ exitCode: null, signal: null, timedOut: false, cancelled: false, durationMs: 0, stdout: "", stderr: "", stdoutOmittedBytes: 0, stderrOmittedBytes: 0, residualProcesses: [], processTreeChecked: true, spawnError: String((error as Error).message) });
             return;

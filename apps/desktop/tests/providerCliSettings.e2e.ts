@@ -90,8 +90,11 @@ test("Development CLIs check typed and selected paths and persist the requested 
       shell.openExternal = async (url) => { check.cliAuthGuide = url; };
     });
     await page.getByRole("button", { name: "Official sign-in guide" }).click();
-    await expect.poll(() => app!.evaluate(() => (globalThis as typeof globalThis & { cliAuthGuide?: string }).cliAuthGuide))
-      .toBe("https://developers.openai.com/codex/auth");
+    const guide = page.getByTestId("desktop-web-view");
+    await expect(guide.getByLabel("Current address")).toContainText("developers.openai.com");
+    await guide.getByTestId("desktop-web-view-close").click();
+    await expect(guide).toHaveCount(0);
+    assert.equal(await app.evaluate(() => (globalThis as typeof globalThis & { cliAuthGuide?: string }).cliAuthGuide), undefined);
     const path = page.getByLabel("Executable file location");
     const browse = page.getByRole("button", { name: "Browse", exact: true });
     const save = page.getByRole("button", { name: "Check and save", exact: true });
@@ -261,8 +264,11 @@ test("Official CLI paths, sign-in guides and isolated account checks stay tied t
       const save = page.getByRole("button", { name: "Check and save", exact: true });
       const verified = page.getByRole("status").filter({ hasText: `${entry.verifiedLabel} · ${entry.version}` });
       await page.getByRole("button", { name: "Official sign-in guide", exact: true }).click();
-      await expect.poll(() => app!.evaluate(() => (globalThis as typeof globalThis & { cliAuthGuide?: string }).cliAuthGuide))
-        .toBe(expectedAuthGuides[entry.id]);
+      const guide = page.getByTestId("desktop-web-view");
+      await expect(guide.getByLabel("Current address")).toContainText(new URL(expectedAuthGuides[entry.id]).host);
+      await guide.getByTestId("desktop-web-view-close").click();
+      await expect(guide).toHaveCount(0);
+      assert.equal(await app.evaluate(() => (globalThis as typeof globalThis & { cliAuthGuide?: string }).cliAuthGuide), undefined);
       await input.fill(alternate);
       await save.click();
       await expect(verified).toBeVisible({ timeout: 30_000 });

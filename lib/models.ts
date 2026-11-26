@@ -21,16 +21,11 @@ export type AiProvider =
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";
-export type ModelUsageClass =
-    | "standard"
-    | "advanced"
-    | "premium"
-    | "reasoning"
-    | "premium-reasoning"
-    | "research"
-    | "deep-research"
-    | "frontier"
-    | "apex";
+export const MODEL_USAGE_CLASSES = [
+    "standard", "advanced", "premium", "reasoning", "premium-reasoning",
+    "research", "deep-research", "frontier", "apex",
+] as const;
+export type ModelUsageClass = (typeof MODEL_USAGE_CLASSES)[number];
 export type ModelMinimumPlan = "Guest" | "Free" | "Pro";
 export type ModelUsageCategory =
     | "Standard"

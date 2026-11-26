@@ -3,6 +3,10 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
+import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
+import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
+import { DEEP_RESEARCH_MODEL_ID } from "@/lib/deepResearchModel";
 import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 import { copyGeneratedArtifactForRevision, generatedArtifactCopySchema, GeneratedArtifactRevisionError } from "@/lib/generatedArtifactRevision";
 import {
@@ -244,6 +248,7 @@ import type { PerplexityResponseCapture } from "@/lib/perplexityResponseCore";
 import {
     DEEP_RESEARCH_DEPTH_PARAMS,
     describeDeepResearchMessages,
+    PerplexityDeepResearchError,
     PerplexityDeepResearchMessageError,
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
@@ -768,7 +773,7 @@ const uploadPreparationSchema = z.union([
             action: z.literal("google-drive-import"),
             fileId: z.string().regex(/^[A-Za-z0-9_-]+$/).max(256),
             name: z.string().trim().min(1).max(120),
-            mediaType: z.string().refine((value) => !!GOOGLE_EXPORT_TYPES[value]),
+            mediaType: z.string().refine((value) => Object.hasOwn(GOOGLE_EXPORT_TYPES, value)),
             accessToken: z.string().min(1).max(4096),
         })
         .strict(),
@@ -831,17 +836,15 @@ export async function GET() {
         return featureNotIncludedResponse("attachments");
     }
 
-    const clientId = process.env.GOOGLE_ID;
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
-    const appId = process.env.NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER;
-    if (!clientId || !apiKey || !appId) {
+    const config = readGooglePickerConfig();
+    if (!config) {
         return Response.json(
             { error: "Google Picker is not configured." },
             { status: 503 }
         );
     }
 
-    return Response.json({ clientId, apiKey, appId });
+    return Response.json(config);
 }
 
 export async function PUT(req: Request) {
@@ -873,8 +876,9 @@ export async function PUT(req: Request) {
             16 * 1024,
             uploadPreparationSchema
         );
-        if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && body.action !== undefined) {
-            return Response.json({ error: "Desktop attachments are prepared from local files." }, { status: 400 });
+        if (req.headers.get("origin") === DESKTOP_APP_ORIGIN && body.action !== undefined &&
+            (body.action !== "google-drive-import" || !desktopDriveEnabled() || !readGooglePickerConfig())) {
+            return Response.json({ error: "This Desktop attachment source is unavailable." }, { status: 400 });
         }
         if (body.action === "generated-artifact-copy") {
             const registered = await copyGeneratedArtifactForRevision({
@@ -985,7 +989,7 @@ export async function PUT(req: Request) {
                 mediaType: registered.mediaType,
                 size: registered.size,
                 kind: registered.kind,
-            });
+            }, { headers: { "Cache-Control": "private, no-store" } });
         }
 
         const name = body.name;
@@ -1554,7 +1558,7 @@ async function handleChatPost(
         const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
         if (desktop && (!body || typeof body !== "object" ||
             Object.keys(body).some((key) => !["messages", "modelId", "conversationId", "assistantMessageId",
-                "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle"].includes(key)))) {
+                "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth"].includes(key)))) {
             return tracedJsonError("Invalid Desktop Chat request.", "INVALID_REQUEST", 400, traceId);
         }
         const currentLocation = parseChatLocation(
@@ -1600,6 +1604,11 @@ async function handleChatPost(
                 return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
             }
             if (desktopConversation?.password != null) return conversationLockedResponse();
+            if ((deepResearchDepth || modelId === DEEP_RESEARCH_MODEL_ID) &&
+                (!desktopDeepResearchEnabled() || desktopProduct !== "chat" || modelId !== DEEP_RESEARCH_MODEL_ID || !deepResearchDepth ||
+                    assistantMessageId !== desktopResearchAnswerId(conversationId, sourceUserMessageId))) {
+                return tracedJsonError("Desktop Deep Research is unavailable for this request.", "DEEP_RESEARCH_UNAVAILABLE", 403, traceId);
+            }
         }
         if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview")) {
             return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
@@ -2455,7 +2464,8 @@ async function handleChatPost(
             // disabled must not be chosen and then refused two lines later by
             // `assertModelRuntimeAvailable`.
             models: runtimeModels.filter(
-                (model) => model.enabled && !model.catalogDeleted
+                (model) => model.enabled && !model.catalogDeleted &&
+                    (!desktop || model.usageClass !== "deep-research")
             ),
             // Confirmed unavailable only. `degraded` stays a candidate and
             // loses tie-breaks instead, and `unknown` -- every model nothing
@@ -3086,6 +3096,9 @@ async function handleChatPost(
             reasoningEffort && modelReasoningEfforts(model).includes(reasoningEffort) ? reasoningEffort : undefined;
         let appliedEffort = appliedEffortFor(dispatchModel);
         const modelConfig = modelWithReasoningEffort(dispatchModel, appliedEffort);
+        if (desktop && (modelConfig.usageClass === "deep-research") !== Boolean(deepResearchDepth)) {
+            return tracedJsonError("The Desktop research selection changed.", "DEEP_RESEARCH_UNAVAILABLE", 403, traceId);
+        }
         if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
@@ -5574,9 +5587,40 @@ async function handleChatPost(
                 );
             }
 
-            // Set once Perplexity has accepted the job. If persisting the
-            // local rows then fails, this is the id an operator needs to
-            // reconcile a provider job that has no Message or job row here.
+            if (desktop) {
+                const claimed = await prisma.$transaction(async (tx) => {
+                    const previous = await tx.message.findUnique({
+                        where: { id: assistantMessageId, conversationId },
+                        select: { status: true },
+                    });
+                    if (previous) {
+                        // A known submit refusal may be retried. An accepted job or an
+                        // unconfirmed dispatch keeps its claim, even after a restart.
+                        if (previous.status !== "error" || await tx.perplexityAsyncJob.findUnique({
+                            where: { assistantMessageId }, select: { id: true },
+                        })) return false;
+                        return (await tx.message.updateMany({
+                            where: { id: assistantMessageId, conversationId, status: "error", modelId: requestedModelId,
+                                role: "assistant", pendingJobId: null },
+                            data: { status: "incomplete", content: "" },
+                        })).count === 1;
+                    }
+                    // Capacity failures are local and use the route's ordinary storage refusal.
+                    await assertMessageCapacity(tx, session.user!.id, conversationId, 1, 0);
+                    // The answer ID is bound to this saved question. Concurrent replays can only claim it once.
+                    return (await tx.message.createMany({ skipDuplicates: true, data: {
+                        id: assistantMessageId, conversationId, role: "assistant", content: "",
+                        modelId: requestedModelId, status: "incomplete",
+                    } })).count === 1;
+                });
+                if (!claimed) {
+                    await settleChatUsage(usageReservation, { inputTokens: 0, outputTokens: 0, outcome: "failed" });
+                    usageReservation = null;
+                    return tracedJsonError("This research question was already submitted.", "DEEP_RESEARCH_ALREADY_SUBMITTED", 409, traceId);
+                }
+            }
+
+            // Preserve the provider job id in diagnostics when persistence fails after acceptance.
             let submittedPerplexityJobId: string | null = null;
             try {
                 const depthParams =
@@ -5596,25 +5640,14 @@ async function handleChatPost(
                 ).catch(() => {});
 
                 await prisma.$transaction(async (tx) => {
-                    await assertMessageCapacity(
-                        tx,
-                        session.user!.id,
-                        conversationId,
-                        1,
-                        0
-                    );
-                    await tx.message.create({
-                        data: {
-                            id: assistantMessageId,
-                            conversationId,
-                            role: "assistant",
-                            content: "",
-                            status: "pending",
-                            modelId: requestedModelId,
-                            pendingJobId: perplexityJobId,
-                            ...contextAttribution,
-                        },
-                    });
+                    const researchState = { status: "pending", pendingJobId: perplexityJobId, ...contextAttribution };
+                    if (desktop) {
+                        await tx.message.update({ where: { id: assistantMessageId, conversationId }, data: researchState });
+                    } else {
+                        await assertMessageCapacity(tx, session.user!.id, conversationId, 1, 0);
+                        await tx.message.create({ data: { id: assistantMessageId, conversationId, role: "assistant",
+                            modelId: requestedModelId, content: "", ...researchState } });
+                    }
                     await tx.perplexityAsyncJob.create({
                         data: {
                             ...(persistenceSourceUserMessageId ? { sourceUserMessageId: persistenceSourceUserMessageId } : {}),
@@ -5645,7 +5678,15 @@ async function handleChatPost(
                 // The credit refund below is unconditional either way.
                 const isMessageContractError =
                     error instanceof PerplexityDeepResearchMessageError;
-                await settleChatUsage(usageReservation, {
+                const definiteSubmitRefusal = error instanceof PerplexityDeepResearchError &&
+                    error.status !== undefined && error.status >= 400 && error.status < 500;
+                if (desktop && (isMessageContractError || definiteSubmitRefusal)) {
+                    await prisma.message.updateMany({
+                        where: { id: assistantMessageId, conversationId, status: "incomplete" },
+                        data: { status: "error" },
+                    }).catch(() => {});
+                }
+                if (usageReservation) await settleChatUsage(usageReservation, {
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",

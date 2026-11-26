@@ -2,17 +2,17 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, DEFAULTS, Gateway, Journal, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, readProjectInstructions,
-  reconcile, renderChange, resolveEndpoint, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, Journal, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
-import { asProposedCodePlan, sessionId as taskIdSchema, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
+import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
-import { canAnswerClarification, canContinueApiQuota, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
-  journalChecks, journalCommand, journalApiUsage, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
+import { canAnswerClarification, canContinueApiQuota, canRewindJournal, markTurns, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
+  journalChecks, journalCommand, journalApiUsage, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
 import type { Connection, RecordedSession, WorkerCommand, WorkerEvent } from "./messages";
 import { assertProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { desktopCodeNotice } from "./desktop-notice";
@@ -22,6 +22,7 @@ import { matchesHistory } from "./history-scope";
 import { nativePatches, openNativeEdits, verifiedContinuationEdits } from "./native-patches";
 import type { ClaudeTurnObservation } from "./claude-turn";
 import { codeProcessLaunch } from "./code-process-launch";
+import { codeMemoryFor } from "./code-memory";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -35,6 +36,9 @@ type ActiveRun = {
   browserSnapshot?: { requestId: string; settle: (text: string | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
+  queueOperation?: (operation: QueueOperation) => boolean;
+  /** Sends the task to the window again (a background command printed something or ended). */
+  refresh?: () => void;
   approval?: { id: string; canRemember: boolean; settle: (action: Decision["action"]) => void };
 };
 let active: ActiveRun | undefined;
@@ -270,7 +274,7 @@ async function executeCodexFixture(command: Extract<WorkerCommand, { type: "star
     const result = await runCodexFixture(command.fixture, { project: command.project, prompt: inputPrompt,
       mode: command.mode, clientVersion: command.clientVersion, signal: control.abort.signal, patchTool: patches?.tool,
       protectedRoots: protectedRoots(command.protectedRoot), connectionKey: command.connectionKey,
-      effort: task.effort === "default" ? undefined : task.effort,
+      effort: task.effort === "low" || task.effort === "high" ? task.effort : undefined,
       verifyDestination: command.apiSource && true, verifySource: beforeTurn,
       history: command.history && { home: join(command.history.directory, "profile"), previous: previousTurn },
     }, (observation) => {
@@ -532,6 +536,17 @@ async function approveNativePatch(view: ApprovalView, signal: AbortSignal, contr
   return action === "once" && !signal.aborted;
 }
 
+/** The commands the task keeps running in the background, for the Code screen: what they are, whether they run, and their newest output. */
+function backgroundView(runner: Runner | undefined, clean: (text: string) => string): Task["background"] {
+  const list = runner?.background.list() ?? [];
+  if (!runner || !list.length) return undefined;
+  return list.slice(-8).map((info) => ({
+    handle: info.handle, command: clean(info.display).slice(0, 300), state: info.state, startedAt: info.startedAt,
+    ...(info.state !== "running" ? { exitCode: info.exitCode ?? null } : {}),
+    output: clean(runner.background.peek(info.handle, 4096)),
+  }));
+}
+
 function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalRequest {
   const clean = (text: string) => cleanText(text);
   const command = view.command;
@@ -541,9 +556,11 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     tool: view.toolName,
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
+    ...(view.web ? { web: { url: clean(view.web.url), host: clean(view.web.host) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
+      ...(command.background ? { background: true } : {}),
     },
     files: view.patch?.map((edit) => ({
       path: clean(edit.path), action: edit.action, eol: edit.eol, bom: edit.bom, preimage: edit.preimage,
@@ -613,7 +630,19 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
   const control: ActiveRun = { runId: command.runId, cancelled: false, abort: new AbortController() };
   active = control;
   if (!resuming) transient = undefined;
-  const publish = () => send({ type: "task", runId: command.runId, task });
+  const publish = () => {
+    if (journal) Object.assign(task, journalEngine(journal.state, command.connection.key));
+    task.background = backgroundView(control.runner, clean);
+    send({ type: "task", runId: command.runId, task });
+  };
+  let backgroundTimer: ReturnType<typeof setTimeout> | undefined;
+  control.refresh = () => {
+    if (backgroundTimer || active !== control) return;
+    backgroundTimer = setTimeout(() => {
+      backgroundTimer = undefined;
+      if (active === control) publish();
+    }, 400);
+  };
   const addEvent = (event: string | ReturnType<typeof desktopCodeNotice>) => {
     const entry = typeof event === "string" ? { role: "event" as const, text: event } : event;
     task.entries.push({ ...entry, text: clean(entry.text).slice(0, 1_200) });
@@ -749,7 +778,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         readOnly: command.input.mode !== "agent",
         codeMode: command.input.mode,
         codePermission,
-        limits: { maxRequests: DEFAULTS.maxRequests, timeoutMs: DEFAULTS.timeoutMinutes * 60_000, commandTimeoutMs: DEFAULTS.commandTimeoutSeconds * 1000 },
+        limits: resolveLimits(command.input.limits),
+        ...(command.input.goal && command.input.mode === "agent" ? { goal: { maxContinuations: GOAL_MAX_CONTINUATIONS } } : {}),
         ...(continuation && { sessionId: continuation.taskId, codeContinuation: {
           segmentId: continuation.segmentId, maximumKeyCreditCap: continuation.maximumKeyCreditCap,
         } }),
@@ -763,6 +793,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     task.canResume = false;
     task.canResumeAfterQuota = false;
     task.canAnswerClarification = false;
+    task.canRewind = undefined;
     task.pendingFollowUp = journalPendingFollowUp(journal.state, command.connection.key);
     assertAllowed();
     const instructions = continuation || savedCap !== undefined ? null : readProjectInstructions(workspace);
@@ -799,8 +830,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
           }
           return;
         }
+        if ((event.type === "goal_check" || event.type === "queued_follow_up_started" || event.type === "subagent_started" || event.type === "subagent_finished") && journal) publish();
         if (event.type === "response" && journal) {
           Object.assign(task, journalApiUsage(journal.state, command.connection.key));
+          task.context = journalContext(journal.state);
           task.actual = task.transmission.findLast((record) => record.purpose === "agent")?.appliedEffort;
           publish();
         }
@@ -829,6 +862,15 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
+      onBackgroundActivity: () => control.refresh?.(),
+      web: {},
+      backgroundCommands: true,
+      images: true,
+      subagents: true,
+      // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
+      nestedInstructions: !continuation && savedCap === undefined,
+      memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin
+        ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,
       codePlugin: usesCodePlugin ? (action, signal) => requestCodePlugin(control, action, signal) : undefined,
       browserSnapshot: DESKTOP_FIXTURE_ALLOWED && command.type === "start" && command.browserSnapshot &&
@@ -839,7 +881,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -877,6 +919,16 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       publish();
       return true;
     };
+    control.queueOperation = (operation) => {
+      if (control.cancelled || ("text" in operation && hasCredential(operation.text, command.connection.key))) return false;
+      assertProjectRoot(command.project);
+      const done = operation.kind === "add" ? runner.enqueue(operation.text) !== null
+        : operation.kind === "edit" ? runner.editQueued(operation.itemId, operation.text)
+        : operation.kind === "remove" ? runner.removeQueued(operation.itemId)
+        : runner.moveQueued(operation.itemId, operation.direction);
+      if (done) publish();
+      return done;
+    };
     if (resuming) {
       await control.runner.loop(resumedInstruction && { text: resumedInstruction.text, confirmed: () => {
         resumedInstructionSaved = true;
@@ -910,7 +962,13 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       : task.status === "unknown" ? "runUnknown" : control.cancelled ? "runStoppedEarly" : "runtimeFailed"));
   } finally {
     control.queueFollowUp = undefined;
+    control.queueOperation = undefined;
+    control.refresh = undefined;
+    clearTimeout(backgroundTimer);
     clearTimeout(streamTimer);
+    // Whatever way the task ended, nothing it started may keep running.
+    await control.runner?.stopBackground("task_ended").catch(() => undefined);
+    task.background = backgroundView(control.runner, clean);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {
         // Receipt reads may fail or lag while the server settles. Finish with the evidence available.
@@ -919,7 +977,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       }
       task.changes = journalChanges(journal.state);
       task.checks = journalChecks(journal.state);
-      Object.assign(task, journalApiUsage(journal.state, command.connection.key));
+      Object.assign(task, journalApiUsage(journal.state, command.connection.key), journalEngine(journal.state, command.connection.key));
+      task.context = journalContext(journal.state);
       task.actual = task.transmission.findLast((record) => record.purpose === "agent")?.appliedEffort;
       task.plan = journalPlan(journal.state, command.connection.key);
       task.pendingFollowUp = journalPendingFollowUp(journal.state, command.connection.key);
@@ -928,6 +987,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         task.quota = task.status === "blocked" ? journalQuota(journal.state) : undefined;
       }
       task.canCheckRecovery = (!usesCodePlugin && task.status === "unknown") || undefined;
+      markTurns(task.entries, journal.state);
+      task.canRewind = (!usesCodePlugin && !journal.broken && journal.persisted && canRewindJournal(journal.state)) || undefined;
       task.canResume = (!usesCodePlugin && !journal.broken && canResumeJournal(journal.state)) || undefined;
       task.canResumeAfterQuota = (journal.persisted && !journal.broken && canResumeQuotaJournal(journal.state)) || undefined;
       task.canAnswerClarification = (!usesCodePlugin && !journal.broken && canAnswerClarification(journal.state)) || undefined;
@@ -1075,6 +1136,48 @@ async function checkRecovery(command: Extract<WorkerCommand, { type: "check-reco
   }
 }
 
+/** One model request that replaces the earlier part of a saved task's history with a summary. Nothing runs and no file is touched. */
+async function compactRecorded(command: Extract<WorkerCommand, { type: "compact-history" }>): Promise<WorkerEvent> {
+  const reply = { type: "history-compacted", requestId: command.requestId } as const;
+  if (active || recovery) return { ...reply, result: "unavailable" };
+  const abort = new AbortController();
+  recovery = { requestId: command.requestId, abort };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  try {
+    unlockProject = lockProject(command.project);
+    const key = command.connection.key;
+    const endpoint = resolveEndpoint({ endpoint: command.connection.endpoint, allowInsecureLocalhost: true }, {});
+    if (endpoint.base !== command.scope.base || sha256(key) !== command.scope.keyIdentity) return { ...reply, result: "unavailable" };
+    journal = openRecordedSession(command);
+    if (!journal || journal.broken || journal.state.codeContinuation || journal.state.pendingApprovals.length ||
+        journalStatus(journal.state) === "unknown" || !journal.persisted) return { ...reply, result: "unavailable" };
+    const gateway = gatewayFor(command.connection, abort.signal);
+    validateSession(journal, gateway.endpoint, gateway.keyPrefix);
+    const catalog = await gateway.models();
+    abort.signal.throwIfAborted();
+    assertProjectRoot(command.project);
+    const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+    const mode = journal.state.codeMode ?? (journal.state.readOnly ? "ask" : "agent");
+    const runner = new Runner({
+      gateway, journal, workspace, catalog, productName: "Tomverse Code", commandEnv: [], instructions: null, prompter: null,
+      output: { json: false, info: () => undefined, stream: () => undefined, event: () => undefined },
+      assertAllowed: () => assertProjectRoot(command.project), redactText: (text) => cleanText(text, key), captureTransmission: true,
+      taskPlan: mode === "ask" ? undefined : mode,
+    });
+    const outcome = await runner.maybeCompact(true, 180_000);
+    if (journal.broken) throw journal.broken;
+    await sessionCost(gatewayFor(command.connection, AbortSignal.any([abort.signal, AbortSignal.timeout(3_000)])), journal, catalog).catch(() => undefined);
+    return { ...reply, result: outcome === "compacted" ? "compacted" : outcome === "skipped" ? "nothing" : "failed" };
+  } catch (error) {
+    return { ...reply, result: error instanceof SessionLockedError ? "unavailable" : journal?.broken ? "failed" : "unavailable" };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+    recovery = undefined;
+  }
+}
+
 function readRecorded<T>(command: Extract<WorkerCommand, { type: "read-change" | "read-command" }>, read: (journal: Journal) => T): T | null {
   if (active) return null;
   let journal: Journal | undefined;
@@ -1120,6 +1223,81 @@ function undoRecordedChange(command: Extract<WorkerCommand, { type: "undo-change
   } catch (error) {
     if (!undoStarted) return { ...reply, result: "unavailable" };
     return { ...reply, result: error instanceof UndoError ? "conflict" : "unconfirmed" };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+  }
+}
+
+/** What a rewind to a turn would do, for the confirmation the person sees before anything is changed. */
+function planRecordedRewind(command: Extract<WorkerCommand, { type: "plan-rewind" }>): WorkerEvent {
+  const reply = { type: "rewind-planned", requestId: command.requestId } as const;
+  if (active || recovery) return { ...reply, plan: null };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  try {
+    unlockProject = lockProject(command.project);
+    journal = openRecordedSession(command);
+    if (!journal || journalStatus(journal.state) === "unknown") return { ...reply, plan: null };
+    assertProjectRoot(command.project);
+    const plan = planRewind(journal, command.turn, true);
+    return { ...reply, plan: {
+      text: cleanText(plan.text), conversationAvailable: plan.conversationAvailable, ...(plan.blocked ? { blocked: true as const } : {}),
+      files: plan.files.slice(0, 40).map((file) => ({ path: cleanText(file.path), kind: file.kind, outcome: file.outcome, ...(file.reason ? { reason: cleanText(file.reason) } : {}) })),
+      commands: plan.commands.slice(0, 20).map((entry) => cleanText(entry.display)),
+    } };
+  } catch {
+    return { ...reply, plan: null };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+  }
+}
+
+/** Takes a saved task back to the start of a turn. Files that changed since are reported, never forced. */
+function rewindRecorded(command: Extract<WorkerCommand, { type: "rewind-history" }>): WorkerEvent {
+  const reply = { type: "history-rewound", requestId: command.requestId, undone: 0, conflicts: 0 } as const;
+  if (active || recovery) return { ...reply, result: "unavailable" };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  let started = false;
+  try {
+    unlockProject = lockProject(command.project);
+    journal = openRecordedSession(command);
+    if (!journal || journalStatus(journal.state) === "unknown") return { ...reply, result: "unavailable" };
+    assertProjectRoot(command.project);
+    started = true;
+    const outcome = rewindSession(journal, command.turn, command.mode, {
+      beforeWrite: () => assertProjectRoot(command.project), requireIdentity: true, redactText: (text) => cleanText(text),
+    });
+    return { ...reply, result: "rewound", text: cleanText(outcome.text), undone: outcome.undone.length, conflicts: outcome.conflicts.length };
+  } catch (error) {
+    if (error instanceof RewindError || !started) return { ...reply, result: "unavailable" };
+    return { ...reply, result: "unconfirmed" };
+  } finally {
+    journal?.release();
+    unlockProject?.();
+  }
+}
+
+/** Copies a saved task's conversation through a turn into a new saved task. No file is touched. */
+function forkRecorded(command: Extract<WorkerCommand, { type: "fork-history" }>): WorkerEvent {
+  const reply = { type: "history-forked", requestId: command.requestId } as const;
+  // Only the task's own history store is written to, never a legacy one.
+  if (active || recovery || command.storage === null || command.storage !== command.scope.home) return { ...reply, result: "unavailable" };
+  let journal: Journal | undefined;
+  let unlockProject: (() => void) | undefined;
+  try {
+    unlockProject = lockProject(command.project);
+    journal = openRecordedSession(command);
+    if (!journal || journalStatus(journal.state) === "unknown") return { ...reply, result: "unavailable" };
+    assertProjectRoot(command.project);
+    const forked = forkSession(command.storage, journal, command.turn);
+    const id = forked.journal.state.id;
+    forked.journal.release();
+    return { ...reply, result: "forked", id };
+  } catch (error) {
+    return { ...reply, result: error instanceof RewindError ? "unavailable" : "unconfirmed" };
   } finally {
     journal?.release();
     unlockProject?.();
@@ -1296,10 +1474,18 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send({ type: "command-detail", requestId: data.requestId, inspection: readRecorded(data, (journal) => journalCommand(journal.state, data.recordId)) });
   } else if (data.type === "check-recovery" || (DESKTOP_FIXTURE_ALLOWED && data.type === "check-native-recovery")) {
     void checkRecovery(data).then(send);
+  } else if (data.type === "compact-history") {
+    void compactRecorded(data).then(send);
   } else if (data.type === "cancel-recovery") {
     if (recovery?.requestId === data.requestId) recovery.abort.abort();
   } else if (data.type === "undo-change") {
     send(undoRecordedChange(data));
+  } else if (data.type === "plan-rewind") {
+    send(planRecordedRewind(data));
+  } else if (data.type === "rewind-history") {
+    send(rewindRecorded(data));
+  } else if (data.type === "fork-history") {
+    send(forkRecorded(data));
   } else if (data.type === "delete-history") {
     send(deleteRecordedHistory(data));
   } else if (data.type === "discard-transient") {
@@ -1318,6 +1504,14 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     void executeStructuredFixture(data);
   } else if (data.type === "follow-up") {
     void followUp(data);
+  } else if (data.type === "queue") {
+    let ok = false;
+    try { ok = active?.runId === data.runId && active.queueOperation?.(data.operation) === true; }
+    catch { /* A changed root or unwritable checkpoint cannot accept the change. */ }
+    send({ type: "queue-result", runId: data.runId, requestId: data.requestId, ok });
+  } else if (data.type === "stop-background" && active?.runId === data.runId) {
+    const runner = active.runner;
+    if (runner && /^bg-[0-9a-f]{6}$/.test(data.handle)) void runner.background.stop(data.handle).then(() => active?.refresh?.(), () => undefined);
   } else if (data.type === "stop" && active?.runId === data.runId) {
     active.cancelled = true;
     active.abort.abort();

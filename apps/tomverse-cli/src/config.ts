@@ -23,6 +23,8 @@ export type CliConfig = {
     model?: string;
     /** Extra environment variable names passed to approved commands. */
     commandEnv?: string[];
+    /** Notes the agent keeps about a project for later tasks. On unless set to false; when off nothing is read or written. */
+    memory?: boolean;
     /** Folders the user has said the CLI may work in (real paths). */
     trustedRoots?: string[];
 };
@@ -60,6 +62,7 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): CliConfig => {
     if (typeof value.allowInsecureLocalhost === "boolean") config.allowInsecureLocalhost = value.allowInsecureLocalhost;
     if (typeof value.model === "string") config.model = value.model;
     if (Array.isArray(value.commandEnv)) config.commandEnv = value.commandEnv.filter((v): v is string => typeof v === "string");
+    if (typeof value.memory === "boolean") config.memory = value.memory;
     if (Array.isArray(value.trustedRoots)) config.trustedRoots = value.trustedRoots.filter((v): v is string => typeof v === "string");
     return config;
 };

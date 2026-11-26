@@ -1,0 +1,8 @@
+{
+  "name": "rf-callbacks-to-async",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { after, afterEach, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -1545,4 +1545,123 @@ test("an answer that carried a bundle records zero, not nothing", async () => {
     memoryUsedCount: 0,
     memoryTokens: 0,
   });
+});
+
+test("Desktop Deep Research requires enrollment and dispatches only once per signed-in saved question", async (t) => {
+  const config = {
+    TOMVERSE_DESKTOP_AUTH_ENABLED: "true",
+    TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED: "true",
+    TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED: "false",
+    MOBILE_AUTH_SIGNING_KEYS: "test:" + generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "test",
+    MOBILE_AUTH_REFRESH_PEPPERS: "test:" + randomBytes(32).toString("base64url"),
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "test",
+    MOBILE_AUTH_TOKEN_ISSUER: "https://tomverse.test",
+    MOBILE_AUTH_TOKEN_AUDIENCE: "tomverse-mobile-api",
+  };
+  for (const [key, value] of Object.entries(config)) {
+    const previous = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const { issueMobileSession } = await import("@/lib/mobileAuthService");
+  const { desktopResearchAnswerId } = await import("@/lib/desktopResearchAnswerId");
+  const user = await seedProUser();
+  const other = await seedProUser();
+  const issue = async (userId: string) => (await issueMobileSession({
+    userId, platform: "desktop", deviceLabel: "Research test",
+    request: new Request("http://127.0.0.1:3100/api/auth/desktop/exchange"),
+  })).tokens.accessToken;
+  const [token, foreign] = await Promise.all([issue(user.id), issue(other.id)]);
+  const { createProject } = await import("@/lib/projectWorkspaceService");
+  const contextRoute = await import("@/app/api/chat/context/route");
+  const project = await createProject(user.id, { name: "Research project", contextEnabled: true });
+  const conversation = await prisma.conversation.create({ data: {
+    userId: user.id, kind: "chat", productKey: "chat", selectionMode: "manual", projectId: project.id,
+    title: "Research", selectedModels: JSON.stringify([DEEP_RESEARCH_MODEL_ID]),
+  } });
+  const question = await prisma.message.create({ data: { id: randomUUID(), conversationId: conversation.id,
+    role: "user", content: "Compare the historical evidence from three primary sources." } });
+  const assistantMessageId = desktopResearchAnswerId(conversation.id, question.id);
+  const request = (path: string, bearer: string, body: object) => new Request("http://127.0.0.1:3100" + path, {
+    method: "POST", body: JSON.stringify(body), headers: {
+      Authorization: "Bearer " + bearer, Origin: "tomverse://desktop", "Content-Type": "application/json",
+    },
+  });
+  const input = { conversationId: conversation.id, assistantMessageId, sourceUserMessageId: question.id,
+    modelId: DEEP_RESEARCH_MODEL_ID, messages: [{ id: question.id, role: "user", content: question.content }], deepResearchDepth: "deep" };
+  const prepareContext = async (sourceId: string) => {
+    const response = await contextRoute.POST(request("/api/chat/context", token, {
+      conversationId: conversation.id, modelId: DEEP_RESEARCH_MODEL_ID, sourceUserMessageId: sourceId,
+    }));
+    assert.equal(response.status, 200, await response.clone().text());
+    const { contextBundle } = await response.json();
+    assert.ok(contextBundle);
+    return contextBundle as string;
+  };
+  const dispatch = (override = {}) => chatRoute.POST(request("/api/chat", token, { ...input, ...override }));
+  const sendSavedQuestion = async (saved: { id: string; content: string }) => dispatch({
+    assistantMessageId: desktopResearchAnswerId(conversation.id, saved.id), sourceUserMessageId: saved.id,
+    messages: [{ id: saved.id, role: "user", content: saved.content }], contextBundle: await prepareContext(saved.id),
+  });
+  assert.equal((await dispatch()).status, 403);
+  assert.equal(perplexitySubmitCalls().length, 0);
+  process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED = "true";
+  assert.equal((await dispatch({ deepResearchDepth: undefined })).status, 403);
+  assert.equal((await dispatch({ assistantMessageId: randomUUID() })).status, 403);
+  assert.equal(perplexitySubmitCalls().length, 0);
+
+  const previousMaximum = process.env.API_MAX_MESSAGES_PER_CONVERSATION;
+  process.env.API_MAX_MESSAGES_PER_CONVERSATION = "1";
+  try {
+    const capped = await sendSavedQuestion(question);
+    assert.equal(capped.status, 409, await capped.clone().text());
+    assert.equal((await capped.json()).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+    assert.equal(perplexitySubmitCalls().length, 0);
+  } finally {
+    if (previousMaximum === undefined) delete process.env.API_MAX_MESSAGES_PER_CONVERSATION;
+    else process.env.API_MAX_MESSAGES_PER_CONVERSATION = previousMaximum;
+  }
+  const submitted = await sendSavedQuestion(question);
+  assert.equal(submitted.status, 200, await submitted.clone().text());
+  assert.deepEqual(await submitted.json(), { deepResearchJobId: assistantMessageId, status: "submitted" });
+  const replay = await sendSavedQuestion(question);
+  assert.equal(replay.status, 409, await replay.clone().text());
+  assert.equal((await replay.json()).code, "DEEP_RESEARCH_ALREADY_SUBMITTED");
+  assert.equal(perplexitySubmitCalls().length, 1);
+  const status = (bearer: string) => statusRoute.POST(request("/api/chat/deep-research/status", bearer, { assistantMessageId }));
+  assert.equal((await status(foreign)).status, 404);
+  const content = "Stored Desktop research report";
+  pollScript = [{ json: { status: "COMPLETED", response: { choices: [{ message: { content } }],
+    usage: { prompt_tokens: 300, completion_tokens: 500, cost: { total_cost: 0.045 } } } } }];
+  const completed = await status(token);
+  assert.equal(completed.status, 200, await completed.clone().text());
+  assert.deepEqual(await completed.json(), { status: "completed", content });
+  const job = await prisma.perplexityAsyncJob.findUniqueOrThrow({ where: { assistantMessageId } });
+  assert.equal((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: job.reservationId } })).status, "settled");
+
+  const refusedQuestion = await prisma.message.create({ data: { id: randomUUID(), conversationId: conversation.id,
+    role: "user", content: "Compare another set of primary sources." } });
+  const refusedAnswerId = desktopResearchAnswerId(conversation.id, refusedQuestion.id);
+  submitScript = [{ status: 400, json: { error: "Fixture refusal" } }];
+  const refused = await sendSavedQuestion(refusedQuestion);
+  assert.equal(refused.status, 502, await refused.clone().text());
+  assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: refusedAnswerId } })).status, "error");
+  assert.equal(perplexitySubmitCalls().length, 2);
+
+  submitScript = [{ json: { id: "after-known-refusal" } }];
+  const retried = await sendSavedQuestion(refusedQuestion);
+  assert.equal(retried.status, 200, await retried.clone().text());
+  assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: refusedAnswerId } })).status, "pending");
+  assert.equal(perplexitySubmitCalls().length, 3);
+
+  const uncertainQuestion = await prisma.message.create({ data: { id: randomUUID(), conversationId: conversation.id,
+    role: "user", content: "Use a final set of primary sources." } });
+  submitScript = [{ status: 503, json: { error: "Fixture provider gateway failure" } }];
+  const uncertain = await sendSavedQuestion(uncertainQuestion);
+  assert.equal(uncertain.status, 502, await uncertain.clone().text());
+  const replayedUncertain = await sendSavedQuestion(uncertainQuestion);
+  assert.equal(replayedUncertain.status, 409, await replayedUncertain.clone().text());
+  assert.equal((await replayedUncertain.json()).code, "DEEP_RESEARCH_ALREADY_SUBMITTED");
+  assert.equal(perplexitySubmitCalls().length, 4);
 });

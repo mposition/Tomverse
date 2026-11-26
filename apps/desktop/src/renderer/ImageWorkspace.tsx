@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Download, Plus } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { desktopImagesCopy } from "../../../../locales/desktopImages";
-import type { ChatHistoryRow, ReviewImageOffer } from "../chat-contract";
-import type { ImageCapability, ImageGeneration, ImageRequest } from "../images-contract";
+import type { ChatConversation, ChatHistoryRow, ReviewImageOffer } from "../chat-contract";
+import type { ImageCapability, ImageGeneration, ImageGroup, ImageRequest } from "../images-contract";
+import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
+import { RECRAFT_SIZE } from "@/lib/directRasterModels";
 
 const activeImage = (image: ImageGeneration) => ["pending", "processing", "settling"].includes(image.status);
 const sizeLabels = { "1024x1024": "square", "1536x1024": "landscape", "1024x1536": "portrait" } as const;
@@ -209,11 +211,47 @@ function ImageResult({ image, name, language }: { image: ImageGeneration; name: 
   </li>;
 }
 
+export function SavedImageTurn({ turn, language, capability }: {
+  turn: NonNullable<ChatConversation["messages"][number]["imageTurn"]>;
+  language: Language;
+  capability?: ImageCapability | null;
+}) {
+  const [group, setGroup] = useState<ImageGroup>();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function read() {
+      try {
+        const result = await window.desktop.imageGroup(turn.groupId);
+        if (!active) return;
+        setGroup(result);
+        if (result.generations.some(activeImage)) timer = setTimeout(read, 4000);
+      } catch {
+        if (active) setFailed(true);
+      }
+    }
+    void read();
+    return () => { active = false; clearTimeout(timer); };
+  }, [turn.groupId]);
+  const copy = desktopImagesCopy[language];
+  if (failed) return <p role="status">{copy.previewFailed}</p>;
+  if (!group) return <p role="status">{copy.generating}</p>;
+  const current = new Set(group.targets.map(({ currentGenerationId }) => currentGenerationId));
+  const results = group.generations.filter((image) => current.has(image.generationId) && turn.modelIds.includes(image.modelId));
+  return <ul className="chat-image-results">{results.map((image) => <ImageResult key={image.generationId} image={image} language={language}
+    name={capability?.models.find(({ id }) => id === image.modelId)?.name ?? IMAGE_MODEL_REGISTRY.find(({ id }) => id === image.modelId)?.name ?? image.modelId} />)}</ul>;
+}
+
 export function ImageWorkspace({ workspace, capability }: { workspace: Workspace; capability: ImageCapability | null }) {
   const { language } = workspace;
   const copy = desktopImagesCopy[language];
-  const [size, setSize] = useState<ImageRequest["size"]>("1024x1024");
-  const [quality, setQuality] = useState<ImageRequest["quality"]>(workspace.seed?.quality ?? "medium");
+  const initialModel = capability?.models.find(({ id }) => id === workspace.seed?.models[0]);
+  const initialQuality = workspace.seed?.quality ?? "medium";
+  const initialPrice = initialModel?.prices.find(({ size, quality }) => size === "1024x1024" && quality === initialQuality)
+    ?? initialModel?.prices.find(({ quality }) => quality === initialQuality) ?? initialModel?.prices[0];
+  const [size, setSize] = useState<ImageRequest["size"]>(initialPrice?.size ?? "1024x1024");
+  const [quality, setQuality] = useState<ImageRequest["quality"]>(initialPrice?.quality ?? initialQuality);
   const [selected, setSelected] = useState<string[]>(() => {
     const offered = [...new Set(workspace.seed?.models ?? [])];
     return offered.filter((id) => capability?.models.some((model) => model.id === id &&
@@ -268,6 +306,8 @@ export function ImageWorkspace({ workspace, capability }: { workspace: Workspace
           <label>{copy.ratio} <select aria-label={copy.ratio} value={size} disabled={workspace.sending}
             onChange={(event) => setSize(event.currentTarget.value as ImageRequest["size"])}>
             {Object.entries(sizeLabels).map(([value, label]) => <option key={value} value={value}>{copy[label]}</option>)}
+            {capability?.models.some(({ prices }) => prices.some(({ size }) => size === RECRAFT_SIZE)) &&
+              <option value={RECRAFT_SIZE}>{copy.square} · 2048×2048</option>}
           </select></label>
           <label>{copy.quality} <select aria-label={copy.quality} value={quality} disabled={workspace.sending}
             onChange={(event) => setQuality(event.currentTarget.value as ImageRequest["quality"])}>
