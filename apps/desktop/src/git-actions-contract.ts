@@ -25,6 +25,13 @@ export const gitPublishInput = z.object({
 export type GitPublishInput = z.infer<typeof gitPublishInput>;
 
 /**
+ * A draft of a commit message or of a pull request's title and body, written by a model chosen from the Code catalogue. The renderer
+ * names the model and what to describe (the files it selected, or the base branch); the main process reads the diff itself, asks the
+ * person in a native dialog (it is a paid model request) and only then runs it.
+ */
+export const gitDraftKind = z.enum(["commit", "pull-request"]);
+
+/**
  * Everything the renderer may ask of the Git panel and the pull request screen. There is no force push, no branch deletion and no
  * "approved" flag: a publish is approved on a card the main process opens, never by a value the renderer sends.
  */
@@ -35,6 +42,8 @@ export const gitCommand = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create-branch"), name: gitBranchName }).strict(),
   z.object({ type: z.literal("commit"), message: gitCommitMessage, paths: z.array(gitFilePath).min(1).max(500) }).strict(),
   z.object({ type: z.literal("publish"), ...gitPublishInput.shape }).strict(),
+  z.object({ type: z.literal("draft"), kind: gitDraftKind, modelId: z.string().min(1).max(240),
+    paths: z.array(gitFilePath).min(1).max(500).optional(), base: gitBranchName.optional() }).strict(),
   z.object({ type: z.literal("pr-view"), link: pullLink }).strict(),
   z.object({ type: z.literal("pr-check-log"), link: pullLink, check: z.string().min(1).max(256) }).strict(),
 ]);
@@ -51,7 +60,8 @@ export type GitErrorCode =
   | "busy" | "no-project" | "no-git" | "unavailable" | "managed-worktree" | "invalid-name" | "branch-exists" | "nothing-to-commit"
   | "staged-elsewhere" | "unknown-path" | "identity" | "commit-failed" | "detached" | "no-commits" | "no-remote" | "remote-unsupported"
   | "default-branch" | "config-blocked" | "nothing-to-publish" | "gh-missing" | "gh-signed-out" | "pr-needs-github" | "pr-same-branch"
-  | "denied" | "changed" | "push-rejected" | "push-failed" | "disabled" | "not-linked" | "no-failed-check" | "log-unavailable";
+  | "denied" | "changed" | "push-rejected" | "push-failed" | "disabled" | "not-linked" | "no-failed-check" | "log-unavailable"
+  | "draft-failed" | "draft-empty" | "model-unavailable";
 
 export type GitFileStatus = { path: string; index: string; worktree: string };
 export type GitStatusResult =
@@ -80,6 +90,12 @@ export type PrDetails = {
   number: number; title: string; state: string; isDraft: boolean; url: string; headRef: string; baseRef: string; headSha: string;
   reviewDecision?: string; mergeable?: string; checks: PrCheck[]; comments: PrComment[]; omittedComments: number;
 };
+/** The text a model wrote for the commit message or the pull request boxes. It is only a draft: the person edits it before it is used. */
+export type GitDraftResult =
+  | { status: "ok"; kind: "commit"; message: string; model: string; requests?: number }
+  | { status: "ok"; kind: "pull-request"; title: string; body: string; model: string; requests?: number }
+  | { status: "cancelled" }
+  | GitFailure;
 export type PrViewResult =
   | { status: "ok"; source: "gh"; details: PrDetails }
   | { status: "limited"; reason: "gh-missing" | "gh-signed-out" | "gh-error"; evidence: PullEvidence | null }
@@ -93,6 +109,7 @@ export type GitResultMap = {
   "create-branch": { status: "ok"; branch: string } | GitFailure;
   commit: { status: "ok"; sha: string } | GitFailure;
   publish: GitPublishResult | GitFailure;
+  draft: GitDraftResult;
   "pr-view": PrViewResult;
   "pr-check-log": PrCheckLogResult;
 };

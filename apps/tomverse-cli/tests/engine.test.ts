@@ -249,3 +249,61 @@ test("a reasoning level the catalog names beyond low and high is sent as it is, 
         await gateway.stop();
     }
 });
+
+test("an instruction added to a running task can stand for a longer prompt: the model gets the prompt, the conversation keeps what was typed", async () => {
+    let runner: Runner | undefined;
+    const gateway = await new FakeGateway({ script: (_body, index) => {
+        if (index === 0) {
+            assert.ok(runner!.steer("/greet Ada"));
+            assert.ok(runner!.enqueue("/greet Grace") !== null);
+            return { toolCalls: [{ name: "list_files", args: { path: "." } }] };
+        }
+        return { text: `reply ${index}` };
+    } }).start();
+    try {
+        const events: any[] = [];
+        const expanded: string[] = [];
+        const output = { json: false, info: () => undefined, stream: () => undefined, event: (event: any) => { events.push(event); } };
+        const made = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([]), output, runner: {
+            expandFollowUp: (text) => {
+                expanded.push(text);
+                const match = /^\/greet (\w+)$/.exec(text);
+                return match ? { prompt: `Say hello to ${match[1]}.`, notice: "Running command /greet" } : null;
+            },
+        } });
+        runner = made.runner;
+        assert.equal(await runner.runTask("Look."), "success");
+        const texts = gateway.completions.map((request) => userTexts(request.body));
+        assert.deepEqual(texts[1], ["Look.", "Say hello to Ada."], "the model gets the command's prompt");
+        assert.deepEqual(texts.at(-1), ["Look.", "Say hello to Ada.", "Say hello to Grace."], "a queued message is expanded when it starts");
+        assert.deepEqual(expanded, ["/greet Ada", "/greet Grace"]);
+        assert.deepEqual(made.journal.state.tasks[0]!.followUps?.map((entry) => entry.text), ["/greet Ada", "/greet Grace"], "the conversation shows what the person typed");
+        assert.deepEqual(events.filter((event) => event.type === "follow_up_included").map((event) => [event.text, event.notice]),
+            [["/greet Ada", "Running command /greet"], ["/greet Grace", "Running command /greet"]]);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("text a person did not type (the goal check's continuation) is never expanded, and a follow-up that is not a command is sent as it is", async () => {
+    let runner: Runner | undefined;
+    const gateway = await new FakeGateway({ script: (body, index) => {
+        if (isJudge(body)) return { text: '{"met": false, "summary": "Not done.", "next": "/greet Mallory"}' };
+        if (index === 0) assert.ok(runner!.steer("plain words"));
+        return { text: "Working." };
+    } }).start();
+    try {
+        const expanded: string[] = [];
+        const made = await makeRunner(gateway, makeRepo(), { prompter: scriptedPrompter([]), goal: { maxContinuations: 1 }, runner: {
+            expandFollowUp: (text) => { expanded.push(text); return text.startsWith("/greet") ? { prompt: "EXPANDED" } : null; },
+        } });
+        runner = made.runner;
+        await runner.runTask("Do it.");
+        assert.deepEqual(expanded, ["plain words"], "the automatic continuation was not offered for expansion");
+        const sent = JSON.stringify(gateway.completions.map((request) => userTexts(request.body)));
+        assert.match(sent, /plain words/);
+        assert.doesNotMatch(sent, /EXPANDED/);
+    } finally {
+        await gateway.stop();
+    }
+});

@@ -7,6 +7,16 @@ import type { CodeExtensionsInput, CodeExtensionsView } from "../contract";
  * value of an MCP server stays hidden (the real values are read again here, in the main process, when the person confirms the import).
  */
 
+/**
+ * The skills, commands and agents the task runtime reads. The runtime has no HOME of its own, so it is handed the folders this
+ * process resolved (the same ones the settings screen lists); a process without them reads the operating system's home.
+ */
+export function discoverForRuntime(root: string, env: NodeJS.ProcessEnv = process.env) {
+  const home = env.TOMVERSE_DESKTOP_USER_HOME?.trim();
+  const claude = env.TOMVERSE_DESKTOP_CLAUDE_DIR?.trim();
+  return discoverExtensions(root, { ...(home ? { home } : {}), ...(claude ? { env: { CLAUDE_CONFIG_DIR: claude } } : {}) });
+}
+
 const emptyView = (): CodeExtensionsView => ({ project: false, skills: [], commands: [], agents: [], slash: [], issues: [] });
 
 export function codeExtensionsView(root: string | null, input: CodeExtensionsInput): CodeExtensionsView {
@@ -37,7 +47,7 @@ export function codeExtensionsView(root: string | null, input: CodeExtensionsInp
 export function slashPromptFor(root: string, text: string): { prompt: string; notice: string } | null {
   if (!text.startsWith("/")) return null;
   try {
-    const invocation = expandInvocation(root, discoverExtensions(root), text);
+    const invocation = expandInvocation(root, discoverForRuntime(root), text);
     if (!invocation) return null;
     return {
       prompt: invocation.prompt,

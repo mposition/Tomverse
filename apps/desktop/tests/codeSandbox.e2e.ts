@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -10,6 +11,10 @@ import { _electron as electron, expect, type ElectronApplication, type Page } fr
 import { FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 
 const executablePath: string = createRequire(import.meta.url)("electron");
+// The test runner gives tests a home of their own. The Windows sandbox keeps what it needs in the real profile (AppDataLocalLow, the one
+// place a low-integrity process can write), so these tests start the app with the real home again; the Claude and Tomverse folders stay isolated.
+const realHome = process.env.TOMVERSE_TEST_REAL_HOME ?? homedir();
+const realHomeEnv = { ...process.env as Record<string, string>, HOME: realHome, USERPROFILE: realHome };
 const desktop = resolve(fileURLToPath(new URL("../", import.meta.url)));
 
 test("the command sandbox settings show what this computer enforces, save the allowed sites, and keep both after a restart", { timeout: 90_000 }, async () => {
@@ -24,7 +29,7 @@ test("the command sandbox settings show what this computer enforces, save the al
     await writeFile(join(profile, "language.txt"), "en");
     async function launch() {
       await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: endpoint.base, key: TEST_KEY }));
-      return electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000 });
+      return electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000, env: realHomeEnv });
     }
     async function openSettings(window: Awaited<ReturnType<ElectronApplication["firstWindow"]>>) {
       await window.getByRole("button", { name: "Desktop settings" }).click();
@@ -97,7 +102,7 @@ async function press(page: Page, name: string) {
 
 test("a task's approved command runs inside the sandbox: it writes the project and cannot write outside it", { timeout: 120_000 }, async () => {
   // Under the home folder, not the temp folder: Windows keeps a low-integrity process out of %LOCALAPPDATA%, and a project is never there.
-  const base = await mkdtemp(join(homedir(), ".tvsbx-e2e-"));
+  const base = await mkdtemp(join(realHome, ".tvsbx-e2e-"));
   const root = join(base, "project");
   const outside = join(base, "outside");
   const profile = join(base, "profile");
@@ -121,7 +126,7 @@ test("a task's approved command runs inside the sandbox: it writes the project a
     await writeFile(join(profile, "language.txt"), "en");
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     // The fixture only accepts folders under the temp folder, so the temp folder is moved under the home folder for this run.
-    app = await electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000, env: { ...process.env as Record<string, string>, TEMP: base, TMP: base, TMPDIR: base } });
+    app = await electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000, env: { ...realHomeEnv, TEMP: base, TMP: base, TMPDIR: base } });
     const page = await app.firstWindow();
     await page.evaluate(() => window.desktop.codeSandbox({ action: "set-mode", mode: "workspace-write" }));
     await page.getByRole("button", { name: "Open local folder" }).click();
@@ -140,6 +145,78 @@ test("a task's approved command runs inside the sandbox: it writes the project a
     } else {
       // Where the OS has no sandbox the command is refused, and nothing ran at all.
       assert.equal(existsSync(join(root, "inside.txt")), false);
+      assert.match(seen, /so the command was not run/);
+    }
+    assert.ok(!seen.includes("outside-written"));
+  } finally {
+    if (app) {
+      const page = await app.firstWindow().catch(() => undefined);
+      await page?.evaluate(() => window.desktop.codeSandbox({ action: "clear-marks" })).catch(() => undefined);
+      await app.close();
+    }
+    await gateway.stop();
+    await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
+});
+
+const gitIn = (cwd: string, ...args: string[]) => execFileSync("git",
+  ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", ...args],
+  { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true }).trim();
+const gitAvailable = (() => {
+  try { return gitIn(tmpdir(), "--version").startsWith("git version"); } catch { return false; }
+})();
+
+test("a task in its own worktree runs its commands with the worktree as the folder they may write, not the project it was made from", { timeout: 150_000, skip: !gitAvailable }, async () => {
+  const base = await mkdtemp(join(realHome, ".tvsbx-wt-e2e-"));
+  const root = join(base, "project");
+  const outside = join(base, "outside");
+  const profile = join(base, "profile");
+  const descriptor = join(base, "fixture.json");
+  let seen = "";
+  const gateway = await new FakeGateway({
+    async script(body) {
+      if (fixtureNeedsWorkPlan(body)) return fixtureInitialWorkPlan;
+      const results = fixtureOperationResults(body);
+      if (!results.length) {
+        const program = "const fs=require('fs');fs.writeFileSync('inside.txt','in');try{fs.writeFileSync(process.argv[1],'out');console.log('outside-written')}catch(e){console.log('outside-denied '+e.code)}";
+        return { toolCalls: [{ name: "run_command", args: { argv: [process.execPath, "-e", program, join(outside, "o.txt")] } }] };
+      }
+      seen = JSON.stringify(results);
+      return { text: "The command finished." };
+    },
+  }).start();
+  let app: ElectronApplication | undefined;
+  try {
+    await Promise.all([mkdir(root), mkdir(outside), mkdir(profile)]);
+    gitIn(root, "init", "-b", "main");
+    await writeFile(join(root, "tracked.txt"), "tracked\n");
+    gitIn(root, "add", ".");
+    gitIn(root, "commit", "-m", "baseline");
+    await writeFile(join(profile, "language.txt"), "en");
+    await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
+    app = await electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000, env: { ...realHomeEnv, TEMP: base, TMP: base, TMPDIR: base } });
+    const page = await app.firstWindow();
+    await page.evaluate(() => window.desktop.codeSandbox({ action: "set-mode", mode: "workspace-write" }));
+    await page.getByRole("button", { name: "Open local folder" }).click();
+    await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).codeGitWorkspace?.kind).toBe("git");
+    const composer = page.getByRole("textbox", { name: "Code request" });
+    await composer.fill("Run the check");
+    await expect(composer).toHaveValue("Run the check");
+    const [approval] = await Promise.all([app.waitForEvent("window", { timeout: 15_000 }), page.getByRole("button", { name: "Send Code request" }).click()]);
+    await press(approval, "Allow once");
+    await expect(page.getByText("The command finished.", { exact: true })).toBeVisible({ timeout: 60_000 });
+    const task = (await page.evaluate(() => window.desktop.state())).task!;
+    assert.ok(task.worktree, "the task has a worktree of its own");
+    assert.notEqual(task.root, root);
+    const sandboxed = (await page.evaluate(() => window.desktop.codeSandbox({ action: "read" }))).enforcement;
+    if (process.platform === "win32") assert.equal(sandboxed.available, true);
+    if (sandboxed.available) {
+      assert.equal(await readFile(join(task.root, "inside.txt"), "utf8"), "in", `the worktree is writable: ${seen}`);
+      assert.equal(existsSync(join(root, "inside.txt")), false, "the project it was made from was not touched");
+      assert.equal(existsSync(join(outside, "o.txt")), false, "a folder outside the worktree is not writable");
+      assert.match(seen, /outside-denied (EPERM|EACCES)/);
+    } else {
+      assert.equal(existsSync(join(task.root, "inside.txt")), false);
       assert.match(seen, /so the command was not run/);
     }
     assert.ok(!seen.includes("outside-written"));

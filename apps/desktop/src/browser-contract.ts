@@ -16,6 +16,8 @@ export const browserCommand = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pick"), tab, enabled: z.boolean() }).strict(),
   // The person takes the tab away from the agent, or hands it back.
   z.object({ type: z.enum(["agent-stop", "agent-resume"]), tab }).strict(),
+  // The person's switch for the agent's browser tools (off by default). The panel itself does not depend on it.
+  z.object({ type: z.literal("agent-tools"), enabled: z.boolean() }).strict(),
 ]);
 export type BrowserCommand = z.infer<typeof browserCommand>;
 /** agent: the tab belongs to the agent of the running task; working while one of its requests runs, stopped once the person took it back. */

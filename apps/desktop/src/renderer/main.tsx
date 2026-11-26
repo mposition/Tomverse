@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
@@ -46,7 +46,8 @@ import { desktopTerminalCopy } from "../../../../locales/desktopTerminal";
 import { AccountSettings, LocalMemoryPrivacy, LocalPreferences } from "./AccountSettings";
 import { Login } from "./Login";
 import { CodeExecutionSettings } from "./CodeExecutionSettings";
-import { SlashMenu, useSlashMenu } from "./CodeExtensions";
+import { SlashMenu, useSlashMenu, type SlashItem } from "./CodeExtensions";
+import { desktopCodeExtensionsCopy } from "../../../../locales/desktopCodeExtensions";
 import { BackgroundPanel, CodeEngineBar, QueuePanel, SubagentPanel, TurnMenu, effortLabel, effortOptions, readCodeEnginePreference, writeCodeEnginePreference, type CodeEnginePreference } from "./CodeEngine";
 import { AnswerBasis, AnswerMessage } from "./AnswerPanel";
 import { DiffPanel } from "./DiffPanel";
@@ -693,7 +694,11 @@ function Desktop() {
     }
   }
 
-  const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus() });
+  // /review is the one command the composer handles itself, and only where it works: a saved task whose changes can be reviewed.
+  const slashBuiltins = useMemo<SlashItem[]>(() => task && canReview(task) ? [{
+    name: "review", kind: "builtin", argumentHint: "[turn|branch]", description: desktopCodeExtensionsCopy[language].slashReviewDescription,
+  }] : [], [task, language]);
+  const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus(), builtins: slashBuiltins });
 
   function changeSaveHistory(value: boolean) {
     setSaveHistory(value);
@@ -984,7 +989,8 @@ ${text}` : text;
             aria-expanded={terminalOpen} aria-controls={terminalOpen ? "code-terminal-panel" : undefined}
             onClick={() => setTerminalPanel(!terminalOpen)}><SquareTerminal size={18} /></button>}
           {surface === "code" && snapshot?.project && snapshot.draftNamespace && !busy &&
-            <GitPanel key={"git:" + snapshot.draftNamespace + (task?.id ?? "new")} language={language} onVisibilityChange={setGithubDialogOpen} disabled={Boolean(busy)} />}
+            <GitPanel key={"git:" + snapshot.draftNamespace + (task?.id ?? "new")} language={language} onVisibilityChange={setGithubDialogOpen} disabled={Boolean(busy)}
+              models={snapshot.models ?? []} defaultModelId={selectedModel?.id} />}
           {canShowBrowser && <button className="icon" type="button" aria-label={codeBrowserLabel(language)}
             aria-expanded={browserOpen} aria-controls={browserOpen ? "code-browser-panel" : undefined}
             onClick={() => setOpenBrowserScope(browserOpen ? null : browserScope)}><Globe size={18} /></button>}
@@ -1146,6 +1152,7 @@ ${text}` : text;
         </div>
       </div>{canShowBrowser && browserOpen && <CodeBrowser language={language}
         canShare={snapshot?.codeBrowserInspection === true && task?.status === "running"}
+        agentTools={snapshot?.codeBrowserAgent === true}
         agentLive={task?.status === "running" || task?.status === "approval"}
         onAttachComments={(block) => changeDraft(appendElementComments(prompt, block).slice(0, MAX_CODE_PROMPT_CHARACTERS))}
         hidden={historyOpen && matchMedia(compactHistoryQuery).matches} occluded={githubDialogOpen || webView !== null} onClose={() => setOpenBrowserScope(null)} />}

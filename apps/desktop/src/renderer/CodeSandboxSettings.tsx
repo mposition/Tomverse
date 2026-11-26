@@ -72,6 +72,7 @@ export function CodeSandboxSettings({ language }: { language: Language }) {
   return <section className="sandbox-settings" aria-labelledby="code-sandbox-heading" data-testid="code-sandbox">
     <h3 id="code-sandbox-heading">{copy.heading}</h3>
     <p>{copy.detail}</p>
+    <p data-testid="sandbox-scope">{copy.scope}</p>
     <div className="execution-setting-row">
       <div><label htmlFor="code-sandbox-mode">{copy.mode}</label></div>
       <div className="execution-setting-control">

@@ -60,18 +60,24 @@ export type ReviewerOptions = {
   maxRequests?: number;
 };
 
-export async function runReviewer(options: ReviewerOptions): Promise<ReviewModelResult> {
+export type AskUsage = { requests: number; credits: { settled: number; held: number; unknown: number } };
+export type AskResult = { status: "ok"; text: string; usage: AskUsage } | { status: "failed" | "cancelled"; usage?: AskUsage };
+
+/**
+ * One read-only Ask run of one model: a session that cannot write or run anything, through the same gateway, receipts and request limit
+ * as any Code turn. The review and the drafts of commit messages and pull requests are built on it. What the model answers is only text.
+ */
+export async function runReadOnlyAsk(options: ReviewerOptions & { productName?: string }): Promise<AskResult> {
   const { model, signal } = options;
-  const base = { modelId: model.id, modelName: model.name, findings: [] };
   const entry = options.catalog.find((item) => item.id === model.id && supportsReview(item));
-  if (!entry) return { ...base, status: "failed" };
+  if (!entry) return { status: "failed" };
   const journal = createSession(null, {
     root: options.workspace.root, endpoint: options.gateway.endpoint, keyPrefix: options.gateway.keyPrefix, model: entry,
     readOnly: true, codeMode: "ask", limits: resolveLimits("standard", { maxRequests: options.maxRequests ?? REVIEW_REQUESTS }),
   });
   try {
     const runner = new Runner({
-      gateway: options.gateway, journal, workspace: options.workspace, catalog: options.catalog, productName: "Tomverse Code Review",
+      gateway: options.gateway, journal, workspace: options.workspace, catalog: options.catalog, productName: options.productName ?? "Tomverse Code Review",
       commandEnv: [], instructions: null, prompter: null, output: { json: false, info: () => undefined, stream: () => undefined, event: () => undefined },
       assertAllowed: options.assertAllowed, redactText: options.redactText, captureTransmission: true,
     });
@@ -84,18 +90,25 @@ export async function runReviewer(options: ReviewerOptions): Promise<ReviewModel
     await sessionCost(options.receipts(), journal, options.catalog).catch(() => undefined);
     const { apiUsage } = journalApiUsage(journal.state);
     const usage = { requests: apiUsage.requestCount, credits: { settled: apiUsage.settled, held: apiUsage.held, unknown: apiUsage.unknown } };
-    if (signal.aborted || outcome === "cancelled") return { ...base, ...usage, status: "cancelled" };
-    if (outcome !== "success") return { ...base, ...usage, status: "failed" };
-    const text = options.redactText(lastAssistantText(journal.state));
-    const parsed = parseReviewReply(text);
-    return parsed
-      ? { ...base, ...usage, status: "ok", summary: parsed.summary, findings: parsed.findings, ...(parsed.dropped ? { dropped: parsed.dropped } : {}) }
-      : { ...base, ...usage, status: "unparseable", summary: text.slice(0, 1_000) };
+    if (signal.aborted || outcome === "cancelled") return { status: "cancelled", usage };
+    if (outcome !== "success") return { status: "failed", usage };
+    return { status: "ok", text: options.redactText(lastAssistantText(journal.state)), usage };
   } catch {
-    return { ...base, status: signal.aborted ? "cancelled" : "failed" };
+    return { status: signal.aborted ? "cancelled" : "failed" };
   } finally {
     journal.release();
   }
+}
+
+export async function runReviewer(options: ReviewerOptions): Promise<ReviewModelResult> {
+  const { model } = options;
+  const base = { modelId: model.id, modelName: model.name, findings: [] };
+  const ask = await runReadOnlyAsk(options);
+  if (ask.status !== "ok") return { ...base, ...ask.usage, status: ask.status };
+  const parsed = parseReviewReply(ask.text);
+  return parsed
+    ? { ...base, ...ask.usage, status: "ok", summary: parsed.summary, findings: parsed.findings, ...(parsed.dropped ? { dropped: parsed.dropped } : {}) }
+    : { ...base, ...ask.usage, status: "unparseable", summary: ask.text.slice(0, 1_000) };
 }
 
 /** Every chosen model reviews the same diff at the same time; one failing leaves the others' results. */

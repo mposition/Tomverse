@@ -8,6 +8,7 @@ import type { Language } from "../lib/language";
 const en = {
   heading: "Command sandbox",
   detail: "Limits what the commands Code runs can change on this computer. It applies to the next task. It is separate from the file edits you approve, and the provider CLIs (Codex, Claude Code and the others) run their own.",
+  scope: "It applies to the commands the agent runs. The terminal panel, MCP servers and hooks run outside the sandbox, with your own access.",
   mode: "Sandbox",
   modeOff: "Off",
   modeWorkspace: "Project folder only (write the project and a temporary folder)",
@@ -57,6 +58,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   ko: {
     heading: "명령 샌드박스",
     detail: "Code가 실행하는 명령이 이 컴퓨터에서 바꿀 수 있는 범위를 제한합니다. 다음 작업부터 적용됩니다. 승인하는 파일 수정과는 별개이며, 제공사 CLI(Codex, Claude Code 등)는 자체 샌드박스를 씁니다.",
+    scope: "에이전트가 실행하는 명령에 적용됩니다. 터미널 패널, MCP 서버, hook은 샌드박스 밖에서 실행되며 사용자 본인의 권한으로 동작합니다.",
     mode: "샌드박스",
     modeOff: "끔",
     modeWorkspace: "프로젝트 폴더만 (프로젝트와 임시 폴더에만 쓰기)",
@@ -103,6 +105,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   zh: {
     heading: "命令沙盒",
     detail: "限制 Code 运行的命令在此电脑上能更改的范围，对下一个任务生效。它与您批准的文件修改无关，各提供商 CLI（Codex、Claude Code 等）使用自己的沙盒。",
+    scope: "仅适用于智能体运行的命令。终端面板、MCP 服务器和 hook 在沙盒之外运行，使用您自己的权限。",
     mode: "沙盒",
     modeOff: "关闭",
     modeWorkspace: "仅项目文件夹（可写入项目和临时文件夹）",
@@ -149,6 +152,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   "zh-Hant": {
     heading: "命令沙盒",
     detail: "限制 Code 執行的命令在此電腦上能更改的範圍，對下一個任務生效。它與您核准的檔案修改無關，各供應商 CLI（Codex、Claude Code 等）使用自己的沙盒。",
+    scope: "僅適用於代理程式執行的命令。終端機面板、MCP 伺服器和 hook 在沙盒之外執行，使用您自己的權限。",
     mode: "沙盒",
     modeOff: "關閉",
     modeWorkspace: "僅專案資料夾（可寫入專案和暫存資料夾）",
@@ -195,6 +199,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   fr: {
     heading: "Bac à sable des commandes",
     detail: "Limite ce que les commandes lancées par Code peuvent modifier sur cet ordinateur. S'applique à la prochaine tâche. Distinct des modifications de fichiers que vous approuvez ; les CLI des fournisseurs (Codex, Claude Code, etc.) utilisent le leur.",
+    scope: "S'applique aux commandes que l'agent exécute. Le panneau de terminal, les serveurs MCP et les hooks s'exécutent hors du bac à sable, avec vos propres droits.",
     mode: "Bac à sable",
     modeOff: "Désactivé",
     modeWorkspace: "Dossier du projet seulement (écrire dans le projet et un dossier temporaire)",
@@ -241,6 +246,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   de: {
     heading: "Befehls-Sandbox",
     detail: "Begrenzt, was die von Code ausgeführten Befehle auf diesem Computer ändern können. Gilt für die nächste Aufgabe. Unabhängig von den Dateiänderungen, die Sie genehmigen; die Anbieter-CLIs (Codex, Claude Code usw.) verwenden ihre eigene.",
+    scope: "Gilt für die Befehle, die der Agent ausführt. Das Terminal-Panel, MCP-Server und Hooks laufen außerhalb der Sandbox, mit Ihren eigenen Rechten.",
     mode: "Sandbox",
     modeOff: "Aus",
     modeWorkspace: "Nur Projektordner (Projekt und temporären Ordner beschreiben)",
@@ -287,6 +293,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   es: {
     heading: "Entorno aislado de comandos",
     detail: "Limita lo que los comandos que ejecuta Code pueden cambiar en este equipo. Se aplica a la próxima tarea. Es independiente de las ediciones de archivos que apruebas; las CLI de los proveedores (Codex, Claude Code, etc.) usan la suya.",
+    scope: "Se aplica a los comandos que ejecuta el agente. El panel de terminal, los servidores MCP y los hooks se ejecutan fuera del sandbox, con tus propios permisos.",
     mode: "Entorno aislado",
     modeOff: "Desactivado",
     modeWorkspace: "Solo la carpeta del proyecto (escribir en el proyecto y en una carpeta temporal)",
@@ -333,6 +340,7 @@ export const desktopCodeSandboxCopy: Record<Language, typeof en> = {
   pt: {
     heading: "Isolamento de comandos",
     detail: "Limita o que os comandos executados pelo Code podem alterar neste computador. Vale para a próxima tarefa. É independente das edições de arquivos que você aprova; as CLIs dos provedores (Codex, Claude Code etc.) usam o seu próprio.",
+    scope: "Aplica-se aos comandos que o agente executa. O painel de terminal, os servidores MCP e os hooks são executados fora do sandbox, com as suas próprias permissões.",
     mode: "Isolamento",
     modeOff: "Desativado",
     modeWorkspace: "Somente a pasta do projeto (gravar no projeto e em uma pasta temporária)",

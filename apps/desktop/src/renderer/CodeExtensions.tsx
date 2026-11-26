@@ -4,7 +4,8 @@ import { desktopCodeExtensionsCopy } from "../../../../locales/desktopCodeExtens
 import type { CodeExtensionsImportItem, CodeExtensionsView } from "../contract";
 import "./code-extensions.css";
 
-type SlashItem = CodeExtensionsView["slash"][number];
+/** `builtin`: a command of the app itself (the composer handles it; it never reaches the agent). */
+export type SlashItem = Omit<CodeExtensionsView["slash"][number], "kind"> & { kind: CodeExtensionsView["slash"][number]["kind"] | "builtin" };
 
 /**
  * The composer's `/` list: the skills and commands of the project and the user's own folders (and `builtins`, for a host that has
@@ -25,7 +26,8 @@ export function useSlashMenu({ draft, setDraft, focus, builtins = [] }: {
   }, [typing]);
   const wanted = draft.slice(1).toLowerCase();
   // Names that start with what was typed come first.
-  const items = typing ? [...builtins, ...entries].filter((item) => item.name.toLowerCase().includes(wanted))
+  // A name the app handles itself wins over a skill or command with the same name: that is what Enter does.
+  const items = typing ? [...builtins, ...entries.filter((entry) => !builtins.some((item) => item.name.toLowerCase() === entry.name.toLowerCase()))].filter((item) => item.name.toLowerCase().includes(wanted))
     .sort((left, right) => Number(!left.name.toLowerCase().startsWith(wanted)) - Number(!right.name.toLowerCase().startsWith(wanted))).slice(0, 8) : [];
   const visible = items.length > 0 && dismissed !== draft;
   const index = Math.min(active, Math.max(0, items.length - 1));
@@ -66,7 +68,7 @@ export function SlashMenu({ menu, language }: { menu: ReturnType<typeof useSlash
       <button type="button" className={position === menu.index ? "active" : undefined} onMouseDown={(event) => event.preventDefault()}
         onClick={() => menu.pick(item)}>
         <span className="slash-name">/{item.name}{item.argumentHint ? ` ${item.argumentHint}` : ""}</span>
-        <span className="slash-kind">{item.kind === "skill" ? copy.slashSkill : copy.slashCommand}</span>
+        <span className="slash-kind">{item.kind === "skill" ? copy.slashSkill : item.kind === "builtin" ? copy.slashBuiltin : copy.slashCommand}</span>
         <small>{item.description}</small>
       </button>
     </li>)}

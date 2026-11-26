@@ -111,6 +111,11 @@ export type RunnerOptions = {
     /** Gives the model commit_changes and publish_changes. The host shows an approval card for each call; the model cannot answer it. */
     git?: GitToolHost;
     codePlugin?: (action: CodePluginAction, signal: AbortSignal) => Promise<CodePluginReply | null>;
+    /**
+     * An instruction the person adds to a running task (a follow-up, a queued message, the text of a resume) can stand for a longer
+     * prompt, such as a skill or a command (`/name arguments`). The conversation still shows what they typed; the model gets the prompt.
+     */
+    expandFollowUp?: (text: string) => { prompt: string; notice?: string } | null;
     beforeWrite?: ToolContext["beforeWrite"];
     beforeCommand?: ToolContext["beforeCommand"];
     /** A background command wrote output or changed state: a host that shows them refreshes. */
@@ -1266,7 +1271,8 @@ export class Runner {
                 followUp.messageIndex = journal.state.messages.length;
                 // A continuation the goal check wrote is not something the person said: no turn of its own.
                 if (!followUp.auto) this.markTurn("follow_up", journal.state.tasks.length - 1, followUp.text);
-                journal.state.messages.push({ role: "user", content: followUp.text });
+                const expanded = followUp.auto ? null : options.expandFollowUp?.(followUp.text) ?? null;
+                journal.state.messages.push({ role: "user", content: expanded?.prompt ?? followUp.text });
                 const task = this.currentTask();
                 const plan = task.plan;
                 if (plan) {
@@ -1278,7 +1284,7 @@ export class Runner {
                 }
                 journal.commit();
                 savedToolMessages = responseMessages.length;
-                options.output.event({ type: "follow_up_included", text: followUp.text });
+                options.output.event({ type: "follow_up_included", text: followUp.text, ...(expanded?.notice ? { notice: expanded.notice } : {}) });
                 if (plan) options.output.event({ type: "task_plan" });
                 analysisOnly = !!this.effectBlockReason();
                 return { messages: [...journal.state.messages],
