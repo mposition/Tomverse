@@ -388,7 +388,7 @@ test("Desktop plan screen buys, changes and cancels in the app and decides succe
     const starter = pack("starter_500");
     assert.deepEqual(writes.map(({ method, path, body }) => [method, path, body]), [
       starter, starter, pack("project_1500"), starter, starter,
-      starter,
+      pack("project_1500"), pack("project_1500"), starter,
       ["POST", "/api/billing/plan-change/preview", { targetTier: "Max", billingInterval: "monthly" }],
       ["POST", "/api/billing/plan-change/confirm", { requestId: "pcr_fixture", resumeRenewal: true }],
       ["POST", "/api/billing/cancel-subscription", {}],
