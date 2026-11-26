@@ -22,7 +22,7 @@ The report is built in the Desktop main process (`apps/desktop/src/host/remote-c
 
 File contents, diffs, command output, environment values, the browser text an agent would type, MCP arguments and credentials are never sent.
 
-`DesktopRemoteDevice` keeps the latest report for 3 minutes after the last sync. `DesktopRemoteCommand` keeps each answer for 15 minutes, and an answer can be picked up only within its first 2 minutes. The PC counts the time since it asked on top of the age the server reports, so an answer that was young at the server and old on arrival is refused as expired. An answer to an approval request is kept past the 15 minutes for as long as the PC's report still shows that request, because the row is what refuses a second answer for it; it goes once the PC reports the request closed. For the same reason the report that shows an answered request is kept, hidden from the screen and unable to receive anything, after the PC stops reporting: a PC that was away and comes back with the request still open finds its answer there, and a second answer is refused. That hidden report goes when the PC reports again without the request, when the PC turns the switch off, or when the device's sign-in ends. Both are deleted by `lib/maintenance.ts` (step `desktop_remote_control`), and the screen deletes what it finds expired. Rows are deleted when the PC turns the switch off (`DELETE /api/desktop/remote/sync`), and they are hidden and deleted once the device's token family is revoked at sign-out. They cascade from `MobileDevice`, so deleting the device or the account deletes them.
+`DesktopRemoteDevice` keeps the latest report for 3 minutes after the last sync. `DesktopRemoteCommand` keeps each answer for 15 minutes, and an answer can be picked up only within its first 2 minutes. The PC counts the time since it asked on top of the age the server reports, so an answer that was young at the server and old on arrival is refused as expired. An answer to an approval request is kept past the 15 minutes for as long as the PC's report still shows that request, because the row is what refuses a second answer for it; it goes once the PC reports the request closed. For the same reason the report that shows an answered request is kept, hidden from the screen and unable to receive anything, after the PC stops reporting: a PC that was away and comes back with the request still open finds its answer there, and a second answer is refused. That hidden report goes when the PC reports again without the request, when the PC turns the switch off, or when the device's sign-in ends. Both are deleted by `lib/maintenance.ts` (step `desktop_remote_control`), and the screen deletes what it finds expired. Rows are deleted when the PC turns the switch off (`DELETE /api/desktop/remote/sync`); the PC first waits for a sync it has already sent, so that sync cannot write the report back after the delete. They are hidden and deleted once the device's token family is revoked at sign-out. They cascade from `MobileDevice`, so deleting the device or the account deletes them.
 
 ## Who decides
 
@@ -32,7 +32,7 @@ The PC decides every approval. A remote answer names one request by id and diges
 - the digest of the whole request is unchanged
 - the request is one that may be answered from elsewhere
 - the answer is not a repeat
-- it is younger than 2 minutes, measured by the server's clock
+- it is younger than 2 minutes: the age the server reports plus the time since this PC asked
 - it names this device
 
 It goes through the same `answer()` as the approval window and is applied once. A follow-up goes through the window's own follow-up handler and its checks.
@@ -40,9 +40,9 @@ It goes through the same `answer()` as the approval window and is applied once. 
 Only these may be answered from another device. The PC enforces this deterministically:
 
 - File changes whose paths are all shown.
-- Commands whose whole line is shown and needed no redaction, and that the CLI's permission boundary (`checkBoundaries`) does not leave to a person. A command that sends anything off this computer, names a credential file or names the app's data folder is never answered remotely.
+- Commands whose whole line is shown and needed no redaction, and that the CLI's permission boundary (`checkBoundaries`) does not leave to a person. A command that sends anything off this computer, names a credential file or names the app's data folder is never answered remotely. The check is given the same protected folders as the task's own permission gate: the permission home, the app's data folder and the workspace lock folder.
 
-Everything else is answered at the PC: Git commit, push and pull request cards, MCP tools, web pages, the browser panel and "Allow for this run". Permission mode, project rule trust, plugin, MCP and hook approvals and schedules are Settings actions and have no remote path. Widening this list is an operator decision.
+Everything else is answered at the PC: every request of a project on another machine (SSH), because the action runs there and only the card at the PC names the machine; Git commit, push and pull request cards, MCP tools, web pages, the browser panel and "Allow for this run". Permission mode, project rule trust, plugin, MCP and hook approvals and schedules are Settings actions and have no remote path. Widening this list is an operator decision.
 
 The server checks the same things before it stores an answer:
 
@@ -65,4 +65,4 @@ The server is still trusted to say who answered. It can only answer a request th
 2. Turn on `TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED` in Test, with `TOMVERSE_DESKTOP_AUTH_ENABLED` already on.
 3. Install a Desktop build that has the setting.
 
-To stop the feature, turn the server switch off. The rows left expire within 15 minutes and maintenance deletes them.
+To stop the feature, turn the server switch off. The rows left expire within 15 minutes and maintenance deletes them, except the hidden report of an answered request and its answer, which go when that device's sign-in ends.

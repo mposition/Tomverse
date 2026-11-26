@@ -3498,6 +3498,8 @@ let followUpTask: ((value: unknown) => unknown) | undefined;
 // approval card stays the one on this screen and `answer` stays the only way to answer it.
 const remoteControl = createRemoteControl({
   userData: app.getPath("userData"),
+  // The same folders the task's own permission gate is given (host/runner-process.ts).
+  protectedDirs: () => [permissionHost.home, app.getPath("userData"), codeProjectLocks()],
   account: () => {
     const active = browserSession;
     if (!active || state.account.stage !== "connected" || signingOut || closing || suspended) return null;

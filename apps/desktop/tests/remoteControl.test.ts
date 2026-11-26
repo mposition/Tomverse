@@ -12,6 +12,7 @@ import {
 let counter = 0;
 const uuid = () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`;
 const KEY = "tvk_live_connectedcodekey123456";
+const APP_DATA = "C:/Users/dev/AppData/Roaming/Tomverse Desktop";
 
 const commandCard = (display = "npm test", over: Partial<ApprovalRequest> = {}): ApprovalRequest => ({
   id: uuid(), root: "/work/app", tool: "run_command", canRemember: true,
@@ -30,7 +31,7 @@ const task = (entries: Task["entries"] = [], changes = 0): Task => ({
 });
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
-type Reply = { status: number; body?: unknown; headers?: Record<string, string>; delayMs?: number } | Error;
+type Reply = { status: number; body?: unknown; headers?: Record<string, string>; delayMs?: number; gate?: Promise<void> } | Error;
 
 function setup(options: { enabled?: boolean } = {}) {
   const userData = mkdtempSync(join(tmpdir(), "tomverse-remote-"));
@@ -53,6 +54,7 @@ function setup(options: { enabled?: boolean } = {}) {
     const reply = replies.shift() ?? { status: 200, body: { ok: true, deviceId: "device-1", commands: [] } };
     if (reply instanceof Error) throw reply;
     now += reply.delayMs ?? 0;
+    await reply.gate;
     return new Response(reply.body === undefined ? null : JSON.stringify(reply.body), { status: reply.status, headers: reply.headers });
   }) as typeof fetch;
   const control = createRemoteControl({
@@ -69,6 +71,7 @@ function setup(options: { enabled?: boolean } = {}) {
     stop: (key) => { stops.push(key); return true; },
     followUp: async (key, text) => { followUps.push({ key, text }); return true; },
     confirmEnable: async () => confirm,
+    protectedDirs: () => [APP_DATA],
     transport,
     now: () => now,
     every: () => ({ stop() {} }),
@@ -148,6 +151,24 @@ test("an answer that was young at the server and old on arrival is not applied",
   assert.deepEqual(acks.map((ack) => ack.reason ?? ack.result), ["expired"]);
 });
 
+test("turning remote control off waits for the sync on the wire before it deletes the report", async (t) => {
+  const s = setup();
+  t.after(s.done);
+  await s.enable();
+  s.setTasks([s.running()]);
+  let release!: () => void;
+  s.replies.push({ status: 200, body: { ok: true, deviceId: "device-1", commands: [] }, gate: new Promise<void>((resolve) => { release = resolve; }) });
+  s.control.tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(s.calls.filter((call) => call.method === "POST").length, 1);
+  const off = s.control.command({ action: "set", enabled: false });
+  for (let index = 0; index < 5; index += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(s.calls.filter((call) => call.method === "DELETE").length, 0);
+  release();
+  assert.equal((await off).enabled, false);
+  assert.deepEqual(s.calls.map((call) => call.method), ["POST", "DELETE"]);
+});
+
 test("requests answered at the PC are never applied from another device", async (t) => {
   const s = setup();
   t.after(s.done);
@@ -168,6 +189,13 @@ test("requests answered at the PC are never applied from another device", async 
     { id: uuid(), root: "/work/app", tool: "unknown", canRemember: false },
   ];
   for (const request of pcOnly) assert.equal(remoteAnswerable(request, KEY), false, JSON.stringify(request).slice(0, 120));
+  // A project on another machine: the action runs there, and only the card at the PC says where.
+  assert.equal(remoteAnswerable(commandCard("npm test", { remote: { target: "dev@build-box", folder: "/srv/app" } }), KEY), false);
+  assert.equal(remoteAnswerable({ ...fileCard(), remote: { target: "dev@build-box", folder: "/srv/app" } }, KEY), false);
+  // The app's own data folder is left to a person at the PC by the task's permission gate, and so it is here.
+  const vault = commandCard("type \"C:/Users/dev/AppData/Roaming/Tomverse Desktop/session-vault.json\"");
+  assert.equal(remoteAnswerable(vault, KEY), true);
+  assert.equal(remoteAnswerable(vault, KEY, [APP_DATA]), false);
   assert.equal(remoteAnswerable(commandCard("npm test -- --watch=false"), KEY), true);
   assert.equal(remoteAnswerable(fileCard(["src/a.ts", "README.md"]), KEY), true);
 

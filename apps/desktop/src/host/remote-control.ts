@@ -63,6 +63,8 @@ export type RemoteControlDeps = {
   followUp(key: string, text: string): Promise<boolean>;
   /** Asked when the person turns remote control on. */
   confirmEnable(): Promise<boolean>;
+  /** The folders the task's own permission gate leaves to a person at this PC (the app's data, the permission home). */
+  protectedDirs?(): readonly string[];
   transport?: typeof fetch;
   now?(): number;
   every?(run: () => void, ms: number): { stop(): void };
@@ -146,9 +148,12 @@ export function remoteApprovalKind(request: ApprovalRequest): DesktopRemoteAppro
 
 /**
  * Whether another device may answer this request. Deterministic and checked again when an answer arrives: the person
- * there must see the whole of what they approve, and nothing that leaves this computer is approved from elsewhere.
+ * there must see the whole of what they approve, and nothing that leaves this computer is approved from elsewhere. A
+ * request of a project on another machine (SSH) acts there, and the report has no room to say where: it is answered at
+ * the PC, whose card names the machine.
  */
-export function remoteAnswerable(request: ApprovalRequest, key?: string): boolean {
+export function remoteAnswerable(request: ApprovalRequest, key?: string, protectedDirs: readonly string[] = []): boolean {
+  if (request.remote) return false;
   const kind = remoteApprovalKind(request);
   if (kind === "files") {
     const files = request.files ?? [];
@@ -163,7 +168,7 @@ export function remoteAnswerable(request: ApprovalRequest, key?: string): boolea
     approvalId: request.id, toolCallId: request.id, toolName: request.tool, input: null, root: request.root,
     command: { mode: command.mode, file: command.file, args: command.args, display: command.display, shell: null, cwd: command.cwd,
       timeoutMs: command.timeoutMs, envNames: command.env, ...(command.background ? { background: true } : {}) },
-  });
+  }, { protectedDirs });
   return boundary === null;
 }
 
@@ -184,7 +189,7 @@ export function approvalDigest(request: ApprovalRequest): string {
   return createHash("sha256").update("tomverse-remote-approval-v1\n" + canonical(rest)).digest("hex");
 }
 
-export function remoteApprovalSummary(card: RemoteCard, key?: string): DesktopRemoteApproval | null {
+export function remoteApprovalSummary(card: RemoteCard, key?: string, protectedDirs: readonly string[] = []): DesktopRemoteApproval | null {
   const { request } = card;
   const kind = remoteApprovalKind(request);
   const files = kind === "files" ? request.files ?? [] : [];
@@ -196,13 +201,13 @@ export function remoteApprovalSummary(card: RemoteCard, key?: string): DesktopRe
       path: remoteText(file.path, key, DESKTOP_REMOTE_LIMITS.path), action: /^[a-z_]{1,16}$/.test(file.action) ? file.action : "update",
     })),
     moreFiles: Math.max(0, files.length - DESKTOP_REMOTE_LIMITS.files),
-    remote: remoteAnswerable(request, key),
+    remote: remoteAnswerable(request, key, protectedDirs),
   });
   return summary.success ? summary.data : null;
 }
 
 /** The report: the running tasks and the request on the screen. Everything in it went through `remoteText`. */
-export function remoteSnapshot(tasks: RemoteTaskSource[], card: RemoteCard | null, key?: string): DesktopRemoteSnapshot {
+export function remoteSnapshot(tasks: RemoteTaskSource[], card: RemoteCard | null, key?: string, protectedDirs: readonly string[] = []): DesktopRemoteSnapshot {
   const rows: DesktopRemoteTask[] = [];
   for (const source of tasks) {
     if (rows.length === DESKTOP_REMOTE_LIMITS.tasks) break;
@@ -213,7 +218,7 @@ export function remoteSnapshot(tasks: RemoteTaskSource[], card: RemoteCard | nul
     });
     if (row.success && !rows.some((entry) => entry.key === row.data.key)) rows.push(row.data);
   }
-  const approval = card && rows.some((row) => row.key === card.taskKey) ? remoteApprovalSummary(card, key) : null;
+  const approval = card && rows.some((row) => row.key === card.taskKey) ? remoteApprovalSummary(card, key, protectedDirs) : null;
   return desktopRemoteSnapshot.parse({ tasks: rows, approval });
 }
 
@@ -251,6 +256,8 @@ export function createRemoteControl(deps: RemoteControlDeps) {
   let failures = 0;
   let deviceId: string | null = null;
   let generation = 0;
+  /** The sync on the wire now. Turning off and signing out wait for it, so it cannot write the report back after the delete. */
+  let running: Promise<void> | null = null;
   let acks: DesktopRemoteAck[] = [];
   const seen = new Set<string>();
   const answered = new Set<string>();
@@ -303,7 +310,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
       const card = deps.card();
       if (!card || card.request.id !== command.approvalId || card.taskKey !== command.taskKey) return refused(command.id, "not_open");
       if (approvalDigest(card.request) !== command.digest) return refused(command.id, "changed");
-      if (!remoteAnswerable(card.request, account.key)) return refused(command.id, "pc_only");
+      if (!remoteAnswerable(card.request, account.key, deps.protectedDirs?.() ?? [])) return refused(command.id, "pc_only");
       remember(answered, command.approvalId);
       return deps.answer({ id: card.request.id, action: command.decision }) ? { id: command.id, result: "applied" } : refused(command.id, "not_open");
     }
@@ -384,7 +391,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     const now = clock();
     if (now < pausedUntil) return;
     let snapshot: DesktopRemoteSnapshot;
-    try { snapshot = remoteSnapshot(deps.tasks(), deps.card(), account.key); }
+    try { snapshot = remoteSnapshot(deps.tasks(), deps.card(), account.key, deps.protectedDirs?.() ?? []); }
     catch { return; }
     // Nothing runs and the server already knows: no request at all.
     if (!snapshot.tasks.length && !lastHadTasks) {
@@ -394,7 +401,17 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     const json = JSON.stringify(snapshot);
     if (json === lastSent && now < nextAt && !acks.length) return;
     if (now - lastSyncAt < REMOTE_MIN_GAP_MS) return;
-    void sync(account, snapshot, json);
+    const started = sync(account, snapshot, json).finally(() => { if (running === started) running = null; });
+    running = started;
+  }
+
+  /** Waits for the sync on the wire to end, at most this long. */
+  async function settled(maxMs: number) {
+    const current = running;
+    if (!current) return;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([current, new Promise<void>((resolve) => { handle = setTimeout(resolve, maxMs); handle.unref?.(); })]);
+    clearTimeout(handle);
   }
 
   function view(): RemoteControlView {
@@ -425,6 +442,8 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     enabledFor = null;
     resetSession();
     status = "off";
+    // A sync that was already sent would put the report back if it reached the server after the delete.
+    await settled(11_000);
     await withdraw(account);
   }
 
@@ -456,8 +475,10 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     async signingOut(accessToken: string) {
       const account = lastAccount;
       const reported = deviceId !== null || lastHadTasks;
+      const sending = running !== null;
       resetSession();
-      if (account && enabledFor === account.accountId && reported) await withdraw({ ...account, authorize: async () => accessToken }, 2_000);
+      if (sending) await settled(2_000);
+      if (account && enabledFor === account.accountId && (reported || sending)) await withdraw({ ...account, authorize: async () => accessToken }, 2_000);
     },
     tick,
     view,
