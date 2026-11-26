@@ -29,6 +29,8 @@ import { BROWSER_ACT_TOOLS, BROWSER_READ_TOOLS, createBrowserTools, type Browser
 import { COMPUTER_ACT_TOOLS, COMPUTER_READ_TOOLS, createComputerTools, type ComputerAgentHost, type ComputerApproval } from "./computer-tools.js";
 import type { CommandLaunch, CommandPlan } from "./commands.js";
 import type { PlannedEdit } from "./patch.js";
+import type { RemoteWorkspace } from "./remote-workspace.js";
+import { planRemoteCommandCall, planRemotePatchCall } from "./remote-tools.js";
 import { withWorkspaceReferences, type Workspace } from "./workspace.js";
 import { terminalReadTool, type TerminalReadReply, type TerminalReadRequest } from "./terminal-read.js";
 
@@ -71,8 +73,10 @@ export type ApprovalView = {
     /** A click, typing, key or scroll in the one desktop window the user chose for the task. */
     computer?: ComputerApproval;
     error?: string;
-    /** The workspace root the action is in. */
+    /** The workspace root the action is in (on the remote machine, for a remote project). */
     root?: string;
+    /** The action is on another machine, reached over SSH: which one. Commands there are never sandboxed. */
+    remote?: { target: string; folder: string };
     /** A call of an MCP server's tool: which server and tool, and the hash of the server definition the approval is for. */
     mcp?: { server: string; tool: string; definition: string; scope: "user" | "project" };
     /** The subagent (or orchestrated subtask) this request is for, so the person can tell which one is asking. */
@@ -105,6 +109,8 @@ export type RunnerOptions = {
     catalog: CatalogModel[];
     commandEnv: string[];
     launchCommand?: CommandLaunch;
+    /** The project is a folder on another machine: its files and commands go there (remote-tools.ts), never to this computer's disk. */
+    remote?: RemoteWorkspace;
     /** The host confirms commands run in a sandbox it enforces: run_command's description says so. Leave it out and commands are described as not sandboxed. */
     sandboxed?: boolean;
     instructions: string | null;
@@ -383,6 +389,7 @@ export class Runner {
             // One read may use at most about a quarter of the model's window.
             readByteLimit: Math.max(8 * 1024, Math.min(100 * 1024, Math.floor(window * 0.25 * 3))),
             workspace: options.workspace,
+            ...(options.remote ? { remote: options.remote } : {}),
             assertAllowed: options.assertAllowed,
             effectBlockReason: () => this.effectBlockReason(),
             redactText: options.redactText,
@@ -613,14 +620,13 @@ export class Runner {
     }
 
     private systemPrompt() {
-        const { workspace } = this.options;
         const readOnly = this.journal.state.readOnly || this.options.taskPlan === "plan";
         const continued = Boolean(this.journal.state.codeContinuation);
         const plan = this.journal.state.tasks.at(-1)?.plan;
         const shellNote = process.platform === "win32" ? "Windows; run_command `command` runs in Windows PowerShell" : `${process.platform}; run_command \`command\` runs in the user's shell`;
         return [
             `You are ${this.options.productName ?? "Tomverse CLI"}, a coding agent working in the user's folder through tools.`,
-            continued ? "Use project-relative file paths." : `Workspace root: ${workspace.root} (${shellNote}).`,
+            continued ? "Use project-relative file paths." : this.rootLine(shellNote),
             readOnly
                 ? "This session is read-only: you can list, search and read files, but you cannot change files or run commands. Explain what you would change."
                 : "Change files only with apply_patch and run programs only with run_command. The user approves each patch and each command; if one is denied, do not ask for the same thing again -- explain or ask instead.",
@@ -669,6 +675,13 @@ export class Runner {
         ].join("\n");
     }
 
+    /** Where the project is, for the system prompt: a folder here, or a folder on another machine reached over SSH. */
+    private rootLine(shellNote: string) {
+        const { remote, workspace } = this.options;
+        if (!remote) return `Workspace root: ${workspace.root} (${shellNote}).`;
+        return `Workspace root: ${remote.root} on the remote machine ${remote.label}${remote.system ? ` (${remote.system})` : ""}, reached over SSH. File tools and run_command work on that machine only; run_command \`command\` runs in sh there, is not sandboxed, and has no background mode. Use / in paths.`;
+    }
+
     /** The project's instruction files as the system prompt carries them, or what to do when there are none. */
     private instructionsLine() {
         const { instructions } = this.options;
@@ -681,10 +694,9 @@ export class Runner {
 
     /** What a subagent is told about the folder: the same facts and instruction files as the main agent, never its conversation. */
     private workspaceLines() {
-        const { workspace } = this.options;
         const shellNote = process.platform === "win32" ? "Windows; run_command `command` runs in Windows PowerShell" : `${process.platform}; run_command \`command\` runs in the user's shell`;
         return [
-            this.journal.state.codeContinuation ? "Use project-relative file paths." : `Workspace root: ${workspace.root} (${shellNote}).`,
+            this.journal.state.codeContinuation ? "Use project-relative file paths." : this.rootLine(shellNote),
             "Uncommitted changes that were already in the folder belong to the user: keep them, never revert them.",
             "Files that can hold credentials (.env, keys, .git internals) cannot be read; do not ask for them.",
             this.instructionsLine(),
@@ -747,6 +759,7 @@ export class Runner {
     }
 
     private effectBlockReason() {
+        if (this.options.remote?.blockReason) return this.options.remote.blockReason;
         if (this.options.taskPlan === "plan") return "Plan mode only permits read-only work.";
         if (this.options.taskPlan === "agent") {
             const plan = this.currentTask().plan;
@@ -1549,17 +1562,18 @@ export class Runner {
         return lines.join(" ");
     }
 
-    private viewFor(request: PendingApproval): ApprovalView {
-        const view: ApprovalView = { ...request, root: this.options.workspace.root };
+    private async viewFor(request: PendingApproval): Promise<ApprovalView> {
+        const { remote } = this.options;
+        const view: ApprovalView = { ...request, root: remote ? remote.root : this.options.workspace.root, ...(remote ? { remote: { target: remote.label, folder: remote.root } } : {}) };
         const blocked = request.blockedDuringAnalysis ? ANALYSIS_READ_ONLY : this.effectBlockReason();
         if (blocked) return { ...view, error: blocked };
         try {
             if (request.toolName === "apply_patch") {
-                view.patch = planPatchCall(this.toolContext, request.input as never);
+                view.patch = remote ? await planRemotePatchCall(remote, request.input as never, this.controller.signal) : planPatchCall(this.toolContext, request.input as never);
                 view.explanation = (request.input as { explanation?: string }).explanation;
             } else if (request.toolName === "run_command") {
-                view.command = planCommandCall(this.toolContext, request.input as never);
-                if (this.options.sandboxed) view.sandboxed = true;
+                view.command = remote ? await planRemoteCommandCall(remote, this.toolContext, request.input as never, this.controller.signal) : planCommandCall(this.toolContext, request.input as never);
+                if (this.options.sandboxed && !remote) view.sandboxed = true;
             } else if (request.toolName === "web_fetch" && this.options.web) {
                 const target = classifyWebUrl((request.input as { url?: unknown })?.url);
                 if (!target.ok) view.error = target.reason;
@@ -1724,7 +1738,7 @@ export class Runner {
         if (!this.options.prompter || this.controller.signal.aborted) return { approved: false, reason: "No one is available to approve this." };
         // A subtask stopped while it waited its turn is not asked about.
         if (approval?.signal?.aborted) return { approved: false, reason: "The subagent was stopped before this was asked." };
-        const view = this.viewFor({ approvalId: `ap-${randomBytes(6).toString("hex")}`, toolCallId, toolName, input });
+        const view = await this.viewFor({ approvalId: `ap-${randomBytes(6).toString("hex")}`, toolCallId, toolName, input });
         if (approval?.origin) view.origin = approval.origin;
         this.announceApproval(view);
         const blockedByHook = view.error ? undefined : await this.ext.preTool(toolName, input, toolCallId);
@@ -1762,7 +1776,9 @@ export class Runner {
     /** Asks for each pending approval, records the decision with what it is bound to. */
     async answerApprovals(pending: PendingApproval[], denyReason?: string, clarification?: string): Promise<"answered" | "needs_approval"> {
         const { journal, options } = this;
-        const views = pending.map((p) => this.viewFor(p));
+        const views: ApprovalView[] = [];
+        // One at a time: each may look at the remote machine, and a burst of connections is not needed for a card.
+        for (const p of pending) views.push(await this.viewFor(p));
         for (const view of views) {
             this.observePlanCall(view.toolCallId, view.toolName, true);
             this.announceApproval(view);

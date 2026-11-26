@@ -44,8 +44,8 @@ export type ScheduleEngineDeps = {
   now(): number;
   load(): string | null;
   save(text: string): void;
-  /** The OS sandbox as this computer enforces it now (read again at every save and every run). */
-  sandbox(): Promise<SandboxFacts>;
+  /** The OS sandbox as this computer enforces it now (read again at every save and every run), for a schedule of this project. A project on another machine has none. */
+  sandbox(project?: string | null): Promise<SandboxFacts>;
   /** Whether the open project is a Git repository, which a new-worktree schedule needs. */
   gitProject(): boolean;
   /** The folder of the open project, or null when none is open. A schedule belongs to the project it was saved in. */
@@ -170,7 +170,7 @@ export class ScheduleEngine {
   }
 
   private async start(item: StoredItem, scheduledFor: number): Promise<ScheduleRefusal | null> {
-    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.gitFor(item.project) };
+    const facts = { sandbox: await this.refreshSandbox(item.project), gitProject: this.gitFor(item.project) };
     const problem = scheduleShapeProblem(item, facts);
     if (problem) {
       this.finishRun(item, this.addRun(item, scheduledFor, { status: "failed" }), "failed", problem === "needs-sandbox" ? "sandbox" : "worktree");
@@ -233,8 +233,8 @@ export class ScheduleEngine {
     return project !== null && project === this.deps.openProject() ? this.deps.gitProject() : true;
   }
 
-  private async refreshSandbox() {
-    try { this.sandboxFacts = await this.deps.sandbox(); } catch { this.sandboxFacts = { mode: "off", available: false, writes: "none" }; }
+  private async refreshSandbox(project: string | null = this.deps.openProject()) {
+    try { this.sandboxFacts = await this.deps.sandbox(project); } catch { this.sandboxFacts = { mode: "off", available: false, writes: "none" }; }
     return this.sandboxFacts;
   }
 
@@ -291,7 +291,7 @@ export class ScheduleEngine {
       const bad = timingProblem(timing, this.deps.now());
       if (bad) return bad;
     }
-    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.gitFor(stored?.project ?? this.deps.openProject()) };
+    const facts = { sandbox: await this.refreshSandbox(stored?.project ?? this.deps.openProject()), gitProject: this.gitFor(stored?.project ?? this.deps.openProject()) };
     return scheduleShapeProblem(item, facts);
   }
 
@@ -308,7 +308,7 @@ export class ScheduleEngine {
     if (!this.deps.modelAvailable(input.model)) return { ok: false, reason: "model-unavailable" };
     const bad = timingProblem(input.timing, this.deps.now());
     if (bad) return { ok: false, reason: bad };
-    const facts = { sandbox: await this.refreshSandbox(), gitProject: this.gitFor(project) };
+    const facts = { sandbox: await this.refreshSandbox(project), gitProject: this.gitFor(project) };
     const problem = scheduleShapeProblem(input, facts);
     if (problem) return { ok: false, reason: problem };
     const fields = { name: input.name, prompt: input.prompt, timing: input.timing, workspace: input.workspace, taskMode: input.taskMode,

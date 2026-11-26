@@ -122,55 +122,65 @@ export const planPatch = (workspace: Workspace, edits: PatchEdit[]): PlannedEdit
         if (exists && !statSync(resolved.absolute).isFile()) throw new PatchError(`${resolved.relative} is not a regular file.`);
         const binding = bindFile(resolved.absolute);
         const bytes = exists ? readFileSync(resolved.absolute) : null;
-        const preimage = bytes ? sha256(bytes) : null;
-        if (edit.action === "create") {
-            if (exists) throw new PatchError(`${resolved.relative} already exists; use an update.`);
-            if (typeof edit.content !== "string") throw new PatchError(`Creating ${resolved.relative} needs content.`);
-            assertShowable(edit.content, `The content of ${resolved.relative}`);
-            // CR only as consistent CRLF line endings, which the approval states.
-            const crlf = edit.content.includes("\r");
-            if (crlf && !consistentCrlf(edit.content)) {
-                throw new PatchError(`The content of ${resolved.relative} mixes CR with LF line endings; use LF, or CRLF on every line.`);
-            }
-            const afterBytes = Buffer.from(edit.content, "utf8");
-            return { path: resolved.relative, absolute: resolved.absolute, action: "create", preimage, beforeText: null, afterText: edit.content, afterBytes, postimage: sha256(afterBytes), eol: crlf ? "crlf" : "none", bom: false, binding };
-        }
-        if (!exists || !bytes) throw new PatchError(`${resolved.relative} does not exist.`);
-        const { text, bom, eol } = decode(bytes, resolved.relative);
-        if (edit.action === "delete") {
-            return { path: resolved.relative, absolute: resolved.absolute, action: "delete", preimage, beforeText: text, afterText: null, afterBytes: null, postimage: null, eol, bom, binding };
-        }
-        if (edit.action !== "update") throw new PatchError(`Unknown action for ${resolved.relative}.`);
-        if (!Array.isArray(edit.replacements) || edit.replacements.length === 0) {
-            throw new PatchError(`Updating ${resolved.relative} needs replacements.`);
-        }
-        const normalize = eol === "crlf";
-        let working = normalize ? text.replaceAll("\r\n", "\n") : text;
-        for (const [index, replacement] of edit.replacements.entries()) {
-            if (typeof replacement.old !== "string" || typeof replacement.new !== "string" || replacement.old.length === 0) {
-                throw new PatchError(`Replacement ${index + 1} for ${resolved.relative} needs non-empty old text and new text.`);
-            }
-            assertShowable(replacement.new, `Replacement ${index + 1} for ${resolved.relative}`);
-            // A CR is never added or removed on its own: in a CRLF file the
-            // endings are the file's, elsewhere an edit cannot carry a CR.
-            const carriesCr = (normalize ? replacement.new.replaceAll("\r\n", "\n") : replacement.new).includes("\r") || (!normalize && replacement.old.includes("\r"));
-            if (carriesCr) {
-                throw new PatchError(
-                    `Replacement ${index + 1} for ${resolved.relative} contains a carriage return; ${eol === "mixed" ? "this file mixes line endings, so" : "in this file"} an edit cannot add or remove CR characters. Leave line endings out of old and new text.`
-                );
-            }
-            const oldText = normalize ? replacement.old.replaceAll("\r\n", "\n") : replacement.old;
-            const newText = normalize ? replacement.new.replaceAll("\r\n", "\n") : replacement.new;
-            const count = countOccurrences(working, oldText);
-            if (count === 0) throw new PatchError(`Replacement ${index + 1}: the old text was not found in ${resolved.relative}. Read the file again.`);
-            if (count > 1) throw new PatchError(`Replacement ${index + 1}: the old text occurs ${count} times in ${resolved.relative}; include more context so it is unique.`);
-            working = working.replace(oldText, () => newText);
-        }
-        const afterText = normalize ? working.replaceAll("\n", "\r\n") : working;
-        if (afterText === text) throw new PatchError(`The replacements leave ${resolved.relative} unchanged.`);
-        const afterBytes = encode(afterText, bom);
-        return { path: resolved.relative, absolute: resolved.absolute, action: "update", preimage, beforeText: text, afterText, afterBytes, postimage: sha256(afterBytes), eol, bom, binding };
+        return planEditContent(edit, resolved.relative, resolved.absolute, bytes, binding);
     });
+};
+
+/**
+ * What one edit does to a file, from the file as it is now (its bytes, or null when it does not exist). The part of planning
+ * that does not touch a disk, so a remote folder is planned by the same rules.
+ */
+export const planEditContent = (edit: PatchEdit, relativePath: string, absolutePath: string, bytes: Buffer | null, binding: FileBinding): PlannedEdit => {
+    const resolved = { relative: relativePath, absolute: absolutePath };
+    const exists = bytes !== null;
+    const preimage = bytes ? sha256(bytes) : null;
+    if (edit.action === "create") {
+        if (exists) throw new PatchError(`${resolved.relative} already exists; use an update.`);
+        if (typeof edit.content !== "string") throw new PatchError(`Creating ${resolved.relative} needs content.`);
+        assertShowable(edit.content, `The content of ${resolved.relative}`);
+        // CR only as consistent CRLF line endings, which the approval states.
+        const crlf = edit.content.includes("\r");
+        if (crlf && !consistentCrlf(edit.content)) {
+            throw new PatchError(`The content of ${resolved.relative} mixes CR with LF line endings; use LF, or CRLF on every line.`);
+        }
+        const afterBytes = Buffer.from(edit.content, "utf8");
+        return { path: resolved.relative, absolute: resolved.absolute, action: "create", preimage, beforeText: null, afterText: edit.content, afterBytes, postimage: sha256(afterBytes), eol: crlf ? "crlf" : "none", bom: false, binding };
+    }
+    if (!exists || !bytes) throw new PatchError(`${resolved.relative} does not exist.`);
+    const { text, bom, eol } = decode(bytes, resolved.relative);
+    if (edit.action === "delete") {
+        return { path: resolved.relative, absolute: resolved.absolute, action: "delete", preimage, beforeText: text, afterText: null, afterBytes: null, postimage: null, eol, bom, binding };
+    }
+    if (edit.action !== "update") throw new PatchError(`Unknown action for ${resolved.relative}.`);
+    if (!Array.isArray(edit.replacements) || edit.replacements.length === 0) {
+        throw new PatchError(`Updating ${resolved.relative} needs replacements.`);
+    }
+    const normalize = eol === "crlf";
+    let working = normalize ? text.replaceAll("\r\n", "\n") : text;
+    for (const [index, replacement] of edit.replacements.entries()) {
+        if (typeof replacement.old !== "string" || typeof replacement.new !== "string" || replacement.old.length === 0) {
+            throw new PatchError(`Replacement ${index + 1} for ${resolved.relative} needs non-empty old text and new text.`);
+        }
+        assertShowable(replacement.new, `Replacement ${index + 1} for ${resolved.relative}`);
+        // A CR is never added or removed on its own: in a CRLF file the
+        // endings are the file's, elsewhere an edit cannot carry a CR.
+        const carriesCr = (normalize ? replacement.new.replaceAll("\r\n", "\n") : replacement.new).includes("\r") || (!normalize && replacement.old.includes("\r"));
+        if (carriesCr) {
+            throw new PatchError(
+                `Replacement ${index + 1} for ${resolved.relative} contains a carriage return; ${eol === "mixed" ? "this file mixes line endings, so" : "in this file"} an edit cannot add or remove CR characters. Leave line endings out of old and new text.`
+            );
+        }
+        const oldText = normalize ? replacement.old.replaceAll("\r\n", "\n") : replacement.old;
+        const newText = normalize ? replacement.new.replaceAll("\r\n", "\n") : replacement.new;
+        const count = countOccurrences(working, oldText);
+        if (count === 0) throw new PatchError(`Replacement ${index + 1}: the old text was not found in ${resolved.relative}. Read the file again.`);
+        if (count > 1) throw new PatchError(`Replacement ${index + 1}: the old text occurs ${count} times in ${resolved.relative}; include more context so it is unique.`);
+        working = working.replace(oldText, () => newText);
+    }
+    const afterText = normalize ? working.replaceAll("\n", "\r\n") : working;
+    if (afterText === text) throw new PatchError(`The replacements leave ${resolved.relative} unchanged.`);
+    const afterBytes = encode(afterText, bom);
+    return { path: resolved.relative, absolute: resolved.absolute, action: "update", preimage, beforeText: text, afterText, afterBytes, postimage: sha256(afterBytes), eol, bom, binding };
 };
 
 export const currentDigest = (absolute: string) => {

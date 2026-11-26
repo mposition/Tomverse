@@ -88,6 +88,10 @@ import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
 import { localExtensionsCommand } from "../local-extensions-contract";
 import { codeSandboxInput } from "../code-sandbox-contract";
 import { codeSandboxView, readCodeSandboxSettings } from "./code-sandbox";
+import { remoteProjectInput } from "../remote-contract";
+import { createRemoteProjectHost } from "./remote-project-host";
+import { isRemoteShadow, setRemoteShadowBase, sshEnvironmentForRuntime, sshRunnerFor } from "./remote-project";
+import type { SandboxFacts } from "../schedule-policy";
 import { sandboxEnforcement } from "../../../tomverse-cli/src/sandbox.js";
 import { createPluginsHost } from "./plugins-host";
 import { pluginsCommand } from "../plugins-contract";
@@ -179,6 +183,8 @@ const fixtureSchema = z.object({
   minimax: cliFixtureInput.optional(),
   grok: cliFixtureInput.optional(),
   antigravity: cliFixtureInput.optional(),
+  /** A stand-in program for ssh (a test runs its own fake machine through it). Read only where fixtures are allowed. */
+  sshFixture: z.object({ file: z.string().min(1), args: z.array(z.string()) }).strict().optional(),
 }).strict().refine(({ codex, claude, qwen, kimi, vibe, deepseek, zcode, minimax, grok, antigravity }) =>
   [codex, claude, qwen, kimi, vibe, deepseek, zcode, minimax, grok, antigravity].filter(Boolean).length <= 1);
 
@@ -489,6 +495,8 @@ function broadcast() {
   state.codeBrowserAgent = browserTools().agent;
   computer.host.refresh();
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
+  state.remote = remoteHost.snapshot();
+  state.remoteEnabled = remoteHost.enabled();
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.deviceFixtureAvailable = accountPermissionsFixture();
@@ -1132,6 +1140,7 @@ function onWorkerMessage(event: WorkerEvent) {
     const discarded = event.runId === discardedRunId;
     if (discarded && event.type !== "finished") return;
     if ("task" in event && state.task?.worktree?.path === event.task.root) event.task.worktree = state.task.worktree;
+    if ("task" in event && event.task.entries.some((entry) => entry.role === "event" && entry.notice === "remoteLost")) remoteHost.markLost();
     if (event.type === "approval") {
       if (state.task?.status === "stopping") return;
       // While other tasks run too, the card says which task it is from.
@@ -1339,6 +1348,51 @@ function checkpointNativeTurn(task: Task, force = false) {
 
 const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
 const codeSandboxDirectory = () => join(app.getPath("userData"), "code-sandbox");
+const remoteSettingsDirectory = () => join(app.getPath("userData"), "remote-projects");
+/** The empty local folders that stand for remote projects (outside the app's data folder, which no project may be in). */
+const remoteShadowDirectory = () => join(DESKTOP_FIXTURE_ALLOWED && fixture ? dirname(app.getPath("userData")) : app.getPath("appData"), "Tomverse Desktop Remote Projects");
+setRemoteShadowBase(remoteShadowDirectory());
+const remoteSshFixture = () => (DESKTOP_FIXTURE_ALLOWED ? fixture?.sshFixture : undefined);
+const remoteWorkerEnvironment = () => ({
+  TOMVERSE_DESKTOP_REMOTE_PROJECTS: remoteShadowDirectory(), TOMVERSE_DESKTOP_REMOTE_SETTINGS: remoteSettingsDirectory(),
+  TOMVERSE_DESKTOP_SSH_ENV: sshEnvironmentForRuntime(),
+  ...(remoteSshFixture() ? { TOMVERSE_DESKTOP_SSH_FIXTURE: JSON.stringify(remoteSshFixture()) } : {}),
+});
+
+const remoteHost = createRemoteProjectHost({
+  settingsDirectory: remoteSettingsDirectory,
+  runner: () => sshRunnerFor({ forwardedEnvironment: sshEnvironmentForRuntime(), fixture: remoteSshFixture() }),
+  sandboxOn: () => readCodeSandboxSettings(codeSandboxDirectory()).mode !== "off",
+  canChange: () => !state.busy && !pendingMutation && !choosing && !closing && !signingOut && !suspended,
+  open: (project) => chooseRemote(project),
+  current: () => (projectRoot?.remote ? { project: projectRoot, target: projectRoot.remote } : null),
+  changed: () => broadcast(),
+});
+
+/** Makes a remote project the open project. There is no folder to look at on this computer and no Git project: the worktree choice is not offered. */
+async function chooseRemote(project: ProjectRoot) {
+  if (!project.remote || state.busy || pendingMutation || choosing) return false;
+  choosing = true;
+  try {
+    assertProjectRoot(project);
+    if (state.root !== project.path || projectRoot?.identity !== project.identity) {
+      codeReferences.clear();
+      workspaceHandoff = null;
+    }
+    projectRoot = project;
+    codeGitProject = null;
+    codeWorktreeDraft = undefined;
+    state.root = project.path;
+    state.project = `${project.remote.destination}:${project.remote.folder}`;
+    discardTransientTask(state.task);
+    state.task = null;
+    refreshHistory();
+    broadcast();
+    return true;
+  } finally {
+    choosing = false;
+  }
+}
 
 /** One Code runtime process. The open task and every task that runs next to it each get one of their own. */
 function forkRunner() {
@@ -1347,7 +1401,7 @@ function forkRunner() {
   )) as Record<string, string>;
   return utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
     env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
-      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory() },
+      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory(), ...remoteWorkerEnvironment() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
 }
@@ -1467,8 +1521,8 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
   const window = mainWindow;
   const session = chatSession.signal;
   const connection = codeConnection();
-  if (!root || !project || !namespace || !connection || !window || window.isDestroyed() || state.busy || choosing || signingOut || closing) {
-    throw new Error("Open a connected Code project to attach files or folders.");
+  if (!root || !project || project.remote || !namespace || !connection || !window || window.isDestroyed() || state.busy || choosing || signingOut || closing) {
+    throw new Error("Open a connected Code project of this computer to attach files or folders.");
   }
   choosing = true;
   try {
@@ -1907,7 +1961,7 @@ function reviewTarget(): ReviewTarget | null {
   const task = state.task;
   const record = selectedRecord();
   if (!task?.id || !record || record.sessionId !== task.id || task.savedLocally === false || record.storage === null || task.unreadable ||
-      task.execution?.executionMode !== "tomverse_api" || task.continuation || task.cliContinuation) return null;
+      record.project.remote || task.execution?.executionMode !== "tomverse_api" || task.continuation || task.cliContinuation) return null;
   const worktree = "worktree" in record ? record.worktree : undefined;
   try { assertProjectRoot(record.project); } catch { return null; }
   if (worktree?.unavailable) return null;
@@ -2685,7 +2739,7 @@ const terminalHost = new TerminalHost({
 });
 
 function terminalProjectOpen() {
-  return Boolean(projectRoot && currentHistoryScope() && codeConnection() && !signingOut && !invalidatingSession && !closing);
+  return Boolean(projectRoot && !projectRoot.remote && currentHistoryScope() && codeConnection() && !signingOut && !invalidatingSession && !closing);
 }
 
 function terminalAvailable() {
@@ -2727,7 +2781,7 @@ function loadCodeTerminal() {
 /** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
 function codeRunTools() {
   const { agent, inspection } = browserTools();
-  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled ? { terminalRead: true } : {}) };
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
@@ -3306,7 +3360,7 @@ async function readTaskPullCommand(value: unknown) {
 
 /** The folder the Git panel works on: the open task's own worktree, else the project. Null when it changed since it was chosen. */
 function gitTarget() {
-  if (!projectRoot || closing || signingOut) return null;
+  if (!projectRoot || projectRoot.remote || closing || signingOut) return null;
   try {
     const worktree = state.task?.worktree;
     const scope = currentHistoryScope();
@@ -3371,6 +3425,11 @@ async function replyToGitAction(event: Extract<WorkerEvent, { type: "git-action"
   }
 }
 
+/** The sandbox as a schedule of this project may rely on it: commands of a project on another machine run outside it, so for them it is as good as off. */
+async function scheduleSandboxFactsFor(project?: string | null): Promise<SandboxFacts> {
+  return project && isRemoteShadow(project) ? { mode: "off", available: false, writes: "none" } : scheduleSandboxFacts();
+}
+
 /** What the OS sandbox enforces on this computer for the mode the person set, read now. */
 async function scheduleSandboxFacts() {
   const settings = readCodeSandboxSettings(codeSandboxDirectory());
@@ -3411,7 +3470,7 @@ const parallel = createParallelHost({
     hasAccount: () => codeConnection() !== null && !signingOut && !invalidatingSession && !closing,
     owner: () => { const connection = codeConnection(); return !connection ? null : linkedCode?.connection === connection ? linkedCode.accountId : "fixture"; },
     modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
-    sandbox: scheduleSandboxFacts,
+    sandbox: scheduleSandboxFactsFor,
     launch: (item, run, lanes, approvalWaitMs) => launchScheduledRun({
       protectedRoot: app.getPath("userData"),
       connection: () => (signingOut || invalidatingSession || closing || suspended ? null : codeConnection()),
@@ -3424,7 +3483,7 @@ const parallel = createParallelHost({
       worktreeHome: managedWorktreeHome,
       permissionHome: () => permissionHost.home,
       modelAvailable: (model) => state.models.some((candidate) => candidate.id === model),
-      sandbox: scheduleSandboxFacts,
+      sandbox: scheduleSandboxFactsFor,
     }, item, run, lanes, approvalWaitMs),
   },
 });
@@ -3613,6 +3672,9 @@ function registerIpc() {
     if (route.executionMode !== "tomverse_api") throw new Error("The selected Code execution route is unavailable.");
     if (executionMode && executionMode !== route.executionMode) throw new Error("The Code execution route changed. Check the selected route and try again.");
     const input = { ...draft, prompt: withHandoffExcerpt("code", draft.prompt, handoffId) };
+    if (sourceProject.remote && (!remoteHost.enabled() || route.executionMode !== "tomverse_api" || draft.pluginConnectionId)) {
+      throw new Error(remoteHost.enabled() ? "Remote projects run through the Tomverse API route." : desktopNativeCopy.en.remoteDisabled);
+    }
     if (workspace?.kind === "worktree" && draft.mode !== "agent") throw new Error("Select Agent to start a worktree.");
     assertProjectRoot(sourceProject);
     let worktree: ManagedWorktree | undefined;
@@ -3780,6 +3842,7 @@ function registerIpc() {
     return localExtensionsReply(projectRoot?.path ?? null, command);
   });
   main("desktop:code-sandbox", (value) => codeSandboxView(codeSandboxDirectory(), codeSandboxInput.parse(value)));
+  main("desktop:remote-project", (value) => remoteHost.run(remoteProjectInput.parse(value)));
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);
     const task = state.task;

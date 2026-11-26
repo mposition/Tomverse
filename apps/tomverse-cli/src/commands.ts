@@ -65,7 +65,7 @@ export class CommandError extends Error {}
 const MAX_TIMEOUT_MS = 30 * 60_000;
 
 /** As for patches: what the approval cannot show as it is never reaches a command. Tab is allowed. */
-const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
+export const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
 
 const windowsSystemRoot = (env: NodeJS.ProcessEnv = process.env) => env.SystemRoot ?? env.SYSTEMROOT ?? "C:\\Windows";
 
@@ -152,7 +152,7 @@ export const planCommand = (input: CommandInput, cwd: string, defaultTimeoutMs: 
 const LIMIT = 32 * 1024;
 
 /** Keeps the first and last 32 KB of a stream and counts what was left out. */
-class BoundedCapture {
+export class BoundedCapture {
     private head: Buffer[] = [];
     private headBytes = 0;
     private tail: Buffer[] = [];

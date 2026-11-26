@@ -126,6 +126,7 @@ if (trustedWindow) {
     codeExtensions: (input: Parameters<DesktopApi["codeExtensions"]>[0]) => ipcRenderer.invoke("desktop:code-extensions", input),
     localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),
     codeSandbox: (input: Parameters<DesktopApi["codeSandbox"]>[0]) => ipcRenderer.invoke("desktop:code-sandbox", input),
+    remoteProject: (input: Parameters<DesktopApi["remoteProject"]>[0]) => ipcRenderer.invoke("desktop:remote-project", input),
     plugins: (command: Parameters<DesktopApi["plugins"]>[0]) => ipcRenderer.invoke("desktop:plugins", command),
     startParallel: (input: Parameters<DesktopApi["startParallel"]>[0]) => ipcRenderer.invoke("desktop:start-parallel", input),
     parallel: (command: Parameters<DesktopApi["parallel"]>[0]) => ipcRenderer.invoke("desktop:parallel", command),

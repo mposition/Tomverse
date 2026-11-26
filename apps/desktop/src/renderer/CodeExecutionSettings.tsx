@@ -14,6 +14,7 @@ import { CodeExtensionsSettings } from "./CodeExtensions";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
 import { CodeSandboxSettings } from "./CodeSandboxSettings";
 import { CodeCloudSettings } from "./CodeCloudSettings";
+import { RemoteProjectPanel } from "./RemoteProject";
 import { PluginsPanel } from "./PluginsPanel";
 import { CodeBrowserSettings } from "./CodeBrowserSettings";
 import { CodeComputerSettings } from "./CodeComputerSettings";
@@ -217,6 +218,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
     <CodeComputerSettings language={language} />
     <CodeSandboxSettings language={language} />
     <CodeCloudSettings language={language} enabled={snapshot?.capabilities?.managedCode === true} />
+    <RemoteProjectPanel language={language} withSwitch />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}
   </section>;
 }

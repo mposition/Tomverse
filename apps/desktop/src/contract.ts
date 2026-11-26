@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
 import type { CodeSandboxInput, CodeSandboxView } from "./code-sandbox-contract";
+import type { RemoteProjectInput, RemoteProjectReply, RemoteSnapshot } from "./remote-contract";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
 import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
 import type { AssistantImportAction, AssistantImportInput, AssistantImportResult } from "./assistant-import-contract";
@@ -408,6 +409,10 @@ export type Snapshot = {
   parallel?: ParallelView;
   /** Scheduled runs: the schedules, their run records and what the schedule form needs to know. */
   schedules?: ScheduleView;
+  /** The open project is a folder on another machine (SSH): which one, and whether it is reachable. Null for a project of this computer. */
+  remote?: RemoteSnapshot | null;
+  /** The switch for remote projects is on: the start screen offers them. */
+  remoteEnabled?: boolean;
 };
 
 export type ApprovalRequest = {
@@ -416,6 +421,8 @@ export type ApprovalRequest = {
   language?: Language;
   id: string;
   root: string;
+  /** The action is on another machine (SSH), and the card says which. */
+  remote?: { target: string; folder: string };
   tool: string;
   explanation?: string;
   canRemember: boolean;
@@ -484,6 +491,7 @@ export type DesktopApi = {
   codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
   localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
   codeSandbox(input: CodeSandboxInput): Promise<CodeSandboxView>;
+  remoteProject(input: RemoteProjectInput): Promise<RemoteProjectReply>;
   plugins(command: PluginsCommand): Promise<PluginsView>;
   /** Starts a task next to the open one (its own runtime process), and acts on the tasks in the activity list. */
   startParallel(input: StartInput): Promise<void>;

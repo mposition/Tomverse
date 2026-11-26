@@ -2,11 +2,15 @@ import { lstatSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync 
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { normalizeRoot, same, sha256 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock } from "../../../tomverse-cli/src/session.js";
+import type { RemoteTarget } from "../../../tomverse-cli/src/remote-target.js";
+import { remoteOfPath } from "./remote-project";
 
 export type ProjectRoot = {
   path: string;
   identity: string;
   worktree?: { checkout: string; gitDirectory: string; branch: string };
+  /** The project is a folder on another machine and `path` is the local folder that stands for it (remote-project.ts). */
+  remote?: RemoteTarget;
 };
 
 export function inProjectFolder(root: string, path: string) {
@@ -38,7 +42,8 @@ export function bindProjectRoot(path: string): ProjectRoot {
   const canonical = normalizeRoot(path);
   if (process.platform === "win32" && /^[\\/]{2}/.test(canonical)) throw new Error("Choose a local project folder.");
   const { dev, ino } = statSync(canonical, { bigint: true });
-  return { path: canonical, identity: `${dev}:${ino}` };
+  const remote = remoteOfPath(canonical);
+  return { path: canonical, identity: `${dev}:${ino}`, ...(remote ? { remote } : {}) };
 }
 
 export function assertProjectRoot(project: ProjectRoot) {
