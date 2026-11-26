@@ -60,6 +60,14 @@ export type PlanChangeCopy = {
   upgradeDoneBody: string;
   retry: string;
   contactSupport: string;
+  /** Settings > Plan buttons that open this screen. */
+  settingsUpgradeTo: (plan: string) => string;
+  settingsChangeTo: (plan: string) => string;
+  /** Settings > Plan control that undoes a scheduled cancellation. */
+  resumeRenewalButton: string;
+  resumeRenewalDone: string;
+  resumeRenewalFailed: string;
+  resumeRenewalBlocked: string;
   errors: Record<PlanChangeCopyErrorCode, string>;
 };
 
@@ -167,6 +175,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} is active`,
     upgradeDoneBody: "The payment went through and the new plan is in effect.",
     retry: "Try again",
+    settingsUpgradeTo: (plan) => `Upgrade to ${plan}`,
+    settingsChangeTo: (plan) => `Change to ${plan}`,
+    resumeRenewalButton: "Turn automatic renewal back on",
+    resumeRenewalDone: "Automatic renewal is back on. Your plan renews at the end of this period.",
+    resumeRenewalFailed: "Automatic renewal could not be turned back on. Please try again.",
+    resumeRenewalBlocked: "Automatic renewal cannot be turned back on while an account deletion or a refund request is pending. Contact support.",
     contactSupport: "Contact support",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "You are already on this plan.",
@@ -240,6 +254,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan}이 적용되었습니다`,
     upgradeDoneBody: "결제가 완료되어 새 플랜이 적용되었습니다.",
     retry: "다시 시도",
+    settingsUpgradeTo: (plan) => `${plan}로 업그레이드`,
+    settingsChangeTo: (plan) => `${plan}로 변경`,
+    resumeRenewalButton: "자동 갱신 다시 켜기",
+    resumeRenewalDone: "자동 갱신을 다시 켰습니다. 이번 기간이 끝나면 플랜이 갱신됩니다.",
+    resumeRenewalFailed: "자동 갱신을 다시 켜지 못했습니다. 다시 시도해 주세요.",
+    resumeRenewalBlocked: "계정 삭제나 환불 요청이 진행 중일 때는 자동 갱신을 다시 켤 수 없습니다. 고객지원에 문의해 주세요.",
     contactSupport: "고객지원 문의",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "이미 이 플랜을 사용 중입니다.",
@@ -312,6 +332,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} 已生效`,
     upgradeDoneBody: "付款已完成，新方案已生效。",
     retry: "重试",
+    settingsUpgradeTo: (plan) => `升级到 ${plan}`,
+    settingsChangeTo: (plan) => `变更为 ${plan}`,
+    resumeRenewalButton: "重新开启自动续费",
+    resumeRenewalDone: "已重新开启自动续费。本周期结束时套餐将续订。",
+    resumeRenewalFailed: "无法重新开启自动续费，请重试。",
+    resumeRenewalBlocked: "账户删除或退款申请处理中时无法重新开启自动续费。请联系客服。",
     contactSupport: "联系支持",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "你已经在使用此方案。",
@@ -379,6 +405,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} 已生效`,
     upgradeDoneBody: "付款已完成，新方案已生效。",
     retry: "重試",
+    settingsUpgradeTo: (plan) => `升級到 ${plan}`,
+    settingsChangeTo: (plan) => `變更為 ${plan}`,
+    resumeRenewalButton: "重新開啟自動續訂",
+    resumeRenewalDone: "已重新開啟自動續訂。本週期結束時方案將續訂。",
+    resumeRenewalFailed: "無法重新開啟自動續訂，請再試一次。",
+    resumeRenewalBlocked: "帳戶刪除或退款申請處理中時無法重新開啟自動續訂。請聯絡客服。",
     contactSupport: "聯絡支援",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "您已在使用此方案。",
@@ -446,6 +478,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} est actif`,
     upgradeDoneBody: "Le paiement a abouti et la nouvelle offre est active.",
     retry: "Réessayer",
+    settingsUpgradeTo: (plan) => `Passer à ${plan}`,
+    settingsChangeTo: (plan) => `Changer pour ${plan}`,
+    resumeRenewalButton: "Réactiver le renouvellement automatique",
+    resumeRenewalDone: "Le renouvellement automatique est réactivé. Votre formule sera renouvelée à la fin de cette période.",
+    resumeRenewalFailed: "Le renouvellement automatique n'a pas pu être réactivé. Veuillez réessayer.",
+    resumeRenewalBlocked: "Le renouvellement automatique ne peut pas être réactivé tant qu'une suppression de compte ou une demande de remboursement est en cours. Contactez le support.",
     contactSupport: "Contacter le support",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "Vous utilisez déjà cette offre.",
@@ -520,6 +558,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} ist aktiv`,
     upgradeDoneBody: "Die Zahlung war erfolgreich und der neue Tarif gilt.",
     retry: "Erneut versuchen",
+    settingsUpgradeTo: (plan) => `Auf ${plan} upgraden`,
+    settingsChangeTo: (plan) => `Zu ${plan} wechseln`,
+    resumeRenewalButton: "Automatische Verlängerung wieder einschalten",
+    resumeRenewalDone: "Die automatische Verlängerung ist wieder eingeschaltet. Ihr Tarif verlängert sich am Ende dieses Zeitraums.",
+    resumeRenewalFailed: "Die automatische Verlängerung konnte nicht wieder eingeschaltet werden. Bitte versuchen Sie es erneut.",
+    resumeRenewalBlocked: "Solange eine Kontolöschung oder ein Erstattungsantrag läuft, kann die automatische Verlängerung nicht wieder eingeschaltet werden. Wenden Sie sich an den Support.",
     contactSupport: "Support kontaktieren",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "Sie nutzen diesen Tarif bereits.",
@@ -594,6 +638,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} está activo`,
     upgradeDoneBody: "El pago se completó y el nuevo plan ya está activo.",
     retry: "Reintentar",
+    settingsUpgradeTo: (plan) => `Mejorar a ${plan}`,
+    settingsChangeTo: (plan) => `Cambiar a ${plan}`,
+    resumeRenewalButton: "Reactivar la renovación automática",
+    resumeRenewalDone: "La renovación automática está activa de nuevo. Su plan se renovará al final de este período.",
+    resumeRenewalFailed: "No se pudo reactivar la renovación automática. Inténtelo de nuevo.",
+    resumeRenewalBlocked: "No se puede reactivar la renovación automática mientras haya una eliminación de cuenta o una solicitud de reembolso pendiente. Contacte con soporte.",
     contactSupport: "Contactar con soporte",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "Ya tienes este plan.",
@@ -668,6 +718,12 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     upgradeDoneTitle: (plan) => `${plan} está ativo`,
     upgradeDoneBody: "O pagamento foi concluído e o novo plano está em vigor.",
     retry: "Tentar novamente",
+    settingsUpgradeTo: (plan) => `Mudar para ${plan}`,
+    settingsChangeTo: (plan) => `Alterar para ${plan}`,
+    resumeRenewalButton: "Reativar a renovação automática",
+    resumeRenewalDone: "A renovação automática foi reativada. O seu plano é renovado no fim deste período.",
+    resumeRenewalFailed: "Não foi possível reativar a renovação automática. Tente novamente.",
+    resumeRenewalBlocked: "Não é possível reativar a renovação automática enquanto houver uma eliminação de conta ou um pedido de reembolso pendente. Contacte o suporte.",
     contactSupport: "Contactar o suporte",
     errors: {
       PLAN_CHANGE_NOT_SUPPORTED: "Já tem este plano.",

@@ -36,7 +36,12 @@ import {
   planCreditsAfterPlanChange,
   type PlanChangeCreditOutcome,
 } from "@/lib/planChangeCredits";
+import {
+  PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+  PLAN_CHANGE_UPGRADED_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
 import { prisma } from "@/lib/prisma";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { getStripe } from "@/lib/stripe";
 import {
   PLAN_CHANGE_AUDIT_ACTIONS,
@@ -362,6 +367,62 @@ async function pendingRequest(userId: string) {
   });
 }
 
+/**
+ * Queue the confirmation for a change that has just taken one step.
+ *
+ * Called only from the single write that moved the row (a confirm that turned
+ * `previewed` into `pending`, or a settlement whose conditional update matched),
+ * which is what makes it once per change: the standard lane does not dedupe by
+ * reference. A failure to queue is logged, never thrown -- the change itself
+ * has already happened at Stripe and must not be reported as failed.
+ */
+async function enqueuePlanChangeConfirmation({
+  templateKey,
+  userId,
+  requestId,
+  fromTier,
+  toTier,
+  billingInterval,
+  effectiveAt,
+}: {
+  templateKey:
+    | typeof PLAN_CHANGE_UPGRADED_TEMPLATE
+    | typeof PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE;
+  userId: string;
+  requestId: string;
+  fromTier: string;
+  toTier: string;
+  billingInterval: string;
+  effectiveAt: Date | null;
+}) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, settings: { select: { language: true } } },
+    });
+    if (!user) return;
+    await enqueueStandardEmail({
+      templateKey,
+      emailAddress: user.email,
+      userId,
+      language: user.settings?.language,
+      payload: {
+        fromPlan: fromTier,
+        toPlan: toTier,
+        billingInterval,
+        effectiveAt: effectiveAt ? effectiveAt.toISOString() : null,
+      },
+      referenceType: "PlanChangeRequest",
+      referenceId: requestId,
+    });
+  } catch (error) {
+    console.error("Plan change confirmation email enqueue failed.", {
+      requestId,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+}
+
 async function loadAccount(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -416,16 +477,30 @@ export async function previewPlanChange({
 }: {
   userId: string;
   targetTier: PlanChangeTier;
-  targetInterval: PlanChangeInterval;
+  /**
+   * Omitted by a screen that does not know the account's interval (a
+   * subscription synced before the stored field existed). The change then
+   * stays on the interval Stripe itself reports, which is the only interval a
+   * change is ever allowed on anyway.
+   */
+  targetInterval?: PlanChangeInterval;
   resumeRenewal?: boolean;
 }): Promise<{ ok: true; quote: PlanChangeQuote } | PlanChangeFailure> {
   const context = await loadContext(userId);
   if ("ok" in context) return context;
 
+  const interval = targetInterval ?? context.snapshot.interval;
+  if (!interval) {
+    return fail(
+      "BILLING_INTERVAL_CHANGE_NOT_SUPPORTED",
+      "The subscription interval is unknown, so no same-interval change can be quoted."
+    );
+  }
+
   const decision = resolvePlanChange({
     snapshot: context.snapshot,
     targetTier,
-    targetInterval,
+    targetInterval: interval,
     reservation: context.reservation,
     resumeRenewal,
   });
@@ -640,6 +715,18 @@ export async function confirmPlanChange({
         appliesAt: decision.plan.effectiveAt,
         renewalDecision: decision.plan.renewal,
       },
+    });
+    // The downgrade is decided now (the schedule is attached), so this is the
+    // moment to confirm it. An upgrade is confirmed at settlement instead,
+    // because it only happens once its invoice is paid.
+    await enqueuePlanChangeConfirmation({
+      templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+      userId,
+      requestId: stored.id,
+      fromTier: decision.plan.fromTier,
+      toTier: decision.plan.toTier,
+      billingInterval: decision.plan.interval,
+      effectiveAt: decision.plan.effectiveAt,
     });
     return { ok: true, reservation: viewOf(updated) };
   } catch (error) {
@@ -904,7 +991,20 @@ export async function settlePlanChangesForSubscription(
         ...(next === "failed" ? { failureCode: "pending_update_discarded" } : {}),
       },
     });
-    if (applied.count > 0) settled = next;
+    if (applied.count > 0) {
+      settled = next;
+      if (next === "applied" && row.execution === "immediate_upgrade") {
+        await enqueuePlanChangeConfirmation({
+          templateKey: PLAN_CHANGE_UPGRADED_TEMPLATE,
+          userId: row.userId,
+          requestId: row.id,
+          fromTier: row.fromTier,
+          toTier: row.toTier,
+          billingInterval: row.billingInterval,
+          effectiveAt: periodEndOf(subscription),
+        });
+      }
+    }
   }
 
   return { settled };

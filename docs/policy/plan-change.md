@@ -276,6 +276,8 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
   (`cancellation_cleared_by_explicit_consent`) 일어납니다.
 - **해지 예약 중 다운그레이드는 거부.** 구독이 기간 말에 끝나는데 그 다음 기간에
   Pro를 예약하면 해지된 구독을 조용히 되살립니다. 요청한 것보다 큰 변경입니다.
+  대신 **자동 갱신 다시 켜기**가 별도 control로 있습니다(10절). 사용자는 먼저
+  갱신을 켜고, 그 다음 다운그레이드를 예약합니다. 두 동의가 두 번의 행동입니다.
 - **preview 만료 · stale.** `planChangeStateFingerprint()`가 견적이 의존하는
   구독 사실을 전부 담고, `checkPlanChangePreview()`가 TTL(10분) · 소유자 · 대상 ·
   fingerprint를 확인합니다. 나이가 음수면(앞선 시계가 쓴 record) 영원히 신선한
@@ -439,11 +441,9 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 `resolvePlanCtaState()`에 `change_plan` 상태를 추가하고
 `components/billing/PlanChangeDialog.tsx`를 붙였습니다.
 
-- **CTA 판정.** 활성 구독이 있고 양쪽이 모두 유료 플랜이면 `change_plan`,
-  **단 구독 interval을 알 때만**입니다. 변경은 언제나 이미 청구 중인 interval
-  위에서 일어나므로, interval을 모르면 열어 봐야 confirm에서 거부됩니다 —
-  그런 계정은 계속 `manage_plan`(고객지원)입니다. 필드가 생기기 전에 동기화된
-  구독이 실제로 여기에 해당합니다.
+- **CTA 판정.** 활성 구독이 있고 양쪽이 모두 유료 플랜이면 `change_plan`입니다.
+  (2026-11-26부터 저장된 interval을 몰라도 같습니다 — 서버가 Stripe의 interval로
+  견적합니다. 9절.)
 - **방향은 한 상태로 묶습니다.** 업그레이드와 다운그레이드가 같은 `change_plan`을
   쓰고, 실제 방향은 서버가 confirm 시점에 다시 판정합니다. label만 위·아래를
   구분합니다("Max로 업그레이드" vs "Pro로 변경") — Max 사용자에게 "Pro로
@@ -468,3 +468,54 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   견적, 지원 전용 거부, 더블클릭 1회 전송, Escape·focus 복귀, 320px·200%),
   `tests/purchaseIntent.test.mjs`의 CTA 상태 행렬,
   `tests/e2e/pricing-purchase-cta.spec.ts` 26개.
+
+## 9. 웹 설정 · 결제 주기 · 확인 메일 (2026-11-26)
+
+운영자 요청(2026-11-26): "Pro ↔ Max 플랜 변경을 자유롭게". Pro → Max는 **1절의
+차액 결제(갱신일 유지)를 그대로 씁니다** — 새 주기 + 남은 일수 환불 안과 비교한 뒤
+운영자가 이 안을 골랐습니다. Max → Pro는 2절 그대로입니다.
+
+- **웹 설정 › 플랜 탭이 변경 화면을 엽니다.** 이전에는 Max 사용자에게 변경 버튼이
+  없었고, Pro → Max 버튼은 신규 Checkout을 열어 5절의 `ACTIVE_SUBSCRIPTION_EXISTS`
+  409로 막혔습니다. 이제 활성 웹 구독(`active` · `trialing` · `past_due`)이 있는 Pro ·
+  Max 계정은 `PlanChangeDialog`를 엽니다("Max로 업그레이드" / "Pro로 변경").
+  예약 표시와 취소는 다이얼로그가 이미 합니다(8절).
+- **결제 주기를 몰라도 변경 화면을 엽니다.** `resolvePlanCtaState()`는 더 이상
+  interval을 조건으로 두지 않습니다. 화면이 interval을 모르면 preview 요청에서
+  생략하고, 서버(`previewPlanChange`)가 Stripe에서 다시 읽은 구독의 interval로
+  견적합니다. 동일 interval 규칙(3절)은 그대로이며, Stripe도 interval을 모르면
+  `BILLING_INTERVAL_CHANGE_NOT_SUPPORTED`입니다. 웹 · 데스크톱이 같은 판정을 씁니다.
+- **확인 메일 두 통.** 결제 안내(`billing_welcome`)와 같은 틀(`shell`, 파란 상자)입니다.
+  | 템플릿 | 보내는 시점 |
+  |---|---|
+  | `plan_change_upgraded` | 업그레이드 정산이 `pending → applied`로 바뀐 그 조건부 update 한 번(=청구서 결제 후). 다음 갱신일을 적습니다 |
+  | `plan_change_downgrade_scheduled` | confirm이 schedule을 붙이고 `previewed → pending`으로 바꾼 직후. 적용일과 취소 방법을 적습니다 |
+
+  표준 메일 lane은 reference로 중복을 거르지 않으므로, "변경 한 건에 한 통"은 행을
+  옮긴 단 한 번의 쓰기 뒤에만 enqueue하는 것으로 지킵니다. 웹훅 재전달은 조건부
+  update가 0건이라 메일을 다시 넣지 않습니다. enqueue 실패는 로그만 남기고 변경을
+  실패로 보고하지 않습니다(이미 Stripe에서 일어난 일). 검증:
+  `tests/planChangeEmails.test.mjs`.
+
+## 10. 자동 갱신 다시 켜기 (2026-11-26)
+
+`DELETE /api/billing/cancel-subscription`이 기간 말 해지 예약을 되돌립니다
+(`cancel_at_period_end: false`). 1절의 "업그레이드 확인 하나로 갱신 재개에 동의한
+것으로 보지 않는다"와 같은 원칙으로, **자기 label을 가진 별도 버튼**입니다(웹 설정 ·
+데스크톱 결제 설정의 해지 카드).
+
+- 판단은 저장된 flag가 아니라 **Stripe에서 다시 읽은 구독**으로 합니다. 이미
+  갱신 중이면 성공으로 그대로 답합니다(멱등).
+- `active` · `trialing`이 아니면 409 `SUBSCRIPTION_NOT_CHANGEABLE`.
+- **계정 삭제 예약(`pending_deletion`)이나 대기 중 환불 요청이 있으면 409**
+  (`ACCOUNT_DELETION_PENDING`, `REFUND_REQUEST_PENDING`). 두 흐름 모두 스스로 해지를
+  예약했고, 그 밑에서 갱신을 켜면 떠나거나 환불을 요청한 계정에 다음 결제가 납니다.
+- 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
+
+## 11. Admin › Plans & pricing › Plan changes (2026-11-26)
+
+`/admin/billing?tab=plan-changes`, 읽기 전용입니다. 진행 중(`pending`)인 변경과 최근
+30일에 처리된(`applied` · `cancelled` · `failed`) 변경을 계정 ID · 방향 · 결제 주기 ·
+상태 · 적용 시점 · 확정 · 처리 시각으로 보입니다(AEST). 이메일 · 이름 · 금액은 싣지
+않습니다(5절 감사 원칙과 같음). 예약 취소는 고객이 하고, 정산은 웹훅이 하므로 이
+화면은 아무것도 쓰지 않습니다.

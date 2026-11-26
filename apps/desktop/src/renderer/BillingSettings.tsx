@@ -153,7 +153,7 @@ function BillingPlan({ language }: { language: Language }) {
   const planChange = useBillingRead("planChange");
   const refund = useBillingRead("refundStatus");
   const [view, setView] = useState<{ kind: "overview" } | { kind: "checkout"; planId: "pro" | "max" } |
-    { kind: "change"; tier: "Pro" | "Max"; interval: Interval }>({ kind: "overview" });
+    { kind: "change"; tier: "Pro" | "Max"; interval: Interval | null }>({ kind: "overview" });
   const [cycle, setCycle] = useState<Interval>("monthly");
   // The window and the purchase records are the main process's; this screen only draws them.
   const billingState = useBillingState();
@@ -309,8 +309,8 @@ function BillingPlan({ language }: { language: Language }) {
               {state === "current_plan" ? <span className="billing-badge">{purchase.currentPlan}</span>
                 : state === "upgrade" ? <button type="button" className="primary" disabled={purchaseBusy}
                   onClick={() => { setFailure(undefined); setView({ kind: "checkout", planId }); }}>{purchase.upgradeTo(plan.name)}</button>
-                  : state === "change_plan" && account.subscription.billingInterval ? <button type="button" className="soft"
-                    onClick={() => setView({ kind: "change", tier, interval: account.subscription.billingInterval as Interval })}>
+                  : state === "change_plan" ? <button type="button" className="soft"
+                    onClick={() => setView({ kind: "change", tier, interval: account.subscription.billingInterval })}>
                     {tier === "Max" ? purchase.upgradeTo(plan.name) : purchase.changePlanTo(plan.name)}</button>
                     : <>
                       <small className="billing-muted">{purchase.managePlanHint}</small>
@@ -580,7 +580,8 @@ function CreditPacks({ language, packs, failed, retry, busy, onBuy }: {
 
 /** The web's plan-change dialog, in place: quote first, confirm second, an existing change wins. */
 function PlanChange({ language, tier, interval, onBack, onSettled }: {
-  language: Language; tier: "Pro" | "Max"; interval: Interval; onBack(): void; onSettled(): void;
+  // Null when the account does not know it: the server then quotes on the interval Stripe reports.
+  language: Language; tier: "Pro" | "Max"; interval: Interval | null; onBack(): void; onSettled(): void;
 }) {
   const text = planChangeText(language);
   const desk = desktopBillingCopy(language);
@@ -609,7 +610,8 @@ function PlanChange({ language, tier, interval, onBack, onSettled }: {
         setReservation(existing.value.reservation);
         return setStage("reserved");
       }
-      const result = await billing<"previewPlanChange">({ action: "previewPlanChange", targetTier: tier, billingInterval: interval });
+      const result = await billing<"previewPlanChange">({ action: "previewPlanChange", targetTier: tier,
+        ...(interval ? { billingInterval: interval } : {}) });
       if (!live) return;
       if (!result.ok) { setError(planChangeErrorCode(result)); return setStage("error"); }
       setQuote(result.value.quote);
@@ -708,6 +710,7 @@ function CancelSubscription({ language, account, periodEnd, onSettled }: {
 }) {
   const auth = dictionaries[language].auth;
   const desk = desktopBillingCopy(language);
+  const change = planChangeText(language);
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; failed: boolean }>();
@@ -731,6 +734,18 @@ function CancelSubscription({ language, account, periodEnd, onSettled }: {
       });
     }}>{scheduled ? auth.cancelPlanButtonScheduled : busy ? auth.cancelPlanProcessing : armed ? desk.cancelConfirm : auth.cancelPlanButton}</button>
     {scheduled && <p className="billing-muted">{auth.cancelPlanNotice}</p>}
+    {scheduled && <button type="button" className="primary" disabled={busy} data-testid="native-billing-resume-renewal" onClick={() => {
+      setBusy(true);
+      setMessage(undefined);
+      void billing<"resumeRenewal">({ action: "resumeRenewal" }).then(result => {
+        setMessage(result.ok ? { text: change.resumeRenewalDone, failed: false }
+          : { text: result.code === "ACCOUNT_DELETION_PENDING" || result.code === "REFUND_REQUEST_PENDING"
+            ? change.resumeRenewalBlocked : change.resumeRenewalFailed, failed: true });
+      }, () => setMessage({ text: change.resumeRenewalFailed, failed: true })).finally(() => {
+        setBusy(false);
+        onSettled();
+      });
+    }}>{busy ? change.working : change.resumeRenewalButton}</button>}
     {message && <p className="notice" role={message.failed ? "alert" : "status"}>{message.text}</p>}
   </section>;
 }

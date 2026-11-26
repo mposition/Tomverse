@@ -48,11 +48,14 @@ export const desktopBillingInput = z.discriminatedUnion("action", [
     repeatHold,
   }).strict(),
   z.object({ action: z.literal("buyCreditPack"), packId, currency, language, repeatHold }).strict(),
-  z.object({ action: z.literal("previewPlanChange"), targetTier: changeTier, billingInterval }).strict(),
+  // The interval is omitted when the account does not know it; the server then quotes on Stripe's own.
+  z.object({ action: z.literal("previewPlanChange"), targetTier: changeTier, billingInterval: billingInterval.optional() }).strict(),
   // Only ever the customer's own tick of the separate renewal control.
   z.object({ action: z.literal("confirmPlanChange"), requestId, resumeRenewal: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("cancelPlanChange") }).strict(),
   z.object({ action: z.literal("cancelSubscription") }).strict(),
+  // Undo a scheduled cancellation: its own control, never a side effect of a plan change.
+  z.object({ action: z.literal("resumeRenewal") }).strict(),
   z.object({ action: z.literal("requestRefund"), reason: z.string().trim().max(1_000) }).strict(),
   z.object({ action: z.literal("closeCheckout") }).strict(),
   // The purchase records the main process keeps for the account, and a renewed account check for one of them.
@@ -158,6 +161,7 @@ export const desktopBillingResponse = {
   confirmPlanChange: z.object({ reservation }),
   cancelPlanChange: z.object({ success: z.literal(true) }),
   cancelSubscription: z.object({ cancelAtPeriodEnd: z.literal(true), currentPeriodEnd: timestamp.nullable() }),
+  resumeRenewal: z.object({ cancelAtPeriodEnd: z.boolean(), currentPeriodEnd: timestamp.nullable() }),
   requestRefund: z.object({ requestId, requestedAt: timestamp }),
 } satisfies Record<BillingServerAction, z.ZodType>;
 

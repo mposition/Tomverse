@@ -521,11 +521,11 @@ const PLAN_RANK: Record<AccountPlanTier, number> = { Free: 0, Pro: 1, Max: 2 };
  * refuses a change with 409, deliberately and permanently, so that a second
  * subscription can never be created by that route.
  *
- * It needs `currentBillingInterval` because a change only ever happens on the
- * interval the subscription already bills on -- monthly <-> annual is not
- * supported -- so an account whose interval is unknown gets `manage_plan`
- * rather than a flow the server would refuse. That is not a hypothetical: the
- * value is null for a subscription synced before the field existed.
+ * `currentBillingInterval` no longer gates the change. A change only ever
+ * happens on the interval the subscription already bills on, and when the
+ * stored value is unknown (a subscription synced before the field existed) the
+ * change screen omits it and the server quotes on the interval Stripe reports.
+ * Sending those subscribers to support was a dead end.
  *
  * Both directions share one state. The dialog behind it knows whether the
  * change is an immediate upgrade or an end-of-period downgrade -- and only the
@@ -537,7 +537,6 @@ export function resolvePlanCtaState({
   currentPlan,
   cardPlan,
   hasActiveSubscription,
-  currentBillingInterval = null,
 }: {
   sessionStatus: "loading" | "authenticated" | "unauthenticated";
   currentPlan: AccountPlanTier | null;
@@ -555,10 +554,7 @@ export function resolvePlanCtaState({
 
   const betweenPaidPlans = currentPlan !== "Free" && cardPlan !== "Free";
   if (hasActiveSubscription && betweenPaidPlans) {
-    // An unknown interval falls through to support rather than opening a flow
-    // the server would refuse: the same-interval rule is the one thing the
-    // change endpoints will not bend on.
-    return currentBillingInterval ? "change_plan" : "manage_plan";
+    return "change_plan";
   }
 
   if (PLAN_RANK[cardPlan] > PLAN_RANK[currentPlan]) {

@@ -156,3 +156,134 @@ export async function POST(req: Request) {
     );
   }
 }
+
+const RESUMABLE_STATUSES = new Set(["active", "trialing"]);
+
+/**
+ * Undo a scheduled cancellation: the subscription renews again on its current
+ * plan. It is its own control with its own label -- a plan change never does
+ * this as a side effect (docs/policy/plan-change.md section 1) -- and it is the
+ * step the plan-change refusal PLAN_CHANGE_BLOCKED_BY_CANCELLATION tells the
+ * customer to take first.
+ *
+ * Refused while an account deletion or a refund request is pending: both of
+ * those scheduled the cancellation themselves, and renewing underneath them
+ * would charge an account that asked to leave or to be refunded.
+ */
+export async function DELETE(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    await consumeApiRateLimit(req, session.user.id, "billing-resume-renewal", {
+      minute: 3,
+      day: 10,
+    });
+
+    if (!isStripeConfigured()) {
+      return NextResponse.json(
+        { code: "STRIPE_NOT_CONFIGURED", error: "Stripe is not configured." },
+        { status: 503 }
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        plan: true,
+        accountStatus: true,
+        stripeSubscriptionId: true,
+        subscriptionCurrentPeriodEnd: true,
+      },
+    });
+    if (!user) {
+      return NextResponse.json(
+        { code: "USER_NOT_FOUND", error: "User not found." },
+        { status: 404 }
+      );
+    }
+    if (!user.stripeSubscriptionId) {
+      return NextResponse.json(
+        { code: "NO_ACTIVE_SUBSCRIPTION", error: "No Stripe subscription to renew." },
+        { status: 409 }
+      );
+    }
+    if (user.accountStatus === "pending_deletion") {
+      return NextResponse.json(
+        { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
+        { status: 409 }
+      );
+    }
+    const pendingRefund = await prisma.refundRequest.findFirst({
+      where: { userId: user.id, status: "pending" },
+      select: { id: true },
+    });
+    if (pendingRefund) {
+      return NextResponse.json(
+        { code: "REFUND_REQUEST_PENDING", error: "A refund request is pending." },
+        { status: 409 }
+      );
+    }
+
+    // Decided on the subscription as Stripe has it now, not on the stored
+    // flag, which a missed webhook can leave stale.
+    const stripe = getStripe();
+    const current = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+    if (!current.cancel_at_period_end) {
+      // Already renewing: nothing to undo, and saying so is idempotent.
+      return NextResponse.json({
+        success: true,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: getPeriodEnd(current)?.toISOString() || null,
+        status: current.status,
+      });
+    }
+    if (!RESUMABLE_STATUSES.has(current.status)) {
+      return NextResponse.json(
+        {
+          code: "SUBSCRIPTION_NOT_CHANGEABLE",
+          error: `A subscription in status "${current.status}" cannot be renewed here.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    const subscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {
+      cancel_at_period_end: false,
+    });
+    const periodEnd = getPeriodEnd(subscription) || user.subscriptionCurrentPeriodEnd;
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        subscriptionStatus: subscription.status,
+        subscriptionCurrentPeriodEnd: periodEnd,
+        subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      },
+    });
+    console.info("billing.subscription.renewal_resumed", {
+      userId: user.id,
+      subscriptionId: subscription.id,
+    });
+
+    return NextResponse.json({
+      success: true,
+      cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      currentPeriodEnd: periodEnd?.toISOString() || null,
+      status: subscription.status,
+    });
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Subscription renewal resume failed:", error);
+    return NextResponse.json(
+      { code: "STRIPE_ERROR", error: "Failed to resume subscription renewal." },
+      { status: 500 }
+    );
+  }
+}
