@@ -4,6 +4,7 @@ import { killTree, userShell } from "./commands.js";
 import { commandEnv } from "./env.js";
 import { tomverseHome } from "./config.js";
 import { claudeHome, readJsonObject } from "./mcp-config.js";
+import { activePlugins, type ActivePlugin } from "./plugin-store.js";
 import { canonicalDigest } from "./session.js";
 
 /**
@@ -33,6 +34,9 @@ export type HookDef = {
     source: string;
     /** Identifies this exact hook: what an approval is bound to. */
     hash: string;
+    /** The plugin the hook came from. A plugin's hook has scope "project": third-party code that waits for the person's approval. */
+    plugin?: string;
+    pluginRoot?: string;
 };
 
 export type HookLoad = { hooks: HookDef[]; problems: string[] };
@@ -45,7 +49,7 @@ const MAX_CONTEXT = 10_000;
 const isEvent = (value: string): value is HookEvent => (HOOK_EVENTS as readonly string[]).includes(value);
 
 /** Reads the `hooks` table of one file (a settings file, or a hooks.json whose top level is the table itself). */
-export const parseHooks = (file: Record<string, unknown>, scope: HookScope, source: string, problems: string[]): HookDef[] => {
+export const parseHooks = (file: Record<string, unknown>, scope: HookScope, source: string, problems: string[], binding?: unknown): HookDef[] => {
     const table = file.hooks ?? (Object.keys(file).some(isEvent) ? file : undefined);
     if (table === undefined) return [];
     if (!table || typeof table !== "object" || Array.isArray(table)) {
@@ -75,7 +79,7 @@ export const parseHooks = (file: Record<string, unknown>, scope: HookScope, sour
                 }
                 const timeout = typeof h?.timeout === "number" && Number.isFinite(h.timeout) && h.timeout > 0 ? Math.min(MAX_TIMEOUT_SEC, h.timeout) : undefined;
                 const timeoutSec = timeout ?? (event === "UserPromptSubmit" ? 30 : DEFAULT_TIMEOUT_SEC);
-                out.push({ event, matcher, command, timeoutSec, scope, source, hash: canonicalDigest({ event, matcher, command, timeoutSec, scope }) });
+                out.push({ event, matcher, command, timeoutSec, scope, source, hash: canonicalDigest({ event, matcher, command, timeoutSec, scope, ...(binding === undefined ? {} : { binding }) }) });
             }
         }
     }
@@ -108,7 +112,37 @@ export const loadHooks = (root: string, homes: { tomverse?: string; claude?: str
             hooks.push(def);
         }
     }
+    for (const plugin of activePlugins(homes.tomverse ?? tomverseHome(), root)) {
+        for (const def of pluginHooks(plugin, problems)) {
+            if (seen.has(def.hash)) continue;
+            seen.add(def.hash);
+            hooks.push(def);
+        }
+    }
     return { hooks, problems };
+};
+
+const slashes = (path: string) => (process.platform === "win32" ? path.replaceAll("\\", "/") : path);
+
+/**
+ * The hooks one plugin brings. Each is bound to the plugin's name and the digest of its files, so an approval holds for exactly this
+ * code: a changed script or definition asks again. `${CLAUDE_PLUGIN_ROOT}` is the plugin's installed folder. A hook that wants a value
+ * from the plugin's own settings (`${user_config.*}`) is not loaded.
+ */
+export const pluginHooks = (plugin: Pick<ActivePlugin, "name" | "dir" | "digest" | "layout">, problems: string[]): HookDef[] => {
+    const out: HookDef[] = [];
+    const root = slashes(plugin.dir);
+    for (const { source, table } of plugin.layout.hookTables) {
+        const label = `plugin ${plugin.name}: ${source}`;
+        for (const def of parseHooks(table, "project", label, problems, { plugin: plugin.name, digest: plugin.digest })) {
+            if (def.command.includes("${user_config.")) {
+                problems.push(`${label}: a hook that reads the plugin's own settings (user_config) is not supported; it was not loaded.`);
+                continue;
+            }
+            out.push({ ...def, command: def.command.replaceAll("${CLAUDE_PLUGIN_ROOT}", root), plugin: plugin.name, pluginRoot: plugin.dir });
+        }
+    }
+    return out;
 };
 
 /** Claude Code's names for the tools that have one, so a hook written there (`matcher: "Bash"`) still matches. */
@@ -154,13 +188,13 @@ const shellArguments = (command: string) =>
         ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", `$global:LASTEXITCODE = $null; ${command}\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE } elseif (-not $?) { exit 1 }`]
         : ["-c", command];
 
-const runHookCommand = (command: string, input: string, root: string, env: NodeJS.ProcessEnv, timeoutMs: number, signal: AbortSignal) =>
+const runHookCommand = (command: string, input: string, root: string, env: NodeJS.ProcessEnv, timeoutMs: number, signal: AbortSignal, pluginRoot?: string) =>
     new Promise<RunResult>((resolve) => {
         let child: ChildProcess;
         try {
             child = spawn(userShell(env), shellArguments(command), {
                 cwd: root,
-                env: commandEnv(["CLAUDE_PROJECT_DIR"], { ...env, CLAUDE_PROJECT_DIR: root }),
+                env: commandEnv(["CLAUDE_PROJECT_DIR", ...(pluginRoot ? ["CLAUDE_PLUGIN_ROOT"] : [])], { ...env, CLAUDE_PROJECT_DIR: root, ...(pluginRoot ? { CLAUDE_PLUGIN_ROOT: slashes(pluginRoot) } : {}) }),
                 stdio: ["pipe", "pipe", "pipe"],
                 shell: false,
                 windowsHide: true,
@@ -240,7 +274,7 @@ export class HookRunner {
         });
         const results = await Promise.all(chosen.map(async (def) => ({
             def,
-            result: await runHookCommand(def.command, input, this.options.root, this.options.env ?? process.env, def.timeoutSec * 1000, signal),
+            result: await runHookCommand(def.command, input, this.options.root, this.options.env ?? process.env, def.timeoutSec * 1000, signal, def.pluginRoot),
         })));
         for (const { def, result } of results) {
             out.ran += 1;

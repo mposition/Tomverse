@@ -25,6 +25,7 @@ import { PermissionRuleStore } from "./permission-rules.js";
 import { discoverExtensions, describeRegistry, expandInvocation, ExtensionError } from "./extensions.js";
 import { startLocalExtensions } from "./local-extensions.js";
 import { extensionsCommand } from "./extensions-cli.js";
+import { pluginCommand } from "./plugin-cli.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -49,6 +50,7 @@ Usage:
 ${PERMISSIONS_HELP.map((line) => `  ${line}`).join("\n")}
   tomverse mcp [list|approve|enable|disable] [name]   MCP servers (mcp.json in the CLI folder, .mcp.json in the project); a project's server needs your approval at a terminal
   tomverse hooks [list|approve|enable|disable] [n]    Hooks (hooks.json, Claude Code settings.json, the project's .claude/settings.json); a project's hook needs your approval
+  tomverse plugin [list|install|update|remove|enable|disable|marketplace] ...   Plugins (skills, commands, agents, hooks, MCP servers in one folder) and the marketplaces they come from; installing needs you at a terminal, and a plugin's hooks and servers need your approval
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
@@ -834,6 +836,12 @@ export const main = async (argv: string[]): Promise<number> => {
             case "mcp":
             case "hooks": {
                 const done = await extensionsCommand(command, args, normalizeRoot(flags.cwd ?? process.cwd()), { interactive: isInteractive(), confirm: (q) => terminalPrompter().confirm(q) });
+                process.stdout.write(`${done.lines.join("\n")}\n`);
+                return done.ok ? EXIT_CODES.success : EXIT_CODES.error;
+            }
+            case "plugin": {
+                const root = normalizeRoot(flags.cwd ?? process.cwd());
+                const done = await pluginCommand(args, { interactive: isInteractive(), confirm: (q) => terminalPrompter().confirm(q), root });
                 process.stdout.write(`${done.lines.join("\n")}\n`);
                 return done.ok ? EXIT_CODES.success : EXIT_CODES.error;
             }

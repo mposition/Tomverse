@@ -18,6 +18,7 @@ import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportI
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
 import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
+import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
@@ -457,6 +458,7 @@ export type DesktopApi = {
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
   codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
   localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
+  plugins(command: PluginsCommand): Promise<PluginsView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

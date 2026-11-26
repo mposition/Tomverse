@@ -10,6 +10,7 @@ import { desktopCodeEngineCopy } from "../../../../locales/desktopCodeEngine";
 import type { CodeEnginePreference } from "./CodeEngine";
 import { CodeExtensionsSettings } from "./CodeExtensions";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
+import { PluginsPanel } from "./PluginsPanel";
 
 type Copy = (typeof desktopCodeExecutionCopy)[Language];
 type FallbackEdit = CodeFallbackUpdate extends infer Update ? Update extends CodeFallbackUpdate ? Omit<Update, "scope"> : never : never;
@@ -153,6 +154,7 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
     } />
     <CodeMemorySettings language={language} />
     <CodeExtensionsSettings language={language} />
+    <PluginsPanel language={language} />
     <LocalExtensionsPanel language={language} />
     <SettingRow field="code-fallback-automatic" label={copy.automatic} detail={automatic ? copy.awaitingVerification : copy.automaticDetail}
       status={automatic} control={

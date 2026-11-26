@@ -39,7 +39,7 @@ export const createSkillTool = (ctx: SkillToolContext) => tool({
             }
             ctx.onActivity(`load_skill ${skill.name}`);
             const { body, truncated } = readSkillBody(ctx.root, skill);
-            const text = expandClaudeArguments(body, input.arguments ?? "", { names: skill.argumentNames, skillDir: skill.dir, projectDir: ctx.root });
+            const text = expandClaudeArguments(body, input.arguments ?? "", { names: skill.argumentNames, skillDir: skill.dir, projectDir: ctx.root, pluginRoot: skill.pluginRoot });
             return {
                 status: "ok", name: skill.name, source: skill.source, folder, text: redact(text.trim()), truncated,
                 supportingFiles: skillSupportingFiles(skill),

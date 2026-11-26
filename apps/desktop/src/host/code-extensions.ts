@@ -7,11 +7,18 @@ import type { CodeExtensionsInput, CodeExtensionsView } from "../contract";
  * value of an MCP server stays hidden (the real values are read again here, in the main process, when the person confirms the import).
  */
 
+/**
+ * Where a process finds the Tomverse folder, where installed plugins live: the main process has TOMVERSE_HOME (or the default folder),
+ * and the task runtime, which gets no such variable, is handed TOMVERSE_DESKTOP_EXTENSIONS_HOME (see extensionWorkerEnv).
+ */
+export const discoverOptions = (env: NodeJS.ProcessEnv = process.env) =>
+  env.TOMVERSE_DESKTOP_EXTENSIONS_HOME ? { env: { ...env, TOMVERSE_HOME: env.TOMVERSE_DESKTOP_EXTENSIONS_HOME } } : {};
+
 const emptyView = (): CodeExtensionsView => ({ project: false, skills: [], commands: [], agents: [], slash: [], issues: [] });
 
 export function codeExtensionsView(root: string | null, input: CodeExtensionsInput): CodeExtensionsView {
   if (!root) return emptyView();
-  const registry = discoverExtensions(root);
+  const registry = discoverExtensions(root, discoverOptions());
   const view: CodeExtensionsView = {
     project: true,
     skills: registry.skills.map(({ name, description, source, scope, implicit, ignored }) => ({ name, description, source, scope, implicit, ignored })),
@@ -37,7 +44,7 @@ export function codeExtensionsView(root: string | null, input: CodeExtensionsInp
 export function slashPromptFor(root: string, text: string): { prompt: string; notice: string } | null {
   if (!text.startsWith("/")) return null;
   try {
-    const invocation = expandInvocation(root, discoverExtensions(root), text);
+    const invocation = expandInvocation(root, discoverExtensions(root, discoverOptions()), text, discoverOptions());
     if (!invocation) return null;
     return {
       prompt: invocation.prompt,

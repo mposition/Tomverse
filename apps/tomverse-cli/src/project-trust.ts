@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./session.js";
 import { tomverseHome } from "./config.js";
+import { approvePluginDefinition, pluginApproved } from "./plugin-store.js";
 
 /**
  * What the person has said about the extensions a folder brings along: which MCP servers and hooks defined INSIDE the folder
@@ -68,22 +69,46 @@ export const openProjectTrust = (root: string, home: string = tomverseHome()) =>
         if (!e[list].includes(hash)) e[list] = [...e[list], hash].slice(-500);
     });
     return {
-        /** A user-scope definition is always trusted; a project one only when its exact hash was approved. */
-        mcpApproved: (def: { scope: "user" | "project"; hash: string }) => def.scope === "user" || entry().mcpApproved.includes(def.hash),
-        approveMcp: (def: { hash: string }) => add("mcpApproved", def.hash),
+        /**
+         * A user-scope definition is always trusted; a project one only when its exact hash was approved. A plugin's definition (it has a
+         * `plugin` name) is approved once for all folders, in the plugin record, bound to the digest of the plugin's files.
+         */
+        mcpApproved: (def: { scope: "user" | "project"; hash: string; plugin?: string }) =>
+            def.scope === "user" || (def.plugin ? pluginApproved(home, "mcp", def.hash) : entry().mcpApproved.includes(def.hash)),
+        approveMcp: (def: { hash: string; plugin?: string }) => (def.plugin ? approvePluginDefinition(home, "mcp", def.hash, def.plugin) : add("mcpApproved", def.hash)),
         mcpEnabled: (def: { name: string }) => !entry().mcpDisabled.includes(def.name),
         setMcpEnabled: (def: { name: string }, enabled: boolean) => toggle("mcpDisabled", def.name, enabled),
-        hookApproved: (def: { scope: "user" | "project"; hash: string }) => def.scope === "user" || entry().hooksApproved.includes(def.hash),
-        approveHook: (def: { hash: string }) => add("hooksApproved", def.hash),
+        hookApproved: (def: { scope: "user" | "project"; hash: string; plugin?: string }) =>
+            def.scope === "user" || (def.plugin ? pluginApproved(home, "hook", def.hash) : entry().hooksApproved.includes(def.hash)),
+        approveHook: (def: { hash: string; plugin?: string }) => (def.plugin ? approvePluginDefinition(home, "hook", def.hash, def.plugin) : add("hooksApproved", def.hash)),
         hookEnabled: (def: { hash: string }) => !entry().hooksDisabled.includes(def.hash),
         setHookEnabled: (def: { hash: string }, enabled: boolean) => toggle("hooksDisabled", def.hash, enabled),
     };
 };
 
 /** What may start for each MCP server: a project server waits for approval of its exact definition, then obeys the on/off switch. */
-export const mcpGate = (trust: ProjectTrust) => (def: { scope: "user" | "project"; hash: string; name: string }): "yes" | "pending_approval" | "disabled" =>
+export const mcpGate = (trust: ProjectTrust) => (def: { scope: "user" | "project"; hash: string; name: string; plugin?: string }): "yes" | "pending_approval" | "disabled" =>
     !trust.mcpApproved(def) ? "pending_approval" : !trust.mcpEnabled(def) ? "disabled" : "yes";
 
 /** A hook runs when it is the person's own or approved by hash, and not switched off. */
-export const hookGate = (trust: ProjectTrust) => (def: { scope: "user" | "project"; hash: string }) =>
+export const hookGate = (trust: ProjectTrust) => (def: { scope: "user" | "project"; hash: string; plugin?: string }) =>
     trust.hookApproved(def) && trust.hookEnabled(def);
+
+/**
+ * Forgets the per-folder switches that belong to a removed plugin: its servers' off switches (by name) and its hooks' (by hash), in
+ * every folder. Approvals live in the plugin record and are removed with it.
+ */
+export const forgetPluginTrust = (home: string, forget: { mcpNames: string[]; hookHashes: string[] }) => {
+    const file = readAll(home);
+    let changed = false;
+    for (const entry of Object.values(file.roots)) {
+        const mcp = entry.mcpDisabled.filter((name) => !forget.mcpNames.includes(name));
+        const hooks = entry.hooksDisabled.filter((hash) => !forget.hookHashes.includes(hash));
+        if (mcp.length !== entry.mcpDisabled.length || hooks.length !== entry.hooksDisabled.length) changed = true;
+        entry.mcpDisabled = mcp;
+        entry.hooksDisabled = hooks;
+    }
+    if (!changed) return;
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    writeFileAtomic(trustFile(home), `${JSON.stringify(file, null, 2)}\n`);
+};

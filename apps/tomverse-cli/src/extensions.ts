@@ -4,6 +4,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import {
     expandClaudeArguments, expandCodexPrompt, frontMatterBoolean, frontMatterList, frontMatterText, parseFrontMatter, parseToml, type FrontMatter,
 } from "./extension-parsers.js";
+import { tomverseHome } from "./config.js";
+import { activePlugins, type ActivePlugin } from "./plugin-store.js";
 import { isSecretPath } from "./workspace.js";
 
 /**
@@ -49,6 +51,9 @@ export type SkillDef = {
     argumentNames: string[];
     /** Fields of the file that exist but are not applied (permissions, hooks, a model choice ...). */
     ignored: string[];
+    /** The plugin it came from (its name is then `plugin:name`) and the plugin's installed folder, for `${CLAUDE_PLUGIN_ROOT}`. */
+    plugin?: string;
+    pluginRoot?: string;
 };
 
 export type CommandDef = {
@@ -62,6 +67,8 @@ export type CommandDef = {
     argumentHint?: string;
     argumentNames: string[];
     ignored: string[];
+    plugin?: string;
+    pluginRoot?: string;
 };
 
 export type AgentDef = {
@@ -80,6 +87,7 @@ export type AgentDef = {
     /** The model the file names, or undefined for the current one. */
     model?: string;
     ignored: string[];
+    plugin?: string;
 };
 
 export type ExtensionRegistry = { skills: SkillDef[]; commands: CommandDef[]; agents: AgentDef[]; issues: string[] };
@@ -287,6 +295,50 @@ const codexAgentFrom = (place: Place, file: string, scope: ExtensionScope, issue
     };
 };
 
+/** Where plugins are kept: next to the CLI's other user files. A test that isolates `home` gets its own `.tomverse` there. */
+const pluginHome = (options: DiscoverOptions) => {
+    const env = options.env ?? process.env;
+    const configured = env.TOMVERSE_HOME?.trim();
+    return configured || (options.home ? join(options.home, ".tomverse") : tomverseHome(env));
+};
+
+/**
+ * The skills, commands and agent definitions one plugin brings, as `plugin:name`. They are read from the plugin's own installed folder
+ * and are information for the model like any other definition: nothing here grants anything, and a plugin's hooks and servers are not
+ * part of this (they wait for the person's approval, see hooks.ts and mcp-config.ts).
+ */
+export const pluginExtensions = (plugin: Pick<ActivePlugin, "name" | "dir" | "layout">): ExtensionRegistry => {
+    const registry = emptyRegistry();
+    const { issues } = registry;
+    const place: Place = { root: plugin.dir, home: plugin.dir, claudeDir: plugin.dir, codexDir: plugin.dir };
+    const shown = (file: string) => `plugin ${plugin.name}: ${relative(plugin.dir, file).split(sep).join("/")}`;
+    const origin = { plugin: plugin.name, pluginRoot: plugin.dir };
+    const usable = (name: string, source: string) => {
+        if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/.test(name)) return true;
+        issues.push(`${source}: the name ${name.slice(0, 100)} is not usable here; it was not used.`);
+        return false;
+    };
+    for (const dir of plugin.layout.skillDirs) {
+        const skill = skillFrom(place, dir, "user", "claude", issues);
+        const name = skill ? `${plugin.name}:${skill.name}` : "";
+        if (!skill || !usable(name, shown(skill.file))) continue;
+        registry.skills.push({ ...skill, name, source: shown(skill.file), ...origin });
+    }
+    for (const { file, name: local } of plugin.layout.commandFiles) {
+        const name = `${plugin.name}:${local}`;
+        if (!usable(name, shown(file))) continue;
+        const command = commandFrom(place, file, name, "user", "claude");
+        if (command) registry.commands.push({ ...command, source: shown(file), ...origin });
+    }
+    for (const { file, prefix } of plugin.layout.agentFiles) {
+        const agent = claudeAgentFrom(place, file, "user", issues);
+        const name = agent ? [plugin.name, ...prefix, agent.name].join(":") : "";
+        if (!agent || !usable(name, shown(file))) continue;
+        registry.agents.push({ ...agent, name, source: shown(file), instructions: agent.instructions.replaceAll("${CLAUDE_PLUGIN_ROOT}", plugin.dir), plugin: plugin.name });
+    }
+    return registry;
+};
+
 /**
  * Finds every skill, command and agent definition the person has: `user` places first for skills and commands (a personal definition
  * outranks the repository's, as in Claude Code), `project` first for agents. A name that is taken is listed under `issues`.
@@ -363,6 +415,15 @@ export const discoverExtensions = (root: string, options: DiscoverOptions = {}):
             if (!agent || taken("agent", agent.name, agent.source, agentOwners)) continue;
             registry.agents.push(agent);
         }
+    }
+
+    // Installed plugins that are on (for everyone and for this folder), last: their names carry the plugin's name, so they never shadow the person's own.
+    for (const plugin of activePlugins(pluginHome(options), root)) {
+        const found = pluginExtensions(plugin);
+        for (const skill of found.skills) if (registry.skills.length < MAX_ENTRIES && !taken("skill", skill.name, skill.source, skillOwners)) registry.skills.push(skill);
+        for (const command of found.commands) if (registry.commands.length < MAX_ENTRIES && !taken("command", command.name, command.source, commandOwners)) registry.commands.push(command);
+        for (const agent of found.agents) if (registry.agents.length < MAX_AGENTS && !taken("agent", agent.name, agent.source, agentOwners)) registry.agents.push(agent);
+        issues.push(...found.issues);
     }
     return registry;
 };
@@ -464,7 +525,7 @@ export const expandInvocation = (root: string, registry: ExtensionRegistry, text
     const skill = registry.skills.find((entry) => entry.userInvocable && entry.name.toLowerCase() === wanted);
     if (skill) {
         const { body } = readSkillBody(root, skill, options);
-        const filled = expandClaudeArguments(body, slash.args, { names: skill.argumentNames, skillDir: skill.dir, projectDir: root, sessionId: options.sessionId });
+        const filled = expandClaudeArguments(body, slash.args, { names: skill.argumentNames, skillDir: skill.dir, projectDir: root, sessionId: options.sessionId, pluginRoot: skill.pluginRoot });
         const folder = skill.scope === "project" ? skill.source.replace(/\/SKILL\.md$/, "") : skill.dir;
         const prompt = [
             `The user ran the skill ${skill.name}${slash.args ? ` with: ${slash.args}` : ""}.`,
@@ -481,7 +542,7 @@ export const expandInvocation = (root: string, registry: ExtensionRegistry, text
     if (!read) throw new ExtensionError(`The command ${command.name} can no longer be read (${command.source}).`);
     const body = parseFrontMatter(read.text).body;
     const prompt = command.flavor === "codex" ? expandCodexPrompt(body, slash.args)
-        : expandClaudeArguments(body, slash.args, { names: command.argumentNames, skillDir: dirname(command.file), projectDir: root, sessionId: options.sessionId });
+        : expandClaudeArguments(body, slash.args, { names: command.argumentNames, skillDir: dirname(command.file), projectDir: root, sessionId: options.sessionId, pluginRoot: command.pluginRoot });
     return { kind: "command", name: command.name, prompt: prompt.trim(), source: command.source, ignored: command.ignored };
 };
 

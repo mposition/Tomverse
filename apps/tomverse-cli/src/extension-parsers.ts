@@ -399,7 +399,7 @@ export const splitArguments = (text: string): string[] => {
     return out;
 };
 
-export type ClaudeArgumentContext = { names?: string[]; skillDir?: string; projectDir?: string; sessionId?: string; effort?: string };
+export type ClaudeArgumentContext = { names?: string[]; skillDir?: string; projectDir?: string; sessionId?: string; effort?: string; pluginRoot?: string };
 
 /**
  * Claude Code's placeholders: `$ARGUMENTS`, `$ARGUMENTS[N]` and `$N` (0-based), `$name` for a name in the `arguments` list,
@@ -412,12 +412,12 @@ export const expandClaudeArguments = (body: string, rawArguments: string, contex
     const names = context.names ?? [];
     let used = false;
     const expanded = body.replace(
-        /\\\$|\$\{(CLAUDE_SKILL_DIR|CLAUDE_PROJECT_DIR|CLAUDE_SESSION_ID|CLAUDE_EFFORT)\}|\$ARGUMENTS\[(\d+)\]|\$ARGUMENTS|\$(\d+)|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+        /\\\$|\$\{(CLAUDE_SKILL_DIR|CLAUDE_PROJECT_DIR|CLAUDE_SESSION_ID|CLAUDE_EFFORT|CLAUDE_PLUGIN_ROOT)\}|\$ARGUMENTS\[(\d+)\]|\$ARGUMENTS|\$(\d+)|\$([A-Za-z_][A-Za-z0-9_]*)/g,
         (whole, variable: string | undefined, bracket: string | undefined, index: string | undefined, name: string | undefined) => {
             if (whole === "\\$") return "$";
             if (variable) {
                 const value = variable === "CLAUDE_SKILL_DIR" ? context.skillDir : variable === "CLAUDE_PROJECT_DIR" ? context.projectDir
-                    : variable === "CLAUDE_SESSION_ID" ? context.sessionId : context.effort;
+                    : variable === "CLAUDE_SESSION_ID" ? context.sessionId : variable === "CLAUDE_PLUGIN_ROOT" ? context.pluginRoot : context.effort;
                 return value ?? whole;
             }
             if (whole === "$ARGUMENTS") {

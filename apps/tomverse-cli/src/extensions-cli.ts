@@ -26,7 +26,7 @@ export const extensionsCommand = async (kind: "mcp" | "hooks", args: string[], r
     if (kind === "mcp") {
         const { servers, problems } = loadMcpServers(root, home);
         const find = () => servers.find((s) => s.id === target || s.name === target);
-        const show = (s: McpServerDef) => `${safeLine(s.id)}  ${s.scope}  ${state(trust.mcpApproved(s), trust.mcpEnabled(s), s.scope)}${s.transport === "unsupported" ? " (unsupported)" : ""}  ${safeLine(describeMcpServer(s))}`;
+        const show = (s: McpServerDef) => `${safeLine(s.id)}  ${s.plugin ? `plugin ${safeLine(s.plugin)}` : s.scope}  ${state(trust.mcpApproved(s), trust.mcpEnabled(s), s.scope)}${s.transport === "unsupported" ? " (unsupported)" : ""}  ${safeLine(describeMcpServer(s))}`;
         if (sub === "list") {
             lines.push(...(servers.length ? servers.map(show) : ["No MCP servers are set up (user: mcp.json in the CLI folder; project: .mcp.json)."]), ...problems.map((p) => `note: ${safeLine(p)}`));
             return { lines, ok: true };
@@ -40,7 +40,7 @@ export const extensionsCommand = async (kind: "mcp" | "hooks", args: string[], r
         if (sub === "approve") {
             if (server.scope === "user") return { lines: [`${safeLine(server.id)} is your own server; it needs no approval.`], ok: true };
             if (!io.interactive) return { lines: ["Approving a project server needs you at a terminal."], ok: false };
-            const question = `Allow this project's MCP server ${safeLine(server.id)} to run on this computer?\n  ${safeLine(describeMcpServer(server))}\n  It runs with your permissions until you disable it; any change to its definition asks again.`;
+            const question = `Allow ${server.plugin ? `the MCP server ${safeLine(server.id)} of the plugin ${safeLine(server.plugin)}` : `this project's MCP server ${safeLine(server.id)}`} to run on this computer?\n  ${safeLine(describeMcpServer(server))}\n  It runs with your permissions until you disable it; any change to its definition asks again.`;
             if (!(await io.confirm(question))) return { lines: ["Not approved."], ok: false };
             trust.approveMcp(server);
             return { lines: [`Approved ${safeLine(server.id)}.`], ok: true };
@@ -50,7 +50,7 @@ export const extensionsCommand = async (kind: "mcp" | "hooks", args: string[], r
     const { hooks, problems } = loadHooks(root, { tomverse: home });
     const index = Number(target);
     const hook: HookDef | undefined = Number.isInteger(index) ? hooks[index - 1] : undefined;
-    const show = (h: HookDef, i: number) => `${i + 1}. ${h.event}${h.matcher ? ` [${safeLine(h.matcher)}]` : ""}  ${h.scope}  ${state(trust.hookApproved(h), trust.hookEnabled(h), h.scope)}  ${safeLine(h.command).slice(0, 160)}`;
+    const show = (h: HookDef, i: number) => `${i + 1}. ${h.event}${h.matcher ? ` [${safeLine(h.matcher)}]` : ""}  ${h.plugin ? `plugin ${safeLine(h.plugin)}` : h.scope}  ${state(trust.hookApproved(h), trust.hookEnabled(h), h.scope)}  ${safeLine(h.command).slice(0, 160)}`;
     if (sub === "list") {
         lines.push(...(hooks.length ? hooks.map(show) : ["No hooks are set up."]), ...problems.map((p) => `note: ${safeLine(p)}`));
         return { lines, ok: true };
@@ -63,7 +63,7 @@ export const extensionsCommand = async (kind: "mcp" | "hooks", args: string[], r
     if (sub === "approve") {
         if (hook.scope === "user") return { lines: ["This is your own hook; it needs no approval."], ok: true };
         if (!io.interactive) return { lines: ["Approving a project hook needs you at a terminal."], ok: false };
-        if (!(await io.confirm(`Allow this project hook to run on this computer, at ${hook.event}?\n  ${safeLine(hook.command)}\n  It runs with your permissions; any change to it asks again.`))) return { lines: ["Not approved."], ok: false };
+        if (!(await io.confirm(`Allow this ${hook.plugin ? `hook of the plugin ${safeLine(hook.plugin)}` : "project hook"} to run on this computer, at ${hook.event}?\n  ${safeLine(hook.command)}\n  It runs with your permissions; any change to it asks again.`))) return { lines: ["Not approved."], ok: false };
         trust.approveHook(hook);
         return { lines: [`Approved hook ${index}.`], ok: true };
     }

@@ -10,7 +10,7 @@ import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session
 import { tomverseHome } from "../../../tomverse-cli/src/config.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import type { TerminalReadReply, TerminalReadRequest } from "../../../tomverse-cli/src/terminal-read.js";
-import { slashPromptFor } from "./code-extensions";
+import { discoverOptions, slashPromptFor } from "./code-extensions";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
@@ -966,7 +966,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       // A private task (no saved history) and a capped continuation keep and read no notes; so does a person who turned memory off.
       nestedInstructions: !continuation && savedCap === undefined,
       // Skills and agent definitions are folder contents like the instruction files: a capped continuation sends none of them.
-      extensions: !continuation && savedCap === undefined ? discoverExtensions(workspace.root) : undefined,
+      // Installed plugins are read from the same Tomverse folder the settings screens use (the worker's own environment has no TOMVERSE_HOME).
+      extensions: !continuation && savedCap === undefined ? discoverExtensions(workspace.root, discoverOptions()) : undefined,
       memory: !continuation && savedCap === undefined && task.savedLocally && !usesCodePlugin
         ? codeMemoryFor(process.env.TOMVERSE_DESKTOP_CODE_MEMORY, command.project, clean) : undefined,
       taskPlan: mode === "ask" ? undefined : mode,

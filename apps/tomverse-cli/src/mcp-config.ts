@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { canonicalDigest } from "./session.js";
 import { tomverseHome } from "./config.js";
+import { activePlugins, type ActivePlugin } from "./plugin-store.js";
 
 /**
  * MCP server definitions the agent may connect to, read from two files in the
@@ -39,6 +40,9 @@ export type McpServerDef = {
     unsupportedReason?: string;
     /** Identifies this exact definition: what an approval is bound to. Environment variables are not expanded into it. */
     hash: string;
+    /** The plugin the server came from (its scope is "project": third-party code that waits for the person's approval) and its installed folder. */
+    plugin?: string;
+    pluginRoot?: string;
 };
 
 export type McpLoad = { servers: McpServerDef[]; problems: string[] };
@@ -95,7 +99,7 @@ const uniqueId = (name: string, used: Set<string>) => {
 };
 
 /** The definitions of one file. `used` carries ids across files so tool names stay unique. */
-export const parseMcpServers = (file: Record<string, unknown>, scope: McpScope, source: string, used: Set<string>, problems: string[]): McpServerDef[] => {
+export const parseMcpServers = (file: Record<string, unknown>, scope: McpScope, source: string, used: Set<string>, problems: string[], binding?: unknown): McpServerDef[] => {
     const table = file.mcpServers;
     if (table === undefined) return [];
     if (!table || typeof table !== "object" || Array.isArray(table)) {
@@ -109,7 +113,7 @@ export const parseMcpServers = (file: Record<string, unknown>, scope: McpScope, 
             continue;
         }
         const raw = value as Record<string, unknown>;
-        const hash = canonicalDigest({ name, scope, raw });
+        const hash = canonicalDigest({ name, scope, raw, ...(binding === undefined ? {} : { binding }) });
         const base = { name, scope, source, hash };
         const type = raw.type;
         const timeoutOf = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 1000 ? Math.floor(v) : undefined);
@@ -165,7 +169,37 @@ export const loadMcpServers = (root: string, home: string = tomverseHome()): Mcp
             else servers.push(def);
         }
     }
+    for (const plugin of activePlugins(home, root)) servers.push(...pluginMcpServers(plugin, used, problems));
     return { servers, problems };
+};
+
+/**
+ * The MCP servers one plugin brings, named `plugin:<plugin>:<server>`. Each is bound to the plugin's name and the digest of its files,
+ * so an approval holds for exactly this code. `${CLAUDE_PLUGIN_ROOT}` is the plugin's installed folder (see expandMcpServer). A server that
+ * wants a value from the plugin's own settings (`${user_config.*}`) is not loaded.
+ */
+export const pluginMcpServers = (plugin: Pick<ActivePlugin, "name" | "dir" | "digest" | "layout">, used: Set<string>, problems: string[]): McpServerDef[] => {
+    const out: McpServerDef[] = [];
+    for (const { source, table } of plugin.layout.mcpTables) {
+        const label = `plugin ${plugin.name}: ${source}`;
+        const servers = table.mcpServers;
+        if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+            problems.push(`${label}: mcpServers must be an object.`);
+            continue;
+        }
+        const renamed: Record<string, unknown> = {};
+        for (const [name, value] of Object.entries(servers as Record<string, unknown>)) {
+            if (JSON.stringify(value)?.includes("${user_config.")) {
+                problems.push(`${label}: the server ${JSON.stringify(name)} reads the plugin's own settings (user_config), which is not supported; it was not loaded.`);
+                continue;
+            }
+            renamed[`plugin:${plugin.name}:${name}`] = value;
+        }
+        for (const def of parseMcpServers({ mcpServers: renamed }, "project", label, used, problems, { plugin: plugin.name, digest: plugin.digest })) {
+            out.push({ ...def, plugin: plugin.name, pluginRoot: plugin.dir });
+        }
+    }
+    return out;
 };
 
 /** Names a definition may never read from the environment: they hold the Tomverse key or session, or change how a program loads code. */
@@ -175,9 +209,10 @@ const NEVER_EXPANDED = /^(?:TOMVERSE_|ELECTRON_)|^NODE_(?:OPTIONS|PATH|REPL_EXTE
  * `${VAR}` and `${VAR:-default}` as in Claude Code. An unset variable without a default stays as written and is reported.
  * `${CLAUDE_PROJECT_DIR}` is the workspace root. TOMVERSE_*, ELECTRON_* and NODE_OPTIONS-like names are never read: they count as unset.
  */
-export const expandVariables = (text: string, root: string, env: NodeJS.ProcessEnv, warnings: string[]) =>
+export const expandVariables = (text: string, root: string, env: NodeJS.ProcessEnv, warnings: string[], pluginRoot?: string) =>
     text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (whole, name: string, fallback: string | undefined) => {
         if (name === "CLAUDE_PROJECT_DIR" || name === "TOMVERSE_PROJECT_DIR") return root;
+        if (name === "CLAUDE_PLUGIN_ROOT" && pluginRoot) return pluginRoot;
         const blocked = NEVER_EXPANDED.test(name);
         const value = blocked ? undefined : env[name];
         if (value !== undefined) return value;
@@ -197,11 +232,12 @@ export type ExpandedMcpServer = {
 
 export const expandMcpServer = (def: McpServerDef, root: string, env: NodeJS.ProcessEnv = process.env): ExpandedMcpServer => {
     const warnings: string[] = [];
-    const sub = (text: string) => expandVariables(text, root, env, warnings);
+    const pluginRoot = def.pluginRoot && process.platform === "win32" ? def.pluginRoot.replaceAll("\\", "/") : def.pluginRoot;
+    const sub = (text: string) => expandVariables(text, root, env, warnings, pluginRoot);
     return {
         ...(def.command !== undefined ? { command: sub(def.command) } : {}),
         args: (def.args ?? []).map(sub),
-        env: Object.fromEntries(Object.entries(def.env ?? {}).map(([key, value]) => [key, sub(value)])),
+        env: { ...(pluginRoot ? { CLAUDE_PLUGIN_ROOT: pluginRoot } : {}), ...Object.fromEntries(Object.entries(def.env ?? {}).map(([key, value]) => [key, sub(value)])) },
         ...(def.url !== undefined ? { url: sub(def.url) } : {}),
         headers: Object.fromEntries(Object.entries(def.headers ?? {}).map(([key, value]) => [key, sub(value)])),
         warnings,

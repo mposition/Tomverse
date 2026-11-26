@@ -64,11 +64,11 @@ export async function localExtensionsReply(root: string | null, command: LocalEx
   return {
     project: true,
     mcp: loaded.servers.map((s) => ({
-      id: s.id, name: clean(s.name, 80), scope: s.scope, transport: s.transport, summary: clean(describeMcpServer(s), 300), hash: s.hash,
+      id: s.id, name: clean(s.name, 80), scope: s.scope, transport: s.transport, summary: clean(describeMcpServer(s), 300), hash: s.hash, ...(s.plugin ? { plugin: clean(s.plugin, 80) } : {}),
       state: s.transport === "unsupported" ? "unsupported" as const : (() => { const g = gate(s); return g === "yes" ? "ready" as const : g; })(),
     })),
     hooks: hooks.hooks.map((h) => ({
-      hash: h.hash, event: h.event, matcher: clean(h.matcher, 80), command: clean(h.command, 300), scope: h.scope, source: basename(h.source),
+      hash: h.hash, event: h.event, matcher: clean(h.matcher, 80), command: clean(h.command, 300), scope: h.scope, source: basename(h.source), ...(h.plugin ? { plugin: clean(h.plugin, 80) } : {}),
       state: !trust.hookApproved(h) ? "pending_approval" as const : hookRuns(h) ? "active" as const : "disabled" as const,
     })),
     problems: [...loaded.problems, ...hooks.problems].map((p) => clean(p, 300)).slice(0, 10),

@@ -79,6 +79,9 @@ import { createReviewActions, type ReviewTarget } from "./review-host";
 import { codeExtensionsView } from "./code-extensions";
 import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
 import { localExtensionsCommand } from "../local-extensions-contract";
+import { createPluginsHost } from "./plugins-host";
+import { pluginsCommand } from "../plugins-contract";
+import { desktopPluginsCopy } from "../../../../locales/desktopPlugins";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -145,6 +148,8 @@ const fixtureSchema = z.object({
   endpoint: z.url().regex(/^http:\/\/127\.0\.0\.1:[0-9]+\/api\/code\/v1$/),
   key: z.literal("tvk_abcdefgh_" + "A".repeat(43)),
   browserInspection: z.boolean().optional(),
+  /** A test chooses this folder where the Plugins screen would open a folder dialog. */
+  pluginFolder: z.string().min(1).optional(),
   browserAgent: z.boolean().optional(),
   codex: cliFixtureInput.optional(),
   claude: cliFixtureInput.optional(),
@@ -3225,6 +3230,17 @@ function mayRequestDictation(contents: Electron.WebContents | null) {
     contents === mainWindow.webContents && contents.getURL() === shellUrl);
 }
 
+const pluginsHost = createPluginsHost({
+  pickFolder: async () => fixture?.pluginFolder ?? (!mainWindow ? null : (await dialog.showOpenDialog(mainWindow, { title: nativeCopy().openFolder, properties: ["openDirectory"] })).filePaths[0] ?? null),
+  confirmFetch: async (address) => {
+    if (fixture) return true;
+    const copy = desktopPluginsCopy[state.language ?? "en"];
+    const question = { type: "question" as const, title: copy.fetchTitle, message: copy.fetchMessage, detail: address, buttons: [copy.fetchCancel, copy.fetchAllow], cancelId: 0, defaultId: 0, noLink: true };
+    const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, question) : await dialog.showMessageBox(question);
+    return response === 1;
+  },
+});
+
 function registerIpc() {
   const update = updates();
   const main = (name: string, action: (input: unknown) => unknown) => ipcMain.handle(name, (event, input: unknown) => {
@@ -3506,6 +3522,7 @@ function registerIpc() {
     if (projectRoot) assertProjectRoot(projectRoot);
     return codeExtensionsView(projectRoot?.path ?? null, input);
   });
+  main("desktop:plugins", (value) => pluginsHost.reply(pluginsCommand.parse(value), projectRoot?.path ?? null));
   main("desktop:local-extensions", (value) => {
     const command = localExtensionsCommand.parse(value);
     if (projectRoot) assertProjectRoot(projectRoot);
