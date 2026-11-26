@@ -283,10 +283,13 @@ test("a quote claimed by a confirm that stops before Stripe is spent, not left i
   await assert.rejects(confirmPlanChange({ userId: "user_1", requestId: "pcr_1" }));
   assert.equal(world.rows.get("pcr_1")!.status, "failed");
   assert.equal(world.scheduleCreates, 0);
-  // The retry is told the quote is spent, not that it is "already being confirmed".
+  // The retry (or a resend whose first answer was lost) is told the quote is
+  // spent -- not that it is "already being confirmed", and never shown as a
+  // reservation that does not exist.
   world.failRetrieve = false;
   const retry = await confirmPlanChange({ userId: "user_1", requestId: "pcr_1" });
-  assert.notEqual((retry as { code?: string }).code, "PLAN_CHANGE_ALREADY_PENDING");
+  assert.equal(retry.ok, false);
+  assert.equal((retry as { code?: string }).code, "PLAN_CHANGE_PREVIEW_EXPIRED");
   assert.equal(world.scheduleCreates, 0);
 });
 

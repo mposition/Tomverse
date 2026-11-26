@@ -622,9 +622,18 @@ export async function confirmPlanChange({
       404
     );
   }
-  if (stored.status !== "previewed") {
+  if (stored.status === "pending" || stored.status === "applied") {
     // Already confirmed. Report the reservation instead of running it twice.
     return { ok: true, reservation: viewOf(stored) };
+  }
+  if (stored.status !== "previewed") {
+    // A spent quote (failed, expired, cancelled) is never reported as a
+    // reservation: a resent confirm whose first answer was lost would
+    // otherwise show a change that does not exist.
+    return fail(
+      "PLAN_CHANGE_PREVIEW_EXPIRED",
+      "This quote can no longer be confirmed; request a new one."
+    );
   }
 
   // One confirm per quote goes on to Stripe. Claimed before anything else so a
@@ -650,8 +659,14 @@ export async function confirmPlanChange({
     const current = await prisma.planChangeRequest.findUniqueOrThrow({
       where: { id: stored.id },
     });
-    if (current.status !== "previewed") {
+    if (current.status === "pending" || current.status === "applied") {
       return { ok: true, reservation: viewOf(current) };
+    }
+    if (current.status !== "previewed") {
+      return fail(
+        "PLAN_CHANGE_PREVIEW_EXPIRED",
+        "This quote can no longer be confirmed; request a new one."
+      );
     }
     return fail(
       "PLAN_CHANGE_ALREADY_PENDING",
