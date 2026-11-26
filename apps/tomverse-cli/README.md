@@ -382,6 +382,17 @@ asks, an allow rule skips the question except where noted).
   permission gate at all: the host opens its own card for every call (a push and a
   pull request every time, a commit too), the model cannot answer it, and only the
   person's answer on that card lets it run.
+- **How a command is read, and what that cannot see.** "A command that sends
+  something out" is found by reading the command line: programs such as `curl`,
+  `ssh` and `gh`, subcommands such as `git push` and `npm publish` wherever they
+  stand after their program, and a network address in the text. A line that hides
+  what it runs is left to a person too: a program name or a subcommand that is a
+  variable or a substitution, `eval` and `iex`, a shell started on built or encoded
+  text, `git -c ...`. This is a reading of text, not enforcement. It does not see
+  what a script file, a package script (`npm run deploy`) or a git alias set in the
+  repository does once it runs. The command sandbox is what limits a command that
+  is already running, and on Windows the sandbox does not limit the network, so
+  allow all on Windows should be used only with code you trust.
 - **MCP tools** are other programs that can send what they are given anywhere, so
   allow all and auto review treat them like a web host: only a rule that names the
   tool (`mcp__server__tool`, as the model sees the name) or its server (`mcp__server__*`, or
