@@ -11,7 +11,10 @@ import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudi
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
-import { createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolFailure, studioToolQuote, studioToolsToRequest, useStudioImageQuote } from "./studioGenerationClient";
+import {
+  createStudioImageRunner, runStudioTool, StudioGenerationError, studioToolOutcome, studioToolQuote, studioToolSequenceStops,
+  studioToolsToRequest, useStudioImageQuote,
+} from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
@@ -321,19 +324,15 @@ export function StudioToolEditor({ tool, preset }: {
           } catch (error) {
             if (signal.aborted) return;
             failures.push(error);
-            // An unfinished request may already be paid for, and only this runner can resume it under
-            // the same key. Nothing else is started until it has: a credit shortfall on the next tool
-            // would send the user to checkout and lose it.
-            if (runner.pending()) break;
+            if (studioToolSequenceStops(error, runner.pending(), isStudioCreditShortfall)) break;
           }
         }
         if (failures.length > 0) {
-          // Nothing made is a failure. A shortfall or a changed quote on any tool is handled as for any
-          // feature (credit recovery, a fresh quote) and what was made stays on screen. Otherwise one of
-          // two is said so.
-          const failure = studioToolFailure(failures, isStudioCreditShortfall);
-          if (fresh.length === 0 || isStudioCreditShortfall(failure) ||
-              (failure instanceof StudioGenerationError && failure.status === 409)) throw failure;
+          const outcome = studioToolOutcome({
+            failures, made: fresh.length, isShortfall: isStudioCreditShortfall,
+            unfinished: quote.targets.some(target => toolRunners.get(target.modelId)?.pending()),
+          });
+          if (outcome.action === "throw") throw outcome.error;
           report(copy.cutoutMissing, true);
         }
       } else {

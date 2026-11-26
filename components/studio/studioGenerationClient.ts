@@ -121,9 +121,44 @@ export const studioToolsToRequest = <Target extends { modelId: string }>(
  * not be lost behind an earlier tool's ordinary error.
  */
 export const studioToolFailure = (failures: readonly unknown[], isShortfall: (error: unknown) => boolean): unknown =>
-  failures.find(isShortfall) ??
-  failures.find(error => error instanceof StudioGenerationError && error.status === 409) ??
-  failures[0];
+  failures.find(isShortfall) ?? failures.find(quoteChanged) ?? failures[0];
+
+const quoteChanged = (error: unknown) => error instanceof StudioGenerationError && error.status === 409;
+
+/**
+ * Whether the tools after a failed one are still worth sending. Not after a
+ * credit shortfall or a changed quote, which hold for every tool, and not
+ * while the failed request is unfinished (`pending`): it may already be paid
+ * for and only its runner can resume it.
+ */
+export const studioToolSequenceStops = (error: unknown, pending: boolean, isShortfall: (error: unknown) => boolean): boolean =>
+  pending || isShortfall(error) || quoteChanged(error);
+
+/**
+ * What the editor does once the tools have run and at least one failed.
+ *
+ *   - `throw`: the caller's ordinary handling takes the error, which for a
+ *     shortfall opens credit recovery and for a changed quote reloads it.
+ *     Nothing made is always thrown.
+ *   - `notice`: something was made; say that one result is missing.
+ *
+ * While any tool's request is unfinished a shortfall is never thrown as one:
+ * the trip to checkout would drop the runner that can resume a request that
+ * may already be paid for. It becomes an ordinary failure until that request
+ * has been resumed.
+ */
+export const studioToolOutcome = (input: {
+  failures: readonly unknown[];
+  made: number;
+  unfinished: boolean;
+  isShortfall: (error: unknown) => boolean;
+}): { action: "throw"; error: unknown } | { action: "notice" } => {
+  const failure = studioToolFailure(input.failures, input.isShortfall);
+  if (input.isShortfall(failure) && input.unfinished) {
+    return input.made === 0 ? { action: "throw", error: new StudioGenerationError(503, "STUDIO_TOOL_UNFINISHED") } : { action: "notice" };
+  }
+  return input.made === 0 || input.isShortfall(failure) || quoteChanged(failure) ? { action: "throw", error: failure } : { action: "notice" };
+};
 
 /**
  * Runs one tool of a several-tool feature after another has finished. The

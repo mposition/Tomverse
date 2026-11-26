@@ -72,7 +72,7 @@ test("a tool sent after another waits out a busy slot twice, and nothing else", 
 });
 
 test("a press requests only what is owed, and every tool only when all are held and on screen", async () => {
-  const { studioToolsToRequest, studioToolFailure } = await import("../components/studio/studioGenerationClient.ts");
+  const { studioToolsToRequest, studioToolFailure, studioToolOutcome, studioToolSequenceStops } = await import("../components/studio/studioGenerationClient.ts");
   const targets = [{ modelId: "tool-a" }, { modelId: "tool-b" }];
   const ids = (held, shown = held) => studioToolsToRequest(targets, id => held.includes(id), id => shown.includes(id)).map(target => target.modelId);
   assert.deepEqual(ids([]), ["tool-a", "tool-b"]);
@@ -92,6 +92,25 @@ test("a press requests only what is owed, and every tool only when all are held 
   assert.equal(studioToolFailure([changed, shortfall], isShortfall), shortfall);
   assert.equal(studioToolFailure([plain, changed], isShortfall), changed);
   assert.equal(studioToolFailure([plain, new Error("crop")], isShortfall), plain);
+
+  // After a failure the next tool is sent only when the failure was that tool's alone and finished.
+  assert.equal(studioToolSequenceStops(plain, false, isShortfall), false);
+  assert.equal(studioToolSequenceStops(plain, true, isShortfall), true);
+  assert.equal(studioToolSequenceStops(shortfall, false, isShortfall), true);
+  assert.equal(studioToolSequenceStops(changed, false, isShortfall), true);
+
+  const outcome = (failures, made, unfinished) => studioToolOutcome({ failures, made, unfinished, isShortfall });
+  // Nothing made is thrown; a shortfall or a changed quote is thrown even beside a result; otherwise a notice.
+  assert.deepEqual(outcome([plain], 0, false), { action: "throw", error: plain });
+  assert.deepEqual(outcome([plain], 1, false), { action: "notice" });
+  assert.deepEqual(outcome([shortfall], 1, false), { action: "throw", error: shortfall });
+  assert.deepEqual(outcome([changed], 1, false), { action: "throw", error: changed });
+  // While a request is unfinished a shortfall never reaches checkout, whichever tool it came from.
+  const held = outcome([shortfall, plain], 0, true);
+  assert.equal(held.action, "throw");
+  assert.ok(held.error !== shortfall && !isShortfall(held.error) && held.error.code === "STUDIO_TOOL_UNFINISHED");
+  assert.deepEqual(outcome([shortfall], 1, true), { action: "notice" });
+  assert.deepEqual(outcome([plain], 0, true), { action: "throw", error: plain });
 });
 
 test("a runner says when a request it sent is unfinished, and resumes it under the same key", async context => {
