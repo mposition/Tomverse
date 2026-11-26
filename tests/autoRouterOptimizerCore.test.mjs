@@ -176,7 +176,7 @@ const fakeDeps = (overrides = {}) => {
       route: async (guidance, decision) => {
         calls.route++;
         const hard = decision.routerInput.startsWith("hard");
-        return { value: guidance === NEW_GUIDANCE && !hard ? "light" : "strong", costMicroUsd: 10, provider: "rtr" };
+        return { value: guidance === NEW_GUIDANCE && !hard ? "light" : "strong", reason: `replayed ${decision.id}`, costMicroUsd: 10, provider: "rtr" };
       },
       answer: async (modelId, turn) => {
         calls.answer++;
@@ -383,6 +383,10 @@ test("too few real decisions: one call writes the rest, each gets the Auto menu,
   // Written alternately, still split so both halves get both kinds.
   assert.ok(trained.some((item) => item.message.startsWith("인사")) && trained.some((item) => item.message.startsWith("hard 동시성")));
   assert.ok(trained.every((item) => item.picked === "strong"));
+  // A replayed synthetic pick carries the router's reason; a real one keeps its recorded reason.
+  const realReasons = new Set(real.map((item) => item.reason));
+  assert.equal(trained.filter((item) => /^replayed synthetic-\d+$/.test(item.reason ?? "")).length, 9);
+  assert.equal(trained.filter((item) => realReasons.has(item.reason)).length, 3);
   assert.equal(result.spentByKind.synthesize, 70);
   assert.equal(result.spentByProvider.get("opt"), 70 + 100 + calls.judge * 20);
   assert.equal(result.status, "passed");
