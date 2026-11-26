@@ -401,7 +401,7 @@ export function desktopChatTurnField(key: string): boolean {
 export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
-  if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && desktopChatWriteEnabled();
+  if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && (desktopChatWriteEnabled() || desktopReviewWriteEnabled());
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
   if (desktopChatWriteEnabled() && desktopChatWriteRoute(path, method)) return true;
   if (!desktopReviewWriteEnabled()) return false;

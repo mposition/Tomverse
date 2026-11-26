@@ -70,6 +70,8 @@ const uploadPreparation = z.object({
 const matchesProduct = (product: DesktopTextProduct) => product === "review" ? isDesktopReview : isDesktopChat;
 type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort" | "deepResearchDepth" | "mcpConnectionId"> & {
   review?: true;
+  /** A Review turn for one model has no shared admission; it prepares its own context where the server offers that for a Review. */
+  reviewContext?: boolean;
   currentLocation?: ChatTurnInput["currentLocation"];
   admission?: { admissionToken: string; contextBundle?: string | null };
 };
@@ -392,7 +394,9 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       };
       // A chosen plugin turn is never a signed-context (location fusion) turn, as on the web.
       const mcpConnectionId = input.review ? undefined : input.mcpConnectionId;
-      const contextBundle = input.review ? input.admission?.contextBundle : mcpConnectionId ? null : await prepare();
+      // Memory, the assistant and the project reach the model through this context. A Review of several models carries the one its admission was priced with.
+      const ownContext = !input.admission && !mcpConnectionId && (!input.review || input.reviewContext === true);
+      const contextBundle = input.admission ? input.admission.contextBundle : ownContext ? await prepare() : null;
       const timeout = new AbortController();
       const watchdog = createChatLivenessWatchdog({ onExpire: () => timeout.abort() });
       try {
@@ -410,7 +414,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           }, { signal: AbortSignal.any([turnSignal(turn), timeout.signal]) });
         };
         let response = await stream(contextBundle);
-        if (!input.review && contextBundle && response.status === 409) {
+        if (ownContext && contextBundle && response.status === 409) {
           // A signed-context refusal happens before the provider stream and keeps the same saved turn identity.
           const refusal = staleChatContext.safeParse(await response.json().catch(() => null));
           if (refusal.success) {

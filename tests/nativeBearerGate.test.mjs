@@ -67,6 +67,30 @@ test("Desktop remote control enrols only the PC's own sync path, and only for th
   }
 });
 
+test("Desktop prepares a turn's context with Chat or Review writes on, and with neither it does not", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
+    // A Review turn that one model answers alone carries memory and the assistant through its own context.
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "GET"), false);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
 test("Desktop analysis and composer tools require their own enrollment", () => {
   const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED",
     "TOMVERSE_DESKTOP_REVIEW_ANALYSIS_ENABLED", "TOMVERSE_DESKTOP_COMPOSER_TOOLS_ENABLED"];

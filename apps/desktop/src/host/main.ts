@@ -2997,7 +2997,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   }
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
   if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
-  if (draft.mcpConnectionId && (!state.capabilities?.plugins || draft.deepResearchDepth || handoffId)) {
+  if (draft.mcpConnectionId && (!state.capabilities?.chatPlugin || draft.deepResearchDepth || handoffId)) {
     throw new Error("Plugins are unavailable for this draft.");
   }
   const attachments = resolveStagedAttachments(draft.attachmentUploadIds);
@@ -3098,10 +3098,11 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   const attachments = resolveStagedAttachments(input.attachmentUploadIds);
   const capability = state.capabilities?.review;
   if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy) ||
-      (input.tools && !state.capabilities?.composerTools)) {
+      (input.tools && !state.capabilities?.reviewTools)) {
     throw new Error("The selected Review options are unavailable.");
   }
   const currentLocation = chatLocationAllowed() ? input.currentLocation : undefined;
+  const reviewContext = state.capabilities?.reviewContext === true;
   return withChatAccount(async (api) => {
     const window = mainWindow;
     const turn = new AbortController();
@@ -3170,7 +3171,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
           const assistant = { id: randomUUID(), text: "" };
           responses.set(modelId, assistant);
           let lastProgressAt = 0;
-          await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, currentLocation },
+          await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext, currentLocation },
             sourceId, assistant.id, signal, (text) => {
               assistant.text = text;
               const now = Date.now();
@@ -3606,7 +3607,8 @@ let geolocationGrant: { session: AbortSignal; expiry: number } | undefined;
 
 /** Chat may read the device position for a signed-in account. It is not a fixture-only device permission like dictation. */
 function chatLocationAllowed() {
-  return Boolean(browserSession) && state.account.stage === "connected" && !suspended && !signingOut && !closing;
+  return Boolean(browserSession) && state.account.stage === "connected" && state.capabilities?.turnLocation === true &&
+    !suspended && !signingOut && !closing;
 }
 
 function mayRequestChatLocation(contents: Electron.WebContents | null) {

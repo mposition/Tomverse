@@ -21,3 +21,18 @@ test("Desktop accepts 2K image quotes and isolates an unsupported image catalogu
   assert.equal(invalid?.attachments, true);
   assert.equal(invalid?.review?.modelLimit, 3);
 });
+
+test("what a turn may carry comes from the server that was reached, and an older server offers none of it", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true, desktopPlugins: true, desktopComposerTools: true };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  const older = await load();
+  assert.deepEqual([older?.plugins, older?.composerTools], [true, true]);
+  assert.deepEqual([older?.turnLocation, older?.chatPlugin, older?.reviewContext, older?.reviewTools], [false, false, false, false]);
+  body = { ...body, desktopTurnLocation: true, desktopChatPlugin: true, desktopReviewContext: true, desktopReviewTools: true };
+  const current = await load();
+  assert.deepEqual([current?.turnLocation, current?.chatPlugin, current?.reviewContext, current?.reviewTools], [true, true, true, true]);
+  // The "+" menu's choices reach a model through the Review turn's context, so they are not offered without it.
+  body = { ...body, desktopReviewContext: false };
+  assert.equal((await load())?.reviewTools, false);
+});

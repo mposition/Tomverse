@@ -6,7 +6,11 @@ import { useLayoutEffect, useRef, useState } from "react";
  */
 export function useSendGuard(scope: string, draft: string) {
   const scopeChanges = useRef(0);
-  useLayoutEffect(() => { scopeChanges.current += 1; }, [scope]);
+  // Counted on leaving too: a workspace that was closed meanwhile sends nothing, although the send itself lives above it.
+  useLayoutEffect(() => {
+    scopeChanges.current += 1;
+    return () => { scopeChanges.current += 1; };
+  }, [scope]);
   const latestDraft = useRef(draft);
   useLayoutEffect(() => { latestDraft.current = draft; });
   const [preparing, setPreparing] = useState(false);

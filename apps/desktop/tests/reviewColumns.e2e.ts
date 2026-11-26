@@ -117,6 +117,8 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
       assert.equal(after.dispatches.length, 1);
       assert.equal(after.dispatches[0]!.modelId, gemini!.id);
       assert.equal(after.dispatches[0]!.admissionToken, undefined);
+      assert.equal(after.dispatches[0]!.contextBundle, "context-for-" + gemini!.id, "memory and the assistant reach the model through the turn's own context");
+      assert.deepEqual(after.contexts, [gemini!.id]);
       assert.deepEqual(after.models, columnModels.map((model) => model.id), "the saved model list is untouched");
       assert.ok(after.dispatches[0]!.transcript.at(-1)!.endsWith("Can you give a one-line summary?"));
       await expect(ask).toHaveValue("");
@@ -136,6 +138,8 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
       const geminiDispatch = state.dispatches.find(({ modelId, sourceUserMessageId }) => modelId === gemini!.id && sourceUserMessageId !== state.dispatches[0]!.sourceUserMessageId)!;
       assert.ok(geminiDispatch.transcript.some((line) => line.includes("one-line summary")));
       assert.equal(geminiDispatch.admissionToken, "columns-comparison");
+      assert.equal(geminiDispatch.contextBundle, undefined);
+      assert.equal(state.contexts.length, 1, "a Review of several models prepares no context of its own");
     });
 
     await t.test("a model can be switched off, which leaves it out of the next send", async () => {
@@ -197,6 +201,31 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
       await column(gemini!).getByRole("button", { name: `Send only to this model · ${gemini!.name}` }).click();
       await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(alone.dispatches.length + 1);
       assert.equal((await columnsState(app)).dispatches.at(-1)!.currentLocation, undefined);
+    });
+
+    await t.test("a question is dropped when the Review is left while its position is still being read", async () => {
+      // The position now arrives only when the test releases it.
+      await desktop.evaluate(`void Object.defineProperty(navigator, "geolocation", { configurable: true, value: {
+        getCurrentPosition(done) { window.releasePosition = () => done({ coords: { latitude: -27.46551, longitude: 153.025879, accuracy: 23 }, timestamp: Date.now() }); },
+      } })`);
+      const composer = desktop.locator(".review-composer-slot form");
+      await composer.locator(".composer-tools > summary").click();
+      await composer.getByTestId("tools-location-row").click();
+      await desktop.evaluate("window.releasePosition()");
+      await expect(composer.getByTestId("tools-location-row")).toHaveAttribute("aria-checked", "true");
+      await desktop.keyboard.press("Escape");
+      const before = await columnsState(app);
+      const question = desktop.getByRole("textbox", { name: "Review question" });
+      await question.fill("Where should we meet?");
+      await desktop.getByRole("button", { name: "Send Review question" }).click();
+      await expect(question).toBeDisabled();
+      await desktop.getByRole("button", { name: "Chat", exact: true }).click();
+      await expect(desktop.locator(".review-composer-slot")).toHaveCount(0);
+      await desktop.evaluate("window.releasePosition()");
+      await desktop.waitForTimeout(700);
+      const after = await columnsState(app);
+      assert.equal(after.saves.length, before.saves.length, "nothing is saved to the Review that was left");
+      assert.equal(after.dispatches.length, before.dispatches.length);
     });
   } finally {
     await closeReviewColumns(session);

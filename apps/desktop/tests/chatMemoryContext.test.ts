@@ -122,3 +122,30 @@ test("Desktop leaves a second stale refusal unresolved and keeps Review on its s
   assert.equal(calls[4]?.body.admissionToken, "review-admission");
   assert.equal(calls[4]?.body.contextBundle, "review-bundle");
 });
+
+test("a Review turn that one model answers alone prepares its own context where the server offers it, and retries one stale refusal", async (t) => {
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const responses = [answer(), Response.json({ ok: true, contextBundle: "review-first" }), stale(),
+    Response.json({ ok: true, contextBundle: "review-refreshed" }), answer(), answer()];
+  t.mock.method(globalThis, "fetch", async (url: URL, request: RequestInit) => {
+    calls.push({ path: url.pathname, body: JSON.parse(String(request.body)) });
+    return responses[calls.length - 1]!;
+  });
+  const signal = new AbortController().signal;
+  const api = desktopChatApi("fixture-bearer", signal, origin);
+  // A server that does not offer it: the turn is sent as before, without a context.
+  await api.stream(current, { ...input, review: true }, "saved-question", "plain-answer", signal, () => {});
+  assert.deepEqual(calls.map(({ path }) => path), ["/api/chat"]);
+  assert.equal("contextBundle" in calls[0]!.body, false);
+  await api.stream(current, { ...input, review: true, reviewContext: true }, "saved-question", "own-answer", signal, () => {});
+  assert.deepEqual(calls.slice(1).map(({ path }) => path), ["/api/chat/context", "/api/chat", "/api/chat/context", "/api/chat"]);
+  assert.deepEqual(calls[1]?.body, { conversationId: current.id, modelId, sourceUserMessageId: "saved-question" });
+  assert.equal(calls[2]?.body.contextBundle, "review-first");
+  assert.equal(calls[3]?.body.previousContextBundle, "review-first");
+  assert.equal(calls[4]?.body.contextBundle, "review-refreshed");
+  // Several models share the admission's context and prepare none of their own.
+  await api.stream(current, { ...input, review: true, reviewContext: true, admission: { admissionToken: "shared", contextBundle: "shared-bundle" } },
+    "saved-question", "shared-answer", signal, () => {});
+  assert.deepEqual(calls.slice(5).map(({ path }) => path), ["/api/chat"]);
+  assert.equal(calls[5]?.body.contextBundle, "shared-bundle");
+});
