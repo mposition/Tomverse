@@ -14,8 +14,11 @@ import { computerRequestRefusal, isUserIntervention, keyInput, mapPoint, partial
 export const COMPUTER_IMAGE_EDGE = 1568;
 /** After the person's own click that the host is told of (an approval card, the hand-back, choosing the window): their hand leaving the mouse is part of it. */
 export const USER_INPUT_GRACE_MS = 400;
-/** After the agent's own input, whose time the backend reports: the way back from the backend and one timer tick, nothing more. */
-export const AGENT_INPUT_SLACK_MS = 50;
+/** One timer tick of the system's input clock (about 15.6 ms). Input is stamped in whole ticks, so input within one tick of the agent's own cannot be told from it. */
+export const INPUT_TICK_MS = 16;
+
+/** How far `inputTick` is after `sentTick` on the 32-bit tick clock, which wraps around (about every 49.7 days). */
+export const tickDistance = (inputTick: number, sentTick: number) => (inputTick - sentTick) | 0;
 export const COMPUTER_STOP_KEY = "CommandOrControl+Alt+Shift+X";
 const MAX_LISTED = 60;
 
@@ -49,11 +52,14 @@ export function createComputerHost(deps: ComputerHostDeps) {
   let notice: ComputerNotice | null = null;
   let stopKeyReady = false;
   let busy = 0;
-  let baseline = deps.now();
-  /** How long after the baseline input still counts as part of it: long after the person's own click, short after the agent's input. */
-  let grace = USER_INPUT_GRACE_MS;
+  /**
+   * What the person's own input is measured from. After something the person did (and the host is told of), it is the host's clock
+   * plus a grace for the hand leaving the mouse. After the agent's own input it is the system's input tick of that input, and the
+   * comparison is made on the system's clock, never on the host's.
+   */
+  let reference: { by: "person"; at: number } | { by: "agent"; sentTick: number } = { by: "person", at: deps.now() };
   /** The person did something the host is told of, now. */
-  const personActed = () => { baseline = deps.now(); grace = USER_INPUT_GRACE_MS; };
+  const personActed = () => { reference = { by: "person", at: deps.now() }; };
   const inflight = new Set<AbortController>();
 
   const getBackend = () => (backend === undefined ? (backend = deps.createBackend()) : backend);
@@ -141,9 +147,13 @@ export function createComputerHost(deps: ComputerHostDeps) {
     if (current.minimized) return fail(refusalText("minimized"));
     // Only Tomverse's own window may hand the front back; a window of any other program in front is the person's.
     if (!current.foreground && !deps.ownPids().includes(current.foregroundPid)) return fail(refusalText("not-front"));
-    const idle = await os.idleMs();
+    const last = await os.lastInput();
     signal.throwIfAborted();
-    if (deps.now() - idle > baseline + grace) {
+    // An input tick that cannot be read counts as the person's: the agent stops rather than go on blind.
+    const personInput = reference.by === "person"
+      ? deps.now() - last.idleMs > reference.at + USER_INPUT_GRACE_MS
+      : !Number.isFinite(last.inputTick) || tickDistance(last.inputTick, reference.sentTick) > INPUT_TICK_MS;
+    if (personInput) {
       stopAgent("user-input", self);
       return fail("The user used the mouse or keyboard, so the agent stopped. Wait for the user to hand control back.");
     }
@@ -155,10 +165,10 @@ export function createComputerHost(deps: ComputerHostDeps) {
     const reason = outcome.reason ?? "";
     const part = { typed: outcome.typed ?? 0, delivered: outcome.delivered ?? 0, planned: outcome.planned ?? 0 };
     const partial = !outcome.performed && (part.typed > 0 || part.delivered > 0);
-    // Only input the agent really sent moves the baseline: a refusal that sent nothing must not hide what the person did meanwhile.
-    // The backend says how long ago the system last saw input when it finished: that is the agent's own last input, and input any
-    // later than that is the person's.
-    if (outcome.performed || partial) { baseline = deps.now() - Math.max(0, outcome.idleMs ?? 0); grace = AGENT_INPUT_SLACK_MS; }
+    // Only input the agent really sent moves the reference: a refusal that sent nothing must not hide what the person did meanwhile.
+    // The backend reports the system's tick of the agent's own last input; input after that tick is the person's. Without a tick the
+    // reference stays where it was, which stops the agent too early rather than too late.
+    if (outcome.sentTick !== undefined && Number.isFinite(outcome.sentTick)) reference = { by: "agent", sentTick: outcome.sentTick };
     const window = info(chosen, current.title);
     if (outcome.performed) return { status: "ok", window, position: "front", note: "Done." };
     // The pointer or the window was changed under the input: that was the person, so it ends like any other use of the mouse.

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ComputerAgentReply } from "../../tomverse-cli/src/computer-tools";
 import type { ComputerState } from "../src/computer-contract";
 import { DENIED_CLASSES, DENIED_PROGRAMS, windowDenial } from "../src/host/computer-deny";
-import { createComputerHost, USER_INPUT_GRACE_MS, type ComputerHostDeps, type ComputerRun } from "../src/host/computer-host";
+import { createComputerHost, INPUT_TICK_MS, tickDistance, USER_INPUT_GRACE_MS, type ComputerHostDeps, type ComputerRun } from "../src/host/computer-host";
 import { createFixtureBackend, FIXTURE_BLOCKED, FIXTURE_WINDOW } from "../src/host/computer-fixture-backend";
 import { computerRequestRefusal, keyInput, mapPoint, type ComputerGateInput } from "../src/host/computer-policy";
 
@@ -90,9 +90,10 @@ test("the gate refuses unless the switch, the system, the run, the task, the win
 
 type Rig = ReturnType<typeof rig>;
 function rig(over: { enabled?: boolean; backend?: boolean; stopKey?: boolean; clean?: (text: string) => string } = {}) {
-  const backend = createFixtureBackend();
-  let enabled = over.enabled ?? true;
   let clock = 1_000_000;
+  // The fake system input clock runs on the host's fake clock, so the tests move both with one `tick`.
+  const backend = createFixtureBackend(() => clock);
+  let enabled = over.enabled ?? true;
   let runNow: ComputerRun = { runId: "run", taskId: "task", running: true, apiExecution: true, suspended: false, scope: "acct" };
   const replies: ComputerAgentReply[] = [];
   const states: ComputerState[] = [];
@@ -225,19 +226,19 @@ test("the person touching the mouse or keyboard stops the agent; their approval 
   // The person's last input was a minute ago: fine.
   assert.equal((await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" }))[0]!.status, "ok");
   // They click the approval card, which the host is told about: not interference.
-  r.backend.state.idleMs = 5;
+  r.backend.userInput(5);
   r.host.noteApprovalAnswered();
   assert.equal((await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" }))[0]!.status, "ok");
   // They move the mouse while the agent thinks.
   r.tick(2_000);
-  r.backend.state.idleMs = 300;
+  r.backend.userInput(300);
   const [stopped] = await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" });
   assert.match(errorOf([stopped!]), /used the mouse or keyboard/);
   assert.equal(r.host.state().control, "stopped");
   assert.equal(r.host.state().notice, "user-input");
   assert.equal(r.backend.done.length, 2);
   // Even when the person is idle again, the agent stays stopped until they hand control back.
-  r.backend.state.idleMs = 60_000;
+  r.backend.userInput(60_000);
   assert.match(errorOf(await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" })), /took control/);
   assert.match(errorOf(await r.ask({ tool: "screenshot" })), /took control/, "it cannot even look");
   await r.host.command({ type: "give" });
@@ -357,9 +358,9 @@ test("a request that is already stopped never reaches the backend's input", asyn
   await r.ask({ tool: "screenshot" });
   let called = 0;
   r.backend.act = async () => { called += 1; return { performed: true }; };
-  const idle = r.backend.idleMs.bind(r.backend);
+  const last = r.backend.lastInput.bind(r.backend);
   // The stop key is pressed while the host is still reading the person's last input.
-  r.backend.idleMs = async () => { r.stop(); return idle(); };
+  r.backend.lastInput = async () => { r.stop(); return last(); };
   const replies = await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" });
   assert.equal(replies[0]!.status, "error");
   assert.equal(called, 0);
@@ -376,14 +377,14 @@ test("a refusal that sent nothing does not move the baseline, so the person's in
   r.backend.act = async () => {
     // The person grabs the mouse a second into the call; the backend then refuses for a standing reason.
     r.tick(1_200);
-    r.backend.state.idleMs = 200;
+    r.backend.userInput(200);
     return { performed: false, reason: "covered-point" };
   };
   const refused = await r.ask(CLICK);
   assert.match(errorOf(refused), /Another window is over that point/);
   assert.equal(r.host.state().control, "idle", "a standing condition is not the person");
   r.tick(500);
-  r.backend.state.idleMs = 700;
+  r.backend.userInput(700);
   assert.match(errorOf(await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" })), /used the mouse or keyboard/);
   assert.equal(r.host.state().control, "stopped");
 });
@@ -488,10 +489,10 @@ test("a screenshot does not move the baseline: what the person did before it sti
   await r.ask({ tool: "screenshot" });
   // The person types in the window, and the agent then looks again before it acts.
   r.tick(2_000);
-  r.backend.state.idleMs = 300;
+  r.backend.userInput(300);
   await r.ask({ tool: "screenshot" });
   r.tick(200);
-  r.backend.state.idleMs = 500;
+  r.backend.userInput(500);
   let sent = false;
   r.backend.act = async () => { sent = true; return { performed: true }; };
   assert.match(errorOf(await r.ask(CLICK)), /used the mouse or keyboard/);
@@ -510,23 +511,112 @@ test("input of the person between two parts of an action stops the agent and say
   assert.equal(r.host.state().control, "stopped");
 });
 
-test("after the agent's own input the person's input counts at once; the long grace is only for the person's own click", async () => {
-  const { AGENT_INPUT_SLACK_MS } = await import("../src/host/computer-host");
-  assert.ok(AGENT_INPUT_SLACK_MS < USER_INPUT_GRACE_MS);
+
+// ── The agent's own input is compared on the system's input clock ─────────
+
+const ENTER = { tool: "key", window: FIXTURE_WINDOW.id, key: "enter" } as const;
+
+/** A rig whose first action has gone out, so the reference is the agent's own input tick. */
+async function afterAgentInput() {
   const r = rig();
   await choose(r);
   await r.ask({ tool: "screenshot" });
   r.tick(USER_INPUT_GRACE_MS + 100);
-  // The agent's click goes out; the backend says the system saw input just now.
-  r.backend.act = async () => ({ performed: true, idleMs: 0 });
-  r.backend.state.idleMs = USER_INPUT_GRACE_MS + 100;
-  assert.equal(errorOf(await r.ask(CLICK)), "ok");
-  // The person presses a key 150 ms later, well inside the grace their own click would have had.
-  r.tick(200);
-  r.backend.state.idleMs = 50;
+  assert.equal(errorOf(await r.ask(ENTER)), "ok");
+  return r;
+}
+
+test("after the agent's own input the person's input counts at once; the long grace is only for the person's own click", async () => {
+  const r = await afterAgentInput();
+  // The person presses a key 150 ms after the agent's input, well inside the grace their own click would have had.
+  r.tick(150);
+  r.backend.userInput(0);
   let sent = false;
-  r.backend.act = async () => { sent = true; return { performed: true, idleMs: 0 }; };
-  assert.match(errorOf(await r.ask({ tool: "key", window: FIXTURE_WINDOW.id, key: "enter" })), /used the mouse or keyboard/);
+  r.backend.act = async () => { sent = true; return { performed: true }; };
+  assert.match(errorOf(await r.ask(ENTER)), /used the mouse or keyboard/);
   assert.equal(sent, false);
   assert.equal(r.host.state().control, "stopped");
+});
+
+test("the person typing after the agent's last input but before the backend finished is caught on the next action (the old idle-time baseline hid it)", async () => {
+  const r = await afterAgentInput();
+  await r.ask({ tool: "screenshot" });
+  const send = r.backend.act.bind(r.backend);
+  r.backend.act = async (...args) => {
+    const outcome = await send(...args);
+    // The agent's input is out; the person hits a key 40 ms later, before the backend answers, and the answer takes a while to arrive.
+    r.tick(40);
+    r.backend.userInput(0);
+    r.tick(30);
+    return outcome;
+  };
+  assert.equal(errorOf(await r.ask(CLICK)), "ok", "the action itself went out and is reported as done");
+  const doneBefore = r.backend.done.length;
+  r.backend.act = send;
+  assert.match(errorOf(await r.ask(ENTER)), /used the mouse or keyboard/);
+  assert.equal(r.backend.done.length, doneBefore, "nothing more was sent");
+  assert.equal(r.host.state().control, "stopped");
+});
+
+test("input that is only the agent's own, or within one timer tick of it, never stops the agent", async () => {
+  const r = await afterAgentInput();
+  for (let n = 0; n < 3; n += 1) {
+    r.tick(300);
+    assert.equal(errorOf(await r.ask(ENTER)), "ok", "the agent's own earlier input is not the person's");
+  }
+  const sentTick = (await r.backend.lastInput()).inputTick;
+  for (const offset of [-500, -1, 0, 1, INPUT_TICK_MS]) {
+    r.backend.state.inputTick = (sentTick + offset) >>> 0;
+    r.backend.act = async () => ({ performed: true, sentTick });
+    assert.equal(errorOf(await r.ask(ENTER)), "ok", `input ${offset} ms from the agent's tick`);
+  }
+  assert.equal(r.host.state().control, "idle");
+  r.backend.state.inputTick = (sentTick + INPUT_TICK_MS + 1) >>> 0;
+  assert.match(errorOf(await r.ask(ENTER)), /used the mouse or keyboard/, "one millisecond past the tick is the person's");
+});
+
+test("the tick clock wraps around: a small input tick just after a large sent tick is later, not earlier", async () => {
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.backend.act = async () => ({ performed: true, sentTick: 4_294_967_290 });
+  assert.equal(errorOf(await r.ask(ENTER)), "ok");
+  // 4294967290 + 11 wraps to 5: the agent's own input.
+  r.backend.lastInput = async () => ({ idleMs: 1_000, inputTick: 5 });
+  assert.equal(errorOf(await r.ask(ENTER)), "ok");
+  // 4294967290 + 36 wraps to 30: the person's.
+  r.backend.lastInput = async () => ({ idleMs: 1_000, inputTick: 30 });
+  assert.match(errorOf(await r.ask(ENTER)), /used the mouse or keyboard/);
+  assert.equal(tickDistance(5, 4_294_967_290), 11);
+  assert.equal(tickDistance(4_294_967_290, 5), -11);
+});
+
+test("an input tick that cannot be read counts as the person's, and an action that reports no tick leaves the reference where it was", async () => {
+  const unreadable = await afterAgentInput();
+  unreadable.backend.lastInput = async () => ({ idleMs: 1_000, inputTick: Number.NaN });
+  assert.match(errorOf(await unreadable.ask(ENTER)), /used the mouse or keyboard/);
+
+  const r = rig();
+  await choose(r);
+  await r.ask({ tool: "screenshot" });
+  r.tick(2_000);
+  // The action went out but says nothing about when: the person's click is still the reference, and input after its grace stops the agent.
+  r.backend.act = async () => ({ performed: true });
+  assert.equal(errorOf(await r.ask(ENTER)), "ok");
+  r.tick(2_000);
+  r.backend.userInput(1_000);
+  assert.match(errorOf(await r.ask(ENTER)), /used the mouse or keyboard/);
+});
+
+test("after the person's own click the agent is not stopped by input inside the grace, and is by input after it", async () => {
+  for (const [later, stops] of [[USER_INPUT_GRACE_MS - 1, false], [USER_INPUT_GRACE_MS, false], [USER_INPUT_GRACE_MS + 1, true]] as const) {
+    const r = await afterAgentInput();
+    // The person answers an approval card; their hand then moves the mouse for a moment.
+    r.host.noteApprovalAnswered();
+    r.tick(later);
+    r.backend.userInput(0);
+    const reply = await r.ask(ENTER);
+    if (stops) assert.match(errorOf(reply), /used the mouse or keyboard/, `${later} ms after the click`);
+    else assert.equal(errorOf(reply), "ok", `${later} ms after the click`);
+  }
 });

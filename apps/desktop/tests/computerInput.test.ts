@@ -52,7 +52,7 @@ const STAND_IN = [
   "require('readline').createInterface({ input: process.stdin }).on('line', (line) => {",
   "  const req = JSON.parse(line);",
   "  if (req.op === 'act') { fs.appendFileSync(process.env.TV_MARK, process.pid + '\\n'); return; }",
-  "  process.stdout.write(JSON.stringify({ id: req.id, ok: true, idleMs: 5 }) + '\\n');",
+  "  process.stdout.write(JSON.stringify({ id: req.id, ok: true, idleMs: 5, inputTick: 4242 }) + '\\n');",
   "});",
 ].join("\n");
 
@@ -82,7 +82,7 @@ test("stopping an input in progress ends the process that is sending it, and onl
     await until(() => !alive(pid), "the process to end");
     assert.ok(alive(process.pid), "the host process is untouched");
     // The next request starts a new process and works.
-    assert.equal(await backend.idleMs(), 5);
+    assert.deepEqual(await backend.lastInput(), { idleMs: 5, inputTick: 4242 });
   } finally {
     backend.dispose();
     delete process.env.TV_MARK;
@@ -96,7 +96,7 @@ test("an input that was stopped before it started is never sent", async () => {
   process.env.TV_MARK = mark;
   const backend = createWindowsBackend({ powershell: process.execPath, args: ["-e", STAND_IN] });
   try {
-    await backend.idleMs();
+    await backend.lastInput();
     const controller = new AbortController();
     controller.abort();
     await assert.rejects(() => backend.act(WINDOW, SIZE, CLICK, 0, controller.signal));
@@ -112,8 +112,10 @@ test("an input that was stopped before it started is never sent", async () => {
 test("the generated script compiles in Windows PowerShell and answers a read-only request (no input is sent)", { skip: process.platform !== "win32" && "Windows only", timeout: 120_000 }, async () => {
   const backend = createWindowsBackend();
   try {
-    const idle = await backend.idleMs();
-    assert.ok(Number.isFinite(idle) && idle >= 0);
+    const input = await backend.lastInput();
+    assert.ok(Number.isFinite(input.idleMs) && input.idleMs >= 0);
+    // The input tick is a 32-bit timer tick, on the clock the script stamps its own input with.
+    assert.ok(Number.isInteger(input.inputTick) && input.inputTick >= 0 && input.inputTick <= 0xffffffff);
   } finally { backend.dispose(); }
 });
 
@@ -165,13 +167,44 @@ test("the Windows backend hands the partial counts of an answer to the host", as
 
 test("between the parts of one action the script looks for input that is not its own", () => {
   const helper = WINDOWS_COMPUTER_SCRIPT.slice(WINDOWS_COMPUTER_SCRIPT.indexOf("static bool OtherInputSince("), WINDOWS_COMPUTER_SCRIPT.indexOf("static Dictionary<string, object> Act("));
-  assert.match(helper, /GetLastInputInfo\(ref i\)/);
-  assert.match(helper, /i\.dwTime - sentAt/);
+  assert.match(WINDOWS_COMPUTER_SCRIPT, /static uint InputTick\(\) \{[^}]*GetLastInputInfo\(ref i\); return i\.dwTime;/);
+  assert.match(helper, /Sent && unchecked\(\(int\)\(InputTick\(\) - LastSent\)\) > 16/, "the stamp of the agent's own input, compared as a signed difference");
   const typing = actSection.slice(actSection.indexOf('kind == "type"'), actSection.indexOf('Unknown input kind'));
-  const check = typing.indexOf('if (sent > 0 && OtherInputSince(sentAt)) { d["performed"] = false; d["reason"] = "user-input"; d["typed"] = sent; return d; }');
+  const check = typing.indexOf('if (sent > 0 && OtherInputSince()) { d["performed"] = false; d["reason"] = "user-input"; d["typed"] = sent; return d; }');
   assert.ok(check > 0 && check < typing.indexOf("Send(batch.ToArray())"), "a batch is checked before it is sent");
-  assert.match(typing, /Send\(batch\.ToArray\(\)\); sentAt = \(uint\)Environment\.TickCount;/);
+  assert.match(typing, /try \{ Send\(batch\.ToArray\(\)\); \}/);
   const click = actSection.slice(actSection.indexOf('kind == "click"'), actSection.indexOf('kind == "key"'));
-  assert.match(click, /if \(why == null && i > 0 && OtherInputSince\(sentAt\)\) why = "user-input";/);
-  assert.match(click, /if \(why == null && done > 0 && OtherInputSince\(sentAt\)\) why = "user-input";/);
+  assert.match(click, /if \(why == null && i > 0 && OtherInputSince\(\)\) why = "user-input";/);
+  assert.match(click, /if \(why == null && done > 0 && OtherInputSince\(\)\) why = "user-input";/);
+  assert.doesNotMatch(actSection, /sentAt/, "one stamp for every path, not one per path");
+});
+
+test("the script stamps the agent's own input on the system tick clock and hands the host both ticks", () => {
+  const send = WINDOWS_COMPUTER_SCRIPT.slice(WINDOWS_COMPUTER_SCRIPT.indexOf("static void Send("), WINDOWS_COMPUTER_SCRIPT.indexOf("static bool IsExtended("));
+  assert.match(send, /LastSent = \(uint\)Environment\.TickCount; Sent = true;/, "every input path goes through Send, which records the tick right after SendInput");
+  assert.ok(send.indexOf("SendInput(") < send.indexOf("LastSent ="));
+  // Every mouse and keyboard input of the action is sent by Send (and the hand-back key press stamps itself).
+  assert.equal([...actSection.matchAll(/SendInput\(/g)].length, 0);
+  assert.match(WINDOWS_COMPUTER_SCRIPT, /static void Activate\(IntPtr h\) \{[^}]*LastSent = \(uint\)Environment\.TickCount; Sent = true;/);
+  // act: the tick of the last input that went out, only when one did; the old idle time is no longer part of the answer.
+  assert.match(WINDOWS_COMPUTER_SCRIPT, /Sent = false;\s+foreach \(var kv in Act\(req\)\) res\[kv\.Key\] = kv\.Value;\s+if \(Sent\) res\["sentTick"\] = \(long\)LastSent;/);
+  assert.doesNotMatch(actSection, /idleMs/);
+  // idle: how long ago and the system's tick of it.
+  assert.match(WINDOWS_COMPUTER_SCRIPT, /op == "idle"\) \{ res\["ok"\] = true; res\["idleMs"\] = IdleMs\(\); res\["inputTick"\] = \(long\)InputTick\(\); \}/);
+});
+
+test("the Windows backend hands the sent tick of an action and the input tick of the system to the host", async () => {
+  const TICKS = [
+    "process.stdout.write(JSON.stringify({ ready: true }) + '\\n');",
+    "require('readline').createInterface({ input: process.stdin }).on('line', (line) => {",
+    "  const req = JSON.parse(line);",
+    "  const reply = req.op === 'act' ? { performed: true, sentTick: 4294967290 } : { idleMs: 3, inputTick: 12 };",
+    "  process.stdout.write(JSON.stringify({ id: req.id, ok: true, ...reply }) + '\\n');",
+    "});",
+  ].join("\n");
+  const backend = createWindowsBackend({ powershell: process.execPath, args: ["-e", TICKS] });
+  try {
+    assert.deepEqual(await backend.act(WINDOW, SIZE, CLICK, 0), { performed: true, sentTick: 4_294_967_290 });
+    assert.deepEqual(await backend.lastInput(), { idleMs: 3, inputTick: 12 });
+  } finally { backend.dispose(); }
 });

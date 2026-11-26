@@ -36,7 +36,14 @@ export type BackendAction =
  * `performed: false` with `reason` means the action stopped. Whatever had already gone out is not undone: `typed` is the characters
  * typed, and `delivered` of `planned` is the clicks or wheel inputs of a double click or a two-axis scroll (both absent when nothing went out).
  */
-export type ActOutcome = { performed: boolean; reason?: string; typed?: number; delivered?: number; planned?: number; idleMs?: number };
+export type ActOutcome = {
+  performed: boolean; reason?: string; typed?: number; delivered?: number; planned?: number;
+  /** The operating system's input clock (a 32-bit millisecond tick) right after the agent's own last input went out. Absent when none did. */
+  sentTick?: number;
+};
+
+/** The system's last mouse or keyboard input, by anyone: how long ago, and when on the same 32-bit tick clock that `sentTick` is read from. */
+export type LastInput = { idleMs: number; inputTick: number };
 
 export interface ComputerBackend {
   list(): Promise<RawWindow[]>;
@@ -52,7 +59,7 @@ export interface ComputerBackend {
   act(window: WindowRef, size: { width: number; height: number }, action: BackendAction, handBackFrom: number, signal?: AbortSignal): Promise<ActOutcome>;
   /** Brings the window forward: only when the person has just chosen it. */
   bringToFront(window: WindowRef): Promise<boolean>;
-  /** Milliseconds since the last mouse or keyboard input of the person (or of any program). */
-  idleMs(): Promise<number>;
+  /** The last mouse or keyboard input of the person (or of any program, the agent's own included). */
+  lastInput(): Promise<LastInput>;
   dispose(): void;
 }

@@ -142,15 +142,15 @@ export function createWindowsBackend(options: { powershell?: string; args?: stri
       return { performed: answer.performed === true, ...(typeof answer.reason === "string" ? { reason: answer.reason } : {}),
         ...(typeof answer.typed === "number" ? { typed: answer.typed } : {}),
         ...(typeof answer.done === "number" && typeof answer.of === "number" ? { delivered: answer.done, planned: answer.of } : {}),
-        ...(typeof answer.idleMs === "number" ? { idleMs: answer.idleMs } : {}) };
+        ...(typeof answer.sentTick === "number" ? { sentTick: answer.sentTick } : {}) };
     },
     async bringToFront(window) {
       const answer = await call("front", ref(window));
       return answer.foreground === true;
     },
-    async idleMs() {
+    async lastInput() {
       const answer = await call("idle");
-      return Number(answer.idleMs ?? 0);
+      return { idleMs: Number(answer.idleMs ?? 0), inputTick: typeof answer.inputTick === "number" ? answer.inputTick : Number.NaN };
     },
     dispose() { stop("The window tools were turned off."); },
   };

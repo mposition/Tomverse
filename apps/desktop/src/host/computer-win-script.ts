@@ -197,8 +197,15 @@ public static class Cu {
   static INPUT Mouse(uint flags, uint data) {
     var i = new INPUT(); i.type = 0; i.u.mi.dwFlags = flags; i.u.mi.mouseData = data; return i;
   }
+  // The system tick right after the last input this process sent, and whether this request sent any. Input is stamped on the same
+  // clock (GetLastInputInfo and Environment.TickCount are both timer ticks), so the host can tell later input from the agent's own.
+  static uint LastSent;
+  static bool Sent;
+
   static void Send(params INPUT[] inputs) {
-    if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) != (uint)inputs.Length) throw new Exception("The input was not accepted by Windows.");
+    uint n = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+    if (n > 0) { LastSent = (uint)Environment.TickCount; Sent = true; }
+    if (n != (uint)inputs.Length) throw new Exception("The input was not accepted by Windows.");
   }
   static bool IsExtended(int vk) { return (vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E; }
 
@@ -214,6 +221,7 @@ public static class Cu {
 
   static void Activate(IntPtr h) {
     keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
+    LastSent = (uint)Environment.TickCount; Sent = true;
     SetForegroundWindow(h);
   }
 
@@ -245,13 +253,15 @@ public static class Cu {
     return d;
   }
 
-  static int IdleMs() { var i = new LASTINPUTINFO(); i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)); GetLastInputInfo(ref i); return (int)((uint)Environment.TickCount - i.dwTime); }
+  static int IdleMs() { return (int)((uint)Environment.TickCount - InputTick()); }
 
-  // Whether input that is not the agent's came after the agent's own last input went out at sentAt. The system stamps input
+  // The tick of the last input of any kind, as the system stamped it.
+  static uint InputTick() { var i = new LASTINPUTINFO(); i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)); GetLastInputInfo(ref i); return i.dwTime; }
+
+  // Whether input that is not the agent's came after the agent's own last input of this request. The system stamps input
   // in timer ticks, so one tick of slack keeps the agent's own input from counting.
-  static bool OtherInputSince(uint sentAt) {
-    var i = new LASTINPUTINFO(); i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO)); GetLastInputInfo(ref i);
-    return unchecked((int)(i.dwTime - sentAt)) > 16;
+  static bool OtherInputSince() {
+    return Sent && unchecked((int)(InputTick() - LastSent)) > 16;
   }
 
   static Dictionary<string, object> Act(Dictionary<string, object> r) {
@@ -281,12 +291,11 @@ public static class Cu {
         bool right = (string)r["button"] == "right";
         uint down = right ? 0x8u : 0x2u, up = right ? 0x10u : 0x4u;
         int times = (bool)r["double"] ? 2 : 1;
-        uint sentAt = 0;
         for (int i = 0; i < times; i++) {
           try {
             why = PointCheck(h, r, f, px, py);
-            if (why == null && i > 0 && OtherInputSince(sentAt)) why = "user-input";
-            if (why == null) { Send(Mouse(down, 0), Mouse(up, 0)); sentAt = (uint)Environment.TickCount; }
+            if (why == null && i > 0 && OtherInputSince()) why = "user-input";
+            if (why == null) Send(Mouse(down, 0), Mouse(up, 0));
           } catch (Exception) { if (i == 0) throw; why = "input-failed"; }
           if (why != null) return Refused(d, why, i, times);
           if (i + 1 < times) Thread.Sleep(60);
@@ -294,18 +303,16 @@ public static class Cu {
       } else {
         int dx = Convert.ToInt32(r["dx"]), dy = Convert.ToInt32(r["dy"]);
         int steps = (dy != 0 ? 1 : 0) + (dx != 0 ? 1 : 0), done = 0;
-        uint sentAt = 0;
         if (dy != 0) {
           why = PointCheck(h, r, f, px, py);
           if (why != null) return Refused(d, why, done, steps);
           Send(Mouse(0x800, unchecked((uint)(-dy * 120))));
-          sentAt = (uint)Environment.TickCount;
           done++;
         }
         if (dx != 0) {
           try {
             why = PointCheck(h, r, f, px, py);
-            if (why == null && done > 0 && OtherInputSince(sentAt)) why = "user-input";
+            if (why == null && done > 0 && OtherInputSince()) why = "user-input";
             if (why == null) Send(Mouse(0x1000, unchecked((uint)(dx * 120))));
           } catch (Exception) { if (done == 0) throw; why = "input-failed"; }
           if (why != null) return Refused(d, why, done, steps);
@@ -328,7 +335,6 @@ public static class Cu {
     } else if (kind == "type") {
       string text = (string)r["text"];
       int sent = 0, inBatch = 0;
-      uint sentAt = 0;
       var batch = new List<INPUT>();
       for (int i = 0; i < text.Length; i++) {
         char c = text[i];
@@ -341,15 +347,14 @@ public static class Cu {
         if (inBatch > 0 && (inBatch >= 16 || i == text.Length - 1)) {
           if (!IsFront(h)) { d["performed"] = false; d["reason"] = "focus-lost"; d["typed"] = sent; return d; }
           // The person typed or clicked while the text was going in: the rest stays unsent, wherever their cursor is now.
-          if (sent > 0 && OtherInputSince(sentAt)) { d["performed"] = false; d["reason"] = "user-input"; d["typed"] = sent; return d; }
-          try { Send(batch.ToArray()); sentAt = (uint)Environment.TickCount; }
+          if (sent > 0 && OtherInputSince()) { d["performed"] = false; d["reason"] = "user-input"; d["typed"] = sent; return d; }
+          try { Send(batch.ToArray()); }
           catch (Exception) { if (sent == 0) throw; d["performed"] = false; d["reason"] = "input-failed"; d["typed"] = sent; return d; }
           batch.Clear(); sent += inBatch; inBatch = 0; Thread.Sleep(5);
         }
       }
       d["performed"] = true; d["typed"] = sent;
     } else throw new Exception("Unknown input kind.");
-    d["idleMs"] = IdleMs();
     return d;
   }
 
@@ -368,7 +373,7 @@ public static class Cu {
       string op = (string)req["op"];
       if (op == "ping") res["ok"] = true;
       else if (op == "list") { res["ok"] = true; res["windows"] = List(); }
-      else if (op == "idle") { res["ok"] = true; res["idleMs"] = IdleMs(); }
+      else if (op == "idle") { res["ok"] = true; res["idleMs"] = IdleMs(); res["inputTick"] = (long)InputTick(); }
       else if (op == "info" || op == "capture") {
         IntPtr h = Find(req);
         res["ok"] = true;
@@ -382,7 +387,12 @@ public static class Cu {
         if (h == IntPtr.Zero) res["gone"] = true;
         else { if (IsIconic(h)) ShowWindow(h, 9); Activate(h); for (int i = 0; i < 8 && !IsFront(h); i++) Thread.Sleep(60); res["foreground"] = IsFront(h); }
       }
-      else if (op == "act") { res["ok"] = true; foreach (var kv in Act(req)) res[kv.Key] = kv.Value; }
+      else if (op == "act") {
+        res["ok"] = true;
+        Sent = false;
+        foreach (var kv in Act(req)) res[kv.Key] = kv.Value;
+        if (Sent) res["sentTick"] = (long)LastSent;
+      }
       else throw new Exception("Unknown operation.");
     } catch (Exception e) { res.Clear(); res["ok"] = false; res["error"] = e.GetType().Name + ": " + e.Message; }
     res["id"] = id;
