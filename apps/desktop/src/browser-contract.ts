@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { linkViewUrl } from "./web-view-contract";
 
 const bounds = z.object({ x: z.number().nonnegative(), y: z.number().nonnegative(),
   width: z.number().nonnegative(), height: z.number().nonnegative() }).strict();
@@ -18,10 +19,14 @@ export const browserCommand = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["agent-stop", "agent-resume"]), tab }).strict(),
   // The person's switch for the agent's browser tools (off by default). The panel itself does not depend on it.
   z.object({ type: z.literal("agent-tools"), enabled: z.boolean() }).strict(),
+  // The person's second switch: the agent may open public https sites too (off by default; it needs the switch above).
+  z.object({ type: z.literal("agent-web"), enabled: z.boolean() }).strict(),
 ]);
 export type BrowserCommand = z.infer<typeof browserCommand>;
 /** agent: the tab belongs to the agent of the running task; working while one of its requests runs, stopped once the person took it back. */
-export type BrowserState = { tab: string; url: string; loading: boolean; failed: boolean; back: boolean; forward: boolean;
+/** local: a loopback development server, pinned to its origin. web: a public https site, checked on every request. */
+export type BrowserKind = "local" | "web";
+export type BrowserState = { tab: string; kind?: BrowserKind; url: string; loading: boolean; failed: boolean; back: boolean; forward: boolean;
   agent?: "idle" | "working" | "stopped"; picking?: boolean };
 
 /** One element the person pointed at: what the page said it is, where it was, and a small picture for the panel. */
@@ -32,6 +37,39 @@ export type ElementPick = {
   /** A data URL for the panel only; the agent reads the full picture through browser_screenshot with this id. */
   thumbnail?: string;
 };
+
+const LOOPBACK_WITH_PORT = /^(localhost|127\.0\.0\.1|\[::1\]):\d+(?:[/?#].*)?$/i;
+const NON_WEB_SCHEME = /^(javascript|data|file|blob|about|mailto|ftp|view-source|chrome|devtools|ws|wss):/i;
+
+/**
+ * What the person typed in the address box. A loopback address with a port is a local page (http), a public https
+ * address is a web page; anything else (another scheme, http on a public name, credentials, private or single-label
+ * names, IP literals) is null. A box with no scheme gets http for a loopback address and https for the rest.
+ */
+export function classifyBrowserAddress(input: string): { kind: BrowserKind; url: URL } | null {
+  const text = input.trim();
+  if (!text || text.length > 2048 || /[\u0000-\u001f\u007f-\u009f\s]/.test(text) || NON_WEB_SCHEME.test(text)) return null;
+  const full = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : (LOOPBACK_WITH_PORT.test(text) ? "http://" : "https://") + text;
+  const local = loopbackBrowserUrl(full);
+  if (local) return { kind: "local", url: local };
+  const web = linkViewUrl(full);
+  return web ? { kind: "web", url: web } : null;
+}
+
+/** The comparison key of a site the agent was given: the lower-case name without a trailing dot. */
+export function webHostKey(target: URL): string {
+  return target.hostname.toLowerCase().replace(/\.$/, "");
+}
+
+/** The only external addresses the agent may open: a public https site on the standard port, without the fragment (it is never sent). */
+export function agentWebUrl(value: string): URL | null {
+  const text = value.trim();
+  if (/[\u0000-\u001f\u007f-\u009f\s]/.test(text)) return null;
+  const target = linkViewUrl(text);
+  if (!target || (target.port && target.port !== "443")) return null;
+  target.hash = "";
+  return target;
+}
 
 export function loopbackBrowserUrl(value: string, origin?: string): URL | null {
   try {

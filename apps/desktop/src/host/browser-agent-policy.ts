@@ -1,4 +1,4 @@
-import { loopbackBrowserUrl } from "../browser-contract";
+import { agentWebUrl, loopbackBrowserUrl, webHostKey, type BrowserKind } from "../browser-contract";
 
 /**
  * The decisions the host takes before the agent touches the browser, kept apart from Electron so they can be tested. The agent never
@@ -45,10 +45,28 @@ export function agentRequestRefusal(input: AgentGateInput): string | null {
   return null;
 }
 
-/** The only addresses the agent may open: the same loopback pages the person may open in the panel, with an explicit port. */
-export function agentNavigateTarget(value: string): { url: URL } | { error: string } {
-  const url = loopbackBrowserUrl(value.trim());
-  return url ? { url } : { error: "Only an http address on localhost, 127.0.0.1 or [::1] with a port can be opened (for example http://localhost:3000/)." };
+/**
+ * The only addresses the agent may open: a loopback page with a port (the same ones the person may open in the panel) and, when the
+ * person's second switch is on, a public https site on the standard port. Nothing else, whatever the model says.
+ */
+export function agentNavigateTarget(value: string, options: { web?: boolean } = {}): { url: URL; kind: BrowserKind } | { error: string } {
+  const local = loopbackBrowserUrl(value.trim());
+  if (local) return { url: local, kind: "local" };
+  const web = options.web ? agentWebUrl(value) : null;
+  if (web) return { url: web, kind: "web" };
+  return { error: options.web
+    ? "Only an https address of a public site (standard port) or an http address on localhost, 127.0.0.1 or [::1] with a port can be opened (for example https://example.com/ or http://localhost:3000/)."
+    : "Only an http address on localhost, 127.0.0.1 or [::1] with a port can be opened (for example http://localhost:3000/)." };
+}
+
+/**
+ * A tab the agent holds on a public site stays on the sites the person approved for it: the page it opened, and every address it was
+ * later asked to open. A page that moves on by itself (a redirect, a link, a form) is stopped, and anything the person did in the tab
+ * after taking it is not read or acted on either until the agent is asked to open that site. No set means a local tab (pinned to its origin).
+ */
+export function agentMayUsePage(approvedHosts: ReadonlySet<string> | undefined, pageUrl: string): boolean {
+  if (!approvedHosts) return true;
+  try { return approvedHosts.has(webHostKey(new URL(pageUrl))); } catch { return false; }
 }
 
 /** A click or typing is bound to the site the person approved: the page must still be on it. */

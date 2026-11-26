@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { browserAgentRequest, type BrowserAgentReply, type BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
-import { MAX_CODE_BROWSER_TABS, type BrowserCommand, type BrowserState, type ElementPick } from "../browser-contract";
-import { agentNavigateTarget, agentRequestRefusal, type AgentTab } from "./browser-agent-policy";
+import { MAX_CODE_BROWSER_TABS, webHostKey, type BrowserCommand, type BrowserKind, type BrowserState, type ElementPick } from "../browser-contract";
+import { agentMayUsePage, agentNavigateTarget, agentRequestRefusal, type AgentTab } from "./browser-agent-policy";
 import { cleanReply } from "./browser-agent-format";
 import type { BrowserDriver } from "./code-browser-driver";
 import { readPick } from "./browser-pick-store";
@@ -12,11 +12,15 @@ import { readPick } from "./browser-pick-store";
  * the live run before anything touches the page.
  */
 
-export type BridgeTab = { origin: string; driver: BrowserDriver; current(): BrowserState | null };
+export type BridgeTab = { kind: BrowserKind; origin: string; driver: BrowserDriver; current(): BrowserState | null;
+  /** The site a page tried to move to that the agent was not given (once); null when there was none. */
+  takeBlocked(): string | null };
 export type BridgeRun = { runId: string | null; taskId: string | null; running: boolean; apiExecution: boolean; suspended: boolean; scope: string | null };
 export type BridgeDeps = {
   /** The browser tools are on (a default-off switch of the fixture). */
   enabled(): boolean;
+  /** The person's second switch: the agent may open public https sites too. Checked again at every address. */
+  webEnabled(): boolean;
   run(): BridgeRun;
   tab(id: string): BridgeTab | undefined;
   tabs(): Array<[string, BridgeTab]>;
@@ -32,7 +36,8 @@ const fail = (message: string): BrowserAgentReply => ({ status: "error", message
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function createBrowserAgentBridge(deps: BridgeDeps) {
-  let agent: AgentTab | undefined;
+  /** hosts: the sites of a web tab the person approved for this task (each address the agent was allowed to open); empty for a local tab. */
+  let agent: (AgentTab & { hosts: Set<string> }) | undefined;
   let busy = 0;
   const inflight = new Set<AbortController>();
 
@@ -58,19 +63,24 @@ export function createBrowserAgentBridge(deps: BridgeDeps) {
     }
   };
 
+  const MOVED = "The page tried to go to a site you were not given (";
+  const blockedReply = (host: string) => fail(MOVED + host + "), so it was stopped. Open that address with browser_navigate if you need it; the user is asked first.");
+
   async function execute(request: BrowserAgentRequest, run: BridgeRun, runId: string, signal: AbortSignal): Promise<BrowserAgentReply> {
     if (request.tool === "screenshot" && request.pick) {
       const stored = readPick(request.pick);
       return stored ? { status: "ok", url: stored.url, image: { mediaType: stored.mediaType, base64: stored.base64 } } : fail("That picked element is no longer available.");
     }
     if (request.tool === "navigate") {
-      const target = agentNavigateTarget(request.url);
+      const target = agentNavigateTarget(request.url, { web: deps.webEnabled() });
       if ("error" in target) return fail(target.error);
       if (agent && (agent.taskId !== run.taskId || agent.scope !== run.scope)) agent = undefined;
       const existing = agent && deps.tab(agent.tab);
       const tab = existing && agent ? agent.tab : randomUUID();
       if (!existing && deps.tabs().length >= MAX_CODE_BROWSER_TABS) return fail("The browser has no free tab. Ask the user to close one.");
-      agent = { tab, taskId: run.taskId!, scope: run.scope!, runId, control: agent?.control ?? "active" };
+      // The site is approved before the page is asked for, so the tab's own checks already know it when the first request goes out.
+      agent = { tab, taskId: run.taskId!, scope: run.scope!, runId, control: agent?.control ?? "active", hosts: existing && agent ? agent.hosts : new Set() };
+      if (target.kind === "web") agent.hosts.add(webHostKey(target.url));
       try { await deps.open(tab, target.url.href); }
       catch { if (!deps.tab(tab)) agent = undefined; return fail("The page could not be opened."); }
       const view = deps.tab(tab);
@@ -79,21 +89,48 @@ export function createBrowserAgentBridge(deps: BridgeDeps) {
       publishTab(tab);
       await view.driver.waitForLoad(15_000);
       signal.throwIfAborted();
+      const moved = view.takeBlocked();
+      if (moved) return blockedReply(moved);
       const loaded = view.current();
-      if (!loaded || loaded.failed) return fail("The page could not be loaded. Is the dev server running at that address?");
+      if (!loaded || loaded.failed) return fail(target.kind === "web" ? "The page could not be loaded." : "The page could not be loaded. Is the dev server running at that address?");
       return { status: "ok", ...view.driver.where() };
     }
     const view = agent && deps.tab(agent.tab);
     if (!view) return fail("The browser tab was closed. Open the page again with browser_navigate.");
+    // A web tab the person moved on (or a page that moved by itself) is on a site the agent was not given: nothing is read or done there.
+    if (!agentMayUsePage(view.kind === "web" ? agent!.hosts : undefined, view.driver.where().url)) {
+      return fail("The tab is no longer on a site you opened for this task. Open the page again with browser_navigate.");
+    }
     if (request.tool === "read") return view.driver.read(request.mode, signal);
     if (request.tool === "console") return view.driver.console(request.clear);
     await waitForSize(view, signal);
-    if (request.tool === "click") return view.driver.click(request.selector, request.origin, signal);
-    if (request.tool === "type") return view.driver.type(request, signal);
-    return view.driver.screenshot(request.selector, signal);
+    let reply: BrowserAgentReply;
+    if (request.tool === "click") reply = await view.driver.click(request.selector, request.origin, signal);
+    else if (request.tool === "type") reply = await view.driver.type(request, signal);
+    else return view.driver.screenshot(request.selector, signal);
+    const moved = view.takeBlocked();
+    return reply.status === "ok" && moved ? blockedReply(moved) : reply;
   }
 
   return {
+    /**
+     * The sites a web tab may move within while the agent holds it, or null (a tab the agent does not hold, one the person took back, a
+     * local tab). The tab's own request checks read this; the person can take the tab to browse freely.
+     */
+    hostsFor(tab: string): ReadonlySet<string> | null {
+      return agent?.tab === tab && agent.control === "active" && agent.hosts.size > 0 ? agent.hosts : null;
+    },
+
+    /** The agent's tab when it belongs to another task or scope than the current one (the host closes it); the person's own tabs stay. */
+    dropStale(): string | undefined {
+      const run = deps.run();
+      if (!agent || (agent.taskId === run.taskId && agent.scope === run.scope)) return undefined;
+      const { tab } = agent;
+      for (const controller of inflight) controller.abort();
+      agent = undefined;
+      return tab;
+    },
+
     /** Adds the agent and picker marks to a tab's state before it reaches the panel. */
     decorate,
 

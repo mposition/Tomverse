@@ -52,6 +52,8 @@ type Copy = {
   approvalBackground: string;
   approvalNoTimeout: string;
   approvalWebHeading: string;
+  approvalBrowserOpenHeading: string;
+  approvalBrowserOpenNote: string;
   approvalWebHost: string;
   approvalWebAddress: string;
   approvalWebNote: string;
@@ -171,6 +173,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "This command keeps running in the background after you allow it. It has no time limit and ends when the task ends or you stop it.",
     approvalNoTimeout: "No time limit (background)",
     approvalWebHeading: "Read a web page",
+    approvalBrowserOpenHeading: "Open a page in the browser tab",
+    approvalBrowserOpenNote: "The site opens in the browser tab, in a separate session without your Tomverse account. The page can run its own code and load other public sites; what the model reads from it is untrusted data. \"Allow for this run\" allows this site until the task ends.",
     approvalWebHost: "Site",
     approvalWebAddress: "Address",
     approvalWebNote: "Only this address is requested from the site, with no cookies, login or files from your project. The page text is sent to the model as untrusted reference material. \"Allow for this run\" allows this site until the task ends.",
@@ -288,6 +292,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "허용하면 이 명령은 백그라운드에서 계속 실행됩니다. 시간 제한이 없으며, 작업이 끝나거나 직접 종료할 때까지 유지됩니다.",
     approvalNoTimeout: "시간 제한 없음 (백그라운드)",
     approvalWebHeading: "웹 페이지 읽기",
+    approvalBrowserOpenHeading: "브라우저 탭에서 페이지 열기",
+    approvalBrowserOpenNote: "이 사이트는 Tomverse 계정이 없는 별도 세션의 브라우저 탭에서 열립니다. 페이지는 자체 코드를 실행하고 다른 공개 사이트를 불러올 수 있으며, 모델이 읽는 내용은 신뢰할 수 없는 데이터입니다. \"이번 실행 동안 허용\"은 작업이 끝날 때까지 이 사이트를 허용합니다.",
     approvalWebHost: "사이트",
     approvalWebAddress: "주소",
     approvalWebNote: "이 사이트에는 이 주소만 요청하며, 쿠키·로그인·프로젝트 파일은 보내지 않습니다. 페이지 본문은 신뢰할 수 없는 참고 자료로 모델에 전달됩니다. \"이번 실행에서 허용\"을 고르면 작업이 끝날 때까지 이 사이트를 허용합니다.",
@@ -405,6 +411,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "允许后，此命令会在后台持续运行。它没有时间限制，直到任务结束或你手动停止才会结束。",
     approvalNoTimeout: "无时间限制（后台）",
     approvalWebHeading: "读取网页",
+    approvalBrowserOpenHeading: "在浏览器标签页中打开页面",
+    approvalBrowserOpenNote: "该网站将在没有你 Tomverse 账户的独立会话中于浏览器标签页打开。页面可运行自身代码并加载其他公开网站；模型读取的内容属于不可信数据。“本次运行允许”将在任务结束前允许此网站。",
     approvalWebHost: "网站",
     approvalWebAddress: "地址",
     approvalWebNote: "只会向该网站请求这个地址，不会发送 Cookie、登录信息或项目文件。网页文本会作为不可信的参考资料发送给模型。选择“允许本次运行”后，在任务结束前都会允许该网站。",
@@ -522,6 +530,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "允許後，此命令會在背景持續執行。它沒有時間限制，直到工作結束或你手動停止才會結束。",
     approvalNoTimeout: "無時間限制（背景）",
     approvalWebHeading: "讀取網頁",
+    approvalBrowserOpenHeading: "在瀏覽器分頁中開啟頁面",
+    approvalBrowserOpenNote: "該網站將在沒有你 Tomverse 帳戶的獨立工作階段中於瀏覽器分頁開啟。頁面可執行自身程式碼並載入其他公開網站；模型讀取的內容屬於不可信資料。「本次執行允許」將在任務結束前允許此網站。",
     approvalWebHost: "網站",
     approvalWebAddress: "位址",
     approvalWebNote: "只會向該網站請求這個位址，不會傳送 Cookie、登入資訊或專案檔案。網頁文字會作為不可信的參考資料傳送給模型。選擇「允許本次執行」後，在工作結束前都會允許該網站。",
@@ -639,6 +649,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "Une fois autorisée, cette commande continue de s'exécuter en arrière-plan. Elle n'a pas de limite de durée et s'arrête avec la tâche ou quand vous l'arrêtez.",
     approvalNoTimeout: "Pas de limite de durée (arrière-plan)",
     approvalWebHeading: "Lire une page web",
+    approvalBrowserOpenHeading: "Ouvrir une page dans l’onglet du navigateur",
+    approvalBrowserOpenNote: "Le site s’ouvre dans l’onglet du navigateur, dans une session séparée sans votre compte Tomverse. La page peut exécuter son propre code et charger d’autres sites publics ; ce que le modèle en lit est une donnée non fiable. « Autoriser pour cette exécution » autorise ce site jusqu’à la fin de la tâche.",
     approvalWebHost: "Site",
     approvalWebAddress: "Adresse",
     approvalWebNote: "Seule cette adresse est demandée au site, sans cookies, connexion ni fichiers de votre projet. Le texte de la page est envoyé au modèle comme source de référence non fiable. « Autoriser pour cette exécution » autorise ce site jusqu'à la fin de la tâche.",
@@ -756,6 +768,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "Nach der Freigabe läuft dieser Befehl im Hintergrund weiter. Er hat kein Zeitlimit und endet mit der Aufgabe oder wenn Sie ihn beenden.",
     approvalNoTimeout: "Kein Zeitlimit (Hintergrund)",
     approvalWebHeading: "Webseite lesen",
+    approvalBrowserOpenHeading: "Seite im Browser-Tab öffnen",
+    approvalBrowserOpenNote: "Die Website öffnet sich im Browser-Tab, in einer getrennten Sitzung ohne Ihr Tomverse-Konto. Die Seite kann eigenen Code ausführen und andere öffentliche Websites laden; was das Modell daraus liest, sind nicht vertrauenswürdige Daten. „Für diesen Lauf erlauben“ erlaubt diese Website bis zum Ende der Aufgabe.",
     approvalWebHost: "Website",
     approvalWebAddress: "Adresse",
     approvalWebNote: "Von der Website wird nur diese Adresse angefragt, ohne Cookies, Anmeldung oder Dateien Ihres Projekts. Der Seitentext geht als nicht vertrauenswürdiges Referenzmaterial an das Modell. „Für diesen Lauf zulassen“ erlaubt diese Website bis zum Ende der Aufgabe.",
@@ -873,6 +887,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "Una vez permitido, este comando sigue ejecutándose en segundo plano. No tiene límite de tiempo y termina cuando acaba la tarea o lo detienes.",
     approvalNoTimeout: "Sin límite de tiempo (segundo plano)",
     approvalWebHeading: "Leer una página web",
+    approvalBrowserOpenHeading: "Abrir una página en la pestaña del navegador",
+    approvalBrowserOpenNote: "El sitio se abre en la pestaña del navegador, en una sesión aparte sin tu cuenta de Tomverse. La página puede ejecutar su propio código y cargar otros sitios públicos; lo que el modelo lee de ella son datos no fiables. «Permitir en esta ejecución» permite este sitio hasta que termine la tarea.",
     approvalWebHost: "Sitio",
     approvalWebAddress: "Dirección",
     approvalWebNote: "Solo se solicita esta dirección al sitio, sin cookies, inicio de sesión ni archivos de tu proyecto. El texto de la página se envía al modelo como material de referencia no fiable. «Permitir durante esta ejecución» permite este sitio hasta que termine la tarea.",
@@ -990,6 +1006,8 @@ export const desktopCodeEngineCopy = {
     approvalBackground: "Depois de permitido, este comando continua em execução em segundo plano. Não tem limite de tempo e termina quando a tarefa termina ou você o para.",
     approvalNoTimeout: "Sem limite de tempo (segundo plano)",
     approvalWebHeading: "Ler uma página da web",
+    approvalBrowserOpenHeading: "Abrir uma página no separador do navegador",
+    approvalBrowserOpenNote: "O site abre-se no separador do navegador, numa sessão separada sem a sua conta Tomverse. A página pode executar o seu próprio código e carregar outros sites públicos; o que o modelo lê dela são dados não fiáveis. «Permitir nesta execução» permite este site até a tarefa terminar.",
     approvalWebHost: "Site",
     approvalWebAddress: "Endereço",
     approvalWebNote: "Apenas este endereço é solicitado ao site, sem cookies, login ou arquivos do seu projeto. O texto da página é enviado ao modelo como material de referência não confiável. \"Permitir para esta execução\" permite este site até o fim da tarefa.",

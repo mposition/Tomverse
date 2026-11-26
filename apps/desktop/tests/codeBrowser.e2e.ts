@@ -45,10 +45,10 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     const page = await app.firstWindow();
     await page.getByRole("button", { name: "Open local folder" }).click();
     await page.getByRole("button", { name: "Browser", exact: true }).click();
-    const address = page.getByRole("textbox", { name: "Local development URL" });
-    await address.fill("https://example.com/");
+    const address = page.getByRole("textbox", { name: "Address" });
+    await address.fill("http://example.com/");
     await address.press("Enter");
-    await expect(page.getByRole("status").filter({ hasText: "Enter an HTTP loopback address with a port." })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Enter an https address or a local HTTP address with a port." })).toBeVisible();
     await address.fill(origin + "/");
     await address.press("Enter");
     await expect.poll(() => app!.evaluate(({ webContents }, origin) =>
@@ -100,7 +100,13 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     await address.fill(origin + "/drop");
     await address.press("Enter");
     await expect(page.getByRole("status").filter({ hasText: "The page could not load." })).toBeVisible();
+    // The panel belongs to the person, not to Code: it stays when they move to Chat, and ends when they close it.
     await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByRole("complementary", { name: "Browser", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select element" })).toHaveCount(0);
+    assert.equal(await app!.evaluate(({ webContents }, origin) =>
+      webContents.getAllWebContents().some((contents) => contents.getURL().startsWith(origin)), origin), true);
+    await page.getByRole("complementary", { name: "Browser", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
     await expect.poll(() => app!.evaluate(({ webContents }, origin) =>
       webContents.getAllWebContents().some((contents) => contents.getURL().startsWith(origin)), origin)).toBe(false);
     await expect(page.getByRole("complementary", { name: "Browser", exact: true })).toHaveCount(0);

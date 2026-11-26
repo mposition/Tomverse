@@ -29,3 +29,11 @@ export function browserToolsFor(input: { switchOn: boolean; fixtureAgent: boolea
   const agent = input.switchOn || input.fixtureAgent;
   return { agent, inspection: agent || input.fixtureInspection };
 }
+
+/**
+ * Whether the agent may also open public https sites. A second default-off switch of the person (a test fixture can turn it on); it
+ * means nothing without the browser tools themselves, and every address is checked again when the request arrives.
+ */
+export function browserWebFor(input: { agent: boolean; switchOn: boolean; fixtureWeb: boolean }) {
+  return input.agent && (input.switchOn || input.fixtureWeb);
+}

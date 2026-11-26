@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { browserCommand } from "../src/browser-contract";
 import { serializeElementComments } from "../src/element-comment";
-import { browserToolsFor, createBrowserAgentSwitch } from "../src/host/code-browser-switch";
+import { browserToolsFor, browserWebFor, createBrowserAgentSwitch } from "../src/host/code-browser-switch";
 import { discoverForRuntime } from "../src/host/code-extensions";
 import { createPullLinker, MAX_WAITING_PULL_LINKS } from "../src/host/task-pull-links";
 import { createTestHome } from "../scripts/test-home.mjs";
@@ -34,6 +34,23 @@ test("a test fixture can still turn the browser tools on, and the person's switc
   assert.deepEqual(browserToolsFor({ switchOn: true, fixtureAgent: false, fixtureInspection: false }), { agent: true, inspection: true });
   assert.deepEqual(browserToolsFor({ switchOn: false, fixtureAgent: true, fixtureInspection: false }), { agent: true, inspection: true });
   assert.deepEqual(browserToolsFor({ switchOn: false, fixtureAgent: false, fixtureInspection: true }), { agent: false, inspection: true });
+});
+
+test("public sites for the agent are a second switch: off by default, and meaningless without the browser tools", () => {
+  assert.equal(browserWebFor({ agent: true, switchOn: false, fixtureWeb: false }), false);
+  assert.equal(browserWebFor({ agent: true, switchOn: true, fixtureWeb: false }), true);
+  assert.equal(browserWebFor({ agent: true, switchOn: false, fixtureWeb: true }), true);
+  assert.equal(browserWebFor({ agent: false, switchOn: true, fixtureWeb: true }), false);
+  const file = join(temp("web-switch"), "code-browser-web.txt");
+  const first = createBrowserAgentSwitch(() => file);
+  first.load();
+  assert.equal(first.enabled, false, "a missing file is off");
+  first.set(true);
+  const second = createBrowserAgentSwitch(() => file);
+  second.load();
+  assert.equal(second.enabled, true);
+  assert.deepEqual(browserCommand.parse({ type: "agent-web", enabled: false }), { type: "agent-web", enabled: false });
+  assert.throws(() => browserCommand.parse({ type: "agent-web", enabled: true, url: "https://example.com/" }));
 });
 
 test("the switch is a typed command with no address or path in it", () => {

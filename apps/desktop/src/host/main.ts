@@ -12,7 +12,7 @@ import { createDesktopComputer } from "./computer-wiring";
 import { createFixtureBackend } from "./computer-fixture-backend";
 import type { ComputerBackend } from "./computer-backend";
 import { createWebViewHost } from "./web-view-host";
-import { browserCommand, loopbackBrowserUrl, MAX_CODE_BROWSER_TABS } from "../browser-contract";
+import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createConnectorApi } from "./connector-api";
 import { openConnectorOAuthWindow } from "./connector-oauth-window";
@@ -99,7 +99,7 @@ import { desktopPluginsCopy } from "../../../../locales/desktopPlugins";
 import { createPullLinker } from "./task-pull-links";
 import { createGitDrafter } from "./git-draft";
 import { gitCommand } from "../git-actions-contract";
-import { browserToolsFor, createBrowserAgentSwitch } from "./code-browser-switch";
+import { browserToolsFor, browserWebFor, createBrowserAgentSwitch } from "./code-browser-switch";
 import { createParallelHost, IDLE_OPEN_TASK_KEY } from "./parallel-host";
 import { launchScheduledRun } from "./schedule-launch";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
@@ -173,6 +173,8 @@ const fixtureSchema = z.object({
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
   browserAgent: z.boolean().optional(),
+  /** A test lets the agent open public https sites (the person's second browser switch). */
+  browserWeb: z.boolean().optional(),
   /** A test runs the computer tools against a fake desktop (two windows and a picture). */
   computerUse: z.boolean().optional(),
   codex: cliFixtureInput.optional(),
@@ -490,11 +492,16 @@ function broadcast() {
   refreshParallel();
   refreshWorktreeDraft();
   if (codePluginScope && !currentCodePlugin(codePluginScope)) revokeCodePlugin();
-  const scope = currentCodeBrowserScope();
+  const scope = currentBrowserScope();
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
+  // The agent's own tab belongs to the task it was opened for; the person's tabs stay when the task or the project changes.
+  const staleAgentTab = browserAgent.dropStale();
+  if (staleAgentTab) closeCodeBrowserTab(staleAgentTab);
+  const tools = browserTools();
   state.codeBrowserAvailable = scope !== null;
-  state.codeBrowserInspection = scope !== null && browserTools().inspection;
-  state.codeBrowserAgent = browserTools().agent;
+  state.codeBrowserInspection = scope !== null && currentCodeBrowserScope() !== null && tools.inspection;
+  state.codeBrowserAgent = tools.agent;
+  state.codeBrowserWeb = tools.web;
   computer.host.refresh();
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
   state.remote = remoteHost.snapshot();
@@ -2586,6 +2593,7 @@ async function removeChat(id: string) {
 }
 
 type CodeBrowser = {
+  /** The account the panel belongs to; the agent's task is checked separately (currentCodeBrowserScope). */
   scope: string;
   tabs: Map<string, ReturnType<typeof createCodeBrowserView>>;
   visibleTab?: string;
@@ -2599,7 +2607,7 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
   const grant = browser?.grant;
   const allowed = () => Boolean(browserTools().inspection && child && worker === child && runId === event.runId &&
     event.runId !== discardedRunId && state.busy && state.task?.status === "running" && !suspended &&
-    browser && browser === codeBrowser && browser.scope === currentCodeBrowserScope() &&
+    browser && browser === codeBrowser && browser.scope === currentBrowserScope() && currentCodeBrowserScope() !== null &&
     grant && browser.grant === grant && grant.runId === event.runId && browser.visibleTab === grant.tab);
   let text: string | null = null;
   if (allowed() && browser && grant) {
@@ -2617,6 +2625,7 @@ async function replyToBrowserSnapshot(event: Extract<WorkerEvent, { type: "brows
 // The agent's browser tools and the element picker; the checks that matter are in browser-agent-policy.ts.
 const browserAgent = createBrowserAgentBridge({
   enabled: () => browserTools().agent,
+  webEnabled: () => browserTools().web,
   run: () => ({
     runId: runId && runId !== discardedRunId ? runId : null, taskId: state.task?.id ?? null,
     running: Boolean(state.busy && state.task?.status === "running"), apiExecution: state.task?.execution?.executionMode === "tomverse_api",
@@ -2651,6 +2660,13 @@ const computer = createDesktopComputer({
   clean: (text) => { const key = codeConnection()?.key; return key ? cleanText(text, key) : text; },
 });
 
+/** The panel is the person's, in Chat, Review and Code alike: it needs no project and no Code connection, only the signed-in account (or none). */
+function currentBrowserScope() {
+  if (signingOut || invalidatingSession || closing || !mainWindow) return null;
+  return JSON.stringify([browserSession?.accountId ?? "device"]);
+}
+
+/** The scope of the task the agent works for: the Code connection, the project and the open task. */
 function currentCodeBrowserScope() {
   if (!codeConnection() || signingOut || closing) return null;
   const scope = currentHistoryScope();
@@ -2659,10 +2675,13 @@ function currentCodeBrowserScope() {
 
 // The panel is always there for a person looking at a local development server; the agent's use of it is the person's switch.
 const browserAgentSwitch = createBrowserAgentSwitch(() => join(app.getPath("userData"), "code-browser-agent.txt"));
+// Public https sites for the agent are a second switch, off by default and meaningless without the first.
+const browserWebSwitch = createBrowserAgentSwitch(() => join(app.getPath("userData"), "code-browser-web.txt"));
 function browserTools() {
   const fixtureOwned = DESKTOP_FIXTURE_ALLOWED && !!fixture && codeConnection() === fixture;
-  return browserToolsFor({ switchOn: browserAgentSwitch.enabled, fixtureAgent: fixtureOwned && fixture?.browserAgent === true,
+  const tools = browserToolsFor({ switchOn: browserAgentSwitch.enabled, fixtureAgent: fixtureOwned && fixture?.browserAgent === true,
     fixtureInspection: fixtureOwned && fixture?.browserInspection === true });
+  return { ...tools, web: browserWebFor({ agent: tools.agent, switchOn: browserWebSwitch.enabled, fixtureWeb: fixtureOwned && fixture?.browserWeb === true }) };
 }
 
 function closeCodeBrowser() {
@@ -2670,6 +2689,13 @@ function closeCodeBrowser() {
   codeBrowser = undefined;
   browserAgent.reset();
   for (const view of browser?.tabs.values() ?? []) view.close();
+}
+
+function closeCodeBrowserTab(tab: string) {
+  const browser = codeBrowser;
+  if (browser?.grant?.tab === tab) browser.grant = undefined;
+  browser?.tabs.get(tab)?.close();
+  browser?.tabs.delete(tab);
 }
 
 async function runCodeBrowser(value: unknown) {
@@ -2684,9 +2710,22 @@ async function runCodeBrowser(value: unknown) {
     broadcast();
     return;
   }
+  if (command.type === "agent-web") {
+    browserWebSwitch.set(command.enabled);
+    // The agent's tab on a public site ends with the permission; a local page of its own stays.
+    if (!command.enabled) {
+      for (const [id, view] of codeBrowser?.tabs ?? []) {
+        if (view.kind !== "web" || !browserAgent.hostsFor(id)) continue;
+        closeCodeBrowserTab(id);
+        browserAgent.reset();
+      }
+    }
+    broadcast();
+    return;
+  }
   if (command.type === "sync" || command.type === "pick" || command.type === "agent-stop" || command.type === "agent-resume") return browserAgent.command(command);
   const owner = mainWindow;
-  const scope = currentCodeBrowserScope();
+  const scope = currentBrowserScope();
   if (!scope || !owner || owner.isDestroyed()) return;
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   const browser: CodeBrowser = codeBrowser ??= { scope, tabs: new Map() };
@@ -2694,7 +2733,7 @@ async function runCodeBrowser(value: unknown) {
   const existing = browser.tabs.get(tabId);
   if (command.type === "share" || command.type === "unshare") {
     const url = existing?.shareableUrl();
-    browser.grant = command.type === "share" && browserTools().inspection && url && browser.visibleTab === tabId &&
+    browser.grant = command.type === "share" && browserTools().inspection && currentCodeBrowserScope() !== null && url && browser.visibleTab === tabId &&
       runId && state.task?.id && state.task.status === "running" && state.task.execution?.executionMode === "tomverse_api" &&
       !suspended ? { tab: tabId, runId, url } : undefined;
     return Boolean(browser.grant);
@@ -2706,18 +2745,20 @@ async function runCodeBrowser(value: unknown) {
     return;
   }
   if (command.type === "open") {
-    const target = loopbackBrowserUrl(command.url);
-    if (!target) throw new Error("Enter an HTTP loopback address with an explicit port.");
+    const address = classifyBrowserAddress(command.url);
+    if (!address) throw new Error("Enter an https address or an HTTP loopback address with an explicit port.");
+    const { kind, url: target } = address;
     if (browser.grant?.tab === tabId) browser.grant = undefined;
-    if (existing?.origin === target.origin) return existing.load(target.href);
+    // A web tab takes any public https address; a local tab stays on its origin. A tab of the other kind is replaced, with a session of its own.
+    if (existing?.kind === kind && (kind === "web" || existing.origin === target.origin)) return existing.load(target.href);
     if (!existing && browser.tabs.size >= MAX_CODE_BROWSER_TABS) throw new Error("Close a browser tab before opening another.");
     existing?.close();
-    const view = createCodeBrowserView(owner, target.origin, tabId, (next) => {
+    const view = createCodeBrowserView(owner, { kind, origin: kind === "web" ? "" : target.origin }, tabId, (next) => {
       if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
       if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
         owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
       }
-    });
+    }, () => browserAgent.hostsFor(tabId));
     browser.tabs.set(tabId, view);
     return view.load(target.href);
   }
@@ -2778,13 +2819,14 @@ function loadCodeTerminal() {
   try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
   catch { codeTerminalEnabled = false; }
   browserAgentSwitch.load();
+  browserWebSwitch.load();
   computer.load();
 }
 
 /** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
 function codeRunTools() {
-  const { agent, inspection } = browserTools();
-  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}) };
+  const { agent, inspection, web } = browserTools();
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(web ? { browserWeb: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
@@ -4272,6 +4314,11 @@ else {
     if (!window || window.isDestroyed()) return;
     window.restore();
     window.focus();
+  });
+  // Electron would offer the first client certificate of the system store to any site that asks for one; the app uses none, so no page gets one.
+  app.on("select-client-certificate", (event, _contents, _url, _list, callback) => {
+    event.preventDefault();
+    callback();
   });
   app.on("before-quit", (event) => {
     if (state.busy || pendingMutation || parallel.lanes.busy()) {

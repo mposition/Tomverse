@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import test from "node:test";
 import { browserAgentRequest, type BrowserAgentReply } from "../../tomverse-cli/src/browser-tools";
-import { browserCommand, elementPickId, loopbackBrowserUrl, type BrowserState, type ElementPick } from "../src/browser-contract";
+import { agentWebUrl, browserCommand, classifyBrowserAddress, elementPickId, loopbackBrowserUrl, type BrowserState, type ElementPick } from "../src/browser-contract";
 import { appendElementComments, MAX_ELEMENT_COMMENTS, serializeElementComments, type ElementComment } from "../src/element-comment";
 import { createBrowserAgentBridge, type BridgeDeps, type BridgeRun, type BridgeTab } from "../src/host/browser-agent-bridge";
 import { cleanReply, formatAxTree, formatPageText, MAX_CONSOLE_ENTRIES, pushConsoleEntry, type ConsoleEntry } from "../src/host/browser-agent-format";
-import { agentNavigateTarget, agentRequestRefusal, sameApprovedSite, type AgentGateInput } from "../src/host/browser-agent-policy";
+import { agentMayUsePage, agentNavigateTarget, agentRequestRefusal, sameApprovedSite, type AgentGateInput } from "../src/host/browser-agent-policy";
 import { locateScript } from "../src/host/browser-agent-page";
 import { rememberPick } from "../src/host/browser-pick-store";
 
@@ -114,13 +114,14 @@ test("every string of a reply passes the host's credential filter, and an error 
 // ---- the bridge, with the browser replaced by a fake ----------------------------------------------
 
 type Calls = string[];
-function harness(options: { run?: Partial<BridgeRun>; enabled?: boolean } = {}) {
+function harness(options: { run?: Partial<BridgeRun>; enabled?: boolean; web?: boolean } = {}) {
   const calls: Calls = [];
   const replies: Array<{ runId: string; requestId: string; reply: BrowserAgentReply }> = [];
   const published: BrowserState[] = [];
   const picked: ElementPick[] = [];
   let run: BridgeRun = { runId: "run-1", taskId: "s-20261126-000000-aaaaaa", running: true, apiExecution: true, suspended: false, scope: "scope-a", ...options.run };
   let url = "";
+  let blocked: string | null = null;
   const tabs = new Map<string, BridgeTab>();
   let release: (() => void) | undefined;
   const driver = {
@@ -142,13 +143,14 @@ function harness(options: { run?: Partial<BridgeRun>; enabled?: boolean } = {}) 
   } as unknown as BridgeTab["driver"];
   const deps: BridgeDeps = {
     enabled: () => options.enabled ?? true,
+    webEnabled: () => options.web ?? false,
     run: () => run,
     tab: (id) => tabs.get(id),
     tabs: () => [...tabs],
     open: async (tab, target) => {
       calls.push("open " + target);
       url = target;
-      tabs.set(tab, { origin: new URL(target).origin, driver, current: () => ({ tab, url, loading: false, failed: false, back: false, forward: false }) });
+      tabs.set(tab, { kind: target.startsWith("https:") ? "web" : "local", origin: new URL(target).origin, driver, takeBlocked: () => { const host = blocked; blocked = null; return host; }, current: () => ({ tab, url, loading: false, failed: false, back: false, forward: false }) });
     },
     publish: (state) => published.push(state),
     publishPick: (pick) => picked.push(pick),
@@ -162,7 +164,7 @@ function harness(options: { run?: Partial<BridgeRun>; enabled?: boolean } = {}) 
     await bridge.handle({ runId, requestId, request });
     return replies.find((entry) => entry.requestId === requestId)?.reply;
   };
-  return { bridge, calls, replies, published, picked, ask, setRun: (next: Partial<BridgeRun>) => { run = { ...run, ...next }; }, hold: () => { release = () => undefined; }, tabs, driver };
+  return { bridge, calls, replies, published, picked, ask, setRun: (next: Partial<BridgeRun>) => { run = { ...run, ...next }; }, hold: () => { release = () => undefined; }, tabs, driver, setUrl: (next: string) => { url = next; }, block: (host: string) => { blocked = host; } };
 }
 
 test("the bridge opens a loopback page in a tab of its own, marks the tab as the agent's, and answers with the page", async () => {
@@ -342,4 +344,94 @@ test("typing into a password, one-time-code or card field is refused by the page
   }
   assert.equal(typeof run(new FakeInput("text", { autocomplete: "email" }), true).x, "number", "an ordinary field can be typed into");
   assert.equal(typeof run(secrets[0]!, false).x, "number", "clicking a password field is a click, not typing");
+});
+
+// ---- public sites ---------------------------------------------------------------------------------
+
+test("the box takes a loopback page or a public https site, and nothing else", () => {
+  const kinds = (text: string) => classifyBrowserAddress(text)?.kind ?? null;
+  assert.equal(kinds("localhost:3000"), "local");
+  assert.equal(kinds("http://127.0.0.1:5173/app?x=1"), "local");
+  assert.equal(kinds("example.com"), "web");
+  assert.equal(kinds("https://example.com/a?b=1#c"), "web");
+  assert.equal(kinds("https://shop.example.co.uk:8443/x"), "web");
+  assert.equal(classifyBrowserAddress("example.com")!.url.href, "https://example.com/");
+  for (const bad of ["", "http://example.com/", "https://localhost/", "https://localhost:3000/", "http://localhost/", "https://192.168.0.1/", "https://[::1]/", "https://10.0.0.1:8443/",
+    "https://u:p@example.com/", "https://intranet/", "https://printer.local/", "file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "ftp://example.com/",
+    "about:blank", "blob:https://example.com/x", "ws://example.com/", "wss://example.com/", "https://exa mple.com/", "http://localhost:3000@example.com/", "x".repeat(2100)]) {
+    assert.equal(classifyBrowserAddress(bad), null, bad);
+  }
+});
+
+test("the agent opens a public site only on the standard port and only when the person's second switch is on", () => {
+  assert.ok("error" in agentNavigateTarget("https://example.com/"), "off by default");
+  assert.ok("error" in agentNavigateTarget("https://example.com/", { web: false }));
+  const target = agentNavigateTarget("https://Example.com/a?q=1#frag", { web: true });
+  assert.ok("url" in target);
+  if ("url" in target) assert.deepEqual([target.kind, target.url.href], ["web", "https://example.com/a?q=1"]);
+  assert.ok("url" in agentNavigateTarget("https://example.com:443/", { web: true }));
+  assert.ok("url" in agentNavigateTarget("http://localhost:3000/", { web: true }));
+  for (const bad of ["https://example.com:8443/", "http://example.com/", "https://localhost/", "https://127.0.0.1/", "https://192.168.0.1/", "https://[::1]/",
+    "https://user:pw@example.com/", "https://intranet/", "https://a.internal/", "file:///etc/hosts", "javascript:alert(1)", "https://exa mple.com/", "example.com", ""]) {
+    assert.ok("error" in agentNavigateTarget(bad, { web: true }), bad);
+  }
+  assert.equal(agentWebUrl("https://example.com:8443/"), null);
+});
+
+test("a tab of the agent on a public site is used only on the sites the person approved for it", () => {
+  const hosts = new Set(["example.com"]);
+  assert.equal(agentMayUsePage(hosts, "https://example.com/a?b"), true);
+  assert.equal(agentMayUsePage(hosts, "https://EXAMPLE.com./a"), true, "case and a trailing dot are the same site");
+  assert.equal(agentMayUsePage(hosts, "https://www.example.com/"), false, "another name is another site");
+  assert.equal(agentMayUsePage(hosts, "https://example.com.evil.test/"), false);
+  assert.equal(agentMayUsePage(hosts, "not a url"), false);
+  assert.equal(agentMayUsePage(undefined, "http://localhost:3000/"), true, "a local tab is pinned to its origin by the tab itself");
+});
+
+test("the bridge opens a public site only with the switch on, approves its host for the tab, and stops a page that moves on by itself", async () => {
+  const off = harness({ web: false });
+  assert.equal((await off.ask({ tool: "navigate", url: "https://example.com/" }))?.status, "error");
+  assert.deepEqual(off.calls, []);
+  const h = harness({ web: true });
+  const reply = await h.ask({ tool: "navigate", url: "https://example.com/start#x" });
+  assert.equal(reply?.status, "ok");
+  assert.deepEqual(h.calls, ["open https://example.com/start"], "the fragment is never sent");
+  const [tab] = [...h.tabs.keys()] as string[];
+  assert.deepEqual([...h.bridge.hostsFor(tab!)!], ["example.com"]);
+  assert.equal(h.bridge.hostsFor("another"), null);
+  assert.equal((await h.ask({ tool: "read", mode: "text" }))?.status, "ok");
+  // The person moved the tab to another site, or a page moved on by itself: nothing is read or done there.
+  h.setUrl("https://other.test/");
+  for (const request of [{ tool: "read", mode: "text" }, { tool: "console", clear: true }, { tool: "screenshot" },
+    { tool: "click", selector: "#a", origin: "https://other.test" }, { tool: "type", selector: "#a", origin: "https://other.test", text: "x", clear: false, submit: false }]) {
+    assert.match(((await h.ask(request)) as { message: string }).message, /no longer on a site you opened/, JSON.stringify(request));
+  }
+  h.setUrl("https://example.com/next");
+  h.block("evil.test");
+  assert.match(((await h.ask({ tool: "click", selector: "#a", origin: "https://example.com" })) as { message: string }).message, /evil\.test/, "a click that sent the page elsewhere is reported");
+  assert.equal((await h.ask({ tool: "click", selector: "#a", origin: "https://example.com" }))?.status, "ok", "the report is made once");
+  // Another address adds its site; the tab is the person's again once they take it.
+  assert.equal((await h.ask({ tool: "navigate", url: "https://docs.example.org/" }))?.status, "ok");
+  assert.deepEqual([...h.bridge.hostsFor(tab!)!].sort(), ["docs.example.org", "example.com"]);
+  await h.bridge.command({ type: "agent-stop", tab: tab! });
+  assert.equal(h.bridge.hostsFor(tab!), null, "a tab the person took is not limited");
+  await h.bridge.command({ type: "agent-resume", tab: tab! });
+  assert.notEqual(h.bridge.hostsFor(tab!), null);
+});
+
+test("the agent's tab ends with its task; the person's other tabs are not the bridge's", async () => {
+  const h = harness({ web: true });
+  await h.ask({ tool: "navigate", url: "https://example.com/" });
+  const [tab] = [...h.tabs.keys()] as string[];
+  assert.equal(h.bridge.dropStale(), undefined);
+  h.setRun({ taskId: "s-20261126-000000-bbbbbb", scope: "scope-b" });
+  assert.equal(h.bridge.dropStale(), tab);
+  assert.equal(h.bridge.dropStale(), undefined);
+  assert.equal(h.bridge.hostsFor(tab!), null);
+});
+
+test("the panel's switch command for public sites is typed", () => {
+  assert.ok(browserCommand.safeParse({ type: "agent-web", enabled: true }).success);
+  assert.equal(browserCommand.safeParse({ type: "agent-web" }).success, false);
+  assert.equal(browserCommand.safeParse({ type: "agent-web", enabled: true, extra: 1 }).success, false);
 });

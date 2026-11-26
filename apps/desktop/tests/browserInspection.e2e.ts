@@ -55,7 +55,7 @@ test("Code reads the live loopback tab only after a task-specific share and lose
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).task?.status).toBe("running");
     await expect.poll(async () => Boolean((await page.evaluate(() => window.desktop.state())).task?.id)).toBe(true);
     await page.getByRole("button", { name: "Browser", exact: true }).click();
-    const address = page.getByRole("textbox", { name: "Local development URL" });
+    const address = page.getByRole("textbox", { name: "Address" });
     await address.fill(href);
     await address.press("Enter");
     const share = page.getByRole("button", { name: "Share this page with Code" });

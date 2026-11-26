@@ -955,6 +955,9 @@ test("Desktop keeps the compact history drawer reachable at 200 percent zoom", {
     await expect(heading).toBeFocused();
     await history.getByRole("button", { name: "Open local folder" }).focus();
     await page.keyboard.press("Tab");
+    // The browser button now sits just before the theme button in every workspace.
+    await expect(page.getByRole("button", { name: "Browser", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "Use dark theme" })).toBeFocused();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByRole("button", { name: "Send Code request" })).toBeInViewport({ ratio: 1 });
