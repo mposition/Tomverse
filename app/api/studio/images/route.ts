@@ -9,7 +9,6 @@ import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { CATALOG_IMAGE_SIZES, RECRAFT_API_MODEL, RECRAFT_SIZE } from "@/lib/directRasterModels";
 import { imageEditEnabled } from "@/lib/imageEditSource";
-import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 import { IMAGE_PHOTO_TOOL_CONTRACTS } from "@/lib/imagePhotoTools";
 import { processImageGenerationGroup, requestImageGeneration } from "@/lib/imageGenerationService";
 import { DEFAULT_IMAGE_MODEL_ID, getImageModel, getImageModelPrice, imageEditCredits, listEnabledImageModels } from "@/lib/imageModelRegistry";
@@ -38,12 +37,6 @@ const requestSchema = z.object({
   pricingVersion: z.string().min(1).max(120),
   quality: z.enum(qualities).optional(),
   credits: z.number().int().positive().optional(),
-  // A feature served by several tools at once echoes each tool's quote.
-  targets: z.array(z.object({
-    modelId: z.string().min(1).max(120),
-    pricingVersion: z.string().min(1).max(120),
-    credits: z.number().int().positive(),
-  }).strict()).min(1).max(4).optional(),
 }).strict();
 
 const unavailable = () => Response.json({ code: "STUDIO_GENERATION_UNAVAILABLE" }, { status: 503 });
@@ -74,13 +67,14 @@ async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useC
   if (useCase === "transparent-png") {
     // A cut-out keeps the photo's own pixels, which only a background remover
     // does: no image generator stands in for one. What to keep is a matter of
-    // taste, so every remover that is on answers and the user picks.
+    // taste, so every remover that is on answers and the user picks. Each is
+    // submitted as its own single-model request with its own price.
     const targets = !edit ? [] : IMAGE_PHOTO_TOOL_CONTRACTS.flatMap(({ modelId }) => {
       const tool = getImageModel(modelId);
       const price = tool && budgeted.has(tool.provider) ? getImageModelPrice(tool.id, "medium", size) : null;
       const credits = tool && price ? imageEditCredits(tool, price) : null;
       return tool && credits ? [{ modelId: tool.id, model: tool.name, credits, pricingVersion: tool.pricingVersion }] : [];
-    }).slice(0, imageGroupMaxModels());
+    });
     return targets.length === 0 ? null : {
       modelId: targets[0].modelId, model: targets.map(target => target.model).join(" + "),
       credits: targets.reduce((sum, target) => sum + target.credits, 0),
@@ -159,15 +153,13 @@ export async function POST(req: Request) {
     // Open tabs from the previous release only know the versioned Medium
     // quote. Feature-routed submissions always echo the exact quote.
     const legacyMedium = body.useCase === undefined && body.quality === undefined && body.credits === undefined;
-    const quoted = quote && "targets" in quote ? quote.targets : undefined;
-    const sameTargets = quoted
-      ? body.targets?.length === quoted.length && quoted.every((target, index) =>
-        target.modelId === body.targets?.[index].modelId && target.pricingVersion === body.targets[index].pricingVersion &&
-        target.credits === body.targets[index].credits)
-      : body.targets === undefined;
-    if (!quote || !sameTargets || quote.modelId !== body.modelId || quote.pricingVersion !== body.pricingVersion ||
+    // A feature served by several tools is submitted one tool at a time: the tool named must be one of
+    // the tools quoted, at that tool's own version and price.
+    const tool = quote && "targets" in quote ? quote.targets.find(target => target.modelId === body.modelId) ?? null : undefined;
+    const priced = tool === undefined ? quote : tool && quote && { ...quote, ...tool };
+    if (!quote || !priced || priced.modelId !== body.modelId || priced.pricingVersion !== body.pricingVersion ||
         quote.size !== body.size ||
-        (legacyMedium ? quote.quality !== "medium" : quote.quality !== body.quality || quote.credits !== body.credits)) {
+        (legacyMedium ? quote.quality !== "medium" : quote.quality !== body.quality || priced.credits !== body.credits)) {
       return Response.json({ code: "STUDIO_QUOTE_CHANGED" }, { status: 409 });
     }
     const { uploadId } = body;
@@ -177,15 +169,10 @@ export async function POST(req: Request) {
       quality: quote.quality,
       size: body.size,
       idempotencyKey: body.idempotencyKey,
-      // Only the quote above names a photo tool: the ids are this feature's own, never the caller's.
-      ...(quoted ? {
-        modelIds: quoted.map(target => target.modelId),
-        expectedPricingVersions: Object.fromEntries(quoted.map(target => [target.modelId, target.pricingVersion])),
-        photoTools: quoted.map(target => target.modelId),
-      } : {
-        modelIds: [body.modelId],
-        expectedPricingVersions: { [body.modelId]: body.pricingVersion },
-      }),
+      modelIds: [body.modelId],
+      expectedPricingVersions: { [body.modelId]: body.pricingVersion },
+      // Reached only through the feature's own quote above, never by a model id alone.
+      ...(tool ? { photoTools: [tool.modelId] } : {}),
       ...(uploadId ? {
         editSource: {
           bindAttachment: (tx, conversationId) => bindStudioImageUpload(tx, {

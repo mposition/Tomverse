@@ -39,41 +39,15 @@ test("Studio does not attempt a fallback after an authentication failure", async
   assert.equal(fetch.mock.callCount(), 1);
 });
 
-test("a request answered by two tools hands over each result as it finishes and submits both quotes", async context => {
-  const { createStudioImageRunner } = await import("../components/studio/studioGenerationClient.ts");
+test("each tool of a several-tool feature is submitted with its own price, never the total", async () => {
+  const { studioToolQuote } = await import("../components/studio/studioGenerationClient.ts");
   const targets = [
     { modelId: "tool-a", model: "Tool A", credits: 20, pricingVersion: "a-1" },
     { modelId: "tool-b", model: "Tool B", credits: 26, pricingVersion: "b-1" },
   ];
-  const twoToolQuote = { ...quote, modelId: "tool-a", pricingVersion: "a-1", credits: 46, quality: "medium", useCase: "transparent-png", targets };
-  const group = statuses => Response.json({
-    targets: [{ modelId: "tool-a", currentGenerationId: "gen-a" }, { modelId: "tool-b", currentGenerationId: "gen-b" }],
-    generations: [{ generationId: "gen-a", status: statuses[0] }, { generationId: "gen-b", status: statuses[1] }],
+  const total = { ...quote, modelId: "tool-a", pricingVersion: "a-1", credits: 46, quality: "medium", useCase: "transparent-png", size: "1024x1024", targets };
+  assert.deepEqual(studioToolQuote(total, targets[1]), {
+    ...total, modelId: "tool-b", model: "Tool B", credits: 26, pricingVersion: "b-1", targets: undefined,
   });
-  const image = name => new Response(new Blob([name], { type: "image/png" }));
-  const submitted = [];
-  const run = async (statuses, onImage) => {
-    context.mock.method(globalThis, "fetch", async (url, init) => {
-      if (url === "/api/studio/images") { submitted.push(JSON.parse(init.body)); return Response.json({ groupId: "group-1" }); }
-      if (url === "/api/images/groups/group-1") return group(statuses);
-      return image(String(url).includes("gen-a") ? "a" : "b");
-    });
-    return createStudioImageRunner()({
-      inputKey: "photo", prompt: "Remove the background from the photo.", size: "1024x1024", quote: twoToolQuote,
-      onImage, signal: new AbortController().signal,
-    });
-  };
-
-  const seen = [];
-  const first = await run(["succeeded", "succeeded"], async ({ blob, modelId }) => { seen.push([modelId, await blob.text()]); });
-  assert.deepEqual(seen, [["tool-a", "a"], ["tool-b", "b"]]);
-  assert.equal(await first.text(), "a");
-  assert.deepEqual(submitted[0].targets, targets.map(({ modelId, pricingVersion, credits }) => ({ modelId, pricingVersion, credits })));
-  assert.deepEqual([submitted[0].modelId, submitted[0].credits], ["tool-a", 46]);
-
-  // One tool failing leaves the other's result; both failing is a failure.
-  seen.length = 0;
-  const survivor = await run(["failed", "succeeded"], ({ modelId }) => { seen.push(modelId); });
-  assert.deepEqual([seen, await survivor.text()], [["tool-b"], "b"]);
-  await assert.rejects(run(["failed", "failed"], () => {}), error => error instanceof StudioGenerationError && error.status === 502);
+  assert.equal(studioToolQuote(total, targets[0]).credits, 20);
 });

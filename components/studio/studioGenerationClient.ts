@@ -16,9 +16,16 @@ export type StudioImageQuote = {
   useCase?: StudioImageUseCase;
   requestedSize?: ImageSize;
   squareFallback?: boolean;
-  /** Set when several tools answer one request; `credits` is then their total. */
+  /**
+   * Set when several tools serve the feature. Each is its own request with its
+   * own price (studioToolQuote); `credits` is their total.
+   */
   targets?: { modelId: string; model: string; credits: number; pricingVersion: string }[];
 };
+
+/** The quote one tool of a several-tool feature is submitted with. */
+export const studioToolQuote = <Quote extends StudioImageQuote>(quote: Quote, target: NonNullable<StudioImageQuote["targets"]>[number]): Quote =>
+  ({ ...quote, modelId: target.modelId, model: target.model, credits: target.credits, pricingVersion: target.pricingVersion, targets: undefined });
 
 export class StudioGenerationError extends Error {
   constructor(readonly status: number, readonly code?: string, readonly details?: Record<string, unknown>) {
@@ -132,15 +139,10 @@ export function createStudioImageRunner() {
     size: ImageSize;
     quote: StudioImageQuote;
     reference?: () => Promise<Blob>;
-    /**
-     * Called for every target of the request as it finishes, in whatever order
-     * they do. Without it only the first target is read.
-     */
-    onImage?: (image: { blob: Blob; modelId: string }) => void | Promise<void>;
     signal: AbortSignal;
   }): Promise<Blob> => {
     const { signal, quote } = input;
-    const key = JSON.stringify([input.inputKey, input.prompt, input.size, quote.modelId, quote.pricingVersion, quote.quality, quote.credits, quote.useCase, quote.targets]);
+    const key = JSON.stringify([input.inputKey, input.prompt, input.size, quote.modelId, quote.pricingVersion, quote.quality, quote.credits, quote.useCase]);
     if (current?.inputKey !== key) current = { inputKey: key, idempotencyKey: crypto.randomUUID() };
     const run = current;
     if (!run.groupId) {
@@ -153,7 +155,6 @@ export function createStudioImageRunner() {
           prompt: input.prompt, size: input.size, modelId: quote.modelId, pricingVersion: quote.pricingVersion,
           quality: quote.quality, credits: quote.credits, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
           useCase: quote.useCase, idempotencyKey: run.idempotencyKey, ...(run.uploadId ? { uploadId: run.uploadId } : {}),
-          ...(quote.targets ? { targets: quote.targets.map(({ modelId, pricingVersion, credits }) => ({ modelId, pricingVersion, credits })) } : {}),
         }, signal));
       } catch (error) {
         if (signal.aborted || (error instanceof StudioGenerationError && error.status < 500)) {
@@ -176,19 +177,14 @@ export function createStudioImageRunner() {
       run.groupId = submitted.groupId;
     }
     const deadline = Date.now() + 16 * 60 * 1000;
-    const delivered = new Map<string, Blob | null>();
     while (Date.now() < deadline) {
       const groupResponse = await fetch("/api/images/groups/" + encodeURIComponent(run.groupId), { signal, cache: "no-store" });
       const group = requireJson<{
-        targets: { modelId: string; currentGenerationId: string | null }[];
+        targets: { currentGenerationId: string | null }[];
         generations: { generationId: string; status: string }[];
       }>(groupResponse, await groupResponse.json().catch(() => null));
-      const targets = input.onImage ? group.targets : group.targets.slice(0, 1);
-      for (const target of targets) {
-        const generation = group.generations.find(item => item.generationId === target.currentGenerationId);
-        if (!generation || delivered.has(generation.generationId)) continue;
-        if (generation.status === "failed") delivered.set(generation.generationId, null);
-        if (generation.status !== "succeeded") continue;
+      const generation = group.generations.find(item => item.generationId === group.targets[0]?.currentGenerationId);
+      if (generation?.status === "succeeded") {
         notifyUserUsageChanged();
         const response = await fetch("/api/images/generations/" + encodeURIComponent(generation.generationId) + "/download", { signal });
         if (!response.ok) {
@@ -197,15 +193,12 @@ export function createStudioImageRunner() {
         }
         const blob = await response.blob();
         if (!blob.type.startsWith("image/")) throw new StudioGenerationError(502);
-        delivered.set(generation.generationId, blob);
-        await input.onImage?.({ blob, modelId: target.modelId });
-      }
-      if (targets.length > 0 && delivered.size >= targets.length) {
         current = undefined;
-        // One tool failing leaves the other's result; all failing is a failure.
-        const first = [...delivered.values()].find(blob => blob !== null);
-        if (!first) throw new StudioGenerationError(502);
-        return first;
+        return blob;
+      }
+      if (generation?.status === "failed") {
+        current = undefined;
+        throw new StudioGenerationError(502);
       }
       await waitForImage(signal);
     }

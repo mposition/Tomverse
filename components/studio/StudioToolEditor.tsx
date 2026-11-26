@@ -11,7 +11,7 @@ import { cropStudioCutout, makeStudioImageReference, readStudioBlob, renderStudi
 import { StudioImageShare } from "./StudioImageShare";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
-import { createStudioImageRunner, StudioGenerationError, useStudioImageQuote } from "./studioGenerationClient";
+import { createStudioImageRunner, StudioGenerationError, studioToolQuote, useStudioImageQuote } from "./studioGenerationClient";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
@@ -95,6 +95,8 @@ export function StudioToolEditor({ tool, preset }: {
   const { busy, status, report, task } = useStudioTask();
   const active = useRef<AbortController | null>(null);
   const [runImage] = useState(createStudioImageRunner);
+  // One runner per background remover: each tool is its own request, with its own retry state.
+  const [toolRunners] = useState(() => new Map<string, ReturnType<typeof createStudioImageRunner>>());
   const { id } = tool;
   const poster = id === "poster";
   const social = id === "social-post";
@@ -269,19 +271,22 @@ export function StudioToolEditor({ tool, preset }: {
     active.current = controller;
     const { signal } = controller;
     try {
-      if (!imageQuote.quote) return;
-      const fresh: typeof cutouts = [];
-      const generated = await runImage({
-        inputKey: hasReference ? photo : id,
-        prompt: imagePrompt(),
-        size: imageQuote.quote.size,
-        quote: imageQuote.quote,
-        reference: hasReference ? () => pngTool
-          ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })
-          : makeStudioImageReference(photo) : undefined,
-        // Each remover's cut-out is shown as it arrives; the first one is picked until the user chooses.
-        onImage: pngTool ? async ({ blob, modelId }) => {
-          const url = urls.make(await cropStudioCutout(photo, blob));
+      const quote = imageQuote.quote;
+      if (!quote) return;
+      // Rendered once: two removers upload the same reference.
+      let prepared: Promise<Blob> | undefined;
+      const reference = hasReference ? () => prepared ??= pngTool
+        ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })
+        : makeStudioImageReference(photo) : undefined;
+      const run = { inputKey: hasReference ? photo : id, prompt: imagePrompt(), size: quote.size, reference, signal };
+      if (quote.targets) {
+        // Every remover is asked on its own and its cut-out shown as it arrives; the first to arrive is
+        // picked until the user chooses. One of them failing leaves the other's result.
+        const fresh: typeof cutouts = [];
+        const outcomes = await Promise.allSettled(quote.targets.map(async target => {
+          const runner = toolRunners.get(target.modelId) ?? createStudioImageRunner();
+          toolRunners.set(target.modelId, runner);
+          const url = urls.make(await cropStudioCutout(photo, await runner({ ...run, quote: studioToolQuote(quote, target) })));
           if (signal.aborted) return urls.release(url);
           if (fresh.length === 0) {
             urls.release(result);
@@ -289,15 +294,18 @@ export function StudioToolEditor({ tool, preset }: {
             setResult(url);
             setResultIsExample(false);
           }
-          fresh.push({ modelId, url });
+          fresh.push({ modelId: target.modelId, url });
           setCutouts([...fresh]);
-        } : undefined,
-        signal,
-      });
-      signal.throwIfAborted();
-      if (!pngTool) {
+        }));
+        signal.throwIfAborted();
+        const failed = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+        if (fresh.length === 0 && failed) throw failed.reason;
+      } else {
+        const generated = await runImage({ ...run, quote });
+        const output = pngTool ? await cropStudioCutout(photo, generated) : generated;
+        signal.throwIfAborted();
         urls.release(result);
-        setResult(urls.make(generated));
+        setResult(urls.make(output));
       }
       setResultIsExample(false);
       if (publishing) setPosterHasText(!title.trim());

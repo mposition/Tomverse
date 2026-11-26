@@ -97,7 +97,6 @@ function quotedSubmission(quote: { modelId: string; pricingVersion: string; qual
   return {
     ...body, modelId: quote.modelId, pricingVersion: quote.pricingVersion, quality: quote.quality,
     credits: quote.credits, size: quote.size, useCase: quote.useCase, requestedSize: quote.requestedSize, squareFallback: quote.squareFallback,
-    targets: quote.targets?.map(({ modelId, pricingVersion, credits }) => ({ modelId, pricingVersion, credits })),
   };
 }
 
@@ -273,10 +272,10 @@ test("real sticker packs and individual edits require the verified square Sunbur
   assert.equal(reservations.length, 3);
 });
 
-test("a transparent PNG is quoted on every background remover that is on, and on nothing else", async context => {
+test("a transparent PNG is quoted on every background remover that is on, each submitted as its own request", async context => {
   const switches = ["IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED", "IMAGE_FAL_BRIA_BACKGROUND_REMOVAL_ENABLED"];
   context.after(() => {
-    for (const name of [...switches, "STUDIO_IMAGE_ROUTE_PREFERENCES", "IMAGE_GROUP_MAX_MODELS"]) delete process.env[name];
+    for (const name of [...switches, "STUDIO_IMAGE_ROUTE_PREFERENCES"]) delete process.env[name];
   });
   process.env.STUDIO_IMAGE_GENERATION_ENABLED = "true";
   // A route preference cannot put an image generator in a remover's place.
@@ -290,45 +289,43 @@ test("a transparent PNG is quoted on every background remover that is on, and on
   assert.deepEqual([single.modelId, single.credits, single.targets.map((target: QuotedTarget) => target.modelId)],
     ["recraft-remove-background", 20, ["recraft-remove-background"]]);
 
-  // Both: one request, two results, the sum of the two prices.
+  // Both: two tools, each with its own price, and their total.
   process.env[switches[1]] = "true";
   const quote = await (await GET(request)).json();
-  assert.deepEqual([quote.modelId, quote.size, quote.quality, quote.credits, quote.useCase],
-    ["recraft-remove-background", "1024x1024", "medium", 46, "transparent-png"]);
+  assert.deepEqual([quote.size, quote.quality, quote.credits, quote.useCase], ["1024x1024", "medium", 46, "transparent-png"]);
   assert.deepEqual(quote.targets.map((target: QuotedTarget) => [target.modelId, target.credits]),
     [["recraft-remove-background", 20], ["bria/rmbg-3", 26]]);
   assert.equal((await GET(new Request(request.url.replace("edit=true", "edit=false")))).status, 503);
   assert.equal((await GET(new Request(request.url.replace("1024x1024", "1536x1024")))).status, 503);
-  // A deployment pinned to one model per request gets one remover, not a refusal.
-  process.env.IMAGE_GROUP_MAX_MODELS = "1";
-  assert.equal((await (await GET(request)).json()).credits, 20);
-  delete process.env.IMAGE_GROUP_MAX_MODELS;
   // No other feature is offered a tool.
   const other = await (await GET(quoteRequest())).json();
   assert.ok(!["recraft-remove-background", "bria/rmbg-3"].includes(other.modelId) && other.targets === undefined);
 
-  const submit = quotedSubmission(quote);
+  // One request per tool, at that tool's own price: never the total, another tool's price or a model that was not quoted.
+  const [recraft, bria] = (quote.targets as QuotedTarget[]).map(target => ({
+    ...quotedSubmission({ ...quote, ...target }), targets: undefined, idempotencyKey: randomUUID(),
+  }));
   for (const wrong of [
-    { credits: 45 }, { targets: undefined }, { targets: submit.targets!.slice(0, 1) }, { targets: [...submit.targets!].reverse() },
-    { targets: [submit.targets![0], { ...submit.targets![1], credits: 25 }] },
-    { targets: [submit.targets![0], { ...submit.targets![1], modelId: "gpt-image-2" }] },
+    { ...recraft, credits: 46 }, { ...bria, credits: 20 }, { ...bria, pricingVersion: recraft.pricingVersion },
+    { ...recraft, modelId: "gpt-image-2" }, { ...recraft, size: "1536x1024" }, { ...recraft, quality: "high" },
   ]) {
-    assert.equal((await post({ ...submit, ...wrong, idempotencyKey: randomUUID() })).status, 409, JSON.stringify(wrong));
+    assert.equal((await post({ ...wrong, idempotencyKey: randomUUID() })).status, 409, JSON.stringify(wrong));
   }
   assert.equal(reservations.length, 0);
-  assert.equal((await post(submit)).status, 202);
-  const tools = ["recraft-remove-background", "bria/rmbg-3"];
-  assert.deepEqual([reservations[0].modelIds, reservations[0].photoTools, Object.keys(reservations[0].expectedPricingVersions ?? {})], [tools, tools, tools]);
-  // Both tools are sent to the executor: a second target left pending would never run.
-  assert.equal(scheduled.length, 1);
-  await scheduled[0]();
-  assert.deepEqual(dispatched, [["studio-image", "studio-image-2"]]);
-  // Every other feature reserves without naming a tool, so the service refuses a tool's id for it; and it cannot add targets.
-  assert.equal((await post({ ...quotedSubmission(other), targets: submit.targets, idempotencyKey: randomUUID() })).status, 409);
+  assert.equal((await post(recraft)).status, 202);
+  assert.equal((await post(bria)).status, 202);
+  assert.deepEqual(reservations.map(row => [row.modelIds, row.photoTools]),
+    [[["recraft-remove-background"], ["recraft-remove-background"]], [["bria/rmbg-3"], ["bria/rmbg-3"]]]);
+  // Each request starts its own generation.
+  assert.equal(scheduled.length, 2);
+  // A tool's id cannot ride on another feature's quote, and another feature never names a tool.
+  assert.equal((await post({ ...quotedSubmission(other), modelId: "bria/rmbg-3", idempotencyKey: randomUUID() })).status, 409);
   assert.equal((await post({ ...quotedSubmission(other), idempotencyKey: randomUUID() })).status, 202);
-  assert.equal(reservations[1].photoTools, undefined);
-  process.env[switches[0]] = "false";
-  assert.equal((await post({ ...submit, idempotencyKey: randomUUID() })).status, 409);
+  assert.equal(reservations[2].photoTools, undefined);
+  // Each tool stops with its own switch; the other keeps working.
+  process.env[switches[1]] = "false";
+  assert.equal((await post({ ...bria, idempotencyKey: randomUUID() })).status, 409);
+  assert.equal((await post({ ...recraft, idempotencyKey: randomUUID() })).status, 202);
 });
 
 test("Studio reserves exactly the quoted model, quality, size and credit amount", async context => {

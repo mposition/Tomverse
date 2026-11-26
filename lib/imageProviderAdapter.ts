@@ -1558,20 +1558,23 @@ const generateWithDirectRaster = async (
   const b64 = item?.b64_json;
   const bytes = typeof b64 === "string" && b64.length <= maxEncodedLength ? Buffer.from(b64, "base64") : null;
   const dimensions = bytes && bytes.byteLength <= FAL_MAX_ASSET_BYTES ? readImageDimensions(bytes, "image/png") : null;
+  // Recraft reports the request's cost in API units (1,000 micro-USD each); read before the image is judged,
+  // so a billed answer that is then refused still tells the failure what it cost.
+  const units = payload?.credits;
+  const reportedCostMicroUsd = !isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
+    ? units * 1000 : null;
   if (!bytes || !dimensions || `${dimensions.width}x${dimensions.height}` !== input.size) {
     const error = new ImageProviderError("provider_failed", "Direct provider returned an unusable image.", response.status, requestId, requestParams);
     error.afterGeneration = true;
+    error.reportedCostMicroUsd = reportedCostMicroUsd;
     throw error;
   }
-  const units = payload?.credits;
   return {
     imageBytes: bytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
     providerRequestId: requestId, provenance: [...model.provenance],
     outputWidth: dimensions.width, outputHeight: dimensions.height, requestParams,
     providerUsage: isSeedream ? numericUsage(payload.usage) : numericUsage({ credits: payload.credits }),
-    ...(!isSeedream && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(units * 1000)
-      ? { reportedCostMicroUsd: units * 1000 }
-      : {}),
+    ...(reportedCostMicroUsd === null ? {} : { reportedCostMicroUsd }),
   };
 };
 
@@ -1620,7 +1623,10 @@ const removeBackground = async (model: ImageModelProfile, input: ImageRequestInp
   // Nearly opaque is opaque: Bria leaves most of a subject at 240-254, which lets
   // a little of whatever the cut-out is placed on show through it.
   for (let i = 3; i < pixels.data.length; i += 4) if (pixels.data[i] >= 240) pixels.data[i] = 255;
-  const imageBytes = await sharp(pixels.data, { raw: { width: pixels.info.width, height: pixels.info.height, channels: 4 } }).png().toBuffer();
+  // A failed re-encode is refused like any other unusable answer, so what the provider billed is not lost with it.
+  const imageBytes = await sharp(pixels.data, { raw: { width: pixels.info.width, height: pixels.info.height, channels: 4 } })
+    .png().toBuffer().catch(() => null);
+  if (!imageBytes) return refuse();
   return {
     imageBytes, mimeType: "image/png", inputTokens: 0, outputTokens: 0, thinkingTokens: 0,
     providerRequestId: answer.providerRequestId, provenance: [],

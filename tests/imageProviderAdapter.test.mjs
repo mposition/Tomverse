@@ -1033,3 +1033,20 @@ test("Bria's remover goes through fal with the platform headers and reads its cu
   }));
   assert.equal(network.mock.callCount(), 8);
 });
+
+test("a Recraft answer that is billed and then refused still says what it cost", async t => {
+  const sharp = (await import("sharp")).default;
+  const model = IMAGE_MODEL_REGISTRY.find(row => row.id === "recraftv4_pro");
+  const price = model.prices[0];
+  setActiveImageModelCatalog([model]);
+  const small = await sharp({ create: { width: 1024, height: 1024, channels: 3, background: "red" } }).png().toBuffer();
+  t.mock.method(globalThis, "fetch", async () => Response.json({ credits: 400, data: [{ image_id: "wrong-size", b64_json: small.toString("base64") }] }));
+  try {
+    await withEnv("RECRAFT_API_TOKEN", "test-key", () => assert.rejects(
+      generateImageWithProvider({ modelId: model.id, quality: price.quality, size: price.size, prompt: "p" }),
+      error => error instanceof ImageProviderError && error.afterGeneration === true && error.reportedCostMicroUsd === 400_000,
+    ));
+  } finally {
+    resetActiveImageModelCatalog();
+  }
+});
