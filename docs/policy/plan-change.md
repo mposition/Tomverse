@@ -488,7 +488,7 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 - **확인 메일 두 통.** 결제 안내(`billing_welcome`)와 같은 틀(`shell`, 파란 상자)입니다.
   | 템플릿 | 보내는 시점 |
   |---|---|
-  | `plan_change_upgraded` | 업그레이드 정산이 `pending → applied`로 바뀐 그 조건부 update 한 번(=청구서 결제 후). 다음 갱신일을 적습니다 |
+  | `plan_change_upgraded` | 업그레이드 정산이 `pending → applied`로 바뀐 그 조건부 update 한 번(=청구서 결제 후). 현재 결제기간 종료일을 적습니다(해지 예약이 유지된 구독은 갱신되지 않으므로 "갱신일"이라 쓰지 않음) |
   | `plan_change_downgrade_scheduled` | confirm이 schedule을 붙이고 `previewed → pending`으로 바꾼 직후. 적용일과 취소 방법을 적습니다 |
 
   표준 메일 lane은 reference로 중복을 거르지 않으므로, "변경 한 건에 한 통"은 행을
@@ -538,3 +538,12 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 상태 · 적용 시점 · 확정 · 처리 시각으로 보입니다(AEST). 이메일 · 이름 · 금액은 싣지
 않습니다(5절 감사 원칙과 같음). 예약 취소는 고객이 하고, 정산은 웹훅이 하므로 이
 화면은 아무것도 쓰지 않습니다.
+
+### 동시 확정 (2026-11-26 보강)
+
+같은 견적으로 confirm 두 개가 겹치면, 먼저 schedule을 붙인 쪽의 변화를 나중 쪽이 보고
+견적을 `expired`로 만들 수 있습니다. 그러면 먼저 쪽의 조건부 update가 0건이 되고, 아무
+행도 그 schedule을 기록하지 않습니다. 이 경우 먼저 쪽이 **schedule을 release**하고
+`PLAN_CHANGE_PREVIEW_EXPIRED`로 답합니다 — 기록되지 않은 schedule은 보여 줄 수도 취소할
+수도 없는 채로 기간 말에 플랜을 바꾸기 때문입니다. release가 실패하면 운영 사고
+`PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED`를 올려 사람이 Stripe에서 확인합니다.

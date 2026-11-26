@@ -75,8 +75,8 @@ test("it uses the billing welcome email's shell, so it reads like the receipt", 
 
 test("an upgrade with no known renewal date leaves that row out", () => {
   const email = render("upgraded", "en", { effectiveAt: null });
-  assert.doesNotMatch(email.text, /Next renewal/);
-  assert.doesNotMatch(email.html, /Next renewal/);
+  assert.doesNotMatch(email.text, /Current billing period ends/);
+  assert.doesNotMatch(email.html, /Current billing period ends/);
   assert.doesNotMatch(email.text, /Not available/);
 });
 

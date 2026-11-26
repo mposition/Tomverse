@@ -75,11 +75,14 @@ test("the webhook keeps a deletion's cancellation whatever order the writes land
   // scheduled for deletion whose subscription renews gets its cancellation
   // back. Transient failures throw so Stripe redelivers.
   const webhook = readFileSync("lib/stripeWebhookProcessing.ts", "utf8");
-  assert.equal(webhook.split("await keepDeletionCancellation(subscription);").length - 1, 1);
+  assert.equal(webhook.split("await keepDeletionCancellation(subscription, eventType !== null);").length - 1, 1);
   const reconciler = webhook.slice(webhook.indexOf("async function keepDeletionCancellation"));
   assert.match(reconciler, /accountStatus: "pending_deletion"/);
   assert.match(reconciler, /cancel_at_period_end: true/);
-  assert.ok(reconciler.includes('!== "StripeInvalidRequestError") throw error;'));
+  // Throws for redelivery only on the webhook path (it has one); a direct
+  // caller such as the mobile cancel gets a reported incident instead.
+  assert.ok(reconciler.includes('if (redelivered && (error as { type?: unknown })?.type !== "StripeInvalidRequestError")'));
+  assert.match(reconciler, /ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED/);
 });
 
 test("an already-renewing subscription corrects a stale stored flag", () => {

@@ -306,11 +306,24 @@ export async function DELETE(req: Request) {
         cancel_at_period_end: false,
       });
     } catch (resumeError) {
-      await restoreCancellationIfDeletionPending(user.id, subscriptionId, "unknown");
+      // The resume's own failure is what this request reports; a failed
+      // restore has already raised its incident and is only logged here.
+      await restoreCancellationIfDeletionPending(user.id, subscriptionId, "unknown").catch(
+        (restoreError) => {
+          console.error("billing.subscription.resume_restore_failed", {
+            userId: user.id,
+            errorName: restoreError instanceof Error ? restoreError.name : "UnknownError",
+          });
+        }
+      );
       throw resumeError;
     }
 
     if (await restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { subscriptionCancelAtPeriodEnd: true },
+      });
       return NextResponse.json(
         { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
         { status: 409 }

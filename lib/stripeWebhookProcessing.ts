@@ -213,7 +213,9 @@ export async function resyncSubscriptionFromStripe(
   // was reserved against what the subscription now bills, and that comparison
   // wants the same freshly read subscription rather than a second retrieve.
   await settlePlanChangesForSubscription(subscription, eventType);
-  await keepDeletionCancellation(subscription);
+  // Throws (for redelivery) only on the webhook path, which is the one that
+  // has a redelivery; a direct caller gets a reported incident instead.
+  await keepDeletionCancellation(subscription, eventType !== null);
   return synced;
 }
 
@@ -231,7 +233,10 @@ const RENEWING_STATUSES = new Set(["active", "trialing", "past_due"]);
  * 500 and Stripe redelivers, which is the durable retry
  * (docs/policy/plan-change.md section 10).
  */
-async function keepDeletionCancellation(subscription: Stripe.Subscription) {
+async function keepDeletionCancellation(
+  subscription: Stripe.Subscription,
+  redelivered: boolean
+) {
   if (subscription.cancel_at_period_end) return;
   if (!RENEWING_STATUSES.has(subscription.status)) return;
   const pendingDeletion = await prisma.user.findFirst({
@@ -248,7 +253,9 @@ async function keepDeletionCancellation(subscription: Stripe.Subscription) {
     // e.g. a schedule-managed subscription) is a person's job, not a reason to
     // fail every event for this subscription for days. Anything else throws
     // and is redelivered.
-    if ((error as { type?: unknown })?.type !== "StripeInvalidRequestError") throw error;
+    if (redelivered && (error as { type?: unknown })?.type !== "StripeInvalidRequestError") {
+      throw error;
+    }
     await reportOperationalIncident({
       code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
       title: "A subscription of an account scheduled for deletion is renewing and could not be cancelled",

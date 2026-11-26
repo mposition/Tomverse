@@ -1079,8 +1079,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `Your Tomverse plan is now ${plan}`,
       title: "Your plan has been upgraded",
       intro: "The payment for your plan change was successful, and the new plan is active on your account now.",
-      dateLabel: "Next renewal",
-      note: "Your renewal date has not changed. This month's plan credit limit is now the new plan's limit; credits you already used this month still count, and purchased credits are unchanged.",
+      dateLabel: "Current billing period ends",
+      note: "Your billing period has not changed. This month's plan credit limit is now the new plan's limit; credits you already used this month still count, and purchased credits are unchanged.",
     },
     downgradeScheduled: {
       subject: (plan) => `Your change to Tomverse ${plan} is scheduled`,
@@ -1098,8 +1098,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `Tomverse ${plan} 플랜으로 변경되었습니다`,
       title: "플랜이 업그레이드되었습니다",
       intro: "플랜 변경 결제가 완료되어 지금부터 새 플랜을 이용하실 수 있습니다.",
-      dateLabel: "다음 갱신일",
-      note: "갱신일은 그대로입니다. 이번 달 플랜 크레딧 한도는 새 플랜 기준으로 바뀌며, 이번 달에 이미 사용한 크레딧은 그대로 반영됩니다. 구매한 추가 크레딧은 변동이 없습니다.",
+      dateLabel: "현재 결제기간 종료일",
+      note: "결제기간은 그대로입니다. 이번 달 플랜 크레딧 한도는 새 플랜 기준으로 바뀌며, 이번 달에 이미 사용한 크레딧은 그대로 반영됩니다. 구매한 추가 크레딧은 변동이 없습니다.",
     },
     downgradeScheduled: {
       subject: (plan) => `Tomverse ${plan} 플랜으로 변경이 예약되었습니다`,
@@ -1117,8 +1117,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `您的 Tomverse 套餐已变更为 ${plan}`,
       title: "套餐已升级",
       intro: "套餐变更付款已成功，新套餐现已在您的账户中生效。",
-      dateLabel: "下次续费日",
-      note: "续费日期保持不变。本月套餐积分额度已改为新套餐的额度；本月已使用的积分仍计入，已购买的积分不变。",
+      dateLabel: "当前计费周期结束日",
+      note: "计费周期保持不变。本月套餐积分额度已改为新套餐的额度；本月已使用的积分仍计入，已购买的积分不变。",
     },
     downgradeScheduled: {
       subject: (plan) => `已预约变更为 Tomverse ${plan}`,
@@ -1136,8 +1136,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `Votre formule Tomverse est désormais ${plan}`,
       title: "Votre formule a été mise à niveau",
       intro: "Le paiement de votre changement de formule a réussi et la nouvelle formule est active dès maintenant sur votre compte.",
-      dateLabel: "Prochain renouvellement",
-      note: "Votre date de renouvellement ne change pas. La limite de crédits du mois en cours correspond désormais à la nouvelle formule ; les crédits déjà utilisés ce mois-ci restent comptés et vos crédits achetés ne changent pas.",
+      dateLabel: "Fin de la période de facturation",
+      note: "Votre période de facturation ne change pas. La limite de crédits du mois en cours correspond désormais à la nouvelle formule ; les crédits déjà utilisés ce mois-ci restent comptés et vos crédits achetés ne changent pas.",
     },
     downgradeScheduled: {
       subject: (plan) => `Votre passage à Tomverse ${plan} est programmé`,
@@ -1155,8 +1155,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `Ihr Tomverse-Tarif ist jetzt ${plan}`,
       title: "Ihr Tarif wurde hochgestuft",
       intro: "Die Zahlung für Ihren Tarifwechsel war erfolgreich, und der neue Tarif ist ab sofort in Ihrem Konto aktiv.",
-      dateLabel: "Nächste Verlängerung",
-      note: "Ihr Verlängerungsdatum bleibt gleich. Das Credit-Limit dieses Monats entspricht jetzt dem neuen Tarif; bereits in diesem Monat verbrauchte Credits zählen weiterhin, gekaufte Credits bleiben unverändert.",
+      dateLabel: "Ende des Abrechnungszeitraums",
+      note: "Ihr Abrechnungszeitraum bleibt gleich. Das Credit-Limit dieses Monats entspricht jetzt dem neuen Tarif; bereits in diesem Monat verbrauchte Credits zählen weiterhin, gekaufte Credits bleiben unverändert.",
     },
     downgradeScheduled: {
       subject: (plan) => `Ihr Wechsel zu Tomverse ${plan} ist geplant`,
@@ -1174,8 +1174,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `Su plan de Tomverse ahora es ${plan}`,
       title: "Su plan se ha mejorado",
       intro: "El pago del cambio de plan se realizó correctamente y el nuevo plan ya está activo en su cuenta.",
-      dateLabel: "Próxima renovación",
-      note: "Su fecha de renovación no cambia. El límite de créditos de este mes pasa a ser el del nuevo plan; los créditos que ya usó este mes siguen contando y los créditos comprados no cambian.",
+      dateLabel: "Fin del período de facturación",
+      note: "Su período de facturación no cambia. El límite de créditos de este mes pasa a ser el del nuevo plan; los créditos que ya usó este mes siguen contando y los créditos comprados no cambian.",
     },
     downgradeScheduled: {
       subject: (plan) => `Su cambio a Tomverse ${plan} está programado`,
@@ -1193,8 +1193,8 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
       subject: (plan) => `O seu plano Tomverse é agora ${plan}`,
       title: "O seu plano foi melhorado",
       intro: "O pagamento da alteração de plano foi concluído e o novo plano já está ativo na sua conta.",
-      dateLabel: "Próxima renovação",
-      note: "A sua data de renovação não muda. O limite de créditos deste mês passa a ser o do novo plano; os créditos já usados este mês continuam a contar e os créditos comprados não mudam.",
+      dateLabel: "Fim do período de faturação",
+      note: "O seu período de faturação não muda. O limite de créditos deste mês passa a ser o do novo plano; os créditos já usados este mês continuam a contar e os créditos comprados não mudam.",
     },
     downgradeScheduled: {
       subject: (plan) => `A sua mudança para Tomverse ${plan} está agendada`,
@@ -1213,7 +1213,7 @@ export function buildPlanChangeEmail(
     toPlan: string | null | undefined;
     billingInterval?: string | null;
     /**
-     * ISO string resolved by the caller: the next renewal for an upgrade, the
+     * ISO string resolved by the caller: the current period end for an upgrade (it may not renew), the
      * date the scheduled plan starts for a downgrade. Never `new Date()` here
      * (docs/policy/email-notifications.md §9.3).
      */
@@ -1232,7 +1232,7 @@ export function buildPlanChangeEmail(
   const billingInterval = formatBillingInterval(input.billingInterval, language);
   const date = formatDate(input.effectiveAt ?? null, language);
   // An upgrade whose next renewal Stripe did not report leaves the row out
-  // rather than printing "not available" under "Next renewal".
+  // rather than printing "not available" under the period end.
   const showDate = Boolean(input.effectiveAt);
   const phaseCopy = phase === "upgraded" ? copy.upgraded : copy.downgradeScheduled;
   const intro =

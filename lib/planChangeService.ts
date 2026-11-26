@@ -41,6 +41,7 @@ import {
   PLAN_CHANGE_UPGRADED_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { prisma } from "@/lib/prisma";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { getStripe } from "@/lib/stripe";
 import {
@@ -724,7 +725,33 @@ export async function confirmPlanChange({
       where: { id: stored.id },
     });
     if (moved.count !== 1) {
-      return { ok: true, reservation: viewOf(updated) };
+      if (updated.status === "pending" && updated.stripeScheduleId === scheduleId) {
+        // The other confirm recorded this same schedule (same idempotency key).
+        return { ok: true, reservation: viewOf(updated) };
+      }
+      // The other confirm saw this request's schedule, read the quote as stale
+      // and expired it. Nothing records the schedule now, so it is released
+      // here -- an unrecorded schedule would move the plan at the period end
+      // with no reservation to show or cancel. Release, not cancel: cancel
+      // would end the subscription.
+      try {
+        await getStripe().subscriptionSchedules.release(scheduleId);
+      } catch (releaseError) {
+        // Outcome unknown: a person reads the schedule back at Stripe rather
+        // than this retrying a release blindly.
+        await reportOperationalIncident({
+          code: "PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED",
+          title: "A downgrade schedule with no reservation could not be released",
+          error: releaseError,
+          severity: "error",
+          context: { component: "plan-change", requestId: stored.id, scheduleId },
+        }).catch(() => {});
+        throw releaseError;
+      }
+      return fail(
+        "PLAN_CHANGE_PREVIEW_EXPIRED",
+        "The quote was confirmed twice at once; request a new one."
+      );
     }
     // The downgrade is decided now (the schedule is attached), so this is the
     // moment to confirm it. An upgrade is confirmed at settlement instead,
