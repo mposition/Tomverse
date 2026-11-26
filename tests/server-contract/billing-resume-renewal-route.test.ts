@@ -73,6 +73,20 @@ mock.module(mod("lib/operationalMonitoring.ts"), {
     },
   },
 });
+// The locked reconciler (lib/deletionCancellation.ts), as it behaves: cancels a
+// renewing subscription only while the account is pending deletion.
+mock.module(mod("lib/deletionCancellation.ts"), {
+  namedExports: {
+    keepDeletionCancellation: async () => {
+      if (state.account?.accountStatus !== "pending_deletion") return { pendingDeletion: false, cancelled: false };
+      if (state.failRestore) throw new Error("stripe down");
+      if (state.subscription.cancel_at_period_end) return { pendingDeletion: true, cancelled: false };
+      state.writes.push(true);
+      state.subscription.cancel_at_period_end = true;
+      return { pendingDeletion: true, cancelled: true };
+    },
+  },
+});
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
     prisma: {
@@ -101,7 +115,6 @@ mock.module(mod("lib/stripe.ts"), {
             if (state.deletionDuringWrite && state.account) state.account.accountStatus = "pending_deletion";
             throw new Error("timeout");
           }
-          if (!resume && state.failRestore) throw new Error("stripe down");
           state.writes.push(params.cancel_at_period_end);
           state.subscription.cancel_at_period_end = params.cancel_at_period_end;
           if (resume && state.deletionDuringWrite && state.account) {
@@ -175,6 +188,15 @@ test("a resume that times out is still reconciled against a deletion", async () 
   assert.equal(status, 500);
   assert.equal(state.subscription.cancel_at_period_end, true);
   assert.deepEqual(state.incidents, []);
+});
+
+test("an account restored before the reconciler runs keeps the renewal it asked for", async () => {
+  // The reconciler finds the account no longer pending deletion and writes nothing.
+  reset();
+  const { status, body } = await call();
+  assert.equal(status, 200);
+  assert.equal(body.cancelAtPeriodEnd, false);
+  assert.deepEqual(state.writes, [false]);
 });
 
 test("a cancellation that cannot be restored is an operational incident", async () => {

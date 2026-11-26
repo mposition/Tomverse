@@ -11,19 +11,26 @@ import test from "node:test";
 
 const count = (source, needle) => source.split(needle).length - 1;
 
-test("every subscription resync runs the deletion reconciler once", () => {
-  const webhook = readFileSync("lib/stripeWebhookProcessing.ts", "utf8");
-  assert.equal(count(webhook, "async function keepDeletionCancellation("), 1);
-  assert.equal(count(webhook, "await keepDeletionCancellation("), 1);
-  // It re-cancels with the account row locked, so a restore (and the
-  // customer's renewal resume after it) waits for it instead of being undone.
-  const reconciler = webhook.slice(webhook.indexOf("async function keepDeletionCancellation("));
-  assert.equal(count(reconciler.slice(0, reconciler.indexOf("export type BillingResyncOutcome")), "FOR UPDATE"), 1);
-  assert.ok(count(webhook, "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED") >= 1);
+test("one locked reconciler turns a deletion's cancellation back on", () => {
+  const reconciler = readFileSync("lib/deletionCancellation.ts", "utf8");
+  // The account row is locked across the check and the Stripe write, so a
+  // restore (and the customer's renewal resume after it) waits for it.
+  assert.equal(count(reconciler, "FOR UPDATE`;"), 1);
+  assert.equal(count(reconciler, "cancel_at_period_end: true"), 1);
 });
 
-test("the deletion flow asserts its cancellation before and after recording pending_deletion", () => {
+test("the webhook, the deletion flow and the resume route all go through it", () => {
+  const webhook = readFileSync("lib/stripeWebhookProcessing.ts", "utf8");
+  assert.equal(count(webhook, "await keepDeletionCancellation(subscription.id);"), 1);
+  assert.equal(count(webhook, "await reconcileDeletionCancellation(subscription, eventType !== null);"), 1);
+
   const deletion = readFileSync("lib/accountDeletion.ts", "utf8");
-  assert.equal(count(deletion, "await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);"), 2);
-  assert.equal(count(deletion, "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED"), 1);
+  // The first cancellation before pending_deletion is recorded, the locked
+  // reconcile after it -- and no unlocked second write.
+  assert.equal(count(deletion, "await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);"), 1);
+  assert.equal(count(deletion, "await keepDeletionCancellation(user.stripeSubscriptionId);"), 1);
+
+  const route = readFileSync("app/api/billing/cancel-subscription/route.ts", "utf8");
+  assert.equal(count(route, "await keepDeletionCancellation(subscriptionId);"), 1);
+  assert.equal(count(route, "cancel_at_period_end: true"), 1, "only the cancellation POST writes true directly");
 });

@@ -512,25 +512,25 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 - **계정 삭제 예약(`pending_deletion`)이면 409** (`ACCOUNT_DELETION_PENDING`). 삭제
   흐름이 스스로 해지를 예약했고, 그 밑에서 갱신을 켜면 떠나려는 계정에 다음 결제가
   납니다. (환불 요청은 그 자체로 해지를 예약하지 않고 승인 시 구독을 정리하므로 거부
-  사유가 아닙니다.) 검사와 Stripe 쓰기 사이에 삭제가 끼어드는 경우를 위해, 이 route는
-  쓴 뒤 계정을 다시 읽어 삭제가 보이면 해지를 되돌리고, 삭제 흐름
-  (`scheduleTomverseAccountDeletion`)은 `pending_deletion` 기록 뒤 해지 예약을 한 번
-  더 겁니다. 둘 중 하나는 반드시 해지로 끝납니다. 삭제 흐름의 두 번째 호출이
-  실패하면 삭제는 그대로 진행하고(이미 기록됐으므로 실패로 보고하지 않음) 운영 사고
-  `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올려 사람이 Stripe 상태를
-  확인합니다. 유예 기간 끝의 영구 삭제는 어떤 경우든 구독을 즉시 해지합니다.
-- **최종 정리는 웹훅이 합니다.** 위의 즉시 검사들은 대부분의 경우를 그 자리에서
-  막지만, 타임아웃된 재개가 늦게 적용되거나 재확인 DB 조회가 실패하는 순서까지 쓰기
-  순서로 다 막을 수는 없습니다. 그래서 `resyncSubscriptionFromStripe()`가 구독 이벤트마다
-  `keepDeletionCancellation()`을 부릅니다: 계정이 `pending_deletion`인데 Stripe 구독이
-  갱신 상태(`cancel_at_period_end: false`, active · trialing · past_due)면 해지를 다시
-  겁니다. 그 쓰기가 일시적으로 실패하면 throw해서 500 → Stripe 재전송이 지속적인 재시도가
-  되고, Stripe가 매번 같은 이유로 거부하는 요청(`StripeInvalidRequestError`)이면 운영 사고
-  `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올리고 그 이벤트는 넘깁니다. 어떤
-  순서든 재개의 결과는 `customer.subscription.updated`로 돌아오므로 해지가 최종 상태가
-  됩니다. 확인과 Stripe 쓰기는 계정 행을 잠근(`SELECT … FOR UPDATE`) 트랜잭션 안에서
-  합니다. 계정 복원은 그 행을 고치므로 정리가 끝날 때까지 기다리고, 복원 뒤 고객이 다시
-  켠 갱신을 늦은 정리가 끄는 일이 없습니다.
+  사유가 아닙니다.)
+- **삭제와 겹친 경우는 잠금을 쥔 정리 함수 하나가 맡습니다**
+  (`lib/deletionCancellation.ts`의 `keepDeletionCancellation()`). 계정 행을
+  `SELECT … FOR UPDATE`로 잠근 채 `pending_deletion`인지 확인하고, 그 안에서 Stripe 구독을
+  다시 읽어 갱신 중(`cancel_at_period_end: false`, active · trialing · past_due)일 때만 해지를
+  겁니다. 계정 복원은 그 행을 고치므로 정리가 끝날 때까지 기다리고, 복원이 먼저 커밋됐으면
+  행이 맞지 않아 아무것도 쓰지 않습니다. 그래서 복원 뒤 고객이 다시 켠 갱신을 늦은 정리가
+  끄는 일이 없습니다. 이 함수를 부르는 곳은 셋입니다.
+  - 갱신 재개 route: 자기 Stripe 쓰기 뒤에(응답이 없었던 경우 포함) 부릅니다. 삭제 예약
+    중이었으면 409, 정리가 실패하면 운영 사고 `BILLING_RESUME_RENEWAL_DELETION_CONFLICT`.
+  - 삭제 흐름(`scheduleTomverseAccountDeletion`): `pending_deletion`을 기록한 뒤 부릅니다.
+    실패해도 삭제는 그대로 진행하고(이미 기록됐으므로) 운영 사고
+    `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올립니다.
+  - 웹훅(`resyncSubscriptionFromStripe()`): 구독 이벤트마다 부릅니다. 타임아웃된 재개가
+    늦게 적용되는 순서까지 포함해, 재개의 결과는 `customer.subscription.updated`로 돌아오므로
+    해지가 최종 상태가 됩니다. 일시적 실패는 throw → 500 → Stripe 재전송이 지속적인 재시도이고,
+    Stripe가 매번 거부할 요청(`StripeInvalidRequestError`)이나 재전송이 없는 직접 호출(모바일
+    해지)의 실패는 운영 사고로 올립니다.
+  유예 기간 끝의 영구 삭제는 어떤 경우든 구독을 즉시 해지합니다.
 - Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
 - 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
 

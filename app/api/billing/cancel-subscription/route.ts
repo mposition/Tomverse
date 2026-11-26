@@ -13,6 +13,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { keepDeletionCancellation } from "@/lib/deletionCancellation";
 import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
@@ -165,9 +166,8 @@ const RESUMABLE_STATUSES = new Set(["active", "trialing"]);
  * meanwhile been scheduled for deletion ends with its cancellation back on.
  *
  * Runs on the failure path too: a timed-out write may still have been applied
- * at Stripe, and the deletion flow's own re-assert may already be behind it.
- * Putting the cancellation back is a different write (and idempotent), not a
- * retry of the resume. Anything that leaves the outcome unknown is raised as
+ * at Stripe. Putting the cancellation back is a different write (and
+ * idempotent), not a retry of the resume. Anything that leaves the outcome unknown is raised as
  * an operational incident for a person to read back at Stripe.
  */
 async function restoreCancellationIfDeletionPending(
@@ -175,16 +175,12 @@ async function restoreCancellationIfDeletionPending(
   subscriptionId: string,
   resumeOutcome: "applied" | "unknown"
 ): Promise<boolean> {
-  const after = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { accountStatus: true },
-  });
-  if (after?.accountStatus !== "pending_deletion") return false;
   try {
-    await getStripe().subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true,
-    });
-    return true;
+    // The one locked reconciler: under the account row lock it re-reads Stripe
+    // and cancels only while the account is still pending deletion, so a
+    // restore and the customer's renewal after it are never undone by this.
+    const outcome = await keepDeletionCancellation(subscriptionId);
+    return outcome.pendingDeletion;
   } catch (error) {
     await reportOperationalIncident({
       code: "BILLING_RESUME_RENEWAL_DELETION_CONFLICT",

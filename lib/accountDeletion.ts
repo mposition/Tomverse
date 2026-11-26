@@ -10,6 +10,7 @@ import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentS
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { keepDeletionCancellation } from "@/lib/deletionCancellation";
 import { requestGa4UserIdDeletion } from "@/lib/ga4UserDeletion";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
@@ -97,32 +98,36 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
       occurredAt: requestedAt,
     });
   });
-  // Asserted once more now that pending_deletion is recorded. A renewal
-  // resume (DELETE /api/billing/cancel-subscription) that read the account
-  // before this record and wrote to Stripe after the first call above would
-  // otherwise leave this account renewing; that route re-reads the account
-  // after its own write, so one of the two always ends with the cancellation.
+  // Reconciled once more now that pending_deletion is recorded, through the
+  // one locked reconciler (lib/deletionCancellation.ts): a renewal resume that
+  // read the account before this record and reached Stripe after the call
+  // above would otherwise leave this account renewing. Under the row lock it
+  // re-reads Stripe and writes only while the account is still pending
+  // deletion, so a restore and the customer's renewal after it are never
+  // undone by this.
   //
   // Not fatal: the deletion is recorded and committed, so failing the request
-  // here would tell the customer it did not happen while it did. The first call
-  // already scheduled the cancellation; this one only matters in that race,
-  // and if it fails a person verifies the subscription at Stripe (an unknown
-  // write outcome is checked, never blindly retried). The permanent deletion
-  // at the end of the grace period cancels the subscription outright either way.
-  try {
-    await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
-  } catch (error) {
-    await reportOperationalIncident({
-      code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
-      title: "Account deletion: re-asserting the Stripe cancellation failed",
-      error,
-      severity: "error",
-      context: {
-        component: "account-deletion",
-        userId: user.id,
-        subscriptionId: user.stripeSubscriptionId,
-      },
-    }).catch(() => {});
+  // here would tell the customer it did not happen while it did. If it fails a
+  // person verifies the subscription at Stripe (an unknown write outcome is
+  // checked, never blindly retried), the webhook reconciles on the next
+  // subscription event, and the permanent deletion at the end of the grace
+  // period cancels the subscription outright either way.
+  if (user.stripeSubscriptionId && isStripeConfigured()) {
+    try {
+      await keepDeletionCancellation(user.stripeSubscriptionId);
+    } catch (error) {
+      await reportOperationalIncident({
+        code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
+        title: "Account deletion: reconciling the Stripe cancellation failed",
+        error,
+        severity: "error",
+        context: {
+          component: "account-deletion",
+          userId: user.id,
+          subscriptionId: user.stripeSubscriptionId,
+        },
+      }).catch(() => {});
+    }
   }
   await revokeAllUserSessions(user.id);
   return {

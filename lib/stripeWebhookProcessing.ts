@@ -18,6 +18,7 @@ import { promotionRiskIdentifierCutoff } from "@/lib/billingPromotionCore";
 import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { getStripe } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { keepDeletionCancellation } from "@/lib/deletionCancellation";
 import {
   analyticsAttributionFromMetadata,
   recordProductAnalyticsEvent,
@@ -215,79 +216,42 @@ export async function resyncSubscriptionFromStripe(
   await settlePlanChangesForSubscription(subscription, eventType);
   // Throws (for redelivery) only on the webhook path, which is the one that
   // has a redelivery; a direct caller gets a reported incident instead.
-  await keepDeletionCancellation(subscription, eventType !== null);
+  await reconcileDeletionCancellation(subscription, eventType !== null);
   return synced;
 }
 
-const RENEWING_STATUSES = new Set(["active", "trialing", "past_due"]);
-
 /**
- * An account scheduled for deletion never renews.
+ * An account scheduled for deletion never renews: every subscription resync
+ * runs the one locked reconciler (lib/deletionCancellation.ts). Whatever order
+ * a renewal resume and a deletion landed in at Stripe -- including a resume
+ * that timed out and was applied late -- its `customer.subscription.updated`
+ * arrives here (docs/policy/plan-change.md section 10).
  *
- * The deletion flow schedules the cancellation itself, and the renewal resume
- * route (DELETE /api/billing/cancel-subscription) refuses such accounts and
- * re-checks after its write. Whatever order those writes land in at Stripe --
- * including a resume that timed out and was applied late -- the resulting
- * `customer.subscription.updated` arrives here, so this is the reconciler that
- * makes the cancellation the end state. A failure throws: the route answers
- * 500 and Stripe redelivers, which is the durable retry
- * (docs/policy/plan-change.md section 10).
+ * On the webhook path a failure throws, so the route answers 500 and Stripe
+ * redelivers: that is the durable retry. A refusal Stripe will repeat on every
+ * redelivery (an invalid request, e.g. a schedule-managed subscription), and
+ * any failure on a direct caller with no redelivery (the mobile cancel), is an
+ * operational incident instead.
  */
-async function keepDeletionCancellation(
+async function reconcileDeletionCancellation(
   subscription: Stripe.Subscription,
   canRedeliver: boolean
 ) {
   if (subscription.cancel_at_period_end) return;
-  if (!RENEWING_STATUSES.has(subscription.status)) return;
-  let pendingDeletion: { id: string } | null = null;
   try {
-    // The account row stays locked across the Stripe write. Restoring the
-    // account updates that row, so a restore (and the customer's own renewal
-    // resume after it) waits for this write instead of being undone by it; a
-    // restore that committed first means the row no longer matches and this
-    // writes nothing.
-    await prisma.$transaction(
-      async (tx) => {
-        const rows = await tx.$queryRaw<{ id: string }[]>`
-          SELECT "id" FROM "User"
-          WHERE "stripeSubscriptionId" = ${subscription.id}
-            AND "accountStatus" = 'pending_deletion'
-          FOR UPDATE`;
-        pendingDeletion = rows[0] ?? null;
-        if (!pendingDeletion) return;
-        await getStripe().subscriptions.update(subscription.id, {
-          cancel_at_period_end: true,
-        });
-      },
-      { timeout: 20_000 }
-    );
-    if (!pendingDeletion) return;
+    await keepDeletionCancellation(subscription.id);
   } catch (error) {
-    if (!pendingDeletion) throw error;
-    // A refusal Stripe will repeat on every redelivery (an invalid request,
-    // e.g. a schedule-managed subscription) is a person's job, not a reason to
-    // fail every event for this subscription for days. Anything else throws
-    // and is redelivered.
     if (canRedeliver && (error as { type?: unknown })?.type !== "StripeInvalidRequestError") {
       throw error;
     }
     await reportOperationalIncident({
       code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
-      title: "A subscription of an account scheduled for deletion is renewing and could not be cancelled",
+      title: "A subscription of an account scheduled for deletion may be renewing and could not be cancelled",
       error,
       severity: "error",
-      context: {
-        component: "stripe-webhook",
-        userId: (pendingDeletion as { id: string }).id,
-        subscriptionId: subscription.id,
-      },
+      context: { component: "stripe-webhook", subscriptionId: subscription.id },
     }).catch(() => {});
-    return;
   }
-  console.warn("billing.subscription.deletion_cancellation_restored", {
-    userId: (pendingDeletion as { id: string } | null)?.id,
-    subscriptionId: subscription.id,
-  });
 }
 
 export type BillingResyncOutcome = {
