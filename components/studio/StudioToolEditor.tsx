@@ -130,6 +130,8 @@ export function StudioToolEditor({ tool, preset }: {
   const [result, setResult] = useState(() => publishing ? asset(publicationChoices[0].artwork)
     : preset ? asset(preset.artwork) : asset(tool.artwork));
   const [resultIsExample, setResultIsExample] = useState(true);
+  // Transparent PNG: one cut-out per background remover; `result` is the one picked.
+  const [cutouts, setCutouts] = useState<{ modelId: string; url: string }[]>([]);
   const [format, setFormat] = useState(() => {
     if (id === "caricature") return 1;
     const style = preset?.style ?? (id === "illustration" ? "watercolor illustration" : "");
@@ -208,6 +210,8 @@ export function StudioToolEditor({ tool, preset }: {
     setPhoto(url);
     setCustomPhoto(true);
     urls.release(result);
+    for (const cutout of cutouts) urls.release(cutout.url);
+    setCutouts([]);
     setResult("");
     setResultIsExample(false);
   };
@@ -266,6 +270,7 @@ export function StudioToolEditor({ tool, preset }: {
     const { signal } = controller;
     try {
       if (!imageQuote.quote) return;
+      const fresh: typeof cutouts = [];
       const generated = await runImage({
         inputKey: hasReference ? photo : id,
         prompt: imagePrompt(),
@@ -274,12 +279,26 @@ export function StudioToolEditor({ tool, preset }: {
         reference: hasReference ? () => pngTool
           ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })
           : makeStudioImageReference(photo) : undefined,
+        // Each remover's cut-out is shown as it arrives; the first one is picked until the user chooses.
+        onImage: pngTool ? async ({ blob, modelId }) => {
+          const url = urls.make(await cropStudioCutout(photo, blob));
+          if (signal.aborted) return urls.release(url);
+          if (fresh.length === 0) {
+            urls.release(result);
+            for (const old of cutouts) urls.release(old.url);
+            setResult(url);
+            setResultIsExample(false);
+          }
+          fresh.push({ modelId, url });
+          setCutouts([...fresh]);
+        } : undefined,
         signal,
       });
-      const output = pngTool ? await cropStudioCutout(photo, generated) : generated;
       signal.throwIfAborted();
-      urls.release(result);
-      setResult(urls.make(output));
+      if (!pngTool) {
+        urls.release(result);
+        setResult(urls.make(generated));
+      }
       setResultIsExample(false);
       if (publishing) setPosterHasText(!title.trim());
       void checkoutDraft.clear();
@@ -297,6 +316,9 @@ export function StudioToolEditor({ tool, preset }: {
       active.current = null;
     }
   });
+
+  const quotedToolName = (modelId: string) =>
+    imageQuote.quote?.targets?.find(target => target.modelId === modelId)?.model ?? copy.result;
 
   const valid = (!publishing || Boolean(title.trim() || posterBrief.trim())) && (id !== "meme" || Boolean(details.trim()));
   const generationLabel = pngTool ? copy.removeBackground : copy.generate;
@@ -431,11 +453,20 @@ export function StudioToolEditor({ tool, preset }: {
         {template && !result && <p className={styles.hint}>{busy ? copy.generating : copy.emptyResult}</p>}
         {!template && <div className={styles.compare}>
           <figure><figcaption>{copy.original}</figcaption><img src={photo} alt="" /></figure>
-          <figure className={pngTool ? styles.checker : undefined}>
-            <figcaption>{artisticPreview ? `${copy.exampleResult} · ${artisticLabel}` : copy.result}</figcaption>
-            {artisticPreview ? <img src={artisticPreview} alt={artisticLabel} />
-              : result ? <img src={result} alt={copy.processedImage} /> : <p>{busy ? copy.generating : copy.emptyResult}</p>}
-          </figure>
+          {pngTool && cutouts.length > 0 && !resultIsExample
+            // One figure per remover; pressing one makes it the image that is saved and shared.
+            ? cutouts.map(cutout => <figure key={cutout.modelId} className={styles.checker} data-picked={cutout.url === result || undefined}>
+              <figcaption>{quotedToolName(cutout.modelId)}</figcaption>
+              <button type="button" aria-pressed={cutout.url === result} aria-label={quotedToolName(cutout.modelId)}
+                onClick={() => setResult(cutout.url)}>
+                <img src={cutout.url} alt={copy.processedImage} />
+              </button>
+            </figure>)
+            : <figure className={pngTool ? styles.checker : undefined}>
+              <figcaption>{artisticPreview ? `${copy.exampleResult} · ${artisticLabel}` : copy.result}</figcaption>
+              {artisticPreview ? <img src={artisticPreview} alt={artisticLabel} />
+                : result ? <img src={result} alt={copy.processedImage} /> : <p>{busy ? copy.generating : copy.emptyResult}</p>}
+            </figure>}
         </div>}
         <div className={styles.creativeActions}>
           <button type="button" className={styles.primary} disabled={!result || busy || Boolean(artisticPreview)}

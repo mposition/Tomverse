@@ -24,20 +24,6 @@ export const DIRECT_RASTER_MODELS = {
   },
 } as const;
 
-/**
- * Recraft's background remover: one photo in, the same picture out with its
- * background cleared. Sold per request whatever the photo, so it has a single
- * option. Not an image generator, and so not a DIRECT_RASTER_MODELS row.
- */
-export const RECRAFT_BACKGROUND_REMOVAL = {
-  modelId: "recraft-remove-background",
-  size: "1024x1024",
-  credits: 20,
-  outputCostMicroUsd: 10_000,
-  pricing: "https://www.recraft.ai/docs/api-reference/pricing",
-  docs: "https://www.recraft.ai/docs/api-reference/tools/remove-background",
-} as const;
-
 export type DirectRasterProvider = keyof typeof DIRECT_RASTER_MODELS;
 export const isDirectRasterProvider = (provider: unknown): provider is DirectRasterProvider =>
   provider === "byteplus" || provider === "recraft";

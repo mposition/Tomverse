@@ -903,9 +903,9 @@ test("the background remover sends only the padded photo and accepts only a same
   assert.ok(isImagePhotoTool(id));
   // Admission is the owning feature's word, never a model id the caller sent (a Chat edit carries a photo too).
   assert.equal(imagePhotoToolAdmitted(id, { hasPhoto: true }), false);
-  assert.equal(imagePhotoToolAdmitted(id, { photoTool: "another-tool", hasPhoto: true }), false);
-  assert.equal(imagePhotoToolAdmitted(id, { photoTool: id, hasPhoto: false }), false);
-  assert.equal(imagePhotoToolAdmitted(id, { photoTool: id, hasPhoto: true }), true);
+  assert.equal(imagePhotoToolAdmitted(id, { photoTools: ["bria/rmbg-3"], hasPhoto: true }), false);
+  assert.equal(imagePhotoToolAdmitted(id, { photoTools: [id], hasPhoto: false }), false);
+  assert.equal(imagePhotoToolAdmitted(id, { photoTools: [id, "bria/rmbg-3"], hasPhoto: true }), true);
   assert.equal(imagePhotoToolAdmitted("gpt-image-2", { hasPhoto: false }), true);
   // Never a catalogue row: no picker, router or comparison can list it.
   assert.ok(!IMAGE_MODEL_REGISTRY.some(row => row.id === id) && !listImageModels().some(row => row.id === id));
@@ -949,6 +949,14 @@ test("the background remover sends only the padded photo and accepts only a same
     const audit = JSON.stringify(result.requestParams);
     assert.ok(!audit.includes("base64") && !audit.includes(request.prompt));
 
+    // Nearly opaque comes back opaque; a real edge keeps its transparency.
+    const raw = Buffer.alloc(1024 * 1024 * 4, 9);
+    for (let i = 3; i < raw.length; i += 4) raw[i] = i < 4 * 1024 * 8 ? 100 : 245;
+    const soft = await sharp(raw, { raw: { width: 1024, height: 1024, channels: 4 } }).png().toBuffer();
+    answer = async () => ({ credits: 10, image: { b64_json: soft.toString("base64") } });
+    const solid = await sharp((await generateImageWithProvider(request)).imageBytes).raw().toBuffer();
+    assert.deepEqual([solid[3], solid[4 * 1024 * 512 + 3]], [100, 255]);
+
     // Billed, then refused: another size, or a picture with no alpha channel.
     for (const bytes of [await cutOut(512), await cutOut(1024, 3)]) {
       answer = async () => ({ credits: 10, image: { b64_json: bytes.toString("base64") } });
@@ -958,5 +966,69 @@ test("the background remover sends only the padded photo and accepts only a same
     answer = async () => ({ credits: 10, image: { url: "https://img.recraft.ai/cut.png" } });
     await assert.rejects(generateImageWithProvider(request), error => error.afterGeneration === true);
   });
-  assert.equal(network.mock.callCount(), 4);
+  assert.equal(network.mock.callCount(), 5);
+});
+
+test("Bria's remover goes through fal with the platform headers and reads its cut-out from fal's CDN only", async t => {
+  const sharp = (await import("sharp")).default;
+  const { getImageModel, minimumCreditsForImageOption } = createRequire(import.meta.url)("../lib/imageModelRegistry.ts");
+  const id = "bria/rmbg-3";
+  const model = getImageModel(id);
+  const price = model.prices[0];
+  assert.deepEqual([model.provider, price.size, price.credits, price.outputCostMicroUsd], ["fal", "1024x1024", 26, 18_000]);
+  assert.equal(minimumCreditsForImageOption(model, price), 26);
+  const source = await sharp({ create: { width: 480, height: 640, channels: 3, background: "green" } }).png().toBuffer();
+  const request = {
+    modelId: id, quality: "medium", size: "1024x1024", prompt: "private label",
+    editImage: { bytes: source, mimeType: "image/png", width: 480, height: 640, sha256: "f".repeat(64) },
+  };
+  const png = (side, channels = 4) =>
+    sharp({ create: { width: side, height: side, channels, background: { r: 1, g: 2, b: 3, alpha: 0 } } }).png().toBuffer();
+  let payload = { image: { url: "https://v3b.fal.media/files/cut.png", content_type: "image/png", width: 1024, height: 1024 } };
+  let asset = async () => new Response(await png(1024), { headers: { "content-type": "image/png" } });
+  const seen = [];
+  const network = t.mock.method(globalThis, "fetch", async (url, init) => {
+    seen.push(String(url));
+    if (String(url) === "https://fal.run/bria/rmbg-3") {
+      assert.equal(init.headers.Authorization, "Key test-fal-key");
+      assert.equal(init.headers["X-Fal-No-Retry"], "1");
+      assert.equal(init.headers["X-Fal-Store-IO"], "0");
+      const body = JSON.parse(init.body);
+      assert.deepEqual(Object.keys(body), ["image_url"]);
+      const photo = await sharp(Buffer.from(body.image_url.replace("data:image/png;base64,", ""), "base64")).metadata();
+      assert.deepEqual([photo.width, photo.height, photo.hasAlpha], [1024, 1024, false]);
+      return Response.json(payload, { headers: { "x-fal-request-id": "fal-cut-1" } });
+    }
+    assert.equal(init.redirect, "manual");
+    const response = await asset();
+    Object.defineProperty(response, "url", { value: String(url) });
+    return response;
+  });
+  const billedThenRefused = error => error instanceof ImageProviderError && error.afterGeneration === true;
+  await withEnv("IMAGE_FAL_BRIA_BACKGROUND_REMOVAL_ENABLED", "false", async () => {
+    assert.equal(imageEditCredits(model, price), null);
+    await assert.rejects(generateImageWithProvider(request), /cannot edit/);
+  });
+  await withEnv("IMAGE_FAL_BRIA_BACKGROUND_REMOVAL_ENABLED", "true", () => withEnv("FAL_KEY", "test-fal-key", async () => {
+    assert.equal(imageEditCredits(model, price), 26);
+    const result = await generateImageWithProvider(request);
+    assert.deepEqual([result.outputWidth, result.outputHeight, result.mimeType, result.providerRequestId], [1024, 1024, "image/png", "fal-cut-1"]);
+    // fal reports no cost: the fixed price is what settles.
+    assert.equal(result.reportedCostMicroUsd, undefined);
+    assert.equal(result.requestParams.endpoint, "removeBackground");
+    assert.ok(!JSON.stringify(result.requestParams).includes("base64"));
+
+    // Billed, then refused: an asset off fal's CDN is never fetched, and a wrong size or a picture without alpha is not a cut-out.
+    payload = { image: { url: "https://example.invalid/cut.png", content_type: "image/png" } };
+    await assert.rejects(generateImageWithProvider(request), billedThenRefused);
+    assert.ok(!seen.some(url => url.includes("example.invalid")));
+    payload = { image: { url: "https://v3b.fal.media/files/cut.png", content_type: "image/png" } };
+    for (const bytes of [await png(512), await png(1024, 3)]) {
+      asset = async () => new Response(bytes, { headers: { "content-type": "image/png" } });
+      await assert.rejects(generateImageWithProvider(request), billedThenRefused);
+    }
+    payload = { images: [{ url: "https://v3b.fal.media/files/cut.png", content_type: "image/png" }] };
+    await assert.rejects(generateImageWithProvider(request), billedThenRefused);
+  }));
+  assert.equal(network.mock.callCount(), 8);
 });

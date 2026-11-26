@@ -575,27 +575,41 @@ High 편집은 $0.22로 별도이며 현재 편집 옵션에서 제외한다.
 2048×2048 PNG를 반환했다. 공급자는 각각 250단위(US$0.25)를 보고했다.
 [Recraft 편집 API](https://www.recraft.ai/docs/api-reference/tools/image-to-image) · [Recraft 데이터 보존](https://www.recraft.ai/docs/api-reference/zero-data-retention)
 
-**배경 제거는 이미지 생성 모델이 아니라 사진 도구다.** `IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED`가
-켜졌을 때 Recraft의 `removeBackground`에 사진 한 장을 보낸다. 사진은 비율을 유지해 흰색
-1024×1024 정사각형에 맞춰 data URL로 전달하고, `zdr: true`·`b64_json`·`image_format: "png"`를
-쓴다. 프롬프트는 보내지 않는다. 공개 가격은 요청당 US$0.01(API 10단위, 2026-11-26 확인)이고
-판매가는 20크레딧이다: (10,000 + 프롬프트 예산 5,000) / 20 = 750µUSD/크레딧, 하한 17크레딧.
-반환된 PNG가 1024×1024이고 알파 채널이 있을 때만 결과로 받는다.
-이 도구는 `IMAGE_MODEL_REGISTRY`에 넣지 않는다(`IMAGE_PHOTO_TOOLS`). 그래서 Chat의 모델 선택,
-자동 라우팅, 비교, Admin 카탈로그에 나오지 않는다. 목록에서 빠진 것은 입장 검사가 아니므로,
-생성 서비스는 이 도구를 소유한 기능(Studio 투명 PNG)이 서버에서 지정한 요청만 받고, 클라이언트가
-보낸 모델 ID로는 사진이 있어도 거절한다. 가격 검사(`check:image-pricing`)는 사진 도구도 함께 본다.
-기본값은 꺼짐이다.
-2026-11-26 dev 토큰으로 합성 사진 9장을 실측했다(운영자 요청, 합계 US$0.09). 모든 응답이
-`image.b64_json`에 1024×1024 알파 채널 PNG를 담았고 10단위를 보고했으며, 불투명 영역의 픽셀은
-입력과 같았다. 응답 시간은 장당 2~5초였다.
-같은 사진으로 Bria RMBG 3.0(fal `bria/rmbg-3`, 장당 US$0.018)과 비교했다. 일반 피사체는 차이가
-없었고, 역광 곱슬머리에서는 Bria가 배경의 밝은 색을 머리카락 가장자리에 남겼다. Bria는 주 피사체
-하나만 남기고(머그잔 옆 운동화, 유리잔 받침 제거) Recraft는 앞쪽 물건을 함께 남겼다. 가격과 응답
-시간, 가장자리 품질을 근거로 Recraft를 유지한다.
-공급자가 보고한 비용이 판매 시점의 원가보다 크면 초과분을 공급자 예산에 더 청구한다
-(`reportedEditOverageMicroUsd`). 보고 비용이 있는 다른 편집 경로에도 같은 규칙이 적용된다.
-[Recraft 배경 제거 API](https://www.recraft.ai/docs/api-reference/tools/remove-background) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing)
+**배경 제거는 이미지 생성 모델이 아니라 사진 도구다**(`lib/imagePhotoTools.ts`). 사진 한 장을 받아 같은
+픽셀에서 배경만 지운 PNG를 돌려준다. 프롬프트는 보내지 않는다. 도구는 둘이고, 각자의 스위치로 켠다.
+둘 다 기본값은 꺼짐이다.
+
+| 도구 | 스위치 | 공급자 원가 | 판매가 | 하한 |
+|---|---|---|---|---|
+| Recraft `removeBackground` | `IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED` | 요청당 US$0.01 | 20크레딧(750µUSD/크레딧) | 17 |
+| Bria RMBG 3.0 (fal `bria/rmbg-3`) | `IMAGE_FAL_BRIA_BACKGROUND_REMOVAL_ENABLED` | 장당 US$0.018 | 26크레딧(885µUSD/크레딧) | 26 |
+
+- 원가에는 다른 옵션과 같은 프롬프트 예산 5,000µUSD를 더해 계산한다. 가격은 2026-11-26에 각 공급자의
+  가격 페이지에서 읽었다. Bria의 직접 API도 장당 US$0.018로 같아, 이미 연결된 fal을 쓴다.
+- **둘을 함께 부르는 것은 운영자 결정이다(2026-11-26).** 같은 합성 사진 9장을 두 도구에 보낸 결과,
+  일반 피사체는 차이가 없었고 갈린 곳은 취향의 문제였다. Recraft는 앞쪽 물건을 함께 남기고(머그잔 옆
+  운동화, 유리잔 받침), Bria는 주 피사체 하나만 남긴다. 역광 곱슬머리는 Recraft의 가장자리가 더 깨끗했다.
+  Studio 투명 PNG는 켜져 있는 도구를 한 묶음으로 요청해 결과를 나란히 보여 주고 사용자가 고른다.
+  둘 다 켜지면 46크레딧이다. 한쪽만 켜져 있거나 `IMAGE_GROUP_MAX_MODELS`가 1이면 한 도구만 견적한다.
+  한 도구가 실패하면 그 몫만 반납되고 다른 결과는 그대로 제공한다.
+- 사진은 비율을 유지해 흰색 1024×1024 정사각형에 맞춰 data URL로 보낸다. Recraft에는 `zdr: true`·
+  `b64_json`·`image_format: "png"`를 쓰고, fal에는 다른 fal 요청과 같은 플랫폼 헤더(재시도 없음, 요청 미보관,
+  결과 15분 만료)를 쓰며 결과 파일은 fal CDN 주소에서만 내려받는다.
+- 반환된 PNG가 1024×1024이고 알파 채널이 있을 때만 결과로 받는다. 그 밖의 응답은 과금된 실패로 처리한다.
+  투명도 240 이상은 255로 올린다. Bria는 피사체 안쪽의 대부분을 240~254로 돌려주기 때문이다.
+- 도구는 `IMAGE_MODEL_REGISTRY`에 넣지 않는다(`IMAGE_PHOTO_TOOLS`). 그래서 Chat의 모델 선택, 자동 라우팅,
+  비교, Admin 카탈로그에 나오지 않는다. 목록에서 빠진 것은 입장 검사가 아니므로, 생성 서비스는 도구를
+  소유한 기능(Studio 투명 PNG)이 서버에서 지정한 요청만 받고, 클라이언트가 보낸 모델 ID로는 사진이 있어도
+  거절한다. 가격 검사(`check:image-pricing`)는 사진 도구도 함께 본다.
+- 2026-11-26 실측(운영자 요청): Recraft는 dev 토큰으로 9건(US$0.09), 모든 응답이 `image.b64_json`에
+  1024×1024 알파 PNG를 담았고 10단위를 보고했으며 장당 2~5초였다. Bria는 fal 키로 9건(약 US$0.16),
+  `image.url`이 fal CDN의 1024×1024 알파 PNG였고 장당 6~11초였다. 두 도구 모두 불투명 영역의 픽셀이
+  입력과 같았다.
+- 공급자가 보고한 비용이 판매 시점의 원가보다 크면 초과분을 공급자 예산에 더 청구한다
+  (`reportedEditOverageMicroUsd`). 보고 비용이 있는 다른 편집 경로에도 같은 규칙이 적용된다. fal은 비용을
+  보고하지 않으므로 Bria는 고정 가격으로 정산한다.
+
+[Recraft 배경 제거 API](https://www.recraft.ai/docs/api-reference/tools/remove-background) · [Recraft 가격](https://www.recraft.ai/docs/api-reference/pricing) · [fal Bria RMBG 3.0](https://fal.ai/models/bria/rmbg-3)
 
 **`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
 각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
@@ -1253,8 +1267,9 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       실사 이모티콘 팩과 개별 재생성은 비교 검증한 GPT Image 2.6 Sunburst의 1024×1024 Medium 사진 편집을 사용한다.
       이 두 기능은 해당 견적을 제공할 수 있을 때만 생성할 수 있다.
       투명 PNG(`transparent-png`)는 배경 제거 도구의 견적만 받는다. 이미지 생성 모델은 피사체를
-      다시 그리므로 기능별 우선순위 설정으로도 대신할 수 없고, 도구가 꺼져 있으면 이 기능은 제공하지 않는다.
-      화면은 반환된 정사각형에서 사진 영역만 잘라 내려받게 한다.
+      다시 그리므로 기능별 우선순위 설정으로도 대신할 수 없고, 도구가 모두 꺼져 있으면 이 기능은 제공하지 않는다.
+      견적은 켜진 도구 각각의 가격(`targets`)과 합계를 담고, 제출은 같은 목록을 그대로 돌려보내야 한다.
+      화면은 도구별 결과를 도착하는 대로 나란히 보여 주고, 사용자가 고른 결과에서 사진 영역만 잘라 내려받게 한다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.

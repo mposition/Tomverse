@@ -274,11 +274,11 @@ export type ImageGenerationRequestInput = {
    */
   editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
   /**
-   * The photo tool this request is for, set only by the server feature that
-   * owns it (Studio's transparent PNG). Without it a photo tool's id is
-   * refused like an unknown model, whatever the caller attached.
+   * The photo tools this request is for, set only by the server feature that
+   * owns them (Studio's transparent PNG). A photo tool's id that is not
+   * listed here is refused like an unknown model, whatever the caller attached.
    */
-  photoTool?: string;
+  photoTools?: readonly string[];
 };
 
 export type ImageGenerationTargetResult = {
@@ -446,7 +446,7 @@ export const requestImageGeneration = async (
   // A photo tool has a price row but is no model a caller may pick.
   const unavailable = targetPlans.filter(
     (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price ||
-      !imagePhotoToolAdmitted(plan.modelId, { photoTool: input.photoTool, hasPhoto: Boolean(input.editSource) })
+      !imagePhotoToolAdmitted(plan.modelId, { photoTools: input.photoTools, hasPhoto: Boolean(input.editSource) })
   );
   if (unavailable.length > 0) {
     throw new ChatAccessError(

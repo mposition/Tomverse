@@ -11,9 +11,8 @@
 // picker renders straight from these profiles.
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
-import {
-  DIRECT_RASTER_MODELS, isDirectRasterProvider, RECRAFT_BACKGROUND_REMOVAL, type DirectRasterProvider,
-} from "@/lib/directRasterModels";
+import { DIRECT_RASTER_MODELS, isDirectRasterProvider, type DirectRasterProvider } from "@/lib/directRasterModels";
+import { IMAGE_PHOTO_TOOL_CONTRACTS, IMAGE_PHOTO_TOOL_SIZE, imagePhotoToolContract } from "@/lib/imagePhotoTools";
 import { IDEOGRAM_MODEL_ID, IDEOGRAM_OUTPUT_COST_MICRO_USD, IDEOGRAM_SIZE } from "@/lib/ideogramImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import type { ImageUseCase } from "@/lib/runtimeImageProviders";
@@ -841,56 +840,44 @@ function directRasterProfile(provider: DirectRasterProvider, name: string, useCa
 }
 
 /**
- * Photo tools that are priced and settled like an image model but generate
- * nothing. Kept out of IMAGE_MODEL_REGISTRY on purpose: no picker, router,
- * comparison or catalogue screen lists one. A tool is found by its id alone,
- * and only an edit of a supplied photo may name it (isImagePhotoTool).
- *
- * The background remover: $0.01 per request (Recraft's pricing page, read
- * 2026-11-26), no prompt and no thinking. Worst case 10,000 + the 5,000 prompt
- * budget every option carries = 15,000 micro-USD, floor 17; 20 credits is 750
- * per credit. It edits only while IMAGE_RECRAFT_BACKGROUND_REMOVAL_ENABLED is
- * "true" (imageEditPricing).
+ * Photo tools (lib/imagePhotoTools.ts) as profiles, so pricing, reservation
+ * and settlement treat one like a model. Kept out of IMAGE_MODEL_REGISTRY on
+ * purpose: no picker, router, comparison or catalogue screen lists one. A tool
+ * is found by its id alone and admitted only for the feature that owns it
+ * (imagePhotoToolAdmitted).
  */
-export const IMAGE_PHOTO_TOOLS: readonly ImageModelProfile[] = [{
-  id: RECRAFT_BACKGROUND_REMOVAL.modelId,
-  apiModelId: RECRAFT_BACKGROUND_REMOVAL.modelId,
-  provider: "recraft",
-  name: "Recraft Background Remover",
+export const IMAGE_PHOTO_TOOLS: readonly ImageModelProfile[] = IMAGE_PHOTO_TOOL_CONTRACTS.map((tool): ImageModelProfile => ({
+  id: tool.modelId,
+  apiModelId: tool.modelId,
+  provider: tool.provider,
+  name: tool.name,
   lifecycle: "stable",
   disabledReason: null,
-  sizes: [RECRAFT_BACKGROUND_REMOVAL.size],
+  sizes: [IMAGE_PHOTO_TOOL_SIZE],
   qualities: ["medium"],
-  prices: [{
-    size: RECRAFT_BACKGROUND_REMOVAL.size, quality: "medium",
-    credits: RECRAFT_BACKGROUND_REMOVAL.credits, outputCostMicroUsd: RECRAFT_BACKGROUND_REMOVAL.outputCostMicroUsd,
-  }],
+  prices: [{ size: IMAGE_PHOTO_TOOL_SIZE, quality: "medium", credits: tool.credits, outputCostMicroUsd: tool.outputCostMicroUsd }],
   latencyClass: "fast",
   provenance: [],
   outputMimeTypes: ["image/png"],
   deliveryMimeType: "image/png",
-  pricingVersion: RECRAFT_BACKGROUND_REMOVAL.modelId + "-2026-11-26",
-  priceVerification: {
-    verifiedAt: "2026-11-26",
-    sources: [RECRAFT_BACKGROUND_REMOVAL.pricing, RECRAFT_BACKGROUND_REMOVAL.docs],
-    thinkingCapMicroUsd: 0,
-  },
-}];
+  pricingVersion: tool.modelId + "-" + tool.verifiedAt,
+  // Billed per request; no prompt and no reasoning charge.
+  priceVerification: { verifiedAt: tool.verifiedAt, sources: [tool.pricing, tool.docs], thinkingCapMicroUsd: 0 },
+}));
 
 /** True for a photo tool: a model id that edits a photo and can generate nothing. */
-export const isImagePhotoTool = (modelId: string): boolean =>
-  IMAGE_PHOTO_TOOLS.some((model) => model.id === modelId);
+export const isImagePhotoTool = (modelId: string): boolean => imagePhotoToolContract(modelId) !== null;
 
 /**
  * Whether a request may name this model. A photo tool is admitted only for
- * the feature that names it server-side (`photoTool`) and only with a photo:
+ * the feature that names it server-side (`photoTools`) and only with a photo:
  * a model id a client sends never selects one, because being absent from the
  * pickers is not an admission check. Every other model is always admitted here.
  */
 export const imagePhotoToolAdmitted = (
   modelId: string,
-  request: { photoTool?: string; hasPhoto: boolean }
-): boolean => !isImagePhotoTool(modelId) || (request.photoTool === modelId && request.hasPhoto);
+  request: { photoTools?: readonly string[]; hasPhoto: boolean }
+): boolean => !isImagePhotoTool(modelId) || (request.photoTools?.includes(modelId) === true && request.hasPhoto);
 
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
@@ -1144,8 +1131,10 @@ const imageThinkingTerms = (
   apiModelId: unknown,
   confirmed?: ConfirmedImageBillingTerms | null
 ): ImageThinkingTerms | null => {
-  if (isDirectRasterProvider(provider) && apiModelId !== DIRECT_RASTER_MODELS[provider].apiModelId &&
-      !(provider === "recraft" && apiModelId === RECRAFT_BACKGROUND_REMOVAL.modelId)) return null;
+  // A photo tool is sold per request and has no reasoning to bill, whichever provider serves it.
+  const photoTool = imagePhotoToolContract(apiModelId);
+  if (photoTool && photoTool.provider === provider) return { billing: "not_billed" };
+  if (isDirectRasterProvider(provider) && apiModelId !== DIRECT_RASTER_MODELS[provider].apiModelId) return null;
   if (provider === "ideogram" && apiModelId !== IDEOGRAM_MODEL_ID) return null;
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
   const bound = googleImageOutputLimitBound(provider, apiModelId, confirmed);

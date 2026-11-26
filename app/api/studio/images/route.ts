@@ -7,8 +7,10 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
-import { CATALOG_IMAGE_SIZES, RECRAFT_API_MODEL, RECRAFT_BACKGROUND_REMOVAL, RECRAFT_SIZE } from "@/lib/directRasterModels";
+import { CATALOG_IMAGE_SIZES, RECRAFT_API_MODEL, RECRAFT_SIZE } from "@/lib/directRasterModels";
 import { imageEditEnabled } from "@/lib/imageEditSource";
+import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
+import { IMAGE_PHOTO_TOOL_CONTRACTS } from "@/lib/imagePhotoTools";
 import { processImageGenerationGroup, requestImageGeneration } from "@/lib/imageGenerationService";
 import { DEFAULT_IMAGE_MODEL_ID, getImageModel, getImageModelPrice, imageEditCredits, listEnabledImageModels } from "@/lib/imageModelRegistry";
 import { resolveActiveImageProviderBudgets } from "@/lib/imageProviderBudget";
@@ -36,6 +38,12 @@ const requestSchema = z.object({
   pricingVersion: z.string().min(1).max(120),
   quality: z.enum(qualities).optional(),
   credits: z.number().int().positive().optional(),
+  // A feature served by several tools at once echoes each tool's quote.
+  targets: z.array(z.object({
+    modelId: z.string().min(1).max(120),
+    pricingVersion: z.string().min(1).max(120),
+    credits: z.number().int().positive(),
+  }).strict()).min(1).max(4).optional(),
 }).strict();
 
 const unavailable = () => Response.json({ code: "STUDIO_GENERATION_UNAVAILABLE" }, { status: 503 });
@@ -64,14 +72,20 @@ async function studioQuote(size: z.infer<typeof sizeSchema>, edit: boolean, useC
   await refreshImageModelCatalog();
   const budgeted = new Set(resolveActiveImageProviderBudgets().filter(row => row.resolved.limits).map(row => row.provider));
   if (useCase === "transparent-png") {
-    // A cut-out keeps the photo's own pixels, which only the background remover
-    // does: no image generator stands in for it.
-    const tool = getImageModel(RECRAFT_BACKGROUND_REMOVAL.modelId);
-    const price = edit && tool && budgeted.has(tool.provider) ? getImageModelPrice(tool.id, "medium", size) : null;
-    const credits = tool && price ? imageEditCredits(tool, price) : null;
-    return tool && price && credits ? {
-      modelId: tool.id, model: tool.name, credits, quality: price.quality, size, pricingVersion: tool.pricingVersion, useCase,
-    } : null;
+    // A cut-out keeps the photo's own pixels, which only a background remover
+    // does: no image generator stands in for one. What to keep is a matter of
+    // taste, so every remover that is on answers and the user picks.
+    const targets = !edit ? [] : IMAGE_PHOTO_TOOL_CONTRACTS.flatMap(({ modelId }) => {
+      const tool = getImageModel(modelId);
+      const price = tool && budgeted.has(tool.provider) ? getImageModelPrice(tool.id, "medium", size) : null;
+      const credits = tool && price ? imageEditCredits(tool, price) : null;
+      return tool && credits ? [{ modelId: tool.id, model: tool.name, credits, pricingVersion: tool.pricingVersion }] : [];
+    }).slice(0, imageGroupMaxModels());
+    return targets.length === 0 ? null : {
+      modelId: targets[0].modelId, model: targets.map(target => target.model).join(" + "),
+      credits: targets.reduce((sum, target) => sum + target.credits, 0),
+      quality: "medium" as const, size, pricingVersion: targets[0].pricingVersion, useCase, targets,
+    };
   }
   const models = listEnabledImageModels().filter(model => budgeted.has(model.provider));
   const quotesAt = (outputSize: typeof size) => models.flatMap(model => {
@@ -145,7 +159,13 @@ export async function POST(req: Request) {
     // Open tabs from the previous release only know the versioned Medium
     // quote. Feature-routed submissions always echo the exact quote.
     const legacyMedium = body.useCase === undefined && body.quality === undefined && body.credits === undefined;
-    if (!quote || quote.modelId !== body.modelId || quote.pricingVersion !== body.pricingVersion ||
+    const quoted = quote && "targets" in quote ? quote.targets : undefined;
+    const sameTargets = quoted
+      ? body.targets?.length === quoted.length && quoted.every((target, index) =>
+        target.modelId === body.targets?.[index].modelId && target.pricingVersion === body.targets[index].pricingVersion &&
+        target.credits === body.targets[index].credits)
+      : body.targets === undefined;
+    if (!quote || !sameTargets || quote.modelId !== body.modelId || quote.pricingVersion !== body.pricingVersion ||
         quote.size !== body.size ||
         (legacyMedium ? quote.quality !== "medium" : quote.quality !== body.quality || quote.credits !== body.credits)) {
       return Response.json({ code: "STUDIO_QUOTE_CHANGED" }, { status: 409 });
@@ -157,10 +177,15 @@ export async function POST(req: Request) {
       quality: quote.quality,
       size: body.size,
       idempotencyKey: body.idempotencyKey,
-      modelIds: [body.modelId],
-      expectedPricingVersions: { [body.modelId]: body.pricingVersion },
-      // The quote above is the only way this id is reached: it is the tool's own for this feature.
-      ...(body.useCase === "transparent-png" ? { photoTool: RECRAFT_BACKGROUND_REMOVAL.modelId } : {}),
+      // Only the quote above names a photo tool: the ids are this feature's own, never the caller's.
+      ...(quoted ? {
+        modelIds: quoted.map(target => target.modelId),
+        expectedPricingVersions: Object.fromEntries(quoted.map(target => [target.modelId, target.pricingVersion])),
+        photoTools: quoted.map(target => target.modelId),
+      } : {
+        modelIds: [body.modelId],
+        expectedPricingVersions: { [body.modelId]: body.pricingVersion },
+      }),
       ...(uploadId ? {
         editSource: {
           bindAttachment: (tx, conversationId) => bindStudioImageUpload(tx, {
