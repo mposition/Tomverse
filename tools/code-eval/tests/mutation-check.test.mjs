@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runMutationCheck } from "../lib/mutation-check.mjs";
 import { tempDir } from "./helpers.mjs";
@@ -40,14 +40,9 @@ const quiet = (fn) => {
     }
 };
 
-const good = `import { test } from "node:test";
-import assert from "node:assert/strict";
-import { add } from "../src/add.js";
-test("adds", () => { assert.equal(add(2, 3), 5); });
-test("adds zero", () => { assert.equal(add(0, 0), 0); });
-test("adds negatives", () => { assert.equal(add(-2, -3), -5); });
-test("adds mixed", () => { assert.equal(add(10, -4), 6); });
-`;
+// The passing suite is a tracked file, copied into each sandbox as test/add.test.mjs: its relative import then resolves to
+// a file of this repository, which the control-plane analysis (tests/agentControlPlaneSlice.test.mjs) needs to follow it.
+const good = readFileSync(new URL("./fixtures/mutation/test/add-suite.mjs", import.meta.url), "utf8");
 
 test("tests that kill every defective implementation pass", () => {
     const sandbox = project(good);
