@@ -2367,11 +2367,14 @@ export function AuthButton({
                                         <div className="grid gap-2 sm:grid-cols-2">
                                             {planChangeTier ? (
                                                 <button
-                                                    ref={planChangeTriggerRef}
                                                     type="button"
                                                     data-testid="account-plan-change"
                                                     data-target-plan={planChangeTier}
-                                                    onClick={() => setPlanChangeOpen(true)}
+                                                    onClick={(event) => {
+                                                    // Whichever button opened it gets focus back.
+                                                    planChangeTriggerRef.current = event.currentTarget;
+                                                    setPlanChangeOpen(true);
+                                                }}
                                                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500"
                                                 >
                                                     <CreditCard className="h-4 w-4" />
@@ -2423,7 +2426,11 @@ export function AuthButton({
                                         <button
                                             type="button"
                                             data-testid="account-plan-change-mobile"
-                                            onClick={() => setPlanChangeOpen(true)}
+                                            onClick={(event) => {
+                                                    // Whichever button opened it gets focus back.
+                                                    planChangeTriggerRef.current = event.currentTarget;
+                                                    setPlanChangeOpen(true);
+                                                }}
                                             className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent-plan-max-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-accent-plan-max-500"
                                         >
                                             <CreditCard className="h-4 w-4" />

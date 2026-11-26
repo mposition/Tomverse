@@ -45,10 +45,19 @@ test("a deletion that lands during the write puts the cancellation back", () => 
   // pending_deletion, then asserts the cancellation again. This route re-reads
   // the account after its own write. Between the two, the cancellation wins.
   const write = position("cancel_at_period_end: false");
-  const recheck = resume.indexOf('after?.accountStatus === "pending_deletion"', write);
-  assert.ok(recheck > write, "no re-read after the write");
-  const revert = resume.indexOf("cancel_at_period_end: true", recheck);
-  assert.ok(revert > recheck, "no revert after the re-read");
+  // Re-read after the write on both paths: answered, and failed (a timed-out
+  // write may still have been applied).
+  const failurePath = resume.indexOf('restoreCancellationIfDeletionPending(user.id, subscriptionId, "unknown")', write);
+  const successPath = resume.indexOf('restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")', write);
+  assert.ok(failurePath > write, "no re-read when the write fails");
+  assert.ok(successPath > failurePath, "no re-read after the answered write");
+  const helper = source.slice(
+    source.indexOf("async function restoreCancellationIfDeletionPending"),
+    source.indexOf("export async function DELETE")
+  );
+  assert.match(helper, /accountStatus !== "pending_deletion"[\s\S]*?cancel_at_period_end: true/);
+  // A restore that fails is an incident, not just a log line.
+  assert.match(helper, /catch \(error\) \{[\s\S]*?BILLING_RESUME_RENEWAL_DELETION_CONFLICT/);
 
   const deletion = readFileSync("lib/accountDeletion.ts", "utf8");
   const schedule = deletion.slice(deletion.indexOf("export async function scheduleTomverseAccountDeletion"));
@@ -64,14 +73,15 @@ test("a deletion that lands during the write puts the cancellation back", () => 
 test("an already-renewing subscription corrects a stale stored flag", () => {
   const branch = resume.slice(
     position("if (!current.cancel_at_period_end)"),
-    position("const subscription = await stripe.subscriptions.update(")
+    position("subscription = await stripe.subscriptions.update(")
   );
   assert.match(branch, /subscriptionCancelAtPeriodEnd: false/);
 });
 
 test("it never touches the plan, the price or a schedule", () => {
   // Every Stripe write in the handler: its parameter object only.
-  const writes = resume.split("stripe.subscriptions.update(").slice(1);
+  const handler = source.slice(source.indexOf("async function restoreCancellationIfDeletionPending"));
+  const writes = handler.split("subscriptions.update(").slice(1);
   assert.equal(writes.length, 2, "the resume and its revert");
   const update = writes.map((write) => write.slice(0, write.indexOf("});"))).join("\n");
   assert.doesNotMatch(update, /items|price|schedule|proration/);

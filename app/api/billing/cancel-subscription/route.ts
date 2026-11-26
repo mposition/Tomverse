@@ -12,6 +12,7 @@ import {
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
@@ -160,6 +161,48 @@ export async function POST(req: Request) {
 const RESUMABLE_STATUSES = new Set(["active", "trialing"]);
 
 /**
+ * After a resume write -- answered or not -- make sure an account that has
+ * meanwhile been scheduled for deletion ends with its cancellation back on.
+ *
+ * Runs on the failure path too: a timed-out write may still have been applied
+ * at Stripe, and the deletion flow's own re-assert may already be behind it.
+ * Putting the cancellation back is a different write (and idempotent), not a
+ * retry of the resume. Anything that leaves the outcome unknown is raised as
+ * an operational incident for a person to read back at Stripe.
+ */
+async function restoreCancellationIfDeletionPending(
+  userId: string,
+  subscriptionId: string,
+  resumeOutcome: "applied" | "unknown"
+): Promise<boolean> {
+  const after = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { accountStatus: true },
+  });
+  if (after?.accountStatus !== "pending_deletion") return false;
+  try {
+    await getStripe().subscriptions.update(subscriptionId, {
+      cancel_at_period_end: true,
+    });
+    return true;
+  } catch (error) {
+    await reportOperationalIncident({
+      code: "BILLING_RESUME_RENEWAL_DELETION_CONFLICT",
+      title: "Renewal resume raced an account deletion and the cancellation could not be restored",
+      error,
+      severity: "error",
+      context: {
+        component: "billing-resume-renewal",
+        userId,
+        subscriptionId,
+        resumeOutcome,
+      },
+    }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
  * Undo a scheduled cancellation: the subscription renews again on its current
  * plan. It is its own control with its own label -- a plan change never does
  * this as a side effect (docs/policy/plan-change.md section 1) -- and it is the
@@ -197,7 +240,6 @@ export async function DELETE(req: Request) {
       where: { id: session.user.id },
       select: {
         id: true,
-        plan: true,
         accountStatus: true,
         stripeSubscriptionId: true,
         subscriptionCurrentPeriodEnd: true,
@@ -252,34 +294,23 @@ export async function DELETE(req: Request) {
       });
     }
 
-    const subscription = await stripe.subscriptions.update(user.stripeSubscriptionId, {
-      cancel_at_period_end: false,
-    });
+    // A deletion may land between the check above and this write. Account
+    // deletion schedules the cancellation at Stripe, records pending_deletion,
+    // then re-asserts the cancellation (lib/accountDeletion.ts); this route
+    // re-reads the account after its own write, answered or not. Between the
+    // two of them the cancellation always wins.
+    const subscriptionId = user.stripeSubscriptionId;
+    let subscription: Stripe.Subscription;
+    try {
+      subscription = await stripe.subscriptions.update(subscriptionId, {
+        cancel_at_period_end: false,
+      });
+    } catch (resumeError) {
+      await restoreCancellationIfDeletionPending(user.id, subscriptionId, "unknown");
+      throw resumeError;
+    }
 
-    // A deletion may have landed between the check above and this write. Account deletion schedules the cancellation at Stripe
-    // and then records pending_deletion, and re-asserts the cancellation after
-    // that record (lib/accountDeletion.ts), so between the two of them the
-    // cancellation always wins: if the record is here now, put it back.
-    const after = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { accountStatus: true },
-    });
-    if (after?.accountStatus === "pending_deletion") {
-      try {
-        await stripe.subscriptions.update(user.stripeSubscriptionId, {
-          cancel_at_period_end: true,
-        });
-      } catch (revertError) {
-        // The one state worth a page: renewal is on for an account that asked
-        // to leave. Not retried blindly -- the outcome of
-        // the write is unknown and is read back by whoever picks this up.
-        console.error("billing.subscription.resume_revert_failed", {
-          userId: user.id,
-          subscriptionId: user.stripeSubscriptionId,
-          errorName: revertError instanceof Error ? revertError.name : "UnknownError",
-        });
-        throw revertError;
-      }
+    if (await restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")) {
       return NextResponse.json(
         { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
         { status: 409 }
