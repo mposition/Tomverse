@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import test from "node:test";
+import test, { after } from "node:test";
 import type * as NodePty from "node-pty";
 import { terminalEnv } from "../src/host/terminal-env";
 import { createTerminalLaunch, defaultShell, type Shell, type TerminalSession } from "../src/host/terminal-session";
@@ -22,6 +22,9 @@ const program = [
 ].join("\n");
 const fakeShell: Shell = { file: process.execPath, args: ["-e", program] };
 
+// A native handle that outlives the tests must never keep this process, and the suite around it, from ending.
+after(() => { setTimeout(() => process.exit(process.exitCode ?? 0), 5_000).unref(); });
+
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; } };
 async function until(condition: () => boolean, label: string, timeout = 15_000) {
   const end = Date.now() + timeout;
@@ -38,6 +41,7 @@ async function exercise(launchPty: boolean, folder: string) {
   let exit: number | null | undefined;
   const launch = createTerminalLaunch(launchPty ? loadPty : () => null, fakeShell);
   let session: TerminalSession | undefined;
+  let grandchild: number | undefined;
   try {
     session = launch({ cwd: folder, cols: 100, rows: 30, env: terminalEnv(),
       onData: (data) => { output += data; }, onExit: (code) => { exit = code; } });
@@ -48,14 +52,18 @@ async function exercise(launchPty: boolean, folder: string) {
       "The shell starts in the folder the host chose.");
     session.write("hello terminal\r");
     await until(() => output.includes("LINE=hello terminal"), "the echoed line");
-    const grandchild = Number(/GRANDCHILD=(\d+)/.exec(output)![1]);
+    grandchild = Number(/GRANDCHILD=(\d+)/.exec(output)![1]);
     assert.ok(alive(grandchild));
     await session.kill();
     await until(() => exit !== undefined, "the exit notification");
-    await until(() => !alive(grandchild), "the grandchild to end");
+    const ended = grandchild;
+    await until(() => !alive(ended), "the grandchild to end");
   } finally {
     if (previous === undefined) delete process.env.TOMVERSE_LEAK_PROBE; else process.env.TOMVERSE_LEAK_PROBE = previous;
-    if (exit === undefined) await session?.kill();
+    // Whatever happened above, no shell or grandchild may outlive the test.
+    await session?.kill().catch(() => {});
+    session?.killSync();
+    if (grandchild !== undefined && alive(grandchild)) { try { process.kill(grandchild); } catch { /* Already gone. */ } }
   }
 }
 
