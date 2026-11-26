@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import {
   ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, discoverExtensions, Journal, PermissionGate, PermissionRuleStore, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
-  type ApprovalView, type CatalogModel, type Output, type WorkspaceReference,
+  startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { tomverseHome } from "../../../tomverse-cli/src/config.js";
@@ -569,6 +569,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
       selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
       ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
+    ...(view.mcp ? { mcp: { server: clean(view.mcp.server), tool: clean(view.mcp.tool), scope: view.mcp.scope, args: clean(JSON.stringify(view.input, null, 2) ?? "").slice(0, 4_000) } } : {}),
     command: command && {
       mode: command.mode, file: clean(command.file), args: command.args.map(clean), cwd: clean(command.cwd),
       display: clean(command.display), env: command.envNames.map(clean), timeoutMs: command.timeoutMs,
@@ -699,6 +700,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     if (task.entries.length > 96) task.entries.splice(1, 1);
   };
   let journal: ReturnType<typeof createSession> | undefined;
+  let extensions: LocalExtensionSetup | undefined;
   let recorded: Journal | undefined;
   let unlockProject: (() => void) | undefined;
   let sourceLock: string | undefined;
@@ -916,12 +918,26 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       },
     };
     const mode = journal.state.codeMode ?? (journal.state.readOnly ? journal.state.tasks.at(-1)?.plan ? "plan" : "ask" : "agent");
+    if (!usesCodePlugin) {
+      // The person's own MCP servers and hooks, and the project's once approved in Settings; a failing one is reported, never fatal.
+      extensions = await startLocalExtensions({
+        root: workspace.root, sessionId: () => journal!.state.id, home: process.env.TOMVERSE_DESKTOP_EXTENSIONS_HOME,
+        claudeDir: process.env.TOMVERSE_DESKTOP_CLAUDE_DIR, signal: control.abort.signal, startupTimeoutMs: 15_000,
+        connectServers: !journal.state.readOnly && mode !== "plan",
+      }).catch(() => undefined);
+      assertAllowed();
+      for (const server of extensions?.mcp.status() ?? []) {
+        if (server.state === "pending_approval") addEvent(`MCP server ${server.id} is waiting for your approval in Settings.`);
+        else if (server.state === "failed" || server.state === "needs_auth") addEvent(`MCP server ${server.id} is not available: ${server.detail ?? server.state}`);
+      }
+    }
     control.runner = new Runner({
       gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch, permissions,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
+      ...(extensions ? { mcp: extensions.mcp, lifecycleHooks: extensions.hooks } : {}),
       backgroundCommands: true,
       images: true,
       subagents: true,
@@ -946,7 +962,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.browser?.url, view.browser?.selector, view.browser?.text, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -1037,6 +1053,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     clearTimeout(streamTimer);
     // Whatever way the task ended, nothing it started may keep running.
     await control.runner?.stopBackground("task_ended").catch(() => undefined);
+    await extensions?.close().catch(() => undefined);
     task.background = backgroundView(control.runner, clean);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {

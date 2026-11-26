@@ -16,6 +16,7 @@ import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
+import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
@@ -404,6 +405,8 @@ export type ApprovalRequest = {
   web?: { url: string; host: string };
   /** A click or typing in the local browser tab: the site, the page, the element and the text the agent would type. */
   browser?: { action: "click" | "type"; origin: string; url: string; selector: string; text?: string; clear?: boolean; submit?: boolean };
+  /** A call of a tool of an MCP server on this computer: which server and tool, where the server is defined, and the arguments. */
+  mcp?: { server: string; tool: string; scope: "user" | "project"; args: string };
   files?: Array<{ path: string; action: string; eol: string; bom: boolean; preimage: string | null; postimage: string | null; before: string | null; after: string | null }>;
 };
 
@@ -449,6 +452,7 @@ export type DesktopApi = {
   stopBackground(id: string, handle: string): Promise<boolean>;
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
   codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
+  localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

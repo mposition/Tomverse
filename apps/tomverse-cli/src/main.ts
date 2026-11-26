@@ -23,6 +23,8 @@ import { PERMISSIONS_HELP, PermissionsUsageError, permissionsCommand } from "./p
 import { PermissionGate } from "./permissions.js";
 import { PermissionRuleStore } from "./permission-rules.js";
 import { discoverExtensions, describeRegistry, expandInvocation, ExtensionError } from "./extensions.js";
+import { startLocalExtensions } from "./local-extensions.js";
+import { extensionsCommand } from "./extensions-cli.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -42,9 +44,11 @@ Usage:
   tomverse undo <change-id> [--session <id>]
   tomverse doctor [--json]        Checks Node, folder, key and API without a model request
   tomverse trust [folder]         Allow the CLI to work in a folder
-  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory> <value> | unset <key>
+  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory|mcp|hooks> <value> | unset <key>
   tomverse memory [show|clear]    The notes the agent kept about this folder (clear asks first, or --yes)
 ${PERMISSIONS_HELP.map((line) => `  ${line}`).join("\n")}
+  tomverse mcp [list|approve|enable|disable] [name]   MCP servers (mcp.json in the CLI folder, .mcp.json in the project); a project's server needs your approval at a terminal
+  tomverse hooks [list|approve|enable|disable] [n]    Hooks (hooks.json, Claude Code settings.json, the project's .claude/settings.json); a project's hook needs your approval
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
@@ -412,13 +416,16 @@ const configCommand = async (ctx: Context, args: string[]) => {
         } else if (key === "agent-models") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("agent-models must be on or off.");
             config.agentModels = value === "true" || value === "on";
+        } else if (key === "mcp" || key === "hooks") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError(`${key} must be on or off.`);
+            config[key] = value === "true" || value === "on";
         } else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
         else throw new UsageError(`Unknown config key '${key}'.`);
         writeConfig(config);
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", mcp: "mcp", hooks: "hooks" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -492,6 +499,21 @@ const engineExtras = (ctx: Context, root: string) => ({
     // The permission rules (tomverse permissions): deny rules refuse, ask rules always ask, allow rules skip the question.
     permissions: new PermissionGate({ mode: "ask", rules: () => new PermissionRuleStore({ root }).effective(), protectedDirs: [tomverseHome()] }),
 });
+
+/** The MCP servers and hooks of this folder and the user (extensions.ts), unless turned off in the config. Reports what is waiting for approval. */
+const localExtensions = async (ctx: Context, root: string, sessionId: () => string, readOnly: boolean) => {
+    if (ctx.config.mcp === false && ctx.config.hooks === false) return null;
+    const setup = await startLocalExtensions({ root, sessionId, connectServers: !readOnly && ctx.config.mcp !== false });
+    for (const problem of setup.problems) ctx.output.info(`note: ${safeLine(problem)}`);
+    for (const server of setup.mcp.status()) {
+        if (server.state === "pending_approval") ctx.output.info(`MCP server ${safeLine(server.id)} (from this project) is waiting for your approval: tomverse mcp approve ${safeLine(server.id)}`);
+        else if (server.state === "failed" || server.state === "needs_auth") ctx.output.info(`MCP server ${safeLine(server.id)}: ${safeLine(server.detail ?? server.state)}`);
+    }
+    return { close: setup.close, options: {
+        ...(ctx.config.mcp === false ? {} : { mcp: setup.mcp }),
+        ...(ctx.config.hooks === false ? {} : { lifecycleHooks: setup.hooks }),
+    } };
+};
 
 const memoryCommand = async (ctx: Context, args: string[]) => {
     const [sub] = args;
@@ -577,7 +599,8 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     if (journal.state.goal) ctx.output.info(`Goal mode: after the model is done, the goal is checked and the task continues until it is verified (at most ${journal.state.goal.maxContinuations} automatic continuations in a row).`);
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");
     const workspace = new Workspace(root);
-    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
+    const extensions = await localExtensions(ctx, workspace.root, () => journal.state.id, journal.state.readOnly);
+    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
     const removeSigint = installSigint(runner, ctx.output);
@@ -592,6 +615,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
         return exitFor(outcome);
     } finally {
         removeSigint();
+        await extensions?.close();
         journal.release();
     }
 };
@@ -708,7 +732,8 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             if (task) task.allowance = Math.max(task.allowance, task.requests + positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests));
         }
         const workspace = new Workspace(root);
-        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root) });
+        const extensions = await localExtensions(ctx, workspace.root, () => state.id, state.readOnly);
+        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);
         for (const note of notes) ctx.output.info(note);
@@ -753,6 +778,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
             return exitFor(outcome);
         } finally {
             removeSigint();
+            await extensions?.close();
         }
     } finally {
         journal.release();
@@ -805,6 +831,12 @@ export const main = async (argv: string[]): Promise<number> => {
                 return await permissionsCommand(args, normalizeRoot(flags.cwd ?? process.cwd()), flags, {
                     write: (text) => void process.stdout.write(text), interactive: isInteractive(), confirm: (question) => terminalPrompter().confirm(question),
                 });
+            case "mcp":
+            case "hooks": {
+                const done = await extensionsCommand(command, args, normalizeRoot(flags.cwd ?? process.cwd()), { interactive: isInteractive(), confirm: (q) => terminalPrompter().confirm(q) });
+                process.stdout.write(`${done.lines.join("\n")}\n`);
+                return done.ok ? EXIT_CODES.success : EXIT_CODES.error;
+            }
             case "resume":
                 return await resume(ctx, args, !flags.json && isInteractive());
             case "exec": {

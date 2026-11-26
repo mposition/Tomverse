@@ -18,6 +18,9 @@ import { estimateTokens } from "./tokens.js";
 import { Subagents } from "./subagent.js";
 import { skillListing, type ExtensionRegistry } from "./extensions.js";
 import { createSkillTool } from "./skill-tool.js";
+import { LocalExtensions } from "./local-extensions.js";
+import type { McpManager } from "./mcp-client.js";
+import type { HookRunner } from "./hooks.js";
 import type { RememberedRule } from "./approvals.js";
 import type { PermissionGate, PolicyNote } from "./permissions.js";
 import { BROWSER_ACT_TOOLS, BROWSER_READ_TOOLS, createBrowserTools, type BrowserAgentHost, type BrowserApproval } from "./browser-tools.js";
@@ -61,6 +64,8 @@ export type ApprovalView = {
     error?: string;
     /** The workspace root the action is in. */
     root?: string;
+    /** A call of an MCP server's tool: which server and tool, and the hash of the server definition the approval is for. */
+    mcp?: { server: string; tool: string; definition: string; scope: "user" | "project" };
 };
 
 /**
@@ -137,6 +142,10 @@ export type RunnerOptions = {
      * (memory off) and nothing is read or written.
      */
     memory?: ProjectMemory | null;
+    /** The MCP servers already connected for this task (the host starts and closes them). Their tools need approval per call. */
+    mcp?: McpManager;
+    /** Local commands run at fixed points of a task (see hooks.ts). They can block or add context, never approve. */
+    lifecycleHooks?: HookRunner;
 };
 
 type CodePluginAction = { type: "list" } |
@@ -315,6 +324,10 @@ export class Runner {
     private readonly subagents: Subagents | undefined;
     /** The browser_* tools; absent when the host does not turn them on. */
     private readonly browser: ReturnType<typeof createBrowserTools> | undefined;
+    /** MCP tools and lifecycle hooks (extensions.ts). */
+    private readonly ext: LocalExtensions;
+    /** Consecutive times a Stop hook sent the task on; bounded so a hook cannot keep it running forever. */
+    private stopContinuations = 0;
     /** The time limit of the model step that is running; null between steps. */
     private clock: StepClock | null = null;
     /** How long the last step stood still while the person was asked something; not counted as the task's active time. */
@@ -509,6 +522,12 @@ export class Runner {
                 },
             });
         }
+        this.ext = new LocalExtensions({
+            mcp: options.mcp, hooks: options.lifecycleHooks, journal: options.journal, output: options.output,
+            signal: () => this.controller.signal, redact: (text) => options.redactText?.(text) ?? text,
+        });
+        if (!options.journal.state.readOnly && options.taskPlan !== "plan") this.ext.addMcpTools(this.tools, this.toolContext);
+        this.ext.wrapTools(this.tools);
     }
 
     get journal() {
@@ -586,6 +605,7 @@ export class Runner {
             ...this.delegateGuidance(),
             ...this.endedBackgroundNote(),
             ...this.endedSubagentNote(),
+            ...this.ext.promptLines(),
             "When the task is done, say briefly what changed and what you ran, with the result.",
             ...(this.options.taskPlan ? [
                 "For work that needs implementation or verification, first inspect relevant workspace files with read-only tools.",
@@ -809,6 +829,14 @@ export class Runner {
     }): Promise<Outcome> {
         this.assertEffort(effort);
         const { journal } = this;
+        await this.ext.sessionStart();
+        // A UserPromptSubmit hook can stop the prompt before anything is recorded or sent.
+        const refused = await this.ext.userPrompt(context?.visiblePrompt ?? prompt);
+        if (refused) {
+            this.options.output.info(`The prompt was stopped by a hook: ${refused}`);
+            return "cancelled";
+        }
+        this.stopContinuations = 0;
         // Notes kept since the last task are part of this one.
         this.memoryBlock = this.options.memory?.prompt() ?? null;
         const references = context?.references ?? [];
@@ -1052,6 +1080,7 @@ export class Runner {
     /** Continues the current task. Background commands never outlive it: whatever way it ends, their process trees are ended. */
     async loop(followUp?: { text: string; confirmed: () => void }): Promise<Outcome> {
         try {
+            await this.ext.sessionStart();
             return await this.runLoop(followUp);
         } finally {
             await this.stopBackground("task_ended");
@@ -1134,6 +1163,14 @@ export class Runner {
                 if (step.kind === "continue") continue;
                 if (step.kind === "done") {
                     if (this.pendingFollowUp() || this.promoteQueued()) continue;
+                    // A Stop hook may say the work is not finished; its reason becomes the next instruction (a few times at most).
+                    const unfinished = this.stopContinuations < 3 ? await this.ext.stop(this.stopContinuations > 0) : undefined;
+                    if (unfinished) {
+                        this.stopContinuations += 1;
+                        (task.followUps ??= []).push({ text: `[Stop hook] ${unfinished}`, auto: true });
+                        journal.commit();
+                        continue;
+                    }
                     const goal = await this.goalCheck();
                     if (goal === "continue") continue;
                     if (goal !== "met") return this.finish(goal.outcome, goal.message);
@@ -1246,6 +1283,8 @@ export class Runner {
                 // A click or typing with no page open answers with the reason instead of asking.
                 ...(this.browser && this.tools.browser_click ? Object.fromEntries(BROWSER_ACT_TOOLS.map((name) =>
                     [name, () => this.browser!.ready() ? "user-approval" as const : undefined])) : {}),
+                // Every call of an MCP tool is asked about: the server is another program, and its tools do what it says.
+                ...Object.fromEntries(this.ext.mcpToolNames().map((name) => [name, "user-approval" as const])),
             } }),
             stopWhen: isStepCount(1),
             maxRetries: 0,
@@ -1469,6 +1508,9 @@ export class Runner {
                 const planned = this.browser.approvalFor(request.toolName, request.input);
                 if ("error" in planned) view.error = planned.error;
                 else view.browser = planned.browser;
+            } else if (this.ext.isMcpTool(request.toolName)) {
+                view.mcp = this.ext.mcpView(request.toolName);
+                if (!view.mcp) view.error = "The MCP server is no longer connected.";
             } else view.error = `Unknown tool ${request.toolName}.`;
         } catch (error) {
             view.error = (error as Error).message;
@@ -1495,6 +1537,7 @@ export class Runner {
             input: view.input,
             ...(view.web ? { web: view.web } : {}),
             ...(view.browser ? { browser: { action: view.browser.action, origin: view.browser.origin, selector: view.browser.selector } } : {}),
+            ...(view.mcp ? { mcp: { server: view.mcp.server, tool: view.mcp.tool, scope: view.mcp.scope } } : {}),
             ...(view.command ? { command: { mode: view.command.mode, display: view.command.display, shell: view.command.shell, cwd: view.command.cwd, timeout_ms: view.command.timeoutMs } } : {}),
             ...(view.patch ? { files: view.patch.map((p) => ({ path: p.path, action: p.action })) } : {}),
             ...(view.error ? { invalid: view.error } : {}),
@@ -1538,7 +1581,8 @@ export class Runner {
                 ? { files: view.patch.map((p) => ({ path: p.path, preimage: p.preimage, disk: p.binding })) }
                 : view.command
                   ? { cwd: view.command.cwd, program: view.command.file, envNames: view.command.envNames, background: view.command.background === true }
-                  : view.web ? { host: view.web.host } : view.browser ? { host: view.browser.origin } : {},
+                  : view.web ? { host: view.web.host } : view.browser ? { host: view.browser.origin }
+                  : view.mcp ? { mcp: { server: view.mcp.server, tool: view.mcp.tool, definition: view.mcp.definition } } : {},
             decision: approved ? "approved" : "denied",
             ...(approved && decision.remembered ? { by: "remembered_answer" as const, rule: decision.remembered } : {}),
             ...(approved && decision.remember ? { remember: decision.remember } : {}),
@@ -1595,7 +1639,8 @@ export class Runner {
         if (!this.options.prompter || this.controller.signal.aborted) return { approved: false, reason: "No one is available to approve this." };
         const view = this.viewFor({ approvalId: `ap-${randomBytes(6).toString("hex")}`, toolCallId, toolName, input });
         this.announceApproval(view);
-        const result = await this.decide(view);
+        const blockedByHook = view.error ? undefined : await this.ext.preTool(toolName, input, toolCallId);
+        const result = await this.decide(view, blockedByHook && `Blocked by a hook: ${blockedByHook}`);
         this.journal.commit();
         return result;
     }
@@ -1636,7 +1681,9 @@ export class Runner {
         const clarificationPending = !!journal.state.tasks.at(-1)?.plan?.clarification;
         const responses: Extract<ModelMessage, { role: "tool" }>["content"] = [];
         for (const view of views) {
-            const { approved, reason } = await this.decide(view, denyReason);
+            // A PreToolUse hook that blocks is answered before the person is asked: nothing to approve.
+            const blockedByHook = denyReason || view.error ? undefined : await this.ext.preTool(view.toolName, view.input, view.toolCallId);
+            const { approved, reason } = await this.decide(view, denyReason ?? (blockedByHook && `Blocked by a hook: ${blockedByHook}`));
             responses.push({ type: "tool-approval-response", approvalId: view.approvalId, approved, ...(reason ? { reason } : {}) });
             // A resumed clarification can add non-tool messages after the denial.
             // The SDK only settles approvals in a trailing tool message.
@@ -1686,13 +1733,19 @@ export class Runner {
         const head = journal.state.messages.slice(0, cut);
         const tail = journal.state.messages.slice(cut);
         const budgetChars = Math.max(20_000, Math.floor((window - reserve) * 0.6 * 3));
+        // A PreCompact hook can stop the compaction, or add what the summary must keep.
+        const compactHook = await this.ext.preCompact(force ? "manual" : "auto");
+        if (compactHook.blocked) {
+            options.output.info(`Compaction was stopped by a hook: ${compactHook.blocked}`);
+            return "skipped";
+        }
         options.output.info("Compacting the conversation (one model request)...");
         const attemptStart = journal.state.generations.length;
         try {
             const result = await generateText({
                 model: options.gateway.chatModel(model.id, this.hooks("compact"), model.reasoningEfforts === undefined ? undefined : task.effort),
                 system: "You compress a coding session so it can continue. Keep: the user's goals and constraints, decisions, files examined with the facts that matter, changes made (which files, what), commands run and their results, current state and the next steps. Plain text, at most about 1200 words.",
-                messages: [{ role: "user", content: `Summarize this session so far.\n\n${transcriptFor(head, budgetChars)}` }],
+                messages: [{ role: "user", content: `Summarize this session so far.${compactHook.instructions ? `\n\nAlso keep, as the person's own tooling asked: ${compactHook.instructions}` : ""}\n\n${transcriptFor(head, budgetChars)}` }],
                 maxRetries: 0,
                 maxOutputTokens: Math.min(4000, model.maxOutputTokens || 4000),
                 abortSignal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, Math.min(180_000, remainingMs)))]),

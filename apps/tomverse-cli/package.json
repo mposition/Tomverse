@@ -42,6 +42,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.121",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "ai": "7.0.176",
     "zod": "4.6.7"
   }

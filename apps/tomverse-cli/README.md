@@ -322,6 +322,32 @@ per task".
   lists this folder's notes and `tomverse memory clear` deletes them;
   `tomverse config set memory off` stops all reading and writing.
 
+## MCP servers and hooks
+
+Both run local commands from configuration files, so each project-defined one waits for your approval.
+
+**MCP servers.** The agent can use tools of MCP servers, several at once, as `mcp__<server>__<tool>`. Definitions use the Claude Code format, in two places:
+
+- yours: `mcp.json` in the CLI folder (`TOMVERSE_HOME`, default `~/.tomverse`). Trusted, because you wrote it.
+- the project's: `.mcp.json` at the folder root. Part of the repository, so **nothing in it runs until you approve that server** (`tomverse mcp approve <name>`, at a terminal; a command the agent runs has no terminal, so it cannot approve itself). The approval is bound to a hash of the whole definition: a changed command, argument, address or header asks again. If a project server has the same name as one of yours, yours is used.
+
+```json
+{ "mcpServers": {
+  "files":  { "command": "npx", "args": ["-y", "some-mcp-server"], "env": { "API_KEY": "${API_KEY}" } },
+  "remote": { "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer ${TOKEN}" } }
+} }
+```
+
+Supported: stdio and streamable HTTP, with `${VAR}` and `${VAR:-default}` expanded in `command`, `args`, `env`, `url` and `headers` (`${CLAUDE_PROJECT_DIR}` is the folder; names starting with `TOMVERSE_` or `ELECTRON_`, and `NODE_OPTIONS`, are never read). Not supported: `sse`, `ws`, and servers that need an OAuth sign-in (listed as unsupported; no credential is stored). Servers start together when a session starts (30 s each, `MCP_TIMEOUT` in ms to change it); one that fails or hangs is reported and the rest carry on. A tool call has 120 s (`MCP_TOOL_TIMEOUT`, or `timeout` in the server's entry). Servers end with the session. A stdio server gets the `env` of its own definition and a small base environment (PATH, HOME and the like), never your Tomverse key or session.
+
+Every call is asked about, with the server, the tool and the arguments; "always" is remembered like other approvals, per tool and per server definition, for the process only. The answer comes back marked as untrusted data from another program. Read-only and plan sessions get no MCP tools and start no servers. `tomverse mcp [list|approve|enable|disable] [name]` shows and changes this for the folder; a disabled server is not started (keeps tool lists out of the context). `tomverse config set mcp off` turns the whole thing off.
+
+**Hooks.** Six events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `PreCompact`. The file format is Claude Code's (`hooks` > event > `[{ matcher, hooks: [{ type: "command", command, timeout }] }]`, matchers as in its documentation; Claude Code's tool names such as `Bash` also match `run_command`). Read from: yours — `hooks.json` in the CLI folder and Claude Code's user `settings.json` (`CLAUDE_CONFIG_DIR` or `~/.claude`); the project's — `.claude/settings.json`, `.claude/settings.local.json` and Codex's `.codex/hooks.json`, which wait for approval by hash (`tomverse hooks approve <n>`) like project servers. A hook gets the event as JSON on stdin and runs in your shell (PowerShell on Windows) in the folder, with `CLAUDE_PROJECT_DIR` and the small command environment. Exit 0 with plain text adds context (`SessionStart`, `UserPromptSubmit`, and instructions for `PreCompact`); exit 2 blocks (a tool call, a prompt, a compaction; on `Stop` it sends the task on with the message, three times at most); JSON output with `decision: "block"`, `hookSpecificOutput.permissionDecision: "deny"` or `additionalContext` works as documented. Any other exit code or a timeout is reported and does not block. Timeout 60 s (30 s for `UserPromptSubmit`), `timeout` in seconds in the entry, 600 at most; a slow hook is ended with its processes.
+
+What a hook cannot do: **widen anything.** "allow" output (`permissionDecision: "allow"`, `decision: "approve"`) is ignored: the approval question, the read-only and plan modes and every path and credential check decide as if the hook were not there. A PreToolUse hook that blocks a call that needs approval answers it before you are asked. Differences from Claude Code: only `command` hooks load (`http`, `prompt`, `agent`, `mcp_tool` do not); `updatedInput` and `continue: false` are ignored (except that `continue: false` stops a prompt); `async` hooks run synchronously; subagent workers' tool calls run PreToolUse hooks only for the ones that need approval and no PostToolUse hooks; the other 20-odd Claude Code events do not exist.
+
+An approval covers the command line as written, not the files it starts: a project hook or server whose command runs a script in the repository (`node .claude/hooks/check.js`) runs whatever that file says now. Approve those only for repositories you trust.
+
 ## Sessions, interruption and recovery
 
 Sessions are saved in `~/.tomverse/sessions/<id>/` (or `$TOMVERSE_HOME`),

@@ -10,6 +10,7 @@ import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import type { ConnectorConnection, ConnectorInput, ConnectorInventory, ConnectorServer } from "../connector-contract";
 import { serverSignInRefused } from "../connector-oauth-policy";
 import { describeConnectorResult, type ConnectorMessage } from "./connector-message";
+import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
 
 const logos = import.meta.glob<string>("../../../../public/plugins/providers/*.{png,svg}", {
   eager: true, query: "?url", import: "default",
@@ -273,5 +274,6 @@ export function ConnectorWorkspace({ language }: { language: Language }) {
       </div>
       <p className="desktop-connector-help">{c.disconnectNotice}</p>
     </section>}
+    <LocalExtensionsPanel language={language} />
   </section>;
 }

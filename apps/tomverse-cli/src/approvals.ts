@@ -2,7 +2,7 @@ import type { ApprovalView } from "./agent.js";
 import { checkBoundaries, ruleForApproval, type PermissionRule } from "./permissions.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
-export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin";
+export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool";
 
 /**
  * "Yes, and don't ask again" answers the person gave at the terminal, for the
@@ -36,6 +36,12 @@ export class ApprovalMemory {
     private readonly commands = new Map<string, string>();
     private readonly webHosts = new Set<string>();
     private readonly browserOrigins = new Set<string>();
+    /** MCP tools answered "always": one tool of one server, for that exact server definition. */
+    private readonly mcpTools = new Set<string>();
+
+    private static mcpKey(view: ApprovalView) {
+        return view.mcp ? JSON.stringify([view.mcp.server, view.mcp.tool, view.mcp.definition]) : null;
+    }
 
     constructor(private readonly persist?: (rule: PermissionRule) => void) {}
 
@@ -52,6 +58,7 @@ export class ApprovalMemory {
     /** Whether "always" can be offered for this request. */
     canRemember(view: ApprovalView) {
         if (view.error || checkBoundaries(view)) return false;
+        if (view.mcp) return true;
         if (view.web) return true;
         if (view.browser) return Boolean(view.browser.origin);
         if (view.patch) return Boolean(view.root) && !ApprovalMemory.deletes(view);
@@ -60,6 +67,7 @@ export class ApprovalMemory {
 
     match(view: ApprovalView): RememberedRule | null {
         if (view.error || checkBoundaries(view)) return null;
+        if (view.mcp) return this.mcpTools.has(ApprovalMemory.mcpKey(view)!) ? "mcp_tool" : null;
         if (view.web) return this.webHosts.has(view.web.host) ? "web_host" : null;
         if (view.browser) return this.browserOrigins.has(view.browser.origin) ? "browser_origin" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
@@ -69,6 +77,11 @@ export class ApprovalMemory {
 
     remember(view: ApprovalView): RememberedRule | null {
         if (!this.canRemember(view)) return null;
+        // An MCP answer is bound to the server's exact definition, so it stays in this process and is never written as a rule.
+        if (view.mcp) {
+            this.mcpTools.add(ApprovalMemory.mcpKey(view)!);
+            return "mcp_tool";
+        }
         const rule = this.persist ? ruleForApproval(view) : null;
         if (rule) {
             try {
@@ -99,10 +112,12 @@ export class ApprovalMemory {
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
             ...[...this.browserOrigins].map((origin) => `clicking and typing in the browser tab on ${origin}`),
+            ...[...this.mcpTools].map((key) => { const [server, tool] = JSON.parse(key) as string[]; return `MCP tool ${server}: ${tool}`; }),
         ];
     }
 
     clear() {
+        this.mcpTools.clear();
         this.fileEdits.clear();
         this.commands.clear();
         this.webHosts.clear();

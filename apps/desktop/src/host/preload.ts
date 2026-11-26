@@ -103,6 +103,7 @@ if (trustedWindow) {
     stopBackground: (id: string, handle: string) => ipcRenderer.invoke("desktop:stop-background", { id, handle }),
     codeMemory: (input: Parameters<DesktopApi["codeMemory"]>[0]) => ipcRenderer.invoke("desktop:code-memory", input),
     codeExtensions: (input: Parameters<DesktopApi["codeExtensions"]>[0]) => ipcRenderer.invoke("desktop:code-extensions", input),
+    localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),

@@ -101,6 +101,10 @@ Code reads the skills, commands and agent definitions written for Claude Code an
 
 **Import from Claude Code / Codex** previews what those tools already hold for this project. Instruction files, skills, commands and agents are read in place, so only MCP servers from your own configuration (`~/.claude.json`, `~/.codex/config.toml`) can be copied, into `mcp.json` in the Tomverse CLI folder (`$TOMVERSE_HOME`, default `~/.tomverse`), in the same shape as a project `.mcp.json`. Nothing is selected by default, `env` and header values are hidden in the preview, and the values are read again in the main process when you confirm. Desktop does not start MCP servers from this screen.
 
+## MCP servers and hooks on this computer
+
+The Tomverse API agent uses MCP servers and hooks defined in files (formats, trust and limits: `apps/tomverse-cli/README.md`, "MCP servers and hooks"). **Connectors** (and **Settings > Execution and limits**) has a section "MCP servers and hooks on this computer", apart from the account's connectors: yours (`mcp.json` and `hooks.json` in `~/.tomverse` or `TOMVERSE_HOME`, Claude Code's user `settings.json`) and the open project's (`.mcp.json`, `.claude/settings.json`, `.codex/hooks.json`). A project's server or hook waits for **Approve**; the approval names the definition's hash, so one that changed since the list was shown is not approved, and a changed one asks again. Each can be switched off, and **Check connection** starts an approved server to count its tools (an unapproved one is never started to be looked at). The window sends typed commands only (`local-extensions-contract.ts`), never a path or a command line. Each MCP tool call opens the usual approval window with the server, the tool and the arguments. Read-only and Plan tasks start no servers.
+
 ## Release checks
 
 See the [Desktop release draft](RELEASE.md) for the download listing, supported workflows, account and privacy details, and the operator's release checks.
