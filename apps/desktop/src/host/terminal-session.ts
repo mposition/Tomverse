@@ -45,9 +45,16 @@ function ptySession(pty: typeof NodePty, shell: Shell, options: TerminalLaunchOp
     name: "xterm-256color", cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env,
   });
   let ended = false;
+  let released = false;
+  // On Windows node-pty keeps a worker thread and pipes for the console until kill() is called, even after the shell exited, and
+  // they keep the process alive. On other systems kill() signals the pid, which an exited shell may no longer own.
+  const release = () => {
+    if (released || (ended && process.platform !== "win32")) return;
+    released = true;
+    try { child.kill(); } catch { /* The shell already ended. */ }
+  };
   child.onData(options.onData);
-  child.onExit(({ exitCode }) => { ended = true; options.onExit(exitCode); });
-  const release = () => { if (!ended) { try { child.kill(); } catch { /* The shell already ended. */ } } };
+  child.onExit(({ exitCode }) => { ended = true; options.onExit(exitCode); setImmediate(release); });
   return {
     kind: "pty", pid: child.pid,
     write: (data) => { if (!ended) child.write(data); },
