@@ -57,7 +57,6 @@ export const studioLocale = {
   "myStickerPack": "My sticker pack",
   "newCaption": "New caption",
   "newImage": "New image",
-  "openHistory": "Open chat history",
   "openingSituation": "Opening situation",
   "originalPhoto": "Original photo",
   "original": "Original",
