@@ -890,6 +890,29 @@ test("optimizer distinguishes recorded timeouts and historical errors without in
   assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /errors alone or zero recorded timeouts do not justify changing it/);
 });
 
+test("a catalogue price set apart from the tier default reaches the generator as deliberate", async () => {
+  const { autoRouterGeneratorMessage, tierBaseCreditsOverridden } = await import("../lib/autoRouterOptimizerCore.ts");
+  assert.equal(tierBaseCreditsOverridden({ tier: "standard", baseCredits: 1 }), null);
+  assert.equal(tierBaseCreditsOverridden({ tier: "standard", baseCredits: 8 }), 1);
+  assert.equal(tierBaseCreditsOverridden({ tier: "frontier", baseCredits: 16 }), 32);
+  // Older samples carry no baseCredits, and an unknown tier has no default to compare.
+  assert.equal(tierBaseCreditsOverridden({ tier: "standard" }), null);
+  assert.equal(tierBaseCreditsOverridden({ tier: "retired-tier", baseCredits: 4 }), null);
+
+  const candidate = (id, tier, baseCredits) => ({
+    id, name: id, provider: "p", bestFor: "", tier, reasoning: null, contextWindowTokens: null,
+    acceptsImages: false, canCreateFiles: false, credits: baseCredits, baseCredits,
+  });
+  const sent = JSON.parse(autoRouterGeneratorMessage("g", [{
+    routerInput: "m", routerContext: null, pickedModelId: "a", reason: null,
+    candidates: [candidate("a", "standard", 1), candidate("b", "advanced", 1)],
+  }]));
+  assert.equal("tierBaseCredits" in sent.decisions[0].candidates[0], false);
+  assert.equal(sent.decisions[0].candidates[1].tierBaseCredits, 4);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /tierBaseCredits appears only on a candidate whose baseCredits differs/);
+  assert.match(AUTO_ROUTER_GENERATOR_SYSTEM, /not a strength signal and not a catalogue error/);
+});
+
 test("router statistics count outcomes, timeouts, fallbacks and pick shares only", () => {
   const rows = [
     { outcome: "picked", pickedModelId: "light", ruleModelId: "light", latencyMs: 900 },
