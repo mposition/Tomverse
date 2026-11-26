@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ComparisonReview, ReviewSetup } from "../../../packages/chat-core/src/review";
+import type { CodeSandboxInput, CodeSandboxView } from "./code-sandbox-contract";
 import type { AccountSettingsAction, AccountSettingsResult, DesktopAccountSettingsInput } from "./account-settings-contract";
 import type { DesktopAccountDataInput, DesktopAccountDataResult } from "./account-data-contract";
 import type { AssistantImportAction, AssistantImportInput, AssistantImportResult } from "./assistant-import-contract";
@@ -457,6 +458,7 @@ export type DesktopApi = {
   codeMemory(input: CodeMemoryInput): Promise<CodeMemoryView>;
   codeExtensions(input: CodeExtensionsInput): Promise<CodeExtensionsView>;
   localExtensions(command: LocalExtensionsCommand): Promise<LocalExtensionsView>;
+  codeSandbox(input: CodeSandboxInput): Promise<CodeSandboxView>;
   stop(): Promise<void>;
   openHistory(id: string): Promise<void>;
   deleteHistory(id: string): Promise<DeleteHistoryResult>;

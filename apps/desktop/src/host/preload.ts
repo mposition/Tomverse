@@ -105,6 +105,7 @@ if (trustedWindow) {
     codeMemory: (input: Parameters<DesktopApi["codeMemory"]>[0]) => ipcRenderer.invoke("desktop:code-memory", input),
     codeExtensions: (input: Parameters<DesktopApi["codeExtensions"]>[0]) => ipcRenderer.invoke("desktop:code-extensions", input),
     localExtensions: (command: Parameters<DesktopApi["localExtensions"]>[0]) => ipcRenderer.invoke("desktop:local-extensions", command),
+    codeSandbox: (input: Parameters<DesktopApi["codeSandbox"]>[0]) => ipcRenderer.invoke("desktop:code-sandbox", input),
     followUp: (id: FollowUpTarget, text: string) => ipcRenderer.invoke("desktop:follow-up", { id, text }),
     exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
     copyDiagnostics: () => ipcRenderer.invoke("desktop:copy-diagnostics"),

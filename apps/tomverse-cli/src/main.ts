@@ -25,6 +25,8 @@ import { PermissionRuleStore } from "./permission-rules.js";
 import { discoverExtensions, describeRegistry, expandInvocation, ExtensionError } from "./extensions.js";
 import { startLocalExtensions } from "./local-extensions.js";
 import { extensionsCommand } from "./extensions-cli.js";
+import { normalizeAllowedDomains } from "./net-proxy.js";
+import { createSandboxRuntime, normalizeSandboxSettings, sandboxModes, type SandboxMode, type SandboxRuntime } from "./sandbox.js";
 import { DEFAULTS, GOAL_MAX_CONTINUATIONS, LIMIT_PROFILES, isLimitProfile, resolveLimits, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
 export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
@@ -44,7 +46,7 @@ Usage:
   tomverse undo <change-id> [--session <id>]
   tomverse doctor [--json]        Checks Node, folder, key and API without a model request
   tomverse trust [folder]         Allow the CLI to work in a folder
-  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory|mcp|hooks> <value> | unset <key>
+  tomverse config show | set <endpoint|model|allow-insecure-localhost|command-env|memory|mcp|hooks|sandbox|sandbox-domains|sandbox-localhost> <value> | unset <key>
   tomverse memory [show|clear]    The notes the agent kept about this folder (clear asks first, or --yes)
 ${PERMISSIONS_HELP.map((line) => `  ${line}`).join("\n")}
   tomverse mcp [list|approve|enable|disable] [name]   MCP servers (mcp.json in the CLI folder, .mcp.json in the project); a project's server needs your approval at a terminal
@@ -420,12 +422,19 @@ const configCommand = async (ctx: Context, args: string[]) => {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError(`${key} must be on or off.`);
             config[key] = value === "true" || value === "on";
         } else if (key === "command-env") config.commandEnv = value.split(",").map((v) => v.trim()).filter((v) => v && !/^TOMVERSE_/i.test(v));
-        else throw new UsageError(`Unknown config key '${key}'.`);
+        else if (key === "sandbox") {
+            if (!sandboxModes.includes(value as SandboxMode)) throw new UsageError(`sandbox must be one of: ${sandboxModes.join(", ")}.`);
+            config.sandbox = value;
+        } else if (key === "sandbox-domains") config.sandboxDomains = normalizeAllowedDomains(value.split(","));
+        else if (key === "sandbox-localhost") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("sandbox-localhost must be on or off.");
+            config.sandboxLocalhost = value === "true" || value === "on";
+        } else throw new UsageError(`Unknown config key '${key}'.`);
         writeConfig(config);
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", mcp: "mcp", hooks: "hooks" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", mcp: "mcp", hooks: "hooks", sandbox: "sandbox", "sandbox-domains": "sandboxDomains", "sandbox-localhost": "sandboxLocalhost" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -467,6 +476,18 @@ const pickModel = async (ctx: Context, catalog: CatalogModel[], prompter: Prompt
 };
 
 const exitFor = (outcome: Outcome) => EXIT_CODES[outcome];
+
+/** The operating-system sandbox the config asks for, started for this working folder; null when it is off. One that cannot be built still comes back: it refuses every command. */
+const startSandbox = async (ctx: Context, root: string): Promise<SandboxRuntime | null> => {
+    const settings = normalizeSandboxSettings({ mode: ctx.config.sandbox, allowedDomains: ctx.config.sandboxDomains, allowLocalhost: ctx.config.sandboxLocalhost });
+    const runtime = await createSandboxRuntime({ settings, workspaceRoot: root, stateDir: join(tomverseHome(), "sandbox") });
+    if (!runtime) return null;
+    const { enforcement } = runtime;
+    ctx.output.info(enforcement.available
+        ? `Sandbox ${settings.mode}: writes ${enforcement.writes === "os" ? "limited by the operating system" : "not limited"}, network ${enforcement.network}.`
+        : `Sandbox ${settings.mode} cannot be created here (${enforcement.detail}); commands are refused until it is changed with: tomverse config set sandbox off`);
+    return runtime;
+};
 
 /** The notes kept about a folder, in the CLI's own home next to the sessions. */
 const projectMemory = (ctx: Context, root: string) => new ProjectMemory(memoryFileFor(join(tomverseHome(), "memory"), root), root);
@@ -600,7 +621,8 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     if (!persist) ctx.output.info("--no-persist: this session lives in memory only; it cannot be resumed and its changes cannot be undone after exit.");
     const workspace = new Workspace(root);
     const extensions = await localExtensions(ctx, workspace.root, () => journal.state.id, journal.state.readOnly);
-    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options });
+    const sandbox = await startSandbox(ctx, workspace.root);
+    const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch } : {}) });
     ctx.output.event({ type: "session", session_id: journal.state.id, root, model: model.id, read_only: journal.state.readOnly, persisted: journal.persisted });
     if (!ctx.output.json) ctx.output.info(`Session ${journal.state.id} in ${root} with ${model.id}${journal.state.readOnly ? " (read-only)" : ""}.`);
     const removeSigint = installSigint(runner, ctx.output);
@@ -617,6 +639,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
         removeSigint();
         await extensions?.close();
         journal.release();
+        await sandbox?.close();
     }
 };
 
@@ -733,7 +756,8 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
         }
         const workspace = new Workspace(root);
         const extensions = await localExtensions(ctx, workspace.root, () => state.id, state.readOnly);
-        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options });
+        const sandbox = await startSandbox(ctx, workspace.root);
+        const runner = new Runner({ gateway, journal, workspace, output: ctx.output, prompter, catalog, commandEnv: ctx.config.commandEnv ?? [], instructions: readInstructions(workspace), ...engineExtras(ctx, workspace.root), ...extensions?.options, ...(sandbox ? { launchCommand: sandbox.launch } : {}) });
         ctx.output.event({ type: "session", session_id: state.id, root, model: modelId, read_only: state.readOnly, persisted: true, resumed: true });
         const notes = reconcile(journal);
         for (const note of notes) ctx.output.info(note);
@@ -779,6 +803,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
         } finally {
             removeSigint();
             await extensions?.close();
+            await sandbox?.close();
         }
     } finally {
         journal.release();

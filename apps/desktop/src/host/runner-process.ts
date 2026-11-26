@@ -28,6 +28,8 @@ import { codeProcessLaunch } from "./code-process-launch";
 import { codeMemoryFor } from "./code-memory";
 import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tools";
 import { createReviewWorker } from "./review-worker";
+import { startCodeSandbox } from "./code-sandbox";
+import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -728,6 +730,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
   let sourceLock: string | undefined;
   let sourceEdits: Journal | undefined;
   let continuationPrompt: string | undefined;
+  let sandbox: SandboxRuntime | null = null;
   let resumedInstructionSaved = false;
   let catalog: CatalogModel[] | undefined;
   let partial = "";
@@ -953,8 +956,10 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         else if (server.state === "failed" || server.state === "needs_auth") addEvent(`MCP server ${server.id} is not available: ${server.detail ?? server.state}`);
       }
     }
+    sandbox = await startCodeSandbox(process.env.TOMVERSE_DESKTOP_CODE_SANDBOX, command.project.path);
+    if (sandbox && !sandbox.enforcement.available) addEvent(desktopCodeNotice("sandboxUnavailable"));
     control.runner = new Runner({
-      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: codeProcessLaunch, permissions,
+      gateway, journal, workspace, catalog, output, productName: "Tomverse Code", commandEnv: [], launchCommand: composeLaunch(sandbox?.launch, codeProcessLaunch), permissions,
       instructions: instructions?.text ?? null, instructionsTruncated: instructions?.truncated,
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
@@ -1077,6 +1082,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
     // Whatever way the task ended, nothing it started may keep running.
     await control.runner?.stopBackground("task_ended").catch(() => undefined);
     await extensions?.close().catch(() => undefined);
+    await sandbox?.close().catch(() => undefined);
     task.background = backgroundView(control.runner, clean);
     if (journal) {
       if (!control.cancelled && (!resumedInstruction || resumedInstructionSaved) && journal.state.generations.length) {

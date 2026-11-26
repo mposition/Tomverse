@@ -79,6 +79,8 @@ import { createReviewActions, type ReviewTarget } from "./review-host";
 import { codeExtensionsView } from "./code-extensions";
 import { extensionWorkerEnv, localExtensionsReply } from "./local-extensions";
 import { localExtensionsCommand } from "../local-extensions-contract";
+import { codeSandboxInput } from "../code-sandbox-contract";
+import { codeSandboxView } from "./code-sandbox";
 import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBranch, worktreePath,
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
@@ -1258,6 +1260,7 @@ function checkpointNativeTurn(task: Task, force = false) {
 }
 
 const codeMemoryDirectory = () => join(app.getPath("userData"), "code-memory");
+const codeSandboxDirectory = () => join(app.getPath("userData"), "code-sandbox");
 
 function bootWorker() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
@@ -1265,7 +1268,7 @@ function bootWorker() {
   )) as Record<string, string>;
   const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
     env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
-      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile },
+      TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
   worker = child;
@@ -3511,6 +3514,7 @@ function registerIpc() {
     if (projectRoot) assertProjectRoot(projectRoot);
     return localExtensionsReply(projectRoot?.path ?? null, command);
   });
+  main("desktop:code-sandbox", (value) => codeSandboxView(codeSandboxDirectory(), codeSandboxInput.parse(value)));
   main("desktop:stop-background", (value) => {
     const { id, handle } = backgroundInput.parse(value);
     const task = state.task;

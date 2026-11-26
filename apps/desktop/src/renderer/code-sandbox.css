@@ -1,0 +1,14 @@
+.sandbox-settings { margin-top: 24px; }
+.sandbox-settings h3 { font-size: 20px; line-height: 1.5; }
+.sandbox-settings > p { margin-block: 8px 12px; }
+.sandbox-enforcement { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.sandbox-enforcement h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.sandbox-enforcement dl { display: grid; gap: 10px; margin: 0; }
+.sandbox-enforcement dl > div { display: grid; grid-template-columns: minmax(96px, 22%) minmax(0, 1fr); gap: 10px; }
+.sandbox-enforcement dt { color: var(--muted); }
+.sandbox-enforcement dd { margin: 0; overflow-wrap: anywhere; }
+.sandbox-enforcement p { margin: 0; }
+.sandbox-block { display: grid; gap: 6px; padding-block: 16px; border-bottom: 1px solid var(--line); }
+.sandbox-block small { color: var(--muted); }
+.sandbox-block textarea { width: 100%; min-height: 120px; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: var(--raised); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; resize: vertical; }
+.sandbox-actions { display: flex; flex-wrap: wrap; gap: 8px; }
