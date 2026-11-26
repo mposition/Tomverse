@@ -6,7 +6,6 @@ import { MANAGED_MAX_APPROVED_CREDITS, type DesktopManagedCodeInput, type Manage
 import "./code-cloud.css";
 
 type Copy = DesktopManagedCodeCopy;
-const locations = describeExecutionLocations();
 const POLL_MS = 5_000;
 
 const locationText = (copy: Copy): Record<ExecutionLocationId, [string, string]> => ({
@@ -98,8 +97,10 @@ function ReserveForm({ copy, view, busy, run }: {
   </form>;
 }
 
-function CloudSection({ language }: { language: Language }) {
+function CloudSection({ language, remoteEnabled }: { language: Language; remoteEnabled: boolean }) {
   const copy = desktopManagedCodeCopy[language];
+  // The SSH row follows the remote-projects switch of this computer; cloud stays unavailable.
+  const locations = describeExecutionLocations(remoteEnabled ? { ssh: { available: true } } : {});
   const [view, setView] = useState<ManagedCodeView | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -146,6 +147,6 @@ function CloudSection({ language }: { language: Language }) {
 }
 
 /** Desktop > Execution and limits > Cloud and managed credits. Nothing renders unless the server's capability is on. */
-export function CodeCloudSettings({ language, enabled }: { language: Language; enabled: boolean }) {
-  return enabled ? <CloudSection language={language} /> : null;
+export function CodeCloudSettings({ language, enabled, remoteEnabled = false }: { language: Language; enabled: boolean; remoteEnabled?: boolean }) {
+  return enabled ? <CloudSection language={language} remoteEnabled={remoteEnabled} /> : null;
 }
