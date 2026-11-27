@@ -19,6 +19,14 @@ import type { WebSearchCitation } from "@/lib/webSearchCitations";
  * result allowance are reserved per pass like every application tool.
  */
 
+/** The text of a user message whether its content is a string or a list of parts. */
+export const messageText = (content: unknown): string =>
+    typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "")).join("\n")
+          : "";
+
 export type ChatReadProgress = "page_reading" | "page_unavailable" | "history_searching" | "done";
 
 export type ChatReadToolContext = {
@@ -35,8 +43,8 @@ export type ChatReadToolContext = {
     researchTurn: boolean;
     /** An assistant profile is running (it may switch memory off for its conversations). */
     profileActive: boolean;
-    /** What the user wrote in this conversation, oldest first. */
-    userMessages: readonly string[];
+    /** What the user wrote in this conversation, oldest first: text, or content parts with text in them. */
+    userMessages: readonly unknown[];
     request: Request;
     signal: AbortSignal;
     /** The project tools when the conversation is in a project, else null. */
@@ -65,7 +73,7 @@ export async function withChatReadTools(context: ChatReadToolContext): Promise<{
     const parts: ChatReadPart[] = [];
     if (urlOn) {
         // Offered only when the user pasted a link: a turn with no link pays no definition tokens.
-        const allowedUrls = userLinksFromMessages(context.userMessages);
+        const allowedUrls = userLinksFromMessages(context.userMessages.map(messageText));
         if (allowedUrls.length) {
             parts.push(buildChatUrlReadPart({ allowedUrls, signal: context.signal, onState: context.onProgress }));
         }

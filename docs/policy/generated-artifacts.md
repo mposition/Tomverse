@@ -447,15 +447,24 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     `<head>`를 패턴으로 찾아 끼우면 주석 안에 들어갈 수 있으므로 앞에 붙입니다): `default-src 'none'`,
     `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`,
     script·style은 inline과 cdnjs·jsdelivr·unpkg만, 이미지·글꼴은 inline과 같은 CDN만, `'unsafe-eval'` 없음.
-  - script가 자기 frame을 다른 주소로 보내는 것은 CSP로 막을 수 없습니다. 패널이 frame의 `load`를 세어
-    두 번째 load에서 frame을 걷어 내고 안내 문구를 보여 줍니다.
+  - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
+    `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
+    닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는
+    유일한 통로인데(`navigate-to`는 출시되지 않았습니다), 브라우저는 frame의 모든 navigation을 그 frame을 담은
+    문서의 `frame-src`로 검사하므로 바깥 문서가 요청 전에 거절합니다. 최초 `srcdoc` 로드는 네트워크 navigation이
+    아니어서 영향받지 않습니다. 패널은 안전망으로 frame의 `load`를 세어 두 번째 load에서 frame을 걷어 내고
+    안내 문구를 보여 줍니다. 한계: 이 거절은 브라우저의 `frame-src` 의미에 기대며, Browser 창(샌드박스된 네트워크
+    문서를 열지 않는 환경)에서는 관찰하지 못했습니다. page가 파일에 담긴 민감 정보를 URL에 실어 보내는 유출은
+    이 한 겹과 앱 CSP의 `frame-src`(enforce 모드)에 의존합니다. 안내 문구도 "계정에 접근할 수 없다"까지만
+    말합니다.
   - 파일은 다운로드와 **같은 인증된 경로**(`/api/artifacts/{id}`)로 읽으므로 소유자 확인·대화 잠금(423)·
     rate limit이 그대로입니다. 1,000,000바이트를 넘으면 미리보기 대신 다운로드만 권합니다.
   - `srcdoc` 문서는 앱의 CSP(nonce 기반 `script-src`·`style-src`)를 **상속**합니다. 그대로 두면 enforce 모드에서 page의
     inline script·style이 막혀 스타일도 동작도 없는 화면이 됩니다(브라우저에서 확인). 그래서 패널이 앱 문서의 nonce를
     page의 `<script>`·`<style>`·stylesheet `<link>`에 붙입니다(`withEmbedderNonce`, 텍스트 패턴이 아니라 브라우저
     `DOMParser`로). frame에 `allow-same-origin`이 없으므로 nonce는 frame 안에서만 쓰이고 `HTML_PREVIEW_CSP`도 함께
-    적용됩니다. inline 이벤트 속성(`onclick="..."`)은 nonce 정책에서 막힌 채로 두며 `addEventListener`는 동작합니다.
+    적용됩니다. `DOMParser` 문서는 브라우저 맥락이 없어 자원을 가져오지 않습니다(img·link·script·iframe·video
+    poster·object·@import를 담은 page를 파싱해도 서버에 요청이 오지 않는 것을 확인). inline 이벤트 속성(`onclick="..."`)은 nonce 정책에서 막힌 채로 두며 `addEventListener`는 동작합니다.
     frame 안에서 막힌 요청의 CSP 위반 보고가 앱의 보고 endpoint로 갈 수 있습니다.
   - 코드 블록 미리보기와 SVG 카드 미리보기는 이것과 별개입니다. 이 패널은 생성 파일 카드에서만 열립니다.
   - 검증: `tests/htmlArtifactPreview.test.mjs`(sandbox·CSP 문자열 고정),

@@ -738,7 +738,7 @@ export const en = {
         artifactPreviewFailed: "The preview couldn't be loaded. You can still download the file.",
         artifactPreviewTooLarge: "This page is too large to preview. Download it to open it.",
         artifactPreviewNavigationBlocked: "The page tried to open another address, so it was stopped. Download the file to open it in your browser.",
-        artifactPreviewSandboxNote: "Runs in an isolated frame: no access to your account and no way to send data out.",
+        artifactPreviewSandboxNote: "Runs in an isolated frame with no access to your account.",
         artifactReadyLabel: "Download {filename}, {type}, {size}",
         artifactFailedLabel: "{type} {filename} could not be created",
         artifactBlockedLabel: "Sign in to create a {type}",

@@ -96,7 +96,8 @@ export async function historyReferenceAllowed(input: {
     const [settings, conversation] = await Promise.all([
         getMemorySettings(input.userId),
         prisma.conversation.findFirst({
-            where: { id: input.conversationId, userId: input.userId, password: null },
+            // Not in a project: a project conversation is answered from its own scope, never from the account's other chats.
+            where: { id: input.conversationId, userId: input.userId, password: null, projectId: null },
             select: { memoryMode: true, assistantProfileVersionId: true },
         }),
     ]);
@@ -124,6 +125,7 @@ export type ChatHistorySearch = (input: {
 
 /** The production search: the user's own messages, filtered by `referenceableConversationWhere`. */
 export const searchPastChats: ChatHistorySearch = async ({ userId, query, currentConversationId }) => {
+    const settings = await getMemorySettings(userId);
     const answer = await searchConversationMessages({
         // No cookies: no unlock grant exists, so every locked conversation is denied in the query.
         request: new Request("https://tomverse.invalid/"),
@@ -131,13 +133,13 @@ export const searchPastChats: ChatHistorySearch = async ({ userId, query, curren
         query,
         displayTimeZone: "UTC",
         excludeConversationId: currentConversationId,
-        nativeOnly: true,
+        // Eligibility is part of the candidate query (before the row limit); the checks below repeat it.
+        modelReference: { accountMemoryDefaultOff: settings.defaultConversationMode === "off" },
     });
     const hits = answer.results.filter((result) => result.kind === "native");
     const ids = [...new Set(hits.map((hit) => hit.conversationId))];
     if (!ids.length) return { conversations: [], incomplete: answer.truncated };
-    const [settings, eligible] = await Promise.all([
-        getMemorySettings(userId),
+    const [eligible] = await Promise.all([
         prisma.conversation.findMany({
             where: { AND: [referenceableConversationWhere({ userId, currentConversationId }), { id: { in: ids } }] },
             select: { id: true, title: true, productKey: true, memoryMode: true },

@@ -4167,7 +4167,7 @@ async function handleChatPost(
             otherToolOwner: Boolean(mcpConnector),
             researchTurn: isResearchPreview || isDeepResearchTurn,
             profileActive: Boolean(conversationProfileVersionId),
-            userMessages: executionMessages.filter((m) => m.role === "user").map((m) => String(m.content ?? "")),
+            userMessages: executionMessages.filter((m) => m.role === "user").map((m) => m.content),
             request: req,
             signal: req.signal,
             base: projectToolsOnly,

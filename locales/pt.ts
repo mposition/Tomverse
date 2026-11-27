@@ -694,7 +694,7 @@ export const pt = {
         artifactPreviewFailed: "Não foi possível carregar a pré-visualização. Você ainda pode baixar o arquivo.",
         artifactPreviewTooLarge: "Esta página é grande demais para pré-visualizar. Baixe-a para abri-la.",
         artifactPreviewNavigationBlocked: "A página tentou abrir outro endereço e foi interrompida. Baixe o arquivo para abri-lo no navegador.",
-        artifactPreviewSandboxNote: "Executa em um quadro isolado: sem acesso à sua conta e sem como enviar dados para fora.",
+        artifactPreviewSandboxNote: "Executa em um quadro isolado, sem acesso à sua conta.",
         artifactReadyLabel: "Baixar {filename}, {type}, {size}",
         artifactFailedLabel: "Não foi possível criar {type} {filename}",
         artifactBlockedLabel: "Entre para criar um {type}",

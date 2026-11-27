@@ -694,7 +694,7 @@ export const es = {
         artifactPreviewFailed: "No se pudo cargar la vista previa. Aún puedes descargar el archivo.",
         artifactPreviewTooLarge: "Esta página es demasiado grande para la vista previa. Descárgala para abrirla.",
         artifactPreviewNavigationBlocked: "La página intentó abrir otra dirección y se detuvo. Descarga el archivo para abrirlo en tu navegador.",
-        artifactPreviewSandboxNote: "Se ejecuta en un marco aislado: sin acceso a tu cuenta y sin forma de enviar datos fuera.",
+        artifactPreviewSandboxNote: "Se ejecuta en un marco aislado, sin acceso a tu cuenta.",
         artifactReadyLabel: "Descargar {filename}, {type}, {size}",
         artifactFailedLabel: "No se pudo crear {type} {filename}",
         artifactBlockedLabel: "Inicia sesión para crear un {type}",

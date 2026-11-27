@@ -73,19 +73,36 @@ export const isHtmlPreviewSmallEnough = (byteSize: number) =>
 const LEADING_DOCTYPE = /^\uFEFF?\s*<!doctype[^>]*>/i;
 
 /**
- * The document handed to the frame: our doctype, then the CSP `<meta>` as the
- * very first element, then the page exactly as the model wrote it.
+ * What the outer document says about its own frames: none. It is the whole of
+ * the outer policy -- nothing else, because a `srcdoc` child inherits every
+ * policy of its parent, and a `default-src` here would reach the page.
+ */
+export const HTML_PREVIEW_OUTER_CSP = "frame-src 'none'";
+
+const attributeEscape = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+
+/**
+ * The page the user sees is a frame inside a frame.
  *
- * The policy is placed in front of the page rather than spliced into its
- * `<head>`: finding that tag by pattern can be fooled by a comment or a string
- * that contains "<head>", and then the policy would sit inside the comment.
- * In front of everything it is parsed first, whatever follows. The page's own
- * `<html>` and `<head>` tags still merge into the elements the parser already
- * made, and a policy the page adds itself can only narrow ours.
+ * The inner document is the model's page, with our policy placed in front of
+ * it (a policy spliced into its `<head>` by pattern could land inside a
+ * comment; in front of everything it is parsed first). The outer document is
+ * ours and contains nothing but that frame, and its policy is `frame-src
+ * 'none'`: the browser checks every navigation of a frame against the
+ * policy of the document that holds it, so a script that sets its own
+ * `location` to an address of its choosing -- the one channel the page's
+ * policy cannot close, because `navigate-to` was never shipped -- is refused
+ * before a request leaves. The initial `srcdoc` load is not a network
+ * navigation and is not affected.
  */
 export function buildHtmlPreviewSrcdoc(html: string): string {
     const page = html.replace(LEADING_DOCTYPE, "");
-    return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">${page}`;
+    const inner = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">${page}`;
+    return (
+        `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_OUTER_CSP}">` +
+        `<body style="margin:0;height:100vh;overflow:hidden">` +
+        `<iframe sandbox="${HTML_PREVIEW_SANDBOX}" referrerpolicy="no-referrer" style="border:0;width:100%;height:100%" srcdoc="${attributeEscape(inner)}"></iframe>`
+    );
 }
 
 /**

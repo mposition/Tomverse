@@ -745,7 +745,7 @@ export const zh = {
         artifactPreviewFailed: "无法加载预览，仍可下载该文件。",
         artifactPreviewTooLarge: "该页面过大，无法预览。请下载后打开。",
         artifactPreviewNavigationBlocked: "该页面试图打开其他地址，已被阻止。请下载文件后在浏览器中打开。",
-        artifactPreviewSandboxNote: "在隔离的框架中运行：无法访问你的账户，也无法向外发送数据。",
+        artifactPreviewSandboxNote: "在隔离的框架中运行，无法访问你的账户。",
         artifactReadyLabel: "下载 {filename}，{type}，{size}",
         artifactFailedLabel: "无法创建 {type} {filename}",
         artifactBlockedLabel: "登录后可创建 {type}",

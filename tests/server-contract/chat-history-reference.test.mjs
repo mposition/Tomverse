@@ -55,6 +55,7 @@ mock.module(mod("lib/apiSecurity.ts"), {
 const history = await import(mod("lib/chatHistoryReference.ts"));
 const { withChatReadTools } = await import(mod("lib/chatReadTools.ts"));
 const { ChatToolLoopError } = await import(mod("lib/chatToolLoop.ts"));
+const { messageText } = await import(mod("lib/chatReadTools.ts"));
 const { UNTRUSTED_TOOL_MARKERS } = await import(mod("lib/untrustedToolText.ts"));
 
 const native = (conversationId, text = "we agreed on the Friday deadline", role = "user") =>
@@ -115,7 +116,7 @@ test("the tool is offered only while this conversation's memory is on, without a
   currentConversation = null;
   assert.equal(await allowed(), false, "a missing or locked conversation");
   const lookup = calls.findFirst.at(-1).where;
-  assert.deepEqual([lookup.id, lookup.userId, lookup.password], ["current", "u1", null], "a locked current conversation reads as none");
+  assert.deepEqual([lookup.id, lookup.userId, lookup.password, lookup.projectId], ["current", "u1", null, null], "a locked or project current conversation reads as none");
 });
 
 test("the search carries no unlock grant, skips imported text and the current conversation, and keeps only eligible conversations", async () => {
@@ -129,7 +130,7 @@ test("the search carries no unlock grant, skips imported text and the current co
   const input = calls.search[0];
   assert.equal(input.userId, "u1");
   assert.equal(input.excludeConversationId, "current");
-  assert.equal(input.nativeOnly, true);
+  assert.deepEqual(input.modelReference, { accountMemoryDefaultOff: true }, "eligibility is part of the candidate query, with the account default");
   assert.equal(input.request.headers.get("cookie"), null, "no cookie, so no unlock grant exists for any locked conversation");
 
   const where = calls.findMany[0].where;
@@ -320,4 +321,13 @@ test("a pre-aborted turn stops before any tool or search runs", async () => {
   const part = buildPart({ signal: controller.signal, stillAllowed: async () => true });
   await assert.rejects(() => exec(part, { queries: ["plan"] }));
   assert.equal(calls.search.length, 0);
+});
+
+test("a pasted link is found whether the user message is a string or a list of content parts", async () => {
+  reset();
+  assert.equal(messageText("plain"), "plain");
+  assert.equal(messageText([{ type: "text", text: "see https://news.example.org/story/42" }, { type: "image", image: "x" }]), "see https://news.example.org/story/42\n");
+  assert.equal(messageText({ nope: true }), "");
+  const offer = await withChatReadTools(context({ userMessages: [[{ type: "text", text: "summarise https://news.example.org/story/42" }]], env: { CHAT_URL_READING_ENABLED: "true" } }));
+  assert.deepEqual(names(offer), ["read_url"]);
 });

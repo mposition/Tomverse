@@ -138,10 +138,34 @@ test("the tool is offered by the conversation's real memory state", async () => 
     const locked = await seed(user.id, "Locked", "x", { password: "stored-hash" });
     const stranger = await createUser();
     const others = await seed(stranger.id, "Others", "x");
+    const project = await prisma.conversationProject.create({ data: { userId: user.id, name: "Beta" } });
+    const inProject = await seed(user.id, "Project chat", "x", { projectId: project.id });
     assert.equal(await historyReferenceAllowed({ userId: user.id, conversationId: on.id }), true);
     assert.equal(await historyReferenceAllowed({ userId: user.id, conversationId: off.id }), false);
     assert.equal(await historyReferenceAllowed({ userId: user.id, conversationId: locked.id }), false);
     assert.equal(await historyReferenceAllowed({ userId: user.id, conversationId: others.id }), false, "another account's conversation is not this account's");
+    assert.equal(await historyReferenceAllowed({ userId: user.id, conversationId: inProject.id }), false, "a project conversation never gets account-wide history, even with project tools off");
     await prisma.userMemorySettings.create({ data: { userId: user.id, masterEnabled: false, styleEnabled: true, defaultConversationMode: "on" } });
     assert.equal(await historyReferenceAllowed({ userId: user.id, conversationId: on.id }), false, "the account's master switch");
+});
+
+test("excluded conversations cannot take the candidate slots an eligible one needs", async () => {
+  const user = await createUser();
+  const current = await seed(user.id, "Current", "nothing here");
+  const project = await prisma.conversationProject.create({ data: { userId: user.id, name: "Crowd" } });
+  // The eligible conversation is the OLDEST; newer excluded ones fill every candidate row (31 groups x 6 rows = the limit).
+  await seed(user.id, "Only eligible", "wombat plan");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  for (let index = 0; index < 34; index++) {
+    const kind = index % 3;
+    await prisma.conversation.create({
+      data: {
+        selectedModels: "[\"gpt-6-luna\"]", userId: user.id, title: `Excluded ${index}`, productKey: "chat",
+        ...(kind === 0 ? { password: "stored-hash" } : kind === 1 ? { projectId: project.id } : { memoryMode: "off" }),
+        messages: { create: Array.from({ length: 6 }, (_, n) => ({ role: "user", content: `wombat plan ${index} ${n}` })) },
+      },
+    });
+  }
+  const answer = await searchPastChats({ userId: user.id, query: "wombat", currentConversationId: current.id });
+  assert.deepEqual(ids(answer), ["Only eligible"]);
 });
