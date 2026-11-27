@@ -62,6 +62,8 @@ import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { CodeBlockPreview } from "@/components/chat/CodeBlockPreview";
+import { CodeBlockStreamingScope } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
@@ -477,6 +479,7 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
       >
         {children}
       </pre>
+      <CodeBlockPreview preRef={preRef}>{children}</CodeBlockPreview>
       {/*
         The icon stays small, but the touch target does not: `before:-inset-2`
         grows the hit area of the 28px button to 44x44. Offset by the same 8px
@@ -1500,6 +1503,7 @@ export function ChatMessageList({
                     <AnswerRenderContext.Provider
                       value={isActivelyGenerating ? ANSWER_RENDER_STREAMING : ANSWER_RENDER_FINAL}
                     >
+                    <CodeBlockStreamingScope streaming={isActivelyGenerating}>
                     <AnswerMarkdown
                       remarkPlugins={ANSWER_REMARK_PLUGINS}
                       rehypePlugins={[rehypeHighlight, ANSWER_MATH_REHYPE_PLUGIN]}
@@ -1762,6 +1766,7 @@ export function ChatMessageList({
                       // nothing outside a project conversation with context on.
                       <ProjectAnswerSources messageId={msg.id} />
                     )}
+                    </CodeBlockStreamingScope>
                     </AnswerRenderContext.Provider>
                   ) : (
                     <UserMessageContent content={msg.content} />
