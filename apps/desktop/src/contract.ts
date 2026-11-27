@@ -422,6 +422,8 @@ export type Snapshot = {
     voiceInput?: boolean; voiceConversation?: VoiceConversationCapability | null;
     /** The `medium` reasoning step a turn may ask for, and the Prompt Refiner decision an Auto Chat turn may carry. */
     reasoningSteps?: boolean; promptRefiner?: boolean;
+    /** The providers the server lets this device add as a login method from Settings (Google, Microsoft). */
+    socialLink?: ("google" | "azure-ad")[];
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */

@@ -129,7 +129,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await application.evaluate(async ({ shell, clipboard, dialog }, { origin, chat, exportPath }) => {
       const host = globalThis as typeof globalThis & {
         clips?: number; sent?: number; mcpSent?: string[]; decided?: boolean[]; oauthCallbacks?: string[]; copied?: string; readOnly?: boolean; importRequests: string[]; pinWrites: boolean[];
-        pauseTranscript?: boolean; finishTranscript?: () => void; lockFromAnotherDevice?: () => void;
+        pauseTranscript?: boolean; finishTranscript?: () => void; lockFromAnotherDevice?: () => void; linkLoopback?: string; linkState?: string;
       };
       host.importRequests = [];
       host.pinWrites = [];
@@ -151,6 +151,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       let pinState = { pinned: false, pinSeq: 0 };
       let pendingApproval = false;
       let linearConnected = false;
+      let microsoftLinked = false;
       let projectName = "";
       let projectId: string | null = null;
       let shareEnabled = false;
@@ -163,6 +164,13 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
       const realFetch = globalThis.fetch;
       shell.openExternal = async (href) => {
         const target = new URL(href);
+        if (target.origin === "https://login.microsoftonline.com") {
+          // The provider's page in the system browser: the person approves, and the server's callback returns to the loopback address.
+          const back = new URL(host.linkLoopback!);
+          back.search = new URLSearchParams({ state: host.linkState!, code: "provider-code" }).toString();
+          if (!(await realFetch(back)).ok) throw new Error("Unable to return from the provider page.");
+          return;
+        }
         if (target.origin !== origin || target.pathname !== "/auth/desktop") throw new Error("Unexpected browser destination.");
         const callback = new URL(target.searchParams.get("redirect_uri")!);
         if (callback.hostname !== "127.0.0.1" || callback.pathname !== "/desktop-login/callback") {
@@ -187,7 +195,8 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           }
           return Response.json({ token: "fixture..settings.web.session", expiresAt: Date.now() + 300_000 });
         }
-        if (["/api/user/settings", "/api/user/login-methods", "/api/memories/settings", "/api/user/usage",
+        if (["/api/user/settings", "/api/user/login-methods", "/api/user/login-methods/oauth/desktop/start",
+          "/api/user/login-methods/oauth/desktop/complete", "/api/memories/settings", "/api/user/usage",
           "/api/user/email-preferences", "/api/assistant-profiles", "/api/external-conversations", "/api/user/api-keys",
           "/api/memories", "/api/memories/memory-1", `/api/conversations/${chat.id}/pin`].includes(target.pathname)
           || target.pathname.startsWith("/api/assistant-profiles/")
@@ -200,6 +209,21 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
           const headers = new Headers(options?.headers);
           if (headers.get("cookie") !== "next-auth.session-token=fixture..settings.web.session" ||
               headers.get("origin") !== origin || headers.has("authorization")) throw new Error("Invalid settings credential transport");
+          if (target.pathname === "/api/user/login-methods/oauth/desktop/start") {
+            const body = JSON.parse(String(options?.body));
+            host.linkLoopback = body.redirectUri;
+            host.linkState = "dl1." + "s".repeat(40) + "." + "g".repeat(43);
+            return Response.json({ ok: true, linkState: host.linkState,
+              url: "https://login.microsoftonline.com/fixture/oauth2/v2.0/authorize?client_id=fixture&state=" + host.linkState });
+          }
+          if (target.pathname === "/api/user/login-methods/oauth/desktop/complete") {
+            const body = JSON.parse(String(options?.body));
+            if (body.linkState !== host.linkState || body.code !== "provider-code" || !/^[A-Za-z0-9_-]{43}$/.test(body.codeVerifier)) {
+              throw new Error("Unexpected link completion");
+            }
+            microsoftLinked = true;
+            return Response.json({ ok: true, provider: "azure-ad" });
+          }
           if (target.pathname === `/api/conversations/${chat.id}/export`) {
             return new Response("Exported Desktop conversation.\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
           }
@@ -352,7 +376,8 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
             return Response.json(preferences);
           }
           if (target.pathname === "/api/user/login-methods") {
-            return Response.json({ methods: [{ type: "oauth", provider: "google", linked: true }] });
+            return Response.json({ methods: [{ type: "oauth", provider: "google", linked: true },
+              { type: "oauth", provider: "azure-ad", linked: microsoftLinked }], canRemove: true });
           }
           if (target.pathname === "/api/memories/settings") {
             return Response.json({ masterEnabled: true, styleEnabled: true, defaultConversationMode: "on" });
@@ -375,6 +400,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
         }
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
           autoSelection: { offered: false }, desktopWrite: !host.readOnly, desktopImport: true, desktopPlugins: true, desktopChatPlugin: true, desktopTurnLocation: true,
+          desktopSocialLink: ["azure-ad"],
           desktopReview: { easy: true, plan: "Pro", modelLimit: 3 },
           desktopStarters: [
             { id: "debug-stack-trace", label: "Debug a stack trace", seed: "Help me debug this stack trace.", outcome: "Understand the error." },
@@ -667,7 +693,13 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await expect(message).toHaveValue("A draft for the selected conversation");
     await message.fill("A draft for the selected conversation");
     await settings.click();
-    await expect(page.getByTestId("native-account-login-methods")).toContainText("Google");
+    const loginMethods = page.getByTestId("native-account-login-methods");
+    await expect(loginMethods).toContainText("Google");
+    // Microsoft is offered because the server named it; Google is already linked, so only Microsoft has a button.
+    await expect(page.getByTestId("native-login-link-google")).toHaveCount(0);
+    await page.getByTestId("native-login-link-azure-ad").click();
+    await expect(loginMethods).toContainText("New login method added.");
+    await expect(page.getByTestId("native-login-link-azure-ad")).toHaveCount(0);
     await page.getByRole("button", { name: "Open email notifications" }).click();
     const email = page.getByTestId("native-account-email");
     await expect(email.getByText("Always on")).toBeVisible();

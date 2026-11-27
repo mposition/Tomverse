@@ -93,3 +93,18 @@ test("the Code agent's paid web search is given to runs only where the server th
   body = { ...body, desktopCodeWebSearch: "yes" };
   assert.equal(await load().catch(() => null), null, "a value this build cannot read is not an offer");
 });
+
+test("connecting Google or Microsoft is offered only for the providers the server names, and an older server names none", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  assert.deepEqual((await load())?.socialLink, []);
+  body = { ...body, desktopSocialLink: ["google"] };
+  assert.deepEqual((await load())?.socialLink, ["google"]);
+  body = { ...body, desktopSocialLink: ["google", "azure-ad"] };
+  assert.deepEqual((await load())?.socialLink, ["google", "azure-ad"]);
+  // A provider this build does not know costs the list, not the rest of the capabilities.
+  body = { ...body, desktopSocialLink: ["google", "apple"] };
+  const unknown = await load();
+  assert.deepEqual([unknown?.socialLink, unknown?.chatWrite], [[], true]);
+});

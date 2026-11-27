@@ -23,6 +23,9 @@ export const desktopAccountDataInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("requestEmailLogin") }).strict(),
   z.object({ action: z.literal("verifyEmailLogin"), code: z.string().regex(/^[0-9]{6}$/) }).strict(),
   z.object({ action: z.literal("removeLoginMethod"), method: z.enum(["google", "azure-ad", "email"]) }).strict(),
+  // Google or Microsoft as a login method: the provider's page opens in the system browser; cancel ends the wait.
+  z.object({ action: z.literal("linkLoginMethod"), method: z.enum(["google", "azure-ad"]) }).strict(),
+  z.object({ action: z.literal("cancelLinkLoginMethod") }).strict(),
   z.object({ action: z.literal("saveAssistant"), id: accountId, name: z.string().max(200) }).strict(),
   z.object({ action: z.literal("uploadKnowledge"), id: accountId }).strict(),
   z.object({ action: z.literal("deleteAllMemories"), confirmation: z.literal(DELETE_ALL_MEMORIES_PHRASE) }).strict(),

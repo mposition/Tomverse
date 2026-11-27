@@ -28,6 +28,7 @@ import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import { autoSelectionCapability } from "@/lib/autoRoutingUi";
+import { desktopLinkProviders } from "@/lib/desktopSocialLoginCore";
 import { identifyChatCaller } from "@/lib/chatSecurity";
 import {
   mintGuestChatAutoCapability,
@@ -104,6 +105,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // Dictation and the Chat voice conversation, each only where its own switch is on as well as Desktop's.
     desktopVoiceInput: desktopVoiceEnabled() && await isVoiceInputEnabled().catch(() => false),
     desktopVoiceConversation: desktopVoiceEnabled() && voiceConversationConfig(process.env) !== null,
+    // The providers Desktop may add as a login method from its settings (empty while the switch is off).
+    desktopSocialLink: desktopLinkProviders(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };

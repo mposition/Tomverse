@@ -297,6 +297,8 @@ test("account-sensitive operations keep the 30-minute default and shared overrid
     "app/api/user/account/export/route.ts",
     "app/api/user/login-methods/route.ts",
     "app/api/user/login-methods/oauth/start/route.ts",
+    "app/api/user/login-methods/oauth/desktop/start/route.ts",
+    "app/api/user/login-methods/oauth/desktop/complete/route.ts",
     "app/api/memories/export/route.ts",
     "app/api/memories/delete-all/route.ts",
   ]) {
