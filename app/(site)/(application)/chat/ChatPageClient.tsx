@@ -11954,9 +11954,14 @@ export function ChatPageClient({
       </div>
     )}
     {showComparisonReview && (
-      <ComparisonReviewDialog key={JSON.stringify([identityKey, currentChatId, reviewResultRevision])}
+      // Identity and conversation remount the dialog; a newly finished answer
+      // does not. It only refreshes the setup step (sourceRevision), so a run
+      // in flight or a result being read survives the panels finishing.
+      <ComparisonReviewDialog key={JSON.stringify([identityKey, currentChatId])}
+        sourceRevision={reviewResultRevision}
         conversationId={isGuestMode ? null : currentChatId ?? null}
         guestSource={guestReviewSource}
+        readGuestSource={isGuestMode ? readGuestComparisonTurn : undefined}
         open
         onClose={() => setShowComparisonReview(false)}
         onCompleted={() => {
