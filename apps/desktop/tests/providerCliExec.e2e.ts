@@ -165,7 +165,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     run = await seen();
     assert.equal(run.response?.response.response.behavior, "deny");
     assert.ok(run.args.includes("--restricted") && run.args.includes("--no-session-persistence"));
-    assert.equal(run.args[run.args.indexOf("--tools") + 1], "Read,Glob,Grep,Edit,Write,Bash,PowerShell".split(",").filter((tool) => tool !== "PowerShell" || process.platform === "win32").join(","));
+    assert.equal(run.args[run.args.indexOf("--tools") + 1], "Read,Glob,Edit,Write,Bash,PowerShell".split(",").filter((tool) => tool !== "PowerShell" || process.platform === "win32").join(","));
     assert.ok(!run.args.includes("--allowedTools"));
     const [allowWindow] = await Promise.all([app.waitForEvent("window", { timeout: 30_000 }), send("Run the build again")]);
     await decide(allowWindow, "Allow once");
@@ -179,7 +179,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await send("Read the project with Claude");
     await expect.poll(async () => { try { return (await seen()).prompt; } catch { return ""; } }, { timeout: 30_000 }).toBe("Read the project with Claude");
     const readOnly = await seen();
-    assert.equal(readOnly.args[readOnly.args.indexOf("--tools") + 1], "Read,Glob,Grep");
+    assert.equal(readOnly.args[readOnly.args.indexOf("--tools") + 1], "Read,Glob");
     assert.equal(readOnly.args[readOnly.args.indexOf("--permission-prompts") + 1], "none");
     // The fake still asks; with no approver and no prompts allowed, the answer is a denial.
     assert.equal(readOnly.response?.response.response.behavior, "deny");

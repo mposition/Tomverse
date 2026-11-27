@@ -48,12 +48,14 @@ test("The permission table, as the CLI's own options", () => {
   }
 
   // Claude Code: the tool list is the hard limit; approvals come back over the stream except in Read only.
-  assert.deepEqual(claudeTools("read_only"), ["Read", "Glob", "Grep"]);
-  assert.equal(pair(claude("read_only"), "--tools"), "Read,Glob,Grep");
+  assert.deepEqual(claudeTools("read_only"), ["Read", "Glob"]);
+  assert.equal(pair(claude("read_only"), "--tools"), "Read,Glob");
   assert.equal(pair(claude("read_only"), "--permission-prompts"), "none");
   assert.equal(pair(claude("read_only"), "--permission-mode"), "dontAsk");
   for (const mode of ["ask", "auto_review", "allow_all"] as const) {
-    assert.deepEqual(claudeTools(mode, "linux"), ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]);
+    assert.deepEqual(claudeTools(mode, "linux"), ["Read", "Glob", "Edit", "Write", "Bash"]);
+    // No tool that returns file contents without the Read deny rules (credential files) applying to it.
+    assert.ok(!claudeTools(mode, "linux").includes("Grep"), mode);
     assert.equal(pair(claude(mode), "--permission-prompts"), "host", mode);
     assert.equal(pair(claude(mode), "--permission-mode"), "default", mode);
   }
@@ -63,8 +65,8 @@ test("The permission table, as the CLI's own options", () => {
   assert.ok(!claude("auto_review").includes("auto"));
   assert.ok(!claude("ask").includes("--allowedTools"), "Ask never pre-approves a tool");
   // Allow all pre-approves file edits; a command is still the person's to approve.
-  assert.equal(pair(claude("allow_all"), "--allowedTools"), "Read,Glob,Grep,Edit,Write");
-  assert.equal(pair(claude("allow_all", "win32"), "--allowedTools"), "Read,Glob,Grep,Edit,Write");
+  assert.equal(pair(claude("allow_all"), "--allowedTools"), "Read,Glob,Edit,Write");
+  assert.equal(pair(claude("allow_all", "win32"), "--allowedTools"), "Read,Glob,Edit,Write");
   assert.equal(cliPermissionPlan("anthropic", "allow_all").approvals, "card");
   assert.equal(cliPermissionPlan("anthropic", "allow_all").notice, "cliAllowAllCommandsAsk");
   assert.ok(claudeTools("ask", "win32").includes("PowerShell"));

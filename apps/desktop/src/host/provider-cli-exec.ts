@@ -42,9 +42,11 @@ export const claudeSecretRules = ["Read", "Edit", "Write", "MultiEdit", "Noteboo
   ...secretNames.map((name) => `${tool}(**/${name})`), ...secretFolders.map((folder) => `${tool}(**/${folder}/**)`),
 ]);
 
-/** Names of Claude Code's built-in tools a run may use, by the permission it was granted. */
+/** Names of Claude Code's built-in tools a run may use, by the permission it was granted (the tool list is the hard limit). */
 export function claudeTools(grants: PermissionModeId, platform: NodeJS.Platform = process.platform): string[] {
-  const read = ["Read", "Glob", "Grep"];
+  // No Grep: a search over a folder returns file contents without passing the Read deny rules for credential files (Claude Code applies
+  // them to Grep only best-effort), so reading goes through Read, which they cover, and Glob lists names only.
+  const read = ["Read", "Glob"];
   if (grants === "read_only") return read;
   return [...read, "Edit", "Write", "Bash", ...(platform === "win32" ? ["PowerShell"] : [])];
 }
@@ -404,6 +406,8 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     child.once("exit", (code) => {
       // Whatever the CLI left running (a background command, a child of a crashed CLI) ends with it, and a question
       // nobody can answer any more is cancelled. This runs at the exit itself, before the process id can mean anything else.
+      // killTree lists the orphans of the exited process too: on Windows by the parent id they still record, on POSIX by the
+      // process group (a command that started its own session is not found once its parent is gone).
       for (const controller of pendingApprovals.values()) controller.abort();
       void kill();
       // A grandchild that kept the pipes open must not hold the run: give the pipes a moment to flush, then let go.
