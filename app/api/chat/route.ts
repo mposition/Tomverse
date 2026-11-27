@@ -500,6 +500,7 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
@@ -2221,9 +2222,15 @@ async function handleChatPost(
                           productKey: true,
                           projectId: true,
                           continuationBridge: { select: { id: true, reviewHandoff: true } },
+                          temporaryExpiresAt: true,
                       },
                   })
                 : null;
+        // A temporary Chat takes no answer past its expiry; the sweep deletes it
+        // shortly after (lib/temporaryChatAccess.ts).
+        if (isTemporaryConversationExpired(conversationRouting?.temporaryExpiresAt, new Date())) {
+            throw new ChatAccessError(410, TEMPORARY_CHAT_EXPIRED, "This temporary chat has ended.");
+        }
         if (conversationRouting?.continuationBridge) continuation.receipt = continuationReceipt({
             traceId, assistantMessageId: assistantMessageId ?? "", selected: req.headers.has(PASSAGE_HEADER), outcome: "not_prepared" });
         if (guestAutoCapability) {
@@ -3718,6 +3725,7 @@ async function handleChatPost(
                   memoryTokens: number;
                   profileTokens: number;
                   projectTokens: number;
+                  preferenceTokens: number;
                   project: ProjectTurnScope | null;
                   projectMaterialSources: Array<{ fileId: string; ordinal: number; fileName: string }>;
                   projectReferenceSources: Array<{ ref: string; status: "included" | "unavailable"; title: string | null }>;
@@ -3777,6 +3785,7 @@ async function handleChatPost(
                 memoryTokens: verification.payload.memoryTokens,
                 profileTokens: verification.payload.profileTokens,
                 projectTokens: verification.payload.projectTokens ?? 0,
+                preferenceTokens: verification.payload.preferenceTokens ?? 0,
                 project: turnContext.project?.project ?? null,
                 projectMaterialSources: turnContext.project?.materialSources ?? [],
                 projectReferenceSources: turnContext.project?.references ?? [],
@@ -4037,7 +4046,8 @@ async function handleChatPost(
                 if (bucket) void recordMemoryCounter(bucket);
             }
             const quotedContextTokens =
-                verifiedContext.memoryTokens + verifiedContext.profileTokens + verifiedContext.projectTokens;
+                verifiedContext.memoryTokens + verifiedContext.profileTokens + verifiedContext.projectTokens +
+                verifiedContext.preferenceTokens;
             estimatedInputTokens += quotedContextTokens;
             inputEstimate.addTokens(quotedContextTokens);
         }

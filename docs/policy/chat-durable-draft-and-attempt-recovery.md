@@ -250,6 +250,12 @@ installed Next.js 16 contract and are awaited promises.
 - Both tables relate to `User` with `onDelete: Cascade`; conversation-scoped
   rows also cascade with their conversation. Account and conversation deletion
   therefore remove recovery state in the same database transaction.
+- The temporary Chat sweep (`lib/temporaryConversationSweep.ts`) deletes an
+  expired temporary conversation under the same conversation recovery lock a
+  claim takes, and skips one whose attempt still holds a live lease; the send
+  path refuses a new answer from the moment of expiry, so only an answer
+  admitted before it can be running, and the conversation goes once that
+  attempt ends or its lease lapses.
 - A draft is the user's unsent content, so unified account export includes its
   text, scope, revision, and timestamps. Opaque attachment reference ids and
   internal row ids are withheld and the export manifest says so.

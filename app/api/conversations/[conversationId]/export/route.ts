@@ -173,7 +173,10 @@ export async function GET(
         }
 
         const conversation = await prisma.conversation.findFirst({
-            where: { id: conversationId, userId },
+            // A temporary Chat is not exportable (lib/temporaryChatAccess.ts);
+            // it has no continuation bridge, so the source path above never
+            // finds one either.
+            where: { id: conversationId, userId, temporaryExpiresAt: null },
             select: {
                 id: true,
                 title: true,

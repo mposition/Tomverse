@@ -27,6 +27,8 @@ import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLoca
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+import { TemporaryChatNotice } from "@/components/chat/TemporaryChatNotice";
+import { useTemporaryChat } from "@/components/chat/useTemporaryChat";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import { GeneratedArtifactRevisionContext, useGeneratedArtifactRevision } from "@/components/chat/GeneratedArtifactRevisionContext";
 
@@ -1136,6 +1138,8 @@ export function ChatPageClient({
   // SessionProviderWrapper, so this is already final on the first render --
   // guest mode is never "unknown and then guest".
   const isGuestMode = status !== "loading" && !sessionUserId;
+  // Temporary Chat (lib/temporaryChatAccess.ts): signed-in Chat only.
+  const temporaryChat = useTemporaryChat({ enabled: mountedSurface === "chat" && !isGuestMode, ownerKey: sessionUserId, currentChatId });
   const guestWorkspaceProduct = mountedSurface === "chat" ? "chat" : "review";
   const {
     activeChatKey: guestActiveChatStorageKey,
@@ -5683,6 +5687,7 @@ export function ChatPageClient({
     )
   ) : undefined;
   const projectComposerBarNode = projectsAvailable && effectiveProjectId && !activeProjectRoute ? <ProjectComposerBar /> : undefined;
+  const temporaryChatNotice = <TemporaryChatNotice controller={temporaryChat} currentChatId={currentChatId} inProject={Boolean(effectiveProjectId)} onEnd={handleNewChat} />;
   
   /**
    * The single mutation path for a conversation's model selection. Every
@@ -6846,7 +6851,8 @@ export function ChatPageClient({
       pendingCreatedChat &&
       pendingCreatedChat.identityKey === identityKey &&
       sameStringList(pendingCreatedChat.modelIds, sendSelectedModels) &&
-      sameStringList(pendingCreatedChat.disabledIds, sendDisabledPanels)
+      sameStringList(pendingCreatedChat.disabledIds, sendDisabledPanels) &&
+      temporaryChat.matchesPending(pendingCreatedChat.id)
     ) {
       // A previous Message transaction may have failed after conversation
       // creation. Reuse that still-empty conversation while the composer stays
@@ -6912,11 +6918,13 @@ export function ChatPageClient({
             // nothing about a profile it was never asked about.
             ...(pendingProfileId ? { assistantProfileId: pendingProfileId } : {}),
             ...(mountedSurface === "chat" ? withProjectAttribution({}, pendingProjectIdRef.current) : {}),
+            ...(mountedSurface === "chat" && !pendingProjectIdRef.current ? temporaryChat.createFields() : {}),
           }),
         });
 
         if (res.ok) {
           const data = await res.json();
+          temporaryChat.adoptCreated(data);
           // Creation is durable, but its late response has no authority to
           // take over a different account, conversation or model selection.
           if (!chatOriginStillCurrent()) {
@@ -8775,7 +8783,8 @@ export function ChatPageClient({
         if (
           reusable?.identityKey === identityKey &&
           sameStringList(reusable.modelIds, capturedModels) &&
-          sameStringList(reusable.disabledIds, capturedDisabled)
+          sameStringList(reusable.disabledIds, capturedDisabled) &&
+          temporaryChat.matchesPending(reusable.id)
         ) {
           createdId = reusable.id;
           createdTitle = reusable.title;
@@ -8796,6 +8805,7 @@ export function ChatPageClient({
                   ? { assistantProfileId: capturedProfileId }
                   : {}),
                 ...withProjectAttribution({}, capturedProjectId),
+                ...(capturedProjectId ? {} : temporaryChat.createFields()),
               }),
             });
           } catch {
@@ -8840,6 +8850,7 @@ export function ChatPageClient({
             return false;
           }
           const knownCreatedId = created.id as string;
+          temporaryChat.adoptCreated(created);
           createdId = knownCreatedId;
           createdModels = clampSelectedModels(
             Array.isArray(created.selectedModels)
@@ -10893,7 +10904,7 @@ export function ChatPageClient({
           onOpenProjectWorkspace={projectsAvailable ? openProjectWorkspace : undefined}
           activeProjectWorkspaceId={activeProjectRoute?.kind === "project" ? activeProjectRoute.projectId : null}
           continuationNotice={reviewHandoffNotice}
-          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
+          workspaceNotice={mountedSurface === "chat" ? <><ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} />{temporaryChatNotice}</> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
@@ -11076,7 +11087,7 @@ export function ChatPageClient({
             }
           }}
           continuationNotice={reviewHandoffNotice}
-          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
+          workspaceNotice={mountedSurface === "chat" ? <><ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} />{temporaryChatNotice}</> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
           onStudioStarter={id => {
