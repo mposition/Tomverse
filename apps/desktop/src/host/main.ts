@@ -515,8 +515,8 @@ function broadcast() {
   if (!state.dictationAvailable) stopDictation(true);
   // The account is gone, or the server answered and no longer offers the voice conversation: the window closes its
   // session. A capability read that failed is not an answer and ends nothing.
-  if (state.account.stage !== "connected") voice.stop(true);
-  else if (state.capabilities && !state.capabilities.voiceConversation) voice.stop(false);
+  if (state.account.stage !== "connected") void voice.end();
+  else if (state.capabilities && !state.capabilities.voiceConversation) voice.withdraw();
   refreshCodeFallbackSettings();
   state.draftNamespace = workspaceNamespace();
   state.handoff = currentHandoff();
@@ -2250,7 +2250,7 @@ function clearAccountWorkspace() {
   attachmentTransfer?.controller.abort();
   attachmentReceipts.clear();
   codeReferences.clear();
-  voice.stop(true);
+  void voice.end();
   chatSession.abort();
   workspaceHandoff = null;
   chatSession = new AbortController();
@@ -3359,6 +3359,8 @@ async function signOut() {
   chatTurn?.abort();
   attachmentTransfer?.controller.abort();
   renewal?.controller.abort();
+  // A paid voice session is ended on the server with this account's token, before the token goes.
+  await voice.end((body, signal) => desktopChatApi(active.accessToken, signal, accountOrigin).voice(body, signal));
   state.account = { stage: "signing-out" };
   broadcast();
   await remoteControl.signingOut(active.accessToken);
@@ -4293,12 +4295,18 @@ function createMainWindow() {
       requestQuit();
       return;
     }
+    // A paid voice session is ended on the server before the window goes, and the app with it.
+    if (voice.active()) {
+      event.preventDefault();
+      void voice.end().finally(() => { if (!window.isDestroyed()) window.close(); });
+      return;
+    }
     try { writeFileAtomic(windowBoundsPath(), JSON.stringify(window.getNormalBounds())); }
     catch { /* A preference write must not prevent closing the app. */ }
   });
   window.once("closed", () => {
     // The window that held the microphone is gone: a session must not stay open (and billed) behind it.
-    voice.stop(true);
+    void voice.end();
     screen.off("display-removed", keepWindowOnDisplay);
     screen.off("display-metrics-changed", keepWindowOnDisplay);
     if (mainWindow === window) {
@@ -4375,6 +4383,12 @@ else {
     if (state.busy || pendingMutation || parallel.lanes.busy()) {
       event.preventDefault();
       requestQuit();
+      return;
+    }
+    // Quitting waits (three seconds at most) for the server to be told that a paid voice session is over.
+    if (voice.active()) {
+      event.preventDefault();
+      void voice.end().finally(() => app.quit());
     }
   });
   app.on("will-quit", () => {
@@ -4454,7 +4468,7 @@ else {
       geolocationGrant = undefined;
       stopDictation(true);
       // A sleeping computer cannot be relied on to let the window end its own session: this process ends it now.
-      voice.stop(true);
+      void voice.end();
       stop();
       parallel.lanes.stopAll();
     });

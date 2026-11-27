@@ -110,23 +110,30 @@ export function createVoiceHost(deps: {
       }
     },
     abort(id: string) { live.get(id)?.abort(); },
-    /**
-     * Ends what this account's window had open, and tells the window. With `cut` this process ends the session
-     * itself, without waiting for the window: it asks the server to stop it and closes the open requests. That is
-     * for sleep, a closed window and an account that is gone, where the window may never get to act.
-     */
-    stop(cut: boolean) {
+    /** The server no longer offers the conversation: the window is told, and ends its own session in the ordinary way. */
+    withdraw() {
       const had = grant !== undefined || live.size > 0;
       grant = undefined;
-      if (cut) {
-        const reservation = session?.reservation;
-        if (reservation) {
-          void deps.send({ action: "stop", reservationId: reservation }, AbortSignal.timeout(5_000))
-            .then((response) => response.body?.cancel()).catch(() => { /* The closed stream ends it on the server as well. */ });
-        }
-        for (const controller of live.values()) controller.abort();
-      }
       if (had) deps.notifyStop();
+    },
+    /**
+     * Ends the session from this process, without waiting for the window: for sleep, a closing window, quitting and
+     * an account that is going, where the window may never get to act. The open requests are closed at once, and the
+     * server is asked to stop the session. It resolves when the server has answered, or after three seconds, so the
+     * caller can hold a sign-out or a quit until then. `send` is for a sign-out, whose token is about to go.
+     */
+    async end(send: (body: VoiceBody, signal: AbortSignal) => Promise<Response> = deps.send) {
+      const had = grant !== undefined || live.size > 0;
+      grant = undefined;
+      const reservation = session?.reservation;
+      session = undefined;
+      const asked = reservation
+        ? send({ action: "stop", reservationId: reservation }, AbortSignal.timeout(3_000))
+          .then((response) => response.body?.cancel()).catch(() => { /* The closed stream ends it on the server as well. */ })
+        : undefined;
+      for (const controller of live.values()) controller.abort();
+      if (had) deps.notifyStop();
+      await asked;
     },
   };
 }

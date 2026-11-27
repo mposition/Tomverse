@@ -221,8 +221,12 @@ test("signing out ends a voice session at once", { timeout: 120_000, skip: !orig
     const panel = desktop.getByTestId("voice-conversation-panel");
     await panel.getByRole("button", { name: "Start voice conversation", exact: true }).click();
     await expect.poll(async () => (await fixtureState(app)).offer !== undefined, { timeout: 20_000 }).toBe(true);
+    // The session has a name once its first event arrives; the main process ends it by that name.
+    await push(app, { type: "usage", reservationId: "voice-r2", seconds: 0, credits: 0 });
     await desktop.evaluate(() => window.desktop.signOut());
     await expect.poll(async () => (await fixtureState(app)).aborted).toBe(true);
+    // The server was told to stop it while the account's token was still good (the fixture refuses any other bearer).
+    assert.deepEqual((await fixtureState(app)).voice.filter(({ action }) => action === "stop"), [{ action: "stop", reservationId: "voice-r2" }]);
     await expect.poll(async () => (await desktop.evaluate(() => window.desktop.state())).account.stage).not.toBe("connected");
     await expect(panel).toHaveCount(0);
     await expect(desktop.getByTestId("voice-conversation-open")).toHaveCount(0);

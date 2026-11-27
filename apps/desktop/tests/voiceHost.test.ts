@@ -124,7 +124,7 @@ test("once the conversation is withdrawn nothing new starts, but a session can s
   assert.deepEqual(sent.map(({ action }) => action), ["stop", "status"]);
 });
 
-test("ending the account's sessions tells the window once, and cuts the open requests only when the account is gone", async () => {
+test("a withdrawn feature only tells the window; ending from here closes the open requests", async () => {
   const stream = session();
   let aborted = false;
   const { host, state, events } = harness({ reply: (body, signal) => {
@@ -132,15 +132,15 @@ test("ending the account's sessions tells the window once, and cuts the open req
     signal.addEventListener("abort", () => { aborted = true; stream.fail(); });
     return stream.response;
   } });
-  host.stop(true);
+  await host.end();
   assert.equal(state.stops, 0, "nothing was open");
   host.arm(); host.microphoneOpened();
   const first = start();
   await host.request(first);
-  host.stop(false);
+  host.withdraw();
   assert.equal(state.stops, 1);
-  assert.equal(aborted, false, "asleep or withdrawn: the window ends its own session, which also ends it on the server");
-  host.stop(true);
+  assert.equal(aborted, false, "withdrawn by the server: the window ends its own session in the ordinary way");
+  await host.end();
   await settle();
   assert.equal(aborted, true);
   assert.deepEqual(events.at(-1), { id: first.id, end: "error" });
@@ -171,7 +171,7 @@ test("a press of Start is spent by time, by a start, by a failed start and by cl
   assert.equal(sent.length, 1);
 });
 
-test("on sleep, a closed window or a lost account this process ends the session itself: it asks the server to stop it and closes the stream", async () => {
+test("on sleep, a closing window, a quit or a lost account this process ends the session itself and waits for the server to be told", async () => {
   const stream = session();
   let aborted = false;
   const { host, sent, events } = harness({ reply: (body, signal) => {
@@ -186,15 +186,35 @@ test("on sleep, a closed window or a lost account this process ends the session 
   stream.push("data: {\"type\":\"ready\",\"reservationId\":\"voice-");
   stream.push("r7\",\"sdp\":\"v=0\"}\n\n");
   await settle();
-  host.stop(true);
-  await settle();
+  // The caller can hold a quit or a sign-out on this: it resolves once the server has answered the stop.
+  let answered = false;
+  const ending = host.end(async (body) => { sent.push(body); await settle(); answered = true; return Response.json({ ok: true }); });
+  assert.equal(host.active(), false, "the session is over here at once");
+  assert.equal(aborted, true, "and its stream is closed at once");
+  assert.equal(answered, false);
+  await ending;
+  assert.equal(answered, true);
   assert.deepEqual(sent.at(-1), { action: "stop", reservationId: "voice-r7" });
-  assert.equal(aborted, true);
-  assert.deepEqual(events.at(-1), { id: first.id, end: "error" });
-  assert.equal(host.active(), false);
-  // Nothing is left to end, so nothing more is sent.
-  const count = sent.length;
-  host.stop(true);
   await settle();
+  assert.deepEqual(events.at(-1), { id: first.id, end: "error" });
+  // Nothing is left to end, so nothing more is sent; a server that cannot be reached does not hold the caller.
+  const count = sent.length;
+  await host.end(async () => { throw new Error("offline"); });
   assert.equal(sent.length, count);
+});
+
+test("a sign-out ends the session with the token it still has, and an unreachable server holds it for a moment only", async () => {
+  const stream = session();
+  const { host, sent } = harness({ reply: (body) => {
+    if (body.action === "start") return stream.response;
+    throw new Error("the account is signing out");
+  } });
+  host.arm(); host.microphoneOpened();
+  await host.request(start());
+  stream.push("data: {\"type\":\"ready\",\"reservationId\":\"voice-r8\"}\n\n");
+  await settle();
+  const direct: unknown[] = [];
+  await host.end(async (body, signal) => { direct.push(body); assert.equal(signal.aborted, false); throw new Error("offline"); });
+  assert.deepEqual(direct, [{ action: "stop", reservationId: "voice-r8" }]);
+  assert.equal(sent.filter(({ action }) => action === "stop").length, 0, "the ordinary sender, which refuses during a sign-out, was not used");
 });
