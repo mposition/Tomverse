@@ -9361,8 +9361,18 @@ async function handleChatPost(
                             typeof issueStreamErrorReport
                         > = null;
                         let attachmentRejected = false;
+                        /*
+                          One terminal transition per attempt. When this turn
+                          wrote a Message (`attemptTerminalWithMessage`) -- a
+                          failure card with no text included -- the Message
+                          transaction closed the attempt, or its failure path
+                          did; nothing here may close it again. This is only
+                          for an empty turn with nothing to save whose
+                          settlement could not write its own `failed`.
+                        */
                         if (
                             isEmptyResponse &&
+                            !attemptTerminalWithMessage &&
                             durableAttempt &&
                             durableFinalCheckpoint
                         ) {

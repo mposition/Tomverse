@@ -76,6 +76,11 @@ type Script = {
   rest?: string;
   /** The unified finish reason the SDK resolves; `stop` when absent. */
   finishReason?: string;
+  /**
+   * A file tool call the provider begins before its first text, and whether
+   * the SDK then runs it (through the tool's own `execute`).
+   */
+  tool?: { toolName: string; toolCallId: string; execute: boolean; input?: unknown };
 };
 
 let script: Script = { first: "Partial.", then: "finish", rest: " The end." };
@@ -84,11 +89,18 @@ let providerAbortReason: unknown = null;
 let providerCancelled = false;
 /** Runs as the provider is called -- after dispatch, before the Response exists. */
 let onProviderCall: (() => void) | null = null;
+/** Whether the last `readToEnd()` ended on a stream error rather than a close. */
+let lastReadErrored = false;
 
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: (options: { abortSignal?: AbortSignal; onChunk?: (event: { chunk: unknown }) => unknown }) => {
+    streamText: (options: {
+      abortSignal?: AbortSignal;
+      onChunk?: (event: { chunk: unknown }) => unknown;
+      onToolExecutionStart?: (event: { toolCall: { toolCallId: string; toolName: string } }) => unknown;
+      tools?: Record<string, { execute?: (input: unknown, meta: { toolCallId: string }) => unknown }>;
+    }) => {
       const observeAbort = () => {
         providerAbortReason = options.abortSignal?.reason ?? "aborted";
       };
@@ -101,7 +113,15 @@ mock.module("ai", {
       });
       const result = {
         textStream: new ReadableStream<string>({
-          start(controller) {
+          async start(controller) {
+            const tool = script.tool;
+            if (tool) {
+              options.onChunk?.({ chunk: { type: "tool-input-start", toolCallId: tool.toolCallId, toolName: tool.toolName } });
+              if (tool.execute) {
+                options.onToolExecutionStart?.({ toolCall: { toolCallId: tool.toolCallId, toolName: tool.toolName } });
+                await options.tools?.[tool.toolName]?.execute?.(tool.input, { toolCallId: tool.toolCallId });
+              }
+            }
             controller.enqueue(script.first);
             text += script.first;
             options.onChunk?.({ chunk: { type: "text-delta", text: script.first } });
@@ -282,6 +302,9 @@ const world = {
   commitAckLost: [] as unknown[],
   /** The route's read-back of its own assistant row fails. */
   commitCheckFails: false,
+  /** Artifact rows the Message transaction wrote, and objects reclaimed. */
+  artifactRows: [] as Array<{ messageId: string; ordinal: number; status: string; failureCode?: string }>,
+  discarded: 0,
 };
 
 const DEFAULTS: Record<string, () => unknown> = {
@@ -312,6 +335,19 @@ const conversationRow = {
 };
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
+  messageArtifact: {
+    createMany: ((args: { data: Array<{ messageId: string; ordinal: number; status: string; failureCode?: string }> }) => {
+      world.artifactRows.push(...args.data);
+      return { count: args.data.length };
+    }) as (args: never) => unknown,
+    findMany: (() =>
+      world.artifactRows.map((row, index) => ({
+        id: `row_${index + 1}`,
+        ordinal: row.ordinal,
+        parentArtifactId: null,
+        lineageId: null,
+      }))) as (args: never) => unknown,
+  },
   user: { findUnique: () => ({ id: USER_ID, email: "detach-qa@tomverse.app", name: "Fixture", accountStatus: "active" }) },
   conversation: {
     findUnique: () => conversationRow,
@@ -383,6 +419,31 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
   },
 });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaProxy } });
+
+// A stored artifact must not reach a real bucket.
+const realArtifactStorage = require(resolve(ROOT, "lib/generatedArtifactStorage.ts")) as {
+  persistArtifactRows: unknown;
+};
+mock.module(mod("lib/generatedArtifactStorage.ts"), {
+  namedExports: {
+    persistArtifactRows: realArtifactStorage.persistArtifactRows,
+    putArtifactObject: async (input: {
+      ordinal: number; format: string; filename: string; mediaType: string; bytes: Uint8Array; modelId: string | null;
+    }) => ({
+      id: `art_${input.ordinal}`,
+      ordinal: input.ordinal,
+      format: input.format,
+      filename: input.filename,
+      mediaType: input.mediaType,
+      byteSize: input.bytes.byteLength,
+      objectKey: `message-artifacts/${USER_ID}/${CONVERSATION_ID}/art_${input.ordinal}.${input.format}`,
+      modelId: input.modelId,
+    }),
+    discardStoredArtifacts: async (artifacts: unknown[]) => {
+      world.discarded += artifacts.length;
+    },
+  },
+});
 
 /* -------------------------------------------------------------------------- */
 /* Money and slots                                                             */
@@ -485,6 +546,8 @@ const start = async (next: Script, switchOn: boolean) => {
   row = null;
   terminals.length = 0;
   world.messages = [];
+  world.artifactRows = [];
+  world.discarded = 0;
   ledger.settlements = [];
   ledger.releases = [];
   if (switchOn) process.env.CHAT_CONTINUE_AFTER_DISCONNECT = "on";
@@ -521,9 +584,13 @@ const start = async (next: Script, switchOn: boolean) => {
       const keep = setInterval(() => {}, 20);
       const decoder = new TextDecoder();
       let body = "";
+      lastReadErrored = false;
       try {
         for (;;) {
-          const read = await reader.read().catch(() => ({ done: true as const, value: undefined }));
+          const read = await reader.read().catch(() => {
+            lastReadErrored = true;
+            return { done: true as const, value: undefined };
+          });
           if (read.done) return body;
           body += decoder.decode(read.value, { stream: true });
         }
@@ -950,3 +1017,70 @@ test("a checkpoint that committed but lost its answer does not fail the turn", a
     checkpointAckLost = [];
   }
 });
+
+/* -------------------------------------------------------------------------- */
+/* Review r-20261127-033833-e39d74: one terminal transition per durable turn   */
+/* -------------------------------------------------------------------------- */
+
+/*
+  Every completion shape a durable Chat turn can take, on the durable path:
+  the attempt row is closed exactly once by its owner, the stream ends without
+  an error, and settlement and storage agree. The orders the Message write
+  itself can fail in (late stop, unknown outcome, known rollback) are pinned
+  by the tests above.
+*/
+const { parseChatStreamTrailer, splitSearchMetadataTrailer } = require(
+  resolve(ROOT, "lib/webSearchStreamTrailer.ts")
+) as typeof import("../../lib/webSearchStreamTrailer");
+const htmlFile = {
+  toolName: "create_text_file",
+  toolCallId: "call_html",
+  execute: true,
+  input: { filename: "page.html", format: "html", content: "<!doctype html><title>ok</title><p>ok</p>" },
+};
+const durableShapes: Array<{
+  name: string;
+  script: Script;
+  settlement: string;
+  terminal: string;
+  saved: boolean;
+  cards: string[];
+}> = [
+  { name: "an answer with text", script: { first: "Partial.", then: "finish", rest: " The end." },
+    settlement: "completed", terminal: "completed", saved: true, cards: [] },
+  { name: "a file with no text", script: { first: "", then: "finish", rest: "", tool: htmlFile },
+    settlement: "completed", terminal: "completed", saved: true, cards: ["ready"] },
+  { name: "a turn_incomplete card with no text",
+    script: { first: "", then: "finish", rest: "", finishReason: "length",
+      tool: { toolName: "create_text_file", toolCallId: "call_cut", execute: false } },
+    settlement: "empty", terminal: "completed", saved: true, cards: ["failed"] },
+  { name: "a failed generation card with no text",
+    script: { first: "", then: "finish", rest: "",
+      tool: { toolName: "create_text_file", toolCallId: "call_txt", execute: true,
+        input: { format: "txt", filename: "notes.txt", content: "x" } } },
+    settlement: "empty", terminal: "completed", saved: true, cards: ["failed"] },
+  { name: "an answer the provider broke off",
+    script: { first: "Partial.", then: "finish", rest: " The en", finishReason: "error" },
+    settlement: "cancelled", terminal: "completed", saved: true, cards: [] },
+  { name: "neither text nor any card", script: { first: "", then: "finish", rest: "" },
+    settlement: "empty", terminal: "failed", saved: false, cards: [] },
+];
+for (const shape of durableShapes) {
+  test(`durable: ${shape.name} closes its attempt once and ends the stream cleanly`, async () => {
+    const { readToEnd } = await start(shape.script, false);
+    releaseRest();
+    const body = await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    await until("the settlement", () => ledger.settlements.length > 0);
+    assert.equal(lastReadErrored, false, "a saved turn ended as a stream error");
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), [shape.settlement]);
+    // Exactly one terminal transition by the owner, and the row agrees.
+    assert.deepEqual(terminals.map((t) => t.status), [shape.terminal]);
+    assert.equal(row?.status, shape.terminal);
+    assert.equal(world.messages.length, shape.saved ? 1 : 0);
+    const trailer = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson);
+    assert.deepEqual((trailer?.artifacts ?? []).map((card) => card.status), shape.cards);
+    assert.deepEqual(world.artifactRows.map((r) => r.status), shape.cards);
+    assert.equal(world.discarded, 0);
+  });
+}
