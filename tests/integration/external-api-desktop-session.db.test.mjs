@@ -406,6 +406,33 @@ test("Desktop Code on the Desktop session over the real shared credit ledger", {
         assert.equal(await db.externalApiRequest.count({ where: { userId } }), 0);
     });
 
+    await t.test("a sign-out still committing when the reservation starts is waited for, then refused", { timeout: 120_000 }, async () => {
+        const userId = await newUser();
+        const session = await signIn(userId);
+        const before = dispatches;
+        let signOut;
+        // A sign-out that holds the family row while the admission reaches it, and commits the revocation half a second later.
+        beforeReservationTransaction = async () => {
+            let locked;
+            const holding = new Promise((resolve) => (locked = resolve));
+            signOut = db.$transaction(async (tx) => {
+                await tx.$executeRaw`SELECT "id" FROM "MobileTokenFamily" WHERE "id" = ${session.familyId} FOR UPDATE`;
+                await tx.mobileTokenFamily.update({ where: { id: session.familyId }, data: { revokedAt: new Date(), revokedReason: "logout" } });
+                locked();
+                await new Promise((settle) => setTimeout(settle, 500));
+            });
+            await holding;
+        };
+        const started = Date.now();
+        const response = await complete(session.token, body(), { desktop: true });
+        await signOut;
+        assert.equal(response.status, 401);
+        assert.equal((await response.json()).error.code, "invalid_desktop_session");
+        assert.ok(Date.now() - started >= 400, "the admission waited for the sign-out to commit");
+        assert.equal(dispatches, before);
+        assert.equal((await reservationsFor(userId)).length, 0);
+    });
+
     await t.test("Code is Pro and above on the session as with a key", { timeout: 120_000 }, async () => {
         const free = await newUser("Free");
         const session = await signIn(free);

@@ -1225,7 +1225,8 @@ function onWorkerMessage(event: WorkerEvent) {
       refreshHistory();
       if (!discarded) void pullLinker.flush(event.task.id);
       if (!discarded) notifyCodeResult(event.task.status);
-      if (discarded && browserSession && !linkedCode && !fixture) syncCodeConnection(browserSession);
+      // A Code connection change that waited for this task (or the discarded task's own account clear) happens now.
+      if (browserSession && !fixture && ((discarded && !linkedCode) || codeConnectionSwitchPending())) syncCodeConnection(browserSession);
       if (closing) app.quit();
     } else {
       const task = activeContinuation ? continuationView(activeContinuation, event.task)
@@ -1546,6 +1547,14 @@ function dropCodeSession() {
   state.task = null;
   refreshHistory();
   requestCodeCatalog();
+}
+
+/** The server's answer and Code's connection disagree: a switch adoptCodeSession or dropCodeSession put off while busy. */
+function codeConnectionSwitchPending() {
+  const capabilities = state.capabilities;
+  if (fixture || !capabilities || !browserSession) return false;
+  return capabilities.codeSession ? !(linkedCode?.connection.session && linkedCode.accountId === browserSession.accountId)
+    : !!linkedCode?.connection.session;
 }
 
 /** Code's connection for this account: the session where the server offers it, else a stored Code key (older servers). */
@@ -2566,6 +2575,10 @@ async function checkBrowserSession() {
     return;
   }
   if (codeTokenDue()) void refreshCodeToken(active);
+  // Capabilities that could not be read are read again, and a Code connection change that waited for a running task
+  // is made once nothing depends on the old connection (a parallel lane finishing included).
+  if (!state.capabilities) void refreshDesktopCapabilities(active, { keepCurrentOnFailure: true });
+  else if (codeConnectionSwitchPending()) { syncCodeConnection(active); broadcast(); }
   try {
     const account = await readBrowserAccount(active.accessToken, AbortSignal.timeout(5_000), accountOrigin);
     if (browserSession === active && !signingOut && account.id !== active.accountId) await expireAccount();
