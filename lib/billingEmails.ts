@@ -1038,3 +1038,238 @@ export function buildAdminPlanChangedEmail(input: {
   );
   return { subject, text, html };
 }
+
+/**
+ * The two plan-change confirmations (docs/policy/plan-change.md section 9).
+ *
+ * Two phases rather than one message with a direction field, for the same
+ * reason the pass notices are three keys: a TemplateVersion hashes one
+ * message's copy, and the audit reproduction has to be able to say which of
+ * the two a delivery was. Both use the billing welcome email's shell and box,
+ * so a plan change reads like the receipt it follows.
+ */
+export type PlanChangeEmailPhase = "upgraded" | "downgrade_scheduled";
+
+type PlanChangeEmailCopy = {
+  fromLabel: string;
+  toLabel: string;
+  billingLabel: string;
+  upgraded: {
+    subject: (plan: string) => string;
+    title: string;
+    intro: string;
+    dateLabel: string;
+    note: string;
+  };
+  downgradeScheduled: {
+    subject: (plan: string) => string;
+    title: string;
+    intro: (fromPlan: string, date: string) => string;
+    dateLabel: string;
+    note: (date: string) => string;
+  };
+};
+
+const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
+  en: {
+    fromLabel: "Previous plan",
+    toLabel: "New plan",
+    billingLabel: "Billing",
+    upgraded: {
+      subject: (plan) => `Your Tomverse plan is now ${plan}`,
+      title: "Your plan has been upgraded",
+      intro: "The payment for your plan change was successful, and the new plan is active on your account now.",
+      dateLabel: "Current billing period ends",
+      note: "Your billing period has not changed. This month's plan credit limit is now the new plan's limit; credits you already used this month still count, and purchased credits are unchanged.",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `Your change to Tomverse ${plan} is scheduled`,
+      title: "Your plan change is scheduled",
+      intro: (fromPlan, date) => `You keep ${fromPlan} until the end of your current billing period. The new plan starts on ${date}.`,
+      dateLabel: "Change takes effect",
+      note: (date) => `There is no charge or refund for this change. You can cancel it from Settings > Plan before ${date}.`,
+    },
+  },
+  ko: {
+    fromLabel: "이전 플랜",
+    toLabel: "새 플랜",
+    billingLabel: "결제 주기",
+    upgraded: {
+      subject: (plan) => `Tomverse ${plan} 플랜으로 변경되었습니다`,
+      title: "플랜이 업그레이드되었습니다",
+      intro: "플랜 변경 결제가 완료되어 지금부터 새 플랜을 이용하실 수 있습니다.",
+      dateLabel: "현재 결제기간 종료일",
+      note: "결제기간은 그대로입니다. 이번 달 플랜 크레딧 한도는 새 플랜 기준으로 바뀌며, 이번 달에 이미 사용한 크레딧은 그대로 반영됩니다. 구매한 추가 크레딧은 변동이 없습니다.",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `Tomverse ${plan} 플랜으로 변경이 예약되었습니다`,
+      title: "플랜 변경이 예약되었습니다",
+      intro: (fromPlan, date) => `현재 결제기간이 끝날 때까지 ${fromPlan} 플랜이 유지되고, ${date}부터 새 플랜이 적용됩니다.`,
+      dateLabel: "적용일",
+      note: (date) => `이 변경에는 추가 결제나 환불이 없습니다. ${date} 전까지 설정 > 플랜에서 예약을 취소할 수 있습니다.`,
+    },
+  },
+  zh: {
+    fromLabel: "原套餐",
+    toLabel: "新套餐",
+    billingLabel: "计费周期",
+    upgraded: {
+      subject: (plan) => `您的 Tomverse 套餐已变更为 ${plan}`,
+      title: "套餐已升级",
+      intro: "套餐变更付款已成功，新套餐现已在您的账户中生效。",
+      dateLabel: "当前计费周期结束日",
+      note: "计费周期保持不变。本月套餐积分额度已改为新套餐的额度；本月已使用的积分仍计入，已购买的积分不变。",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `已预约变更为 Tomverse ${plan}`,
+      title: "套餐变更已预约",
+      intro: (fromPlan, date) => `在当前计费周期结束前，您将继续使用 ${fromPlan}。新套餐将于 ${date} 开始生效。`,
+      dateLabel: "生效日期",
+      note: (date) => `此次变更不会产生额外费用或退款。您可以在 ${date} 之前于“设置 > 套餐”中取消此预约。`,
+    },
+  },
+  fr: {
+    fromLabel: "Ancienne formule",
+    toLabel: "Nouvelle formule",
+    billingLabel: "Facturation",
+    upgraded: {
+      subject: (plan) => `Votre formule Tomverse est désormais ${plan}`,
+      title: "Votre formule a été mise à niveau",
+      intro: "Le paiement de votre changement de formule a réussi et la nouvelle formule est active dès maintenant sur votre compte.",
+      dateLabel: "Fin de la période de facturation",
+      note: "Votre période de facturation ne change pas. La limite de crédits du mois en cours correspond désormais à la nouvelle formule ; les crédits déjà utilisés ce mois-ci restent comptés et vos crédits achetés ne changent pas.",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `Votre passage à Tomverse ${plan} est programmé`,
+      title: "Votre changement de formule est programmé",
+      intro: (fromPlan, date) => `Vous conservez ${fromPlan} jusqu'à la fin de votre période de facturation actuelle. La nouvelle formule commence le ${date}.`,
+      dateLabel: "Date d'effet",
+      note: (date) => `Ce changement n'entraîne ni frais ni remboursement. Vous pouvez l'annuler depuis Paramètres > Formule avant le ${date}.`,
+    },
+  },
+  de: {
+    fromLabel: "Bisheriger Tarif",
+    toLabel: "Neuer Tarif",
+    billingLabel: "Abrechnung",
+    upgraded: {
+      subject: (plan) => `Ihr Tomverse-Tarif ist jetzt ${plan}`,
+      title: "Ihr Tarif wurde hochgestuft",
+      intro: "Die Zahlung für Ihren Tarifwechsel war erfolgreich, und der neue Tarif ist ab sofort in Ihrem Konto aktiv.",
+      dateLabel: "Ende des Abrechnungszeitraums",
+      note: "Ihr Abrechnungszeitraum bleibt gleich. Das Credit-Limit dieses Monats entspricht jetzt dem neuen Tarif; bereits in diesem Monat verbrauchte Credits zählen weiterhin, gekaufte Credits bleiben unverändert.",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `Ihr Wechsel zu Tomverse ${plan} ist geplant`,
+      title: "Ihr Tarifwechsel ist geplant",
+      intro: (fromPlan, date) => `Sie behalten ${fromPlan} bis zum Ende Ihres aktuellen Abrechnungszeitraums. Der neue Tarif beginnt am ${date}.`,
+      dateLabel: "Wirksam ab",
+      note: (date) => `Für diesen Wechsel fallen weder Kosten noch Erstattungen an. Sie können ihn vor dem ${date} unter Einstellungen > Tarif stornieren.`,
+    },
+  },
+  es: {
+    fromLabel: "Plan anterior",
+    toLabel: "Plan nuevo",
+    billingLabel: "Facturación",
+    upgraded: {
+      subject: (plan) => `Su plan de Tomverse ahora es ${plan}`,
+      title: "Su plan se ha mejorado",
+      intro: "El pago del cambio de plan se realizó correctamente y el nuevo plan ya está activo en su cuenta.",
+      dateLabel: "Fin del período de facturación",
+      note: "Su período de facturación no cambia. El límite de créditos de este mes pasa a ser el del nuevo plan; los créditos que ya usó este mes siguen contando y los créditos comprados no cambian.",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `Su cambio a Tomverse ${plan} está programado`,
+      title: "Su cambio de plan está programado",
+      intro: (fromPlan, date) => `Conservará ${fromPlan} hasta el final de su período de facturación actual. El nuevo plan comienza el ${date}.`,
+      dateLabel: "Fecha de entrada en vigor",
+      note: (date) => `Este cambio no tiene cargos ni reembolsos. Puede cancelarlo desde Configuración > Plan antes del ${date}.`,
+    },
+  },
+  pt: {
+    fromLabel: "Plano anterior",
+    toLabel: "Plano novo",
+    billingLabel: "Faturação",
+    upgraded: {
+      subject: (plan) => `O seu plano Tomverse é agora ${plan}`,
+      title: "O seu plano foi melhorado",
+      intro: "O pagamento da alteração de plano foi concluído e o novo plano já está ativo na sua conta.",
+      dateLabel: "Fim do período de faturação",
+      note: "O seu período de faturação não muda. O limite de créditos deste mês passa a ser o do novo plano; os créditos já usados este mês continuam a contar e os créditos comprados não mudam.",
+    },
+    downgradeScheduled: {
+      subject: (plan) => `A sua mudança para Tomverse ${plan} está agendada`,
+      title: "A sua alteração de plano está agendada",
+      intro: (fromPlan, date) => `Mantém o ${fromPlan} até ao fim do seu período de faturação atual. O novo plano começa a ${date}.`,
+      dateLabel: "Data de entrada em vigor",
+      note: (date) => `Esta alteração não tem custos nem reembolsos. Pode cancelá-la em Definições > Plano antes de ${date}.`,
+    },
+  },
+};
+
+const PLAN_CHANGE_EMAIL_COPY = new Map(
+  Object.entries(planChangeEmailCopy) as [EmailLanguage, PlanChangeEmailCopy][]
+);
+
+export function buildPlanChangeEmail(
+  phase: PlanChangeEmailPhase,
+  input: {
+    fromPlan: string | null | undefined;
+    toPlan: string | null | undefined;
+    billingInterval?: string | null;
+    /**
+     * ISO string resolved by the caller: the current period end for an upgrade (it may not renew), the
+     * date the scheduled plan starts for a downgrade. Never `new Date()` here
+     * (docs/policy/email-notifications.md §9.3).
+     */
+    effectiveAt?: string | null;
+    language?: string | null;
+  }
+) {
+  const language = normalizeLanguage(input.language);
+  // A Map lookup, not a computed index: the language is already normalised
+  // and every language has copy, so `en` is only the type's fallback.
+  const copy = PLAN_CHANGE_EMAIL_COPY.get(language) ?? planChangeEmailCopy.en;
+  // Raw in the text part and inside the sentences (each sentence is escaped
+  // once, as a whole, for the HTML part); escaped in the HTML rows.
+  const rawFrom = input.fromPlan || "Tomverse";
+  const rawTo = input.toPlan || "Tomverse";
+  const fromPlan = escapeHtml(rawFrom);
+  const toPlan = escapeHtml(rawTo);
+  const billingInterval = formatBillingInterval(input.billingInterval, language);
+  const date = formatDate(input.effectiveAt ?? null, language);
+  // An upgrade whose next renewal Stripe did not report leaves the row out
+  // rather than printing "not available" under the period end.
+  const showDate = Boolean(input.effectiveAt);
+  const phaseCopy = phase === "upgraded" ? copy.upgraded : copy.downgradeScheduled;
+  const intro =
+    phase === "upgraded"
+      ? copy.upgraded.intro
+      : copy.downgradeScheduled.intro(rawFrom, date);
+  const note =
+    phase === "upgraded" ? copy.upgraded.note : copy.downgradeScheduled.note(date);
+  const text = [
+    intro,
+    `${copy.fromLabel}: ${rawFrom}`,
+    `${copy.toLabel}: ${rawTo}`,
+    `${copy.billingLabel}: ${billingInterval}`,
+    showDate ? `${phaseCopy.dateLabel}: ${date}` : "",
+    note,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const html = shell(
+    phaseCopy.title,
+    `
+        <p>${escapeHtml(intro)}</p>
+        <div style="margin:20px 0;padding:18px;border:1px solid #dbeafe;border-radius:16px;background:#eff6ff;color:#1e3a8a;">
+          <div style="margin-bottom:8px;"><strong>${copy.fromLabel}:</strong> ${fromPlan}</div>
+          <div style="margin-bottom:8px;"><strong>${copy.toLabel}:</strong> ${toPlan}</div>
+          <div${showDate ? ' style="margin-bottom:8px;"' : ""}><strong>${copy.billingLabel}:</strong> ${billingInterval}</div>
+          ${showDate ? `<div><strong>${phaseCopy.dateLabel}:</strong> ${date}</div>` : ""}
+        </div>
+        <p>${escapeHtml(note)}</p>
+      `,
+    language
+  );
+  return { subject: phaseCopy.subject(rawTo), text, html };
+}

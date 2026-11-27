@@ -138,6 +138,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       prices: { label: "가격", description: "플랜과 통화별 현지화 가격" },
       promotions: { label: "프로모션", description: "프로모션 코드와 악용 신호" },
       diagnostics: { label: "진단", description: "프로모션 코드별 읽기 전용 점검" },
+      "plan-changes": { label: "플랜 변경", description: "예약·진행 중인 Pro / Max 변경과 최근 처리 내역" },
     },
   },
   refunds: {
