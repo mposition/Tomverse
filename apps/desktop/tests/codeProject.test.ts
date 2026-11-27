@@ -253,6 +253,12 @@ test("adding an existing folder registers it once, opens it, and a folder that i
   assert.equal(second.result.changed, false, "the same project again keeps what hangs on it");
   assert.deepEqual(t.opened, [root], "and the open project is not opened a second time");
   assert.equal(t.host.view().items.length, 1);
+  // The mode in force stays when the open project is chosen again.
+  t.setPermission("allow_all");
+  t.picks.push(root);
+  assert.ok((await t.host.run({ action: "add-existing" })).result.ok);
+  assert.equal(t.permission(), "allow_all");
+  t.setPermission("ask");
   assert.deepEqual(await t.host.run({ action: "add-existing" }), { result: { ok: false, failure: "cancelled" } });
   t.picks.push(join(root, "missing"));
   assert.deepEqual((await t.host.run({ action: "add-existing" })).result, { ok: false, failure: "missing-folder" });

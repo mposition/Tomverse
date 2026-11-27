@@ -105,8 +105,11 @@ export function createCodeProjectHost(deps: CodeProjectHostDeps) {
     if (switching) await deps.open(bound.folder);
     if (!deps.current() || !same(deps.current()!, bound.folder)) return fail("failed");
     updateProject(entry.data, project.id, { folder: bound.folder, lastUsedAt: deps.now() });
-    const mode = startMode(project, switching);
-    if (mode !== deps.permission()) deps.setPermission(mode);
+    // The conversation that stays open keeps the mode it has; only a project that is newly open brings its own.
+    if (switching) {
+      const mode = startMode(project, true);
+      if (mode !== deps.permission()) deps.setPermission(mode);
+    }
     save(entry);
     return done({ ok: true, id: project.id, changed: switching });
   }
