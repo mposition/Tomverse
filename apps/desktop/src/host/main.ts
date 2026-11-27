@@ -3057,6 +3057,8 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
         }
         const refined = refinerAttempt?.refined ?? null;
         sourceId = await api.saveQuestion(id, refined ? { ...input, requestId: refined.clientRequestId } : input, signal);
+        // The saved question is the draft's exact text, so the held decision survives the draft's removal (a database check at commit).
+        await refinerAttempt?.finish();
         if (input.deepResearchDepth) assistantId = desktopResearchAnswerId(id, sourceId);
         if (handoffId) removeWorkspaceHandoff(handoffId);
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);

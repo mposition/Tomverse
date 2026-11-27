@@ -12,15 +12,25 @@ const conversationId = "chat_owned_1";
 const scopeId = randomUUID();
 const suggestionId = randomUUID();
 const clientRequestId = randomUUID();
+const createdAt = "2026-11-27T00:00:00.000Z";
 
 /** A stand-in for the account settings session: it answers what each Refiner route would, and keeps what it was asked. */
 function server(answers: {
   put?: () => Response; scope?: () => Response; prepare?: () => Response; remove?: () => Response;
+  /** What a read of the conversation's draft finds after the write; the default is the draft that was written. */
+  read?: (written: { text: string }) => Response;
 } = {}) {
   const calls: Call[] = [];
+  let written = { text: "" };
   const send = async (request: { path: string; method?: string; body?: object }, accept?: string, timeout?: number) => {
     calls.push({ path: request.path, method: request.method, body: request.body as Record<string, unknown> | undefined, accept, timeout });
-    if (request.method === "PUT") return answers.put?.() ?? Response.json({ draft: { revision: 1, text: "x" } });
+    if (request.method === "PUT") {
+      written = { text: String((request.body as { text: string }).text) };
+      return answers.put?.() ?? Response.json({ draft: { revision: 1, text: written.text, createdAt } });
+    }
+    if (request.method === "GET") {
+      return answers.read?.(written) ?? Response.json({ scopeKey: conversationId, draft: { revision: 1, text: written.text, createdAt } });
+    }
     if (request.method === "DELETE") return answers.remove?.() ?? new Response(null, { status: 204 });
     if (request.path.endsWith("/scope")) return answers.scope?.() ?? Response.json({ scopeId, epoch: 3 });
     return answers.prepare?.() ?? Response.json({ outcome: "auto_held", clientRequestId,
@@ -29,13 +39,15 @@ function server(answers: {
   return { calls, send: send as unknown as AccountSettingsApi["send"] };
 }
 const signal = () => new AbortController().signal;
+const draftPath = `/api/products/chat/drafts/${conversationId}`;
+const methods = (calls: Call[]) => calls.map(({ method }) => method);
 
 test("an Auto turn writes its draft, takes a scope, prepares, and hands back the decision and the request id the server minted", async () => {
   const fake = server();
   const attempt = await prepareRefinedTurn(fake, { conversationId, prompt: "fix my typos pls" }, signal());
   assert.deepEqual(attempt.refined, { decision: { suggestionId, scopeId, epoch: 3, decision: "accepted" }, clientRequestId });
   assert.deepEqual(fake.calls.map(({ method, path }) => `${method} ${path}`), [
-    `PUT /api/products/chat/drafts/${conversationId}`, "POST /api/chat/prompt-refiner/scope", "POST /api/chat/prompt-refiner/prepare",
+    `PUT ${draftPath}`, "POST /api/chat/prompt-refiner/scope", "POST /api/chat/prompt-refiner/prepare",
   ]);
   // A draft is only ever created: a revision-0 write cannot overwrite one the web already holds.
   assert.deepEqual(fake.calls[0].body, { expectedRevision: 0, text: "fix my typos pls", attachmentReferences: [] });
@@ -50,8 +62,10 @@ test("an Auto turn writes its draft, takes a scope, prepares, and hands back the
   assert.equal(JSON.stringify(fake.calls.slice(1)).includes("typos"), false);
   assert.ok((fake.calls[2].timeout ?? 0) >= 13_000, "the budgeted Refiner call gets the server's own deadline");
   await attempt.finish();
-  assert.deepEqual(fake.calls.at(-1), { path: `/api/products/chat/drafts/${conversationId}`, method: "DELETE", body: { expectedRevision: 1 },
-    accept: "application/json", timeout: 8_000 });
+  assert.deepEqual(fake.calls.slice(3).map(({ method, path, body }) => ({ method, path, body })), [
+    { method: "GET", path: draftPath, body: undefined },
+    { method: "DELETE", path: draftPath, body: { expectedRevision: 1 } },
+  ]);
   await attempt.finish();
   assert.equal(fake.calls.filter(({ method }) => method === "DELETE").length, 1, "the draft is removed once");
 });
@@ -60,14 +74,14 @@ test("a draft the web already holds, or a refused scope, sends the turn as typed
   const conflict = server({ put: () => Response.json({ code: "CHAT_DRAFT_REVISION_CONFLICT" }, { status: 409 }) });
   const first = await prepareRefinedTurn(conflict, { conversationId, prompt: "hello" }, signal());
   assert.equal(first.refined, null);
-  assert.deepEqual(conflict.calls.map(({ path }) => path), [`/api/products/chat/drafts/${conversationId}`]);
+  assert.deepEqual(conflict.calls.map(({ path }) => path), [draftPath]);
   await first.finish();
-  assert.equal(conflict.calls.length, 1, "a draft this attempt did not write is never removed");
+  assert.equal(conflict.calls.length, 1, "a draft this attempt did not write is never read or removed");
 
   const refused = server({ scope: () => Response.json({ code: "PROMPT_REFINER_STALE" }, { status: 409 }) });
   const second = await prepareRefinedTurn(refused, { conversationId, prompt: "hello" }, signal());
   assert.equal(second.refined, null);
-  assert.deepEqual(refused.calls.map(({ method }) => method), ["PUT", "POST"]);
+  assert.deepEqual(methods(refused.calls), ["PUT", "POST"]);
   await second.finish();
   assert.equal(refused.calls.at(-1)?.method, "DELETE", "the draft this attempt wrote is removed");
 });
@@ -94,6 +108,33 @@ test("every way the server declines is the typed original, once, and the draft i
   }
 });
 
+test("cleanup removes only the draft this attempt wrote, even when another client started its own with the same revision", async () => {
+  // Another client deleted the draft and typed a new one: it is revision 1 again, but it was created later.
+  const replaced = server({ read: (written) => Response.json({ draft: { revision: 1, text: written.text, createdAt: "2026-11-27T00:05:00.000Z" } }) });
+  const first = await prepareRefinedTurn(replaced, { conversationId, prompt: "hello" }, signal());
+  await first.finish();
+  assert.equal(replaced.calls.some(({ method }) => method === "DELETE"), false, "a different draft is not removed");
+
+  const edited = server({ read: () => Response.json({ draft: { revision: 2, text: "hello and more", createdAt } }) });
+  const second = await prepareRefinedTurn(edited, { conversationId, prompt: "hello" }, signal());
+  await second.finish();
+  assert.equal(edited.calls.some(({ method }) => method === "DELETE"), false, "an edited draft is not removed");
+
+  const gone = server({ read: () => Response.json({ draft: null }) });
+  const third = await prepareRefinedTurn(gone, { conversationId, prompt: "hello" }, signal());
+  await third.finish();
+  assert.equal(gone.calls.some(({ method }) => method === "DELETE"), false, "nothing is removed once it is gone");
+});
+
+test("a draft whose write was answered but not readable is still found and removed by what was typed", async () => {
+  const unreadable = server({ put: () => new Response("ok", { status: 200 }) });
+  const attempt = await prepareRefinedTurn(unreadable, { conversationId, prompt: "hello" }, signal());
+  assert.equal(attempt.refined, null);
+  assert.deepEqual(methods(unreadable.calls), ["PUT"], "no scope and no paid call without a revision to name");
+  await attempt.finish();
+  assert.deepEqual(methods(unreadable.calls), ["PUT", "GET", "DELETE"]);
+});
+
 test("a transport failure is the typed original, and a stop ends the turn after removing the draft", async () => {
   const failing = server();
   const broken = { ...failing, send: (async (request: { path: string; method?: string }) => {
@@ -116,6 +157,9 @@ test("a failing cleanup never fails the turn", async () => {
   const fake = server({ remove: () => { throw new Error("offline"); } });
   const attempt = await prepareRefinedTurn(fake, { conversationId, prompt: "hello" }, signal());
   await assert.doesNotReject(attempt.finish());
+  const unreadable = server({ read: () => { throw new Error("offline"); } });
+  const other = await prepareRefinedTurn(unreadable, { conversationId, prompt: "hello" }, signal());
+  await assert.doesNotReject(other.finish());
 });
 
 test("only an Auto, plain-text turn in a saved conversation is prepared, and only where the server offers it", () => {

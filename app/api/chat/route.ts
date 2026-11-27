@@ -1608,7 +1608,8 @@ async function handleChatPost(
                 return tracedJsonError("Desktop Deep Research is unavailable for this request.", "DEEP_RESEARCH_UNAVAILABLE", 403, traceId);
             }
         }
-        // `medium` is a Desktop-only step, available while its own switch is on; the web keeps its two presets.
+        // `medium` is a Desktop-only step, available while its own switch is on; the web keeps its two presets. A Desktop turn
+        // reaching here has passed the Desktop write gate above, and the proxy refuses a cookie on the Desktop origin.
         const effortSteps = desktop && reasoningEffortStepsEnabled();
         if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview" ||
             (reasoningEffort === "medium" && !effortSteps))) {
