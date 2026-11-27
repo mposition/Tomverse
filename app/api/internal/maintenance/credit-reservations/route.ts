@@ -48,6 +48,8 @@ import { runDevelopCiRepairQuietly } from "@/lib/developCiRepair";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
 import { recoverResearchEngine } from "@/lib/researchEngineRecovery";
+import { runScheduledTasksQuietly } from "@/lib/scheduledTaskRunner";
+import { SCHEDULED_TASK_LIMITS } from "@/lib/scheduledTaskCore";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -90,6 +92,7 @@ const reconcileCreditReservationsWithRetry = async () => {
 };
 
 export async function POST(request: Request) {
+  const requestStartedAt = Date.now();
   if (!isAuthorized(request)) {
     return Response.json(
       { error: "Unauthorized" },
@@ -285,6 +288,10 @@ export async function POST(request: Request) {
     after(() => runTraceReportAnalysisQuietly());
     // Off unless the owner turned it on; reads develop CI and calls no model.
     after(() => runDevelopCiRepairQuietly());
+    // Off (and touching nothing) unless feature.scheduledTasksEnabled; never
+    // throws; returns inside this request's maxDuration (runs that outlive it
+    // settle from their Chat attempt).
+    after(() => runScheduledTasksQuietly({ deadline: requestStartedAt + maxDuration * 1_000 - SCHEDULED_TASK_LIMITS.routeDeadlineMarginMs }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,

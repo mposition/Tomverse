@@ -84,6 +84,7 @@ import {
     type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
 import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
+import { ScheduledTasksSettingsEntry } from "@/components/scheduledTasks/ScheduledTasksSettingsEntry";
 import { DeveloperSettingsTab } from "@/components/settings/DeveloperSettingsTab";
 import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
@@ -2070,6 +2071,11 @@ export function AuthButton({
                                                 />
                                             </div>
                                         </section>
+                                        <ScheduledTasksSettingsEntry
+                                            onNavigate={pageMode ? undefined : closeSettingsModal}
+                                            pendingFocus={pendingSettingsSection === "scheduled-tasks"}
+                                            onFocused={() => setPendingSettingsSection(null)}
+                                        />
                                     </div>
                                 )}
 

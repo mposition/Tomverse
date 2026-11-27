@@ -10,11 +10,16 @@ import { prisma } from "@/lib/prisma";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import { requireDesktopBearer } from "@/lib/desktopAuthServer";
 import { DESKTOP_APP_ORIGIN, desktopReadApiRoute, desktopWriteApiRoute } from "@/lib/desktopReadApiContract";
+import { scheduledTaskRunSession } from "@/lib/scheduledTaskRunContext";
 
 /** Never fall back to an ambient cookie when an Authorization header is present. */
 export async function resolveChatRouteSession(request: Request): Promise<
   { session: Session | null; response?: never } | { session?: never; response: Response }
 > {
+  // A scheduled run's in-process request (lib/scheduledTaskRunContext.ts).
+  // Reachable only from the runner, never from the network.
+  const scheduled = scheduledTaskRunSession(request);
+  if (scheduled) return { session: scheduled };
   const origin = request.headers.get("origin");
   const path = new URL(request.url).pathname;
   if (origin === DESKTOP_APP_ORIGIN) {

@@ -99,6 +99,7 @@ export const SETTINGS_SECTION_IDS = [
     "account-data",
     "email-notifications",
     "api-keys",
+    "scheduled-tasks",
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTION_IDS)[number];
@@ -130,6 +131,10 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
         // tab on 2026-11-21, so an older deep link still opens the tab the
         // section is in today (the section decides the tab).
         "api-keys": "developer",
+        // What the AI does for the account on its own schedule: beside memory
+        // in the tab about what a model is told and does, in a group of its
+        // own because "Account memory" does not describe it.
+        "scheduled-tasks": "ai",
     };
 
 /**

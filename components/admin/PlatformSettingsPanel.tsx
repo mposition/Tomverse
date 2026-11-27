@@ -81,6 +81,7 @@ type AdminAppSettingsResponse = {
   assistantKnowledgeEnabled?: boolean;
   chatStarterEnabled?: boolean;
   helpAssistantEnabled?: boolean;
+  scheduledTasksEnabled?: boolean;
   memoryExtractionEnabled?: boolean;
   memoryInjectionEnabled?: boolean;
   memoryApprovedPairCount?: number;
@@ -142,6 +143,12 @@ type Props = {
    */
   helpAssistantEnabled?: boolean;
   /**
+   * Scheduled tasks (lib/scheduledTaskAccess.ts): unattended Chat turns paid
+   * from each account's own credits. Default-off; read on the server so a save
+   * of the other switches writes back the stored value, never a placeholder.
+   */
+  scheduledTasksEnabled?: boolean;
+  /**
    * Release B (account memory), reported and never edited here. Enabling
    * either one is the import/memory policy §12.4 human procedure, so this
    * screen has no control for them -- and `/api/admin/app-settings` refuses a
@@ -181,6 +188,7 @@ export function PlatformSettingsPanel({
   assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
   chatStarterEnabled: initialChatStarterEnabled,
   helpAssistantEnabled: initialHelpAssistantEnabled = false,
+  scheduledTasksEnabled: initialScheduledTasksEnabled,
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
@@ -358,6 +366,11 @@ export function PlatformSettingsPanel({
   const [helpAssistantEnabled, setHelpAssistantEnabled] = useState(
     initialHelpAssistantEnabled
   );
+  // Scheduled tasks (lib/scheduledTaskAccess.ts). Undefined until the stored
+  // value is known: a save never sends a value nobody read.
+  const [scheduledTasksEnabled, setScheduledTasksEnabled] = useState<boolean | undefined>(
+    initialScheduledTasksEnabled
+  );
   // One state object rather than three: they are read together and are only
   // ever meaningful together, and no control writes any of them.
   const [memoryStatus, setMemoryStatus] = useState<MemoryReleaseStatus>({
@@ -494,6 +507,7 @@ export function PlatformSettingsPanel({
         data.chatStarterEnabled
       );
       if (typeof data.helpAssistantEnabled === "boolean") setHelpAssistantEnabled(data.helpAssistantEnabled);
+      if (typeof data.scheduledTasksEnabled === "boolean") setScheduledTasksEnabled(data.scheduledTasksEnabled);
       applyMemoryStatus(data);
       if (data.guestLead) setStoredGuestLead(data.guestLead.stored);
       dispatchAppToast(m.toast.reloaded, "success");
@@ -549,6 +563,7 @@ export function PlatformSettingsPanel({
             assistantKnowledgeEnabled,
             chatStarterEnabled,
             helpAssistantEnabled,
+            scheduledTasksEnabled,
           }
         : {
             imageGenerationEnabled: current.imageGenerationEnabled,
@@ -558,6 +573,7 @@ export function PlatformSettingsPanel({
             assistantKnowledgeEnabled: current.assistantKnowledgeEnabled,
             chatStarterEnabled: current.chatStarterEnabled,
             helpAssistantEnabled: current.helpAssistantEnabled,
+            scheduledTasksEnabled: current.scheduledTasksEnabled,
           };
       const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
@@ -613,6 +629,7 @@ export function PlatformSettingsPanel({
         data.chatStarterEnabled
       );
       if (typeof data.helpAssistantEnabled === "boolean") setHelpAssistantEnabled(data.helpAssistantEnabled);
+      if (typeof data.scheduledTasksEnabled === "boolean") setScheduledTasksEnabled(data.scheduledTasksEnabled);
       applyMemoryStatus(data);
       dispatchAppToast(m.toast.saved, "success");
     } catch {
@@ -909,6 +926,7 @@ export function PlatformSettingsPanel({
   const flagRows = [
     { testId: "admin-chat-starter-flag", copy: m.switches.items.chatStarter, enabled: chatStarterEnabled, set: setChatStarterEnabled, waiting: false },
     { testId: "admin-help-assistant-flag", copy: m.switches.items.helpAssistant, enabled: helpAssistantEnabled, set: setHelpAssistantEnabled, waiting: false },
+    { testId: "admin-scheduled-tasks-flag", copy: m.switches.items.scheduledTasks, enabled: scheduledTasksEnabled === true, set: setScheduledTasksEnabled, waiting: false },
     { testId: "admin-image-generation-flag", copy: m.switches.items.imageGeneration, enabled: imageGenerationEnabled, set: setImageGenerationEnabled, waiting: false },
     { testId: "admin-external-import-flag", copy: m.switches.items.externalImport, enabled: externalImportEnabled, set: setExternalImportEnabled, waiting: false },
     { testId: "admin-external-continuation-flag", copy: m.switches.items.externalContinuation, enabled: externalContinuationEnabled, set: setExternalContinuationEnabled, waiting: false },
