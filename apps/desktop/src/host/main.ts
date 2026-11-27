@@ -9,13 +9,15 @@ import { dictationClip } from "../dictation-contract";
 import { voiceRequestInput } from "../voice-contract";
 import { createVoiceHost } from "./voice-host";
 import { createCodeBrowserView } from "./code-browser-view";
+import { admitTypedAddress, browserProfile } from "./code-browser-policy";
+import { flushBrowserProfiles, openBrowserProfile } from "./code-browser-profile";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
 import { pictureFor } from "./browser-pick-store";
 import { createDesktopComputer } from "./computer-wiring";
 import { createFixtureBackend } from "./computer-fixture-backend";
 import type { ComputerBackend } from "./computer-backend";
 import { createWebViewHost } from "./web-view-host";
-import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserState } from "../browser-contract";
+import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserKind, type BrowserState } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createConnectorApi } from "./connector-api";
 import { openConnectorOAuthWindow } from "./connector-oauth-window";
@@ -41,7 +43,7 @@ import { desktopCloudExecutionInput } from "../cloud-execution-contract";
 import { createCloudExecutionClient } from "./cloud-execution-client";
 import { createCloudExecutionHost, type CloudExecutionHost, type CloudProject } from "./cloud-execution-host";
 import { createBillingWindowHost } from "./billing-window";
-import { desktopBillingInput, type BillingState } from "../billing-contract";
+import { desktopBillingInput, isTomverseUrl, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
 import { solveEmailLoginChallenge } from "./login-challenge";
 import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, type DesktopLoginEmail } from "../login-contract";
@@ -186,6 +188,8 @@ const fixtureSchema = z.object({
   pluginZip: z.string().min(1).optional(),
   pluginSources: z.boolean().optional(),
   browserAgent: z.boolean().optional(),
+  /** A test names the folder a browser-panel download is saved in, where the system's save dialog would ask (no test clicks a native dialog). */
+  browserDownloads: z.string().min(1).optional(),
   /** A test lets the agent open public https sites (the person's second browser switch). */
   browserWeb: z.boolean().optional(),
   /** A test runs the computer tools against a fake desktop (two windows and a picture). */
@@ -2651,7 +2655,7 @@ const browserAgent = createBrowserAgentBridge({
   }),
   tab: (id) => codeBrowser?.tabs.get(id),
   tabs: () => [...(codeBrowser?.tabs ?? [])],
-  open: (tab, url) => runCodeBrowser({ type: "open", tab, url }),
+  open: (tab, url) => runCodeBrowser({ type: "open", tab, url }, "agent"),
   publish: (browserState) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-state", browserState); },
   publishPick: (pick) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:code-browser-pick", pick); },
   reply: (replyRunId, requestId, reply) => { if (worker && runId === replyRunId) send({ type: "browser-agent-result", runId: replyRunId, requestId, reply }); },
@@ -2721,7 +2725,53 @@ function closeCodeBrowserTab(tab: string, announce = false) {
   }
 }
 
-async function runCodeBrowser(value: unknown) {
+/** The saved data of the project the panel is in now, for the account it is open for (see browserProfile in code-browser-policy.ts). */
+function codeBrowserProfile() {
+  return openBrowserProfile(browserProfile(browserSession?.accountId ?? null, projectRoot?.path ?? null), {
+    directory: () => join(app.getPath("userData"), "code-browser-permissions"),
+    copy: nativeCopy,
+  });
+}
+
+/** Tomverse's own origins: a page there is not signed in to the Tomverse account, and the panel says so. */
+const tomverseOrigins = () => [...new Set([accountOrigin ?? DESKTOP_LIVE_ORIGIN, webOrigin].map((value) => new URL(value).origin))];
+
+function createBrowserTab(browser: CodeBrowser, owner: BrowserWindow, tabId: string, target: { kind: BrowserKind; origin: string }, opener?: string) {
+  const view = createCodeBrowserView(owner, target, tabId, (next) => {
+    if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
+    if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
+      owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
+    }
+  }, {
+    profile: codeBrowserProfile(),
+    limitHosts: () => browserAgent.hostsFor(tabId),
+    agentHolds: () => browserAgent.holds(tabId),
+    isTomverse: (address) => isTomverseUrl(address, tomverseOrigins()),
+    openTab: (address) => openPopupTab(tabId, address),
+    downloads: {
+      // The save dialog starts in the download folder; a system without one starts in the home folder.
+      directory: () => { try { return app.getPath("downloads"); } catch { return app.getPath("home"); } },
+      testDirectory: () => DESKTOP_FIXTURE_ALLOWED ? fixture?.browserDownloads ?? null : null,
+      title: (from) => from === "agent" ? nativeCopy().browserDownloadAgentTitle : nativeCopy().browserDownloadTitle,
+    },
+    ...(opener ? { opener } : {}),
+  });
+  browser.tabs.set(tabId, view);
+  return view;
+}
+
+/** A page's link or window.open opens a tab of the panel: the same profile, kind and origin rules as the tab that opened it. */
+function openPopupTab(openerTab: string, address: string): boolean {
+  const browser = codeBrowser;
+  const opener = browser?.tabs.get(openerTab);
+  const owner = mainWindow;
+  if (!browser || !opener || !owner || owner.isDestroyed() || browser.tabs.size >= MAX_CODE_BROWSER_TABS) return false;
+  const view = createBrowserTab(browser, owner, randomUUID(), { kind: opener.kind, origin: opener.origin }, openerTab);
+  void view.load(address);
+  return true;
+}
+
+async function runCodeBrowser(value: unknown, by: "person" | "agent" = "person") {
   const command = browserCommand.parse(value);
   if (command.type === "close") { closeCodeBrowser(); return; }
   if (command.type === "agent-tools") {
@@ -2754,6 +2804,20 @@ async function runCodeBrowser(value: unknown) {
   if (!scope || !owner || owner.isDestroyed()) return;
   if (codeBrowser && codeBrowser.scope !== scope) closeCodeBrowser();
   const browser: CodeBrowser = codeBrowser ??= { scope, tabs: new Map() };
+  if (command.type === "clear-data") {
+    // The profile of the tab the person is on (or of the project the panel is in, when that tab holds no page yet).
+    const profile = (command.tab ? browser.tabs.get(command.tab) : undefined)?.profile ?? codeBrowserProfile();
+    const copy = nativeCopy();
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "warning", title: copy.browserClearTitle, message: copy.browserClearPrompt, detail: copy.browserClearDetail,
+      buttons: [copy.cancel, copy.browserClearAccept], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response !== 1 || owner.isDestroyed() || codeBrowser !== browser) return false;
+    await profile.clearData();
+    // A page that stayed open would keep the sign-in it holds in memory.
+    for (const view of browser.tabs.values()) if (view.profile === profile) view.reloadAfterClear();
+    return true;
+  }
   const tabId = command.tab;
   const existing = browser.tabs.get(tabId);
   if (command.type === "share" || command.type === "unshare") {
@@ -2770,21 +2834,25 @@ async function runCodeBrowser(value: unknown) {
     return;
   }
   if (command.type === "open") {
-    const address = classifyBrowserAddress(command.url);
-    if (!address) throw new Error("Enter an https address or an HTTP loopback address with an explicit port.");
+    let address = classifyBrowserAddress(command.url);
+    if (!address) throw new Error("Enter a public https address, or an address on this computer or your own network.");
+    if (by === "agent") {
+      // The agent opens a local page or (with the person's second switch) a public site; a private-network page is the person's alone.
+      if (address.kind === "private") throw new Error("Only a person opens a page on their own network.");
+    } else {
+      // A name is looked up first: a private name must answer privately, and a name that answers a public address over plain http is refused.
+      address = await admitTypedAddress(address, (host) => (existing?.profile ?? codeBrowserProfile()).resolveHost(host));
+      if (!address) throw new Error("That address is not on this computer or your own network.");
+      if (codeBrowser !== browser || currentBrowserScope() !== scope || owner.isDestroyed()) return;
+    }
     const { kind, url: target } = address;
     if (browser.grant?.tab === tabId) browser.grant = undefined;
-    // A web tab takes any public https address; a local tab stays on its origin. A tab of the other kind is replaced, with a session of its own.
-    if (existing?.kind === kind && (kind === "web" || existing.origin === target.origin)) return existing.load(target.href);
-    if (!existing && browser.tabs.size >= MAX_CODE_BROWSER_TABS) throw new Error("Close a browser tab before opening another.");
-    existing?.close();
-    const view = createCodeBrowserView(owner, { kind, origin: kind === "web" ? "" : target.origin }, tabId, (next) => {
-      if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
-      if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
-        owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
-      }
-    }, () => browserAgent.hostsFor(tabId));
-    browser.tabs.set(tabId, view);
+    const live = browser.tabs.get(tabId);
+    // A web tab takes any public https address; a local or private tab stays on its origin. A tab of the other kind (or another origin) is replaced.
+    if (live?.kind === kind && (kind === "web" || live.origin === target.origin)) return live.load(target.href);
+    if (!live && browser.tabs.size >= MAX_CODE_BROWSER_TABS) throw new Error("Close a browser tab before opening another.");
+    live?.close();
+    const view = createBrowserTab(browser, owner, tabId, { kind, origin: kind === "web" ? "" : target.origin });
     return view.load(target.href);
   }
   if (command.type === "layout") {
@@ -3796,7 +3864,7 @@ function registerIpc() {
     refreshCodeFallbackSettings();
     return { ...state, handoff: currentHandoff() };
   });
-  main("desktop:code-browser", runCodeBrowser);
+  main("desktop:code-browser", (value) => runCodeBrowser(value));
   main("desktop:code-computer", (value) => computer.host.command(value));
   main("desktop:code-terminal", (value) => terminalApi.run(value));
   main("desktop:location-arm", () => {
@@ -4487,6 +4555,8 @@ else {
       requestQuit();
       return;
     }
+    // What the browser panel's profiles hold in memory (cookies, storage) reaches the disk.
+    void flushBrowserProfiles();
     // Quitting waits (three seconds at most) for the server to be told that a paid voice session is over.
     if (voice.active()) {
       event.preventDefault();

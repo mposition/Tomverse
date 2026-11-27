@@ -42,13 +42,17 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     await writeFile(join(profile, "language.txt"), "en");
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     app = await launchNativeFixture(descriptor);
+    // Inside the application only: the name lookup of the browser panel answers a public address at once (no test depends on the network).
+    await app.evaluate(({ app: electronApp }) => {
+      electronApp.on("session-created", (created) => { created.resolveHost = async () => ({ endpoints: [{ address: "93.184.216.34", family: "ipv4" }] }); });
+    });
     const page = await app.firstWindow();
     await page.getByRole("button", { name: "Open local folder" }).click();
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const address = page.getByRole("textbox", { name: "Address" });
     await address.fill("http://example.com/");
     await address.press("Enter");
-    await expect(page.getByRole("status").filter({ hasText: "Enter an https address or a local HTTP address with a port." })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Enter a public https address, or an address on this computer or your network." })).toBeVisible();
     await address.fill(origin + "/");
     await address.press("Enter");
     await expect.poll(() => app!.evaluate(({ webContents }, origin) =>
@@ -64,8 +68,14 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     assert.deepEqual(features, ["undefined", "undefined", "undefined"]);
     const panel = app.context().pages().find((candidate) => candidate.url() === origin + "/");
     assert.ok(panel);
+    // A link that opens a new window opens a tab of the panel, on the same origin: nothing else is reachable through it.
     await panel.getByText("Popup", { exact: true }).click();
-    assert.ok(!requestPaths.includes("/popup"));
+    await expect(page.getByRole("tab", { name: "Tabs 2" })).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => requestPaths.includes("/popup")).toBe(true);
+    await expect(address).toHaveValue(origin + "/popup");
+    await page.getByRole("button", { name: "Close tab", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "Tabs 1" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Tabs 2" })).toHaveCount(0);
     await panel.getByLabel("Search").fill("ordering");
     await panel.getByRole("button", { name: "Search", exact: true }).click();
     await expect(panel.getByRole("heading", { name: "Fixture result" })).toBeVisible();
