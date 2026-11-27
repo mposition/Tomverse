@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
@@ -79,6 +79,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopAttachments,
     desktopGoogleDrive: desktopAttachments && desktopDriveEnabled() && Boolean(readGooglePickerConfig()),
     desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
+    // A Deep Research column in a Review needs its own switch and the same provider key; a Desktop build offers it only on this signal.
+    desktopReviewDeepResearch: desktopReviewDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
     desktopBilling: desktopBillingEnabled(),
     desktopManagedCode: desktopManagedCodeEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),

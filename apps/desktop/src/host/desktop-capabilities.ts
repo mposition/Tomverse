@@ -28,6 +28,7 @@ const capabilities = z.object({
   desktopChatPlugin: z.boolean().optional(),
   desktopReviewContext: z.boolean().optional(),
   desktopReviewTools: z.boolean().optional(),
+  desktopReviewDeepResearch: z.boolean().optional(),
   desktopVoiceInput: z.boolean().optional(),
   desktopVoiceConversation: z.boolean().optional(),
   voiceConversation: z.object({ enabled: z.boolean(), maxSeconds: z.number().int().positive(), continuous: z.boolean().optional() }).optional().catch(undefined),
@@ -58,6 +59,8 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,
     reviewContext: data.desktopReviewContext === true,
     reviewTools: data.desktopReviewTools === true && data.desktopReviewContext === true,
+    // A Deep Research column of a Review prepares its own context, as a one-model Review turn does.
+    reviewDeepResearch: data.desktopReviewDeepResearch === true && data.desktopReviewContext === true && data.desktopReview !== undefined,
     voiceInput: data.desktopVoiceInput === true,
     // The conversation is offered only where Desktop's own switch and the server's voice switch are both on.
     voiceConversation: data.desktopVoiceConversation === true && data.voiceConversation?.enabled

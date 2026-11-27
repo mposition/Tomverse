@@ -3,7 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
+import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled, desktopReviewDeepResearchEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "@/lib/deepResearchModel";
@@ -1617,8 +1617,10 @@ async function handleChatPost(
                 return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
             }
             if (desktopConversation?.password != null) return conversationLockedResponse();
+            // Chat and Review each have their own switch. A Review run is put to Deep Research alone, so it has no shared admission.
             if ((deepResearchDepth || modelId === DEEP_RESEARCH_MODEL_ID) &&
-                (!desktopDeepResearchEnabled() || desktopProduct !== "chat" || modelId !== DEEP_RESEARCH_MODEL_ID || !deepResearchDepth ||
+                (!(desktopProduct === "chat" ? desktopDeepResearchEnabled() : desktopReviewDeepResearchEnabled()) ||
+                    (desktopProduct === "review" && admissionToken) || modelId !== DEEP_RESEARCH_MODEL_ID || !deepResearchDepth ||
                     assistantMessageId !== desktopResearchAnswerId(conversationId, sourceUserMessageId))) {
                 return tracedJsonError("Desktop Deep Research is unavailable for this request.", "DEEP_RESEARCH_UNAVAILABLE", 403, traceId);
             }

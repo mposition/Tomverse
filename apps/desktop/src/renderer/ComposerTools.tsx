@@ -7,6 +7,8 @@ import type { ComposerOptions } from "../chat-contract";
 type Props = {
   children: ReactNode; options?: ComposerOptions; setOptions?: (patch: ComposerOptions) => void; disabled?: boolean;
   onDrive?: () => void; driveFull?: boolean; onResearch?: () => void;
+  /** Why Deep Research cannot start now; the row stays visible, switched off, with this in place of its description. */
+  researchBlocked?: string;
   /** Rows that sit just above Deep Research, as on the web: Research Preview and the Deep Research engine. */
   researchTools?: ReactNode;
 };
@@ -17,7 +19,7 @@ export function ComposerTools({ language, ...props }: Props & { language: Langua
   </LanguageProvider>;
 }
 
-function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull, onResearch, researchTools }: Props) {
+function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull, onResearch, researchBlocked, researchTools }: Props) {
   const { t } = useLanguage();
   const trigger = useRef<HTMLElement>(null);
   const [profiles, setProfiles] = useState<Array<{ id: string; name: string }>>();
@@ -76,9 +78,9 @@ function ToolsMenu({ children, options, setOptions, disabled, onDrive, driveFull
       </div></>}
       {researchTools}
       {onResearch && <div className="composer-tool-secondary"><button type="button" className="composer-tool-row"
-        disabled={disabled} onClick={(event) => choose(event, onResearch)}>
+        disabled={disabled || Boolean(researchBlocked)} onClick={(event) => choose(event, onResearch)}>
         <span className="composer-tool-icon research-icon"><Microscope size={18} /></span>
-        <span><strong>{t("chat.toolsDeepResearch")}</strong><small>{t("chat.toolsDeepResearchDescription")}</small></span>
+        <span><strong>{t("chat.toolsDeepResearch")}</strong><small>{researchBlocked ?? t("chat.toolsDeepResearchDescription")}</small></span>
       </button></div>}
     </div>
   </details>;

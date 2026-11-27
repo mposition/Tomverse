@@ -40,6 +40,7 @@ const en = {
   moveHint: "Alt + Left / Right moves the selected model.",
   moved: "{model} moved to position {position} of {count}.",
   analysisActions: "Compare the answers",
+  researchNeedsRoom: "Deep Research needs a free model place. Turn one model off first.",
 };
 
 export const desktopReviewCopy: Record<Language, typeof en> = {
@@ -84,6 +85,7 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "Alt + ← / → 로 선택한 모델을 옮길 수 있습니다.",
     moved: "{model}을(를) {count}개 중 {position}번째로 옮겼습니다.",
     analysisActions: "답변 비교",
+    researchNeedsRoom: "Deep Research를 추가하려면 모델 자리가 하나 비어 있어야 합니다. 모델 하나를 먼저 끄세요.",
   },
   zh: {
     partial: "一个或多个回答提前结束。",
@@ -125,6 +127,7 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "按 Alt + 左/右 方向键移动所选模型。",
     moved: "已将 {model} 移到第 {position} 位（共 {count} 个）。",
     analysisActions: "比较回答",
+    researchNeedsRoom: "Deep Research 需要一个空闲的模型位置。请先关闭一个模型。",
   },
   "zh-Hant": {
     partial: "一個或多個回答提前結束。",
@@ -166,6 +169,7 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "按 Alt + 左/右方向鍵移動所選模型。",
     moved: "已將 {model} 移到第 {position} 位（共 {count} 個）。",
     analysisActions: "比較回答",
+    researchNeedsRoom: "Deep Research 需要一個空的模型位置。請先關閉一個模型。",
   },
   fr: {
     partial: "Une ou plusieurs réponses se sont interrompues.",
@@ -207,6 +211,7 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "Alt + Gauche / Droite déplace le modèle sélectionné.",
     moved: "{model} déplacé en position {position} sur {count}.",
     analysisActions: "Comparer les réponses",
+    researchNeedsRoom: "Deep Research a besoin d’une place libre. Désactivez d’abord un modèle.",
   },
   de: {
     partial: "Mindestens eine Antwort endete vorzeitig.",
@@ -248,6 +253,7 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "Alt + Links / Rechts verschiebt das ausgewählte Modell.",
     moved: "{model} auf Position {position} von {count} verschoben.",
     analysisActions: "Antworten vergleichen",
+    researchNeedsRoom: "Deep Research braucht einen freien Modellplatz. Schalten Sie zuerst ein Modell aus.",
   },
   es: {
     partial: "Una o más respuestas terminaron antes de tiempo.",
@@ -289,6 +295,7 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "Alt + Izquierda / Derecha mueve el modelo seleccionado.",
     moved: "{model} movido a la posición {position} de {count}.",
     analysisActions: "Comparar las respuestas",
+    researchNeedsRoom: "Deep Research necesita un hueco libre. Desactiva primero un modelo.",
   },
   pt: {
     partial: "Uma ou mais respostas terminaram antes do previsto.",
@@ -330,5 +337,6 @@ export const desktopReviewCopy: Record<Language, typeof en> = {
     moveHint: "Alt + Esquerda / Direita move o modelo selecionado.",
     moved: "{model} movido para a posição {position} de {count}.",
     analysisActions: "Comparar as respostas",
+    researchNeedsRoom: "O Deep Research precisa de uma vaga livre. Desative primeiro um modelo.",
   },
 };

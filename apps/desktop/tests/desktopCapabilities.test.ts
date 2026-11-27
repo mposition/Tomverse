@@ -37,6 +37,21 @@ test("what a turn may carry comes from the server that was reached, and an older
   assert.equal((await load())?.reviewTools, false);
 });
 
+test("Deep Research in a Review is offered only where the server names it, with a Review and its own context", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true, desktopDeepResearch: true,
+    desktopReview: { easy: true, modelLimit: 3, plan: "Max" }, desktopReviewContext: true };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  // Chat's Deep Research says nothing about a Review.
+  assert.deepEqual([(await load())?.deepResearch, (await load())?.reviewDeepResearch], [true, false]);
+  body = { ...body, desktopReviewDeepResearch: true };
+  assert.equal((await load())?.reviewDeepResearch, true);
+  body = { ...body, desktopReviewContext: false };
+  assert.equal((await load())?.reviewDeepResearch, false);
+  body = { ...body, desktopReviewContext: true, desktopReview: undefined };
+  assert.equal((await load())?.reviewDeepResearch, false);
+});
+
 test("dictation and the voice conversation are offered only where Desktop's switch and the server's own voice switch are both on", async (t) => {
   let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true,
     voiceConversation: { enabled: true, maxSeconds: 300, continuous: true, reservationSeconds: 60 } };

@@ -1665,3 +1665,103 @@ test("Desktop Deep Research requires enrollment and dispatches only once per sig
   assert.equal((await replayedUncertain.json()).code, "DEEP_RESEARCH_ALREADY_SUBMITTED");
   assert.equal(perplexitySubmitCalls().length, 4);
 });
+
+test("Desktop Deep Research in a Review has its own switch, runs for that model alone and is polled only under it", async (t) => {
+  const config = {
+    TOMVERSE_DESKTOP_AUTH_ENABLED: "true",
+    TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED: "true",
+    TOMVERSE_DESKTOP_REVIEW_ENABLED: "true",
+    TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED: "true",
+    TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED: "false",
+    MOBILE_AUTH_SIGNING_KEYS: "test:" + generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "test",
+    MOBILE_AUTH_REFRESH_PEPPERS: "test:" + randomBytes(32).toString("base64url"),
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "test",
+    MOBILE_AUTH_TOKEN_ISSUER: "https://tomverse.test",
+    MOBILE_AUTH_TOKEN_AUDIENCE: "tomverse-mobile-api",
+  };
+  for (const [key, value] of Object.entries(config)) {
+    const previous = process.env[key];
+    process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const { issueMobileSession } = await import("@/lib/mobileAuthService");
+  const { desktopResearchAnswerId } = await import("@/lib/desktopResearchAnswerId");
+  const user = await seedProUser();
+  const token = (await issueMobileSession({
+    userId: user.id, platform: "desktop", deviceLabel: "Review research test",
+    request: new Request("http://127.0.0.1:3100/api/auth/desktop/exchange"),
+  })).tokens.accessToken;
+  const contextRoute = await import("@/app/api/chat/context/route");
+  const review = await prisma.conversation.create({ data: {
+    userId: user.id, kind: "chat", productKey: "review", selectionMode: "manual",
+    title: "Review research", selectedModels: JSON.stringify(["gpt-5-6-terra", DEEP_RESEARCH_MODEL_ID]),
+  } });
+  // A question put to Deep Research alone, as the Desktop Review saves it.
+  const question = await prisma.message.create({ data: { id: randomUUID(), conversationId: review.id, role: "user",
+    modelId: DEEP_RESEARCH_MODEL_ID, content: "Compare the historical evidence from three primary sources." } });
+  const assistantMessageId = desktopResearchAnswerId(review.id, question.id);
+  const request = (path: string, body: object) => new Request("http://127.0.0.1:3100" + path, {
+    method: "POST", body: JSON.stringify(body), headers: {
+      Authorization: "Bearer " + token, Origin: "tomverse://desktop", "Content-Type": "application/json",
+    },
+  });
+  const prepared = await contextRoute.POST(request("/api/chat/context", {
+    conversationId: review.id, modelId: DEEP_RESEARCH_MODEL_ID, sourceUserMessageId: question.id,
+  }));
+  assert.equal(prepared.status, 200, await prepared.clone().text());
+  const { contextBundle } = await prepared.json();
+  const dispatch = (override = {}) => chatRoute.POST(request("/api/chat", {
+    conversationId: review.id, assistantMessageId, sourceUserMessageId: question.id, modelId: DEEP_RESEARCH_MODEL_ID,
+    messages: [{ id: question.id, role: "user", content: question.content }], deepResearchDepth: "deep", ...(contextBundle ? { contextBundle } : {}), ...override,
+  }));
+  const poll = () => statusRoute.POST(request("/api/chat/deep-research/status", { assistantMessageId }));
+
+  // Chat's switch is not a Review's: the paid run is refused before anything is reserved or sent.
+  const refusedOff = await dispatch();
+  assert.equal(refusedOff.status, 403, await refusedOff.clone().text());
+  assert.equal(perplexitySubmitCalls().length, 0);
+  process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED = "true";
+  // One model answers alone: a shared Review admission, another model or a missing depth is refused.
+  assert.equal((await dispatch({ admissionToken: "shared-admission" })).status, 403);
+  assert.equal((await dispatch({ modelId: "gpt-5-6-terra" })).status, 403);
+  assert.equal((await dispatch({ deepResearchDepth: undefined })).status, 403);
+  assert.equal((await dispatch({ assistantMessageId: randomUUID() })).status, 403);
+  assert.equal(perplexitySubmitCalls().length, 0);
+
+  const submitted = await dispatch();
+  assert.equal(submitted.status, 200, await submitted.clone().text());
+  assert.deepEqual(await submitted.json(), { deepResearchJobId: assistantMessageId, status: "submitted" });
+  assert.equal(perplexitySubmitCalls().length, 1);
+  assert.equal((await dispatch()).status, 409);
+  assert.equal(perplexitySubmitCalls().length, 1);
+  assert.deepEqual(await prisma.message.findUniqueOrThrow({ where: { id: assistantMessageId },
+    select: { status: true, modelId: true, role: true } }), { status: "pending", modelId: DEEP_RESEARCH_MODEL_ID, role: "assistant" });
+
+  // The poll answers only while the Review switch is on.
+  process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED = "false";
+  assert.equal((await poll()).status, 404);
+  process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED = "true";
+  const content = "Stored Review research report";
+  pollScript = [{ json: { status: "COMPLETED", response: { choices: [{ message: { content } }],
+    usage: { prompt_tokens: 300, completion_tokens: 500, cost: { total_cost: 0.045 } } } } }];
+  const completed = await poll();
+  assert.equal(completed.status, 200, await completed.clone().text());
+  assert.deepEqual(await completed.json(), { status: "completed", content });
+  const job = await prisma.perplexityAsyncJob.findUniqueOrThrow({ where: { assistantMessageId } });
+  assert.equal((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: job.reservationId } })).status, "settled");
+
+  // The Review's switch does not open a Chat: with Chat's own switch off, a research run for a Chat is refused.
+  process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED = "false";
+  const chat = await prisma.conversation.create({ data: {
+    userId: user.id, kind: "chat", productKey: "chat", selectionMode: "manual", title: "Chat research", selectedModels: JSON.stringify([DEEP_RESEARCH_MODEL_ID]),
+  } });
+  const chatQuestion = await prisma.message.create({ data: { id: randomUUID(), conversationId: chat.id, role: "user", content: "Compare the evidence again." } });
+  const submitsBefore = perplexitySubmitCalls().length;
+  const chatRun = await chatRoute.POST(request("/api/chat", {
+    conversationId: chat.id, assistantMessageId: desktopResearchAnswerId(chat.id, chatQuestion.id), sourceUserMessageId: chatQuestion.id,
+    modelId: DEEP_RESEARCH_MODEL_ID, messages: [{ id: chatQuestion.id, role: "user", content: chatQuestion.content }], deepResearchDepth: "deep",
+  }));
+  assert.equal(chatRun.status, 403, await chatRun.clone().text());
+  assert.equal(perplexitySubmitCalls().length, submitsBefore);
+});

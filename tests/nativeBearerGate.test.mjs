@@ -13,6 +13,7 @@ import {
   desktopPluginsEnabled,
   desktopReadApiRoute,
   desktopRemoteControlEnabled,
+  desktopReviewDeepResearchEnabled,
   desktopVoiceEnabled,
   desktopWriteApiRoute,
   nativeBearerVerdict,
@@ -263,6 +264,40 @@ test("Desktop Drive and Deep Research are opt-in and retain the existing attachm
     assert.equal(desktopDriveEnabled(), false);
     assert.equal(desktopWriteApiRoute(status, "POST"), true);
     delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Deep Research from a Desktop Review has its own switch on top of Review writes and opens only the status poll", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED",
+    "TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const status = "/api/chat/deep-research/status";
+  try {
+    for (const key of switches) delete process.env[key];
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    assert.equal(desktopReviewDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), false);
+    // Chat's switch does not open a Review, and the Review switch does not open Chat.
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED = "true";
+    assert.equal(desktopReviewDeepResearchEnabled(), false);
+    assert.equal(desktopDeepResearchEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED;
+    process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED = "true";
+    assert.equal(desktopReviewDeepResearchEnabled(), true);
+    assert.equal(desktopDeepResearchEnabled(), false);
+    assert.equal(desktopWriteApiRoute(status, "POST"), true);
+    assert.equal(desktopWriteApiRoute(status, "GET"), false);
+    assert.equal(desktopWriteApiRoute("/api/chat/research/runs", "POST"), false);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    assert.equal(desktopReviewDeepResearchEnabled(), false);
     assert.equal(desktopWriteApiRoute(status, "POST"), false);
   } finally {
     switches.forEach((key, index) => {

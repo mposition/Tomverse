@@ -3107,7 +3107,8 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   const attachments = resolveStagedAttachments(input.attachmentUploadIds);
   const capability = state.capabilities?.review;
   if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy) ||
-      (input.tools && !state.capabilities?.reviewTools)) {
+      (input.tools && !state.capabilities?.reviewTools) || (input.deepResearchDepth && !state.capabilities?.reviewDeepResearch) ||
+      (input.onlyModelId === DEEP_RESEARCH_MODEL_ID && !input.deepResearchDepth)) {
     throw new Error("The selected Review options are unavailable.");
   }
   const currentLocation = chatLocationAllowed() ? input.currentLocation : undefined;
@@ -3121,6 +3122,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
     let id = input.conversationId;
     let savedQuestion = false;
     let dispatching = false;
+    let researchSubmitted = false;
     const responses = new Map<string, { id: string; text: string }>();
     const publish = (update: Omit<ReviewTurnProgress, "requestId" | "conversationId">) => {
       if (!id || !window || window !== mainWindow || window.isDestroyed() || window.webContents.isDestroyed() ||
@@ -3131,10 +3133,20 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
       try {
         let current = id ? await api.conversation({ id, product: "review" }, true, signal) : null;
         let modelIds = input.choices;
+        // Deep Research is one more column of the Review, put to that model alone.
+        const limit = Math.min(3, capability.modelLimit);
+        let researchHeld: string[] | undefined;
         const only = input.onlyModelId;
+        if (input.deepResearchDepth) {
+          if (!(await api.models()).some((model) => model.id === DEEP_RESEARCH_MODEL_ID)) throw new Error("Deep Research is unavailable.");
+          // Like any send, the Review then holds the models the composer shows; a new Review gives up the last ones that do not fit.
+          researchHeld = [...(current ? input.choices : input.choices.slice(0, Math.max(0, limit - 1))), DEEP_RESEARCH_MODEL_ID];
+          if (researchHeld.length > limit) throw new Error("There is no room for Deep Research in this Review.");
+          modelIds = [DEEP_RESEARCH_MODEL_ID];
+        }
         // A follow-up for one model goes to a saved Review that already holds that model; nothing else about the Review changes.
         if (only && !current?.selectedModels.includes(only)) throw new Error("The model is not part of this Review.");
-        if (!only && input.mode === "easy") {
+        if (!only && !input.deepResearchDepth && input.mode === "easy") {
           const context = current?.messages.filter((message) => message.role === "user").slice(-2)
             .map((message) => message.content).join("\n") ?? "";
           const decision = await api.routeReview(input, context, signal, attachments);
@@ -3157,30 +3169,36 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
             throw new Error("The selected models do not share this reasoning effort.");
           }
         }
+        // What the Review holds once this send is made. Easy mode has routed its providers to models by now; the research column
+        // of a Review stays while a place is free beside the models that answer.
+        const held = researchHeld ?? (!only && current?.selectedModels.includes(DEEP_RESEARCH_MODEL_ID) && modelIds.length < limit
+          ? [...modelIds, DEEP_RESEARCH_MODEL_ID] : modelIds);
         if (!id) {
-          id = await api.createReview(modelIds, input.prompt, signal);
+          id = await api.createReview(held, input.prompt, signal);
           if (input.tools && Object.keys(input.tools).length) {
-            await api.configureReview(await api.conversation({ id, product: "review" }, true, signal), modelIds, signal, input.tools);
+            await api.configureReview(await api.conversation({ id, product: "review" }, true, signal), held, signal, input.tools);
           }
         } else if (current && !only) {
-          await api.configureReview(current, modelIds, signal, input.tools);
+          await api.configureReview(current, held, signal, input.tools);
         }
         current = await api.conversation({ id, product: "review" }, true, signal);
-        if (!only && current.selectedModels.length !== modelIds.length || !modelIds.every((modelId) => current!.selectedModels.includes(modelId))) {
+        if (!only && current.selectedModels.length !== held.length || !held.every((modelId) => current!.selectedModels.includes(modelId))) {
           throw new Error("Tomverse did not confirm the selected Review models.");
         }
         const admission = modelIds.length > 1 ? await api.admitReview(current, input, modelIds, signal, attachments) : undefined;
-        const sourceId = await api.saveQuestion(id, input, signal);
+        const reviewId = id;
+        const sourceId = await api.saveQuestion(id, input.deepResearchDepth ? { ...input, onlyModelId: DEEP_RESEARCH_MODEL_ID } : input, signal);
         savedQuestion = true;
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);
         publish({ savedPrompt: input.prompt });
         const saved = await api.conversation({ id, product: "review" }, true, signal);
         dispatching = true;
         await Promise.allSettled(modelIds.map(async (modelId) => {
-          const assistant = { id: randomUUID(), text: "" };
+          const assistant = { id: input.deepResearchDepth ? desktopResearchAnswerId(reviewId, sourceId) : randomUUID(), text: "" };
           responses.set(modelId, assistant);
           let lastProgressAt = 0;
-          await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext, currentLocation },
+          const result = await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext,
+            currentLocation: input.deepResearchDepth ? undefined : currentLocation, deepResearchDepth: input.deepResearchDepth },
             sourceId, assistant.id, signal, (text) => {
               assistant.text = text;
               const now = Date.now();
@@ -3189,6 +3207,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
                 publish({ modelId, text });
               }
             });
+          if (result && "deepResearch" in result) researchSubmitted = true;
         }));
       } catch {
         // Keep any saved question available for a readback after a refusal or transport failure.
@@ -3200,7 +3219,9 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
       const stored = new Map(conversation?.messages.map((message) => [message.id, message]));
       const partial = [...responses].flatMap(([modelId, response]) =>
         response.text && !stored.has(response.id) ? [{ modelId, text: response.text }] : []);
-      const completed = [...responses.values()].filter(({ id }) => stored.get(id)?.status === "normal").length;
+      // A research run that the server accepted is under way, not unfinished: its answer arrives by polling.
+      const completed = [...responses.values()].filter(({ id }) => stored.get(id)?.status === "normal" ||
+        (researchSubmitted && input.deepResearchDepth && (!stored.has(id) || stored.get(id)?.status === "pending"))).length;
       const status = completed && completed === responses.size ? "saved" : signal.aborted ? "stopped"
         : completed || partial.length ? "partial" : dispatching ? "unconfirmed" : "failed";
       return { conversation, status, savedQuestion, partial };
@@ -4162,7 +4183,7 @@ function registerIpc() {
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
   main("chat:research-status", (value) => {
-    if (!state.capabilities?.deepResearch) throw new Error("Deep Research is unavailable.");
+    if (!state.capabilities?.deepResearch && !state.capabilities?.reviewDeepResearch) throw new Error("Deep Research is unavailable.");
     return withChatAccount((api) => api.checkDeepResearch(chatId.parse(value)));
   });
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));
