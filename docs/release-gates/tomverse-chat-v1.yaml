@@ -925,6 +925,12 @@ gates:
     evidenceRefs: []
     category: scope-control
     title: Push-notification infrastructure remains out of v1 until a use case is approved
+    # Owner decision in chat, 2026-11-27: a local notification the open page
+    # shows itself (the answer-ready notice; Notification API only, no push
+    # subscription, service-worker push handler, device token or server
+    # credential) is not push infrastructure and is allowed. The one file that
+    # asks for the permission is listed in scripts/check-push-scope-core.mjs
+    # (APPROVED_LOCAL_NOTIFICATION_PATHS). Push itself stays out of v1.
     blocking: true
     owner: product-qa
     criteria:

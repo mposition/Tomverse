@@ -1,6 +1,6 @@
 import type { Conversation, Message } from "@/components/chat/types";
 import { discardResponseBody } from "./discardResponseBody";
-import { removeGuestConversationMessages } from "./guestConversationStorage";
+import { readGuestSupersededIds, removeGuestConversationMessages } from "./guestConversationStorage";
 
 export const PENDING_GUEST_IMPORT_KEY = "tomverse_pending_guest_import";
 export const GUEST_IMPORT_SEEN_KEY = "tomverse_guest_import_prompted_v1";
@@ -28,6 +28,8 @@ export type GuestImportPayloadMessage = {
   status: "normal" | "incomplete" | "error" | "cancelled";
   modelId: string | null;
   createdAt: string;
+  /** Replaced by a regenerate or an edit: kept in the account's history, left out of model context. */
+  superseded?: true;
 };
 
 export type GuestImportPayload = {
@@ -154,6 +156,10 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
 
   const seenUserIds = new Set<string>();
   const merged: GuestImportPayloadMessage[] = [];
+  // A turn the guest replaced (regenerate, edit) is carried into the account
+  // marked replaced: the guest copy is removed after the import, so leaving it
+  // out would lose it, and importing it unmarked would put it back in context.
+  const replaced = new Set(readGuestSupersededIds(guestConversationId));
 
   modelIds.forEach((modelId, panelIndex) => {
     const raw = window.localStorage.getItem(`guest_messages_${guestConversationId}_${modelId}`);
@@ -186,6 +192,7 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
           // stable, monotonically increasing timestamp from position so
           // ordering survives even without a real chat-time timestamp.
           new Date(Date.parse(conversation.createdAt || new Date().toISOString()) + panelIndex * 1000 + indexInPanel).toISOString(),
+        ...(replaced.has(message.id) ? { superseded: true as const } : {}),
       });
     });
   });

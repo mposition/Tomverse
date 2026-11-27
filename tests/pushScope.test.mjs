@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+    APPROVED_LOCAL_NOTIFICATION_PATHS,
     describeFindings,
     findPushInfrastructure,
     PUSH_PACKAGES,
@@ -162,4 +163,28 @@ test("the package list names the delivery SDKs by their real names", () => {
     for (const name of ["web-push", "firebase-admin", "expo-notifications", "node-apn"]) {
         assert.ok(PUSH_PACKAGES.includes(name), `${name} should be listed`);
     }
+});
+
+test("the approved local notification may ask for permission, and nothing else is excused by it", () => {
+    const ask = "const result = await Notification.requestPermission();";
+    // Owner decision 2026-11-27: exactly this file, on either path separator.
+    assert.deepEqual(APPROVED_LOCAL_NOTIFICATION_PATHS, ["components/settings/AnswerNotificationSetting.tsx"]);
+    assert.deepEqual(find({ sources: [{ path: "components/settings/AnswerNotificationSetting.tsx", text: ask }] }), []);
+    const windowsPath = ["components", "settings", "AnswerNotificationSetting.tsx"].join(String.fromCharCode(92));
+    assert.deepEqual(find({ sources: [{ path: windowsPath, text: ask }] }), []);
+    // The same request anywhere else is still the Web Push surface.
+    assert.equal(find({ sources: [{ path: "components/settings/OtherSetting.tsx", text: ask }] }).length, 1);
+    assert.equal(find({ sources: [{ path: "lib/answerNotification.ts", text: ask }] }).length, 1);
+    // And the approved file may not grow into push: a subscription or a worker notification is reported.
+    const grown = find({
+        sources: [{
+            path: "components/settings/AnswerNotificationSetting.tsx",
+            text: ask + " registration.pushManager.subscribe({ applicationServerKey }); registration.showNotification('x');",
+        }],
+    });
+    assert.deepEqual(grown.map((finding) => finding.detail).sort(), ["applicationServerKey", "pushManager", "showNotification"]);
+    // The real tree: the file asks for permission and names nothing from the push surface.
+    const source = readFileSync(join(root, "components/settings/AnswerNotificationSetting.tsx"), "utf8");
+    assert.ok(source.includes("Notification.requestPermission"));
+    assert.deepEqual(find({ sources: [{ path: "components/settings/AnswerNotificationSetting.tsx", text: source }] }), []);
 });
