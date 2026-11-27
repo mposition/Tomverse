@@ -155,7 +155,14 @@ async function finalizeRun(
       // the operator is not finished: it is due again (onceTaskRetryAt).
       let retryAt: Date | null = null;
       if (!streak.pause && task.frequency === "once") {
-        const first = await tx.scheduledTaskRun.aggregate({ where: { taskId: run.taskId }, _min: { scheduledFor: true } });
+        // The first occurrence of this schedule: runs of the revision this run
+        // was claimed for. An edit starts a new revision, so a task that was
+        // rescheduled, or was recurring before it became one-time, is not
+        // measured from runs of a schedule it no longer has.
+        const first = await tx.scheduledTaskRun.aggregate({
+          where: { taskId: run.taskId, taskRevision: run.taskRevision },
+          _min: { scheduledFor: true },
+        });
         retryAt = first._min.scheduledFor
           ? onceTaskRetryAt({ classification, now: new Date(), firstScheduledFor: first._min.scheduledFor })
           : null;

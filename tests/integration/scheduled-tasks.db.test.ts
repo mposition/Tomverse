@@ -901,3 +901,31 @@ test("a one-time task stopped by the operator before it could spend stays active
   assert.equal(finished.status, "completed");
   assert.equal(finished.nextRunAt, null);
 });
+
+test("a rescheduled one-time task is retried from its new schedule, not from runs of the old one", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId, { frequency: "once", runOnDate: new Date().toISOString().slice(0, 10) });
+  // A run of an earlier schedule, long ago (the task was edited since: its revision moved on).
+  await prisma.scheduledTaskRun.create({
+    data: {
+      id: randomUUID(), taskId: task.id, userId, runningUserId: null, taskRevision: task.revision, status: "succeeded",
+      scheduledFor: new Date(Date.now() - 30 * 86_400_000), startedAt: new Date(Date.now() - 30 * 86_400_000),
+      finishedAt: new Date(Date.now() - 30 * 86_400_000), assistantMessageId: randomUUID(),
+      leaseExpiresAt: new Date(Date.now() - 30 * 86_400_000),
+    },
+  });
+  await prisma.scheduledTask.update({ where: { id: task.id }, data: { revision: { increment: 1 } } });
+  const calls: Call[] = [];
+  await runScheduledTasksTick({
+    enabled: async () => true,
+    dispatch: async () => async (request) => {
+      await prisma.appSetting.update({ where: { key: SCHEDULED_TASKS_FLAG_KEY }, data: { value: "false" } });
+      return completingChat(calls)(request);
+    },
+  });
+  const stored = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+  // The month-old run belongs to the old schedule: the new one is still inside its retry window.
+  assert.equal(stored.status, "active");
+  assert.ok(stored.nextRunAt, "the rescheduled task is due again");
+});

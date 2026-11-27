@@ -429,7 +429,7 @@ export const classifyAttempt = (
 export const onceTaskRetryAt = (input: {
   classification: RunClassification;
   now: Date;
-  /** The task's first occurrence: the earliest run's scheduledFor. */
+  /** The first occurrence of the task's current schedule: the earliest scheduledFor among runs of this revision. */
   firstScheduledFor: Date;
 }): Date | null => {
   const { classification, now, firstScheduledFor } = input;
