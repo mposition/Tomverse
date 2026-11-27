@@ -199,57 +199,6 @@ export async function peekChatResponseAttempt(userId: string, assistantMessageId
   return readChatResponseAttemptFrom(prisma, userId, assistantMessageId);
 }
 
-/**
- * The user's explicit stop of a turn that may have no connection left to
- * abort (lib/chatContinueAfterDisconnect.ts).
- *
- * One conditional UPDATE, scoped to the owner and the authorized
- * conversation, that turns a still-active row into terminal `cancelled` with
- * the prefix it has already committed. It does not name an owner or a
- * revision: the user is not a worker, and the stop must win against whichever
- * worker holds the lease. That worker's next checkpoint or terminal CAS then
- * finds a terminal row, and its stream reads the row and cancels with the
- * ordinary prorated settlement. An expired lease is reconciled first, so a
- * dead worker's row still ends `failed / worker_lease_expired` rather than
- * being relabelled a stop. A row that is already terminal is left alone and
- * returned as it is.
- */
-export async function requestChatResponseAttemptStop(
-  userId: string,
-  assistantMessageId: string,
-  expectedConversationId: string
-) {
-  await reconcileExpiredChatResponseAttempt(
-    userId,
-    assistantMessageId,
-    expectedConversationId
-  );
-  const stopped = await prisma.$executeRaw(
-    Prisma.sql`
-      UPDATE "ChatResponseAttempt"
-      SET "status" = 'cancelled',
-          "checkpointRevision" = "checkpointRevision" + 1,
-          "finishReason" = 'cancelled',
-          "failureCode" = NULL,
-          "terminalAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
-          "updatedAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-      WHERE "assistantMessageId" = ${assistantMessageId}
-        AND "userId" = ${userId}
-        AND "conversationId" = ${expectedConversationId}
-        AND "status" IN ('claimed', 'streaming')
-        AND "leaseExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-        AND "checkpointRevision" < 2147483647
-    `
-  );
-  const attempt = await readChatResponseAttemptFrom(
-    prisma,
-    userId,
-    assistantMessageId,
-    expectedConversationId
-  );
-  return { stopped: stopped === 1, attempt };
-}
-
 export async function listChatResponseAttempts(input: {
   userId: string;
   conversationId: string;

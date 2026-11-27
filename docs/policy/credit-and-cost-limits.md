@@ -886,33 +886,6 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 `pricingVersion`·`costSource`·`longContextThresholdTokens`가 reservation payload와
 `pricingSnapshot`에 저장되고, 정산은 그 값으로 이뤄집니다.
 
-### 연결이 끊긴 durable Chat turn (기본 꺼짐 스위치)
-
-`CHAT_CONTINUE_AFTER_DISCONNECT=on`일 때만 바뀝니다(`lib/chatContinueAfterDisconnect.ts`).
-꺼져 있으면 요청 연결이 끊긴 turn은 예전처럼 provider 호출을 중단하고 생성분 비례
-`cancelled`로 정산합니다.
-
-- 켜져 있으면 응답 시도 행이 있는 계정 Chat turn(Research Preview, plugin·project 도구
-  turn 제외)은 **명시적 Stop 없이** 연결만 끊겼을 때 provider 호출을 계속하고, 끝나면
-  연결이 유지된 turn과 똑같이 `completed`로 정산합니다. 연결을 끊어 덜 내는 길은
-  없습니다 — 계속되면 완료 과금, 사용자가 멈추면 지금과 같은 비례 과금입니다.
-- Stop은 attempt 행에 기록되고(`POST /api/products/chat/attempts/[id]`), 떨어진 turn이
-  그 행을 읽어 즉시 `cancelled` 비례 정산합니다. 완료 직전 최종 checkpoint에서 Stop을
-  만나도 `failed`(무과금)가 아니라 `cancelled`로 정산합니다. 최종 checkpoint를 통과한
-  뒤에 기록된 Stop은 늦은 Stop입니다 — 이미 `completed` 정산이 턴을 가졌으므로 답변
-  Message를 그대로 저장합니다. `completed`로 정산된 턴은 반드시 저장되고, 이긴 Stop은
-  `completed` 정산에 이르지 않습니다.
-- **떨어진 것으로 보는 끊김은 스트리밍 응답이 공개된 뒤의 끊김뿐입니다.** 그 전(응답
-  헤더가 나가기 전)에 온 요청 중단은 스위치와 무관하게 예전처럼 취소이고 `cancelled`
-  비례 정산입니다 — 브라우저는 아직 아무것도, Stop을 알려야 한다는 헤더조차 받지
-  못했습니다. 브라우저는 durable Chat 요청을 보낼 때부터 Stop 요청을 걸어 두고, 행이
-  아직 없어 404를 받으면 짧게 몇 번(합계 약 30초) 다시 보냅니다. Stop을 누른 사용자는
-  어떤 순서에서도 `completed`로 과금되지 않습니다(2026-11-27, 검토
-  r-20261127-023116-0f6e2b).
-- 떨어진 turn도 lease heartbeat, 첫 토큰 기한, 출력 상한, tool step 상한을 그대로
-  받습니다. 첫 토큰 이후 provider가 아무 part도 내지 않으면(기본 90초, 브라우저의
-  무응답 기준과 같음) 서버가 스스로 비례 `cancelled`로 끝냅니다.
-
 ### 완료 분기의 정산 (2026-11-27)
 
 provider 스트림이 끝난 뒤 완료 분기가 고르는 정산 outcome입니다. 정산은 Message

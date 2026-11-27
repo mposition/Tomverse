@@ -7,19 +7,14 @@ import { resolve } from "node:path";
 import * as aiModule from "ai";
 
 /**
- * POST /api/chat for a durable Chat turn whose connection goes away
- * (lib/chatContinueAfterDisconnect.ts).
- *
- * Off -- the default -- a request abort cancels the turn, prorated, exactly
- * as before. On, a dropped connection without an explicit stop no longer
- * aborts the provider: the turn finishes and is saved and charged as
- * completed, and only a stop recorded in the attempt row (or a provider that
- * stops producing anything) cancels it. A stop that meets the final
- * checkpoint is a stop, never a free `failed` turn.
+ * POST /api/chat's completion branch for a durable Chat turn (an attempt row):
+ * the final checkpoint, the settlement, the Message transaction and the one
+ * terminal transition of the attempt, for every shape a finished turn takes
+ * and for each way the Message write can fail.
  *
  * Built on the same fixture shape as chat-route-stream-keepalive.test.ts,
- * with the attempt row held in memory so a stop can be written into it the
- * way the attempt endpoint would.
+ * with the attempt row held in memory and the file tools run by the fake
+ * provider.
  */
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -38,8 +33,8 @@ process.env.ANTHROPIC_API_KEY ||= "server-contract-test-key";
 process.env.OPENAI_API_KEY = "server-contract-test-key";
 
 const MODEL_ID = "claude-haiku-4-5";
-const USER_ID = "detach-user-1";
-const CONVERSATION_ID = "detach-conversation-1";
+const USER_ID = "durable-user-1";
+const CONVERSATION_ID = "durable-conversation-1";
 const SOURCE_MESSAGE_ID = "11111111-2222-4333-8444-555555555555";
 const ASSISTANT_MESSAGE_ID = "33333333-4444-4555-8666-777777777777";
 
@@ -47,16 +42,12 @@ const KEEPALIVE_INTERVAL_MS = 25;
 const FIRST_TOKEN_DEADLINE_MS = 1_500;
 process.env.CHAT_STREAM_KEEPALIVE_INTERVAL_MS = String(KEEPALIVE_INTERVAL_MS);
 process.env.CHAT_FIRST_TOKEN_DEADLINE_MS = String(FIRST_TOKEN_DEADLINE_MS);
-// The detached turn's own bounds, lowered through the operator seam.
-process.env.CHAT_DETACHED_STOP_GRACE_MS = "100";
-process.env.CHAT_DETACHED_STOP_POLL_MS = "25";
-process.env.CHAT_DETACHED_PROVIDER_IDLE_MS = "1500";
 
 mock.module(mod("lib/mobileAuthRoute.ts"), { namedExports: { requireMobileBearer: async () => ({ ok: false }) } });
 mock.module("next-auth/next", {
   namedExports: {
     getServerSession: async () => ({
-      user: { id: USER_ID, email: "detach-qa@tomverse.app" },
+      user: { id: USER_ID, email: "durable-qa@tomverse.app" },
     }),
   },
 });
@@ -87,8 +78,6 @@ let script: Script = { first: "Partial.", then: "finish", rest: " The end." };
 let releaseRest = () => {};
 let providerAbortReason: unknown = null;
 let providerCancelled = false;
-/** Runs as the provider is called -- after dispatch, before the Response exists. */
-let onProviderCall: (() => void) | null = null;
 /** Whether the last `readToEnd()` ended on a stream error rather than a close. */
 let lastReadErrored = false;
 
@@ -106,7 +95,6 @@ mock.module("ai", {
       };
       if (options.abortSignal?.aborted) observeAbort();
       else options.abortSignal?.addEventListener("abort", observeAbort, { once: true });
-      onProviderCall?.();
       let text = "";
       const finished = new Promise<void>((settle) => {
         releaseRest = settle;
@@ -140,7 +128,7 @@ mock.module("ai", {
           },
         }),
         response: finished.then(() => ({
-          id: "resp-detach-1",
+          id: "resp-durable-1",
           modelId: MODEL_ID,
           headers: {},
           messages: [],
@@ -194,31 +182,12 @@ type Row = {
   updatedAt: Date;
 };
 let row: Row | null = null;
-/** Points in the completion branch a test may act at. */
-const hooks: {
-  afterCheckpoint?: (written: Row) => void;
-  afterSettle?: (outcome: string) => void;
-  inMessageTransaction?: () => void;
-} = {};
 /** Errors the next checkpoint writes throw, in order. */
 let checkpointFailures: unknown[] = [];
 /** Errors thrown by the next checkpoint writes *after* they committed. */
 let checkpointAckLost: unknown[] = [];
 const terminals: Array<{ status: string; writer: "owner" }> = [];
 const isTerminal = (status: string) => ["completed", "failed", "cancelled"].includes(status);
-/** What POST .../attempts/[id] {action: "stop"} writes. */
-const stopFromEndpoint = () => {
-  assert.ok(row && !isTerminal(row.status), "a stop needs an active attempt");
-  row = {
-    ...row,
-    status: "cancelled",
-    finishReason: "cancelled",
-    failureCode: null,
-    terminalAt: new Date(),
-    checkpointRevision: row.checkpointRevision + 1,
-  };
-};
-
 mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
   namedExports: {
     ChatAttemptCapacityError: class extends Error {},
@@ -256,7 +225,6 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
       if (row.checkpointRevision !== input.expectedRevision) throw new CasError("revision_conflict");
       row = { ...row, status: "streaming", partialContent: input.partialContent, checkpointRevision: row.checkpointRevision + 1 };
       const written = row;
-      hooks.afterCheckpoint?.(written);
       // The UPDATE committed and its answer was lost on the way back.
       const lostAck = checkpointAckLost.shift();
       if (lostAck) throw lostAck;
@@ -348,7 +316,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
         lineageId: null,
       }))) as (args: never) => unknown,
   },
-  user: { findUnique: () => ({ id: USER_ID, email: "detach-qa@tomverse.app", name: "Fixture", accountStatus: "active" }) },
+  user: { findUnique: () => ({ id: USER_ID, email: "durable-qa@tomverse.app", name: "Fixture", accountStatus: "active" }) },
   conversation: {
     findUnique: () => conversationRow,
     findFirst: () => conversationRow,
@@ -367,7 +335,6 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     create: (args: { data: { id: string; content?: unknown } }) => {
       const failure = world.createFailures.shift();
       if (failure) throw failure;
-      hooks.inMessageTransaction?.();
       world.messages.push({ ...args.data });
       return args.data;
     },
@@ -458,12 +425,12 @@ mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     ...realChatSecurity,
     acquireChatAccess: async () => ({
-      leaseId: "lease-detach-1",
+      leaseId: "lease-durable-1",
       setCookie: undefined,
       usageReservation: {
-        reservationId: "reservation-detach-1",
+        reservationId: "reservation-durable-1",
         userId: USER_ID,
-        traceId: "trace-detach-1",
+        traceId: "trace-durable-1",
         source: "chat" as const,
         modelId: MODEL_ID,
         provider: "anthropic" as const,
@@ -476,7 +443,6 @@ mock.module(mod("lib/chatSecurity.ts"), {
     heartbeatChatAccess: async () => true,
     settleChatUsage: async (_reservation: unknown, usage: { outcome?: string }) => {
       ledger.settlements.push({ outcome: usage?.outcome ?? "unknown" });
-      hooks.afterSettle?.(usage?.outcome ?? "unknown");
     },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async () => ({ ok: true, entries: [] }),
@@ -527,19 +493,12 @@ const until = async (what: string, ready: () => boolean): Promise<void> => {
     clearInterval(anchor);
   }
 };
-const pause = (ms: number) => {
-  const anchor = setInterval(() => {}, 20);
-  return new Promise<void>((settle) => setTimeout(() => {
-    clearInterval(anchor);
-    settle();
-  }, ms));
-};
 
 /**
  * Sends a durable turn, reads its first visible chunk, and returns the
  * response and an abort for the request's connection.
  */
-const start = async (next: Script, switchOn: boolean) => {
+const start = async (next: Script) => {
   script = next;
   providerAbortReason = null;
   providerCancelled = false;
@@ -550,8 +509,6 @@ const start = async (next: Script, switchOn: boolean) => {
   world.discarded = 0;
   ledger.settlements = [];
   ledger.releases = [];
-  if (switchOn) process.env.CHAT_CONTINUE_AFTER_DISCONNECT = "on";
-  else delete process.env.CHAT_CONTINUE_AFTER_DISCONNECT;
 
   const connection = new AbortController();
   const { POST } = await loadRoute();
@@ -606,91 +563,20 @@ const start = async (next: Script, switchOn: boolean) => {
 };
 
 test.afterEach(() => {
-  delete process.env.CHAT_CONTINUE_AFTER_DISCONNECT;
   releaseRest();
 });
 
 /* -------------------------------------------------------------------------- */
 
-test("switch off: a dropped connection cancels the durable turn exactly as before", async () => {
-  const { response, drop } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
-  assert.equal(response.headers.get("X-Chat-Continue-After-Disconnect"), null);
+test("a dropped connection cancels the durable turn, prorated", async () => {
+  const { drop } = await start({ first: "Partial.", then: "finish", rest: " The end." });
   drop();
   await until("the cancelled settlement", () => ledger.settlements.length > 0);
   releaseRest();
   assert.equal(ledger.settlements[0].outcome, "cancelled");
-  assert.ok(providerAbortReason !== null, "the provider must be aborted with the switch off");
+  assert.ok(providerAbortReason !== null, "a dropped connection must abort the provider");
   assert.deepEqual(world.messages, []);
   assert.deepEqual(terminals.map((t) => t.status), ["cancelled"]);
-});
-
-test("switch on: a dropped connection keeps the provider, and the turn completes and is charged as completed", async () => {
-  const { response, drop } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
-  assert.equal(response.headers.get("X-Chat-Continue-After-Disconnect"), "on");
-  drop();
-  // Past the stop grace: nobody stopped it, so it carries on.
-  await pause(200);
-  assert.equal(providerAbortReason, null, "a disconnect must not abort the provider");
-  assert.equal(ledger.settlements.length, 0);
-  releaseRest();
-  await until("the completed settlement", () => ledger.settlements.length > 0);
-  assert.equal(ledger.settlements[0].outcome, "completed");
-  await until("the saved answer", () => world.messages.length > 0);
-  assert.equal(world.messages[0].content, "Partial. The end.");
-  assert.deepEqual(terminals.map((t) => t.status), ["completed"]);
-  assert.equal(providerAbortReason, null);
-  await until("the lease release", () => ledger.releases.length > 0);
-});
-
-test("switch on: a stop recorded before the abort cancels at once, prorated", async () => {
-  const { drop } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
-  stopFromEndpoint();
-  drop("client pressed stop");
-  await until("the cancelled settlement", () => ledger.settlements.length > 0);
-  assert.equal(ledger.settlements[0].outcome, "cancelled");
-  assert.ok(providerAbortReason !== null, "a stop must abort the provider");
-  releaseRest();
-  await pause(50);
-  assert.deepEqual(world.messages, []);
-  // The row was the endpoint's to terminalize; the owner wrote nothing over it.
-  assert.deepEqual(terminals, []);
-  assert.equal(row?.status, "cancelled");
-});
-
-test("switch on: a stop that lands after the disconnect is found by the detached watch", async () => {
-  const { drop } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
-  drop();
-  await pause(200);
-  assert.equal(ledger.settlements.length, 0, "still running, detached");
-  stopFromEndpoint();
-  await until("the cancelled settlement", () => ledger.settlements.length > 0);
-  assert.equal(ledger.settlements[0].outcome, "cancelled");
-  assert.ok(providerAbortReason !== null);
-  releaseRest();
-  await pause(50);
-  assert.deepEqual(world.messages, []);
-});
-
-test("switch on: a detached provider that stops producing is cancelled, not left running", async () => {
-  const { drop } = await start({ first: "Partial.", then: "stall" }, true);
-  drop();
-  await until("the cancelled settlement", () => ledger.settlements.length > 0);
-  assert.equal(ledger.settlements[0].outcome, "cancelled");
-  assert.ok(providerAbortReason !== null);
-  await until("the lease release", () => ledger.releases.length > 0);
-});
-
-test("a stop that meets the final checkpoint settles as a stop, never as a free failure", async () => {
-  // Connected the whole way: the stop is recorded while the provider is
-  // finishing, so the completion branch's final CAS is the first to see it.
-  const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
-  stopFromEndpoint();
-  releaseRest();
-  await readToEnd();
-  await until("the settlement", () => ledger.settlements.length > 0);
-  assert.equal(ledger.settlements[0].outcome, "cancelled");
-  assert.notEqual(ledger.settlements[0].outcome, "failed");
-  assert.deepEqual(world.messages, []);
 });
 
 /*
@@ -707,7 +593,7 @@ const retryableWriteError = () =>
 test("a durable turn whose Message write fails once is retried and completes once", async () => {
   world.createFailures = [retryableWriteError()];
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     await readToEnd();
     await until("the saved answer", () => world.messages.length > 0);
@@ -723,7 +609,7 @@ test("a durable turn whose Message write fails once is retried and completes onc
 test("a durable turn whose Message write keeps failing ends failed, still settled once", async () => {
   world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     await readToEnd();
     await until("the lease release", () => ledger.releases.length > 0);
@@ -746,7 +632,7 @@ test("a Message write that keeps failing is not filed as a provider or model fai
   health.modelFailures = [];
   world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     await readToEnd();
     await until("the lease release", () => ledger.releases.length > 0);
@@ -758,10 +644,10 @@ test("a Message write that keeps failing is not filed as a provider or model fai
   }
 });
 
-test("a refused final checkpoint that is not the user's stop is not a provider failure", async () => {
+test("a refused final checkpoint is not a provider failure", async () => {
   health.providerFailures = [];
   health.modelFailures = [];
-  const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+  const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
   // Another writer moved the row on: the lease is no longer this request's.
   assert.ok(row);
   row = { ...row, checkpointRevision: row.checkpointRevision + 5 };
@@ -779,7 +665,7 @@ test("a transient checkpoint failure does not fail a turn the user read to the e
   health.providerFailures = [];
   checkpointFailures = [retryableWriteError()];
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     await readToEnd();
     await until("the saved answer", () => world.messages.length > 0);
@@ -803,8 +689,7 @@ test("a durable answer the provider broke off is saved incomplete, settled prora
   health.providerFailures = [];
   health.modelFailures = [];
   const { readToEnd } = await start(
-    { first: "Partial.", then: "finish", rest: " The en", finishReason: "error" },
-    false
+    { first: "Partial.", then: "finish", rest: " The en", finishReason: "error" }
   );
   releaseRest();
   await readToEnd();
@@ -816,63 +701,6 @@ test("a durable answer the provider broke off is saved incomplete, settled prora
   assert.equal(row?.status, "completed");
   assert.deepEqual(health.providerFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
   assert.deepEqual(health.modelFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
-});
-
-/* -------------------------------------------------------------------------- */
-/* Review r-20261127-023116-0f6e2b                                             */
-/* -------------------------------------------------------------------------- */
-
-/*
-  Major 1. A Stop pressed before the response's headers reached the browser
-  aborted the fetch without the stop request (the browser only learns from the
-  header that it must say one), and a server with the switch on detached that
-  abort as a dropped connection and finished -- charged as completed. An abort
-  that arrives before the Response is published is a cancel, as with the
-  switch off: the browser has received nothing and cannot reattach.
-*/
-test("switch on: an abort after dispatch but before the response is published cancels, never continues", async () => {
-  script = { first: "Partial.", then: "finish", rest: " The end." };
-  providerAbortReason = null;
-  providerCancelled = false;
-  row = null;
-  terminals.length = 0;
-  world.messages = [];
-  ledger.settlements = [];
-  ledger.releases = [];
-  process.env.CHAT_CONTINUE_AFTER_DISCONNECT = "on";
-  const connection = new AbortController();
-  onProviderCall = () => connection.abort("stop pressed before the headers arrived");
-  try {
-    const { POST } = await loadRoute();
-    const anchor = setInterval(() => {}, 20);
-    const response = await POST(
-      new Request("http://127.0.0.1:3100/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: "긴 답을 써 줘", id: SOURCE_MESSAGE_ID }],
-          modelId: MODEL_ID,
-          conversationId: CONVERSATION_ID,
-          assistantMessageId: ASSISTANT_MESSAGE_ID,
-          sourceUserMessageId: SOURCE_MESSAGE_ID,
-        }),
-        signal: connection.signal,
-      })
-    ).finally(() => clearInterval(anchor));
-    // The provider finishes at once: a turn that was (wrongly) detached
-    // would now complete, not stall into the idle cancel.
-    releaseRest();
-    await response.body?.cancel().catch(() => undefined);
-    await until("the settlement", () => ledger.settlements.length > 0);
-    await pause(150);
-    assert.equal(ledger.settlements[0].outcome, "cancelled");
-    assert.equal(ledger.settlements.length, 1);
-    assert.notEqual(providerAbortReason, null, "the provider must be aborted, not left generating");
-    assert.deepEqual(world.messages, []);
-    assert.ok(!terminals.some((t) => t.status === "completed"), "a stopped turn was completed");
-  } finally {
-    onProviderCall = null;
-  }
 });
 
 /*
@@ -889,7 +717,7 @@ test("a durable write whose commit is unknown leaves the attempt row the judge",
   world.commitAckLost = [retryableWriteError()];
   world.commitCheckFails = true;
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     const body = await readToEnd();
     await until("the lease release", () => ledger.releases.length > 0);
@@ -912,7 +740,7 @@ test("a durable write known not to have committed still ends with its signed fai
   process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
   world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     const body = await readToEnd();
     await until("the lease release", () => ledger.releases.length > 0);
@@ -925,77 +753,6 @@ test("a durable write known not to have committed still ends with its signed fai
   }
 });
 
-/* -------------------------------------------------------------------------- */
-/* Review r-20261127-025915-939c77                                             */
-/* -------------------------------------------------------------------------- */
-
-/*
-  Major 1. Once the final checkpoint's CAS has passed, the completed
-  settlement owns the turn. A stop the attempt endpoint records after that --
-  before the settlement, between it and the Message transaction, or inside
-  that transaction -- used to leave the turn charged as completed with its
-  Message refused by the terminal CAS. The invariant: a turn settled as
-  completed is saved. The row keeps the user's stop; the Message is written.
-*/
-const FULL_ANSWER = "Partial. The end.";
-const lateStopOrders: Array<[string, () => void]> = [
-  ["right after the final checkpoint, before the settlement", () => {
-    hooks.afterCheckpoint = (written) => {
-      if (written.partialContent === FULL_ANSWER && !isTerminal(written.status)) {
-        hooks.afterCheckpoint = undefined;
-        stopFromEndpoint();
-      }
-    };
-  }],
-  ["after the settlement, before the Message transaction", () => {
-    hooks.afterSettle = (outcome) => {
-      hooks.afterSettle = undefined;
-      if (outcome === "completed") stopFromEndpoint();
-    };
-  }],
-  ["inside the Message transaction, before its terminal CAS", () => {
-    hooks.inMessageTransaction = () => {
-      hooks.inMessageTransaction = undefined;
-      stopFromEndpoint();
-    };
-  }],
-];
-for (const [when, arm] of lateStopOrders) {
-  test(`a stop recorded ${when} never leaves a completed charge without its saved answer`, async () => {
-    try {
-      const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
-      arm();
-      releaseRest();
-      await readToEnd();
-      await until("the lease release", () => ledger.releases.length > 0);
-      const outcomes = ledger.settlements.map((s) => s.outcome);
-      assert.deepEqual(outcomes, ["completed"], "the completed settlement already owned the turn");
-      // completed <=> saved.
-      assert.equal(world.messages.length, 1, "a turn charged as completed was not saved");
-      assert.equal(world.messages[0].content, FULL_ANSWER);
-      // The row keeps the user's stop; the owner wrote nothing over it.
-      assert.equal(row?.status, "cancelled");
-      assert.deepEqual(terminals, []);
-    } finally {
-      hooks.afterCheckpoint = undefined;
-      hooks.afterSettle = undefined;
-      hooks.inMessageTransaction = undefined;
-    }
-  });
-}
-
-test("a stop that the final checkpoint meets is still a prorated stop with nothing saved", async () => {
-  // The other side of the same boundary (unchanged): stop first, then the
-  // final CAS refuses, and the turn never becomes completed.
-  const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
-  stopFromEndpoint();
-  releaseRest();
-  await readToEnd();
-  await until("the settlement", () => ledger.settlements.length > 0);
-  assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["cancelled"]);
-  assert.deepEqual(world.messages, []);
-});
-
 /*
   Major 2 at the route. A checkpoint whose UPDATE committed and whose answer
   was lost left the writer one revision behind its row; the retry was refused
@@ -1006,7 +763,7 @@ test("a checkpoint that committed but lost its answer does not fail the turn", a
   t.mock.method(console, "warn", () => {});
   checkpointAckLost = [retryableWriteError()];
   try {
-    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." });
     releaseRest();
     await readToEnd();
     await until("the saved answer", () => world.messages.length > 0);
@@ -1026,7 +783,7 @@ test("a checkpoint that committed but lost its answer does not fail the turn", a
   Every completion shape a durable Chat turn can take, on the durable path:
   the attempt row is closed exactly once by its owner, the stream ends without
   an error, and settlement and storage agree. The orders the Message write
-  itself can fail in (late stop, unknown outcome, known rollback) are pinned
+  itself can fail in (retried write, unknown outcome, known rollback) are pinned
   by the tests above.
 */
 const { parseChatStreamTrailer, splitSearchMetadataTrailer } = require(
@@ -1067,7 +824,7 @@ const durableShapes: Array<{
 ];
 for (const shape of durableShapes) {
   test(`durable: ${shape.name} closes its attempt once and ends the stream cleanly`, async () => {
-    const { readToEnd } = await start(shape.script, false);
+    const { readToEnd } = await start(shape.script);
     releaseRest();
     const body = await readToEnd();
     await until("the lease release", () => ledger.releases.length > 0);

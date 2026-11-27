@@ -519,28 +519,3 @@ test("completed recovery rejects an unbound or malformed canonical message", () 
   }
   assert.equal(parseCompletedChatResponseMessage(valid, attempt()), null);
 });
-
-// Review r-20261127-025915-939c77, major 1: a stop recorded after the final
-// checkpoint is too late -- the answer was settled as completed and its
-// Message is saved, while the attempt row keeps the user's `cancelled`. A
-// reload shows the saved answer, never the stopped attempt.
-test("a saved Message wins over its attempt row even when the row kept a late stop", () => {
-  const source = { id: "user_1", role: "user", content: "Question" };
-  const saved = { id: "assistant_1", role: "assistant", content: "The whole answer", status: "normal", modelId: "gpt-5-6-luna" };
-  const merged = mergeChatResponseAttempts(
-    [source, saved],
-    [attempt({
-      status: "cancelled",
-      finishReason: "cancelled",
-      partialContent: "The whole answer",
-      terminalAt: "2026-09-13T00:00:02.000Z",
-    })],
-    "gpt-5-6-luna",
-    "Interrupted",
-    "conversation"
-  );
-  assert.equal(merged.messages.length, 2);
-  assert.equal(merged.messages[1].status, "normal");
-  assert.equal(merged.messages[1].content, "The whole answer");
-  assert.equal(merged.attemptBackedIds.size, 0);
-});

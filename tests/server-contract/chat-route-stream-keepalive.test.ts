@@ -888,45 +888,6 @@ test("request abort reaches the provider before cancelling its reader", async ()
   assert.deepEqual(world.messages, []);
 });
 
-test("with CHAT_CONTINUE_AFTER_DISCONNECT on, a turn with no attempt row still cancels on abort", async () => {
-  // This fixture's conversation carries no `productKey: "chat"`, so its turn
-  // has no durable attempt: the Review / guest shape the switch leaves alone.
-  process.env.CHAT_CONTINUE_AFTER_DISCONNECT = "on";
-  try {
-    script = { text: "Partial answer.", textThenStall: true };
-    sourceCancelReason = null;
-    providerAbortReason = null;
-    world.messages = [];
-    ledger.settlements = [];
-    ledger.releases = [];
-    const requestAbortController = new AbortController();
-    const { POST } = await loadRoute();
-    const response = await POST(
-      new Request("http://127.0.0.1:3100/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: "분석해 줘" }],
-          modelId: MODEL_ID,
-          conversationId: CONVERSATION_ID,
-          assistantMessageId: ASSISTANT_MESSAGE_ID,
-        }),
-        signal: requestAbortController.signal,
-      })
-    );
-    assert.equal(response.headers.get("X-Chat-Response-Mode"), null);
-    assert.equal(response.headers.get("X-Chat-Continue-After-Disconnect"), null);
-    const reader = response.body!.getReader();
-    await whileWaiting(() => reader.read());
-    requestAbortController.abort("client pressed stop");
-    await until("the aborted turn to settle", () => ledger.settlements.length > 0);
-    assert.equal(providerAbortReason, "client pressed stop");
-    assert.equal(ledger.settlements[0].outcome, "cancelled");
-  } finally {
-    delete process.env.CHAT_CONTINUE_AFTER_DISCONNECT;
-  }
-});
-
 test("request abort after provider stream creation closes before the first pull", async () => {
   script = { text: null, abortAfterStreamCreation: true };
   sourceCancelReason = null;

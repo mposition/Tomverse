@@ -173,60 +173,13 @@ sets `terminalAt` in the same update. A completed value must also preserve the
 committed prefix. Terminal rows are immutable. A stale worker cannot overwrite
 a newer checkpoint or terminal result.
 
-The one terminal write that is not the worker's is the user's explicit stop,
-and it exists only with `CHAT_CONTINUE_AFTER_DISCONNECT=on`
-(`lib/chatContinueAfterDisconnect.ts`): a durable turn whose connection
-closes without a stop then keeps generating, so a stop has to be recorded
-somewhere every process can read. `POST /api/products/chat/attempts/[id]`
-with `{"action":"stop"}` runs the expired-lease reconciliation first, then
-one owner- and authorized-conversation-scoped conditional update that turns a
-row that is still `claimed`/`streaming` with a live database-clock lease into
-`cancelled` with its committed prefix. It names no worker or revision -- the
-stop must win against whichever worker holds the lease -- and that worker's
-next checkpoint or terminal CAS is then refused like any other write to a
-terminal row. A detached stream reads its row (for a short grace after the
-disconnect, then about once a second) and cancels with the ordinary prorated
-settlement; a stop that meets the completion branch's final CAS settles as a
-stop, never as an unbilled failure. With the switch off the endpoint answers
-with the current state and writes nothing.
-
-The completion branch's final checkpoint is the boundary between the two. Its
-CAS proves no stop had been recorded, and from that moment the completed
-settlement owns the turn. A stop recorded after it -- before the settlement,
-between the settlement and the Message transaction, or inside that
-transaction before its terminal CAS -- is too late, as an abort after
-completion always was: the terminal CAS is refused by the now-`cancelled`
-row, and the Message transaction still writes the Message and its artifact
-rows instead of failing. So a turn settled as `completed` is always saved, and
-a stop that wins (before the final CAS) never reaches a completed settlement.
-The row keeps the user's stop (terminal rows are never rewritten); a reload
-shows the saved Message, which always wins over its attempt, and only a panel
-still polling that attempt shows it as stopped with the final checkpoint's
-text. No column can mark "completing" on an active row without a migration --
-the database requires an active row's `finishReason`, `failureCode` and
-`terminalAt` to be NULL and allows only `claimed`/`streaming` as active
-statuses -- so the stop's own UPDATE is left unchanged.
-
-Only a disconnect after the streaming Response was handed back is detached.
-Before that the browser has received nothing -- not even the
-`X-Chat-Continue-After-Disconnect` header that tells it a stop must be said --
-so an abort that arrives before publication ends the turn exactly as with the
-switch off: the turn's own signal follows the request's, the provider is
-aborted, and the turn settles as the ordinary prorated `cancelled`. The
-browser, for its part, arms the stop request as the durable Chat request
-leaves, not when its headers arrive, and keeps it only if the headers say the
-turn continues. A stop can overtake the request that claims the attempt row;
-one that finds no row yet (404) is sent again on a bounded schedule (about
-thirty seconds in all), so a server that only learns of the abort after
-publication -- and detaches -- still finds the stop in the row.
-
 Visible stream prefixes are coalesced by size or one second, whichever arrives
 first. A small final chunk therefore receives a scheduled checkpoint even when
 no later chunk arrives; terminal flush remains the final owner/revision/database
 clock barrier.
 
-A CAS refusal of a checkpoint (lost lease, another owner, a moved revision, the
-user's stop) ends the writer at once and is thrown by the terminal flush, as
+A CAS refusal of a checkpoint (lost lease, another owner, a moved revision)
+ends the writer at once and is thrown by the terminal flush, as
 before. A transient write failure (a dropped connection, a pool timeout) is no
 longer latched: it is logged as `chat_attempt_checkpoint_retry`, the content
 stays pending and is written again one interval later (a coalescing timer
@@ -240,8 +193,8 @@ after a transient write failure (a lease renewal included) nothing is written
 until the row has been read: the same revision means the write did not land
 and it is retried; one revision on, with this owner, an active status and
 exactly the content that write carried, means it landed and the writer adopts
-that revision; another owner, a terminal row (the user's stop, an expired
-lease) or any other revision is a refusal, surfaced as before. A read that
+that revision; another owner, a terminal row (an expired lease) or any
+other revision is a refusal, surfaced as before. A read that
 fails leaves the write unsettled and is tried again next cycle, and at the
 terminal flush it is the turn's error -- nothing is written blind. The terminal
 flush still makes its own fresh write: a write that was only reconciled does
