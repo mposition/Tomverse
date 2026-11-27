@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "1b606a8008925e8b1933f0dc5795791e346232731fc96177ed5dec03754608e9",
+  "replacedChecks": [
+    {
+      "table": "ChatComposerDraft",
+      "constraint": "ChatComposerDraft_text_length_check",
+      "previousDefinitionSha256": "bf3264c0606ea9729487cffe02528ada6347d752edc255cbf7090e8198831dc4"
+    },
+    {
+      "table": "ChatComposerDraft",
+      "constraint": "ChatComposerDraft_attachment_references_check",
+      "previousDefinitionSha256": "59bc29732e6dd26a0764230aa4eda741677806948144607d83fb6e93dadc2bd4"
+    }
+  ]
+}
