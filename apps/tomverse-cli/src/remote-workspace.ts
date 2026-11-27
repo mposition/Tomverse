@@ -387,7 +387,8 @@ export class RemoteWorkspace {
             stdout.push(chunk);
             onOutput?.("stdout", chunk.toString("utf8"));
         };
-        const args = [this.root, plan.cwd, plan.mode === "shell" ? "shell" : "argv", ...(plan.mode === "shell" ? [plan.display] : [plan.file, ...plan.args])];
+        const args = [this.root, plan.cwd, plan.mode === "shell" ? "shell" : "argv", this.target.shell ?? "sh",
+            ...(plan.mode === "shell" ? [plan.display] : [plan.file, ...plan.args])];
         const result = await this.runner({
             target: this.target, command: remoteShellCommand(EXEC_SCRIPT, args), holdStdin: true, signal, timeoutMs: plan.timeoutMs,
             onStdout: (chunk) => {

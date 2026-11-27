@@ -16,11 +16,15 @@ export type GhRunner = (args: readonly string[], options?: { cwd?: string; timeo
 const passthrough = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
   "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"];
 
-function ghEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...commandEnv([], source), GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_SPINNER_DISABLED: "1", GH_PAGER: "cat" };
-  // The person's own sign-in sources, passed to the program that uses them; Desktop never reads or keeps them.
+/** The person's own sign-in sources (and proxy settings), by name, for a program that reads them. Desktop never reads or keeps their values. */
+export function ghPassthroughEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
   for (const name of passthrough) if (typeof source[name] === "string") env[name] = source[name];
   return env;
+}
+
+function ghEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...commandEnv([], source), GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_SPINNER_DISABLED: "1", GH_PAGER: "cat", ...ghPassthroughEnv(source) };
 }
 
 /** A runner for the installed `gh`, or null when none is on the PATH. */

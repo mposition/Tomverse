@@ -517,7 +517,7 @@ function Desktop() {
   const chat = useChatHistory(chatActive, "chat", accountDraft, language, snapshot?.capabilities?.deepResearch);
   const reviewActive = workspace === "review" && account?.stage === "connected";
   const nativeReview = !settingsView && reviewActive;
-  const review = useChatHistory(reviewActive, "review", accountDraft, language);
+  const review = useChatHistory(reviewActive, "review", accountDraft, language, snapshot?.capabilities?.reviewDeepResearch);
   async function openImportedConversation(id: string, product: "chat" | "review" = "chat") {
     const history = product === "chat" ? chat : review;
     const row = (await window.desktop.chatHistory(product)).find(conversation => conversation.id === id);
@@ -1201,6 +1201,7 @@ ${text}` : text;
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.dictationAvailable === true}
           composerTools={snapshot?.capabilities?.reviewTools} deviceLocation={snapshot?.chatLocationAvailable === true}
+          deepResearch={snapshot?.capabilities?.reviewDeepResearch}
           onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">
@@ -1338,6 +1339,13 @@ function Approval() {
           <dt>{engineCopy.approvalWebAddress}</dt><dd><code>{request.web.url}</code></dd>
         </dl>
         <p role="note">{request.tool === "browser_navigate" ? engineCopy.approvalBrowserOpenNote : engineCopy.approvalWebNote}</p>
+      </section>}
+      {request.webSearch && <section aria-label={engineCopy.approvalWebSearchHeading} data-testid="approval-web-search">
+        <h2>{engineCopy.approvalWebSearchHeading}</h2>
+        <dl>
+          {request.webSearch.queries.map((query, index) => <Fragment key={index}><dt>{engineCopy.approvalWebSearchQuery}</dt><dd><code>{query}</code></dd></Fragment>)}
+        </dl>
+        <p role="note">{engineCopy.approvalWebSearchNote}</p>
       </section>}
       {request.browser && <ApprovalBrowser browser={request.browser} copy={engineCopy} />}
       {request.computer && <ApprovalComputer computer={request.computer} language={language} />}

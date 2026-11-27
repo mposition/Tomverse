@@ -1,14 +1,14 @@
 /**
- * Where Code can run a task. This is a description, not a switch: choosing a location is not wired to starting a task
- * yet, so the list only tells the person which places exist on this build and why one is not available.
+ * Where Code can run a task. This is a description of the places this build and the server it reached offer, with the
+ * reason a place is not available.
  *
- * `cloud` is never available here. Nothing in this repository runs a person's project on a Tomverse server
- * (see docs/ops/desktop-cloud-execution.md), so the row exists to say that plainly instead of promising it.
+ * `cloud` is available only when the server names `desktopCloudExecution` (docs/ops/desktop-cloud-execution.md): a task
+ * then runs on a Tomverse runner on a snapshot of the project's tracked files, and comes back as a patch to review.
  * `ssh` is filled in by the remote lane through `ssh`; until then it reads as not set up.
  */
 export type ExecutionLocationId = "local" | "worktree" | "ssh" | "cloud";
 
-export type ExecutionLocationUnavailable = "not_set_up" | "server_infrastructure_required";
+export type ExecutionLocationUnavailable = "not_set_up" | "not_offered";
 
 export type ExecutionLocation =
   | { id: ExecutionLocationId; available: true }
@@ -17,6 +17,8 @@ export type ExecutionLocation =
 export type ExecutionLocationInput = {
   /** Set by the remote lane once a host can be reached; absent means not set up. */
   ssh?: { available: true } | { available: false; reason: ExecutionLocationUnavailable };
+  /** The server's `desktopCloudExecution` capability. */
+  cloud?: boolean;
 };
 
 export function describeExecutionLocations(input: ExecutionLocationInput = {}): ExecutionLocation[] {
@@ -24,6 +26,6 @@ export function describeExecutionLocations(input: ExecutionLocationInput = {}): 
     { id: "local", available: true },
     { id: "worktree", available: true },
     input.ssh ? { id: "ssh", ...input.ssh } : { id: "ssh", available: false, reason: "not_set_up" },
-    { id: "cloud", available: false, reason: "server_infrastructure_required" },
+    input.cloud ? { id: "cloud", available: true } : { id: "cloud", available: false, reason: "not_offered" },
   ];
 }

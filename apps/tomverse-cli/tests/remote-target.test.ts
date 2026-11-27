@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
-    classifySshFailure, parseDestination, parsePort, parseRemoteFolder, parseRemoteTarget, remoteShellCommand, RemoteError, scriptFailure,
+    classifySshFailure, parseDestination, parsePort, parseRemoteFolder, parseRemoteShell, parseRemoteTarget, remoteShellCommand, RemoteError, scriptFailure, targetKey,
     shellQuote, sshArguments, targetLabel,
 } from "../src/remote-target.js";
 import { HAS_SH } from "./remote-fixture.js";
@@ -99,7 +99,12 @@ test("ssh gets an argument array: options first, then --, then the target and on
     const options = args.flatMap((arg, index) => (args[index - 1] === "-o" ? [arg] : []));
     for (const required of ["BatchMode=yes", "ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "RemoteCommand=none"]) assert.ok(options.includes(required), required);
     assert.equal(args[args.indexOf("-p") + 1], "2200");
-    assert.ok(!args.some((arg) => arg.startsWith("StrictHostKeyChecking")), "the host key policy is the user's own");
+    // The host key policy is not the configuration's to weaken: the command line wins over ~/.ssh/config, so `accept-new` or `no`
+    // there cannot make the app connect to an unknown host or write to known_hosts.
+    assert.ok(options.includes("StrictHostKeyChecking=yes"));
+    assert.ok(options.includes("UpdateHostKeys=no"));
+    assert.ok(!options.some((option) => /^(?:UserKnownHostsFile|StrictHostKeyChecking=(?!yes$)|CheckHostIP|VerifyHostKeyDNS)/.test(option)), "no option that points ssh at another set of keys");
+    assert.ok(args.indexOf("StrictHostKeyChecking=yes") < args.indexOf("--"), "an option, before the target");
     assert.ok(!options.includes("ControlMaster=no"), "other systems keep the user's connection sharing");
     const windows = sshArguments({ destination: "devbox" }, "true", { platform: "win32" });
     assert.ok(windows.includes("ControlMaster=no") && windows.includes("ControlPath=none"), "Windows' OpenSSH has no connection sharing");
@@ -147,4 +152,17 @@ test("the remote scripts' exit codes become the error the person can act on", ()
     assert.match(scriptFailure(47, "tr\n", "devbox")!.message, /tr/);
     assert.equal(scriptFailure(1, "", "devbox"), null);
     assert.equal(scriptFailure(255, "", "devbox"), null);
+});
+
+test("the command shell of a remote project is sh unless it says bash-login, and it never changes what names the project", () => {
+    assert.equal(parseRemoteShell(undefined), "sh");
+    assert.equal(parseRemoteShell(""), "sh");
+    assert.equal(parseRemoteShell("bash-login"), "bash-login");
+    for (const bad of ["bash", "zsh", "sh -c", "bash-login ", 3, {}]) refused(() => parseRemoteShell(bad));
+    const plain = parseRemoteTarget({ destination: "devbox", folder: "/srv/app" });
+    assert.equal("shell" in plain, false, "sh is the default and is not written down");
+    const login = parseRemoteTarget({ destination: "devbox", folder: "/srv/app", shell: "bash-login" });
+    assert.equal(login.shell, "bash-login");
+    assert.equal(targetKey(login), targetKey(plain));
+    refused(() => parseRemoteTarget({ destination: "devbox", folder: "/srv/app", shell: "fish" }));
 });

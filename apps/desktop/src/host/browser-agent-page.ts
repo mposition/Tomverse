@@ -115,10 +115,19 @@ export const elementBoxScript = (selector: string) => `(() => {
   return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height };
 })()`;
 
-/** Called on a picked node (callFunctionOn): the facts the person's comment will refer to. */
+/**
+ * Called on a picked node (callFunctionOn): the facts the person's comment will refer to. `secret`: the element is a secret field, or a
+ * visible secret field lies under its box (a form, a card around one), so no picture of it may be taken.
+ */
 export const describePickedFunction = `function () { ${HELPERS}
   const el = this;
   const r = el.getBoundingClientRect();
-  return { tag: el.localName, selector: uniqueSelector(el), text: nameOf(el), url: location.href,
+  let secret = isSecret(el);
+  for (const field of secret ? [] : el.ownerDocument.querySelectorAll("input, textarea")) {
+    if (!isSecret(field) || !isVisible(field)) continue;
+    const f = field.getBoundingClientRect();
+    if (f.left < r.right && f.right > r.left && f.top < r.bottom && f.bottom > r.top) { secret = true; break; }
+  }
+  return { tag: el.localName, selector: uniqueSelector(el), text: nameOf(el), url: location.href, secret,
     box: { x: r.left, y: r.top, width: r.width, height: r.height }, page: { x: r.left + scrollX, y: r.top + scrollY } };
 }`;

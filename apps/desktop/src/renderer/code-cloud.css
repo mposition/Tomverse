@@ -22,3 +22,14 @@
 .managed-reservation dt { color: var(--muted); }
 .managed-reservation dd { margin: 0; }
 .managed-reservation button { justify-self: start; }
+.cloud-tasks { margin-top: 16px; }
+.managed-form textarea { width: 100%; resize: vertical; font: inherit; }
+.cloud-jobs { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cloud-job { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.cloud-job p { margin: 0; overflow-wrap: anywhere; }
+.cloud-job small { color: var(--muted); }
+.cloud-job-log, .cloud-review-hunks { max-height: 220px; margin: 0; padding: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cloud-review { display: grid; gap: 8px; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.cloud-review h4 { margin: 0; }
+.cloud-review p { margin: 0; }
+.cloud-review-file summary { cursor: pointer; overflow-wrap: anywhere; }

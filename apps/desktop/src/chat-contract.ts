@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DEEP_RESEARCH_DEPTHS } from "../../../lib/deepResearchModel";
+import { DEEP_RESEARCH_DEPTHS, DEEP_RESEARCH_MODEL_ID } from "../../../lib/deepResearchModel";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { CONVERSATION_TITLE_MAX_LENGTH } from "../../../lib/conversationRename";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../lib/chatRequestLimits";
@@ -22,7 +22,8 @@ export const chatHistorySearchInput = z.object({ query: chatSearch, product: des
 export const chatPageInput = z.object({ id: chatId, cursor: chatId.optional(), product: desktopTextProduct.optional() }).strict();
 export const chatSourceInput = z.object({ id: chatId, offset: z.number().int().nonnegative().optional() }).strict();
 export const chatRenameInput = z.object({ id: chatId, title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH) }).strict();
-export const chatEffort = z.enum(["low", "default", "high"]);
+// `medium` is a step only a server that names `desktopReasoningSteps` takes; the host refuses to send it otherwise.
+export const chatEffort = z.enum(["low", "medium", "default", "high"]);
 export const composerOptions = z.object({
   webSearchMode: z.enum(["off", "always"]).optional(),
   memoryMode: z.enum(["inherit", "on", "off"]).optional(),
@@ -64,8 +65,16 @@ export const reviewTurnInput = z.object({
   currentLocation: chatTurnInput.shape.currentLocation,
   /** The "+" menu's choices for the Review; a follow-up for one model changes none of them. */
   tools: composerOptions.optional(),
+  /**
+   * A Deep Research run of this Review: the model answers alone, as a column of the Review, and the question is put to
+   * no other model. `choices` are the models the Review holds; the Deep Research model joins them (a new Review keeps
+   * the first of them that fit beside it).
+   */
+  deepResearchDepth: deepResearchDepth.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length))
-  .refine((input) => !input.onlyModelId || (Boolean(input.conversationId) && !input.tools && input.choices.length === 1 && input.choices[0] === input.onlyModelId));
+  .refine((input) => !input.onlyModelId || (Boolean(input.conversationId) && !input.tools && input.choices.length === 1 && input.choices[0] === input.onlyModelId))
+  .refine((input) => !input.deepResearchDepth || (input.mode === "professional" && !input.onlyModelId && input.effort === "default" &&
+    input.prompt.length > 0 && !input.choices.includes(DEEP_RESEARCH_MODEL_ID)));
 export const chatHistoryRow = z.object({
   id: chatId,
   title: z.string(),

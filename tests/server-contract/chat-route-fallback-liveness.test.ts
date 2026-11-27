@@ -1797,7 +1797,7 @@ const ask = async (
     | "during_record_dispatched"
     | "during_primary_reader_cancel" = "none",
   requestedModelId = REQUESTED_MODEL_ID,
-  reasoningEffort?: "low" | "high",
+  reasoningEffort?: "low" | "medium" | "high",
 ) => {
   activeSession = {
     user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
@@ -1992,6 +1992,23 @@ test("reasoning effort preserves Auto model selection and the answering model re
   assert.deepEqual(attempts.map(attempt => attempt.modelId), ["command-a-plus", "deepseek-v4-flash"]);
   const trailer = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson);
   assert.equal(trailer?.appliedReasoningEffort, "default");
+});
+
+test("the middle reasoning step is refused to a web request even while both effort switches are on", async t => {
+  const keys = ["TOMVERSE_REASONING_EFFORT_ENABLED", "TOMVERSE_DESKTOP_REASONING_STEPS_ENABLED"] as const;
+  const original = keys.map(key => process.env[key]);
+  for (const key of keys) process.env[key] = "true";
+  t.after(() => {
+    keys.forEach((key, index) => {
+      if (original[index] === undefined) delete process.env[key];
+      else process.env[key] = original[index];
+    });
+  });
+  await assert.rejects(
+    ask("answers", "claimed", 200, false, undefined, true, true, undefined, "off", "none", REQUESTED_MODEL_ID, "medium"),
+    /status 409[\s\S]*REASONING_EFFORT_UNAVAILABLE/
+  );
+  assert.equal(attempts.length, 0, "a refused step reaches no provider");
 });
 
 test("both attempts log a stream error by its metadata, never the model's content", async () => {

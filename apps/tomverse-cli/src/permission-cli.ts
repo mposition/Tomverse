@@ -13,7 +13,7 @@ import { describeRule, type PermissionRule, type RuleEffect, type RuleScope } fr
 
 export const PERMISSIONS_HELP = [
     "tomverse permissions [list]     Allow, ask and deny rules (user: your CLI folder; project: .tomverse/permissions.json)",
-    "tomverse permissions add <allow|ask|deny> <apply_patch|run_command|web_fetch|mcp__server__tool> [pattern] [--project] [--exact]",
+    "tomverse permissions add <allow|ask|deny> <apply_patch|run_command|web_fetch|web_search|mcp__server__tool> [pattern] [--project] [--exact]",
     "tomverse permissions remove <allow|ask|deny> <tool> [pattern] [--project]",
     "tomverse permissions trust [--revoke] [--yes]   Apply (or stop applying) the allow rules this project came with",
 ];

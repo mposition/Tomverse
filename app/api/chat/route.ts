@@ -3,7 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
+import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled, desktopReviewDeepResearchEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "@/lib/deepResearchModel";
@@ -81,7 +81,7 @@ import {
     isRouterShadowEnabled,
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
-import { modelReasoningEfforts, modelWithReasoningEffort, reasoningEffortEnabled } from "@/lib/reasoningEffort";
+import { modelReasoningEfforts, modelReasoningEffortSteps, modelWithReasoningEffort, reasoningEffortEnabled, reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
@@ -1627,13 +1627,19 @@ async function handleChatPost(
                 return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
             }
             if (desktopConversation?.password != null) return conversationLockedResponse();
+            // Chat and Review each have their own switch. A Review run is put to Deep Research alone, so it has no shared admission.
             if ((deepResearchDepth || modelId === DEEP_RESEARCH_MODEL_ID) &&
-                (!desktopDeepResearchEnabled() || desktopProduct !== "chat" || modelId !== DEEP_RESEARCH_MODEL_ID || !deepResearchDepth ||
+                (!(desktopProduct === "chat" ? desktopDeepResearchEnabled() : desktopReviewDeepResearchEnabled()) ||
+                    (desktopProduct === "review" && admissionToken) || modelId !== DEEP_RESEARCH_MODEL_ID || !deepResearchDepth ||
                     assistantMessageId !== desktopResearchAnswerId(conversationId, sourceUserMessageId))) {
                 return tracedJsonError("Desktop Deep Research is unavailable for this request.", "DEEP_RESEARCH_UNAVAILABLE", 403, traceId);
             }
         }
-        if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview")) {
+        // `medium` is a Desktop-only step, available while its own switch is on; the web keeps its two presets. A Desktop turn
+        // reaching here has passed the Desktop write gate above, and the proxy refuses a cookie on the Desktop origin.
+        const effortSteps = desktop && reasoningEffortStepsEnabled();
+        if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview" ||
+            (reasoningEffort === "medium" && !effortSteps))) {
             return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
         }
         const isResearchPreview = researchMode === "preview";
@@ -3122,7 +3128,8 @@ async function handleChatPost(
             ? routedCatalogModel
             : requestedModelConfig;
         const appliedEffortFor = (model: typeof dispatchModel) =>
-            reasoningEffort && modelReasoningEfforts(model).includes(reasoningEffort) ? reasoningEffort : undefined;
+            reasoningEffort && (effortSteps ? modelReasoningEffortSteps(model) : modelReasoningEfforts(model)).includes(reasoningEffort)
+                ? reasoningEffort : undefined;
         let appliedEffort = appliedEffortFor(dispatchModel);
         const modelConfig = modelWithReasoningEffort(dispatchModel, appliedEffort);
         if (desktop && (modelConfig.usageClass === "deep-research") !== Boolean(deepResearchDepth)) {

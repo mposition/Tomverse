@@ -99,6 +99,13 @@ export function RemoteProjectPanel({ language, withSwitch = false, onChanged }: 
         <button className="soft" type="button" data-testid="remote-reconnect" disabled={busy !== null}
           onClick={() => void run("reconnect", () => window.desktop.remoteProject({ action: "reconnect" }))}>{copy.reconnect}</button>
         {view.sandboxOutside && <p role="note" data-testid="remote-sandbox-note">{copy.sandboxNote}</p>}
+        <label>{copy.shellLabel}
+          <select data-testid="remote-shell" value={view.current.shell ?? "sh"} disabled={busy !== null} aria-describedby="remote-shell-note"
+            onChange={(event) => void run("switch", () => window.desktop.remoteProject({ action: "set-shell", shell: event.currentTarget.value === "bash-login" ? "bash-login" : "sh" }))}>
+            <option value="sh">{copy.shellSh}</option><option value="bash-login">{copy.shellBash}</option>
+          </select>
+          <small id="remote-shell-note">{copy.shellNote}</small>
+        </label>
       </div>}
     </>}
     {failed && <p role="alert">{copy.failures.failed}</p>}

@@ -235,19 +235,30 @@ exit 0
 `;
 
 /**
- * Runs a command in a folder inside the project. $1 root, $2 folder, $3 "argv" (then $4... is the program and its arguments) or
- * "shell" (then $4 is a shell line). It prints a start marker first, so the caller can tell a command that failed from one
+ * Runs a command in a folder inside the project. $1 root, $2 folder, $3 "argv" (then $5... is the program and its arguments) or
+ * "shell" (then $5 is a shell line), $4 how the command is started: "sh" (as it is) or "bash-login" (through `bash -lc`, which reads the
+ * remote user's profile; a machine without bash refuses with exit 47 before anything starts). It prints a start marker first, so the caller can tell a command that failed from one
  * that never started. The command's input is closed; a second process waits on the connection's own input and ends the command
  * (its whole process group) when the connection goes away, so a cancelled or dropped task does not leave it running.
  */
 export const EXEC_MARKER = "@tv-start";
-export const EXEC_SCRIPT = PRELUDE + String.raw`root=$1; cwd=$2; mode=$3; shift 3
+export const EXEC_SCRIPT = PRELUDE + String.raw`root=$1; cwd=$2; mode=$3; login=$4; shift 4
+case $login in sh) ;; bash-login) command -v bash >/dev/null 2>&1 || { echo bash >&2; exit 47; };; *) echo shell >&2; exit 47;; esac
 cd -P -- "$cwd" 2>/dev/null || exit 44
 [ "$(pwd -P)" = "$cwd" ] || exit 42
 inside "$cwd" "$root" || exit 42
 printf '@tv-start\n'
 (set -m) 2>/dev/null && set -m
-if [ "$mode" = shell ]; then sh -c "$1" </dev/null & else "$@" </dev/null & fi
+if [ "$login" = bash-login ]; then
+  # The profile runs first and may change the folder: it is set again, and checked again, right before the command, in the same bash.
+  if [ "$mode" = shell ]; then
+    bash -lc 'cd -P -- "$1" 2>/dev/null || { echo "the project folder is gone after the login profile ran" >&2; exit 44; }; [ "$(pwd -P)" = "$1" ] || { echo "the login profile moved the command out of the project folder" >&2; exit 42; }; line=$2; shift 2; eval "$line"' bash "$cwd" "$1" </dev/null &
+  else
+    bash -lc 'cd -P -- "$1" 2>/dev/null || { echo "the project folder is gone after the login profile ran" >&2; exit 44; }; [ "$(pwd -P)" = "$1" ] || { echo "the login profile moved the command out of the project folder" >&2; exit 42; }; shift; exec "$@"' bash "$cwd" "$@" </dev/null &
+  fi
+else
+  if [ "$mode" = shell ]; then sh -c "$1" </dev/null & else "$@" </dev/null & fi
+fi
 pid=$!
 (
   cat >/dev/null
