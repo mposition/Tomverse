@@ -32,6 +32,7 @@ import {
   preflightChatDraftForMessage,
 } from "@/lib/chatDraftMessageConsume";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
+import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import {
   PUBLIC_MESSAGE_ATTACHMENT_SELECT,
   toPublicMessageAttachment,
@@ -165,11 +166,20 @@ export async function POST(
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
           select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true,
-            continuationBridge: { select: { reviewHandoff: true } } }
+            continuationBridge: { select: { reviewHandoff: true } }, temporaryExpiresAt: true }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
           return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
+      }
+      // A temporary Chat past its expiry takes no new question, refused here
+      // before the message is saved or the composer draft consumed, so the
+      // person keeps what they typed (lib/temporaryChatAccess.ts).
+      if (isTemporaryConversationExpired(existingConv.temporaryExpiresAt, new Date())) {
+          return NextResponse.json(
+            { error: "This temporary chat has ended.", code: TEMPORARY_CHAT_EXPIRED },
+            { status: 410 }
+          );
       }
       const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
       const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;

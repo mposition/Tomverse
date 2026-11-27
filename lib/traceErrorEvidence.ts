@@ -141,6 +141,11 @@ const captureToSentry = (
         errorCode: input.errorCode,
         routeClass: input.routeClass,
         traceOccurrenceId: occurrenceId,
+        // Without these an `AI_APICallError: HTTP_400` cannot be placed: the
+        // event named the status and nothing about who returned it. Both come
+        // from the call site's own dispatch record, never from the request.
+        ...(input.provider ? { provider: input.provider.slice(0, 100) } : {}),
+        ...(input.modelId ? { modelId: input.modelId.slice(0, 100) } : {}),
       },
     });
     return typeof eventId === "string" ? eventId : null;

@@ -22,12 +22,14 @@ let rateLimitRefused = false;
 let draftReadCount = 0;
 let draftAttachmentResolveFailure = false;
 let writtenDraftRow: Record<string, unknown> | null = null;
+let draftWriteError: unknown = null;
 let hydratedDraftRow: Record<string, unknown> | null = null;
 let receiptResult: Record<string, unknown> = {
   outcome: "unchanged",
   attachments: [],
 };
 let receiptInput: Record<string, unknown> | null = null;
+let deleteInput: Record<string, unknown> | null = null;
 let receiptConversation: {
   userId: string;
   password: string | null;
@@ -124,10 +126,11 @@ mock.module(mod("lib/chatComposerDraftPersistence.ts"), {
       return draftRow;
     },
     writeChatComposerDraft: async ({ draft }: { draft: Record<string, unknown> }) => {
+      if (draftWriteError) throw draftWriteError;
       if (draft.expectedRevision === 99) throw new DraftConflict(4);
       return writtenDraftRow ?? draftRow;
     },
-    deleteChatComposerDraft: async () => undefined,
+    deleteChatComposerDraft: async (input: Record<string, unknown>) => { deleteInput = input; },
   },
 });
 mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
@@ -205,9 +208,11 @@ test.beforeEach(() => {
   draftReadCount = 0;
   draftAttachmentResolveFailure = false;
   writtenDraftRow = null;
+  draftWriteError = null;
   hydratedDraftRow = null;
   receiptResult = { outcome: "unchanged", attachments: [] };
   receiptInput = null;
+  deleteInput = null;
   receiptConversation = {
     userId: "user_1", password: null, kind: "chat", productKey: "chat",
   };
@@ -405,6 +410,31 @@ test("draft GET turns a dangling attachment into an explicit recoverable conflic
   assert.deepEqual(body.currentDraft.attachments, []);
 });
 
+test("a draft delete may name the creation time it read, so only that draft is removed", async () => {
+  const { draftRoute } = await loadRoutes();
+  const remove = (body: unknown) => draftRoute.DELETE(request("/api/products/chat/drafts/conversation_1", "DELETE", body), {
+    params: Promise.resolve({ scopeKey: "conversation_1" }),
+  });
+  // Read through a function: the closure assigns it, which control-flow narrowing cannot see.
+  const sent = () => deleteInput;
+  const createdAt = "2026-11-27T00:00:00.123Z";
+  assert.equal((await remove({ expectedRevision: 1, expectedCreatedAt: createdAt })).status, 204);
+  assert.equal(sent()?.expectedRevision, 1);
+  assert.deepEqual(sent()?.expectedCreatedAt, new Date(createdAt));
+  // Without it the delete is by revision alone, as before.
+  deleteInput = null;
+  assert.equal((await remove({ expectedRevision: 2 })).status, 204);
+  assert.equal(sent()?.expectedRevision, 2);
+  assert.equal("expectedCreatedAt" in (sent() ?? {}), false);
+  // A malformed time, or any other field, is refused before anything is removed.
+  deleteInput = null;
+  for (const body of [{ expectedRevision: 1, expectedCreatedAt: "yesterday" }, { expectedRevision: 1, expectedCreatedAt: 5 },
+    { expectedRevision: 1, expectedUpdatedAt: createdAt }]) {
+    assert.equal((await remove(body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal(sent(), null);
+});
+
 test("an access refusal remains no-store", async () => {
   const { draftRoute } = await loadRoutes();
   accessAllowed = false;
@@ -496,6 +526,49 @@ test("draft PUT returns the exact row written without a success-path reread", as
   assert.equal(draftReadCount, 0);
   assert.equal(hydratedDraftRow, writtenDraftRow);
   assert.equal((await response.json()).draft.revision, 7);
+});
+
+test("draft PUT answers a table CHECK refusal with a coded 422, not a bare 500", async () => {
+  // 2026-11-24, production: the draft table still held 50,000 characters and
+  // 5 files after the app had raised both, and every such save answered 500.
+  // This is the shape Prisma throws through the pg adapter for SQLSTATE 23514.
+  const { draftRoute } = await loadRoutes();
+  const put = () => draftRoute.PUT(
+    request("/api/products/chat/drafts/new", "PUT", {
+      expectedRevision: 0,
+      text: "a long question",
+      attachmentReferences: [],
+    }),
+    { params: Promise.resolve({ scopeKey: "new" }) }
+  );
+  const originalConsoleError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    draftWriteError = Object.assign(new Error("refused"), {
+      code: "P2039",
+      meta: {
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: { kind: "postgres", code: "23514", originalCode: "23514" },
+        },
+      },
+    });
+    const refused = await put();
+    assert.equal(refused.status, 422);
+    assert.equal(refused.headers.get("Cache-Control"), "private, no-store");
+    assert.equal((await refused.json()).code, "CHAT_DRAFT_STORAGE_LIMIT");
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0][1], draftWriteError);
+
+    // Any other database failure is still the generic write failure.
+    draftWriteError = Object.assign(new Error("connection reset"), { code: "P1017" });
+    const failed = await put();
+    assert.equal(failed.status, 500);
+    assert.equal((await failed.json()).code, "CHAT_DRAFT_WRITE_FAILED");
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("attempt GET makes foreign and missing ids indistinguishable", async () => {

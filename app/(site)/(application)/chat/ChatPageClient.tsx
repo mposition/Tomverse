@@ -27,8 +27,11 @@ import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLoca
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
+import { TemporaryChatNotice } from "@/components/chat/TemporaryChatNotice";
+import { useTemporaryChat } from "@/components/chat/useTemporaryChat";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import { GeneratedArtifactRevisionContext, useGeneratedArtifactRevision } from "@/components/chat/GeneratedArtifactRevisionContext";
+import { ChatArtifactWorkspaceProvider } from "@/components/chat/ChatArtifactWorkspaceContext";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -834,6 +837,7 @@ export function ChatPageClient({
   generatedArtifactRevisionEnabled = false,
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
+  chatArtifactWorkspaceEnabled = false,
   chatParallelPreparationEnabled = false,
   chatRouterLocationFusion = false,
   existingChatRouterLocationFusion = false,
@@ -865,6 +869,8 @@ export function ChatPageClient({
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
   generatedArtifactRevisionEnabled?: boolean;
+  /** TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED, resolved server-side: Preview on code blocks, React previews, "change this screen". */
+  chatArtifactWorkspaceEnabled?: boolean;
   /**
    * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
@@ -1136,6 +1142,8 @@ export function ChatPageClient({
   // SessionProviderWrapper, so this is already final on the first render --
   // guest mode is never "unknown and then guest".
   const isGuestMode = status !== "loading" && !sessionUserId;
+  // Temporary Chat (lib/temporaryChatAccess.ts): signed-in Chat only.
+  const temporaryChat = useTemporaryChat({ enabled: mountedSurface === "chat" && !isGuestMode, ownerKey: sessionUserId, currentChatId });
   const guestWorkspaceProduct = mountedSurface === "chat" ? "chat" : "review";
   const {
     activeChatKey: guestActiveChatStorageKey,
@@ -5683,6 +5691,7 @@ export function ChatPageClient({
     )
   ) : undefined;
   const projectComposerBarNode = projectsAvailable && effectiveProjectId && !activeProjectRoute ? <ProjectComposerBar /> : undefined;
+  const temporaryChatNotice = <TemporaryChatNotice controller={temporaryChat} currentChatId={currentChatId} inProject={Boolean(effectiveProjectId)} onEnd={handleNewChat} />;
   
   /**
    * The single mutation path for a conversation's model selection. Every
@@ -6846,7 +6855,8 @@ export function ChatPageClient({
       pendingCreatedChat &&
       pendingCreatedChat.identityKey === identityKey &&
       sameStringList(pendingCreatedChat.modelIds, sendSelectedModels) &&
-      sameStringList(pendingCreatedChat.disabledIds, sendDisabledPanels)
+      sameStringList(pendingCreatedChat.disabledIds, sendDisabledPanels) &&
+      temporaryChat.matchesPending(pendingCreatedChat.id)
     ) {
       // A previous Message transaction may have failed after conversation
       // creation. Reuse that still-empty conversation while the composer stays
@@ -6912,11 +6922,13 @@ export function ChatPageClient({
             // nothing about a profile it was never asked about.
             ...(pendingProfileId ? { assistantProfileId: pendingProfileId } : {}),
             ...(mountedSurface === "chat" ? withProjectAttribution({}, pendingProjectIdRef.current) : {}),
+            ...(mountedSurface === "chat" && !pendingProjectIdRef.current ? temporaryChat.createFields() : {}),
           }),
         });
 
         if (res.ok) {
           const data = await res.json();
+          temporaryChat.adoptCreated(data);
           // Creation is durable, but its late response has no authority to
           // take over a different account, conversation or model selection.
           if (!chatOriginStillCurrent()) {
@@ -8775,7 +8787,8 @@ export function ChatPageClient({
         if (
           reusable?.identityKey === identityKey &&
           sameStringList(reusable.modelIds, capturedModels) &&
-          sameStringList(reusable.disabledIds, capturedDisabled)
+          sameStringList(reusable.disabledIds, capturedDisabled) &&
+          temporaryChat.matchesPending(reusable.id)
         ) {
           createdId = reusable.id;
           createdTitle = reusable.title;
@@ -8796,6 +8809,7 @@ export function ChatPageClient({
                   ? { assistantProfileId: capturedProfileId }
                   : {}),
                 ...withProjectAttribution({}, capturedProjectId),
+                ...(capturedProjectId ? {} : temporaryChat.createFields()),
               }),
             });
           } catch {
@@ -8840,6 +8854,7 @@ export function ChatPageClient({
             return false;
           }
           const knownCreatedId = created.id as string;
+          temporaryChat.adoptCreated(created);
           createdId = knownCreatedId;
           createdModels = clampSelectedModels(
             Array.isArray(created.selectedModels)
@@ -10827,6 +10842,12 @@ export function ChatPageClient({
     reviewWorkspace.setMode(mode);
   };
 
+  // A request typed under a code preview goes to the top of the composer draft, ahead of whatever is already there.
+  const fillComposerFromPreview = useCallback((text: string) => {
+    setInputValue((current) => (current.trim() ? [text, current].join("\n\n") : text));
+    setFocusToken((value) => value + 1);
+  }, [setInputValue]);
+
   const artifactRevisionAction = useGeneratedArtifactRevision({
     enabled: generatedArtifactRevisionEnabled && mountedSurface === "chat" &&
       !isGuestMode && identityKey?.startsWith("account:") === true &&
@@ -10858,6 +10879,7 @@ export function ChatPageClient({
       notify={text => showToast(text, "info")} />}
     <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
     <GeneratedArtifactRevisionContext.Provider value={artifactRevisionAction}>
+    <ChatArtifactWorkspaceProvider enabled={chatArtifactWorkspaceEnabled} fillComposer={mountedSurface === "chat" ? fillComposerFromPreview : null}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
@@ -10893,7 +10915,7 @@ export function ChatPageClient({
           onOpenProjectWorkspace={projectsAvailable ? openProjectWorkspace : undefined}
           activeProjectWorkspaceId={activeProjectRoute?.kind === "project" ? activeProjectRoute.projectId : null}
           continuationNotice={reviewHandoffNotice}
-          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
+          workspaceNotice={mountedSurface === "chat" ? <><ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} />{temporaryChatNotice}</> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
             ...reviewWorkspace,
@@ -11076,7 +11098,7 @@ export function ChatPageClient({
             }
           }}
           continuationNotice={reviewHandoffNotice}
-          workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
+          workspaceNotice={mountedSurface === "chat" ? <><ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} />{temporaryChatNotice}</> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
           onStudioStarter={id => {
@@ -11954,9 +11976,14 @@ export function ChatPageClient({
       </div>
     )}
     {showComparisonReview && (
-      <ComparisonReviewDialog key={JSON.stringify([identityKey, currentChatId, reviewResultRevision])}
+      // Identity and conversation remount the dialog; a newly finished answer
+      // does not. It only refreshes the setup step (sourceRevision), so a run
+      // in flight or a result being read survives the panels finishing.
+      <ComparisonReviewDialog key={JSON.stringify([identityKey, currentChatId])}
+        sourceRevision={reviewResultRevision}
         conversationId={isGuestMode ? null : currentChatId ?? null}
         guestSource={guestReviewSource}
+        readGuestSource={isGuestMode ? readGuestComparisonTurn : undefined}
         open
         onClose={() => setShowComparisonReview(false)}
         onCompleted={() => {
@@ -12125,6 +12152,7 @@ export function ChatPageClient({
         </form>
       </div>
     )}
+    </ChatArtifactWorkspaceProvider>
     </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
     </ReviewChatHandoffProvider>

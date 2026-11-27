@@ -47,6 +47,7 @@ import { ChatImageRetry } from "./ChatImageRetry";
 import { showImageOffer } from "./image-offer-store";
 import { ProjectComposerBar, ProjectWorkspace } from "./ProjectWorkspace";
 import { MessageProjectSaves } from "./ProjectSaveToProject";
+import { effortLabel } from "./CodeEngine";
 import { useChatResearch } from "./ResearchEngine";
 import type { ProjectWorkspaceRoute } from "../../../../lib/projectWorkspaceRoute";
 import type { ProjectConversationRow } from "../../../../packages/api-client/src/projectWorkspace";
@@ -899,7 +900,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   const { language } = chat;
   const copy = desktopChatCopy[language];
   const shellCopy = desktopShellCopy[language];
-  const effortLabels = { default: shellCopy.defaultEffort, low: shellCopy.lowEffort, high: shellCopy.highEffort };
+  const effortLabels = { default: shellCopy.defaultEffort, low: shellCopy.lowEffort, medium: effortLabel(language, "medium"), high: shellCopy.highEffort };
   const starterCopy = workspaceWelcomeCopy[language].starter;
   const [models, setModels] = useState<ChatModel[]>([]);
   const [modelError, setModelError] = useState(false);
@@ -929,6 +930,10 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     ?? eligible.find(({ id }) => id === "gpt-6-luna") ?? eligible[0];
   const mode = availableAuto ? currentPicker?.mode ?? chat.conversation?.selectionMode ?? "auto" : "manual";
   const effortEnabled = models.some((model) => model.reasoningEfforts !== undefined);
+  // The steps the picked model's catalogue entry names, in order; `medium` appears only where the server offers it for that model.
+  const effortChoices = (["low", "medium", "default", "high"] as const).filter((level) =>
+    level === "default" || level === "low" || level === "high" || selectedModel?.reasoningEfforts?.includes("medium") === true);
+  const turnEffort = effort === "medium" && !effortChoices.includes("medium") ? "default" : effort;
   const research = useChatResearch({ account: chat.account, language, ready: chatWrite && online && !chat.selected?.isLocked,
     busy: chat.sending || chat.writing || attachments.uploading, conversationId: activeId, modelId: selectedModel?.id, draft: chat.draft,
     projectId: activeId ? chat.selected?.projectId : chat.newChatProject?.id, plain: !attachments.files.length && !draftExcerpt,
@@ -970,7 +975,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
       const currentLocation = depth ? undefined : await location.read();
       if (stale()) return;
       const saved = await chat.send({ modelId: model.id, selectionMode: depth ? "manual" : mode,
-        effort: !depth && effortEnabled ? effort : "default", attachmentUploadIds,
+        effort: !depth && effortEnabled ? turnEffort : "default", attachmentUploadIds,
         ...(depth ? { deepResearchDepth: depth } : { handoffId: draftExcerpt?.id, currentLocation,
           ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
         tools: composerTools ? toolChanges : undefined });
@@ -984,7 +989,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
   /** What the voice heard goes through the ordinary Send: the same model choice, tools, credits and saved messages. */
   async function requestVoiceAnswer(text: string) {
     if (!chatWrite || !online || !selectedModel || chat.draft.trim() || attachments.files.length || draftExcerpt) throw new Error("The composer is busy.");
-    const result = await chat.dispatch({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? effort : "default",
+    const result = await chat.dispatch({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? turnEffort : "default",
       attachmentUploadIds: [], currentLocation: await location.read(), tools: composerTools ? toolChanges : undefined }, text);
     if (result?.savedQuestion) setToolDraft(undefined);
     if (!result?.conversation || !result.sourceUserMessageId || result.status !== "saved") throw new Error("The voice answer did not finish.");
@@ -1148,13 +1153,13 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             searchReadiness={searchReadiness} hasImageAttachments={attachments.files.some(({ mediaType }) => mediaType.startsWith("image/"))}
             onModeChange={(next) => { if (selectedModel) setPicker({ id: selectedModel.id, mode: next, conversation: activeId }); }}
             onChoose={([id]) => { if (id) setPicker({ id, mode: "manual", conversation: activeId }); }}
-            effort={effortEnabled && <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={effort} disabled={chat.sending}
+            effort={effortEnabled && <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={turnEffort} disabled={chat.sending}
                 onChange={(event) => setEffort(event.currentTarget.value as ChatTurnInput["effort"])}>
-                {(["low", "default", "high"] as const).map((value) => <option key={value} value={value}>{effortLabels[value]}</option>)}
+                {effortChoices.map((value) => <option key={value} value={value}>{effortLabels[value]}</option>)}
               </select></label>}>
             {mode === "auto" && <Sparkles size={15} />}
             {mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
-            {effortEnabled && effort !== "default" && ` · ${effortLabels[effort]}`}
+            {effortEnabled && turnEffort !== "default" && ` · ${effortLabels[turnEffort]}`}
           </DesktopModelPicker>
           {dictation && <DraftDictation language={language} scope={"chat:" + (activeId ?? "new")}
             disabled={chat.sending || attachments.uploading || preparing} draft={chat.draft} setDraft={chat.setDraft} />}

@@ -1,4 +1,4 @@
-import { modelReasoningEfforts, reasoningEffortEnabled, type ExplicitReasoningEffort } from "@/lib/reasoningEffort";
+import { modelReasoningEffortSteps, modelReasoningEfforts, reasoningEffortEnabled, reasoningEffortStepsEnabled, type ExplicitReasoningEffort, type ReasoningEffortStep } from "@/lib/reasoningEffort";
 import type { AiModel } from "@/lib/models";
 
 /**
@@ -56,6 +56,11 @@ export type PublicCatalogModel = {
     userVisibleNote?: string;
     reasoning?: AiModel["reasoning"];
     reasoningEfforts?: readonly ExplicitReasoningEffort[];
+    /**
+     * Every step the model takes while the Desktop steps switch is on. Additive: a client that predates it keeps
+     * reading `reasoningEfforts`, and the server still decides per request which step a turn may carry.
+     */
+    reasoningEffortSteps?: readonly ReasoningEffortStep[];
     contextWindowTokens?: number;
     inputCapabilities?: AiModel["inputCapabilities"];
     /**
@@ -118,6 +123,7 @@ export const toPublicCatalogModel = (model: AiModel): PublicCatalogModel => ({
         : {}),
     ...(model.userVisibleNote ? { userVisibleNote: model.userVisibleNote } : {}),
     ...(reasoningEffortEnabled() ? { reasoningEfforts: modelReasoningEfforts(model) } : {}),
+    ...(reasoningEffortStepsEnabled() ? { reasoningEffortSteps: modelReasoningEffortSteps(model) } : {}),
     ...(model.reasoning ? { reasoning: model.reasoning } : {}),
     ...(model.contextWindowTokens
         ? { contextWindowTokens: model.contextWindowTokens }

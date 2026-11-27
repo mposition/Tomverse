@@ -239,6 +239,9 @@ const APP_MANAGED_BRAVE: WebSearchCapability = {
   maxBillableSearchQueriesPerRequest: APP_MANAGED_MAX_SEARCH_QUERIES,
 };
 
+/** The same capability for a search no model owns: the coding API's web search (lib/codeWebSearch.ts). */
+export const APP_MANAGED_WEB_SEARCH_CAPABILITY: WebSearchCapability = APP_MANAGED_BRAVE;
+
 const NATIVE_OPENAI: WebSearchCapability = {
   support: "native",
   provider: "openai",

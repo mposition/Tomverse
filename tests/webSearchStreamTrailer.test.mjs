@@ -256,3 +256,29 @@ test("an old client reading a new trailer still gets its citations", () => {
   assert.deepEqual(parsed.searchMetadata, execution);
   assert.equal(parsed.completion.status, "incomplete");
 });
+
+test("persistence round-trips only as not_saved or unknown, and alone still makes an envelope", () => {
+  const json = (trailer) =>
+    splitSearchMetadataTrailer(buildChatStreamTrailerChunk(trailer)).searchMetadataJson;
+  for (const persistence of ["not_saved", "unknown"]) {
+    assert.equal(parseChatStreamTrailer(json({ searchMetadata: null, persistence }))?.persistence, persistence);
+  }
+  assert.equal(parseChatStreamTrailer(json({ searchMetadata: null }))?.persistence, undefined);
+  assert.equal(parseChatStreamTrailer(JSON.stringify({ persistence: "saved" }))?.persistence, undefined);
+  const alone = parseChatStreamTrailer(JSON.stringify({ persistence: "unknown" }));
+  assert.equal(alone?.persistence, "unknown");
+  assert.equal(alone?.searchMetadata, null);
+});
+
+test("an interrupted answer's reason round-trips; an unknown reason is dropped", () => {
+  const json = (trailer) =>
+    splitSearchMetadataTrailer(buildChatStreamTrailerChunk(trailer)).searchMetadataJson;
+  assert.deepEqual(
+    parseChatStreamTrailer(json({ searchMetadata: null, completion: { status: "incomplete", incompleteReason: "interrupted" } }))?.completion,
+    { status: "incomplete", incompleteReason: "interrupted" }
+  );
+  assert.deepEqual(
+    parseChatStreamTrailer(JSON.stringify({ completion: { status: "incomplete", incompleteReason: "gremlins" } }))?.completion,
+    { status: "incomplete" }
+  );
+});

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { ChatAccessError } from "@/lib/chatSecurity";
 
@@ -93,5 +93,107 @@ export const releaseGuestIdempotencyKey = async (
       count: { gt: 0 },
     },
     data: { count: { decrement: 1 } },
+  });
+};
+
+/**
+ * A claim on one account run while it is in flight, beside the guest key
+ * above and built the same way: one conditional upsert on the generic usage
+ * table, so a second request loses in the database rather than in a check the
+ * first has not finished writing.
+ *
+ * What it guards is different, so two things differ. The guest key is
+ * single-use for the day; this claim is held only while its run runs:
+ *
+ *  - It expires. `updatedAt` is the last time its holder showed it was alive
+ *    (the claim, then each `renewInFlightRun`), and a claim older than
+ *    `ttlSeconds` may be taken over, so a process that dies before its
+ *    `finally` cannot lock the run out for good, while a live run however
+ *    long keeps it by renewing.
+ *  - It is owned. The holder's random token is stored as the row's count, and
+ *    release deletes the row only while that token is still there, so a holder
+ *    that overran its TTL cannot release the claim of the request that took
+ *    over from it.
+ *
+ * The key starts with the caller's usage subject, so account deletion's
+ * prefix sweep removes it. The period names no minute, day or month, so the
+ * maintenance sweep (lib/maintenance.ts) only drops it after 90 idle days
+ * instead of treating it as an expired time bucket; a released claim is
+ * deleted at once anyway.
+ */
+export type InFlightRunClaim = {
+  key: string;
+  period: string;
+  periodStart: Date;
+  token: number;
+};
+
+/** One row per run key: the claim is not a time bucket. */
+const IN_FLIGHT_PERIOD_START = new Date(0);
+const inFlightPeriod = (scope: string) => `${scope}-in-flight`;
+
+/** A positive int4, so the bound parameter needs no BigInt handling. */
+const inFlightToken = () => randomInt(1, 2 ** 31);
+
+export const claimInFlightRun = async (
+  subjectKey: string,
+  scope: string,
+  runKey: string,
+  ttlSeconds: number
+): Promise<InFlightRunClaim> => {
+  const key = `${subjectKey}:${scope}:${runKey}`;
+  const period = inFlightPeriod(scope);
+  const periodStart = IN_FLIGHT_PERIOD_START;
+  const token = inFlightToken();
+  const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+    VALUES (${key}, ${period}, ${periodStart}, ${token}, NOW())
+    ON CONFLICT ("key", "period", "periodStart")
+    DO UPDATE SET
+      "count" = EXCLUDED."count",
+      "updatedAt" = NOW()
+    WHERE "ChatUsageBucket"."updatedAt" < NOW() - ${ttlSeconds}::int * INTERVAL '1 second'
+    RETURNING "count"
+  `;
+  if (rows.length === 0) {
+    throw new ChatAccessError(
+      409,
+      "DUPLICATE_REQUEST",
+      "This request is already being processed."
+    );
+  }
+  return { key, period, periodStart, token };
+};
+
+/**
+ * Moves the claim's `updatedAt` forward while its run is alive, so a run
+ * longer than the TTL is not taken over. Only the holder's own token is
+ * renewed: false means the claim already expired and was taken over (or
+ * released), and nothing was changed.
+ */
+export const renewInFlightRun = async (claim: InFlightRunClaim) => {
+  const renewed = await prisma.$executeRaw`
+    UPDATE "ChatUsageBucket"
+    SET "updatedAt" = NOW()
+    WHERE "key" = ${claim.key}
+      AND "period" = ${claim.period}
+      AND "periodStart" = ${claim.periodStart}
+      AND "count" = ${claim.token}
+  `;
+  return renewed > 0;
+};
+
+/**
+ * Hands the claim back once its run is over -- success, failure or exception
+ * alike. A no-op when the claim already expired and was taken over.
+ */
+export const releaseInFlightRun = async (claim: InFlightRunClaim) => {
+  await prisma.chatUsageBucket.deleteMany({
+    where: {
+      key: claim.key,
+      period: claim.period,
+      periodStart: claim.periodStart,
+      count: BigInt(claim.token),
+    },
   });
 };

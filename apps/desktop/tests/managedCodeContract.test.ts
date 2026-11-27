@@ -37,15 +37,16 @@ test("every language has a sentence for every refusal and every location", () =>
   }
 });
 
-test("cloud is listed as not available and says why; ssh is not set up until the remote lane says otherwise", () => {
+test("cloud is available only on the server's capability; ssh is not set up until the remote lane says otherwise", () => {
   const locations = describeExecutionLocations();
   assert.deepEqual(locations.map((location) => location.id), ["local", "worktree", "ssh", "cloud"]);
-  assert.deepEqual(locations.find((location) => location.id === "cloud"), { id: "cloud", available: false, reason: "server_infrastructure_required" });
+  assert.deepEqual(locations.find((location) => location.id === "cloud"), { id: "cloud", available: false, reason: "not_offered" });
   assert.deepEqual(locations.find((location) => location.id === "ssh"), { id: "ssh", available: false, reason: "not_set_up" });
   assert.equal(locations.find((location) => location.id === "local")?.available, true);
   assert.deepEqual(describeExecutionLocations({ ssh: { available: true } }).find((location) => location.id === "ssh"), { id: "ssh", available: true });
-  // Whatever the other lanes pass in, the cloud row never becomes available.
+  // The SSH lane's answer never turns the cloud row on; only the server's capability does.
   assert.equal(describeExecutionLocations({ ssh: { available: true } }).find((location) => location.id === "cloud")?.available, false);
+  assert.deepEqual(describeExecutionLocations({ cloud: true }).find((location) => location.id === "cloud"), { id: "cloud", available: true });
 });
 
 test("the managed credits capability is read as off unless the server says true, and reads true when it does", async (t) => {

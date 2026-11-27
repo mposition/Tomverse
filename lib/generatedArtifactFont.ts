@@ -12,16 +12,27 @@
  * Korean-first product is the whole file failing quietly. So the bytes travel
  * with the document.
  *
- * `lib/fonts/noto-sans-kr-400-subset.ttf` is Noto Sans KR at weight 400,
- * instanced from the upstream variable font and cut to Latin, punctuation,
- * currency, CJK punctuation, the Hangul jamo blocks and all 11,172 precomposed
- * syllables. It is licensed under the SIL Open Font License 1.1 (`OFL.txt`
- * beside it), which permits embedding; Noto carries no Reserved Font Name, so
- * a subset needs no rename. `scripts/build-pdf-font-subset.mjs` reproduces it.
+ * `lib/fonts/noto-sans-kr-400-subset.ttf` is Noto Sans KR at weight 400 cut to
+ * what documents in Korean, Chinese, Japanese and English are written with:
+ * Latin (including Vietnamese), Greek and Cyrillic, punctuation, currency,
+ * letterlike and number forms, arrows, maths, box drawing, enclosed numbers and
+ * the CJK compatibility units (㈜ ㎡ ℃), kana, the Hangul jamo blocks and all
+ * 11,172 precomposed syllables, and about 10,800 ideographs -- the hanja of
+ * KS X 1001, GB 2312, Big5 level 1 and JIS X 0208. Noto Sans KR itself lacks
+ * about half of GB 2312, so the ideographs it does not draw come from Noto Sans
+ * SC of the same release and weight; the Korean form wins wherever both draw a
+ * character. It is licensed under the SIL Open Font License 1.1 (`OFL.txt`
+ * beside it), which permits embedding; its Reserved Font Name is "Source",
+ * which the family name does not use, so a subset needs no rename.
+ * `scripts/build-pdf-font-subset.mjs` reproduces it, byte for byte.
+ *
+ * What it still cannot draw -- emoji, ✔ ✗ ✘, Arabic, Hebrew, Thai, Devanagari,
+ * the rarer hanja -- is the PDF writer's business, not this file's: see
+ * `lib/generatedArtifactPdf.ts`.
  *
  * ## Why the subsetting looks like this
  *
- * The vendored font is 2.4 MB and a document uses a few hundred glyphs of it,
+ * The vendored font is 6.2 MB and a document uses a few hundred glyphs of it,
  * so something has to shrink before the bytes go into every PDF. The usual way
  * is to renumber glyphs into a dense range -- and renumbering is where a
  * subsetter goes subtly wrong, because every composite glyph's component index
@@ -34,11 +45,12 @@
  * component indices stay valid because nothing moved, `cmap` stays valid for
  * the same reason, and `CIDToGIDMap` can be `/Identity`.
  *
- * The trade is that `loca` and `hmtx` stay full length: about 100 KB of the
- * ~140 KB a subset weighs, before the PDF's own Flate compression takes it to
- * roughly half that. A renumbering subsetter would reach ~40 KB. That is the
- * price of not having a class of bug whose symptom is a file the reader opens
- * and then draws wrong.
+ * The trade is that `loca` and `hmtx` stay full length: about 190 KB of the
+ * ~240 KB a subset weighs, which is why the PDF writer Flate-compresses the
+ * font program (they are almost all repeats, and a one-line document is about
+ * 60 KB). A renumbering subsetter would reach ~40 KB. That is the price of not
+ * having a class of bug whose symptom is a file the reader opens and then
+ * draws wrong.
  */
 
 import "server-only";
@@ -399,9 +411,10 @@ export const subsetPdfFont = (
 /**
  * The glyph a code point draws as, or null when the font cannot draw it.
  *
- * Null rather than `.notdef`: a PDF full of empty boxes is a PDF that looks
- * broken without saying so, and the caller turns this into a named refusal
- * instead (policy section 4).
+ * Null rather than `.notdef`, so the caller has to decide what a missing
+ * character means. The PDF writer draws a replacement box and reports the
+ * character, or refuses the document when most of it would be boxes
+ * (`lib/generatedArtifactPdf.ts`).
  */
 export const glyphFor = (font: LoadedFont, codePoint: number): number | null =>
   font.cmap.get(codePoint) ?? null;

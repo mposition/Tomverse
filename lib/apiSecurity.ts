@@ -5,8 +5,16 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import {
+  DATABASE_RETRY_AFTER_SECONDS,
+  DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
+  isRetryableDatabaseError,
+} from "@/lib/databaseError";
 
 type ApiPeriod = "minute" | "day";
+
+/** Pause before the single in-process retry of a transient database error. */
+const RATE_LIMIT_DATABASE_RETRY_DELAY_MS = 200;
 
 export class ApiSecurityError extends Error {
   constructor(
@@ -113,37 +121,75 @@ export async function consumeApiRateLimit(
       ? null
       : `api:${hashKey(scope, "ip", clientIp)}`;
 
-  await prisma.$transaction(async (tx) => {
-    for (const period of ["minute", "day"] as const) {
-      const start = periodStart(period, now);
-      const allowed = await incrementBucket(
-        tx,
-        userKey,
-        `api-${scope}-${period}`,
-        start,
-        1,
-        limits[period]
-      );
-      const ipAllowed = ipKey
-        ? await incrementBucket(
-            tx,
-            ipKey,
-            `api-${scope}-${period}`,
-            start,
-            1,
-            limits[period] * 3
-          )
-        : true;
-      if (!allowed || !ipAllowed) {
-        throw new ApiSecurityError(
-          429,
-          "API_RATE_LIMITED",
-          "Too many requests.",
-          retryAfter(period, now)
+  const consume = () =>
+    prisma.$transaction(async (tx) => {
+      for (const period of ["minute", "day"] as const) {
+        const start = periodStart(period, now);
+        const allowed = await incrementBucket(
+          tx,
+          userKey,
+          `api-${scope}-${period}`,
+          start,
+          1,
+          limits[period]
         );
+        const ipAllowed = ipKey
+          ? await incrementBucket(
+              tx,
+              ipKey,
+              `api-${scope}-${period}`,
+              start,
+              1,
+              limits[period] * 3
+            )
+          : true;
+        if (!allowed || !ipAllowed) {
+          throw new ApiSecurityError(
+            429,
+            "API_RATE_LIMITED",
+            "Too many requests.",
+            retryAfter(period, now)
+          );
+        }
       }
+    });
+
+  /*
+    One transient database error is absorbed, a second one is answered as
+    503 + Retry-After instead of each route's generic 500.
+
+    The increments are one interactive transaction, so a failed attempt rolls
+    every bucket back and the retry cannot count a request twice. The single
+    residue is a COMMIT that succeeded while its acknowledgement was lost: that
+    leaves one extra unit in a per-minute rate bucket (never a credit, never a
+    reservation), which is the price of not refusing the request.
+
+    A 429 is the limiter working, not a database failure, and is rethrown as is.
+  */
+  try {
+    await consume();
+  } catch (error) {
+    if (error instanceof ApiSecurityError || !isRetryableDatabaseError(error)) {
+      throw error;
     }
-  });
+    await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DATABASE_RETRY_DELAY_MS));
+    try {
+      await consume();
+    } catch (retryError) {
+      if (
+        retryError instanceof ApiSecurityError ||
+        !isRetryableDatabaseError(retryError)
+      ) {
+        throw retryError;
+      }
+      throw new ApiSecurityError(
+        503,
+        DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
+        "The service is temporarily unavailable. Please try again shortly.",
+        DATABASE_RETRY_AFTER_SECONDS
+      );
+    }
+  }
 }
 
 // Gives back one unit of a per-user rate-limit bucket consumed earlier by

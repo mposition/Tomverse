@@ -1,28 +1,50 @@
-import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pluginHooks } from "./hooks.js";
 import { pluginMcpServers } from "./mcp-config.js";
+import { ARCHIVE_LIMITS, ArchiveSink, archiveRoot, extractZip } from "./plugin-archive.js";
+import { downloadBytes, sha256Hex, shownUrl, type DownloadFetch } from "./plugin-download.js";
 import { copyTreeSafely, PluginError, treeDigest } from "./plugin-fs.js";
 import { readPluginLayout } from "./plugin-format.js";
-import { fetchGitSnapshot } from "./plugin-git.js";
+import { fetchGitSnapshotSigningIn, type GitAuth } from "./plugin-git.js";
 import { diffPlugins, inspectPlugin, type PluginDiff, type PluginInspection } from "./plugin-inspect.js";
 import { discardStaging, newStaging, readMarketplace, refreshMarketplace, resolveInMarketplace } from "./plugin-marketplace.js";
+import { fetchNpmPackage } from "./plugin-npm.js";
 import {
-    installedDir, installedPluginPath, pluginApproved, readPluginState, removeInstalledPlugin, updatePluginState, type PluginRecord, type PluginSourceRecord,
+    installedDir, installedPluginPath, pluginApproved, readPluginState, removeInstalledPlugin, updatePluginState, type PluginOrigin, type PluginRecord, type PluginSourceRecord,
 } from "./plugin-store.js";
 import { forgetPluginTrust } from "./project-trust.js";
 
 /**
  * Installing, updating and removing plugins. Installing is two steps: `stagePlugin` copies the plugin into a private staging folder
  * (safely: no link out, bounded size) and reads what it holds; `commitStaged` moves it into place only after the person confirmed
- * what `stagePlugin` showed, and only if the files are still exactly those. Neither step runs anything of the plugin. An update that
- * changes any file leaves the plugin's hooks and servers unapproved again (their approval is bound to the digest of the files).
+ * what `stagePlugin` showed, and only if the files (and the place they came from) are still exactly those. Neither step runs anything of
+ * the plugin. An update that changes any file leaves the plugin's hooks and servers unapproved again (their approval is bound to the
+ * digest of the files).
+ *
+ * A zip file, an address of a zip file and an npm package are further places to install from. They are off unless the caller passes
+ * `sources` (Desktop does, when its server switch is on); the terminal command does not. They go through the same copy, the same
+ * preview and the same confirmation as a folder, after an unpacking that refuses links and escaping paths (plugin-archive.ts).
  */
 
 export type PluginRequest =
     | { kind: "folder"; path: string }
     | { kind: "marketplace"; marketplace: string; plugin: string }
-    | { kind: "update"; name: string };
+    | { kind: "update"; name: string }
+    | { kind: "zip"; path: string }
+    | { kind: "zip-url"; url: string; sha256?: string }
+    | { kind: "npm"; package: string; version?: string; registry?: string; integrity?: string };
+
+/** The places beyond a folder and a public git catalog, with what they need. Passing it turns them on. */
+export type SourceOptions = {
+    /** For tests: a stand-in for the network. */
+    fetchImpl?: DownloadFetch;
+    /** How a private github.com repository is read, when it cannot be read without signing in (it asks the person first). */
+    signIn?: (url: string) => Promise<GitAuth | null>;
+};
+
+export type StageOptions = { signal?: AbortSignal; refresh?: boolean; sources?: SourceOptions };
 
 export type StagedPlugin = {
     id: string;
@@ -34,13 +56,65 @@ export type StagedPlugin = {
     previous?: PluginInspection;
     diff?: PluginDiff;
     source: PluginSourceRecord;
+    /** Where the files really came from, when it is not a folder or a git catalog entry. */
+    origin?: PluginOrigin;
+    /** What the person confirms: the digest of the files together with where they came from (an npm integrity value, a zip's SHA-256, a commit). */
+    approval: string;
 };
 
 export type StageResult = { staged: StagedPlugin } | { upToDate: PluginInspection };
 
-type Resolved = { sourceDir: string; source: PluginSourceRecord; fallbackName?: string };
+type Resolved = { sourceDir: string; source: PluginSourceRecord; origin?: PluginOrigin; fallbackName?: string };
 
-const resolveMarketplaceEntry = async (home: string, marketplace: string, plugin: string, stagingRoot: string, signal?: AbortSignal): Promise<Resolved> => {
+export const approvalDigestOf = (filesDigest: string, source: PluginSourceRecord, origin?: PluginOrigin) =>
+    createHash("sha256").update(JSON.stringify([filesDigest, source, origin ?? null])).digest("hex");
+
+const NOT_HERE = "This kind of source is not available here.";
+
+const requireSources = (options: StageOptions): SourceOptions => {
+    if (!options.sources) throw new PluginError(NOT_HERE);
+    return options.sources;
+};
+
+/** The unpacked files of an archive go to `<staging>/src`; the plugin's root inside them is the folder that is copied. */
+const unpackZip = (bytes: Buffer, stagingRoot: string) => {
+    const unpacked = join(stagingRoot, "src");
+    extractZip(bytes, new ArchiveSink(unpacked));
+    return archiveRoot(unpacked);
+};
+
+const readZipFile = (path: string): { bytes: Buffer; real: string } => {
+    if (!isAbsolute(path)) throw new PluginError("Give the full path of the zip file.");
+    let real: string;
+    try {
+        real = realpathSync.native(path);
+        const stat = statSync(real);
+        if (!stat.isFile()) throw new Error("not a file");
+        if (stat.size > ARCHIVE_LIMITS.archiveBytes) throw new PluginError("The zip file is too large.");
+    } catch (error) {
+        if (error instanceof PluginError) throw error;
+        throw new PluginError("That is not a readable file.");
+    }
+    return { bytes: readFileSync(real), real };
+};
+
+const zipFromUrl = async (url: string, pinned: string | undefined, stagingRoot: string, options: StageOptions) => {
+    const sources = requireSources(options);
+    const bytes = await downloadBytes(url, { maxBytes: ARCHIVE_LIMITS.archiveBytes, what: "zip file", accept: "application/zip, application/octet-stream", signal: options.signal, fetchImpl: sources.fetchImpl });
+    const sha256 = sha256Hex(bytes);
+    if (pinned !== undefined && pinned !== sha256) throw new PluginError("The downloaded zip file does not match the SHA-256 the catalog pins; nothing was installed.");
+    return { sourceDir: unpackZip(bytes, stagingRoot), sha256 };
+};
+
+const npmToStaging = async (request: { package: string; version?: string; registry?: string; integrity?: string }, stagingRoot: string, options: StageOptions) => {
+    const sources = requireSources(options);
+    const unpacked = join(stagingRoot, "src");
+    const found = await fetchNpmPackage(request, unpacked, { signal: options.signal, fetchImpl: sources.fetchImpl });
+    const origin: PluginOrigin = { kind: "npm", package: request.package, version: found.version, integrity: found.integrity, ...(request.registry ? { registry: found.registry } : {}) };
+    return { sourceDir: archiveRoot(unpacked), origin };
+};
+
+const resolveMarketplaceEntry = async (home: string, marketplace: string, plugin: string, stagingRoot: string, options: StageOptions): Promise<Resolved> => {
     const { record, catalog, dir } = readMarketplace(home, marketplace);
     const entry = catalog.entries.find((candidate) => candidate.name === plugin);
     if (!entry) throw new PluginError(`The marketplace ${marketplace} has no plugin named ${plugin}.`);
@@ -49,12 +123,25 @@ const resolveMarketplaceEntry = async (home: string, marketplace: string, plugin
     if (source.kind === "relative") {
         return { sourceDir: resolveInMarketplace(dir, source.path), source: { kind: "marketplace", marketplace, plugin, ...(record.commit ? { commit: record.commit } : {}) }, fallbackName: entry.name };
     }
+    if (source.kind === "npm") {
+        if (!options.sources) throw new PluginError(`The plugin ${plugin} comes from a source this app does not support (npm).`);
+        const { sourceDir, origin } = await npmToStaging(source, stagingRoot, options);
+        return { sourceDir, source: { kind: "marketplace", marketplace, plugin }, origin, fallbackName: entry.name };
+    }
+    if (source.kind === "zip") {
+        if (!options.sources) throw new PluginError(`The plugin ${plugin} comes from a source this app does not support (zip).`);
+        const { sourceDir, sha256 } = await zipFromUrl(source.url, source.sha256, stagingRoot, options);
+        return { sourceDir, source: { kind: "marketplace", marketplace, plugin }, origin: { kind: "zip-url", url: shownUrl(source.url), sha256 }, fallbackName: entry.name };
+    }
     const checkout = join(stagingRoot, "src");
-    const { commit } = await fetchGitSnapshot({ url: source.url, ...(source.ref ? { ref: source.ref } : {}), ...(source.sha ? { sha: source.sha } : {}) }, checkout, { signal });
+    const { commit } = await fetchGitSnapshotSigningIn(
+        { url: source.url, ...(source.ref ? { ref: source.ref } : {}), ...(source.sha ? { sha: source.sha } : {}) }, checkout,
+        { signal: options.signal, ...(options.sources?.signIn ? { signIn: options.sources.signIn } : {}) },
+    );
     return { sourceDir: source.subdir ? resolveInMarketplace(checkout, source.subdir) : checkout, source: { kind: "marketplace", marketplace, plugin, commit }, fallbackName: entry.name };
 };
 
-const resolveRequest = async (home: string, request: PluginRequest, stagingRoot: string, options: { signal?: AbortSignal; refresh?: boolean }): Promise<Resolved> => {
+const resolveRequest = async (home: string, request: PluginRequest, stagingRoot: string, options: StageOptions): Promise<Resolved> => {
     if (request.kind === "folder") {
         if (!isAbsolute(request.path)) throw new PluginError("Give the full path of the plugin folder.");
         let real: string;
@@ -66,16 +153,53 @@ const resolveRequest = async (home: string, request: PluginRequest, stagingRoot:
         }
         return { sourceDir: real, source: { kind: "folder", path: real } };
     }
-    if (request.kind === "marketplace") return resolveMarketplaceEntry(home, request.marketplace, request.plugin, stagingRoot, options.signal);
+    if (request.kind === "zip") {
+        requireSources(options);
+        const { bytes, real } = readZipFile(request.path);
+        return { sourceDir: unpackZip(bytes, stagingRoot), source: { kind: "folder", path: real }, origin: { kind: "zip", sha256: sha256Hex(bytes) } };
+    }
+    if (request.kind === "zip-url") {
+        const { sourceDir, sha256 } = await zipFromUrl(request.url, request.sha256, stagingRoot, options);
+        const shown = shownUrl(request.url);
+        return { sourceDir, source: { kind: "folder", path: shown }, origin: { kind: "zip-url", url: shown, sha256 } };
+    }
+    if (request.kind === "npm") {
+        const { sourceDir, origin } = await npmToStaging(request, stagingRoot, options);
+        return { sourceDir, source: { kind: "folder", path: `npm:${request.package}@${origin.kind === "npm" ? origin.version : ""}` }, origin };
+    }
+    if (request.kind === "marketplace") return resolveMarketplaceEntry(home, request.marketplace, request.plugin, stagingRoot, options);
     const record = readPluginState(home).plugins[request.name];
     if (!record) throw new PluginError(`No plugin named ${request.name} is installed.`);
-    if (record.source.kind === "folder") return resolveRequest(home, { kind: "folder", path: record.source.path }, stagingRoot, options);
-    if (options.refresh !== false) await refreshMarketplace(home, record.source.marketplace, { signal: options.signal });
-    return resolveMarketplaceEntry(home, record.source.marketplace, record.source.plugin, stagingRoot, options.signal);
+    if (record.source.kind === "folder") {
+        // Installed from a zip file, an address or an npm package: the same place is read again (npm: the registry's newest version).
+        if (record.origin?.kind === "zip") return resolveRequest(home, { kind: "zip", path: record.source.path }, stagingRoot, options);
+        if (record.origin?.kind === "zip-url") return resolveRequest(home, { kind: "zip-url", url: record.origin.url }, stagingRoot, options);
+        if (record.origin?.kind === "npm") {
+            return resolveRequest(home, { kind: "npm", package: record.origin.package, ...(record.origin.registry ? { registry: record.origin.registry } : {}) }, stagingRoot, options);
+        }
+        return resolveRequest(home, { kind: "folder", path: record.source.path }, stagingRoot, options);
+    }
+    if (options.refresh !== false) {
+        await refreshMarketplace(home, record.source.marketplace, { signal: options.signal, ...(options.sources?.signIn ? { signIn: options.sources.signIn } : {}) });
+    }
+    return resolveMarketplaceEntry(home, record.source.marketplace, record.source.plugin, stagingRoot, options);
+};
+
+/** An npm package's install scripts are only text here: npm is never run. Said in the preview so nobody expects them to have run. */
+const npmScriptNote = (tree: string): string | null => {
+    try {
+        const file = join(tree, "package.json");
+        if (statSync(file).size > 256 * 1024) return null;
+        const scripts = (JSON.parse(readFileSync(file, "utf8")) as { scripts?: Record<string, unknown> }).scripts;
+        const names = Object.keys(scripts ?? {}).filter((name) => /^(?:pre|post)?(?:install|prepare|prepack|publish)$|^prepublish(?:Only)?$/.test(name)).slice(0, 6);
+        return names.length ? `This npm package declares ${names.join(", ")} scripts. They are never run: npm is not used, only the package's files.` : null;
+    } catch {
+        return null;
+    }
 };
 
 /** Copies a plugin into staging and reads it. Throws PluginError; the staging folder is removed then. */
-export const stagePlugin = async (home: string, request: PluginRequest, options: { signal?: AbortSignal; refresh?: boolean } = {}): Promise<StageResult> => {
+export const stagePlugin = async (home: string, request: PluginRequest, options: StageOptions = {}): Promise<StageResult> => {
     const staging = newStaging(home);
     try {
         const resolved = await resolveRequest(home, request, staging.dir, options);
@@ -83,10 +207,16 @@ export const stagePlugin = async (home: string, request: PluginRequest, options:
         copyTreeSafely(resolved.sourceDir, tree);
         if (existsSync(join(staging.dir, "src"))) rmSync(join(staging.dir, "src"), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         const inspection = inspectPlugin(tree, resolved.fallbackName ?? (request.kind === "update" ? request.name : undefined));
+        if (resolved.origin?.kind === "npm") {
+            const note = npmScriptNote(tree);
+            if (note) inspection.issues.push(note);
+        }
         const state = readPluginState(home);
+        const approval = approvalDigestOf(inspection.digest, resolved.source, resolved.origin);
+        const common = { id: staging.id, dir: staging.dir, tree, inspection, source: resolved.source, ...(resolved.origin ? { origin: resolved.origin } : {}), approval };
         if (request.kind !== "update") {
             if (state.plugins[inspection.name]) throw new PluginError(`The plugin ${inspection.name} is already installed. Update it, or remove it first.`);
-            return { staged: { id: staging.id, dir: staging.dir, tree, mode: "install", inspection, source: resolved.source } };
+            return { staged: { ...common, mode: "install" } };
         }
         if (inspection.name !== request.name) throw new PluginError(`The plugin now calls itself ${inspection.name}; remove ${request.name} and install the new one.`);
         const previous = inspectPlugin(installedPluginPath(home, request.name));
@@ -94,7 +224,7 @@ export const stagePlugin = async (home: string, request: PluginRequest, options:
             discardStaging(staging.dir);
             return { upToDate: previous };
         }
-        return { staged: { id: staging.id, dir: staging.dir, tree, mode: "update", inspection, previous, diff: diffPlugins(previous, inspection), source: resolved.source } };
+        return { staged: { ...common, mode: "update", previous, diff: diffPlugins(previous, inspection) } };
     } catch (error) {
         discardStaging(staging.dir);
         throw error;
@@ -106,7 +236,7 @@ export const discardStaged = (staged: Pick<StagedPlugin, "dir">) => discardStagi
 /** The folders of the staging area are the CLI's own; `staged` must be one this process made. */
 export const commitStaged = (home: string, staged: StagedPlugin): PluginRecord => {
     if (!existsSync(staged.tree)) throw new PluginError("The staged plugin is gone.");
-    if (treeDigest(staged.tree) !== staged.inspection.digest) {
+    if (treeDigest(staged.tree) !== staged.inspection.digest || approvalDigestOf(staged.inspection.digest, staged.source, staged.origin) !== staged.approval) {
         discardStaging(staged.dir);
         throw new PluginError("The plugin's files changed after you looked at them; nothing was installed. Try again.");
     }
@@ -134,6 +264,7 @@ export const commitStaged = (home: string, staged: StagedPlugin): PluginRecord =
             ...(staged.inspection.version ? { version: staged.inspection.version } : {}),
             installedAt: previous?.installedAt ?? now, ...(previous ? { updatedAt: now } : {}),
             treeDigest: staged.inspection.digest, enabled: previous?.enabled ?? true, disabledIn: previous?.disabledIn ?? [], source: staged.source,
+            ...(staged.origin ? { origin: staged.origin } : {}),
         };
         current.plugins[name] = written;
         // What was approved belonged to the old files.
@@ -184,6 +315,16 @@ export const listInstalledPlugins = (home: string): InstalledPlugin[] =>
         };
     });
 
+/** One line naming where the files came from and the value that identifies them, for the confirmation. */
+export const describeOrigin = (staged: Pick<StagedPlugin, "origin" | "source">): string | null => {
+    const origin = staged.origin;
+    if (origin?.kind === "npm") return `npm package ${origin.package}@${origin.version}, integrity ${origin.integrity}`;
+    if (origin?.kind === "zip") return `zip file, SHA-256 ${origin.sha256}`;
+    if (origin?.kind === "zip-url") return `zip file from ${origin.url}, SHA-256 ${origin.sha256}`;
+    if (staged.source.kind === "marketplace" && staged.source.commit) return `git commit ${staged.source.commit}`;
+    return null;
+};
+
 /** The confirmation text for a staged plugin, for a terminal. */
 export const describeStaged = (staged: StagedPlugin): string[] => {
     const { inspection: plugin, diff } = staged;
@@ -192,6 +333,8 @@ export const describeStaged = (staged: StagedPlugin): string[] => {
         `  ${plugin.files} file(s), ${Math.ceil(plugin.bytes / 1024)} KB`,
         `  ${plugin.skills.length} skill(s), ${plugin.commands.length} command(s), ${plugin.agents.length} agent definition(s)`,
     ];
+    const origin = describeOrigin(staged);
+    if (origin) lines.push(`  From: ${origin}`);
     for (const [label, names] of [["skills", plugin.skills], ["commands", plugin.commands], ["agents", plugin.agents]] as const) {
         if (names.length) lines.push(`    ${label}: ${names.slice(0, 20).join(", ")}${names.length > 20 ? ` (+${names.length - 20} more)` : ""}`);
     }

@@ -39,7 +39,7 @@ import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { pickRequestedModel } from "@/lib/externalApiProtocols";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
-import { modelReasoningEfforts, modelWithReasoningEffort, reasoningEffortEnabled } from "@/lib/reasoningEffort";
+import { modelReasoningEffortOptions, modelWithReasoningEffort, reasoningEffortEnabled, reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
     buildChatCompletion,
@@ -253,7 +253,8 @@ export async function handleChatCompletions(request: Request, options: { surface
         const parsed = parseChatCompletionRequest(body);
         const effort = parsed.tomverse_effort;
         if (effort && (options.surface !== "coding" || !reasoningEffortEnabled() ||
-            parsed.reasoning_effort != null || parsed.reasoning?.effort != null)) {
+            parsed.reasoning_effort != null || parsed.reasoning?.effort != null ||
+            (effort === "medium" && !reasoningEffortStepsEnabled()))) {
             throw new ProtocolError(400, "unsupported_parameter", "tomverse_effort is available only on the coding API, by itself.", "tomverse_effort");
         }
 
@@ -334,7 +335,7 @@ export async function handleChatCompletions(request: Request, options: { surface
             throw new ProtocolError(404, "model_not_found", `The model '${parsed.model}' is not available to this key.`, "model");
         }
         const { model, capabilities } = entry;
-        const appliedEffort = effort && modelReasoningEfforts(model).includes(effort) ? effort : undefined;
+        const appliedEffort = effort && modelReasoningEffortOptions(model).includes(effort) ? effort : undefined;
         const view = {
             id: model.id,
             provider: model.provider,

@@ -321,7 +321,8 @@ async function parentForCreate(input: {
   request: Request;
 }) {
   const parent = await input.tx.conversation.findFirst({
-    where: { id: input.parentConversationId, userId: input.userId },
+    // A temporary Chat never seeds a lasting Review (lib/temporaryChatAccess.ts).
+    where: { id: input.parentConversationId, userId: input.userId, temporaryExpiresAt: null },
     select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true, projectId: true,
       project: { select: { archivedAt: true } } },
   });

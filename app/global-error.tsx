@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { reportClientError } from "@/lib/clientErrorReporter";
+
 /**
  * Last-resort boundary for failures in the root layout itself.
  *
@@ -25,6 +28,11 @@ export default function GlobalError({
   error: Error & { digest?: string };
   retry: () => void;
 }) {
+  // The shared document shell, and the listeners it mounts, are replaced by
+  // this file, so the boundary reports for itself. Fire-and-forget by design.
+  useEffect(() => {
+    reportClientError(error, "react-boundary", { digest: error.digest });
+  }, [error]);
   return (
     <html lang="en">
       <body

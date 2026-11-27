@@ -100,19 +100,40 @@ test("a small visible prefix is checkpointed when no later chunk arrives", async
 // with three PDFs. Only checkpoints renewed the lease, and they follow text,
 // so the claim's 4-minute lease had expired and the terminal CAS refused the
 // answer the user had already read (CHAT_ATTEMPT_REVISION_CONFLICT).
+/*
+  The row as the database holds it, for the writer's reconciliation read after
+  a transient failure: the last write that returned, since a mock that throws
+  wrote nothing.
+*/
+const trackCommitted = (persist) => {
+  const committed = { checkpointRevision: 0, partialContent: "" };
+  return {
+    persist: async (input) => {
+      const row = await persist(input);
+      committed.checkpointRevision = row.checkpointRevision;
+      committed.partialContent = row.partialContent;
+      return row;
+    },
+    read: async () => ({ ownerId: "worker_1", status: "streaming", ...committed }),
+  };
+};
 const leaseWriter = (calls, persist = async (input) => {
   calls.push(input);
   return attemptRow(input, calls.length);
-}) => createChatResponseAttemptCheckpointWriter(
-  {
-    userId: "user_1",
-    assistantMessageId: "assistant_1",
-    ownerId: "worker_1",
-    initialRevision: 0,
-    requestedModelId: "provider/model",
-  },
-  persist
-);
+}) => {
+  const tracked = trackCommitted(persist);
+  return createChatResponseAttemptCheckpointWriter(
+    {
+      userId: "user_1",
+      assistantMessageId: "assistant_1",
+      ownerId: "worker_1",
+      initialRevision: 0,
+      requestedModelId: "provider/model",
+    },
+    tracked.persist,
+    tracked.read
+  );
+};
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test("while no text arrives, the lease is renewed once a minute has passed since the last write", async (t) => {
@@ -197,13 +218,313 @@ test("a renewal never runs while text is queued or being checkpointed", async (t
   assert.ok(calls.every((call) => call.partialContent === "x"), JSON.stringify(calls.map((c) => c.partialContent)));
 });
 
-test("the chat route renews the attempt lease from the first-token keepalive tick", async () => {
+test("the chat route renews the attempt lease from the keepalive tick, before and after the first token", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
   const tick = source.slice(source.indexOf("keepaliveWriter = setInterval(() => {"),
     source.indexOf("}, plan.intervalMs);"));
   assert.match(tick, /state: "awaiting_first_token"/);
-  assert.match(tick, /durableCheckpointWriter\?\.renewLease\(\);/);
-  // The tick stops at the first visible token, after which checkpoints renew it.
-  assert.match(tick, /if \(visibleTokenEmitted \|\| streamState !== "open"\) \{\s*stopFirstTokenWatch\(\);/);
+  // Renewed before the phase branch: minutes of tool input after the first
+  // token add no checkpoint either, and would let the lease run out.
+  assert.ok(
+    tick.indexOf("durableCheckpointWriter?.renewLease();") <
+      tick.indexOf("if (!visibleTokenEmitted) {"),
+    "the lease renewal must not be confined to the first-token wait"
+  );
+  // The tick ends only with the stream, not at the first visible token.
+  assert.match(tick, /if \(streamState !== "open"\) \{\s*stopFirstTokenWatch\(\);/);
+  assert.doesNotMatch(tick, /visibleTokenEmitted \|\| streamState/);
+  // After the first token it writes only on provider evidence.
+  assert.match(tick, /state: "provider_active"/);
+  assert.match(tick, /!partsArrived \|\|/);
+});
+
+// S4: one failed checkpoint write used to be latched as the writer's failure,
+// so the stream ran to the end and the final flush threw -- AI_STREAM_FAILED
+// after the user had read the whole answer, and nothing saved.
+const { ChatAttemptCasError } = await import("../lib/chatResponseAttemptPersistence.ts");
+const transient = () =>
+  Object.assign(new Error("connection closed"), { name: "PrismaClientKnownRequestError", code: "P1017" });
+const big = (character) => character.repeat(3_000);
+
+test("a transient checkpoint failure is not latched: the final flush persists the answer", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const calls = [];
+  let failures = 1;
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (failures-- > 0) throw transient();
+    return attemptRow(input, calls.length);
+  });
+  writer.observe(big("a"));
+  await settle();
+  assert.equal(calls.length, 1, "the first write was attempted and failed");
+  const final = await writer.flush(big("a") + "end");
+  assert.equal(final.partialContent, big("a") + "end");
+  assert.equal(calls.at(-1).partialContent, big("a") + "end");
+});
+
+test("flush writes the final content itself when the cycle it started fails transiently", async (t) => {
+  const warnings = [];
+  t.mock.method(console, "warn", (line) => warnings.push(JSON.parse(line)));
+  const calls = [];
+  let failures = 2;
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (failures-- > 0) throw transient();
+    return attemptRow(input, calls.length);
+  });
+  writer.observe(big("b"));
+  await settle();
+  const final = await writer.flush(big("b") + "!");
+  assert.equal(final.partialContent, big("b") + "!");
+  assert.equal(calls.length, 3);
+  assert.deepEqual(warnings.map((warning) => [warning.event, warning.code]), [
+    ["chat_attempt_checkpoint_retry", "P1017"],
+    ["chat_attempt_checkpoint_retry", "P1017"],
+  ]);
+  assert.doesNotMatch(JSON.stringify(warnings), /connection closed/);
+});
+
+test("a persistent outage still fails the turn at the terminal flush", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const calls = [];
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    throw transient();
+  });
+  writer.observe(big("c"));
+  await settle();
+  await assert.rejects(writer.flush(big("c")), (error) => error.code === "P1017");
+});
+
+test("a CAS refusal (lost lease, the user's stop) is still latched and thrown by flush", async () => {
+  const calls = [];
+  const refusal = new ChatAttemptCasError("revision_conflict");
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    throw refusal;
+  });
+  writer.observe(big("d"));
+  await settle();
+  writer.observe(big("d") + "more");
+  await settle();
+  assert.equal(calls.length, 1, "a refused writer never writes again");
+  await assert.rejects(writer.flush(big("d") + "more"), (error) => error === refusal);
+});
+
+test("after a transient failure, chunks wait out the interval instead of a write each", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 4_000_000 });
+  const calls = [];
+  let failures = 1;
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (failures-- > 0) throw transient();
+    return attemptRow(input, calls.length);
+  });
+  writer.observe(big("e"));
+  await settle();
+  assert.equal(calls.length, 1);
+  writer.observe(big("e") + big("f"));
+  writer.observe(big("e") + big("f") + big("g"));
+  await settle();
+  assert.equal(calls.length, 1, "no write per chunk while backing off");
+  t.mock.timers.tick(1_000);
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].partialContent, big("e") + big("f") + big("g"));
+});
+
+/* ------------------------------ review r-20261127-025915-939c77, major 2 -- */
+
+/*
+  A row with real CAS semantics. `plan` says what each write does: "ok",
+  "fail" (refused before it reached the row) or "land-then-fail" (the UPDATE
+  committed and its answer was lost). `readPlan` can make the reconciliation
+  read itself fail.
+*/
+const casStore = () => {
+  const row = { ownerId: "worker_1", status: "streaming", checkpointRevision: 0, partialContent: "" };
+  const calls = [];
+  const reads = [];
+  const plan = [];
+  const readPlan = [];
+  const persist = async (input) => {
+    calls.push(input);
+    const mode = plan.shift() ?? "ok";
+    if (mode === "fail") throw transient();
+    if (row.status !== "streaming" && row.status !== "claimed") throw new ChatAttemptCasError("terminal");
+    if (input.ownerId !== row.ownerId || input.expectedRevision !== row.checkpointRevision) {
+      throw new ChatAttemptCasError("revision_conflict");
+    }
+    row.checkpointRevision += 1;
+    row.partialContent = input.partialContent;
+    if (mode === "land-then-fail") throw transient();
+    return attemptRow({ ...input, partialContent: row.partialContent }, row.checkpointRevision);
+  };
+  const read = async () => {
+    reads.push(true);
+    if (readPlan.shift() === "fail") throw transient();
+    return { ...row };
+  };
+  const writer = createChatResponseAttemptCheckpointWriter(
+    { userId: "user_1", assistantMessageId: "assistant_1", ownerId: "worker_1", initialRevision: 0, requestedModelId: "provider/model" },
+    persist,
+    read
+  );
+  return { row, calls, reads, plan, readPlan, writer };
+};
+
+test("a checkpoint that committed but lost its answer is reconciled, not retried into a conflict", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const store = casStore();
+  store.plan.push("land-then-fail");
+  store.writer.observe(big("h"));
+  await settle();
+  assert.equal(store.row.checkpointRevision, 1, "the first write landed");
+  const final = await store.writer.flush(big("h") + "!");
+  // Reconciled to revision 1, then the final write CASed against it.
+  assert.equal(final.partialContent, big("h") + "!");
+  assert.equal(store.row.checkpointRevision, 2);
+  assert.equal(store.calls.at(-1).expectedRevision, 1);
+  assert.ok(store.reads.length >= 1, "the row was read before writing again");
+});
+
+test("a checkpoint that did not land is written again after the row says so", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const store = casStore();
+  store.plan.push("fail");
+  store.writer.observe(big("i"));
+  await settle();
+  assert.equal(store.row.checkpointRevision, 0);
+  const final = await store.writer.flush(big("i"));
+  assert.equal(final.partialContent, big("i"));
+  assert.equal(store.row.checkpointRevision, 1);
+  assert.equal(store.calls.at(-1).expectedRevision, 0);
+});
+
+test("an unsettled write whose row another owner took is a refusal", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const store = casStore();
+  store.plan.push("land-then-fail");
+  store.writer.observe(big("j"));
+  await settle();
+  store.row.ownerId = "worker_2";
+  await assert.rejects(store.writer.flush(big("j")), (error) => error instanceof ChatAttemptCasError);
+  assert.equal(store.calls.length, 1, "nothing was written over the other owner's row");
+});
+
+test("an unsettled write whose row the user stopped is a refusal", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const store = casStore();
+  store.plan.push("fail");
+  store.writer.observe(big("k"));
+  await settle();
+  // The stop endpoint's own write: terminal, revision moved on.
+  store.row.status = "cancelled";
+  store.row.checkpointRevision += 1;
+  await assert.rejects(store.writer.flush(big("k")), (error) => error instanceof ChatAttemptCasError);
+  assert.equal(store.calls.length, 1);
+});
+
+test("an unexpected revision is a refusal, not a guess", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const store = casStore();
+  store.plan.push("land-then-fail");
+  store.writer.observe(big("l"));
+  await settle();
+  // One write landed, and then somebody else's.
+  store.row.checkpointRevision += 1;
+  await assert.rejects(store.writer.flush(big("l")), (error) => error instanceof ChatAttemptCasError);
+});
+
+test("a reconciliation read that fails writes nothing, and is tried again next cycle", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 5_000_000 });
+  const store = casStore();
+  store.plan.push("land-then-fail");
+  store.readPlan.push("fail");
+  store.writer.observe(big("m"));
+  await settle();
+  assert.equal(store.calls.length, 1);
+  store.writer.observe(big("m") + big("n"));
+  t.mock.timers.tick(1_000);
+  await settle();
+  assert.equal(store.calls.length, 1, "a write went out while its predecessor was unsettled");
+  assert.equal(store.reads.length, 1);
+  t.mock.timers.tick(1_000);
+  await settle();
+  // Read again, found the landed write, then wrote the newer content on top.
+  assert.equal(store.reads.length, 2);
+  assert.equal(store.calls.length, 2);
+  assert.equal(store.calls[1].expectedRevision, 1);
+  assert.equal(store.row.partialContent, big("m") + big("n"));
+});
+
+test("a terminal flush whose reconciliation read fails is the turn's error, never a blind write", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const store = casStore();
+  store.plan.push("land-then-fail");
+  store.writer.observe(big("o"));
+  await settle();
+  store.readPlan.push("fail", "fail");
+  await assert.rejects(store.writer.flush(big("o")), (error) => error.code === "P1017");
+  assert.equal(store.calls.length, 1);
+});
+
+test("a lease renewal that landed but lost its answer is reconciled before the next write", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  t.mock.timers.enable({ apis: ["Date"], now: 6_000_000 });
+  const store = casStore();
+  store.plan.push("land-then-fail");
+  t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+  store.writer.renewLease();
+  await settle();
+  assert.equal(store.row.checkpointRevision, 1);
+  const final = await store.writer.flush("answer");
+  assert.equal(final.partialContent, "answer");
+  assert.equal(store.calls.at(-1).expectedRevision, 1);
+});
+
+/* ------------------------------ review r-20261127-025915-939c77, minor 3 -- */
+
+// A coalescing timer armed while a write was in flight used to survive that
+// write's transient failure and fire before `retryAt`, defeating the backoff.
+test("a timer armed during a failing write does not cut the backoff short", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 7_000_000 });
+  const calls = [];
+  let rejectFirst = () => {};
+  let committed = 0;
+  const writer = createChatResponseAttemptCheckpointWriter(
+    { userId: "user_1", assistantMessageId: "assistant_1", ownerId: "worker_1", initialRevision: 0, requestedModelId: "provider/model" },
+    (input) => {
+      calls.push(input);
+      if (calls.length === 1) return new Promise((_resolve, reject) => { rejectFirst = () => reject(transient()); });
+      committed += 1;
+      return Promise.resolve(attemptRow(input, committed));
+    },
+    async () => ({ ownerId: "worker_1", status: "streaming", checkpointRevision: committed, partialContent: "" })
+  );
+  writer.observe("a");
+  t.mock.timers.tick(1_000);
+  await settle();
+  assert.equal(calls.length, 1, "the coalesced write is in flight");
+  // A small chunk 200 ms later arms the coalescing timer for 1 s after the
+  // in-flight write started.
+  t.mock.timers.tick(200);
+  writer.observe("ab");
+  // The in-flight write fails 500 ms after it started: retry no sooner than
+  // one interval from now.
+  t.mock.timers.tick(300);
+  rejectFirst();
+  await settle();
+  t.mock.timers.tick(500);
+  await settle();
+  assert.equal(calls.length, 1, "the earlier timer fired inside the backoff");
+  t.mock.timers.tick(500);
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].partialContent, "ab");
 });

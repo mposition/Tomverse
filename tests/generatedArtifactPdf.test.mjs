@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { admitDocumentSpec } from "../lib/generatedArtifactCore.ts";
-import { renderDocumentPdf } from "../lib/generatedArtifactPdf.ts";
+import {
+  PDF_MAX_REPLACED_SHARE,
+  PdfGenerationError,
+  describePdfReplacements,
+  renderDocumentPdf,
+  renderDocumentPdfWithReport,
+} from "../lib/generatedArtifactPdf.ts";
 import { glyphFor, loadPdfFont, PDF_FONT_NAME } from "../lib/generatedArtifactFont.ts";
+import { renderArchiveArtifact, renderDocumentArtifact } from "../lib/generatedArtifactRenderers.ts";
 
 // docs/policy/generated-artifacts.md sections 3 and 4.
 //
@@ -301,4 +308,286 @@ test("PDF table weights reject incomplete, nonpositive, unbounded and nonfinite 
     assert.equal(admission.ok, false, JSON.stringify(weights));
     assert.equal(admission.code, "SCHEMA_INVALID");
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* Characters the font has no glyph for                                         */
+/* -------------------------------------------------------------------------- */
+
+const paragraphs = (...texts) => ({
+  filename: "text.pdf",
+  format: "pdf",
+  blocks: texts.map((text) => ({ type: "paragraph", text })),
+});
+
+const report = (spec) => {
+  const admission = admitDocumentSpec(spec);
+  assert.equal(admission.ok, true, JSON.stringify(admission));
+  return renderDocumentPdfWithReport(admission.spec);
+};
+
+test("hanja, kana and the symbols Korean documents use are drawn, not refused", async () => {
+  const lines = [
+    "甲은 乙에게 丙의 권리를 양도한다. 契約書 第1條 丁",
+    "㈜톰버스 ㈱ ㎡ ℃ ㎏ ① ② ⑩ ★ ☆ ✓ α β γ Ω № ™",
+    "ひらがな カタカナ ハングル",
+    "这个们说时为经发还问现东书 對應處理變數",
+    "├── src │ └── lib",
+  ];
+  const result = report(paragraphs(...lines));
+  assert.equal(result.replacedCount, 0, JSON.stringify(result.replaced));
+  assert.deepEqual(result.replaced, []);
+  assert.equal(describePdfReplacements(result), null);
+  const text = await textOf(result.bytes);
+  for (const line of lines) {
+    // pdfjs hands back each wrapped piece; spaces are not worth comparing.
+    assert.ok(text.replace(/\s/gu, "").includes(line.replace(/\s/gu, "")), `missing: ${line}`);
+  }
+});
+
+test("the font covers the legacy standards Korean, Chinese and Japanese text is written to", () => {
+  const font = loadPdfFont();
+  const range = (from, to) => Array.from({ length: to - from + 1 }, (_, index) => from + index);
+  const ideographsOf = (label, leads, trails) => {
+    const decoder = new TextDecoder(label, { fatal: true });
+    const found = new Set();
+    for (const lead of leads) {
+      for (const trail of trails) {
+        let character;
+        try {
+          character = decoder.decode(Uint8Array.of(lead, trail));
+        } catch {
+          continue;
+        }
+        const code = character.codePointAt(0);
+        if ([...character].length === 1 && ((code >= 0x4e00 && code <= 0x9fff) || (code >= 0xf900 && code <= 0xfaff))) {
+          found.add(code);
+        }
+      }
+    }
+    return found;
+  };
+  const standards = {
+    "GB 2312": [ideographsOf("gbk", range(0xb0, 0xf7), range(0xa1, 0xfe)), 0],
+    "Big5 level 1": [ideographsOf("big5", range(0xa4, 0xc6), [...range(0x40, 0x7e), ...range(0xa1, 0xfe)]), 0],
+    "JIS X 0208": [
+      ideographsOf("shift_jis", [...range(0x88, 0x9f), ...range(0xe0, 0xea)], [...range(0x40, 0x7e), ...range(0x80, 0xfc)]),
+      0,
+    ],
+    // Two KS X 1001 hanja are in neither Noto Sans KR nor Noto Sans SC.
+    "KS X 1001 hanja": [ideographsOf("euc-kr", range(0xca, 0xfd), range(0xa1, 0xfe)), 2],
+  };
+  for (const [name, [codes, allowedMissing]] of Object.entries(standards)) {
+    assert.ok(codes.size > 3_000, `${name}: ${codes.size} characters`);
+    const missing = [...codes].filter((code) => glyphFor(font, code) === null);
+    assert.ok(missing.length <= allowedMissing, `${name} is missing ${missing.length}: ${missing.slice(0, 8).map((code) => code.toString(16))}`);
+  }
+  for (const [label, from, to] of [
+    ["Hangul syllables", 0xac00, 0xd7a3],
+    ["Hiragana", 0x3041, 0x3093],
+    ["Katakana", 0x30a1, 0x30f6],
+    ["Greek", 0x391, 0x3a9],
+    ["Cyrillic", 0x410, 0x44f],
+    ["circled numbers", 0x2460, 0x2473],
+    ["box drawing", 0x2500, 0x257f],
+  ]) {
+    const missing = range(from, to).filter((code) => glyphFor(font, code) === null && ![0x3a2, 0x30fb].includes(code));
+    assert.deepEqual(missing, [], label);
+  }
+  // The replacement box itself must exist, or "replaced" would draw .notdef.
+  assert.notEqual(glyphFor(font, 0x25a1), null);
+});
+
+test("an unsupported character becomes a box and is reported, not fatal", async () => {
+  const result = report(paragraphs("프로젝트 완료 보고서입니다 🚀 배포가 끝났습니다 🚀🚀 모든 항목이 정상입니다 😀"));
+  assert.equal(result.replacedCount, 4);
+  assert.deepEqual(
+    result.replaced.map(({ character, count }) => [character, count]),
+    [["🚀", 3], ["😀", 1]]
+  );
+  const text = await textOf(result.bytes);
+  assert.ok(text.includes("보고서입니다 □ 배포가 끝났습니다 □□ 모든 항목이 정상입니다 □"), text);
+  assert.ok(!text.includes("🚀"));
+  const notice = describePdfReplacements(result);
+  assert.match(notice, /^The PDF font has no glyph for 4 characters of this document \(🚀x3 😀\), so each is drawn as a box/);
+  assert.match(notice, /docx/i);
+  assert.match(
+    describePdfReplacements({ ...result, replacedCount: 1, replaced: [result.replaced[1]] }),
+    /^The PDF font has no glyph for 1 character of this document \(😀\), so it is drawn as a box/
+  );
+});
+
+test("a replaced character does not break the layout or the text around it", async () => {
+  const spec = {
+    filename: "boxes.pdf",
+    format: "pdf",
+    title: "제목 🎉",
+    blocks: [
+      { type: "bullets", items: ["첫째 🎉", "둘째"] },
+      { type: "table", columns: ["항목 🎉", "값"], rows: [["가", 1], ["🎉 나", 2]] },
+      { type: "paragraph", text: "본문 내용이 이어집니다 🎉 ".repeat(40) },
+    ],
+  };
+  const result = report(spec);
+  assert.equal(result.replacedCount, 44);
+  const document = await readPdf(result.bytes);
+  const content = await (await document.getPage(1)).getTextContent();
+  for (const item of content.items.filter((item) => item.str?.trim())) {
+    assert.ok(item.transform[4] >= 56 - 0.1);
+    assert.ok(item.transform[4] + item.width <= 595.28 - 56 + 0.1, `${item.str} overflows`);
+  }
+  await document.cleanup();
+  const text = await textOf(result.bytes);
+  for (const expected of ["제목 □", "첫째 □", "둘째", "항목 □", "□ 나"]) {
+    assert.ok(text.includes(expected), `missing: ${expected}`);
+  }
+  assert.deepEqual(result, report(spec), "the report is deterministic too");
+  assert.deepEqual(result.bytes, report(spec).bytes);
+});
+
+test("invisible characters are dropped without a box and without being counted", async () => {
+  const result = report(paragraphs("a\u200Bb\uFE0Fc\u200Dd\uFEFFe\u0007f\u00ADg ✓\uFE0F 가"));
+  assert.equal(result.replacedCount, 0, JSON.stringify(result.replaced));
+  const text = await textOf(result.bytes);
+  assert.ok(text.replace(/\s/gu, "").includes("abcdef"), text);
+  assert.ok(text.includes("가"));
+  assert.ok(!text.includes("□"));
+});
+
+test("a document that is mostly unsupported is refused, naming the characters", () => {
+  const arabic = "مرحبا بكم في تقرير الربع الأول. ".repeat(6);
+  assert.throws(
+    () => report(paragraphs("Report", arabic)),
+    (error) => {
+      assert.ok(error instanceof PdfGenerationError);
+      assert.equal(error.code, "UNSUPPORTED_CHARACTERS");
+      assert.match(error.message, /does not cover this document's writing system/);
+      assert.match(error.message, /Characters it cannot draw: .*م/u);
+      assert.match(error.message, /docx/i);
+      // The tool report keeps 300 characters of a failure; the point must fit.
+      assert.ok(error.message.length <= 300, `${error.message.length}: ${error.message}`);
+      return true;
+    }
+  );
+  // Thai, Hebrew and emoji-only text are the same case.
+  for (const text of ["สวัสดีครับ ยินดีต้อนรับ", "שלום עולם, זהו דוח", "🚀🔥✅❌🎉"]) {
+    assert.throws(() => report(paragraphs(text)), PdfGenerationError, text);
+  }
+});
+
+test("a long list of unsupported characters is capped and counted in the refusal", () => {
+  const letters = Array.from({ length: 200 }, (_, index) => String.fromCodePoint(0x0e01 + (index % 80)));
+  assert.throws(
+    () => report(paragraphs(letters.join(""))),
+    (error) => {
+      assert.ok(error instanceof PdfGenerationError);
+      assert.match(error.message, / and \d+ more kinds\./);
+      assert.ok(error.message.length <= 300, `${error.message.length}`);
+      return true;
+    }
+  );
+});
+
+test("the refusal point is a share of the visible characters, and spaces do not count", () => {
+  assert.equal(PDF_MAX_REPLACED_SHARE, 0.25);
+  const mix = (plain, boxes) => `${"a".repeat(plain)} `.concat("🚀".repeat(boxes));
+  // 25 of 100 is not more than a quarter; 26 of 100 is.
+  assert.equal(report(paragraphs(mix(75, 25))).replacedCount, 25);
+  assert.throws(() => report(paragraphs(mix(74, 26))), PdfGenerationError);
+  // A separate paragraph of plain text pulls the share back under the line.
+  assert.equal(report(paragraphs(mix(74, 26), "b".repeat(30))).replacedCount, 26);
+  // Whitespace is neither drawn text nor missing text.
+  assert.equal(report(paragraphs(`${mix(75, 25)}${" ".repeat(500)}`)).replacedCount, 25);
+});
+
+test("list markers and table headers are not counted as text the author wrote", () => {
+  // Three emoji and nothing else is all boxes, whatever markers surround them.
+  for (const block of [
+    { type: "bullets", items: ["🚀🚀🚀"] },
+    { type: "numbers", items: ["🚀", "🚀", "🚀"] },
+  ]) {
+    assert.throws(() => report({ filename: "list.pdf", format: "pdf", blocks: [block] }), PdfGenerationError);
+  }
+  // Every item counts, the first one included.
+  const result = report({
+    filename: "list.pdf",
+    format: "pdf",
+    blocks: [{ type: "bullets", items: ["가나다라마바사", "아자차카타파하", "🚀"] }],
+  });
+  assert.equal(result.replacedCount, 1);
+});
+
+test("a Korean contract with one stray emoji is a PDF, not an error", async () => {
+  const result = report({
+    filename: "contract.pdf",
+    format: "pdf",
+    title: "용역 계약서",
+    blocks: [
+      { type: "paragraph", text: "甲(㈜톰버스)과 乙(홍길동)은 다음과 같이 계약한다. 🙂" },
+      { type: "numbers", items: ["제1조 목적", "제2조 대금 ₩10,000,000 (㎡당 ①)"] },
+    ],
+  });
+  assert.equal(result.replacedCount, 1);
+  assert.equal(result.replaced[0].character, "🙂");
+  assert.ok((await textOf(result.bytes)).includes("甲(㈜톰버스)과 乙(홍길동)"));
+});
+
+test("Japanese and Chinese paragraphs wrap inside the column", async () => {
+  const japanese = "これは日本語の長い文章です。".repeat(30);
+  const chinese = "这是一个关于经济发展的报告，内容包括市场、价格和数据。".repeat(20);
+  for (const text of [japanese, chinese]) {
+    const document = await readPdf(build(paragraphs(text)));
+    const content = await (await document.getPage(1)).getTextContent();
+    const lines = content.items.filter((item) => item.str?.trim());
+    assert.ok(lines.length > 3, `${lines.length} lines`);
+    for (const line of lines) {
+      assert.ok(line.transform[4] >= 56 - 0.1);
+      assert.ok(line.transform[4] + line.width <= 595.28 - 56 + 0.1, `${line.str} overflows`);
+    }
+    assert.equal(lines.map((line) => line.str).join(""), text);
+    await document.cleanup();
+  }
+});
+
+test("the larger face does not make every PDF bigger: the font program is compressed", () => {
+  const font = loadPdfFont();
+  assert.ok(font.numGlyphs > 20_000, `${font.numGlyphs} glyphs`);
+  const korean = build(paragraphs("가"));
+  const chinese = build(paragraphs("这是一个关于经济发展的报告"));
+  assert.ok(korean.byteLength < 100_000, `${korean.byteLength} bytes`);
+  assert.ok(chinese.byteLength < 100_000, `${chinese.byteLength} bytes`);
+  assert.match(new TextDecoder("latin1").decode(korean), /\/Length1 \d+ \/Filter \/FlateDecode/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The same behaviour through the renderers and the conversion path             */
+/* -------------------------------------------------------------------------- */
+
+test("renderDocumentArtifact carries the notice for a PDF and none for other formats", () => {
+  const spec = (format) => {
+    const admission = admitDocumentSpec({ ...paragraphs("가나다라마바사 🚀"), filename: `a.${format}`, format });
+    assert.equal(admission.ok, true);
+    return admission.spec;
+  };
+  const pdf = renderDocumentArtifact(spec("pdf"));
+  assert.equal(pdf.notices?.length, 1);
+  assert.match(pdf.notices[0], /^The PDF font has no glyph for 1 character of this document \(🚀\)/);
+  assert.equal(renderDocumentArtifact(spec("docx")).notices, undefined);
+  const clean = admitDocumentSpec({ ...paragraphs("甲乙 ㈜"), filename: "clean.pdf" });
+  assert.equal(renderDocumentArtifact(clean.spec).notices, undefined);
+});
+
+test("a PDF inside a zip passes its notice on, named by path", () => {
+  const admission = admitDocumentSpec({ ...paragraphs("x"), filename: "x.pdf" });
+  assert.equal(admission.ok, true);
+  const archive = renderArchiveArtifact({
+    filename: "bundle.zip",
+    format: "zip",
+    entries: [
+      { path: "docs/a.pdf", documentFormat: "pdf", blocks: [{ type: "paragraph", text: "가나다라마바사 🚀" }] },
+      { path: "docs/b.pdf", documentFormat: "pdf", blocks: [{ type: "paragraph", text: "나" }] },
+    ],
+  });
+  assert.equal(archive.notices?.length, 1);
+  assert.match(archive.notices[0], /^docs\/a\.pdf: The PDF font has no glyph for 1 character/);
 });

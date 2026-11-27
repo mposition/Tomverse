@@ -5,13 +5,13 @@ import { workspaceWelcomeCopy } from "../../../../locales/workspaceWelcome";
 import openaiLogo from "../../../../public/model-icons/chatgpt.png?no-inline";
 import anthropicLogo from "../../../../public/model-icons/claude.png?no-inline";
 import googleLogo from "../../../../public/model-icons/gemini.png?no-inline";
-import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
-import { canUseModelWithPlan, getModel } from "../../../../lib/models";
+import { DEEP_RESEARCH_MODEL_ID, estimateDeepResearchInputTokens } from "../../../../lib/deepResearchModel";
+import { canUseModelWithPlan, getModel, getWeightedUsageCredits } from "../../../../lib/models";
 import { reviewProviderName } from "../../../../lib/reviewProviderName";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopReviewCopy } from "../../../../locales/desktopReview";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
-import type { ChatConversation, ChatModel, ComposerOptions, ReviewCapability, ReviewImageOffer, ReviewTurnInput, ReviewTurnResult } from "../chat-contract";
+import type { ChatConversation, ChatModel, ComposerOptions, DeepResearchDepth, ReviewCapability, ReviewImageOffer, ReviewTurnInput, ReviewTurnResult } from "../chat-contract";
 import { ImportedSource, type useChatHistory } from "./ChatWorkspace";
 import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { AttachmentDraftStatus, AttachmentPicker, type DesktopAttachmentDraft } from "./AttachmentDraft";
@@ -22,9 +22,11 @@ import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDra
 import { useSendGuard } from "./send-guard";
 import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
 import { DesktopCompareSummary } from "./DesktopCompareSummary";
+import { DesktopResearchSetup } from "./DesktopResearchSetup";
 import { BrandMark } from "./ReviewBrand";
 import { ReviewColumns, UserBubble, type ReviewLive } from "./ReviewColumns";
 import { ChatMarkdown } from "./ChatTranscript";
+import { effortLabel } from "./CodeEngine";
 import { arrangeColumns } from "../review-columns";
 import type { ImageCapability } from "../images-contract";
 
@@ -79,7 +81,7 @@ export function useReviewRun(history: History) {
 
   /** Sends the composer draft to the chosen models, or, with `followUp`, one question to one model of the saved Review. */
   async function send(mode: ReviewMode, choices: string[], effort: Effort, attachmentUploadIds: string[], followUp?: { prompt: string; modelId: string },
-    extra: Pick<ReviewTurnInput, "currentLocation" | "tools"> = {}) {
+    extra: Pick<ReviewTurnInput, "currentLocation" | "tools" | "deepResearchDepth"> = {}) {
     const prompt = followUp ? followUp.prompt : history.draft;
     if (request.current || (!prompt.trim() && !attachmentUploadIds.length) || (history.selected && !history.conversation)) return false;
     const requestId = crypto.randomUUID();
@@ -92,12 +94,14 @@ export function useReviewRun(history: History) {
     setOutcomeId(undefined);
     setImageOffer(undefined);
     setModels(mode === "professional" ? choices : []);
-    setOnly(followUp?.modelId);
+    // A research run is put to Deep Research alone: the other columns stay as they are.
+    setOnly(followUp?.modelId ?? (extra.deepResearchDepth ? DEEP_RESEARCH_MODEL_ID : undefined));
     try {
       const result = await window.desktop.sendReview({ mode, choices, effort, requestId, prompt, attachmentUploadIds,
         conversationId: history.conversation?.id, ...(followUp ? { onlyModelId: followUp.modelId } : {}),
         ...(extra.currentLocation ? { currentLocation: extra.currentLocation } : {}),
-        ...(!followUp && extra.tools && Object.keys(extra.tools).length ? { tools: extra.tools } : {}) });
+        ...(!followUp && extra.tools && Object.keys(extra.tools).length ? { tools: extra.tools } : {}),
+        ...(extra.deepResearchDepth ? { deepResearchDepth: extra.deepResearchDepth } : {}) });
       if (request.current !== requestId) return false;
       if (result.savedQuestion && !followUp) history.setDraft("");
       if (result.conversation) history.applyConversation(result.conversation);
@@ -122,7 +126,7 @@ export function useReviewRun(history: History) {
 }
 
 export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages, onImageStarter, attachments, online, dictation, preferredModelIds,
-  analysisEnabled, searchReadiness, imageCapability, onModelImage, composerTools, deviceLocation }: {
+  analysisEnabled, searchReadiness, imageCapability, onModelImage, composerTools, deviceLocation, deepResearch }: {
   history: History; capability: ReviewCapability | null; run: ReturnType<typeof useReviewRun>;
   onFollowUp?: (draft: string) => void;
   onImages: (offer: ReviewImageOffer) => void;
@@ -135,6 +139,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   preferredModelIds?: readonly string[];
   /** The "+" menu's web search, assistant and memory rows, and the "Current location" switch, as in Chat. */
   composerTools?: boolean; deviceLocation?: boolean;
+  /** The server runs Deep Research as a column of a Review: the "+" menu offers it in Professional. */
+  deepResearch?: boolean;
 }) {
   const { language } = history;
   const copy = desktopReviewCopy[language];
@@ -142,19 +148,22 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const starters = workspaceWelcomeCopy[language].starter.cards;
   const common = desktopChatCopy[language];
   const shell = desktopShellCopy[language];
-  const effortNames = { low: shell.lowEffort, default: shell.defaultEffort, high: shell.highEffort };
-  const [models, setModels] = useState<ChatModel[]>([]);
+  const effortNames = { low: shell.lowEffort, medium: effortLabel(language, "medium"), default: shell.defaultEffort, high: shell.highEffort };
+  const [catalog, setCatalog] = useState<ChatModel[]>([]);
+  const models = useMemo(() => catalog.filter(({ id }) => id !== DEEP_RESEARCH_MODEL_ID), [catalog]);
+  const researchModel = deepResearch ? catalog.find(({ id }) => id === DEEP_RESEARCH_MODEL_ID) : undefined;
+  const [researchSetup, setResearchSetup] = useState<string>();
   const [modeChoice, setModeChoice] = useState<ReviewMode | null>(null);
   const [picked, setPicked] = useState<{ conversationId?: string; mode: ReviewMode; choices: string[] }>();
   const [effort, setEffort] = useState<Effort>("default");
   useEffect(() => {
     let active = true;
     void window.desktop.chatModels().then((available) => {
-      if (active) setModels(available.filter(({ id }) => id !== DEEP_RESEARCH_MODEL_ID));
+      if (active) setCatalog(available);
     }).catch(() => {});
     return () => { active = false; };
   }, []);
-  const byId = new Map(models.map((model) => [model.id, model]));
+  const byId = new Map(catalog.map((model) => [model.id, model]));
   const describe = (modelId: string) => {
     const model = byId.get(modelId) ?? getModel(modelId);
     return { name: model?.name ?? modelId, provider: model?.provider ?? "" };
@@ -186,7 +195,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   let nextChosen = 0;
   const shownProviders = providerIds.map((provider) => choices.includes(provider) ? choices[nextChosen++]! : provider);
   const levels = mode === "professional" && choices.length
-    ? (["low", "high"] as const).filter((level) =>
+    ? (["low", "medium", "high"] as const).filter((level) =>
       choices.every((modelId) => eligible.find((model) => model.id === modelId)?.reasoningEfforts?.includes(level)))
     : [];
   const actualEffort = effort === "default" || levels.includes(effort) ? effort : "default";
@@ -236,6 +245,21 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const completedModels = new Set(latest?.answers.filter((answer) => answer.status === "normal" && !answer.imageTurn && answer.content.trim())
     .flatMap(({ modelId }) => modelId ? [modelId] : []));
   const showComposer = capability && !readOnly && !history.selected?.isLocked && (!id || history.conversation);
+  // Deep Research is one more column of the Review, so it needs a place beside the models that are on; a new Review gives up its last ones.
+  const researchRoom = !id || choices.length < limit;
+  const researchOffer = Boolean(researchModel && mode === "professional" && choices.length > 0 && online && !history.selected?.isLocked);
+  async function sendResearch(depth: DeepResearchDepth) {
+    if (!capability || !researchModel || !researchOffer || !researchRoom || !history.draft.trim() || run.running || preparing ||
+        !canUseModelWithPlan(capability.plan, researchModel)) return;
+    await guarded(async (stale) => {
+      const attachmentUploadIds = await attachments.prepare();
+      if (!attachmentUploadIds || stale()) return;
+      if (await run.send(mode, choices, "default", attachmentUploadIds, undefined, { tools: composerTools ? toolChanges : undefined, deepResearchDepth: depth })) {
+        attachments.clear();
+        setToolDraft(undefined);
+      }
+    });
+  }
   function seedPrompt(prompt: string) {
     history.setDraft([history.draft.trimEnd(), prompt].filter(Boolean).join("\n\n"));
     document.getElementById("review-draft-input")?.focus();
@@ -416,8 +440,10 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           }
         }} />
       <div className="composer-actions">
-        {(attachments.enabled || composerTools || deviceLocation) && <ComposerTools language={language} key={toolsScope}
+        {(attachments.enabled || composerTools || deviceLocation || researchOffer) && <ComposerTools language={language} key={toolsScope}
           disabled={run.running || attachments.uploading || preparing}
+          onResearch={researchOffer ? () => setResearchSetup(toolsScope) : undefined}
+          researchBlocked={researchRoom ? undefined : copy.researchNeedsRoom}
           onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
           options={composerTools ? { webSearchMode: history.conversation?.webSearchMode, memoryMode: history.conversation?.memoryMode,
             assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
@@ -439,6 +465,11 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
             disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading || preparing}><ArrowUp size={18} /></button>}
       </div>
     </form>
+    {researchModel && researchSetup === toolsScope && <DesktopResearchSetup language={language} model={researchModel.name}
+      credits={getWeightedUsageCredits(researchModel, estimateDeepResearchInputTokens(history.draft))}
+      locked={!canUseModelWithPlan(capability.plan, researchModel)}
+      ready={Boolean(history.draft.trim()) && researchRoom && online && !run.running && !history.writing && !attachments.uploading && !preparing}
+      onClose={() => setResearchSetup(undefined)} onStart={(depth) => { setResearchSetup(undefined); void sendResearch(depth); }} />}
   </div>}
   </>;
 }

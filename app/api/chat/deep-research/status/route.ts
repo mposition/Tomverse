@@ -1,7 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
-import { DESKTOP_APP_ORIGIN } from "@/lib/nativeBearerGate";
+import { DESKTOP_APP_ORIGIN, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled } from "@/lib/nativeBearerGate";
+import { desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
 import { extendChatReservationExpiry } from "@/lib/chatSecurity";
@@ -93,8 +94,10 @@ export async function POST(request: Request) {
       select: { userId: true, password: true, passwordVersion: true, productKey: true, kind: true },
     });
     const desktop = request.headers.get("origin") === DESKTOP_APP_ORIGIN;
+    // A Desktop poll reads the research of a Chat or of a Review, each only while its own switch is on.
+    const desktopProduct = desktop ? desktopConversationWriteProduct(conversation) : null;
     if (!conversation || conversation.userId !== session.user.id ||
-        (desktop && (conversation.kind !== "chat" || conversation.productKey !== "chat"))) {
+        (desktop && !(desktopProduct === "chat" ? desktopDeepResearchEnabled() : desktopProduct === "review" && desktopReviewDeepResearchEnabled()))) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
     }
     if (
