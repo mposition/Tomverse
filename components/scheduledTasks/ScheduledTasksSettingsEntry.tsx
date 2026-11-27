@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarClock } from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
@@ -57,6 +57,11 @@ export function ScheduledTasksSettingsEntry({
 
   const visible = scheduledTasksEntryVisible(summary);
 
+  const onFocusedRef = useRef(onFocused);
+  useEffect(() => {
+    onFocusedRef.current = onFocused;
+  }, [onFocused]);
+
   useEffect(() => {
     if (!visible || !pendingFocus) return;
     const frame = requestAnimationFrame(() => {
@@ -64,10 +69,10 @@ export function ScheduledTasksSettingsEntry({
       if (!row) return;
       row.scrollIntoView({ block: "center" });
       row.focus({ preventScroll: true });
-      onFocused?.();
+      onFocusedRef.current?.();
     });
     return () => cancelAnimationFrame(frame);
-  }, [visible, pendingFocus, onFocused]);
+  }, [visible, pendingFocus]);
 
   if (!visible || !summary) return null;
   const active = summary.tasks.filter((task) => task.status === "active").length;
