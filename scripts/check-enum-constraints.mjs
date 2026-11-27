@@ -66,6 +66,27 @@ const REGISTRY = {
     reason:
       "Optional explicit assessment of an owned assistant answer. The request schema and client payload share this list; NULL represents reports without a verified answer link or assessment.",
   },
+  UserPersonalization_responseStyle_check: {
+    owner: "list",
+    module: "lib/chatPersonalizationCore.ts",
+    list: "RESPONSE_STYLES",
+    reason:
+      "The answer style an account owner picks in personal instructions. The settings form, the PUT schema and the prompt builder read this list; 'default' adds no instruction.",
+  },
+  ChatAnswerRating_rating_check: {
+    owner: "list",
+    module: "lib/chatAnswerRatingCore.ts",
+    list: "CHAT_ANSWER_RATINGS",
+    reason:
+      "A thumbs up or down on one assistant answer. Withdrawing a rating deletes the row, so there is no neutral value.",
+  },
+  ChatAnswerRating_reason_check: {
+    owner: "list",
+    module: "lib/chatAnswerRatingCore.ts",
+    list: "CHAT_ANSWER_RATING_REASONS",
+    reason:
+      "The optional reason for a down rating, a closed list so no prose is stored. NULL is a rating without a reason; a separate CHECK refuses a reason on an up rating.",
+  },
   ProductAnalyticsEvent_name_check: {
     owner: "list",
     module: "lib/productAnalyticsShared.ts",

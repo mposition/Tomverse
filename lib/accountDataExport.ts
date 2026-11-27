@@ -96,6 +96,18 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       },
     }),
 
+  userPersonalization: (userId) =>
+    prisma.userPersonalization.findMany({
+      where: { userId },
+      select: {
+        aboutMe: true,
+        responsePreferences: true,
+        responseStyle: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+
   analyticsUserId: (userId) =>
     prisma.ga4UserId.findMany({
       where: { userId },
@@ -118,6 +130,11 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         // every device it signs in on, so an export without it would be
         // narrower than the screen.
         pinnedAt: true,
+        // A temporary Chat is still held until it is deleted, so the account's
+        // copy of its data includes it, with when it will be deleted. The
+        // conversation's own export and the all-conversations download leave
+        // it out, as the temporary Chat promises.
+        temporaryExpiresAt: true,
         createdAt: true,
         updatedAt: true,
         messages: {
@@ -130,6 +147,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
     })).map((conversation) => ({
       id: conversation.id, title: conversation.title, kind: conversation.kind,
       productKey: conversation.productKey, pinnedAt: conversation.pinnedAt,
+      temporaryExpiresAt: conversation.temporaryExpiresAt,
       createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
       messages: conversation.messages.map(toAccountExportMessage),
     })),
@@ -860,6 +878,22 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         reviewItemId: true,
         section: true,
         verdict: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  chatAnswerRating: (userId) =>
+    prisma.chatAnswerRating.findMany({
+      where: { userId },
+      select: {
+        messageId: true,
+        conversationId: true,
+        modelId: true,
+        rating: true,
+        reason: true,
         createdAt: true,
         updatedAt: true,
       },

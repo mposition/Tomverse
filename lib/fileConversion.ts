@@ -50,7 +50,7 @@ import {
   sanitizeArtifactFilename,
   type ArtifactCellValue,
 } from "@/lib/generatedArtifactCore";
-import { renderDocumentPdf } from "@/lib/generatedArtifactPdf";
+import { describePdfReplacements, renderDocumentPdfWithReport } from "@/lib/generatedArtifactPdf";
 import { zipArchiveEntries } from "@/lib/generatedArtifactText";
 import { renderWorkbook } from "@/lib/generatedArtifactXlsx";
 import { XLSX_MEDIA_TYPE } from "@/lib/messageAttachmentCore";
@@ -1186,10 +1186,9 @@ const prepareConvertSpreadsheet = async (
     return {
       format: "pdf",
       render: async () => {
-        const bytes = assertOutputSize(
-          renderDocumentPdf(admission.spec),
-          "Offer xlsx or csv instead."
-        );
+        const pdf = renderDocumentPdfWithReport(admission.spec);
+        const bytes = assertOutputSize(pdf.bytes, "Offer xlsx or csv instead.");
+        const notice = describePdfReplacements(pdf);
         const pages = (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount();
         if (pages > FILE_CONVERSION_LIMITS.maxPdfPages) {
           throw new FileConversionError(
@@ -1198,7 +1197,11 @@ const prepareConvertSpreadsheet = async (
               `${FILE_CONVERSION_LIMITS.maxPdfPages}. Offer xlsx or csv instead.`
           );
         }
-        return { bytes, parts: `${parts}, ${plural(pages, "page")}` };
+        return {
+          bytes,
+          parts: `${parts}, ${plural(pages, "page")}`,
+          ...(notice ? { notices: [notice] } : {}),
+        };
       },
     };
   }

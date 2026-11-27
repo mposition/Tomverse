@@ -7,16 +7,32 @@
 // the difference in one pure place so the streaming client, the persisted
 // message and a later re-fetch all say the same thing.
 //
-// Deliberately narrow: `cancelled` (the user stopped it), `error` (the
-// request failed) and the empty-response path keep their existing meanings
-// and are decided elsewhere. This only ever distinguishes "finished" from
-// "ran out of room".
+// Deliberately narrow: `cancelled` (the user stopped it), a request that
+// failed with no answer, and the empty-response path keep their existing
+// meanings and are decided elsewhere. This only ever distinguishes "finished"
+// from "stopped short": the answer ran out of room (`length`), or the
+// provider's stream ended on an error part -- which the AI SDK does not throw
+// from `textStream`, it resolves the finish reason as `error` -- or without
+// its completion signal (`interrupted`), after real text had arrived.
 
 /** Persisted in `Message.status` and mirrored in the client Message type. */
 export type ChatCompletionStatus = "normal" | "incomplete";
 
-/** Why an answer is incomplete. One case today; the field names it anyway. */
-export type ChatIncompleteReason = "length";
+/**
+ * Why an answer is incomplete. Not persisted -- `Message.status` only says
+ * `incomplete` -- so it reaches the browser in the stream trailer.
+ */
+export type ChatIncompleteReason = "length" | "interrupted";
+
+/**
+ * Unified finish reasons for a stream that ended on a failure rather than on
+ * an answer: `error` (the provider sent an error part mid-stream) and
+ * `interrupted` (the provider's stream ended without a completion signal).
+ */
+export const INTERRUPTED_FINISH_REASONS: ReadonlySet<string> = new Set([
+  "error",
+  "interrupted",
+]);
 
 export type ChatCompletionOutcome = {
   status: ChatCompletionStatus;
@@ -58,20 +74,33 @@ export const isLengthRawFinishReason = (
 
 /**
  * The completion status for one finished turn. `length` on either the
- * unified or the provider-raw reason means the answer was cut off; anything
- * else is a normal completion.
+ * unified or the provider-raw reason means the answer was cut off at its
+ * ceiling; an interrupted finish reason, or `streamFailed` (the finish
+ * metadata itself was rejected), means the provider's stream broke off;
+ * anything else is a normal completion. `length` wins when both apply.
  */
 export const resolveChatCompletionOutcome = (args: {
   finishReason?: string | null;
   rawFinishReason?: string | null;
+  streamFailed?: boolean;
 }): ChatCompletionOutcome => {
   const truncated =
     args.finishReason === "length" ||
     isLengthRawFinishReason(args.rawFinishReason);
-  return truncated
-    ? { status: "incomplete", incompleteReason: "length" }
+  if (truncated) return { status: "incomplete", incompleteReason: "length" };
+  const interrupted =
+    args.streamFailed === true ||
+    (typeof args.finishReason === "string" &&
+      INTERRUPTED_FINISH_REASONS.has(args.finishReason));
+  return interrupted
+    ? { status: "incomplete", incompleteReason: "interrupted" }
     : { status: "normal" };
 };
+
+/** Narrows an untrusted string (a stream trailer) to an incomplete reason. */
+export const isChatIncompleteReason = (
+  value: unknown
+): value is ChatIncompleteReason => value === "length" || value === "interrupted";
 
 /** Narrows an untrusted string (a stored row, a stream trailer) to a status. */
 export const isChatCompletionStatus = (

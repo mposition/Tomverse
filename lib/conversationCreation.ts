@@ -74,6 +74,13 @@ export type CreateConversationInput = {
   projectId?: string | null;
   assistantProfileVersionId?: string | null;
   importedGuestKey?: string | null;
+  /**
+   * Only a temporary Chat passes these (lib/temporaryChatAccess.ts): memory
+   * off and the deletion time. The database refuses a temporary row with a
+   * project or with memory on.
+   */
+  memoryMode?: "off";
+  temporaryExpiresAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
 };
@@ -150,6 +157,10 @@ export async function createConversation(
     ...(input.importedGuestKey === undefined
       ? {}
       : { importedGuestKey: input.importedGuestKey }),
+    ...(input.memoryMode === undefined ? {} : { memoryMode: input.memoryMode }),
+    ...(input.temporaryExpiresAt === undefined
+      ? {}
+      : { temporaryExpiresAt: input.temporaryExpiresAt }),
     ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
     ...(input.updatedAt === undefined ? {} : { updatedAt: input.updatedAt }),
   } satisfies Prisma.ConversationUncheckedCreateInput;

@@ -28,6 +28,7 @@
  * subscription re-read from Stripe.
  */
 
+import type { Prisma } from "@prisma/client";
 import type Stripe from "stripe";
 import { getBillingPlans, getBillingPlanByTier } from "@/lib/billingConfig";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
@@ -36,7 +37,13 @@ import {
   planCreditsAfterPlanChange,
   type PlanChangeCreditOutcome,
 } from "@/lib/planChangeCredits";
+import {
+  PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+  PLAN_CHANGE_UPGRADED_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
 import { prisma } from "@/lib/prisma";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { getStripe } from "@/lib/stripe";
 import {
   PLAN_CHANGE_AUDIT_ACTIONS,
@@ -362,6 +369,62 @@ async function pendingRequest(userId: string) {
   });
 }
 
+/**
+ * Queue the confirmation for a change that has just taken one step.
+ *
+ * Written in the same transaction as the conditional update that moved the row
+ * (a confirm that turned `previewed` into `pending`, or a settlement whose
+ * update matched), so the state change and its outbox row commit together or
+ * not at all (docs/policy/email-notifications.md: the record and the email
+ * about it commit together). That single write is also what makes it once per
+ * change -- the standard lane does not dedupe by reference.
+ */
+async function enqueuePlanChangeConfirmation({
+  templateKey,
+  userId,
+  requestId,
+  fromTier,
+  toTier,
+  billingInterval,
+  effectiveAt,
+  tx,
+}: {
+  templateKey:
+    | typeof PLAN_CHANGE_UPGRADED_TEMPLATE
+    | typeof PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE;
+  userId: string;
+  requestId: string;
+  fromTier: string;
+  toTier: string;
+  billingInterval: string;
+  effectiveAt: Date | null;
+  tx: Prisma.TransactionClient;
+}) {
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: { email: true, settings: { select: { language: true } } },
+  });
+  if (!user) return;
+  await enqueueStandardEmail({
+    tx,
+    templateKey,
+    emailAddress: user.email,
+    userId,
+    language: user.settings?.language,
+    payload: {
+      fromPlan: fromTier,
+      toPlan: toTier,
+      billingInterval,
+      effectiveAt: effectiveAt ? effectiveAt.toISOString() : null,
+    },
+    referenceType: "PlanChangeRequest",
+    referenceId: requestId,
+  });
+}
+
+/** Longer than any confirm's Stripe calls can run; shorter than the quote's own TTL. */
+const PLAN_CHANGE_CLAIM_STALE_MS = 5 * 60 * 1000;
+
 async function loadAccount(userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -416,16 +479,30 @@ export async function previewPlanChange({
 }: {
   userId: string;
   targetTier: PlanChangeTier;
-  targetInterval: PlanChangeInterval;
+  /**
+   * Omitted by a screen that does not know the account's interval (a
+   * subscription synced before the stored field existed). The change then
+   * stays on the interval Stripe itself reports, which is the only interval a
+   * change is ever allowed on anyway.
+   */
+  targetInterval?: PlanChangeInterval;
   resumeRenewal?: boolean;
 }): Promise<{ ok: true; quote: PlanChangeQuote } | PlanChangeFailure> {
   const context = await loadContext(userId);
   if ("ok" in context) return context;
 
+  const interval = targetInterval ?? context.snapshot.interval;
+  if (!interval) {
+    return fail(
+      "BILLING_INTERVAL_CHANGE_NOT_SUPPORTED",
+      "The subscription interval is unknown, so no same-interval change can be quoted."
+    );
+  }
+
   const decision = resolvePlanChange({
     snapshot: context.snapshot,
     targetTier,
-    targetInterval,
+    targetInterval: interval,
     reservation: context.reservation,
     resumeRenewal,
   });
@@ -545,13 +622,78 @@ export async function confirmPlanChange({
       404
     );
   }
-  if (stored.status !== "previewed") {
+  if (stored.status === "pending" || stored.status === "applied") {
     // Already confirmed. Report the reservation instead of running it twice.
     return { ok: true, reservation: viewOf(stored) };
   }
+  if (stored.status !== "previewed") {
+    // A spent quote (failed, expired, cancelled) is never reported as a
+    // reservation: a resent confirm whose first answer was lost would
+    // otherwise show a change that does not exist.
+    return fail(
+      "PLAN_CHANGE_PREVIEW_EXPIRED",
+      "This quote can no longer be confirmed; request a new one."
+    );
+  }
 
-  const context = await loadContext(userId);
-  if ("ok" in context) return context;
+  // One confirm per quote goes on to Stripe. Claimed before anything else so a
+  // second, simultaneous confirm of the same quote can neither run its own
+  // Stripe call nor read the first one's change as a stale quote and expire
+  // it underneath it (docs/policy/plan-change.md, "동시 확정").
+  // A claim older than PLAN_CHANGE_CLAIM_STALE_MS belongs to a confirm that
+  // stopped without spending the quote (its cleanup failed too); it may be
+  // taken again rather than answering "already being confirmed" forever.
+  const claimedAt = new Date();
+  const claimed = await prisma.planChangeRequest.updateMany({
+    where: {
+      id: stored.id,
+      status: "previewed",
+      OR: [
+        { confirmedAt: null },
+        { confirmedAt: { lt: new Date(claimedAt.getTime() - PLAN_CHANGE_CLAIM_STALE_MS) } },
+      ],
+    },
+    data: { confirmedAt: claimedAt },
+  });
+  if (claimed.count !== 1) {
+    const current = await prisma.planChangeRequest.findUniqueOrThrow({
+      where: { id: stored.id },
+    });
+    if (current.status === "pending" || current.status === "applied") {
+      return { ok: true, reservation: viewOf(current) };
+    }
+    if (current.status !== "previewed") {
+      return fail(
+        "PLAN_CHANGE_PREVIEW_EXPIRED",
+        "This quote can no longer be confirmed; request a new one."
+      );
+    }
+    return fail(
+      "PLAN_CHANGE_ALREADY_PENDING",
+      "This quote is already being confirmed."
+    );
+  }
+
+  // A claimed quote that stops before Stripe is spent, never left claimed: a
+  // claimed-but-idle quote would answer every retry with "already being
+  // confirmed". The retry starts from a new preview.
+  const spend = (failureCode: string) =>
+    prisma.planChangeRequest.updateMany({
+      where: { id: stored.id, status: "previewed" },
+      data: { status: "failed", failureCode },
+    });
+  let context: Awaited<ReturnType<typeof loadContext>>;
+  try {
+    context = await loadContext(userId);
+  } catch (error) {
+    await spend("context_unavailable").catch(() => {});
+    throw error;
+  }
+  if ("ok" in context) {
+    // Best effort, like the other refusals: a failed write leaves the claim to expire.
+    await spend(context.code).catch(() => {});
+    return context;
+  }
 
   const targetTier: PlanChangeTier = stored.toTier === "Max" ? "Max" : "Pro";
   const targetInterval: PlanChangeInterval =
@@ -593,7 +735,14 @@ export async function confirmPlanChange({
     reservation: context.reservation,
     resumeRenewal,
   });
-  if (!decision.allowed) return fail(decision.code, decision.reason);
+  if (!decision.allowed) {
+    // The claimed quote is spent: a retry starts from a new preview.
+    await prisma.planChangeRequest.updateMany({
+      where: { id: stored.id, status: "previewed" },
+      data: { status: "failed", failureCode: decision.code },
+    });
+    return fail(decision.code, decision.reason);
+  }
 
   const idempotencyKey = planChangeIdempotencyKey(stored.id);
   // The row is the durable record; this line is what makes a change findable
@@ -630,17 +779,90 @@ export async function confirmPlanChange({
       targetPriceId: stored.targetStripePriceId,
       idempotencyKey,
     });
-    const updated = await prisma.planChangeRequest.update({
-      where: { id: stored.id },
-      data: {
-        status: "pending",
-        pendingForUserId: userId,
-        confirmedAt: new Date(),
-        stripeScheduleId: scheduleId,
-        appliesAt: decision.plan.effectiveAt,
-        renewalDecision: decision.plan.renewal,
-      },
-    });
+    // Conditional on the row still being a quote: two confirms racing on one
+    // quote both reach here (Stripe's idempotency key gives them the same
+    // schedule), but only one of them moves the row, and only that one may
+    // queue the confirmation email.
+    // The downgrade is decided now (the schedule is attached), so this is the
+    // moment to confirm it -- in the same transaction as the row moving. An
+    // upgrade is confirmed at settlement instead, because it only happens once
+    // its invoice is paid.
+    // From here on the schedule exists at Stripe. Any way this request fails
+    // to record it releases it, so no schedule moves a plan unrecorded.
+    let moved: { count: number };
+    let updated: Awaited<ReturnType<typeof prisma.planChangeRequest.findUniqueOrThrow>>;
+    try {
+      moved = await prisma.$transaction(async (tx) => {
+        const result = await tx.planChangeRequest.updateMany({
+          where: { id: stored.id, status: "previewed" },
+          data: {
+            status: "pending",
+            pendingForUserId: userId,
+            confirmedAt: new Date(),
+            stripeScheduleId: scheduleId,
+            appliesAt: decision.plan.effectiveAt,
+            renewalDecision: decision.plan.renewal,
+          },
+        });
+        if (result.count === 1) {
+          await enqueuePlanChangeConfirmation({
+            tx,
+            templateKey: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+            userId,
+            requestId: stored.id,
+            fromTier: decision.plan.fromTier,
+            toTier: decision.plan.toTier,
+            billingInterval: decision.plan.interval,
+            effectiveAt: decision.plan.effectiveAt,
+          });
+        }
+        return result;
+      });
+      updated = await prisma.planChangeRequest.findUniqueOrThrow({
+        where: { id: stored.id },
+      });
+    } catch (recordError) {
+      // Released only once it is known that nothing records it: the
+      // transaction may have committed before a later read failed, or the
+      // other confirm may have recorded the same schedule. If even that cannot
+      // be read, the schedule is left alone and a person looks.
+      const recorded = await prisma.planChangeRequest
+        .findUnique({ where: { id: stored.id } })
+        .then((row) => ({ readable: true as const, row }))
+        .catch(() => ({ readable: false as const, row: null }));
+      if (!recorded.readable) {
+        await reportOperationalIncident({
+          code: "PLAN_CHANGE_SCHEDULE_RECORD_UNKNOWN",
+          title: "A downgrade schedule was attached but whether it was recorded is unknown",
+          error: recordError,
+          severity: "error",
+          context: { component: "plan-change", requestId: stored.id, scheduleId },
+        }).catch(() => {});
+        throw recordError;
+      }
+      if (recorded.row?.status === "pending" && recorded.row.stripeScheduleId === scheduleId) {
+        return { ok: true, reservation: viewOf(recorded.row) };
+      }
+      await releaseUnrecordedSchedule(scheduleId, stored.id);
+      throw recordError;
+    }
+    if (moved.count !== 1) {
+      if (updated.status === "pending" && updated.stripeScheduleId === scheduleId) {
+        // The other confirm recorded this same schedule (same idempotency key).
+        return { ok: true, reservation: viewOf(updated) };
+      }
+      // The other confirm saw this request's schedule, read the quote as stale
+      // and expired it. Nothing records the schedule now, so it is released
+      // here -- an unrecorded schedule would move the plan at the period end
+      // with no reservation to show or cancel.
+      await releaseUnrecordedSchedule(scheduleId, stored.id);
+      // Spent like every other refused quote, so it is not claimable again.
+      await spend("concurrent_confirm").catch(() => {});
+      return fail(
+        "PLAN_CHANGE_PREVIEW_EXPIRED",
+        "The quote was confirmed twice at once; request a new one."
+      );
+    }
     return { ok: true, reservation: viewOf(updated) };
   } catch (error) {
     // The change did not start. Leave the row confirmable-from-scratch rather
@@ -658,6 +880,27 @@ export async function confirmPlanChange({
       "The payment provider refused the change.",
       502
     );
+  }
+}
+
+/**
+ * Hand a subscription back from a downgrade schedule that no reservation
+ * records. Release, not cancel: cancel would end the subscription. If the
+ * release fails its outcome is unknown, so a person reads the schedule back at
+ * Stripe (an operational incident) rather than this retrying it blindly; the
+ * caller's answer to the customer does not depend on it.
+ */
+async function releaseUnrecordedSchedule(scheduleId: string, requestId: string) {
+  try {
+    await getStripe().subscriptionSchedules.release(scheduleId);
+  } catch (releaseError) {
+    await reportOperationalIncident({
+      code: "PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED",
+      title: "A downgrade schedule with no reservation could not be released",
+      error: releaseError,
+      severity: "error",
+      context: { component: "plan-change", requestId, scheduleId },
+    }).catch(() => {});
   }
 }
 
@@ -895,14 +1138,32 @@ export async function settlePlanChangesForSubscription(
     });
     if (!transition.applied) continue;
 
-    const applied = await prisma.planChangeRequest.updateMany({
-      where: { id: row.id, status: "pending" },
-      data: {
-        status: next,
-        pendingForUserId: null,
-        settledAt: new Date(),
-        ...(next === "failed" ? { failureCode: "pending_update_discarded" } : {}),
-      },
+    // One transaction: the row settling and its confirmation email commit
+    // together. A failure throws out of the webhook, which is redelivered and
+    // finds the row still pending.
+    const applied = await prisma.$transaction(async (tx) => {
+      const result = await tx.planChangeRequest.updateMany({
+        where: { id: row.id, status: "pending" },
+        data: {
+          status: next,
+          pendingForUserId: null,
+          settledAt: new Date(),
+          ...(next === "failed" ? { failureCode: "pending_update_discarded" } : {}),
+        },
+      });
+      if (result.count > 0 && next === "applied" && row.execution === "immediate_upgrade") {
+        await enqueuePlanChangeConfirmation({
+          tx,
+          templateKey: PLAN_CHANGE_UPGRADED_TEMPLATE,
+          userId: row.userId,
+          requestId: row.id,
+          fromTier: row.fromTier,
+          toTier: row.toTier,
+          billingInterval: row.billingInterval,
+          effectiveAt: periodEndOf(subscription),
+        });
+      }
+      return result;
     });
     if (applied.count > 0) settled = next;
   }

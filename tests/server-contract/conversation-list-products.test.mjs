@@ -29,8 +29,9 @@ mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   userSettings: { findUnique: async () => null },
   conversation: { findMany: async ({ where, select }) => {
-    // The account's own rows, without Studio tool runs: those are one-off and not history.
-    assert.deepEqual(where, { userId: "fixture-owner", NOT: STUDIO_RUN_CONVERSATION });
+    // The account's own rows, without Studio tool runs (one-off, not history)
+    // and without temporary Chats, which are never listed.
+    assert.deepEqual(where, { userId: "fixture-owner", NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null });
     assert.equal(select.productKey, true);
     listQueries++;
     return rows;

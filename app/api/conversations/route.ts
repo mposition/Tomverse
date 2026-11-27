@@ -1,12 +1,8 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿export const dynamic = "force-dynamic";
 
-import { applyNativeSourceDeletion } from "@/lib/projectWorkspaceService";
 import { NextResponse } from "next/server";
-import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
-import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
-import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
-import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
+import { deleteOwnedConversations } from "@/lib/conversationDeletion";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { readableContinuationSourceTitle } from "@/lib/continuationDisplayTitle";
 import {
@@ -82,8 +78,9 @@ export async function GET(req: Request) {
     // hundred shared conversations pulled hundreds of megabytes into the
     // process to answer a request that sends back a title and a count.
     const conversations = await prisma.conversation.findMany({
-      // A Studio tool run is a one-off shown in the tool, not a conversation to come back to.
-      where: { userId, NOT: STUDIO_RUN_CONVERSATION },
+      // A Studio tool run is a one-off shown in the tool, not a conversation to
+      // come back to. A temporary Chat is never listed (lib/temporaryChatAccess.ts).
+      where: { userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -296,25 +293,15 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: true, deleted: 0 });
     }
 
-    // Same DB-first tombstone order as the single-conversation delete: R2
-    // keys are enqueued before the rows disappear, never deleted ahead of
-    // the database.
-    const result = await prisma.$transaction(async (tx) => {
-      const conversationIds = conversations.map(
-        (conversation) => conversation.id
-      );
-      await enqueueImageAssetCleanupForConversations(tx, conversationIds);
-      await enqueueArtifactCleanupForConversations(tx, conversationIds);
-      await enqueueMessageAttachmentCleanupForConversations(tx, conversationIds);
-      await deleteDeepResearchJobsForConversations(tx, conversationIds);
-      await applyNativeSourceDeletion(tx, userId, conversationIds);
-      return tx.conversation.deleteMany({
-        where: {
-          userId,
-          id: { in: conversationIds },
-        },
-      });
-    });
+    // The single-conversation delete's path and order (lib/conversationDeletion.ts):
+    // object keys are queued before the rows disappear, never deleted ahead
+    // of the database.
+    const result = await prisma.$transaction((tx) =>
+      deleteOwnedConversations(tx, {
+        userId,
+        conversationIds: conversations.map((conversation) => conversation.id),
+      })
+    );
 
     return NextResponse.json({ success: true, deleted: result.count });
   } catch (error) {

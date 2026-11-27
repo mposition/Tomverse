@@ -61,8 +61,11 @@ export const reviewTurnInput = z.object({
   attachmentUploadIds,
   /** A follow-up for one model of a saved Review: only that model answers and the others keep their transcript. */
   onlyModelId: z.string().min(1).max(100).optional(),
+  currentLocation: chatTurnInput.shape.currentLocation,
+  /** The "+" menu's choices for the Review; a follow-up for one model changes none of them. */
+  tools: composerOptions.optional(),
 }).strict().refine((input) => input.prompt.length > 0 || Boolean(input.attachmentUploadIds?.length))
-  .refine((input) => !input.onlyModelId || (Boolean(input.conversationId) && input.choices.length === 1 && input.choices[0] === input.onlyModelId));
+  .refine((input) => !input.onlyModelId || (Boolean(input.conversationId) && !input.tools && input.choices.length === 1 && input.choices[0] === input.onlyModelId));
 export const chatHistoryRow = z.object({
   id: chatId,
   title: z.string(),
@@ -187,6 +190,8 @@ export type ChatTurnResult = {
   contextChanged?: boolean;
   /** The server judged this saved question an image request; Desktop asks before anything is charged. */
   imageOffer?: ChatImageOffer;
+  /** The saved question's id: the voice conversation names it when it asks the server to read the answer aloud. */
+  sourceUserMessageId?: string;
 };
 export type ReviewCapability = z.infer<typeof reviewCapability>;
 export type ReviewTurnInput = z.infer<typeof reviewTurnInput>;

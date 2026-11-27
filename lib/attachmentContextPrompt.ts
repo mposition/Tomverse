@@ -138,10 +138,13 @@ export type ExtractedAttachment = {
  * damage -- the user asks "what does the contract say about termination" and
  * the model, holding no contract and told nothing about one, answers anyway.
  *
- * So this marker is only ever produced after the person has been shown the
- * refusal and has explicitly chosen to continue without the file. It names the
- * file (the person knows which one they lost) and says, in the imperative the
- * rest of the fenced context uses, that its contents are unknown.
+ * So for an account this marker is only ever produced after the person has
+ * been shown the refusal and has explicitly chosen to continue without the
+ * file. The one other producer is a guest's file on an EARLIER message whose
+ * temporary object the TTL sweep took: a guest has no row to acknowledge, and
+ * refusing every later turn of the conversation for it helps nobody. It names
+ * the file (the person knows which one they lost) and says, in the imperative
+ * the rest of the fenced context uses, that its contents are unknown.
  */
 export function unavailableAttachmentMarker(name: string): ExtractedAttachment {
     return {

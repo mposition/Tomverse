@@ -22,6 +22,7 @@ let rateLimitRefused = false;
 let draftReadCount = 0;
 let draftAttachmentResolveFailure = false;
 let writtenDraftRow: Record<string, unknown> | null = null;
+let draftWriteError: unknown = null;
 let hydratedDraftRow: Record<string, unknown> | null = null;
 let receiptResult: Record<string, unknown> = {
   outcome: "unchanged",
@@ -124,6 +125,7 @@ mock.module(mod("lib/chatComposerDraftPersistence.ts"), {
       return draftRow;
     },
     writeChatComposerDraft: async ({ draft }: { draft: Record<string, unknown> }) => {
+      if (draftWriteError) throw draftWriteError;
       if (draft.expectedRevision === 99) throw new DraftConflict(4);
       return writtenDraftRow ?? draftRow;
     },
@@ -205,6 +207,7 @@ test.beforeEach(() => {
   draftReadCount = 0;
   draftAttachmentResolveFailure = false;
   writtenDraftRow = null;
+  draftWriteError = null;
   hydratedDraftRow = null;
   receiptResult = { outcome: "unchanged", attachments: [] };
   receiptInput = null;
@@ -496,6 +499,49 @@ test("draft PUT returns the exact row written without a success-path reread", as
   assert.equal(draftReadCount, 0);
   assert.equal(hydratedDraftRow, writtenDraftRow);
   assert.equal((await response.json()).draft.revision, 7);
+});
+
+test("draft PUT answers a table CHECK refusal with a coded 422, not a bare 500", async () => {
+  // 2026-11-24, production: the draft table still held 50,000 characters and
+  // 5 files after the app had raised both, and every such save answered 500.
+  // This is the shape Prisma throws through the pg adapter for SQLSTATE 23514.
+  const { draftRoute } = await loadRoutes();
+  const put = () => draftRoute.PUT(
+    request("/api/products/chat/drafts/new", "PUT", {
+      expectedRevision: 0,
+      text: "a long question",
+      attachmentReferences: [],
+    }),
+    { params: Promise.resolve({ scopeKey: "new" }) }
+  );
+  const originalConsoleError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  try {
+    draftWriteError = Object.assign(new Error("refused"), {
+      code: "P2039",
+      meta: {
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: { kind: "postgres", code: "23514", originalCode: "23514" },
+        },
+      },
+    });
+    const refused = await put();
+    assert.equal(refused.status, 422);
+    assert.equal(refused.headers.get("Cache-Control"), "private, no-store");
+    assert.equal((await refused.json()).code, "CHAT_DRAFT_STORAGE_LIMIT");
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0][1], draftWriteError);
+
+    // Any other database failure is still the generic write failure.
+    draftWriteError = Object.assign(new Error("connection reset"), { code: "P1017" });
+    const failed = await put();
+    assert.equal(failed.status, 500);
+    assert.equal((await failed.json()).code, "CHAT_DRAFT_WRITE_FAILED");
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("attempt GET makes foreign and missing ids indistinguishable", async () => {

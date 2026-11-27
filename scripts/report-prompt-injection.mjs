@@ -65,6 +65,14 @@ import {
     PROMPT_REFINER_INPUT_SCOPE,
 } from "../lib/promptRefinerSuggestion.ts";
 import {
+    HISTORY_REFERENCE_RULES,
+    UNTRUSTED_TOOL_MARKERS,
+    URL_READ_RULES,
+    frameHistoryText,
+    frameWebPageText,
+    inertToolLabel,
+} from "../lib/untrustedToolText.ts";
+import {
     ATTACHMENT_MARKERS,
     MEMORY_MARKERS,
     PROMPT_INJECTION_CORPUS,
@@ -110,6 +118,16 @@ const BENIGN_KNOWLEDGE_PROMPT = buildProfileKnowledgePrompt([
 })));
 
 
+const WEB_LABEL = { title: "Ordinary article", url: "https://example.org/a" };
+const BENIGN_WEB_PROMPT = `${URL_READ_RULES}
+
+${frameWebPageText("Ordinary body.", WEB_LABEL)}`;
+const historyBody = (text) =>
+    JSON.stringify([{ conversation: inertToolLabel(text, 120), excerpts: [{ role: "user", text: inertToolLabel(text, 360) }] }]);
+const BENIGN_HISTORY_PROMPT = `${HISTORY_REFERENCE_RULES}
+
+${frameHistoryText(historyBody("Ordinary excerpt."))}`;
+
 /**
  * Every untrusted source the gate names, and how it is exercised. A source
  * with no prompt path is recorded as such rather than dropped.
@@ -139,6 +157,20 @@ const SURFACE_COVERAGE = [
         surface: "profile-knowledge",
         exercised: true,
         note: "assistant profile knowledge excerpts (release C, §14)",
+    },
+    {
+        // read_url: the text of a page the user linked, returned by a chat tool.
+        source: "web-page",
+        surface: "web-page",
+        exercised: true,
+        note: "read_url results: page body and title, fenced by lib/untrustedToolText.ts",
+    },
+    {
+        // search_past_chats: quotes from the user's own earlier conversations.
+        source: "past-chat",
+        surface: "past-chat",
+        exercised: true,
+        note: "search_past_chats results: titles and excerpts, fenced by lib/untrustedToolText.ts",
     },
     {
         source: "prompt-refiner-current-turn",
@@ -233,6 +265,57 @@ const knowledgeCase = (payload) => ({
     baselineAssembled: BENIGN_KNOWLEDGE_PROMPT,
 });
 
+/** A fetched page: its body keeps line structure, the fence makes that safe. */
+const webPageCase = (payload) => ({
+    surface: "web-page",
+    payloadId: payload.id,
+    payload: payload.text,
+    assembled: `${URL_READ_RULES}
+
+${frameWebPageText(payload.text, WEB_LABEL)}`,
+    rules: URL_READ_RULES,
+    openMarker: UNTRUSTED_TOOL_MARKERS.webOpen,
+    closeMarker: UNTRUSTED_TOOL_MARKERS.webClose,
+    expectedRegions: 1,
+    flattensNewlines: false,
+    invisiblePolicy: "structural-only",
+    baselineAssembled: BENIGN_WEB_PROMPT,
+});
+
+/** A page title is attacker-controlled too, and is flattened to one label line. */
+const webTitleCase = (payload) => ({
+    surface: "web-page-title",
+    payloadId: payload.id,
+    payload: payload.text,
+    assembled: `${URL_READ_RULES}
+
+${frameWebPageText("Ordinary body.", { title: payload.text, url: WEB_LABEL.url })}`,
+    rules: URL_READ_RULES,
+    openMarker: UNTRUSTED_TOOL_MARKERS.webOpen,
+    closeMarker: UNTRUSTED_TOOL_MARKERS.webClose,
+    expectedRegions: 1,
+    flattensNewlines: true,
+    invisiblePolicy: "structural-only",
+    baselineAssembled: BENIGN_WEB_PROMPT,
+});
+
+/** Past-conversation text: titles and excerpts, flattened labels inside one fenced JSON region. */
+const pastChatCase = (payload) => ({
+    surface: "past-chat",
+    payloadId: payload.id,
+    payload: payload.text,
+    assembled: `${HISTORY_REFERENCE_RULES}
+
+${frameHistoryText(historyBody(payload.text))}`,
+    rules: HISTORY_REFERENCE_RULES,
+    openMarker: UNTRUSTED_TOOL_MARKERS.historyOpen,
+    closeMarker: UNTRUSTED_TOOL_MARKERS.historyClose,
+    expectedRegions: 1,
+    flattensNewlines: true,
+    invisiblePolicy: "structural-only",
+    baselineAssembled: BENIGN_HISTORY_PROMPT,
+});
+
 const promptRefinerCase = (payload) => {
     let messages = null;
     try {
@@ -263,6 +346,9 @@ for (const payload of PROMPT_INJECTION_CORPUS) {
         attachmentCase,
         filenameCase,
         knowledgeCase,
+        webPageCase,
+        webTitleCase,
+        pastChatCase,
     ]) {
         const input = build(payload);
         const found = auditAssembledPrompt(input);

@@ -95,7 +95,8 @@ export async function GET(req: Request) {
         });
 
         const conversations = await prisma.conversation.findMany({
-            where: { userId },
+            // A temporary Chat is not exported (lib/temporaryChatAccess.ts).
+            where: { userId, temporaryExpiresAt: null },
             orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
             take: MAX_EXPORTED_CONVERSATIONS,
             select: {

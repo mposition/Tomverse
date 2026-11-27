@@ -285,11 +285,13 @@ export type ImageInvariantAuditResult = {
    */
   thumbnailsExhausted: number;
   /**
-   * Reservations that can never be resolved: not settled, and the generation
-   * they name is gone. Every path that could advance one -- finalizeFailure,
-   * the stale sweep -- reads the generation first, so a missing row is
-   * terminal rather than slow. No stale window is involved for the same
-   * reason.
+   * Reservations not settled whose generation is gone. finalizeFailure and the
+   * stale sweep read the generation first, so they never reach one; the
+   * orphan refund arm (refundOrphanedImageCreditReservations) runs just before
+   * this count and closes every one that still has a user. What remains is a
+   * refund that failed this run and is retried on the next, or a reservation
+   * whose account was deleted, which has no credits left to return. No stale
+   * window is involved: a missing generation is terminal, not slow.
    *
    * Counted because nothing else could see them. The reservation deliberately
    * has no foreign key to anything it describes, so that a financial record
@@ -396,11 +398,12 @@ export const auditImageGenerationInvariants = async (
     });
   }
 
-  // orphanedReservations raises no incident on purpose. Nothing clears one --
-  // no refund path exists, and building one is a separate decision, since
-  // finalizeFailure keeps the provider charge precisely because the provider
-  // may already have billed. An alert that can never go green is noise by the
-  // second firing, so this stays a number an operator reads.
+  // orphanedReservations raises no incident on purpose. The refund arm returns
+  // a user's credits before this runs (keeping the provider charge, since the
+  // provider may already have billed), so what it still counts is a refund the
+  // next run retries or a deleted account's record that can never clear. An
+  // alert that can never go green is noise by the second firing, so this
+  // stays a number an operator reads.
 
   return {
     emptyImageConversations,
@@ -423,19 +426,29 @@ export type ImageAssetMaintenanceResult = {
     refunded: number;
     /** Refunds that came from a settlement transaction that had failed. */
     settlementStranded: number;
+    /** Pending generations handed to a re-drive instead of refunded. */
+    redriven: number;
   };
+  /** Reservations whose generation was deleted, with their user credits returned. */
+  orphanedReservationRefunds: { examined: number; refunded: number };
 };
 
 /**
  * The ride-along for the fifteen-minute maintenance cron. Never throws, so
  * it cannot turn a successful credit reconciliation run into a failed one
  * (same contract as drainNotificationDeliveriesQuietly). Alongside the R2
- * tombstone sweep, this is the refund arm for generations whose executor
- * died: the settling claim inside the service makes it race-safe against a
- * worker that is merely slow.
+ * tombstone sweep, this is the recovery for generations whose executor died:
+ * one that never started is re-driven through `scheduleRedrive` (the route
+ * passes `after`) while IMAGE_PENDING_REDRIVE_ENABLED is `on` and refunded
+ * while it is off (the default), one that had started is refunded. The claims
+ * inside the service make both race-safe against a worker that is merely
+ * slow. It also
+ * returns the user credits of a reservation whose generation went with a
+ * deleted conversation, which no generation-led path can reach.
  */
 export const runImageAssetMaintenanceQuietly = async (
-  now = new Date()
+  now = new Date(),
+  options: { scheduleRedrive?: (run: () => Promise<void>) => void } = {}
 ): Promise<ImageAssetMaintenanceResult> => {
   try {
     const cleanup = await drainImageAssetCleanupQueue(200, now);
@@ -448,14 +461,25 @@ export const runImageAssetMaintenanceQuietly = async (
       failed: 0,
       exhausted: 0,
     }));
-    const { reconcileStaleImageGenerations } = await import(
-      "@/lib/imageGenerationService"
-    );
-    const staleRecovery = await reconcileStaleImageGenerations(now).catch(
-      () => ({ examined: 0, refunded: 0, settlementStranded: 0 })
-    );
+    const {
+      reconcileStaleImageGenerations,
+      refundOrphanedImageCreditReservations,
+    } = await import("@/lib/imageGenerationService");
+    const staleRecovery = await reconcileStaleImageGenerations(now, undefined, {
+      scheduleRedrive: options.scheduleRedrive,
+    }).catch(() => ({ examined: 0, refunded: 0, settlementStranded: 0, redriven: 0 }));
+    // Before the audit, so its orphan count is what this run could not close.
+    const orphanedReservationRefunds = await refundOrphanedImageCreditReservations(
+      now
+    ).catch(() => ({ examined: 0, refunded: 0 }));
     const invariants = await auditImageGenerationInvariants(now);
-    return { cleanup, thumbnails, invariants, staleRecovery };
+    return {
+      cleanup,
+      thumbnails,
+      invariants,
+      staleRecovery,
+      orphanedReservationRefunds,
+    };
   } catch (error) {
     console.error("Image asset maintenance failed:", error);
     return {
@@ -471,7 +495,8 @@ export const runImageAssetMaintenanceQuietly = async (
         orphanedReservations: 0,
         orphanedReservationCostMicroUsd: 0,
       },
-      staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0 },
+      staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0, redriven: 0 },
+      orphanedReservationRefunds: { examined: 0, refunded: 0 },
     };
   }
 };

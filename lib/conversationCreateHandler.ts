@@ -56,6 +56,12 @@ import { clampRuntimeSelectedModels } from "@/lib/modelRegistry";
 import { resolveNewConversationSelectedModels } from "@/lib/newConversationSelectedModels";
 import { prisma } from "@/lib/prisma";
 import { DESKTOP_APP_ORIGIN, desktopTextWriteEnabled } from "@/lib/desktopReadApiContract";
+import {
+  TEMPORARY_CHAT_NOT_ALLOWED,
+  TEMPORARY_CHAT_UNAVAILABLE,
+  temporaryConversationExpiresAt,
+} from "@/lib/temporaryChatAccess";
+import { isTemporaryChatEnabled } from "@/lib/temporaryChatSettings";
 
 const modelSchema = z.string().min(1).max(120);
 
@@ -75,6 +81,9 @@ const createConversationSchema = z
     // was current when it bound; a client that could name one could pin a
     // conversation to a draft or to a revision the owner has replaced.
     assistantProfileId: z.string().trim().min(1).max(100).optional(),
+    // A temporary Chat (lib/temporaryChatAccess.ts). Only `true` is a
+    // request; the server decides whether it is allowed.
+    temporary: z.literal(true).optional(),
   })
   .strict();
 const desktopConversationCreateSchema = createConversationSchema.pick({ title: true, selectedModels: true }).strict();
@@ -123,6 +132,21 @@ export const createConversationForProduct = async (
     const body = await readLimitedJson<z.infer<typeof createConversationSchema>>(req, 8 * 1024,
       desktop ? desktopConversationCreateSchema : createConversationSchema);
     const title = body.title || "New chat";
+    // Temporary is a Chat-only, signed-in, switch-gated start: never in a
+    // project, memory off, deleted by the sweep at its expiry.
+    const temporary = body.temporary === true;
+    if (temporary && (productKey !== "chat" || body.projectId)) {
+      return NextResponse.json(
+        { error: "A temporary chat starts outside projects, in Chat only.", code: TEMPORARY_CHAT_NOT_ALLOWED },
+        { status: 400 }
+      );
+    }
+    if (temporary && !(await isTemporaryChatEnabled())) {
+      return NextResponse.json(
+        { error: "Temporary chat is not available.", code: TEMPORARY_CHAT_UNAVAILABLE },
+        { status: 404 }
+      );
+    }
 
       const userSettings = await prisma.userSettings.findUnique({
           where: { userId }
@@ -248,6 +272,9 @@ export const createConversationForProduct = async (
         projectId: body.projectId || null,
         assistantProfileVersionId:
           binding.outcome === "bind" ? binding.profileVersionId : null,
+        ...(temporary
+          ? { memoryMode: "off" as const, temporaryExpiresAt: temporaryConversationExpiresAt(new Date()) }
+          : {}),
       });
     });
 
@@ -265,6 +292,7 @@ export const createConversationForProduct = async (
             ? newConversation.webSearchMode
             : normalizeWebSearchMode(newConversation.webSearchMode),
           isLocked: !!newConversation.password,
+          temporary: newConversation.temporaryExpiresAt !== null,
           messageCount: 0,
           // Server-computed, so the screen never has to work out which
           // revision it pinned to or whether a newer one exists (§14).

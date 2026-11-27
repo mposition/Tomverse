@@ -18,6 +18,7 @@ import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
+import { isComparisonReviewAlreadyRunning } from "@/lib/comparisonReviewInFlight";
 import type { ComparisonReview, ReviewSetup } from "../../packages/chat-core/src/review";
 import type { AiReviewAccess } from "./ComparisonActionRail";
 import "./studio-answer-analysis.css";
@@ -62,6 +63,8 @@ export function StudioAnswerAnalysis({
   const [tab, setTab] = useState<"summary" | "detail">("summary");
   const [reviewer, setReviewer] = useState<"primary" | "secondary">("primary");
   const keys = useRef(new Map<string, string>());
+  /** The scope whose last attempt was refused because that analysis is already running. */
+  const [alreadyRunningScope, setAlreadyRunningScope] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -126,8 +129,37 @@ export function StudioAnswerAnalysis({
           reviewMode: "balanced", includeSynthesis: false,
         }),
       });
-      trackProductEvent("comparison_review_started", setup.responses?.length ?? 0, { review_mode: "balanced" });
-      let response = await send();
+      // An account request the server answers with "this analysis is already
+      // running" (409 DUPLICATE_REQUEST) started and billed nothing, so it is
+      // not counted as started. That is only known from the answer, so an
+      // account start is counted when the server answers (or never does); a
+      // guest start is counted here, as before.
+      let startTracked = false;
+      const trackStarted = () => {
+        if (startTracked) return;
+        startTracked = true;
+        trackProductEvent("comparison_review_started", setup.responses?.length ?? 0, { review_mode: "balanced" });
+      };
+      if (guest) trackStarted();
+      setAlreadyRunningScope((current) => current === scope ? null : current);
+      let response = await send().catch((error: unknown) => {
+        trackStarted();
+        throw error;
+      });
+      if (!guest && response.status === 409) {
+        const refusal = await response.clone().json().catch(() => ({}));
+        if (isComparisonReviewAlreadyRunning(response.status, refusal)) {
+          // The same balanced analysis is already running for this account
+          // (Classic, another tab, or a stream this session lost) and was
+          // billed once. Say so and offer the retry: pressed again it is
+          // refused while that run is in flight and served from the saved row
+          // once it has finished.
+          await discardResponseBody(response);
+          setAlreadyRunningScope(scope);
+          throw new StudioAnalysisKnownFailure("Analysis already running");
+        }
+      }
+      trackStarted();
       if (guest && !response.ok) {
         const failure = await response.clone().json().catch(() => ({})) as { code?: string };
         if (failure.code === "TURNSTILE_REQUIRED") {
@@ -161,16 +193,19 @@ export function StudioAnswerAnalysis({
     kind: "review" as const, conversationId, setup: entry.setup, review, mode: "balanced" as const, includeSynthesis: false, reviewer,
   } : null;
   const slots = review ? (["primary", ...(review.result.secondary ? ["secondary"] : [])] as const) : [];
+  // Refused because the same analysis is already running: not a failure, so
+  // the entry does not read as one.
+  const runningElsewhere = entry?.phase === "error" && alreadyRunningScope === scope;
   if (!active) return null;
 
   return <>
-    <div className="studio-analysis-entry" data-testid="studio-analysis-entry" data-state={entry?.phase === "error" ? "error" : review ? busy ? "partial" : "done" : "new"}>
+    <div className="studio-analysis-entry" data-testid="studio-analysis-entry" data-state={runningElsewhere ? "running-elsewhere" : entry?.phase === "error" ? "error" : review ? busy ? "partial" : "done" : "new"}>
       <button type="button" onClick={show} disabled={!ready && !review && !busy} aria-haspopup="dialog" aria-expanded={open}>
         {review && entry?.phase !== "error" ? <Check size={17} /> : <Sparkles size={17} />}
-        <span>{entry?.phase === "error" ? copy.retry : review ? copy.view : entry?.phase === "checking" ? copy.checking : busy ? copy.running : copy.start}</span><ChevronRight size={16} />
+        <span>{runningElsewhere ? t("chat.aiReviewAlreadyRunningCheck") : entry?.phase === "error" ? copy.retry : review ? copy.view : entry?.phase === "checking" ? copy.checking : busy ? copy.running : copy.start}</span><ChevronRight size={16} />
       </button>
       {busy && <div className="studio-analysis-progress" role="progressbar" aria-label={copy.running}><span /></div>}
-      <p>{entry?.phase === "error" ? copy.failed : review ? copy.reuse : !ready ? copy.wait : copy.ready}</p>
+      <p>{runningElsewhere ? t("chat.aiReviewDuplicateRequest") : entry?.phase === "error" ? copy.failed : review ? copy.reuse : !ready ? copy.wait : copy.ready}</p>
     </div>
     {openScope === scope && createPortal(
       <div ref={dialogRef} className="studio-analysis-overlay" style={{ display: open ? undefined : "none" }}
@@ -200,8 +235,8 @@ export function StudioAnswerAnalysis({
               <ol><li aria-current={entry?.phase === "checking" ? "step" : undefined}>{entry?.phase !== "checking" && <Check size={15} />}{t("chat.aiReviewResponse")}</li><li aria-current={entry?.phase === "running" ? "step" : undefined}>{copy.detail}</li><li>{copy.summary}</li></ol>
               <p>{copy.background}</p>
             </div>}
-            {entry?.phase === "error" && <div className="studio-analysis-error" role="alert"><p>{copy.failed}</p>
-              <button type="button" onClick={show}>{copy.retry}</button>
+            {entry?.phase === "error" && <div className="studio-analysis-error" role={runningElsewhere ? "status" : "alert"}><p>{runningElsewhere ? t("chat.aiReviewAlreadyRunningRetryLater") : copy.failed}</p>
+              <button type="button" onClick={show}>{runningElsewhere ? t("chat.aiReviewAlreadyRunningCheck") : copy.retry}</button>
               {isGuest && <button type="button" onClick={() => { close(); onSignIn?.(); }}>{copy.signIn}</button>}
             </div>}
             {review && <>

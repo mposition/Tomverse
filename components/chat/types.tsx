@@ -93,12 +93,27 @@ export type Message = {
    * and it persists through storage and a re-fetch like any other status.
    */
   status?: "normal" | "incomplete" | "error" | "cancelled" | "pending";
+  /**
+   * Runtime-only: why an `incomplete` answer stopped, from the stream
+   * trailer -- `length` (the output ceiling) or `interrupted` (the provider's
+   * stream broke off). Not stored: a reloaded incomplete answer has no
+   * reason and keeps the ceiling notice. Never serialized.
+   */
+  incompleteReason?: import("@tomverse/chat-core").ChatIncompleteReason;
   attachments?: ChatAttachment[];
   modelId?: string;
   errorCode?: string;
   errorHadAttachments?: boolean;
   /** Runtime-only recovery notice, never mixed into a partial answer body. */
   recoveryNotice?: string;
+  /**
+   * Runtime-only: the server streamed this answer but did not save it (the
+   * stream trailer's `persistence`) -- `not_saved`, a reload will not show
+   * it; `unknown`, whether it was saved could not be checked. Never
+   * serialized -- the allowlists in lib/chatMessageSerialization.ts do not
+   * name it.
+   */
+  persistence?: "not_saved" | "unknown";
   /**
    * Runtime-only: another model's answer shown in this panel because this
    * panel's model never answered that turn (lib/chatTranscriptGapFill.ts).

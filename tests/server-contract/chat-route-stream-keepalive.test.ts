@@ -121,6 +121,12 @@ type Script = {
   textThenStall?: boolean;
   /** Abort after the provider stream exists but before the route resumes dispatch setup. */
   abortAfterStreamCreation?: boolean;
+  /**
+   * After the first visible chunk, this many non-visible SDK parts (a tool
+   * input being written), one every few milliseconds through `onChunk`,
+   * then a closing sentence and the end of the stream.
+   */
+  partsAfterText?: number;
   responseMessages?: unknown[];
 };
 
@@ -141,7 +147,7 @@ let abortRequestAfterStreamCreation = () => {};
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: (options: { abortSignal?: AbortSignal; instructions?: string; messages?: unknown[]; providerOptions?: typeof providerOptions }) => {
+    streamText: (options: { abortSignal?: AbortSignal; instructions?: string; messages?: unknown[]; providerOptions?: typeof providerOptions; onChunk?: (event: { chunk: unknown }) => unknown }) => {
       providerCalls += 1;
       providerInstructions = options.instructions;
       providerOptions = options.providerOptions;
@@ -170,6 +176,18 @@ mock.module("ai", {
             }
             if (script.text === null) return; // never resolves on its own
             controller.enqueue(script.text);
+            if (script.partsAfterText) {
+              let remaining = script.partsAfterText;
+              const writer = setInterval(() => {
+                options.onChunk?.({ chunk: { type: "tool-input-delta", delta: "{}" } });
+                remaining -= 1;
+                if (remaining > 0) return;
+                clearInterval(writer);
+                controller.enqueue(" Done.");
+                controller.close();
+              }, 5);
+              return;
+            }
             if (!script.textThenStall) controller.close();
           },
           cancel(reason) {
@@ -659,6 +677,73 @@ test("a turn that answers is never marked stalled, and reads clean", async () =>
   assert.ok((line.serverMsToFirstVisibleChunk as number) <= line.serverMsToSettlement);
   assert.equal(JSON.stringify(line).includes("The answer."), false);
   assert.equal(JSON.stringify(line).includes("분석"), false);
+});
+
+/*
+  After the first visible token. A preamble, then a tool input being written
+  for longer than the client's silence budget: parts the user never sees. The
+  keepalive used to stop at the first token, so the browser ended these turns
+  as CHAT_STREAM_IDLE_TIMEOUT while the provider was still working.
+*/
+test("a provider writing non-visible parts after the first token keeps the stream alive", async () => {
+  // ~1s of parts at 5ms each against a 25ms tick: many ticks see evidence.
+  const { body } = await ask({ text: "Preamble.", partsAfterText: 200 });
+
+  const afterFirstText = body.slice(body.indexOf("Preamble.") + "Preamble.".length);
+  const split = splitStreamKeepaliveSignal(afterFirstText);
+  assert.ok(
+    split.count >= 1,
+    `no keepalive followed the first token while the provider produced parts: ${JSON.stringify(body)}`
+  );
+  assert.equal(split.signal?.state, "provider_active");
+  assert.equal(split.signal?.intervalMs, KEEPALIVE_INTERVAL_MS);
+  assert.ok(splitStreamKeepaliveSignal(body).text.startsWith("Preamble. Done."));
+  assert.equal(ledger.settlements[0]?.outcome, "completed");
+});
+
+test("a provider that goes quiet after the first token gets no keepalive to hide behind", async () => {
+  script = { text: "Partial answer.", textThenStall: true };
+  ledger.settlements = [];
+  ledger.releases = [];
+  timingLines.length = 0;
+  const requestAbortController = new AbortController();
+  const { POST } = await loadRoute();
+  const response = await POST(
+    new Request("http://127.0.0.1:3100/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "분석해 줘" }],
+        modelId: MODEL_ID,
+        conversationId: CONVERSATION_ID,
+        assistantMessageId: ASSISTANT_MESSAGE_ID,
+      }),
+      signal: requestAbortController.signal,
+    })
+  );
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  const reading = (async () => {
+    for (;;) {
+      const read = await reader.read().catch(() => ({ done: true, value: undefined }));
+      if (read.done) return;
+      received += decoder.decode(read.value, { stream: true });
+    }
+  })();
+  // Twenty ticks with an open provider stream and not one part from it.
+  await whileWaiting(() => new Promise((settle) => setTimeout(settle, KEEPALIVE_INTERVAL_MS * 20)));
+  assert.ok(received.includes("Partial answer."));
+  const afterFirstText = received.slice(received.indexOf("Partial answer.") + "Partial answer.".length);
+  assert.equal(
+    splitStreamKeepaliveSignal(afterFirstText).count,
+    0,
+    `a timer vouched for a silent provider: ${JSON.stringify(received)}`
+  );
+  requestAbortController.abort("test cleanup");
+  await until("the quiet turn to settle", () => ledger.settlements.length > 0);
+  await reading;
+  assert.equal(ledger.settlements[0].outcome, "cancelled");
 });
 
 test("an empty answer and a stream that breaks before its first chunk send no visible chunk", async () => {
