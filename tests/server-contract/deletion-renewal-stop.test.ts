@@ -21,6 +21,7 @@ const state = {
   secondDraft: false,
   listParams: [] as { status?: string; created?: { gte: number } }[],
   oldDunning: false,
+  paidJustNow: false,
   subscriptionStatus: "active",
   failCancel: false,
   cancels: [] as { id: string; params: Record<string, unknown> }[],
@@ -37,6 +38,7 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     secondDraft: false,
     listParams: [],
     oldDunning: false,
+    paidJustNow: false,
     subscriptionStatus: "active",
     failCancel: false,
     cancels: [],
@@ -84,6 +86,14 @@ mock.module(mod("lib/stripe.ts"), {
               return;
             }
             yield { id: "in_paid_old", status: "paid", billing_reason: "subscription_cycle" };
+            if (state.paidJustNow) {
+              yield {
+                id: "in_paid_now",
+                status: "paid",
+                billing_reason: "subscription_cycle",
+                status_transitions: { paid_at: Math.floor(Date.now() / 1000) },
+              };
+            }
             if (!state.noOpen) yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
             for (let i = 0; i < state.manualDrafts; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
             yield { id: "in_1", status: "draft", billing_reason: "subscription_cycle" };
@@ -170,7 +180,7 @@ test("the deletion flow stops a renewal drafted before pending_deletion was comm
   // Both renewals are found before anything is cancelled (the cancellation's
   // webhook clears the account's subscription id); one cancellation stops
   // collection on all of them, and the open one is counted for a person.
-  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1", new Date(0)), { stopped: 1, finalized: 1 });
   // Only renewals are looked at; other invoices are not reasons to cancel.
   assert.equal(state.cancels.length, 1);
   assert.equal(state.locked, 1);
@@ -179,14 +189,14 @@ test("the deletion flow stops a renewal drafted before pending_deletion was comm
 test("a renewal paid after the lookup does not stop the check of the others", async () => {
   reset({ paidAfterList: ["in_open"] });
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1", new Date(0)), { stopped: 1, finalized: 1 });
   assert.equal(state.cancels.length, 1);
 });
 
 test("a lookup cut off by the scan limit is a failure, after stopping what it found", async () => {
   reset({ manualDrafts: 600 });
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  await assert.rejects(stopDeletionPendingDraftRenewals("sub_1"), /scan limit/);
+  await assert.rejects(stopDeletionPendingDraftRenewals("sub_1", new Date(0)), /scan limit/);
   assert.equal(state.cancels.length, 1);
 });
 
@@ -202,21 +212,21 @@ test("a void or uncollectible renewal is no reason to end the subscription", asy
 test("a draft renewal paid before its re-read is counted for a person", async () => {
   reset({ paidAfterList: ["in_open", "in_1"] });
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 0, finalized: 2 });
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1", new Date(0)), { stopped: 0, finalized: 2 });
   assert.equal(state.cancels.length, 0);
 });
 
 test("after the cancellation the remaining renewals are re-read, and one paid meanwhile is counted", async () => {
   reset({ noOpen: true, secondDraft: true, paidAfterList: ["in_2"] });
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1", new Date(0)), { stopped: 1, finalized: 1 });
   assert.equal(state.cancels.length, 1);
 });
 
 test("the renewal lookup lists every open invoice, then every status over the recent window", async () => {
   reset();
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  await stopDeletionPendingDraftRenewals("sub_1");
+  await stopDeletionPendingDraftRenewals("sub_1", new Date(0));
   assert.equal(state.listParams.length, 2);
   assert.equal(state.listParams[0]!.status, "open");
   assert.equal(state.listParams[0]!.created, undefined);
@@ -228,9 +238,19 @@ test("the renewal lookup lists every open invoice, then every status over the re
 test("an old renewal still in dunning is found and counted, not only recent ones", async () => {
   reset({ oldDunning: true, paidAfterList: ["in_open", "in_1"] });
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
-  const result = await stopDeletionPendingDraftRenewals("sub_1");
+  const result = await stopDeletionPendingDraftRenewals("sub_1", new Date(0));
   // The dunning renewal is the one still collectible: it ends the subscription.
   assert.equal(result.stopped, 1);
   assert.equal(result.finalized, 3);
   assert.equal(state.cancels.length, 1);
+});
+
+test("a renewal paid after the deletion started is counted for a person; one paid before is not", async () => {
+  reset({ paidJustNow: true, noOpen: true });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  const startedAt = new Date(Date.now() - 60_000);
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1", startedAt), { stopped: 1, finalized: 1 });
+  reset({ paidJustNow: true, noOpen: true });
+  const later = new Date(Date.now() + 60_000);
+  assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1", later), { stopped: 1, finalized: 0 });
 });

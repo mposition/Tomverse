@@ -69,6 +69,8 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   });
   if (!user) return { scheduled: false as const };
 
+  // Before the first Stripe write: a renewal paid from here on is reported.
+  const deletionStartedAt = new Date();
   await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
   const requestedAt = new Date();
   const scheduledFor = new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_MS);
@@ -136,7 +138,10 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
     // so it is never collected (docs/policy/plan-change.md section 10). Not
     // fatal for the same reason; a person checks the draft at Stripe.
     try {
-      const renewals = await stopDeletionPendingDraftRenewals(user.stripeSubscriptionId);
+      const renewals = await stopDeletionPendingDraftRenewals(
+        user.stripeSubscriptionId,
+        deletionStartedAt
+      );
       if (renewals.finalized > 0) {
         await reportOperationalIncident({
           code: "ACCOUNT_DELETION_RENEWAL_FINALIZED",

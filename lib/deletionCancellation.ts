@@ -111,7 +111,9 @@ const RENEWAL_LOOKBACK_SECONDS = 4 * 24 * 60 * 60;
  * but an open invoice can still be paid by hand, so a person checks them.
  */
 export async function stopDeletionPendingDraftRenewals(
-  subscriptionId: string
+  subscriptionId: string,
+  /** When the deletion flow started: a renewal paid since then is for a person. */
+  deletionStartedAt: Date
 ): Promise<{ stopped: number; finalized: number }> {
   const renewals: { id: string; status: string }[] = [];
   let scanned = 0;
@@ -123,6 +125,9 @@ export async function stopDeletionPendingDraftRenewals(
   //      draft that turned open after listing 1 is still caught here.
   // Status is filtered in code; the last status seen for an invoice wins.
   const found = new Map<string, string>();
+  // A renewal paid after the deletion started was collected from an account
+  // asking to leave; renewals paid before it are the period already bought.
+  const paidSinceDeletion = new Set<string>();
   const createdSince = Math.floor(Date.now() / 1000) - RENEWAL_LOOKBACK_SECONDS;
   const listings = [
     { subscription: subscriptionId, status: "open" as const, limit: 100 },
@@ -140,6 +145,10 @@ export async function stopDeletionPendingDraftRenewals(
       }
       if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
       found.set(invoice.id, invoice.status ?? "unknown");
+      const paidAt = invoice.status_transitions?.paid_at;
+      if (invoice.status === "paid" && paidAt && paidAt * 1000 >= deletionStartedAt.getTime()) {
+        paidSinceDeletion.add(invoice.id);
+      }
     }
   }
   for (const [id, status] of found) {
@@ -147,9 +156,10 @@ export async function stopDeletionPendingDraftRenewals(
   }
   // Renewals found open, plus any that left draft between the list and its
   // re-read under the lock: all of them are for a person to check.
-  const finalizedIds = new Set(
-    renewals.filter((renewal) => renewal.status === "open").map((renewal) => renewal.id)
-  );
+  const finalizedIds = new Set([
+    ...renewals.filter((renewal) => renewal.status === "open").map((renewal) => renewal.id),
+    ...paidSinceDeletion,
+  ]);
   // Each renewal until one ends the subscription: one paid in the meantime is
   // left for a person (see stopDeletionPendingRenewal) and must not stop the
   // check of the others.
