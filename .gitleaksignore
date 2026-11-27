@@ -1969,3 +1969,14 @@ b6135529b17f4ef909c8b89a15b5924e38264f8b:apps/tomverse-vscode/tests/security.tes
 # Synthetic image request UUID in the receipt reconciliation test (#4272).
 # It identifies the request and grants no access. The test now generates it.
 110200bab86bf664daf45aca078ace7d34ce15c4:apps/desktop/tests/imageReceipt.test.ts:generic-api-key:10
+
+# Synthetic secret-shaped fixtures in the Desktop and CLI redaction/import tests
+# (#4272, #4282, #4312), never credentials. They are inputs that prove a
+# redactor, an extension importer or a memory validator refuses a secret shape.
+# Suppress only the exact findings in the immutable commits that added them;
+# a changed line or another commit gets a new fingerprint and stays scanned.
+d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/desktop/tests/pluginSources.test.ts:github-pat:174
+907e83392b491b9e2a97b47fc585fe4f06fbef9a:apps/desktop/tests/remoteControl.test.ts:generic-api-key:245
+8c316d74b5efc32c039e14b369c396a8bd0256e0:apps/tomverse-cli/tests/extension-import.test.ts:generic-api-key:8
+5ef9870e6429d59b27f0f1f119f6f6a5297fa238:apps/desktop/tests/codeMemory.test.ts:generic-api-key:55
+5ef9870e6429d59b27f0f1f119f6f6a5297fa238:apps/tomverse-cli/tests/memory.test.ts:aws-access-token:37
