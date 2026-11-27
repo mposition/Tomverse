@@ -11,9 +11,10 @@ import type { McpProvider } from "../../../lib/mcpProviderCatalog";
 export const PLUGIN_CATALOG_PATH = "/api/mcp/providers";
 /** Where a platform's logo lives on the account origin; anything else is not fetched. */
 export const PLUGIN_LOGO_PATH = /^\/plugins\/providers\/[A-Za-z0-9._-]{1,100}\.(?:png|jpe?g|svg|webp)$/;
-export const PLUGIN_LOGO_ROUTE = /^\/plugin-logo\/([a-z0-9-]{1,60})$/;
+/** `/plugin-logo/<revision>/<platform id>`: the revision changes with every list the server sends, so a picture that changed is asked for again. */
+export const PLUGIN_LOGO_ROUTE = /^\/plugin-logo\/(\d{1,9})\/([a-z0-9-]{1,60})$/;
 /** The app's own address for a platform's logo, served by the main process. */
-export const pluginLogoUrl = (id: string) => `tomverse://desktop/plugin-logo/${encodeURIComponent(id)}`;
+export const pluginLogoUrl = (id: string, revision: number) => `tomverse://desktop/plugin-logo/${revision}/${encodeURIComponent(id)}`;
 
 const providerWire = z.object({
   id: z.string().regex(/^[a-z0-9-]{1,60}$/),
@@ -37,6 +38,8 @@ export const pluginCatalogBody = z.object({
   })),
 });
 export type PluginCatalog = z.infer<typeof pluginCatalogBody>;
+/** What the renderer receives: the list, and the revision of the copy the main process holds. */
+export type PluginCatalogView = PluginCatalog & { revision: number };
 
 /** Seconds a response may be reused, from its Cache-Control header; none when it names no lifetime. */
 export function catalogMaxAge(cacheControl: string | null): number {

@@ -1,4 +1,4 @@
-import { PLUGIN_LOGO_PATH, type PluginCatalog } from "../plugin-catalog-contract";
+import { PLUGIN_LOGO_PATH, type PluginCatalog, type PluginCatalogView } from "../plugin-catalog-contract";
 
 export type CatalogRead =
   | { status: "not-modified"; maxAge: number }
@@ -48,14 +48,16 @@ export function createPluginCatalog(deps: {
   now?: () => number;
 }) {
   const now = deps.now ?? Date.now;
-  let held: { catalog: PluginCatalog; etag: string | null; fetchedAt: number; maxAge: number } | undefined;
-  let inflight: Promise<PluginCatalog> | undefined;
+  let held: { catalog: PluginCatalog; etag: string | null; fetchedAt: number; maxAge: number; revision: number } | undefined;
+  let inflight: Promise<PluginCatalogView> | undefined;
+  // Counts the lists received. The renderer puts it in a logo's address, so its images are asked for again when a new list arrives.
+  let revision = 0;
   // A logo is kept with the path it was read from, and every new list from the server drops them all: a picture that changed under the same path is read again.
   const logos = new Map<string, PluginLogo & { path: string }>();
 
   /** `refresh` revalidates a list that is still fresh; a failed read keeps the last list for the caller to show beside the error. */
-  function read(refresh = false): Promise<PluginCatalog> {
-    if (held && !refresh && now() - held.fetchedAt < held.maxAge * 1000) return Promise.resolve(held.catalog);
+  function read(refresh = false): Promise<PluginCatalogView> {
+    if (held && !refresh && now() - held.fetchedAt < held.maxAge * 1000) return Promise.resolve({ ...held.catalog, revision: held.revision });
     inflight ??= (async () => {
       const result = await deps.read(held?.etag ?? undefined);
       if (result.status === "not-modified") {
@@ -63,9 +65,10 @@ export function createPluginCatalog(deps: {
         held = { ...held, fetchedAt: now(), maxAge: result.maxAge };
       } else {
         logos.clear();
-        held = { catalog: result.catalog, etag: result.etag, fetchedAt: now(), maxAge: result.maxAge };
+        revision += 1;
+        held = { catalog: result.catalog, etag: result.etag, fetchedAt: now(), maxAge: result.maxAge, revision };
       }
-      return held.catalog;
+      return { ...held.catalog, revision: held.revision };
     })().finally(() => { inflight = undefined; });
     return inflight;
   }
@@ -75,6 +78,7 @@ export function createPluginCatalog(deps: {
     if (!path || !PLUGIN_LOGO_PATH.test(path)) return null;
     const kept = logos.get(id);
     if (kept?.path === path) return kept;
+    const generation = revision;
     let result: PluginLogo | null = null;
     try {
       const response = await deps.fetchLogo(path);
@@ -87,8 +91,9 @@ export function createPluginCatalog(deps: {
         await response.body?.cancel().catch(() => {});
       }
     } catch { /* A logo that cannot be read is shown as the platform's initial. */ }
-    // Only a logo that was read is kept: a failed one is tried again the next time it is asked for.
-    if (result) {
+    // Only a logo that was read is kept: a failed one is tried again the next time it is asked for. A picture fetched for a list
+    // the server has since replaced is shown once and not kept.
+    if (result && generation === revision) {
       if (logos.size >= LOGO_KEPT) logos.delete(logos.keys().next().value!);
       logos.set(id, { ...result, path });
     }

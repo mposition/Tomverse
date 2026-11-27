@@ -4546,7 +4546,7 @@ else {
       if (request.method !== "GET" || address.host !== "desktop" || address.search) return new Response(null, { status: 404 });
       const route = address.pathname;
       // A platform's logo, read from the account's server for the Plugins screen (the page may load images from this app only).
-      const logoId = PLUGIN_LOGO_ROUTE.exec(route)?.[1];
+      const logoId = PLUGIN_LOGO_ROUTE.exec(route)?.[2];
       if (logoId) {
         const logo = state.capabilities?.pluginCatalog && pluginCatalogHost?.signal === chatSession.signal ? await pluginCatalogHost.host.logo(logoId) : null;
         return logo ? new Response(logo.bytes, { headers: {

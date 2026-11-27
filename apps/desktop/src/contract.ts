@@ -21,7 +21,7 @@ import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
-import type { PluginCatalog } from "./plugin-catalog-contract";
+import type { PluginCatalogView } from "./plugin-catalog-contract";
 import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
 import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
@@ -608,7 +608,7 @@ export type DesktopApi = {
   pluginInventory(): Promise<DesktopPluginInventory>;
   connectorInventory(): Promise<ConnectorInventory>;
   /** The web's platform list, read from the server (null where the server does not offer it). `refresh` asks again instead of reusing a list that is still fresh. */
-  pluginCatalog(refresh?: boolean): Promise<PluginCatalog | null>;
+  pluginCatalog(refresh?: boolean): Promise<PluginCatalogView | null>;
   connectorAction(input: ConnectorInput): Promise<ConnectorResult>;
   importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
   checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;

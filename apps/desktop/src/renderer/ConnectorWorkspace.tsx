@@ -11,7 +11,7 @@ import { PluginScopePicker, initialPluginScopes } from "../../../../components/p
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
 import type { ConnectorConnection, ConnectorInput, ConnectorInventory, ConnectorServer } from "../connector-contract";
 import { serverSignInRefused } from "../connector-oauth-policy";
-import { pluginLogoUrl, type PluginCatalog } from "../plugin-catalog-contract";
+import { pluginLogoUrl, type PluginCatalogView } from "../plugin-catalog-contract";
 import { linkViewUrl } from "../web-view-contract";
 import { describeConnectorResult, type ConnectorMessage } from "./connector-message";
 import { LocalExtensionsPanel } from "./LocalExtensionsPanel";
@@ -47,7 +47,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   const [source, setSource] = useState("all");
   const [limit, setLimit] = useState(PAGE);
   // undefined: not asked yet; null: this server serves no catalogue, so only its own servers are listed.
-  const [catalog, setCatalog] = useState<PluginCatalog | null>();
+  const [catalog, setCatalog] = useState<PluginCatalogView | null>();
   const [bundled, setBundled] = useState<Bundled>();
   const [providerId, setProviderId] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -111,7 +111,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   // The web's catalogue from the server; for a server that serves none, the one this app was built with labels that server's own list.
   const providers: readonly McpProvider[] = catalog?.providers ?? bundled?.bundledProviders ?? [];
   const ready = catalog !== undefined && (catalog !== null || bundled !== undefined);
-  const logoOf = (provider: McpProvider | undefined) => !provider?.logo ? undefined : catalog ? pluginLogoUrl(provider.id) : bundled?.bundledLogo(provider);
+  const logoOf = (provider: McpProvider | undefined) => !provider?.logo ? undefined : catalog ? pluginLogoUrl(provider.id, catalog.revision) : bundled?.bundledLogo(provider);
   // Cards, their order and the filters are the web page's own (lib/mcpProviderBrowse.ts).
   const cards = ready ? pluginCards({ servers: inventory?.servers ?? [], providers, customEnabled: Boolean(inventory?.customEnabled), customName: c.custom, catalog: Boolean(catalog) }) : [];
   const visibleCards = filterPluginCards(cards, { search: query.trim(), category, source,

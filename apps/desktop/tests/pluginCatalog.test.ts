@@ -42,9 +42,10 @@ test("a response's lifetime comes from its Cache-Control header", () => {
 });
 
 test("a logo is addressed by the app's own origin, and only a platform id fits that address", () => {
-  assert.equal(pluginLogoUrl("github"), "tomverse://desktop/plugin-logo/github");
-  assert.equal(PLUGIN_LOGO_ROUTE.exec("/plugin-logo/github")?.[1], "github");
-  for (const route of ["/plugin-logo/", "/plugin-logo/GitHub", "/plugin-logo/a/b", "/plugin-logo/../assets/x.js", "/plugin-logo/a%2Fb", "/plugin-logos/a"]) {
+  assert.equal(pluginLogoUrl("github", 3), "tomverse://desktop/plugin-logo/3/github");
+  assert.notEqual(pluginLogoUrl("github", 3), pluginLogoUrl("github", 4), "a new list gives the images a new address");
+  assert.deepEqual(PLUGIN_LOGO_ROUTE.exec("/plugin-logo/3/github")?.slice(1), ["3", "github"]);
+  for (const route of ["/plugin-logo/", "/plugin-logo/github", "/plugin-logo/3/GitHub", "/plugin-logo/x/github", "/plugin-logo/3/a/b", "/plugin-logo/3/../assets/x.js", "/plugin-logo/3/a%2Fb", "/plugin-logos/3/a", "/plugin-logo/1234567890/a"]) {
     assert.equal(PLUGIN_LOGO_ROUTE.test(route), false, route);
   }
 });
@@ -220,4 +221,34 @@ test("a logo is read again when the server sends a new list, or names another fi
   await host.read();
   await host.logo("a");
   assert.deepEqual(served, ["/plugins/providers/a.png", "/plugins/providers/a.png", "/plugins/providers/a-new.png"]);
+});
+
+test("the revision moves with each list the server sends and not with an unchanged answer, and a late logo of a replaced list is not kept", async () => {
+  let next: CatalogRead = { status: "ok", catalog: catalog("d", ["a"]), etag: "\"v1\"", maxAge: 0 };
+  let release: () => void = () => {};
+  const gate = () => new Promise<void>((resolve) => { release = resolve; });
+  let hold: Promise<void> | undefined;
+  let served = 0;
+  const host = createPluginCatalog({
+    read: async () => next,
+    fetchLogo: async () => { served += 1; await hold; return new Response(png, { headers: { "content-type": "image/png" } }); },
+  });
+  const first = await host.read();
+  assert.equal(first.revision, 1);
+  next = { status: "not-modified", maxAge: 0 };
+  assert.equal((await host.read()).revision, 1, "an unchanged answer is the same copy");
+  next = { status: "ok", catalog: catalog("d", ["a"]), etag: "\"v2\"", maxAge: 0 };
+  assert.equal((await host.read()).revision, 2);
+  // A picture still on its way when the server's new list arrives belongs to the old list: it is shown once, and read again next time.
+  hold = gate();
+  const late = host.logo("a");
+  next = { status: "ok", catalog: catalog("d", ["a"]), etag: "\"v3\"", maxAge: 0 };
+  assert.equal((await host.read()).revision, 3);
+  release();
+  assert.ok(await late);
+  assert.equal(served, 1);
+  hold = undefined;
+  await host.logo("a");
+  await host.logo("a");
+  assert.equal(served, 2, "read again for the new list, then kept");
 });

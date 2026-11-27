@@ -166,6 +166,9 @@ test("Plugins lists the web's catalogue from the server, keeps it per its cache 
       await expect.poll(names).toEqual(["Custom MCP server", "GitHub", "Airtable", "Zeta Tools", "Aikido"]);
       await expect(plugins.getByTestId("desktop-connector-provider")).toHaveCount(4);
       assert.deepEqual((await catalogCalls()).map((call) => [call.ifNoneMatch, call.status]), [[null, 200], ["\"catalog-v1\"", 200]]);
+      // A new list gives the images new addresses: the pictures are asked for again (the old ones are not trusted), and the new platform's is fetched.
+      await expect.poll(async () => (await logoCalls()).map((call) => call.path).sort()).toEqual(["/plugins/providers/airtable.png", "/plugins/providers/airtable.png",
+        "/plugins/providers/github.png", "/plugins/providers/github.png", "/plugins/providers/zeta-tools.png"]);
       await search.fill("zeta");
       await expect.poll(names).toEqual(["Zeta Tools"]);
       await search.fill("");
