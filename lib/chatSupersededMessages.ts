@@ -83,8 +83,15 @@ export async function markMessagesSuperseded(
  * older bundle, another device, the native apps) gets the same context as the
  * one that did. The last message is the one being answered and always stays.
  * `replacing` is the turn this very request replaces, left out at once.
+ *
+ * A message sent without an id (the id is optional in the chat API) is matched
+ * by role and text instead, in order: each replaced row takes the earliest
+ * id-less message with the same role and text that no other row took. A
+ * replaced turn always comes before the turn that replaced it, and a
+ * regenerate asks the same question again, so the earliest copy is the
+ * replaced one and the question that stands keeps its place.
  */
-export async function withoutSupersededChatMessages<T extends { id?: string }>(input: {
+export async function withoutSupersededChatMessages<T extends { id?: string; role?: string; content?: unknown }>(input: {
   userId: string | null | undefined;
   conversationId: string | null | undefined;
   messages: T[];
@@ -94,16 +101,31 @@ export async function withoutSupersededChatMessages<T extends { id?: string }>(i
   if (!userId || !conversationId || messages.length < 2) return messages;
   const rows = await prisma.message.findMany({
     where: { conversationId, supersededAt: { not: null }, conversation: { userId } },
-    select: { id: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, role: true, content: true },
   });
   const excluded = new Set([...rows.map((row) => row.id), ...bothSpellings(conversationId, replacing)]);
   if (excluded.size === 0) return messages;
   const last = messages.length - 1;
-  const kept = messages.filter(
-    (message, index) =>
-      index === last ||
-      !message.id ||
-      !(excluded.has(message.id) || excluded.has(scopedMessageId(conversationId, message.id)))
-  );
-  return kept.length === messages.length ? messages : kept;
+  const dropped = new Set<number>();
+  messages.forEach((message, index) => {
+    if (index !== last && message.id && (excluded.has(message.id) || excluded.has(scopedMessageId(conversationId, message.id)))) {
+      dropped.add(index);
+    }
+  });
+  if (messages.some((message, index) => index !== last && !message.id)) {
+    for (const row of rows) {
+      const match = messages.findIndex(
+        (message, index) =>
+          index !== last &&
+          !message.id &&
+          !dropped.has(index) &&
+          message.role === row.role &&
+          typeof message.content === "string" &&
+          message.content === row.content
+      );
+      if (match !== -1) dropped.add(match);
+    }
+  }
+  return dropped.size === 0 ? messages : messages.filter((_, index) => !dropped.has(index));
 }

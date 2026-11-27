@@ -466,3 +466,35 @@ test("a guest conversation imported on sign-in keeps its replaced turn in its hi
   );
   assert.equal(refused.status, 400);
 });
+
+test("a transcript sent without ids still leaves the replaced turn out, and a regenerated question keeps its place", async () => {
+  const owner = await createUser();
+  const conversation = await createConversation(owner.id);
+  // A regenerate: the same question asked again, a different answer.
+  await seedTurns(conversation.id, [
+    ["q1", "SAME-QUESTION"],
+    ["a1", "REPLACED-ANSWER"],
+    ["q2", "SAME-QUESTION"],
+    ["a2", "STANDING-ANSWER"],
+  ]);
+  signInAs(owner);
+  await put(conversation.id, { messageIds: ["q1", "a1"] });
+
+  // The id is optional in the chat API: an older client sends none.
+  const response = await ask(conversation.id, [
+    { role: "user", content: "SAME-QUESTION" },
+    { role: "assistant", content: "REPLACED-ANSWER" },
+    { role: "user", content: "SAME-QUESTION" },
+    { role: "assistant", content: "STANDING-ANSWER" },
+    { role: "user", content: "NEXT-QUESTION" },
+  ]);
+  assert.equal(response.status, 200, await response.clone().text());
+  await drain(response);
+  assert.ok(providerMessages.length >= 1, "the provider was never called");
+  const sent = sentText();
+  assert.doesNotMatch(sent, /REPLACED-ANSWER/);
+  // One copy of the question goes: the replaced one. The one that stands stays.
+  assert.equal(sent.split("SAME-QUESTION").length - 1, 1);
+  assert.match(sent, /STANDING-ANSWER/);
+  assert.match(sent, /NEXT-QUESTION/);
+});
