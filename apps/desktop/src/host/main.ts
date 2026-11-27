@@ -3704,6 +3704,7 @@ function registerIpc() {
     return true;
   });
   main("desktop:voice-arm", () => voice.arm());
+  main("desktop:voice-disarm", () => voice.disarm());
   main("desktop:voice-request", (value) => voice.request(voiceRequestInput.parse(value)));
   main("desktop:voice-abort", (value) => voice.abort(z.uuid().parse(value)));
   main("desktop:dictation-arm", () => {
@@ -4452,7 +4453,8 @@ else {
       suspended = true;
       geolocationGrant = undefined;
       stopDictation(true);
-      voice.stop(false);
+      // A sleeping computer cannot be relied on to let the window end its own session: this process ends it now.
+      voice.stop(true);
       stop();
       parallel.lanes.stopAll();
     });

@@ -35,6 +35,7 @@ export function DesktopVoiceConversation({ language, capability, conversationId,
   const close = useCallback(() => {
     client.current?.destroy();
     client.current = null;
+    void window.desktop.disarmVoice().catch(() => {});
     setOpen(false);
     setState(null);
     callbacks.current.onSessionEnded?.();
@@ -71,6 +72,8 @@ export function DesktopVoiceConversation({ language, capability, conversationId,
       },
       onChange: (next) => {
         setState(next);
+        // A press of Start that ended or failed is spent: the next session needs a new press.
+        if (next.status === "ended" || next.status === "error") void window.desktop.disarmVoice().catch(() => {});
         if (next.status === "ended" && !next.billingPending) callbacks.current.onSessionEnded?.();
       },
       onRequest: (text) => callbacks.current.onRequest(text),

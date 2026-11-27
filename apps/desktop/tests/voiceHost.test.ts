@@ -67,6 +67,10 @@ test("a session starts only behind the microphone that was opened for it, one at
   assert.equal(sent.length, 0);
   host.arm();
   assert.equal((await host.request(start())).status, 403, "armed, but the microphone was never opened");
+  // That attempt spent the press.
+  host.microphoneOpened();
+  assert.equal((await host.request(start())).status, 403);
+  host.arm();
   host.microphoneOpened();
   const first = start();
   assert.deepEqual(await host.request(first), { status: 200, stream: true });
@@ -141,4 +145,56 @@ test("ending the account's sessions tells the window once, and cuts the open req
   assert.equal(aborted, true);
   assert.deepEqual(events.at(-1), { id: first.id, end: "error" });
   host.abort(crypto.randomUUID());
+});
+
+test("a press of Start is spent by time, by a start, by a failed start and by closing the conversation", async () => {
+  const { host, state, sent } = harness({ reply: () => Response.json({ code: "VOICE_PROVIDER_UNAVAILABLE" }, { status: 502 }) });
+  // Too late: the microphone was opened, but the start comes after the press has run out.
+  host.arm(); host.microphoneOpened();
+  state.now += 15_001;
+  assert.equal((await host.request(start())).status, 403);
+  assert.equal(sent.length, 0);
+  // Opening the microphone gives the start its own few seconds, counted from then.
+  host.arm();
+  state.now += 14_000;
+  host.microphoneOpened();
+  state.now += 14_000;
+  assert.equal((await host.request(start())).status, 502, "sent in time; the server refused it");
+  // That start failed, and the press went with it: nothing starts later without a new one.
+  assert.equal((await host.request(start())).status, 403);
+  assert.equal(sent.length, 1);
+  // The window closed the conversation (or it ended in an error) before any start.
+  host.arm(); host.microphoneOpened();
+  host.disarm();
+  assert.equal((await host.request(start())).status, 403);
+  assert.equal(host.mayOpenMicrophone(), false);
+  assert.equal(sent.length, 1);
+});
+
+test("on sleep, a closed window or a lost account this process ends the session itself: it asks the server to stop it and closes the stream", async () => {
+  const stream = session();
+  let aborted = false;
+  const { host, sent, events } = harness({ reply: (body, signal) => {
+    if (body.action !== "start") return Response.json({ ok: true });
+    signal.addEventListener("abort", () => { aborted = true; stream.fail(); });
+    return stream.response;
+  } });
+  host.arm(); host.microphoneOpened();
+  const first = start();
+  await host.request(first);
+  // The session's name arrives in its first event, split across two pieces here.
+  stream.push("data: {\"type\":\"ready\",\"reservationId\":\"voice-");
+  stream.push("r7\",\"sdp\":\"v=0\"}\n\n");
+  await settle();
+  host.stop(true);
+  await settle();
+  assert.deepEqual(sent.at(-1), { action: "stop", reservationId: "voice-r7" });
+  assert.equal(aborted, true);
+  assert.deepEqual(events.at(-1), { id: first.id, end: "error" });
+  assert.equal(host.active(), false);
+  // Nothing is left to end, so nothing more is sent.
+  const count = sent.length;
+  host.stop(true);
+  await settle();
+  assert.equal(sent.length, count);
 });

@@ -68,6 +68,7 @@ if (trustedWindow) {
       return () => ipcRenderer.removeListener("desktop:dictation-stop", onStop);
     },
     armVoice: () => ipcRenderer.invoke("desktop:voice-arm"),
+    disarmVoice: () => ipcRenderer.invoke("desktop:voice-disarm"),
     voiceRequest: (input: Parameters<DesktopApi["voiceRequest"]>[0]) => ipcRenderer.invoke("desktop:voice-request", input),
     abortVoice: (id: string) => ipcRenderer.invoke("desktop:voice-abort", id),
     subscribeVoiceStream(listener: Parameters<DesktopApi["subscribeVoiceStream"]>[0]) {

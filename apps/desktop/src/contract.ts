@@ -468,6 +468,8 @@ export type DesktopApi = {
   subscribeDictationStop: (listener: () => void) => () => void;
   /** The person pressed Start in the voice conversation: the main window may open the microphone once. */
   armVoice: () => Promise<boolean>;
+  /** That press is over (the conversation was closed, ended or failed): it starts no session later. */
+  disarmVoice: () => Promise<void>;
   voiceRequest: (input: VoiceRequestInput) => Promise<VoiceReply>;
   abortVoice: (id: string) => Promise<void>;
   subscribeVoiceStream: (listener: (event: VoiceStreamEvent) => void) => () => void;
