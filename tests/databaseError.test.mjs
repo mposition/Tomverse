@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import {
+  DatabaseWriteOutcomeUnknownError,
   databaseErrorMetadata,
   hasDatabaseSqlstate,
   isCheckViolationDatabaseError,
@@ -146,26 +147,34 @@ test("a failed try that in fact committed is not written twice", async () => {
   assert.equal(writes, 1);
 });
 
-test("a non-retryable failure is thrown at once, with no commit check", async () => {
+test("a non-retryable failure is not retried, but is still checked before it is called a rollback", async () => {
   const unique = Object.assign(new Error("duplicate"), { code: "P2002" });
+  let writes = 0;
   let checks = 0;
+  const delays = [];
   await assert.rejects(
     runRetryableDatabaseWrite({
       write: async () => {
+        writes += 1;
         throw unique;
       },
       committed: async () => {
         checks += 1;
         return false;
       },
-      sleep: noSleep,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
     }),
+    // Checked and not found: the write's own error, meaning "not committed".
     (error) => error === unique
   );
-  assert.equal(checks, 0);
+  assert.equal(writes, 1);
+  assert.equal(checks, 1);
+  assert.deepEqual(delays, [], "nothing to wait for when no retry follows");
 });
 
-test("an unreadable outcome is never retried", async () => {
+test("an unreadable outcome is never retried and is reported as unknown, not as the write's error", async () => {
   const conflict = writeConflict();
   let writes = 0;
   await assert.rejects(
@@ -179,9 +188,25 @@ test("an unreadable outcome is never retried", async () => {
       },
       sleep: noSleep,
     }),
-    (error) => error === conflict
+    (error) => error instanceof DatabaseWriteOutcomeUnknownError && error.cause === conflict
   );
   assert.equal(writes, 1);
+});
+
+test("a non-retryable failure whose outcome cannot be read is unknown too", async () => {
+  const odd = new Error("socket hang up during COMMIT");
+  await assert.rejects(
+    runRetryableDatabaseWrite({
+      write: async () => {
+        throw odd;
+      },
+      committed: async () => {
+        throw new Error("still down");
+      },
+      sleep: noSleep,
+    }),
+    (error) => error instanceof DatabaseWriteOutcomeUnknownError && error.cause === odd
+  );
 });
 
 test("at most two more tries, then the last failure is checked once more and thrown", async () => {

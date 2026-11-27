@@ -1952,16 +1952,20 @@ export function ChatMessageList({
                     </p>
                   )}
                   {/*
-                    The server streamed this answer and could not save it, so
-                    a reload will not show it. Only ever on the live message:
-                    the flag is runtime-only and never serialized.
+                    The server streamed this answer and did not save it (a
+                    reload will not show it), or could not confirm that it did
+                    (a reload will tell). Only ever on the live message: the
+                    flag is runtime-only and never serialized.
                   */}
-                  {!isUser && msg.notSaved && msg.status !== "error" && (
+                  {!isUser && msg.persistence && msg.status !== "error" && (
                     <p
                       data-testid="response-not-saved-notice"
+                      data-persistence={msg.persistence}
                       className="mt-3 border-t border-zinc-200 pt-2 text-[11px] leading-4 font-semibold text-zinc-500 dark:border-zinc-700/60 dark:text-zinc-400"
                     >
-                      {t("chat.responseNotSavedNotice")}
+                      {t(msg.persistence === "unknown"
+                        ? "chat.responseSaveUnknownNotice"
+                        : "chat.responseNotSavedNotice")}
                     </p>
                   )}
                   {!isUser && msg.status === "cancelled" && (

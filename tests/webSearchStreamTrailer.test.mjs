@@ -257,14 +257,16 @@ test("an old client reading a new trailer still gets its citations", () => {
   assert.equal(parsed.completion.status, "incomplete");
 });
 
-test("notSaved round-trips only as true, and alone still makes an envelope", () => {
+test("persistence round-trips only as not_saved or unknown, and alone still makes an envelope", () => {
   const json = (trailer) =>
     splitSearchMetadataTrailer(buildChatStreamTrailerChunk(trailer)).searchMetadataJson;
-  assert.equal(parseChatStreamTrailer(json({ searchMetadata: null, notSaved: true }))?.notSaved, true);
-  assert.equal(parseChatStreamTrailer(json({ searchMetadata: null }))?.notSaved, undefined);
-  assert.equal(parseChatStreamTrailer(JSON.stringify({ notSaved: "yes" }))?.notSaved, undefined);
-  const alone = parseChatStreamTrailer(JSON.stringify({ notSaved: true }));
-  assert.equal(alone?.notSaved, true);
+  for (const persistence of ["not_saved", "unknown"]) {
+    assert.equal(parseChatStreamTrailer(json({ searchMetadata: null, persistence }))?.persistence, persistence);
+  }
+  assert.equal(parseChatStreamTrailer(json({ searchMetadata: null }))?.persistence, undefined);
+  assert.equal(parseChatStreamTrailer(JSON.stringify({ persistence: "saved" }))?.persistence, undefined);
+  const alone = parseChatStreamTrailer(JSON.stringify({ persistence: "unknown" }));
+  assert.equal(alone?.persistence, "unknown");
   assert.equal(alone?.searchMetadata, null);
 });
 

@@ -82,6 +82,8 @@ let script: Script = { first: "Partial.", then: "finish", rest: " The end." };
 let releaseRest = () => {};
 let providerAbortReason: unknown = null;
 let providerCancelled = false;
+/** Runs as the provider is called -- after dispatch, before the Response exists. */
+let onProviderCall: (() => void) | null = null;
 
 mock.module("ai", {
   namedExports: {
@@ -92,6 +94,7 @@ mock.module("ai", {
       };
       if (options.abortSignal?.aborted) observeAbort();
       else options.abortSignal?.addEventListener("abort", observeAbort, { once: true });
+      onProviderCall?.();
       let text = "";
       const finished = new Promise<void>((settle) => {
         releaseRest = settle;
@@ -262,6 +265,10 @@ const world = {
   messages: [] as Array<{ id: string; content?: unknown }>,
   /** Errors the next assistant `message.create` calls throw, in order. */
   createFailures: [] as unknown[],
+  /** Errors thrown by the next transactions *after* they committed. */
+  commitAckLost: [] as unknown[],
+  /** The route's read-back of its own assistant row fails. */
+  commitCheckFails: false,
 };
 
 const DEFAULTS: Record<string, () => unknown> = {
@@ -298,7 +305,16 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     findFirst: () => conversationRow,
   },
   message: {
-    findFirst: () => ({ id: SOURCE_MESSAGE_ID }),
+    findFirst: ((args: { where?: { role?: string } }) => {
+      // The route's commit check reads its own assistant row back.
+      if (args?.where?.role === "assistant" && world.commitCheckFails) {
+        throw Object.assign(new Error("connection closed"), {
+          name: "PrismaClientKnownRequestError",
+          code: "P1017",
+        });
+      }
+      return { id: SOURCE_MESSAGE_ID };
+    }) as (args: never) => unknown,
     create: (args: { data: { id: string; content?: unknown } }) => {
       const failure = world.createFailures.shift();
       if (failure) throw failure;
@@ -326,10 +342,14 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
   get: (target, property: string) => {
     if (property === "then") return undefined;
     if (property === "$transaction") {
-      return async (arg: unknown) =>
-        typeof arg === "function"
-          ? (arg as (tx: unknown) => unknown)(prismaProxy)
-          : Promise.all(arg as unknown[]);
+      return async (arg: unknown) => {
+        if (typeof arg !== "function") return Promise.all(arg as unknown[]);
+        const result = await (arg as (tx: unknown) => unknown)(prismaProxy);
+        // The COMMIT went through and its acknowledgement was lost.
+        const lostAck = world.commitAckLost.shift();
+        if (lostAck) throw lostAck;
+        return result;
+      };
     }
     if (property === "$connect" || property === "$disconnect") return async () => undefined;
     if (property === "$executeRaw" || property === "$executeRawUnsafe") return async () => 0;
@@ -476,10 +496,13 @@ const start = async (next: Script, switchOn: boolean) => {
     /** Reads the rest of the body, as a reader that stayed would. */
     readToEnd: async () => {
       const keep = setInterval(() => {}, 20);
+      const decoder = new TextDecoder();
+      let body = "";
       try {
         for (;;) {
           const read = await reader.read().catch(() => ({ done: true as const, value: undefined }));
-          if (read.done) return;
+          if (read.done) return body;
+          body += decoder.decode(read.value, { stream: true });
         }
       } finally {
         clearInterval(keep);
@@ -703,4 +726,111 @@ test("a durable answer the provider broke off is saved incomplete, settled prora
   assert.equal(row?.status, "completed");
   assert.deepEqual(health.providerFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
   assert.deepEqual(health.modelFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Review r-20261127-023116-0f6e2b                                             */
+/* -------------------------------------------------------------------------- */
+
+/*
+  Major 1. A Stop pressed before the response's headers reached the browser
+  aborted the fetch without the stop request (the browser only learns from the
+  header that it must say one), and a server with the switch on detached that
+  abort as a dropped connection and finished -- charged as completed. An abort
+  that arrives before the Response is published is a cancel, as with the
+  switch off: the browser has received nothing and cannot reattach.
+*/
+test("switch on: an abort after dispatch but before the response is published cancels, never continues", async () => {
+  script = { first: "Partial.", then: "finish", rest: " The end." };
+  providerAbortReason = null;
+  providerCancelled = false;
+  row = null;
+  terminals.length = 0;
+  world.messages = [];
+  ledger.settlements = [];
+  ledger.releases = [];
+  process.env.CHAT_CONTINUE_AFTER_DISCONNECT = "on";
+  const connection = new AbortController();
+  onProviderCall = () => connection.abort("stop pressed before the headers arrived");
+  try {
+    const { POST } = await loadRoute();
+    const anchor = setInterval(() => {}, 20);
+    const response = await POST(
+      new Request("http://127.0.0.1:3100/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "긴 답을 써 줘", id: SOURCE_MESSAGE_ID }],
+          modelId: MODEL_ID,
+          conversationId: CONVERSATION_ID,
+          assistantMessageId: ASSISTANT_MESSAGE_ID,
+          sourceUserMessageId: SOURCE_MESSAGE_ID,
+        }),
+        signal: connection.signal,
+      })
+    ).finally(() => clearInterval(anchor));
+    // The provider finishes at once: a turn that was (wrongly) detached
+    // would now complete, not stall into the idle cancel.
+    releaseRest();
+    await response.body?.cancel().catch(() => undefined);
+    await until("the settlement", () => ledger.settlements.length > 0);
+    await pause(150);
+    assert.equal(ledger.settlements[0].outcome, "cancelled");
+    assert.equal(ledger.settlements.length, 1);
+    assert.notEqual(providerAbortReason, null, "the provider must be aborted, not left generating");
+    assert.deepEqual(world.messages, []);
+    assert.ok(!terminals.some((t) => t.status === "completed"), "a stopped turn was completed");
+  } finally {
+    onProviderCall = null;
+  }
+});
+
+/*
+  Major 2 on the durable path. The COMMIT went through, its acknowledgement
+  was lost, and the commit check failed too: the outcome is unknown. Nothing
+  may be decided on a guess -- the terminal `failed` CAS is refused by the
+  committed row rather than written over it, and the stream ends without a
+  signed failure so the browser reads the attempt row, which says completed.
+*/
+test("a durable write whose commit is unknown leaves the attempt row the judge", async () => {
+  const previousSecret = process.env.ERROR_REPORT_SIGNING_SECRET;
+  process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
+  health.providerFailures = [];
+  world.commitAckLost = [retryableWriteError()];
+  world.commitCheckFails = true;
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    const body = await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    assert.equal(world.messages.length, 1, "the transaction committed");
+    assert.equal(row?.status, "completed");
+    assert.deepEqual(terminals.map((t) => t.status), ["completed"], "a committed attempt was marked failed");
+    assert.doesNotMatch(body, /TOMVERSE_SEARCH_METADATA/, "a signed failure would stop the browser reading the attempt");
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
+    assert.deepEqual(health.providerFailures, []);
+  } finally {
+    world.commitAckLost = [];
+    world.commitCheckFails = false;
+    if (previousSecret === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previousSecret;
+  }
+});
+
+test("a durable write known not to have committed still ends with its signed failure", async () => {
+  const previousSecret = process.env.ERROR_REPORT_SIGNING_SECRET;
+  process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
+  world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    const body = await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
+    assert.match(body, /TOMVERSE_SEARCH_METADATA/);
+  } finally {
+    world.createFailures = [];
+    if (previousSecret === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previousSecret;
+  }
 });

@@ -223,10 +223,10 @@ export const settleInterruptedChatAttempt = (
  * Best effort and never thrown: the abort that accompanies it still ends
  * everything on this side, and a server with the switch off ignores it.
  */
-export const requestChatAttemptStop = async (
+const postChatAttemptStop = async (
   assistantMessageId: string,
-  fetchImpl: typeof fetch = fetch
-): Promise<boolean> => {
+  fetchImpl: typeof fetch
+): Promise<number | null> => {
   try {
     const response = await fetchImpl(
       `/api/products/chat/attempts/${encodeURIComponent(assistantMessageId)}`,
@@ -239,9 +239,60 @@ export const requestChatAttemptStop = async (
       }
     );
     await response.body?.cancel().catch(() => undefined);
-    return response.ok;
+    return response.status;
   } catch {
-    return false;
+    return null;
+  }
+};
+
+/** One stop request; true when the server answered it with a 2xx. */
+export const requestChatAttemptStop = async (
+  assistantMessageId: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<boolean> => {
+  const status = await postChatAttemptStop(assistantMessageId, fetchImpl);
+  return status !== null && status >= 200 && status < 300;
+};
+
+/**
+ * Waits between stop requests that found no attempt row yet. Together about
+ * thirty seconds: longer than the route's work before it claims the row.
+ */
+export const CHAT_ATTEMPT_STOP_RETRY_DELAYS_MS: readonly number[] = [
+  1_000, 2_000, 4_000, 8_000, 15_000,
+];
+
+/**
+ * A stop pressed as the request leaves, said until a row hears it.
+ *
+ * The stop can overtake the request it stops: it may reach the server before
+ * the streaming route has claimed this turn's attempt row, and then it finds
+ * nothing (404) and records nothing. A route that saw the abort before its
+ * response went out cancels on its own; one that only learns of it later
+ * detaches and keeps generating, and the next stop request finds the row and
+ * stops it. So a 404 is retried on a bounded schedule; anything else -- the
+ * row was found (stopped, or already terminal), the server refused, or the
+ * network failed -- ends it, as a single stop always did.
+ */
+export const requestChatAttemptStopUntilFound = async (
+  assistantMessageId: string,
+  options: {
+    fetchImpl?: typeof fetch;
+    delaysMs?: readonly number[];
+    sleep?: (ms: number) => Promise<void>;
+  } = {}
+): Promise<boolean> => {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const sleep =
+    options.sleep ??
+    ((ms: number) => new Promise<void>((settle) => setTimeout(settle, ms)));
+  const pending = [...(options.delaysMs ?? CHAT_ATTEMPT_STOP_RETRY_DELAYS_MS)];
+  for (;;) {
+    const status = await postChatAttemptStop(assistantMessageId, fetchImpl);
+    if (status !== 404) return status !== null && status >= 200 && status < 300;
+    const delay = pending.shift();
+    if (delay === undefined) return false;
+    await sleep(delay);
   }
 };
 

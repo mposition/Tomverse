@@ -421,6 +421,7 @@ export const pt = {
         responseIncomplete: "A resposta parou no limite de comprimento de saída.",
         responseIncompleteNotice: "A resposta foi interrompida pelo limite de comprimento de saída. Você pode continuar com uma pergunta de acompanhamento.",
         responseNotSavedNotice: "Esta resposta não foi salva. Ela não aparecerá depois que você recarregar a página.",
+        responseSaveUnknownNotice: "Não conseguimos confirmar que esta resposta foi salva. Recarregue a página para verificar.",
         responseInterruptedNotice: "A resposta foi interrompida por um problema no provedor de IA. Você pode tentar novamente ou continuar com uma pergunta de acompanhamento.",
         responseFailed: "A solicitação falhou.",
         traceId: "ID de rastreamento",

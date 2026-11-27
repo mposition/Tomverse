@@ -107,12 +107,13 @@ export type Message = {
   /** Runtime-only recovery notice, never mixed into a partial answer body. */
   recoveryNotice?: string;
   /**
-   * Runtime-only: the server streamed this answer but could not save it
-   * (the stream trailer's `notSaved`), so a reload will not show it. Never
+   * Runtime-only: the server streamed this answer but did not save it (the
+   * stream trailer's `persistence`) -- `not_saved`, a reload will not show
+   * it; `unknown`, whether it was saved could not be checked. Never
    * serialized -- the allowlists in lib/chatMessageSerialization.ts do not
    * name it.
    */
-  notSaved?: true;
+  persistence?: "not_saved" | "unknown";
   /**
    * Runtime-only: another model's answer shown in this panel because this
    * panel's model never answered that turn (lib/chatTranscriptGapFill.ts).

@@ -146,6 +146,8 @@ const world = {
   messageCreateFailures: [] as unknown[],
   landsBeforeThrow: false,
   messageCreateCalls: 0,
+  /** The route's read-back of its own assistant row fails (the database is still down). */
+  commitCheckFails: false,
   providerContexts: [] as Array<{ messageId: string }>,
   uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
     sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
@@ -310,10 +312,16 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
   message: {
     // The route's commit check reads the assistant row back; every other
     // lookup is the source prompt.
-    findFirst: ((args: { where?: { id?: string; role?: string } }) =>
-      args?.where?.role === "assistant"
-        ? world.messages.find((message) => message.id === args.where?.id) ?? null
-        : { id: "user-message-1" }) as (args: never) => unknown,
+    findFirst: ((args: { where?: { id?: string; role?: string } }) => {
+      if (args?.where?.role !== "assistant") return { id: "user-message-1" };
+      if (world.commitCheckFails) {
+        throw Object.assign(new Error("connection closed"), {
+          name: "PrismaClientKnownRequestError",
+          code: "P1017",
+        });
+      }
+      return world.messages.find((message) => message.id === args.where?.id) ?? null;
+    }) as (args: never) => unknown,
     create: (args: { data: { id: string; status: string; modelId: string; content?: string } }) => {
       world.messageCreateCalls += 1;
       const failure = world.messageCreateFailures.shift();
@@ -1875,19 +1883,22 @@ const retryableWriteError = () =>
     name: "PrismaClientKnownRequestError",
     code: "P2034",
   });
-type NotSavedTrailer = { notSaved?: true } | null;
+type PersistenceTrailer = { persistence?: "not_saved" | "unknown" } | null;
 const withMessageCreateFailures = async <T,>(
   failures: unknown[],
   landsBeforeThrow: boolean,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  commitCheckFails = false
 ): Promise<T> => {
   world.messageCreateFailures = failures;
   world.landsBeforeThrow = landsBeforeThrow;
+  world.commitCheckFails = commitCheckFails;
   try {
     return await run();
   } finally {
     world.messageCreateFailures = [];
     world.landsBeforeThrow = false;
+    world.commitCheckFails = false;
   }
 };
 
@@ -1900,17 +1911,19 @@ test("a retryable failure of the Message write is run again and the answer is sa
   assert.equal(world.artifactRows.length, 1);
   assert.equal(world.discarded, 0);
   assert.equal(trailer?.artifacts?.[0]!.status, "ready");
-  assert.equal((trailer as NotSavedTrailer)?.notSaved, undefined);
+  assert.equal((trailer as PersistenceTrailer)?.persistence, undefined);
   assert.deepEqual(world.settlements, ["completed"]);
 });
 
-test("a write that landed before its error is found, not written a second time", async () => {
+test("a write that landed before its error is found, not written a second time, and keeps its file", async () => {
   const { trailer } = await withMessageCreateFailures([retryableWriteError()], true, () =>
-    ask({})
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
   );
   assert.equal(world.messageCreateCalls, 1, "the landed write was run again");
   assert.equal(world.messages.length, 1);
-  assert.equal((trailer as NotSavedTrailer)?.notSaved, undefined);
+  // Commit confirmed: the object its row points at stays.
+  assert.equal(world.discarded, 0);
+  assert.equal((trailer as PersistenceTrailer)?.persistence, undefined);
 });
 
 test("a write that keeps failing tells the browser the answer was not saved; billing is unchanged", async () => {
@@ -1921,8 +1934,9 @@ test("a write that keeps failing tells the browser the answer was not saved; bil
   assert.equal(world.messageCreateCalls, 3, "two more tries, no more");
   assert.deepEqual(world.messages, []);
   assert.ok(body.startsWith(ANSWER), "the answer still streamed");
-  assert.equal((trailer as NotSavedTrailer)?.notSaved, true);
-  // The file's row was never written, so neither is its card.
+  assert.equal((trailer as PersistenceTrailer)?.persistence, "not_saved");
+  // The file's row was never written, so neither is its card -- and the
+  // check found no row, so the object is reclaimed.
   assert.equal(trailer?.artifacts, undefined);
   assert.equal(world.discarded, 1);
   // Settled before the write, and not rolled back with it.
@@ -1936,7 +1950,31 @@ test("a non-retryable Message write failure is not retried", async () => {
   });
   const { trailer } = await withMessageCreateFailures([refusal], false, () => ask({}));
   assert.equal(world.messageCreateCalls, 1);
-  assert.equal((trailer as NotSavedTrailer)?.notSaved, true);
+  assert.equal((trailer as PersistenceTrailer)?.persistence, "not_saved");
+});
+
+/*
+  The review's major 2. A COMMIT whose outcome is unknown, and a commit check
+  that fails too, used to fall into the rollback branch and delete the stored
+  file -- although the transaction may have committed, leaving a row and a
+  download card pointing at a deleted object. Nothing is deleted on a guess:
+  the object is left for the orphan sweep, which removes only objects no row
+  references.
+*/
+test("a write whose commit cannot be checked deletes nothing and says the save is unknown", async () => {
+  const { trailer } = await withMessageCreateFailures(
+    [retryableWriteError()],
+    // The dangerous case: it did land before the connection dropped.
+    true,
+    () => ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] }),
+    true
+  );
+  assert.equal(world.messageCreateCalls, 1, "an unknown outcome is never retried");
+  assert.equal(world.discarded, 0, "a file a committed row may point at was deleted");
+  assert.equal((trailer as PersistenceTrailer)?.persistence, "unknown");
+  // No download button for a row that may not exist; a reload shows it if it does.
+  assert.equal(trailer?.artifacts, undefined);
+  assert.deepEqual(world.settlements, ["completed"]);
 });
 
 /* -------------------------------------------------------------------------- */

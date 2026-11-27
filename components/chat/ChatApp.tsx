@@ -87,6 +87,7 @@ import {
   pendingInterruptedChatAttempts,
   recoveredPartialText,
   requestChatAttemptStop,
+  requestChatAttemptStopUntilFound,
   settleInterruptedChatAttempt,
   shouldApplyPolledPartial,
   watchInterruptedChatAttempts,
@@ -1900,6 +1901,35 @@ function ChatAppComponent({
     let streamReadFailed = false;
     let serverReportedFailure = false;
     let detachPageLivenessListeners = () => {};
+    /*
+      The explicit stop a server that goes on after a dropped connection needs
+      (lib/chatContinueAfterDisconnect.ts): its fetch abort alone reads as a
+      disconnect. Armed as the request leaves, on a turn that may be durable,
+      because until the headers arrive nobody here knows whether this server
+      continues -- and a stop pressed in that window must still reach it (a
+      server with the switch off writes nothing). Disarmed once the headers
+      say this turn does not continue. A timeout or an identity switch is not
+      a stop and says nothing.
+    */
+    let stopOnServerArmed = false;
+    const stopOnServer = () => {
+      const cause = getChatRuntimeAbortCause(runKey, controller);
+      if (cause === "user_stop" || cause === "user_stop_all") {
+        // Retried while the attempt row does not exist yet: a stop can
+        // overtake the request that creates it.
+        void requestChatAttemptStopUntilFound(assistantMessageId);
+      }
+    };
+    const armStopOnServer = () => {
+      if (stopOnServerArmed) return;
+      stopOnServerArmed = true;
+      controller.signal.addEventListener("abort", stopOnServer, { once: true });
+    };
+    const disarmStopOnServer = () => {
+      if (!stopOnServerArmed) return;
+      stopOnServerArmed = false;
+      controller.signal.removeEventListener("abort", stopOnServer);
+    };
     const buildErrorReport = (
       traceId: string | null,
       errorCode: string,
@@ -2319,9 +2349,20 @@ function ChatAppComponent({
             ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
             : {}),
         };
+        // The same scope the server makes durable: an account Chat turn in
+        // its conversation, not a Review projection or a research job.
+        const mayContinueAfterDisconnect =
+          !isGuestMode &&
+          !researchMode &&
+          !deepResearchDepth &&
+          transcriptScope === "conversation" &&
+          !reviewProvider &&
+          Boolean(targetChatId);
         const post = (path: string, fields: Record<string, unknown>) => {
           const body = JSON.stringify({ ...requestBody, ...fields });
           controller.signal.throwIfAborted();
+          // Before the request leaves, not when its headers arrive.
+          if (mayContinueAfterDisconnect) armStopOnServer();
           if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
           return fetch(path, {
           method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
@@ -2359,6 +2400,11 @@ function ChatAppComponent({
         // own thinking time share it instead of chaining two full budgets.
         latency.headers(res);
         liveness.noteHeaders();
+        // The headers settle it: only a server that says it continues after a
+        // disconnect needs the stop said out loud.
+        if (res.headers.get(CHAT_CONTINUE_AFTER_DISCONNECT_HEADER) !== "on") {
+          disarmStopOnServer();
+        }
         requestTraceId = res.headers.get("X-Request-ID");
         sourceReceipt = receiptForAttempt(res.headers.get(CONTINUATION_RECEIPT_HEADER), requestTraceId, assistantMessageId);
         if (sourceReceipt) setAssistantMessage(assistantMessageId, assistantText, "pending");
@@ -2686,24 +2732,13 @@ function ChatAppComponent({
         durableStream &&
         response.headers.get(CHAT_CONTINUE_AFTER_DISCONNECT_HEADER) === "on"
       ) {
-        // This server goes on generating when the connection closes
-        // (lib/chatContinueAfterDisconnect.ts), so the fetch abort a stop
-        // causes is not enough to stop it: the stop is said out loud, in the
-        // same moment. A timeout or an identity switch is not a stop and
-        // says nothing.
-        const stoppedMessageId = assistantMessageId;
-        const stopOnServer = () => {
-          const cause = getChatRuntimeAbortCause(runKey, controller);
-          if (cause === "user_stop" || cause === "user_stop_all") {
-            void requestChatAttemptStop(stoppedMessageId);
-          }
-        };
-        controller.signal.addEventListener("abort", stopOnServer, { once: true });
-        const detachPageListeners = detachPageLivenessListeners;
-        detachPageLivenessListeners = () => {
-          detachPageListeners();
-          controller.signal.removeEventListener("abort", stopOnServer);
-        };
+        // This server goes on generating when the connection closes, so the
+        // fetch abort a stop causes is not enough to stop it: the stop is
+        // said out loud, in the same moment. Armed since the request left;
+        // this keeps it for a turn the header promises will continue.
+        armStopOnServer();
+      } else {
+        disarmStopOnServer();
       }
 
       /*
@@ -2826,9 +2861,11 @@ function ChatAppComponent({
           // "pick another model" is the wrong advice then (2026-11-21).
           `${t(trailer?.failure?.kind === "attachment_rejected"
             ? "chat.responseAttachmentRejected"
-            : trailer?.notSaved
+            : trailer?.persistence === "not_saved"
               ? "chat.responseNotSavedNotice"
-              : "chat.responseEmpty")}${
+              : trailer?.persistence === "unknown"
+                ? "chat.responseSaveUnknownNotice"
+                : "chat.responseEmpty")}${
             requestTraceId
               ? `\n${t("chat.traceId")}: ${requestTraceId}`
               : ""
@@ -2865,8 +2902,9 @@ function ChatAppComponent({
             artifacts,
             isGeneratingArtifact: false,
             generatingArtifactFormat: undefined,
-            // The server could not save this answer; say so under it.
-            ...(trailer?.notSaved ? { notSaved: true as const } : {}),
+            // The server did not (or could not confirm it did) save this
+            // answer; say so under it.
+            ...(trailer?.persistence ? { persistence: trailer.persistence } : {}),
             // Which notice an incomplete answer gets: the output ceiling, or
             // a provider stream that broke off.
             ...(completionStatus === "incomplete" && trailer?.completion?.incompleteReason
@@ -3190,6 +3228,7 @@ function ChatAppComponent({
     } finally {
 	  liveness.stop();
       detachPageLivenessListeners();
+      disarmStopOnServer();
       latency.finish(latencyCompleted ? "completed" :
         controller.signal.aborted && classifyChatAbort(getChatRuntimeAbortCause(runKey, controller)).kind !== "timeout"
           ? "cancelled" : "failed");

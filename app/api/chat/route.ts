@@ -526,6 +526,7 @@ import {
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import {
+    DatabaseWriteOutcomeUnknownError,
     databaseErrorMetadata,
     isDatabaseError,
     runRetryableDatabaseWrite,
@@ -5802,6 +5803,26 @@ async function handleChatPost(
         const clientSignal: AbortSignal = continueAfterDisconnect
             ? turnAbortController.signal
             : req.signal;
+        /*
+          Set as the streaming Response is handed back, so its headers -- and
+          with them `X-Chat-Continue-After-Disconnect` -- can reach the
+          browser. Until then a request abort is what it has always been: the
+          browser has received nothing, cannot reattach, and may be a user
+          whose stop never had the header it needed to be said out loud. So an
+          abort before publication ends the turn exactly as with the switch
+          off -- the turn's own signal follows the request's -- and only a
+          disconnect after it is detached (`detachFromClient`).
+        */
+        let responsePublished = false;
+        if (continueAfterDisconnect) {
+            const endUnpublishedTurn = () => {
+                if (!responsePublished) {
+                    turnAbortController.abort(req.signal.reason ?? "request aborted");
+                }
+            };
+            if (req.signal.aborted) endUnpublishedTurn();
+            else req.signal.addEventListener("abort", endUnpublishedTurn, { once: true });
+        }
         const researchPreviewRunSignal = isResearchPreview
             ? AbortSignal.any([req.signal, AbortSignal.timeout(120_000)])
             : clientSignal;
@@ -6743,6 +6764,13 @@ async function handleChatPost(
          * write -- and the catch below classifies it as such.
          */
         let providerStreamFinished = false;
+        /**
+         * The durable Message write failed and whether it committed is still
+         * unknown. The stream then ends without a signed failure trailer, so
+         * the browser reads the attempt row -- the one record that will say
+         * `completed` or `failed` -- instead of being told it failed.
+         */
+        let messagePersistOutcomeUnknown = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
         /**
          * Set once the client's connection is gone and the turn carries on
@@ -8336,6 +8364,9 @@ async function handleChatPost(
             if (responseDetached) return true;
             if (
                 !continueAfterDisconnect ||
+                // An abort before the Response was published is a cancel:
+                // see `responsePublished`.
+                !responsePublished ||
                 !durableAttempt ||
                 completionCommitted ||
                 released ||
@@ -8847,8 +8878,11 @@ async function handleChatPost(
                             artifactCollector?.toStreamArtifacts() ?? [];
                         /** The Message transaction committed (or was found to have). */
                         let messageCommitted = false;
-                        /** A non-durable answer the browser is showing that was not saved. */
-                        let answerNotSaved = false;
+                        /**
+                         * For a non-durable answer the browser is showing:
+                         * known not saved, or not known to be saved.
+                         */
+                        let answerPersistence: "not_saved" | "unknown" | null = null;
                         if (persistAnswer && conversationId && assistantMessageId) {
                             try {
                                 // A file-only answer is stored with no body,
@@ -9140,12 +9174,41 @@ async function handleChatPost(
                                     error,
                                     dispatched.modelId
                                 );
+                                /*
+                                  Three outcomes, and only one of them may
+                                  delete anything: committed (only the
+                                  read-back after it failed), known not
+                                  committed (the commit check found no row),
+                                  and unknown (the check itself failed --
+                                  `DatabaseWriteOutcomeUnknownError`).
+                                */
+                                const outcomeUnknown =
+                                    !messageCommitted &&
+                                    error instanceof DatabaseWriteOutcomeUnknownError;
                                 if (messageCommitted) {
-                                    // Only the read-back after the commit
-                                    // failed. The Message and its rows exist,
-                                    // so their objects stay and the answer is
-                                    // saved; the cards keep the ids they had.
+                                    // The Message and its rows exist, so their
+                                    // objects stay and the answer is saved;
+                                    // the cards keep the ids they had.
                                     artifactsPersisted = true;
+                                } else if (outcomeUnknown) {
+                                    /*
+                                      The transaction may have committed, and
+                                      its rows may point at these objects:
+                                      nothing is deleted on a guess. If it did
+                                      not commit, the orphan sweep removes
+                                      them later -- it deletes only objects
+                                      older than ARTIFACT_ORPHAN_TTL_MS that no
+                                      MessageArtifact row references
+                                      (lib/generatedArtifactStorage.ts). The
+                                      cards are still dropped: a download
+                                      button for a row that may not exist is
+                                      worse than none, and a reload shows them
+                                      if it does.
+                                    */
+                                    artifactsPersisted = true;
+                                    artifactsForTrailer = [];
+                                    messagePersistOutcomeUnknown = true;
+                                    if (!durableAttempt) answerPersistence = "unknown";
                                 } else {
                                     /*
                                       The message did not land, so nothing can
@@ -9166,7 +9229,7 @@ async function handleChatPost(
                                     // other way to tell the browser: the
                                     // answer it is showing will be gone on
                                     // reload.
-                                    answerNotSaved = !durableAttempt;
+                                    if (!durableAttempt) answerPersistence = "not_saved";
                                 }
                                 if (durableAttempt && durableFinalCheckpoint) {
                                     // Billing has already settled above and is
@@ -9175,6 +9238,17 @@ async function handleChatPost(
                                     // failure immediately outside that aborted
                                     // transaction so recovery never advertises
                                     // an active attempt until lease expiry.
+                                    //
+                                    // For an unknown outcome this CAS also
+                                    // decides it. The Message transaction
+                                    // carries this attempt's own terminal CAS,
+                                    // so the attempt can still take `failed`
+                                    // only if that transaction did not commit;
+                                    // if it did, the row is `completed` and
+                                    // this is refused, and the attempt row --
+                                    // which the browser reads when the stream
+                                    // breaks without a signed failure -- tells
+                                    // the truth either way.
                                     await terminalChatResponseAttempt({
                                         userId: durableAttempt.userId,
                                         assistantMessageId:
@@ -9190,6 +9264,12 @@ async function handleChatPost(
                                         finishReason: "error",
                                         failureCode: "internal_error",
                                     });
+                                    if (outcomeUnknown) {
+                                        // Not committed after all: known now.
+                                        messagePersistOutcomeUnknown = false;
+                                        artifactsPersisted = false;
+                                        await artifactCollector?.discard();
+                                    }
                                     durableAttempt = null;
                                     durableCheckpointWriter = null;
                                     throw error;
@@ -9412,7 +9492,7 @@ async function handleChatPost(
                                 ...(attachmentRejected
                                     ? { failure: { kind: "attachment_rejected" as const } }
                                     : {}),
-                                ...(answerNotSaved ? { notSaved: true as const } : {}),
+                                ...(answerPersistence ? { persistence: answerPersistence } : {}),
                             })
                         );
                         closeSafely(controller);
@@ -9534,6 +9614,7 @@ async function handleChatPost(
                     const completionFailureIsLocal =
                         providerStreamFinished &&
                         (error instanceof ChatAttemptCasError ||
+                            error instanceof DatabaseWriteOutcomeUnknownError ||
                             isDatabaseError(error));
                     const streamFailureIsLocal =
                         isStorageError(error) ||
@@ -9713,7 +9794,11 @@ async function handleChatPost(
                     // The failed turn's error report, on the same terms as the
                     // empty answer's. A Research Preview stop is a limit doing
                     // its job, not a failure to report.
-                    const streamErrorReport = researchStopReason
+                    // No signed failure for a durable answer whose save is
+                    // still unknown: the stream breaks bare, so the browser
+                    // reads the attempt row (lib/chatStreamReattach.ts), which
+                    // ends `completed` with the Message or `failed` without.
+                    const streamErrorReport = researchStopReason || messagePersistOutcomeUnknown
                         ? null
                         : issueStreamErrorReport(
                               "AI_STREAM_FAILED",
@@ -9862,6 +9947,9 @@ async function handleChatPost(
         // throw and an unpublished stream is never pulled. After this the
         // stream's own release paths are the ones that free the slot.
         leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
+        // From here a disconnect may be detached (`detachFromClient`). Any
+        // abort before this line was already handled as a cancel.
+        responsePublished = true;
         return response;
         };
         return await executeTurn(llmPick, routerCallOutcome, preparedContinuation);

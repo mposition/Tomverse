@@ -105,15 +105,38 @@ export const DATABASE_WRITE_RETRY_DELAYS_MS: readonly number[] = [150, 500];
 const FINAL_COMMIT_CHECK_DELAY_MS = 150;
 
 /**
- * Runs a database write again when it failed with a retryable error -- but
- * only once the failed try is known not to have committed.
+ * A write failed and nobody could find out whether it committed.
  *
- * A retryable error does not prove a rollback: a connection that drops during
- * COMMIT leaves the outcome unknown, and running the write again blindly would
- * duplicate it. So every failure is followed by `committed()`, after a short
- * pause, and a write that turns out to have landed is reported as
- * `already_committed` instead of being run again. If that read fails too, the
- * outcome stays unknown and the original error is thrown, never retried.
+ * Distinct from the write's own error on purpose: that error means "it did
+ * not land" (the commit check said so), while this one means "it may have",
+ * and a caller must not do anything destructive -- delete what the write
+ * would have referenced -- on the strength of it. The write's error is on
+ * `cause`.
+ */
+export class DatabaseWriteOutcomeUnknownError extends Error {
+  constructor(cause: unknown) {
+    super("A database write failed and whether it committed is unknown.", {
+      cause,
+    } as ErrorOptions);
+    this.name = "DatabaseWriteOutcomeUnknownError";
+  }
+}
+
+/**
+ * Runs a database write again when it failed with a retryable error -- but
+ * only once the failed try is known not to have committed -- and says, for a
+ * write that finally fails, whether it is known not to have landed.
+ *
+ * No failure proves a rollback on its own: a connection that drops during
+ * COMMIT leaves the outcome unknown, and running the write again blindly
+ * would duplicate it. So every failure is followed by `committed()` (after a
+ * short pause for a retryable one). The three outcomes:
+ *
+ * - committed: `written`, or `already_committed` when the check found it;
+ * - known not committed: the write's own error is thrown, once a retryable
+ *   failure has had its two more tries;
+ * - unknown (the check itself failed): `DatabaseWriteOutcomeUnknownError`,
+ *   never retried.
  *
  * `write` must be safe to run again after a rollback: one transaction, with
  * nothing outside it that the first try already changed.
@@ -134,14 +157,14 @@ export async function runRetryableDatabaseWrite(input: {
       await input.write();
       return "written";
     } catch (error) {
-      if (!isRetryableDatabaseError(error)) throw error;
-      const delay = pending.shift();
-      await sleep(delay ?? FINAL_COMMIT_CHECK_DELAY_MS);
+      const retryable = isRetryableDatabaseError(error);
+      const delay = retryable ? pending.shift() : undefined;
+      if (retryable) await sleep(delay ?? FINAL_COMMIT_CHECK_DELAY_MS);
       let committed: boolean;
       try {
         committed = await input.committed();
       } catch {
-        throw error;
+        throw new DatabaseWriteOutcomeUnknownError(error);
       }
       if (committed) return "already_committed";
       if (delay === undefined) throw error;

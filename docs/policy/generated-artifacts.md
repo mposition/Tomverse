@@ -352,7 +352,10 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   존재하거나 함께 없다.
 - `artifactsPersisted`가 true가 아닌 모든 종료 경로(취소, provider 오류, 클라이언트
   연결 끊김, fallback swap, 메시지 쓰기 실패)는 `releaseSafely()`에서
-  `discard()`로 객체를 회수한다. 기본값이 "회수"다.
+  `discard()`로 객체를 회수한다. 기본값이 "회수"다. **단, 메시지 쓰기의 결과를 알
+  수 없을 때**(COMMIT 결과 불명 + 커밋 확인 조회 실패)는 커밋된 행이 그 객체를
+  가리킬 수 있으므로 지우지 않고 아래 고아 sweep에 맡긴다(2026-11-27). durable turn은
+  attempt의 terminal CAS가 롤백을 확인하면 그때 회수한다.
 - **텍스트 없이 파일만 만든 turn**(모델이 본문 없이 끝났거나 tool step이 모두
   소진된 turn)도 파일이 저장소에 하나라도 저장됐으면 답변이다. 빈 본문의
   assistant 메시지와 파일 행을 같은 트랜잭션에 쓰고 `completed`로 정산한다(파일이

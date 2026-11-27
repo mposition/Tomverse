@@ -190,6 +190,19 @@ settlement; a stop that meets the completion branch's final CAS settles as a
 stop, never as an unbilled failure. With the switch off the endpoint answers
 with the current state and writes nothing.
 
+Only a disconnect after the streaming Response was handed back is detached.
+Before that the browser has received nothing -- not even the
+`X-Chat-Continue-After-Disconnect` header that tells it a stop must be said --
+so an abort that arrives before publication ends the turn exactly as with the
+switch off: the turn's own signal follows the request's, the provider is
+aborted, and the turn settles as the ordinary prorated `cancelled`. The
+browser, for its part, arms the stop request as the durable Chat request
+leaves, not when its headers arrive, and keeps it only if the headers say the
+turn continues. A stop can overtake the request that claims the attempt row;
+one that finds no row yet (404) is sent again on a bounded schedule (about
+thirty seconds in all), so a server that only learns of the abort after
+publication -- and detaches -- still finds the stop in the row.
+
 Visible stream prefixes are coalesced by size or one second, whichever arrives
 first. A small final chunk therefore receives a scheduled checkpoint even when
 no later chunk arrives; terminal flush remains the final owner/revision/database
@@ -217,19 +230,39 @@ attempt is immediately terminalised as a public-safe internal failure rather
 than remaining active until lease expiry.
 
 That transaction is re-run, up to twice after short backoffs, when it fails
-with a retryable database error (`isRetryableDatabaseError`). A failed COMMIT
-has an unknown outcome, so before each re-run (and after the last failure) the
-route reads this turn's assistant Message back; finding its own body and model
-means the earlier try committed and nothing is written again. If that read
-fails too, the outcome stays unknown and the write is not retried. A rollback
-leaves the final checkpoint revision unchanged, so the re-run's terminal CAS
-names the same revision. Settlement still runs before the transaction and is
-not reversed when the write finally fails: the answer was shown and the
-provider ran. A turn without an attempt row (Review panels and other
-non-durable callers) whose Message still cannot be written receives
-`notSaved: true` in its stream trailer, and the browser shows a localized
-"this answer was not saved" notice under the answer instead of ending as if it
-were saved.
+with a retryable database error (`isRetryableDatabaseError`). No failure proves
+a rollback on its own -- a failed COMMIT has an unknown outcome -- so every
+failure is followed by a read of this turn's assistant Message: finding its own
+body and model means the try committed and nothing is written again. A failed
+write therefore ends in one of three outcomes, and only one may delete:
+
+- committed (found by the read): kept, as a success;
+- known not committed (the read found nothing): retried while retryable, and
+  then the generated-file objects are reclaimed as before;
+- unknown (the read failed too, `DatabaseWriteOutcomeUnknownError`): never
+  retried and nothing is deleted. A committed row may point at those objects;
+  if none does, the generated-artifact orphan sweep removes them later (it
+  deletes only objects older than its TTL that no `MessageArtifact` row
+  references). Download cards are not sent for rows that may not exist.
+
+A rollback leaves the final checkpoint revision unchanged, so the re-run's
+terminal CAS names the same revision. Settlement still runs before the
+transaction and is not reversed when the write finally fails: the answer was
+shown and the provider ran.
+
+On a durable turn the route then writes the attempt's terminal `failed` CAS as
+before. For an unknown outcome that CAS also decides it: the Message
+transaction carries the attempt's own terminal CAS, so `failed` can only land
+if that transaction did not commit (the objects are then reclaimed and the
+turn fails as a known failure); if it did commit, the CAS is refused by the
+`completed` row. When the CAS is refused or cannot be written, the outcome is
+still unknown here, and the stream ends without a signed failure trailer so
+the browser reads the attempt row (lib/chatStreamReattach.ts) and shows the
+canonical Message or the failure the row records. A turn without an attempt row (Review panels and other
+non-durable callers) receives `persistence: "not_saved"` (known) or
+`persistence: "unknown"` in its stream trailer, and the browser shows a
+localized notice under the answer -- "not saved", or "could not confirm it was
+saved; reload to check" -- instead of ending as if it were saved.
 
 Finish reasons and failure codes are closed, public-safe classifications shared
 by runtime parsing and database constraints. A failed attempt must use the

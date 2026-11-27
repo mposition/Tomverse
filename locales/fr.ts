@@ -421,6 +421,7 @@ export const fr = {
         responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
         responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
         responseNotSavedNotice: "Cette réponse n'a pas été enregistrée. Elle n'apparaîtra plus après le rechargement.",
+        responseSaveUnknownNotice: "Nous n'avons pas pu confirmer l'enregistrement de cette réponse. Rechargez la page pour vérifier.",
         responseInterruptedNotice: "La réponse a été interrompue par un problème chez le fournisseur d'IA. Vous pouvez réessayer ou poursuivre avec une question complémentaire.",
         responseFailed: "La requête a échoué.",
         traceId: "ID de suivi",

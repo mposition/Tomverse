@@ -80,12 +80,14 @@ export type ChatStreamTrailer = {
    */
   failure?: { kind: "attachment_rejected" };
   /**
-   * The answer streamed in full, but its Message could not be written after
-   * the server's retries -- on a turn with no durable attempt row, so nothing
-   * else will tell the browser that a reload will not show it. Billing is
-   * unaffected (the provider ran and the answer was shown). Absent otherwise.
+   * The answer streamed in full, but its Message was not saved -- on a turn
+   * with no durable attempt row, so nothing else will tell the browser.
+   * `not_saved`: the server's retries failed and it checked that nothing
+   * landed, so a reload will not show it. `unknown`: whether it landed could
+   * not be checked, so a reload is the way to find out. Billing is unaffected
+   * (the provider ran and the answer was shown). Absent otherwise.
    */
-  notSaved?: true;
+  persistence?: "not_saved" | "unknown";
 };
 
 const ERROR_REPORT_TOKEN_MAX_LENGTH = 2_048;
@@ -124,7 +126,7 @@ export function parseChatStreamTrailer(
     !("fileGenerationRetry" in record) &&
     !("errorReport" in record) &&
     !("failure" in record) &&
-    !("notSaved" in record)
+    !("persistence" in record)
   ) {
     return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
@@ -183,7 +185,9 @@ export function parseChatStreamTrailer(
     (record.failure as Record<string, unknown>).kind === "attachment_rejected"
       ? { failure: { kind: "attachment_rejected" as const } }
       : {}),
-    ...(record.notSaved === true ? { notSaved: true as const } : {}),
+    ...(record.persistence === "not_saved" || record.persistence === "unknown"
+      ? { persistence: record.persistence }
+      : {}),
   };
 }
 

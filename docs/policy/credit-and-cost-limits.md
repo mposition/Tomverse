@@ -899,6 +899,13 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 - Stop은 attempt 행에 기록되고(`POST /api/products/chat/attempts/[id]`), 떨어진 turn이
   그 행을 읽어 즉시 `cancelled` 비례 정산합니다. 완료 직전 최종 checkpoint에서 Stop을
   만나도 `failed`(무과금)가 아니라 `cancelled`로 정산합니다.
+- **떨어진 것으로 보는 끊김은 스트리밍 응답이 공개된 뒤의 끊김뿐입니다.** 그 전(응답
+  헤더가 나가기 전)에 온 요청 중단은 스위치와 무관하게 예전처럼 취소이고 `cancelled`
+  비례 정산입니다 — 브라우저는 아직 아무것도, Stop을 알려야 한다는 헤더조차 받지
+  못했습니다. 브라우저는 durable Chat 요청을 보낼 때부터 Stop 요청을 걸어 두고, 행이
+  아직 없어 404를 받으면 짧게 몇 번(합계 약 30초) 다시 보냅니다. Stop을 누른 사용자는
+  어떤 순서에서도 `completed`로 과금되지 않습니다(2026-11-27, 검토
+  r-20261127-023116-0f6e2b).
 - 떨어진 turn도 lease heartbeat, 첫 토큰 기한, 출력 상한, tool step 상한을 그대로
   받습니다. 첫 토큰 이후 provider가 아무 part도 내지 않으면(기본 90초, 브라우저의
   무응답 기준과 같음) 서버가 스스로 비례 `cancelled`로 끝냅니다.
@@ -907,7 +914,8 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 
 provider 스트림이 끝난 뒤 완료 분기가 고르는 정산 outcome입니다. 정산은 Message
 저장보다 먼저 하고, 저장이 실패해도 되돌리지 않습니다(답은 화면에 나갔고 provider
-비용은 발생함).
+비용은 발생함). 저장 결과를 알 수 없을 때(COMMIT 결과 불명 + 확인 조회 실패)는 생성
+파일 객체를 지우지 않습니다(`docs/policy/chat-durable-draft-and-attempt-recovery.md` §4).
 
 - 본문이 있으면 `completed`. 본문이 없어도 **저장소에 저장된 생성 파일이 하나라도**
   있고 메시지를 쓸 대화가 있으면 `completed`입니다(파일이 전달됨).
