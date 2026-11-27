@@ -864,3 +864,40 @@ test("a run claimed before the switch went off holds no credits: the stop is rea
     assert.equal(stored.pauseReason, null, stop);
   }
 });
+
+test("a one-time task stopped by the operator before it could spend stays active and is due again", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId, { frequency: "once", runOnDate: new Date().toISOString().slice(0, 10) });
+  const calls: Call[] = [];
+  const startedAt = Date.now();
+  await runScheduledTasksTick({
+    enabled: async () => true,
+    dispatch: async () => async (request) => {
+      // Turned off between the claim and the reservation.
+      await prisma.appSetting.update({ where: { key: SCHEDULED_TASKS_FLAG_KEY }, data: { value: "false" } });
+      return completingChat(calls)(request);
+    },
+  });
+  const run = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { taskId: task.id } });
+  assert.equal(run.status, "skipped");
+  assert.equal(run.outcome, "feature_disabled");
+  assert.equal(run.reservedCredits, 0);
+  // Not completed: what the person asked for has not been answered.
+  const stored = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(stored.status, "active");
+  assert.equal(stored.pauseReason, null);
+  assert.ok(stored.nextRunAt, "the task is due again");
+  const wait = stored.nextRunAt!.getTime() - startedAt;
+  assert.ok(wait >= SCHEDULED_TASK_LIMITS.minRunIntervalMs && wait < SCHEDULED_TASK_LIMITS.minRunIntervalMs + 60_000, `retry in ${wait} ms`);
+
+  // Back on, and the retry time reached: the task runs once and is then finished.
+  await enable();
+  const retryAt = stored.nextRunAt!;
+  await runScheduledTasksTick({ dispatch: async () => completingChat(calls), now: () => new Date(retryAt.getTime() + 1_000) });
+  const runs = await prisma.scheduledTaskRun.findMany({ where: { taskId: task.id }, orderBy: { startedAt: "asc" } });
+  assert.deepEqual(runs.map((row) => row.status), ["skipped", "succeeded"]);
+  const finished = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(finished.status, "completed");
+  assert.equal(finished.nextRunAt, null);
+});

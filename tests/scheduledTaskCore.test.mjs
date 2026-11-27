@@ -6,6 +6,7 @@ import {
   classifyChatRefusal,
   decideDueOccurrence,
   failureStreakAfter,
+  onceTaskRetryAt,
   nextOccurrence,
   planRunsScheduledTasks,
   scheduleProblem,
@@ -222,4 +223,32 @@ test("the minimum interval holds between real start times, not only between occu
   assert.equal(decision.next?.toISOString(), "2026-11-29T04:00:00.000Z");
   assert.equal(decideDueOccurrence({ ...input, now: new Date("2026-11-28T07:00:00Z"), previousStartedAt: new Date("2026-11-27T10:59:00Z") }).kind,
     "run");
+});
+
+test("a one-time task refused by the platform or stopped by the operator is due again, not finished", () => {
+  const now = new Date("2026-11-28T08:05:00Z");
+  const firstScheduledFor = new Date("2026-11-28T08:00:00Z");
+  const retry = (classification, at = now) => onceTaskRetryAt({ classification, now: at, firstScheduledFor });
+  const interval = SCHEDULED_TASK_LIMITS.minRunIntervalMs;
+
+  // The operator's stop and the platform's refusals: nothing was spent, the task did nothing wrong.
+  for (const outcome of ["feature_disabled", "CHAT_CONCURRENCY_EXCEEDED", "AI_CHAT_DISABLED_BY_ADMIN", "PROVIDER_BUDGET_EXHAUSTED", "API_RATE_LIMITED", "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"]) {
+    const at = retry({ status: "skipped", outcome, pause: null });
+    assert.equal(at?.getTime(), now.getTime() + interval, outcome);
+  }
+  // The retry keeps the distance every two runs keep, so the claim's own interval check admits it.
+  assert.ok(SCHEDULED_TASK_LIMITS.onceRetryWindowMs >= interval);
+
+  // It ran, it failed, its outcome is unknown, or the skip is the task's or the account's own: finished.
+  assert.equal(retry({ status: "succeeded", outcome: "completed", pause: null }), null);
+  assert.equal(retry({ status: "failed", outcome: "provider_error", pause: null }), null);
+  assert.equal(retry({ status: "unknown", outcome: "outcome_unknown", pause: null }), null);
+  assert.equal(retry({ status: "skipped", outcome: "task_changed", pause: null }), null);
+  assert.equal(retry({ status: "skipped", outcome: "web_search_unavailable", pause: null }), null);
+  assert.equal(retry({ status: "skipped", outcome: "CREDIT_BALANCE_INSUFFICIENT", pause: "insufficient_credits" }), null);
+
+  // Bounded: once a retry would fall outside the window after the first time, the task completes.
+  const lastInside = new Date(firstScheduledFor.getTime() + SCHEDULED_TASK_LIMITS.onceRetryWindowMs - interval);
+  assert.ok(retry({ status: "skipped", outcome: "feature_disabled", pause: null }, lastInside));
+  assert.equal(retry({ status: "skipped", outcome: "feature_disabled", pause: null }, new Date(lastInside.getTime() + 1)), null);
 });

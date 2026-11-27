@@ -19,6 +19,7 @@ import {
   decideDueOccurrence,
   failureStreakAfter,
   nextOccurrence,
+  onceTaskRetryAt,
   planRunsScheduledTasks,
   SCHEDULED_TASK_LIMITS,
   scheduledTasksHostProblem,
@@ -150,6 +151,15 @@ async function finalizeRun(
     const task = rows[0];
     if (task && task.status === "active" && task.revision === run.taskRevision) {
       const streak = failureStreakAfter(task.consecutiveFailures, classification);
+      // A one-time task whose run was refused by the platform or stopped by
+      // the operator is not finished: it is due again (onceTaskRetryAt).
+      let retryAt: Date | null = null;
+      if (!streak.pause && task.frequency === "once") {
+        const first = await tx.scheduledTaskRun.aggregate({ where: { taskId: run.taskId }, _min: { scheduledFor: true } });
+        retryAt = first._min.scheduledFor
+          ? onceTaskRetryAt({ classification, now: new Date(), firstScheduledFor: first._min.scheduledFor })
+          : null;
+      }
       await tx.scheduledTask.update({
         where: { id: run.taskId },
         data: {
@@ -157,7 +167,9 @@ async function finalizeRun(
           ...(streak.pause
             ? { status: "paused", pauseReason: streak.pause, nextRunAt: null }
             : task.frequency === "once"
-              ? { status: "completed", nextRunAt: null }
+              ? retryAt
+                ? { nextRunAt: retryAt }
+                : { status: "completed", nextRunAt: null }
               : {}),
         },
       });

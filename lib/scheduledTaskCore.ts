@@ -74,6 +74,13 @@ export const SCHEDULED_TASK_LIMITS = Object.freeze({
    * every missed day at once.
    */
   lateGraceMs: 3 * 60 * 60 * 1_000,
+  /**
+   * How long after its first time a one-time task is still tried again when
+   * its run was refused for a reason that is the platform's or the operator's
+   * (see onceTaskRetryAt). Tries stay minRunIntervalMs apart, so this is at
+   * most three more tries; after it the task completes without an answer.
+   */
+  onceRetryWindowMs: 72 * 60 * 60 * 1_000,
   /** A claimed run that has not finished by then is reconciled, never re-sent. */
   runLeaseMs: 15 * 60 * 1_000,
   /**
@@ -406,6 +413,30 @@ export const classifyAttempt = (
   // an unknown outcome is never sent again.
   if (attempt.leaseExpiresAt.getTime() > now.getTime()) return null;
   return { status: "unknown", outcome: "outcome_unknown", pause: null };
+};
+
+/**
+ * A one-time task has one occurrence, so closing its run normally completes
+ * it. Not when the run was never taken: a refusal that is the platform's
+ * state (PLATFORM_CODES) or the operator's stop (feature_disabled) spent
+ * nothing and says nothing about the task, and completing it then would lose
+ * what the person asked for. Such a task stays active and is due again one
+ * minimum interval later -- the same distance every two runs keep -- for as
+ * long as that is within onceRetryWindowMs of its first time. Null: complete
+ * the task (it ran, failed, was skipped for its own reasons, or the window is
+ * over). Lateness still applies to the retry like to any occurrence.
+ */
+export const onceTaskRetryAt = (input: {
+  classification: RunClassification;
+  now: Date;
+  /** The task's first occurrence: the earliest run's scheduledFor. */
+  firstScheduledFor: Date;
+}): Date | null => {
+  const { classification, now, firstScheduledFor } = input;
+  if (classification.status !== "skipped" || classification.pause !== null) return null;
+  if (classification.outcome !== "feature_disabled" && !PLATFORM_CODES.has(classification.outcome)) return null;
+  const retryAt = new Date(now.getTime() + SCHEDULED_TASK_LIMITS.minRunIntervalMs);
+  return retryAt.getTime() <= firstScheduledFor.getTime() + SCHEDULED_TASK_LIMITS.onceRetryWindowMs ? retryAt : null;
 };
 
 /** Consecutive failures after a run, and whether that run pauses the task. */
