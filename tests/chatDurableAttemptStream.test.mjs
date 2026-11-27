@@ -197,13 +197,23 @@ test("a renewal never runs while text is queued or being checkpointed", async (t
   assert.ok(calls.every((call) => call.partialContent === "x"), JSON.stringify(calls.map((c) => c.partialContent)));
 });
 
-test("the chat route renews the attempt lease from the first-token keepalive tick", async () => {
+test("the chat route renews the attempt lease from the keepalive tick, before and after the first token", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
   const tick = source.slice(source.indexOf("keepaliveWriter = setInterval(() => {"),
     source.indexOf("}, plan.intervalMs);"));
   assert.match(tick, /state: "awaiting_first_token"/);
-  assert.match(tick, /durableCheckpointWriter\?\.renewLease\(\);/);
-  // The tick stops at the first visible token, after which checkpoints renew it.
-  assert.match(tick, /if \(visibleTokenEmitted \|\| streamState !== "open"\) \{\s*stopFirstTokenWatch\(\);/);
+  // Renewed before the phase branch: minutes of tool input after the first
+  // token add no checkpoint either, and would let the lease run out.
+  assert.ok(
+    tick.indexOf("durableCheckpointWriter?.renewLease();") <
+      tick.indexOf("if (!visibleTokenEmitted) {"),
+    "the lease renewal must not be confined to the first-token wait"
+  );
+  // The tick ends only with the stream, not at the first visible token.
+  assert.match(tick, /if \(streamState !== "open"\) \{\s*stopFirstTokenWatch\(\);/);
+  assert.doesNotMatch(tick, /visibleTokenEmitted \|\| streamState/);
+  // After the first token it writes only on provider evidence.
+  assert.match(tick, /state: "provider_active"/);
+  assert.match(tick, /!partsArrived \|\|/);
 });

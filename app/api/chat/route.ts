@@ -6362,6 +6362,33 @@ async function handleChatPost(
         }
         if (hasContinuation) recordAutoSelection();
         const initialAttemptAbortController = new AbortController();
+        /*
+          Evidence that the current provider stream is producing parts.
+
+          Bumped by every SDK stream part of whichever attempt is current --
+          reasoning, tool input, step boundaries, text -- and read by the
+          keepalive tick below. After the first visible token a keepalive goes
+          out only when this moved since the previous tick, so a provider that
+          stopped producing parts stops vouching for itself
+          (lib/chatStreamKeepalive.ts).
+        */
+        let providerPartsObserved = 0;
+        type ProviderPartObserver = (event: {
+            chunk: unknown;
+        }) => PromiseLike<void> | void;
+        const observeProviderParts =
+            (forward: ProviderPartObserver | null): ProviderPartObserver =>
+            (event) => {
+                providerPartsObserved += 1;
+                return forward?.(event);
+            };
+        const forwardedOnChunk = (config: unknown) => {
+            const candidate = (config as { onChunk?: unknown } | null | undefined)
+                ?.onChunk;
+            return typeof candidate === "function"
+                ? (candidate as ProviderPartObserver)
+                : null;
+        };
         // The last error the active provider stream reported through `onError`.
         // Read only by the in-stream error report: an empty answer settles as
         // the SDK's "no output" error, and this is what caused it.
@@ -6481,6 +6508,14 @@ async function handleChatPost(
                             ...projectTools!.prepareStep(options),
                         }),
                     } : {}),
+                    // After every spread, so it wraps the artifact tool's own
+                    // observer (the only other `onChunk` a turn can carry)
+                    // rather than replacing it.
+                    onChunk: observeProviderParts(
+                        researchPreviewExecution
+                            ? null
+                            : forwardedOnChunk(combinedToolConfig)
+                    ),
                     onError: observeStreamError({
                         traceId,
                         modelId: modelConfig.id,
@@ -6671,6 +6706,12 @@ async function handleChatPost(
          * Set once, by the same line that sets `visibleTokenEmitted`.
          */
         let firstVisibleTokenAt: Date | null = null;
+        /**
+         * When the latest visible chunk was handed to the response stream.
+         * The keepalive tick skips an interval in which text went out: the
+         * wire was not silent, so there is nothing to keep alive.
+         */
+        let lastVisibleWriteAt = 0;
         /**
          * Cancels the keepalive writer and the first-token deadline below.
          *
@@ -7303,8 +7344,8 @@ async function handleChatPost(
             }
         };
         /*
-          Keeping the connection alive while the provider thinks, and giving
-          up on it when it never stops.
+          Keeping the connection alive while the provider works, and giving
+          up on it when it never starts.
 
           lib/chatStreamKeepalive.ts carries the whole rationale. In short:
           this deployment sits behind an edge proxy whose read timeout is far
@@ -7317,24 +7358,37 @@ async function handleChatPost(
           can lower either without a deploy.
 
           The keepalive covers whichever attempt is current -- the primary and
-          §7's automatic fallback alike -- because it is tied to "no visible
-          token yet", which is precisely the window a fallback is allowed to
-          happen in. The deadline is absolute from the first pull and is not
-          restarted by a swap: a turn that has shown the user nothing for nine
-          minutes is over regardless of how many models were tried inside it.
+          §7's automatic fallback alike. Before the first visible token it is
+          written on the timer, which is precisely the window a fallback is
+          allowed to happen in, and the deadline below bounds it: absolute from
+          the first pull and not restarted by a swap, because a turn that has
+          shown the user nothing for nine minutes is over regardless of how
+          many models were tried inside it.
+
+          After the first visible token there is no deadline of the server's
+          own, so the timer alone may not vouch for the provider: a tick writes
+          only when the provider stream delivered a part since the previous
+          tick and no visible text went out in that interval. A provider that
+          goes quiet produces no keepalives, and the client's silence watchdog
+          ends the turn exactly as it always did.
         */
         const firstTokenWatchStartedAt = Date.now();
         let keepaliveWriter: ReturnType<typeof setInterval> | null = null;
         let firstTokenDeadline: ReturnType<typeof setTimeout> | null = null;
+        let firstTokenWatchStarted = false;
+        let providerPartsAtLastTick = 0;
+        const clearFirstTokenDeadline = () => {
+            if (firstTokenDeadline) {
+                clearTimeout(firstTokenDeadline);
+                firstTokenDeadline = null;
+            }
+        };
         stopFirstTokenWatch = () => {
             if (keepaliveWriter) {
                 clearInterval(keepaliveWriter);
                 keepaliveWriter = null;
             }
-            if (firstTokenDeadline) {
-                clearTimeout(firstTokenDeadline);
-                firstTokenDeadline = null;
-            }
+            clearFirstTokenDeadline();
         };
         /**
          * Ends a turn whose provider never produced a visible token.
@@ -7395,33 +7449,62 @@ async function handleChatPost(
         const startFirstTokenWatch = (
             controller: ReadableStreamDefaultController<string>
         ) => {
-            if (keepaliveWriter || visibleTokenEmitted) return;
+            // Once per turn. A writer stopped on a terminal path is never
+            // restarted by a later pull.
+            if (firstTokenWatchStarted || visibleTokenEmitted) return;
+            firstTokenWatchStarted = true;
             const plan = resolveChatStreamKeepalivePlan();
             keepaliveWriter = setInterval(() => {
-                if (visibleTokenEmitted || streamState !== "open") {
+                if (streamState !== "open") {
                     stopFirstTokenWatch();
+                    return;
+                }
+                // Checkpoints renew the attempt's lease only when text
+                // arrives; a first token minutes away -- or minutes of tool
+                // input after one -- would otherwise find it expired at the
+                // terminal CAS (2026-11-21).
+                durableCheckpointWriter?.renewLease();
+                const partsArrived =
+                    providerPartsObserved !== providerPartsAtLastTick;
+                providerPartsAtLastTick = providerPartsObserved;
+                if (!visibleTokenEmitted) {
+                    enqueueSafely(
+                        controller,
+                        buildStreamKeepaliveChunk({
+                            state: "awaiting_first_token",
+                            elapsedMs: Date.now() - firstTokenWatchStartedAt,
+                            intervalMs: plan.intervalMs,
+                        })
+                    );
+                    return;
+                }
+                // After the first token: on evidence, and only into silence.
+                if (
+                    !partsArrived ||
+                    Date.now() - lastVisibleWriteAt < plan.intervalMs
+                ) {
                     return;
                 }
                 enqueueSafely(
                     controller,
                     buildStreamKeepaliveChunk({
-                        state: "awaiting_first_token",
+                        state: "provider_active",
                         elapsedMs: Date.now() - firstTokenWatchStartedAt,
+                        intervalMs: plan.intervalMs,
                     })
                 );
-                // Checkpoints renew the attempt's lease only once text
-                // arrives; a first token minutes away would otherwise find
-                // it expired at the terminal CAS (2026-11-21).
-                durableCheckpointWriter?.renewLease();
             }, plan.intervalMs);
             // Same reason as the lease heartbeat: a pending timer must never
             // be why a worker stays up after its request is done.
             keepaliveWriter.unref?.();
             firstTokenDeadline = setTimeout(() => {
-                if (visibleTokenEmitted || streamState !== "open") {
+                firstTokenDeadline = null;
+                if (streamState !== "open") {
                     stopFirstTokenWatch();
                     return;
                 }
+                // Answered in time: the writer carries on, on evidence.
+                if (visibleTokenEmitted) return;
                 void endOnFirstTokenDeadline(controller);
             }, plan.firstTokenDeadlineMs);
             firstTokenDeadline.unref?.();
@@ -7750,6 +7833,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
+                    onChunk: observeProviderParts(null),
                     onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
@@ -8846,16 +8930,19 @@ async function handleChatPost(
                     if (value.length === 0) return;
                     generatedText += value;
                     if (continuation.receipt?.status === "unknown") continuation.receipt.status = "dispatched";
-                    // The user is about to see something, so the keepalive
-                    // window is over -- for this attempt and for the turn:
+                    // The user is about to see something, so the first-token
+                    // deadline is over -- for this attempt and for the turn:
                     // §7 forbids a fallback once a visible token has gone
                     // out, so nothing can put this turn back into the wait.
+                    // The keepalive writer stays, and from here writes only
+                    // on provider evidence (see `startFirstTokenWatch`).
                     visibleTokenEmitted = true;
-                    stopFirstTokenWatch();
+                    clearFirstTokenDeadline();
                     if (!enqueueSafely(controller, value)) {
                         await cancelTurnSafely("response stream is no longer open");
                         return;
                     }
+                    lastVisibleWriteAt = Date.now();
                     // After the enqueue, not before it: a chunk the closed
                     // response refused never reached the stream, and a first
                     // token recorded for it would feed the Router's TTFT
