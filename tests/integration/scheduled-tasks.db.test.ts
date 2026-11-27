@@ -86,8 +86,8 @@ async function seedTask(userId: string, overrides: Record<string, unknown> = {})
 
 type Call = { body: Record<string, unknown>; sessionUserId: string | null };
 
-/** Behaves like the Chat route's durable path: guard, attempt, stream. */
-const completingChat = (calls: Call[], credits = 1): ChatDispatch => async (request) => {
+/** Behaves like the Chat route's durable path: guard, attempt, stream (held open until `until`, if given). */
+const completingChat = (calls: Call[], credits = 1, until?: Promise<void>): ChatDispatch => async (request) => {
   const session = scheduledTaskRunSession(request);
   const body = (await request.json()) as Record<string, string>;
   calls.push({ body, sessionUserId: session?.user?.id ?? null });
@@ -118,9 +118,25 @@ const completingChat = (calls: Call[], credits = 1): ChatDispatch => async (requ
   return new Response(new ReadableStream({
     start(controller) {
       controller.enqueue(new TextEncoder().encode("answer"));
-      controller.close();
+      if (until) void until.then(() => controller.close());
+      else controller.close();
     },
   }), { status: 200 });
+};
+
+const held = () => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  return { released, release };
+};
+
+const eventually = async (check: () => Promise<boolean>, timeoutMs = 5_000) => {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    if (await check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
 };
 
 const refusingChat = (status: number, code: string, calls: Call[] = []): ChatDispatch => async (request) => {
@@ -187,6 +203,67 @@ test("a due task runs once as its account, answers into its own conversation and
   const again = await runScheduledTasksTick({ dispatch: async () => neverCalled() });
   assert.equal(again.claimed, 0);
   assert.equal(await prisma.scheduledTaskRun.count(), 1);
+});
+
+test("with too little time left before its deadline a tick starts nothing and the task stays due", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const result = await runScheduledTasksTick({
+    dispatch: async () => neverCalled(),
+    deadline: Date.now() + SCHEDULED_TASK_LIMITS.runStartReserveMs - 1_000,
+  });
+  assert.equal(result.claimed, 0);
+  assert.equal(result.stoppedForTime, true);
+  assert.equal(await prisma.scheduledTaskRun.count(), 0);
+  assert.equal((await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } })).nextRunAt?.getTime(), task.nextRunAt?.getTime());
+});
+
+test("a turn still answering at the deadline is not cut off: the tick returns and the run settles after it", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const calls: Call[] = [];
+  const stream = held();
+  const started = Date.now();
+  const result = await runScheduledTasksTick({
+    dispatch: async () => completingChat(calls, 1, stream.released),
+    deadline: Date.now() + 500,
+    startReserveMs: 0,
+  });
+  assert.ok(Date.now() - started < 3_000, "the tick returned at its deadline");
+  assert.deepEqual(result.executed, { continues_after_tick: 1 });
+  const running = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { taskId: task.id } });
+  assert.equal(running.status, "running");
+  stream.release();
+  assert.ok(await eventually(async () =>
+    (await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: running.id } })).status === "succeeded"));
+  assert.equal(calls.length, 1);
+});
+
+test("a process that dies mid-turn is settled by the next tick from the Chat attempt, never sent again", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const calls: Call[] = [];
+  const stream = held();
+  await runScheduledTasksTick({ dispatch: async () => completingChat(calls, 1, stream.released), deadline: Date.now() + 300, startReserveMs: 0 });
+  const run = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { taskId: task.id } });
+  assert.equal(run.status, "running");
+  // The worker that was reading the answer is gone; its lease runs out.
+  await prisma.scheduledTaskRun.update({ where: { id: run.id }, data: { leaseExpiresAt: new Date(Date.now() - 1_000) } });
+  const next = await runScheduledTasksTick({ dispatch: async () => neverCalled() });
+  assert.equal(next.reconciled, 1);
+  const settled = await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.runningUserId, null);
+  // The orphaned reader finishing later changes nothing.
+  stream.release();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: run.id } })).status, "succeeded");
+  assert.equal(calls.length, 1);
+  assert.equal(await prisma.chatResponseAttempt.count(), 1);
+  assert.equal((await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } })).consecutiveFailures, 0);
 });
 
 test("two ticks racing for one occurrence produce one run", async () => {

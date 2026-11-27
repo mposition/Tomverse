@@ -283,6 +283,9 @@ export function ScheduledTasksSettings() {
       <p className={`mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400 ${keep}`}>{copy.page.runNote}</p>
 
       {loadFailed && !listing ? <p className="mt-8 text-sm" role="alert">{copy.page.loadFailed}</p> : null}
+      {!loadFailed && !listing ? (
+        <p className="mt-8 text-sm text-zinc-500" role="status" data-testid="scheduled-tasks-loading">{copy.page.loading}</p>
+      ) : null}
 
       {listing && !listing.enabled ? (
         <p className="mt-8 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800" data-testid="scheduled-tasks-unavailable">

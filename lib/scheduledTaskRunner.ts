@@ -58,6 +58,8 @@ export type ScheduledTaskTickResult = {
   skippedLate: number;
   skippedTooSoon: number;
   deferred: number;
+  /** Work was left for the next tick because the deadline was too close. */
+  stoppedForTime: boolean;
   executed: Record<string, number>;
 };
 
@@ -497,7 +499,7 @@ async function eligibility(task: {
   return null;
 }
 
-async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>): Promise<string> {
+async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>, deadline: number): Promise<string> {
   const task = await prisma.scheduledTask.findUnique({
     where: { id: run.taskId },
     select: {
@@ -549,19 +551,39 @@ async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>
   });
 
   const post = await dispatch();
-  const refusalClassification = await runAsScheduledTask(
+  // The whole turn -- dispatch, reading the answer to its end, settling the
+  // run -- is one promise. The tick waits for it only until its deadline; past
+  // that it keeps running here (the Chat stream is pulled by this reader, so
+  // it must keep reading) and settles the run itself. If the process dies
+  // first, the run's lease lapses and the next tick settles it from the Chat
+  // attempt row: the same assistant id, so nothing is sent or charged twice.
+  const finishing = runAsScheduledTask(
     { runId: run.id, userId: run.userId, session, request, creditCeiling: task.creditsPerRun },
-    async (): Promise<RunClassification | null> => {
-      const response = await post(request);
-      if (!response.ok) return classifyChatRefusal(response.status, await readRefusalCode(response));
-      if (response.headers.get("x-chat-response-mode") === "image-turn") {
-        await response.body?.cancel().catch(() => undefined);
-        return { status: "failed", outcome: "image_turn_unsupported", pause: null };
-      }
-      await drain(response, DISPATCH_TIMEOUT_MS);
-      return null;
-    }
-  );
+    () => dispatchAndSettle(run, post, request, prepared.conversationId)
+  ).catch((error: unknown) => {
+    console.warn(JSON.stringify({
+      event: "scheduled_task_run_error",
+      runId: run.id,
+      error: error instanceof Error ? error.name : "unknown",
+      timestamp: new Date().toISOString(),
+    }));
+    return "error";
+  });
+  const waited = await untilDeadline(finishing, deadline);
+  return waited === TIMED_OUT ? "continues_after_tick" : waited;
+}
+
+async function dispatchAndSettle(run: ClaimedRun, post: ChatDispatch, request: Request, conversationId: string) {
+  let refusalClassification: RunClassification | null = null;
+  const response = await post(request);
+  if (!response.ok) {
+    refusalClassification = classifyChatRefusal(response.status, await readRefusalCode(response));
+  } else if (response.headers.get("x-chat-response-mode") === "image-turn") {
+    await response.body?.cancel().catch(() => undefined);
+    refusalClassification = { status: "failed", outcome: "image_turn_unsupported", pause: null };
+  } else {
+    await drain(response, DISPATCH_TIMEOUT_MS);
+  }
 
   const closed = await prisma.scheduledTaskRun.findUnique({
     where: { id: run.id },
@@ -569,10 +591,7 @@ async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>
   });
   const charged = closed ? await chargedCreditsOf(closed) : null;
   if (refusalClassification) {
-    await finalizeRun(run, refusalClassification, {
-      chargedCredits: charged,
-      conversationId: prepared.conversationId,
-    });
+    await finalizeRun(run, refusalClassification, { chargedCredits: charged, conversationId });
     return refusalClassification.outcome;
   }
   const attempt = await prisma.chatResponseAttempt.findFirst({
@@ -582,12 +601,25 @@ async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>
   const classification = classifyAttempt(attempt, new Date());
   // Still owned and alive: reconciliation settles it once the lease decides.
   if (!classification) return "pending_reconciliation";
-  await finalizeRun(run, classification, {
-    chargedCredits: charged,
-    conversationId: prepared.conversationId,
-  });
+  await finalizeRun(run, classification, { chargedCredits: charged, conversationId });
   return classification.outcome;
 }
+
+const TIMED_OUT = Symbol("timed_out");
+
+/** The work's result, or TIMED_OUT at the deadline -- the work itself is not stopped. */
+const untilDeadline = async <T>(work: Promise<T>, deadline: number): Promise<T | typeof TIMED_OUT> => {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return TIMED_OUT;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<typeof TIMED_OUT>((resolve) => {
+      timer = setTimeout(() => resolve(TIMED_OUT), remaining);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 /* ----------------------------------------------------------------- tick -- */
 
@@ -595,12 +627,22 @@ export async function runScheduledTasksTick(input: {
   dispatch: () => Promise<ChatDispatch>;
   enabled?: () => Promise<boolean>;
   now?: () => Date;
+  /**
+   * When this tick must have returned, in epoch ms -- the calling request's
+   * own time limit. Defaults to SCHEDULED_TASK_LIMITS.tickBudgetMs from now.
+   */
+  deadline?: number;
+  /** Time a new run needs left before the deadline to be started at all. */
+  startReserveMs?: number;
 }): Promise<ScheduledTaskTickResult> {
   const result: ScheduledTaskTickResult = {
-    enabled: false, reconciled: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0, executed: {},
+    enabled: false, reconciled: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0,
+    stoppedForTime: false, executed: {},
   };
   if (!(await (input.enabled ?? isScheduledTasksEnabled)())) return result;
   result.enabled = true;
+  const deadline = input.deadline ?? Date.now() + SCHEDULED_TASK_LIMITS.tickBudgetMs;
+  const startReserveMs = input.startReserveMs ?? SCHEDULED_TASK_LIMITS.runStartReserveMs;
   // Read at every decision, not once per tick: a tick can spend many minutes
   // on earlier runs, and lateness is judged when a run is about to start.
   const clock = input.now ?? (() => new Date());
@@ -620,6 +662,12 @@ export async function runScheduledTasksTick(input: {
   const resumable = [...reconciliation.resumable];
   let nextDue = 0;
   const takeWork = async (): Promise<ClaimedRun | null> => {
+    // Nothing new starts without the time to finish inside this request; what
+    // is left stays due (or resumable) for the next tick.
+    if (Date.now() + startReserveMs > deadline) {
+      result.stoppedForTime = resumable.length > 0 || nextDue < due.length;
+      return null;
+    }
     for (let candidate = resumable.shift(); candidate; candidate = resumable.shift()) {
       const taken = await acquireResumable(candidate, clock());
       if (taken.closed) result.reconciled += 1;
@@ -644,7 +692,7 @@ export async function runScheduledTasksTick(input: {
     for (let run = await takeWork(); run; run = await takeWork()) {
       let outcome: string;
       try {
-        outcome = await executeRun(run, input.dispatch);
+        outcome = await executeRun(run, input.dispatch, deadline);
       } catch (error) {
         // An exception is not an answer: the run stays `running` and its lease
         // decides, from the attempt row, what really happened.
@@ -663,11 +711,16 @@ export async function runScheduledTasksTick(input: {
   return result;
 }
 
-/** For the maintenance route: never throws, logs one line. */
-export async function runScheduledTasksQuietly() {
+/**
+ * For the maintenance route: never throws, logs one line. `deadline` is the
+ * route's own time limit (request start + maxDuration, less a margin), so the
+ * tick returns inside the request whatever the platform enforces.
+ */
+export async function runScheduledTasksQuietly(options: { deadline?: number } = {}) {
   try {
     const result = await runScheduledTasksTick({
       dispatch: async () => (await import("@/app/api/chat/route")).POST,
+      deadline: options.deadline,
     });
     if (result.enabled) {
       console.info(JSON.stringify({ event: "scheduled_tasks_tick", ...result, timestamp: new Date().toISOString() }));

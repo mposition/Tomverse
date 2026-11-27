@@ -412,7 +412,10 @@ export async function resumeScheduledTask(
     select: { modelId: true, prompt: true, webSearch: true, creditsPerRun: true, revision: true },
   });
   if (!current) throw new ScheduledTaskError(404, "TASK_NOT_FOUND");
-  const quoted = await quoteScheduledRunCredits({ userId, ...current });
+  // The quote is of the version the person is resuming; the transaction below
+  // checks the same revision again under the row lock.
+  if (current.revision !== expectedRevision) throw new ScheduledTaskError(409, "TASK_CHANGED");
+  const quoted = await quoteScheduledRunCredits({ userId, modelId: current.modelId, prompt: current.prompt, webSearch: current.webSearch });
   if (quoted > current.creditsPerRun && confirmCredits !== quoted) {
     throw new ScheduledTaskError(409, "CREDITS_CONFIRMATION_REQUIRED", { creditsPerRun: quoted });
   }

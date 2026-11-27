@@ -77,6 +77,17 @@ export const SCHEDULED_TASK_LIMITS = Object.freeze({
   claimBatch: 20,
   /** Runs executed at once within one tick. */
   executionConcurrency: 2,
+  /** A tick's time budget when its caller names no deadline. */
+  tickBudgetMs: 240 * 1_000,
+  /**
+   * Time a run needs left before the tick's deadline to be started at all. A
+   * started turn that outlives the deadline is not cut off: it finishes and
+   * settles after the tick returns, or the next tick settles it from its
+   * Chat attempt.
+   */
+  runStartReserveMs: 120 * 1_000,
+  /** Kept free at the end of the calling request's own time limit. */
+  routeDeadlineMarginMs: 30 * 1_000,
 });
 
 /** Only paid plans run unattended work (owner direction for scheduled tasks: Pro and above). */
