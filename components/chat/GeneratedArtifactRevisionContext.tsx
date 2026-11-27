@@ -8,7 +8,8 @@ import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ChatAttachment } from "@/components/chat/types";
 
-type RevisionAction = (artifact: ChatStreamArtifact) => Promise<string | null>;
+/** `change` is what the user wants different, typed in the preview panel; it is added under the standard request. */
+type RevisionAction = (artifact: ChatStreamArtifact, change?: string) => Promise<string | null>;
 export const GeneratedArtifactRevisionContext = createContext<RevisionAction | null>(null);
 export const useArtifactRevisionAction = () => useContext(GeneratedArtifactRevisionContext);
 
@@ -22,7 +23,7 @@ export function useGeneratedArtifactRevision(input: {
 }): RevisionAction | null {
   const operations = useRef(new Map<string, { id: string; pending?: Promise<string | null> }>());
   const { enabled, scopeKey, conversationId, readDraft, updateDraft, t } = input;
-  const prepare = useCallback(async (artifact: ChatStreamArtifact): Promise<string | null> => {
+  const prepare = useCallback(async (artifact: ChatStreamArtifact, change?: string): Promise<string | null> => {
     if (!enabled || !conversationId) return t("chat.artifactRevisionFailed");
     const conflictCopy = (conflict: "count" | "name" | "size") => t(conflict === "count"
       ? "chat.attachmentCountError" : conflict === "size"
@@ -63,7 +64,7 @@ export function useGeneratedArtifactRevision(input: {
             ? "chat.artifactRevisionWorkbookValuesPrompt" : "chat.artifactRevisionWorkbookPrompt"
           : office ? "chat.artifactRevisionOfficePrompt" : "chat.artifactRevisionPrompt";
         const request = t(promptKey)
-          .replaceAll("{filename}", payload.name);
+          .replaceAll("{filename}", payload.name) + (change?.trim() ? `\n${change.trim()}` : "");
         let appendConflict: "count" | "name" | "size" | null = null;
         updateDraft((current) => {
           const result = appendArtifactRevisionDraft(current, attachment, request);
