@@ -54,3 +54,17 @@ test("a follow-up for one model names a saved conversation and exactly that mode
   assert.equal(reviewTurnInput.safeParse({ ...base, conversationId: "review-1", choices: ["gpt", "gemini"], onlyModelId: "gpt" }).success, false);
   assert.equal(reviewTurnInput.safeParse({ ...base, conversationId: "review-1", choices: ["gemini"], onlyModelId: "gpt" }).success, false);
 });
+
+test("a Review turn carries the \"+\" menu's choices and the position; a follow-up for one model changes no choice", () => {
+  const base = { requestId: crypto.randomUUID(), prompt: "What is near me?", mode: "professional", effort: "default", choices: ["gpt"] } as const;
+  const location = { latitude: -27.46551, longitude: 153.025879, accuracy: 23, timestamp: Date.now() };
+  const turn = reviewTurnInput.safeParse({ ...base, tools: { webSearchMode: "always", memoryMode: "off" }, currentLocation: location });
+  assert.equal(turn.success, true);
+  assert.deepEqual(turn.data?.tools, { webSearchMode: "always", memoryMode: "off" });
+  assert.equal(turn.data?.currentLocation?.accuracy, 150, "the position is made coarse before it leaves the window");
+  assert.equal(reviewTurnInput.safeParse({ ...base, tools: { webSearch: true } }).success, false);
+  assert.equal(reviewTurnInput.safeParse({ ...base, currentLocation: "Brisbane" }).data?.currentLocation, null);
+  const followUp = { ...base, conversationId: "review-1", onlyModelId: "gpt" };
+  assert.equal(reviewTurnInput.safeParse({ ...followUp, currentLocation: location }).success, true);
+  assert.equal(reviewTurnInput.safeParse({ ...followUp, tools: { webSearchMode: "always" } }).success, false);
+});

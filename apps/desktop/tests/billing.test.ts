@@ -136,7 +136,11 @@ test("every action maps to the web's own billing route with the web's request bo
   assert.deepEqual(map({ action: "confirmPlanChange", requestId: "pcr_1" }),
     { path: "/api/billing/plan-change/confirm", method: "POST", body: { requestId: "pcr_1" } });
   assert.deepEqual(map({ action: "cancelPlanChange" }), { path: "/api/billing/plan-change", method: "DELETE" });
+  // An unknown interval is left out; the server quotes on the one Stripe reports.
+  assert.deepEqual(map({ action: "previewPlanChange", targetTier: "Pro" }),
+    { path: "/api/billing/plan-change/preview", method: "POST", body: { targetTier: "Pro" } });
   assert.deepEqual(map({ action: "cancelSubscription" }), { path: "/api/billing/cancel-subscription", method: "POST", body: {} });
+  assert.deepEqual(map({ action: "resumeRenewal" }), { path: "/api/billing/cancel-subscription", method: "DELETE" });
   assert.deepEqual(map({ action: "requestRefund", reason: "  charged twice " }),
     { path: "/api/billing/refund-request", method: "POST", body: { reason: "charged twice" } });
   assert.deepEqual(billingRequest({ action: "config" }, null), { path: "/api/billing/config" });

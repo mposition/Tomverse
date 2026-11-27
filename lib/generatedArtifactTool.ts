@@ -1427,6 +1427,7 @@ export class GeneratedArtifactCollector {
           format,
           mediaType: requireArtifactFormat(format).mediaType,
           bytes: converted.bytes,
+          ...(converted.notices?.length ? { notices: converted.notices } : {}),
         };
       },
       describe: () => parts,
@@ -1547,10 +1548,14 @@ export class GeneratedArtifactCollector {
       format,
       parts,
       note:
-        job.createdNote ??
-        "The file is attached to your message and the user has a download " +
-          "button. Do not repeat the table, the CSV text, the code, or a link. " +
-          "Write one or two short sentences about what it contains.",
+        (job.createdNote ??
+          "The file is attached to your message and the user has a download " +
+            "button. Do not repeat the table, the CSV text, the code, or a link. " +
+            "Write one or two short sentences about what it contains.") +
+        // The file exists but is not exactly what was written (a PDF with a
+        // box where its font has no glyph). The model is the only channel to
+        // the user here, so it is told in the same breath as the success.
+        (rendered.notices?.length ? ` Notice: ${rendered.notices.join(" ")}` : ""),
     };
   }
 }

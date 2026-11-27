@@ -31,7 +31,10 @@ import {
   buildDocxBatchEntries,
 } from "@/lib/generatedArtifactDocxBatch";
 import { renderDocumentDocx } from "@/lib/generatedArtifactDocx";
-import { renderDocumentPdf } from "@/lib/generatedArtifactPdf";
+import {
+  describePdfReplacements,
+  renderDocumentPdfWithReport,
+} from "@/lib/generatedArtifactPdf";
 import { renderPresentationPptx } from "@/lib/generatedArtifactPptx";
 import {
   archiveTextEntryBytes,
@@ -56,6 +59,12 @@ export type RenderedArtifact = {
   format: SupportedArtifactFormat;
   mediaType: string;
   bytes: Uint8Array;
+  /**
+   * What the model should tell the user about this file: the file was made, but
+   * not exactly as written (a PDF that drew a box for a character its font
+   * cannot draw). Absent when the file is what was asked for.
+   */
+  notices?: string[];
 };
 
 const encoder = new TextEncoder();
@@ -105,8 +114,14 @@ export const renderDocumentArtifact = (
   switch (spec.format) {
     case "docx":
       return bounded(spec.format, renderDocumentDocx(spec, images), ceiling);
-    case "pdf":
-      return bounded(spec.format, renderDocumentPdf(spec, images), ceiling);
+    case "pdf": {
+      const pdf = renderDocumentPdfWithReport(spec, images);
+      const notice = describePdfReplacements(pdf);
+      return {
+        ...bounded(spec.format, pdf.bytes, ceiling),
+        ...(notice ? { notices: [notice] } : {}),
+      };
+    }
     case "md":
       return bounded(spec.format, encoder.encode(renderDocumentMarkdown(spec)));
     case "txt":
@@ -134,7 +149,7 @@ export const renderTextArtifact = (spec: TextFileSpec): RenderedArtifact =>
  */
 const renderArchiveDocumentEntry = (
   entry: ArtifactArchiveDocumentEntry
-): Uint8Array => {
+): RenderedArtifact => {
   const spec: DocumentSpec = {
     // The entry's path is its name inside the archive; the writers take a
     // filename only to put it in document properties, and the path is the
@@ -145,20 +160,28 @@ const renderArchiveDocumentEntry = (
     ...(entry.subtitle !== undefined ? { subtitle: entry.subtitle } : {}),
     blocks: entry.blocks,
   };
-  return renderDocumentArtifact(spec).bytes;
+  return renderDocumentArtifact(spec);
 };
 
-export const renderArchiveArtifact = (spec: ArchiveSpec): RenderedArtifact =>
-  bounded(
+export const renderArchiveArtifact = (spec: ArchiveSpec): RenderedArtifact => {
+  // A document inside the zip can carry a notice of its own; the zip passes it
+  // on, named by path, because the model has one file to describe and not two.
+  const notices: string[] = [];
+  const archive = bounded(
     spec.format,
     zipArchiveEntries(
-      spec.entries.map((entry) =>
-        isArchiveDocumentEntry(entry)
-          ? { path: entry.path, bytes: renderArchiveDocumentEntry(entry) }
-          : { path: entry.path, bytes: archiveTextEntryBytes(entry) }
-      )
+      spec.entries.map((entry) => {
+        if (!isArchiveDocumentEntry(entry)) {
+          return { path: entry.path, bytes: archiveTextEntryBytes(entry) };
+        }
+        const rendered = renderArchiveDocumentEntry(entry);
+        for (const notice of rendered.notices ?? []) notices.push(`${entry.path}: ${notice}`);
+        return { path: entry.path, bytes: rendered.bytes };
+      })
     )
   );
+  return notices.length > 0 ? { ...archive, notices } : archive;
+};
 
 /** What the batch renderer needs that the specification cannot carry. */
 export type DocumentBatchInputs = {

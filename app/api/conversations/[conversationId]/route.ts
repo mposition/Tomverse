@@ -452,9 +452,8 @@ export async function PATCH(
             return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
         }
         const desktopProduct = desktop ? desktopConversationWriteProduct(existingConv) : null;
-        const hasComposerOptions = body.webSearchMode !== undefined || body.memoryMode !== undefined || body.assistantProfileId !== undefined;
-        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1) ||
-            (desktopProduct !== "chat" && hasComposerOptions))) {
+        // The "+" menu's options (web search, memory, assistant) belong to a Review as much as to a Chat, as on the web.
+        if (desktop && (!desktopProduct || (desktopProduct === "chat" && (body.selectedModels?.length ?? 1) > 1))) {
             return NextResponse.json({ error: "This conversation belongs to another workspace." }, { status: 403 });
         }
 

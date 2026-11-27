@@ -23,7 +23,9 @@ import { isStripeConfigured } from "@/lib/stripe";
 const previewSchema = z
   .object({
     targetTier: z.enum(["Pro", "Max"]),
-    billingInterval: z.enum(["monthly", "annual"]),
+    // Optional: when absent the change stays on the interval Stripe reports
+    // for the subscription (see previewPlanChange).
+    billingInterval: z.enum(["monthly", "annual"]).optional(),
     // Quoting is read-only, so consent only affects what the quote says will
     // happen to an existing cancellation.
     resumeRenewal: z.boolean().optional(),

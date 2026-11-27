@@ -280,7 +280,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "billing",
     label: "Plans & pricing",
     href: "/admin/billing",
-    description: "Plans, price catalogue, promotions, and promotion diagnostics",
+    description: "Plans, price catalogue, promotions, promotion diagnostics, and plan changes",
     group: "Customers & Revenue",
     writeRoles: ["owner", "billing"],
     aliases: [
@@ -317,6 +317,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "diagnostics",
         label: "Diagnostics",
         description: "Read-only checks on each promotion code",
+      },
+      {
+        id: "plan-changes",
+        label: "Plan changes",
+        description: "Scheduled and in-flight Pro / Max changes, and recent settlements",
       },
     ],
   },

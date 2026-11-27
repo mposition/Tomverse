@@ -531,6 +531,12 @@ export type ConvertedFile = {
   bytes: Uint8Array;
   /** Human-readable size of the work, e.g. "3 pages from 2 files". */
   parts: string;
+  /**
+   * Things the model should tell the user about the result: it was made, but
+   * not exactly as the source read (a PDF table with a box for a character the
+   * PDF font cannot draw).
+   */
+  notices?: string[];
 };
 
 /**

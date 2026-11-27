@@ -10,9 +10,12 @@ export const dynamic = "force-dynamic";
  * kept as a literal because route segment config is read statically;
  * `npm run check:image-executor-budget` is what keeps the two in step.
  *
- * A cut-off executor is not a delay. Nothing re-drives a `pending` generation
- * -- the sweep only refunds one -- so the request is lost and its owner waits
- * out the stale window for the credits back.
+ * A cut-off executor is not a delay. The attempt it was running stays
+ * `processing`, which the sweep only refunds -- its provider may have been
+ * called -- so that request is lost and its owner waits out the stale window
+ * for the credits back. Targets it had not started stay `pending`: the sweep
+ * re-drives those once while IMAGE_PENDING_REDRIVE_ENABLED is `on` (off by
+ * default), and refunds them like the rest while it is off.
  */
 export const maxDuration = 968;
 
@@ -147,7 +150,9 @@ export async function POST(req: Request) {
     // is stated rather than inherited. The claim inside processImageGeneration
     // keeps this safe to run alongside the reconciliation sweep (or a future
     // dedicated worker). A process death here is exactly the stale case the
-    // sweep refunds.
+    // sweep recovers: a target not yet started is re-driven (while
+    // IMAGE_PENDING_REDRIVE_ENABLED is on; refunded while it is off), one
+    // that had started is refunded.
     if (!result.reused) {
       const pending = result.targets
         .filter((target) => target.status === "pending")

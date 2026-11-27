@@ -191,6 +191,7 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
   - `customer.subscription.updated`
   - `customer.subscription.pending_update_expired`
   - `subscription_schedule.*`
+  - `invoice.created` (갱신 인보이스만 봅니다 — 10절의 삭제 예약 계정 차단)
 - 자동 billing resync와 **관리자 수동 재동기화** 경로를 제공합니다.
 
 이 보강 없이 플랜 변경을 열면, 결제는 성공했는데 권한이 되돌아가거나 그 반대인
@@ -276,6 +277,8 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
   (`cancellation_cleared_by_explicit_consent`) 일어납니다.
 - **해지 예약 중 다운그레이드는 거부.** 구독이 기간 말에 끝나는데 그 다음 기간에
   Pro를 예약하면 해지된 구독을 조용히 되살립니다. 요청한 것보다 큰 변경입니다.
+  대신 **자동 갱신 다시 켜기**가 별도 control로 있습니다(10절). 사용자는 먼저
+  갱신을 켜고, 그 다음 다운그레이드를 예약합니다. 두 동의가 두 번의 행동입니다.
 - **preview 만료 · stale.** `planChangeStateFingerprint()`가 견적이 의존하는
   구독 사실을 전부 담고, `checkPlanChangePreview()`가 TTL(10분) · 소유자 · 대상 ·
   fingerprint를 확인합니다. 나이가 음수면(앞선 시계가 쓴 record) 영원히 신선한
@@ -439,11 +442,9 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 `resolvePlanCtaState()`에 `change_plan` 상태를 추가하고
 `components/billing/PlanChangeDialog.tsx`를 붙였습니다.
 
-- **CTA 판정.** 활성 구독이 있고 양쪽이 모두 유료 플랜이면 `change_plan`,
-  **단 구독 interval을 알 때만**입니다. 변경은 언제나 이미 청구 중인 interval
-  위에서 일어나므로, interval을 모르면 열어 봐야 confirm에서 거부됩니다 —
-  그런 계정은 계속 `manage_plan`(고객지원)입니다. 필드가 생기기 전에 동기화된
-  구독이 실제로 여기에 해당합니다.
+- **CTA 판정.** 활성 구독이 있고 양쪽이 모두 유료 플랜이면 `change_plan`입니다.
+  (2026-11-26부터 저장된 interval을 몰라도 같습니다 — 서버가 Stripe의 interval로
+  견적합니다. 9절.)
 - **방향은 한 상태로 묶습니다.** 업그레이드와 다운그레이드가 같은 `change_plan`을
   쓰고, 실제 방향은 서버가 confirm 시점에 다시 판정합니다. label만 위·아래를
   구분합니다("Max로 업그레이드" vs "Pro로 변경") — Max 사용자에게 "Pro로
@@ -468,3 +469,145 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
   견적, 지원 전용 거부, 더블클릭 1회 전송, Escape·focus 복귀, 320px·200%),
   `tests/purchaseIntent.test.mjs`의 CTA 상태 행렬,
   `tests/e2e/pricing-purchase-cta.spec.ts` 26개.
+
+## 9. 웹 설정 · 결제 주기 · 확인 메일 (2026-11-26)
+
+운영자 요청(2026-11-26): "Pro ↔ Max 플랜 변경을 자유롭게". Pro → Max는 **1절의
+차액 결제(갱신일 유지)를 그대로 씁니다** — 새 주기 + 남은 일수 환불 안과 비교한 뒤
+운영자가 이 안을 골랐습니다. Max → Pro는 2절 그대로입니다.
+
+- **웹 설정 › 플랜 탭이 변경 화면을 엽니다.** 이전에는 Max 사용자에게 변경 버튼이
+  없었고, Pro → Max 버튼은 신규 Checkout을 열어 5절의 `ACTIVE_SUBSCRIPTION_EXISTS`
+  409로 막혔습니다. 이제 활성 웹 구독(`active` · `trialing` · `past_due`)이 있는 Pro ·
+  Max 계정은 `PlanChangeDialog`를 엽니다("Max로 업그레이드" / "Pro로 변경").
+  예약 표시와 취소는 다이얼로그가 이미 합니다(8절).
+- **결제 주기를 몰라도 변경 화면을 엽니다.** `resolvePlanCtaState()`는 더 이상
+  interval을 조건으로 두지 않습니다. 화면이 interval을 모르면 preview 요청에서
+  생략하고, 서버(`previewPlanChange`)가 Stripe에서 다시 읽은 구독의 interval로
+  견적합니다. 동일 interval 규칙(3절)은 그대로이며, Stripe도 interval을 모르면
+  `BILLING_INTERVAL_CHANGE_NOT_SUPPORTED`입니다. 웹 · 데스크톱이 같은 판정을 씁니다.
+- **확인 메일 두 통.** 결제 안내(`billing_welcome`)와 같은 틀(`shell`, 파란 상자)입니다.
+  | 템플릿 | 보내는 시점 |
+  |---|---|
+  | `plan_change_upgraded` | 업그레이드 정산이 `pending → applied`로 바뀐 그 조건부 update 한 번(=청구서 결제 후). 현재 결제기간 종료일을 적습니다(해지 예약이 유지된 구독은 갱신되지 않으므로 "갱신일"이라 쓰지 않음) |
+  | `plan_change_downgrade_scheduled` | confirm이 schedule을 붙이고 `previewed → pending`으로 바꾼 직후. 적용일과 취소 방법을 적습니다 |
+
+  메일 outbox 행은 **행을 옮긴 조건부 update와 같은 트랜잭션**에 씁니다. 그래서 둘은
+  함께 커밋되거나 함께 사라집니다. 정산에서 트랜잭션이 실패하면 웹훅이 500으로 끝나고,
+  재전달 때 행이 여전히 `pending`이라 다시 시도됩니다. 표준 메일 lane은 reference로
+  중복을 거르지 않으므로 "변경 한 건에 한 통"은 그 조건부 update가 맞았을 때만 쓰는
+  것으로 지킵니다. 재전달이나 동시 확정에서 update가 0건이면 메일도 없습니다. 검증:
+  `tests/planChangeEmails.test.mjs`.
+
+## 10. 자동 갱신 다시 켜기 (2026-11-26)
+
+`DELETE /api/billing/cancel-subscription`이 기간 말 해지 예약을 되돌립니다
+(`cancel_at_period_end: false`). 1절의 "업그레이드 확인 하나로 갱신 재개에 동의한
+것으로 보지 않는다"와 같은 원칙으로, **자기 label을 가진 별도 버튼**입니다(웹 설정 ·
+데스크톱 결제 설정의 해지 카드).
+
+- 판단은 저장된 flag가 아니라 **Stripe에서 다시 읽은 구독**으로 합니다. 먼저
+  `active` · `trialing`이 아니면 409 `SUBSCRIPTION_NOT_CHANGEABLE`(해지 완료된 구독도
+  `cancel_at_period_end`가 false라서 순서가 중요합니다). 그 다음 이미 갱신 중이면
+  성공으로 그대로 답합니다(멱등). `past_due` 구독에는 버튼을 보이지 않습니다.
+- **계정 삭제 예약(`pending_deletion`)이면 409** (`ACCOUNT_DELETION_PENDING`). 삭제
+  흐름이 스스로 해지를 예약했고, 그 밑에서 갱신을 켜면 떠나려는 계정에 다음 결제가
+  납니다. (환불 요청은 그 자체로 해지를 예약하지 않고 승인 시 구독을 정리하므로 거부
+  사유가 아닙니다.)
+- **삭제와 겹친 경우는 잠금을 쥔 정리 함수 하나가 맡습니다**
+  (`lib/deletionCancellation.ts`의 `keepDeletionCancellation()`). 계정 행을
+  `SELECT … FOR UPDATE`로 잠근 채 `pending_deletion`인지 확인하고, 그 안에서 Stripe 구독을
+  다시 읽어 갱신 중(`cancel_at_period_end: false`, active · trialing · past_due)일 때만 해지를
+  겁니다. 계정 복원은 그 행을 고치므로 정리가 끝날 때까지 기다리고, 복원이 먼저 커밋됐으면
+  행이 맞지 않아 아무것도 쓰지 않습니다. 그래서 복원 뒤 고객이 다시 켠 갱신을 늦은 정리가
+  끄는 일이 없습니다. 이 함수를 부르는 곳은 셋입니다.
+  - 갱신 재개 route: 자기 Stripe 쓰기 뒤에(응답이 없었던 경우 포함) 부릅니다. 삭제 예약
+    중이었으면 409, 정리가 실패하면 운영 사고 `BILLING_RESUME_RENEWAL_DELETION_CONFLICT`.
+  - 삭제 흐름(`scheduleTomverseAccountDeletion`): `pending_deletion`을 기록한 뒤 부릅니다.
+    실패해도 삭제는 그대로 진행하고(이미 기록됐으므로) 운영 사고
+    `ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED`를 올립니다.
+  - 웹훅(`resyncSubscriptionFromStripe()`): 구독 이벤트마다 부릅니다. 타임아웃된 재개가
+    늦게 적용되는 순서까지 포함해, 재개의 결과는 `customer.subscription.updated`로 돌아오므로
+    해지가 최종 상태가 됩니다. 일시적 실패는 throw → 500 → Stripe 재전송이 지속적인 재시도이고,
+    Stripe가 매번 거부할 요청(`StripeInvalidRequestError`)이나 재전송이 없는 직접 호출(모바일
+    해지)의 실패는 운영 사고로 올립니다.
+  유예 기간 끝의 영구 삭제는 어떤 경우든 구독을 즉시 해지합니다.
+- **남는 위험(수용).** 잠금 안의 Stripe 요청은 트랜잭션 시작부터 재는 15초 예산 하나를
+  나눠 쓰고(요청 하나는 최대 8초, 트랜잭션은 20초), 예산이 다하면 요청을 보내지 않고
+  throw합니다(`stripeLockBudget()`). 행 잠금을 기다린 시간도 예산에 들어가므로, 요청이
+  몇 번이든 잠금이 풀린 뒤까지 기다리는 일은 없습니다. 다만 포기한 요청을 Stripe가 나중에
+  적용할 수는 있습니다. 그 경우는 언제나 **해지 쪽**(다음 결제 없음)으로만 기울고, 고객은
+  설정 › 플랜에서 해지 예약을 보고 자동 갱신을 다시 켤 수 있습니다. 돈이 잘못 나가는 쪽의
+  잔여 위험은 없습니다. 반대 방향 하나 — 응답 없이 끝난 **갱신 재개** 요청이 정리보다 늦게
+  적용되는 경우 — 도 그 변경의 `customer.subscription.updated`가 오면 웹훅의 잠금 정리가 다시
+  해지합니다.
+- **갱신 인보이스 단계의 마지막 차단 (2026-11-27, 운영자 "더 막아 주세요").** 위의 늦은
+  적용과 그 웹훅 처리 사이에 결제기간이 끝나 갱신이 일어나도 청구되지 않습니다. Stripe는
+  갱신 인보이스를 약 1시간 draft로 두고, `invoice.created` 전달이 실패하는 동안 확정을
+  최대 72시간 미룹니다. 웹훅은 `billing_reason: subscription_cycle`인 `invoice.created`마다
+  `stopDeletionPendingRenewal()`(같은 파일, 같은 행 잠금)을 부릅니다.
+  - 계정이 `pending_deletion`이고 그 인보이스가 아직 수금될 수 있으면(draft · open) 구독을
+    즉시 해지합니다(void · uncollectible은 해지 사유가 아닙니다)(`prorate: false`,
+    `invoice_now: false`). 해지는 그 구독의 draft · open 인보이스의 자동 청구를 끕니다.
+    구독 인보이스는 삭제할 수 없으므로 이것이 청구를 막는 방법입니다. 떠나려는 계정이라
+    새 기간을 줄 이유가 없고, 유예 끝의 영구 삭제도 어차피 즉시 해지합니다.
+  - 복원이 먼저 커밋됐으면 행이 맞지 않아 갱신은 그대로 진행됩니다.
+  - 삭제 요청 직전에 이미 만들어진 갱신 인보이스는 그 `invoice.created`가 계정이 활성일 때
+    처리됐으므로, 삭제 흐름이 `pending_deletion` 커밋 뒤에 그 구독의 미수금 갱신 인보이스
+    (draft와, 이미 확정돼 결제를 기다리는 open)를 모두 먼저 찾은 뒤 — 그 구독의 인보이스 전체를
+    상태 · 날짜 조건 없이 한 번에 모든 페이지 조회(결제 재시도 중인 오래된 갱신과 조회 중의 상태
+    전환까지 포함, 최대 500건) —
+    구독을 즉시 해지해 전부의 추심을 끕니다(`stopDeletionPendingDraftRenewals()`). 삭제 흐름이
+    시작된 뒤 결제된 갱신(`status_transitions.paid_at`, 초 단위 비교)도 사람 확인 건수에 넣습니다 — 그 전에
+    결제된 것은 이미 산 기간입니다. 하나가 그 사이
+    결제됐으면 다음 것으로 계속 확인하고, 해지 뒤에는 나머지를 다시 읽어 그 사이 확정 · 결제된 건도
+    사람 확인 건수에 넣습니다. 500건 한도에 닿아 다 보지 못했으면 실패로 알립니다. open이 있었으면 추심을 끈 뒤 운영 사고
+    `ACCOUNT_DELETION_RENEWAL_FINALIZED`로 사람에게 알립니다. 실패하면 삭제는 그대로
+    두고 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`를 올립니다.
+  - 갱신 재개 route는 저장된 구독 상태를 직접 쓰지 않습니다. 재개 뒤("이미 갱신 중" 포함)
+    웹훅과 같은 `resyncSubscriptionFromStripe()`로 Stripe를 다시 읽어 단조 시각 snapshot으로
+    기록하므로, 다른 곳의 해지 · 삭제 · 복원과 겹쳐도 더 새로운 읽기가 이깁니다. 기록 뒤 계정이
+    `pending_deletion`이면 409로 답합니다. 그 사이 커밋된 삭제가 있으면 쓰지 않고 409이며,
+    Stripe 쪽 해지는 삭제 흐름의 잠금 정리가 다시 겁니다.
+  - 실패는 throw → 500 → 재전송이고, 그동안 인보이스는 청구되지 않은 draft로 남습니다.
+    Stripe가 매번 거부할 요청이면 운영 사고 `ACCOUNT_DELETION_RENEWAL_STOP_FAILED`도 올립니다.
+  - 그 인보이스가 이미 draft를 벗어났으면(72시간 뒤 강제 확정 등) 운영 사고
+    `ACCOUNT_DELETION_RENEWAL_FINALIZED`를 올립니다. 이미 결제됐으면 해지하지 않고
+    환불 여부를 사람에게 남깁니다.
+  - 다른 인보이스는 바로 통과시킵니다(실패하면 그 인보이스의 확정이 늦어지므로).
+  - 응답 없이 끝난 해지 요청을 Stripe가 잠금이 풀린 뒤 적용하고, 그 몇 초 사이에 고객이
+    계정을 복원했다면 복원된 계정의 구독이 끝납니다. 청구는 없고(돈이 잘못 나가는 쪽이
+    아님) 고객은 다시 구독할 수 있으므로 수용합니다.
+  - **운영 설정 필요:** Stripe 웹훅 endpoint가 `invoice.created`를 구독해야 이 차단이
+    동작합니다(test 모드에서 먼저, 그 다음 live). endpoint 이벤트 추가는 운영자 몫입니다.
+- Stripe가 이미 갱신 중이면 저장된 flag도 `false`로 고칩니다(웹훅 누락 대비).
+- 모바일 앱은 이 버튼을 아직 두지 않습니다(웹 구독자에게 설명과 해지만 보임).
+
+## 11. Admin › Plans & pricing › Plan changes (2026-11-26)
+
+`/admin/billing?tab=plan-changes`, 읽기 전용입니다. 진행 중(`pending`)인 변경과 최근
+30일에 처리된(`applied` · `cancelled` · `failed`) 변경을 계정 ID · 방향 · 결제 주기 ·
+상태 · 적용 시점 · 확정 · 처리 시각으로 보입니다(AEST). 이메일 · 이름 · 금액은 싣지
+않습니다(5절 감사 원칙과 같음). 예약 취소는 고객이 하고, 정산은 웹훅이 하므로 이
+화면은 아무것도 쓰지 않습니다.
+
+### 동시 확정 (2026-11-26 보강)
+
+- **소진된 견적은 예약으로 보이지 않습니다.** `failed` · `expired` · `cancelled` 견적으로 온
+  confirm(첫 응답이 유실된 재전송 포함)은 `PLAN_CHANGE_PREVIEW_EXPIRED`를 받습니다. 예약으로
+  보고하는 것은 `pending` · `applied`뿐입니다.
+- **견적 선점.** confirm은 Stripe를 부르기 전에 견적 행을 `confirmedAt` 조건부 기록
+  (`status = 'previewed' AND confirmedAt IS NULL`)으로 선점합니다. 같은 견적의 두 번째
+  confirm은 Stripe까지 가지 않고, 이미 예약됐으면 그 예약을, 아니면
+  `PLAN_CHANGE_ALREADY_PENDING`을 받습니다. Stripe 전에 멈추면(구독 조회 실패, 구독 없음,
+  판정 거부) 선점한 견적은 `failed`가 되어, 재시도는 "진행 중"에 막히지 않고 새 견적부터
+  합니다. 선점 뒤 그 정리마저 실패해 남은 선점은 5분(`PLAN_CHANGE_CLAIM_STALE_MS`)이 지나면
+  다시 선점할 수 있어, 견적이 영구히 "진행 중"에 묶이지 않습니다.
+- **기록되지 않은 schedule은 남기지 않습니다.** schedule을 붙인 뒤 기록(행 이동 + 메일
+  outbox 트랜잭션)이 실패하면, 행을 다시 읽어 그 schedule이 기록되지 않았음을 확인한 뒤
+  **release**합니다. 기록되지 않은 schedule은 보여 줄 수도 취소할 수도 없는 채로 기간 말에
+  플랜을 바꾸기 때문입니다. 다시 읽기조차 실패하면 release하지 않고 운영 사고
+  `PLAN_CHANGE_SCHEDULE_RECORD_UNKNOWN`을, release가 실패하면
+  `PLAN_CHANGE_ORPHAN_SCHEDULE_RELEASE_FAILED`를 올려 사람이 Stripe에서 확인합니다.
+- 검증: `tests/server-contract/plan-change-confirm-emails.test.ts`(동시 확정 1회, 기록 실패 시
+  release, 메일이 트랜잭션 안에서 한 번), `tests/server-contract/billing-resume-renewal-route.test.ts`.

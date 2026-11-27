@@ -238,7 +238,7 @@ import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실�
   유료 전사만 대신한다. 스위치가 꺼져 있으면 이번 메시지의 캐시도 읽지 않는다.
   행이 아직 없으면 다음 turn이 한 번 더 전사하고 저장한다. 캐시는 첨부 행에서
   cascade로 지워지므로 대화·계정 삭제 규칙이 그대로 적용된다
-  (`docs/policy/user-attachment-persistence.md` §7.1). 원본 녹음도 다른 첨부와 같은
+  (`docs/policy/user-attachment-persistence.md §7.1`). 원본 녹음도 다른 첨부와 같은
   보존 규칙을 따른다.
 - **게스트와 압축파일 안의 오디오는 받지 않는다.** 게스트 객체에는 캐시할 행이
   없어 매 turn 다시 전사하게 되고, 압축파일 안의 녹음은 사용자가 열거하지 않은 유료
@@ -556,6 +556,13 @@ lock 파일을 늘 가지고 있고, 그것을 빼는 데 드는 비용은 사�
 - 이미지는 정규화한 뒤 이미지 입력을 지원하는 모델에만 전달한다. 압축 내부
   이미지도 같은 개수·payload 제한에 포함된다.
 - **확장자만 바꾼 원본 ZIP을 공급자에게 보내지 않는다.**
+- **이전 메시지의 파일은 거절 사유가 아니다.** 이미지 입력이 없는 모델로 바꾼 뒤의
+  이전 이미지, 파싱 실패·timeout, OCR·압축 해제 거절은 그 파일만 "이번 답변에
+  포함되지 않음"(`earlier attachment, not included`)으로 모델에 알리고 뺀다. 이번에
+  보내는 메시지의 파일은 위 규칙대로 거절하며(`ATTACHMENT_MODEL_UNSUPPORTED`,
+  `PDF_OCR_UNAVAILABLE`, 코드 없던 파서 실패는 `ATTACHMENT_UNREADABLE`), 사용자에게는
+  `lib/chatAttachmentErrorCopy.ts`의 문장으로 보인다. 이전 파일을 생략했다는 사실을
+  사용자에게 알리는 UI는 아직 없다(알려진 한계).
 
 ## 7. 오류는 코드로 말한다
 
@@ -570,6 +577,11 @@ lock 파일을 늘 가지고 있고, 그것을 빼는 데 드는 비용은 사�
 
 압축파일 코드는 `CHAT_ARCHIVE_ERROR_CODES`가 소유하며, 코드가 늘고 문장이 없는
 상태는 `tests/chatAttachmentErrorCopy.test.mjs`가 막는다.
+
+채팅 전송 단계(`components/chat/ChatApp.tsx`)는 서버의 영어 문장 대신 이 표의 문장을
+쓰는 코드를 `CHAT_SEND_LOCALIZED_ATTACHMENT_CODES`로 명시한다(현재
+`ATTACHMENT_UNREADABLE`·`ATTACHMENT_MODEL_UNSUPPORTED`·`PDF_OCR_UNAVAILABLE`). 표 전체를
+전송 단계에 연결하지 않는 것은 나머지 코드가 업로드 단계의 표면에서 처리되기 때문이다.
 
 ## 8. 변경 규칙
 
