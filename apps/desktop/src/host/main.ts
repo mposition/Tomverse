@@ -3603,6 +3603,12 @@ const remoteControl = createRemoteControl({
     const copy = desktopRemoteCopy[state.language ?? "en"];
     return confirmNative({ title: copy.confirmTitle, message: copy.confirmMessage, detail: copy.sentToServer, accept: copy.confirmAccept, cancel: copy.confirmCancel });
   },
+  // Previews of file changes: named by the server, and only after the person agrees to what they hold.
+  previewSupported: () => state.capabilities?.remotePreview === true,
+  confirmPreview: () => {
+    const copy = desktopRemoteCopy[state.language ?? "en"];
+    return confirmNative({ title: copy.previewConfirmTitle, message: copy.previewConfirmMessage, detail: copy.previewDetail, accept: copy.confirmAccept, cancel: copy.confirmCancel });
+  },
 });
 
 let dictation: { id: string; session: AbortSignal; expiry: number; mediaGranted: boolean; sent: boolean; controller: AbortController } | undefined;

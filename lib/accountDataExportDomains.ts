@@ -1375,6 +1375,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Owner decision 2026-11-26: not exported. One answer, stop or follow-up the person sent from the web to their own PC, kept for a few minutes until the PC has picked it up; the task it acted on, with the follow-up in it, is on the person's own PC.",
   },
   {
+    domain: "desktopRemotePasskey",
+    publicName: "desktop_remote_passkeys",
+    prismaModel: "DesktopRemotePasskey",
+    state: "excluded",
+    exclusionReason:
+      "Not exported: a passkey the person registered to confirm remote approvals is a public key and a credential id, security material that identifies nothing the person can use elsewhere. The person sees its name and dates on the same screen where they remove it.",
+  },
+  {
+    domain: "desktopRemotePasskeyChallenge",
+    publicName: "desktop_remote_passkey_challenges",
+    prismaModel: "DesktopRemotePasskeyChallenge",
+    state: "excluded",
+    exclusionReason:
+      "Not exported: a random single-use challenge that lives two minutes, with the digest of the one command it is bound to.",
+  },
+  {
     domain: "mobileTokenFamily",
     publicName: "mobile_sessions",
     prismaModel: "MobileTokenFamily",

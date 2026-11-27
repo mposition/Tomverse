@@ -242,6 +242,8 @@ export async function recordDesktopRemoteCommand(input: {
   session: Session;
   request: Request;
   command: DesktopRemoteCommandRequest;
+  /** The passkey that confirmed this command (lib/desktopRemotePasskeyStore.ts), when one was needed. */
+  passkeyId?: string;
 }): Promise<{ id: string }> {
   const userId = input.session.user.id;
   const command = input.command;
@@ -287,6 +289,7 @@ export async function recordDesktopRemoteCommand(input: {
       metadata: {
         deviceId: command.deviceId,
         taskKey: command.taskKey,
+        ...(input.passkeyId ? { passkeyId: input.passkeyId } : {}),
         ...(approval ? {
           approvalId: approval.approvalId, decision: approval.decision, digest: approval.digest,
           approvalKind: snapshot.data.approval?.kind ?? null,

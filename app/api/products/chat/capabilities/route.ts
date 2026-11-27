@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
@@ -91,6 +91,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // Dictation and the Chat voice conversation, each only where its own switch is on as well as Desktop's.
     desktopVoiceInput: desktopVoiceEnabled() && await isVoiceInputEnabled().catch(() => false),
     desktopVoiceConversation: desktopVoiceEnabled() && voiceConversationConfig(process.env) !== null,
+    // Remote control's file-change counts and previews: a Desktop reports them only where this server says it takes them.
+    desktopRemotePreview: desktopRemotePreviewEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };

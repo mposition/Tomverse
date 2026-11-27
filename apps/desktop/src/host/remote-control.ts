@@ -9,10 +9,12 @@ import {
 } from "../../../../lib/desktopRemoteControlContract";
 import { DESKTOP_APP_ORIGIN, DESKTOP_REMOTE_SYNC } from "../../../../lib/nativeBearerGate";
 import { checkBoundaries, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
+import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { ApprovalRequest, Decision, RunStatus, Task } from "../contract";
 import type { LaneKind } from "../parallel-contract";
 import { remoteControlCommand, type RemoteControlStatus, type RemoteControlView } from "../remote-control-contract";
 import { cleanText } from "./journal-view";
+import { diffTexts } from "./review-diff";
 
 /**
  * Remote control of this PC from the account's other signed-in devices (docs/ops/desktop-remote-control.md).
@@ -63,6 +65,10 @@ export type RemoteControlDeps = {
   followUp(key: string, text: string): Promise<boolean>;
   /** Asked when the person turns remote control on. */
   confirmEnable(): Promise<boolean>;
+  /** Asked when the person turns file-change previews on. */
+  confirmPreview?(): Promise<boolean>;
+  /** The server this PC reached names previews (`desktopRemotePreview`): an older one would refuse the new fields. */
+  previewSupported?(): boolean;
   /** The folders the task's own permission gate leaves to a person at this PC (the app's data, the permission home). */
   protectedDirs?(): readonly string[];
   transport?: typeof fetch;
@@ -211,16 +217,54 @@ export function approvalDigest(request: ApprovalRequest): string {
   return createHash("sha256").update("tomverse-remote-approval-v1\n" + canonical(rest)).digest("hex");
 }
 
-export function remoteApprovalSummary(card: RemoteCard, key?: string, protectedDirs: readonly string[] = []): DesktopRemoteApproval | null {
+/**
+ * What a report says of the content of a file change. `none`: nothing (a server that does not name previews would refuse
+ * the fields); `counts`: the lines added and removed per file; `excerpt`: also a few of the changed lines, redacted.
+ */
+export type RemotePreviewMode = "none" | "counts" | "excerpt";
+
+/** One changed line as it may leave the PC: its indentation is kept (it can change what the code does), the rest is redacted. */
+function previewLine(prefix: "+" | "-", text: string, key: string | undefined): string {
+  const indent = Math.min(16, (/^[ \t]*/.exec(text)?.[0] ?? "").replaceAll("\t", "  ").length);
+  return `${prefix} ${" ".repeat(indent)}${remoteText(text, key, DESKTOP_REMOTE_LIMITS.previewLine - indent)}`;
+}
+
+type RemoteFile = NonNullable<ApprovalRequest["files"]>[number];
+
+/** The counts and, when asked, the changed lines of one file. Never the file itself, and nothing at all of a path that may hold secrets. */
+export function remoteFilePreview(file: RemoteFile, mode: RemotePreviewMode, key: string | undefined, room: { lines: number }):
+  { added?: number; removed?: number; preview?: string[]; omitted?: "binary" | "large" | "secret" | "unreadable" } {
+  if (mode === "none") return {};
+  if (isSecretPath(file.path)) return { omitted: "secret" };
+  let diff;
+  try { diff = diffTexts(file.path, file.before, file.after); } catch { return { omitted: "unreadable" }; }
+  if (diff.omitted) return { omitted: diff.omitted };
+  const counts = { added: diff.added, removed: diff.removed };
+  if (mode === "counts") return counts;
+  const lines: string[] = [];
+  for (const hunk of diff.hunks) {
+    for (const entry of hunk.lines) {
+      if (entry.kind === "context") continue;
+      if (lines.length >= DESKTOP_REMOTE_LIMITS.previewLines || room.lines <= 0) return { ...counts, preview: lines };
+      lines.push(previewLine(entry.kind === "add" ? "+" : "-", entry.text, key));
+      room.lines -= 1;
+    }
+  }
+  return { ...counts, preview: lines };
+}
+
+export function remoteApprovalSummary(card: RemoteCard, key?: string, protectedDirs: readonly string[] = [], preview: RemotePreviewMode = "none"): DesktopRemoteApproval | null {
   const { request } = card;
   const kind = remoteApprovalKind(request);
   const files = kind === "files" ? request.files ?? [] : [];
+  const room = { lines: DESKTOP_REMOTE_LIMITS.previewTotal };
   const summary = desktopRemoteApproval.safeParse({
     id: request.id, taskKey: card.taskKey, digest: approvalDigest(request), kind,
     tool: remoteText(request.tool, key, DESKTOP_REMOTE_LIMITS.tool),
     target: kind === "command" && request.command ? remoteText(request.command.display, key, DESKTOP_REMOTE_LIMITS.target) : "",
     files: files.slice(0, DESKTOP_REMOTE_LIMITS.files).map((file) => ({
       path: remoteText(file.path, key, DESKTOP_REMOTE_LIMITS.path), action: /^[a-z_]{1,16}$/.test(file.action) ? file.action : "update",
+      ...remoteFilePreview(file, preview, key, room),
     })),
     moreFiles: Math.max(0, files.length - DESKTOP_REMOTE_LIMITS.files),
     remote: remoteAnswerable(request, key, protectedDirs),
@@ -229,7 +273,7 @@ export function remoteApprovalSummary(card: RemoteCard, key?: string, protectedD
 }
 
 /** The report: the running tasks and the request on the screen. Everything in it went through `remoteText`. */
-export function remoteSnapshot(tasks: RemoteTaskSource[], card: RemoteCard | null, key?: string, protectedDirs: readonly string[] = []): DesktopRemoteSnapshot {
+export function remoteSnapshot(tasks: RemoteTaskSource[], card: RemoteCard | null, key?: string, protectedDirs: readonly string[] = [], preview: RemotePreviewMode = "none"): DesktopRemoteSnapshot {
   const rows: DesktopRemoteTask[] = [];
   for (const source of tasks) {
     if (rows.length === DESKTOP_REMOTE_LIMITS.tasks) break;
@@ -240,18 +284,20 @@ export function remoteSnapshot(tasks: RemoteTaskSource[], card: RemoteCard | nul
     });
     if (row.success && !rows.some((entry) => entry.key === row.data.key)) rows.push(row.data);
   }
-  const approval = card && rows.some((row) => row.key === card.taskKey) ? remoteApprovalSummary(card, key, protectedDirs) : null;
+  const approval = card && rows.some((row) => row.key === card.taskKey) ? remoteApprovalSummary(card, key, protectedDirs, preview) : null;
   return desktopRemoteSnapshot.parse({ tasks: rows, approval });
 }
 
 // ── The switch ────────────────────────────────────────────────────────────
 
 const settingsFile = (userData: string) => join(userData, "remote-control.json");
-const savedSetting = z.object({ accountId: z.string().min(1).max(200), enabled: z.literal(true) }).strict();
+const savedSetting = z.object({ accountId: z.string().min(1).max(200), enabled: z.literal(true), preview: z.literal(true).optional() }).strict();
 
-function readSetting(userData: string): string | null {
-  try { return savedSetting.parse(JSON.parse(readFileSync(settingsFile(userData), "utf8"))).accountId; }
-  catch { return null; }
+function readSetting(userData: string): { accountId: string; preview: boolean } | null {
+  try {
+    const saved = savedSetting.parse(JSON.parse(readFileSync(settingsFile(userData), "utf8")));
+    return { accountId: saved.accountId, preview: saved.preview === true };
+  } catch { return null; }
 }
 
 // ── The loop ──────────────────────────────────────────────────────────────
@@ -264,6 +310,8 @@ export function createRemoteControl(deps: RemoteControlDeps) {
   const transport: typeof fetch = (input, init) => (deps.transport ?? globalThis.fetch)(input, init);
   /** The account remote control is on for, from the settings file: one account at a time, and never another's. */
   let enabledFor: string | null = null;
+  /** Previews of file changes are on for `enabledFor`: a second choice, off by default, that only that account's setting file holds. */
+  let previewOn = false;
   let status: RemoteControlStatus = "signed_out";
   let accountId: string | null = null;
   /** The account of the last tick that had one, for the sign-out that no longer has it. */
@@ -427,7 +475,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     const now = clock();
     if (now < pausedUntil) return;
     let snapshot: DesktopRemoteSnapshot;
-    try { snapshot = remoteSnapshot(deps.tasks(), deps.card(), account.key, deps.protectedDirs?.() ?? []); }
+    try { snapshot = remoteSnapshot(deps.tasks(), deps.card(), account.key, deps.protectedDirs?.() ?? [], previewMode()); }
     catch { return; }
     // Nothing runs and the server already knows: no request at all.
     if (!snapshot.tasks.length && !lastHadTasks) {
@@ -456,9 +504,16 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     await ended(1_000);
   }
 
+  /** A server that does not name previews gets none of their fields, whatever the person chose. */
+  function previewMode(): RemotePreviewMode {
+    if (deps.previewSupported?.() !== true) return "none";
+    return previewOn ? "excerpt" : "counts";
+  }
+
   function view(): RemoteControlView {
     const account = deps.account();
     return {
+      preview: { available: deps.previewSupported?.() === true, enabled: Boolean(account && enabledFor === account.accountId && previewOn) },
       enabled: Boolean(account && enabledFor === account.accountId),
       status: !account ? "signed_out" : enabledFor !== account.accountId ? "off" : status === "off" || status === "signed_out" ? "idle" : status,
       page: account ? new URL("/remote", account.origin).toString() : null,
@@ -475,6 +530,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
       mkdirSync(dirname(settingsFile(deps.userData)), { recursive: true, mode: 0o700 });
       writeFileAtomic(settingsFile(deps.userData), JSON.stringify({ accountId: account.accountId, enabled: true }));
       enabledFor = account.accountId;
+      previewOn = false;
       resetSession();
       status = "idle";
       return;
@@ -482,6 +538,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     if (enabledFor !== account.accountId) return;
     rmSync(settingsFile(deps.userData), { force: true });
     enabledFor = null;
+    previewOn = false;
     resetSession();
     status = "off";
     // A sync that was already sent would put the report back if it reached the server after the delete.
@@ -489,9 +546,25 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     await withdraw(account);
   }
 
+  async function setPreview(enabled: boolean) {
+    const account = deps.account();
+    if (!account || enabledFor !== account.accountId || previewOn === enabled) return;
+    if (enabled) {
+      if (deps.previewSupported?.() !== true || !deps.confirmPreview || !(await deps.confirmPreview())) return;
+      if (deps.account()?.accountId !== account.accountId || enabledFor !== account.accountId) return;
+    }
+    writeFileAtomic(settingsFile(deps.userData), JSON.stringify({ accountId: account.accountId, enabled: true, ...(enabled ? { preview: true } : {}) }));
+    previewOn = enabled;
+    // The next report is built again, so a preview already sent is replaced by one that has none.
+    lastSent = null;
+    nextAt = 0;
+  }
+
   return {
     start() {
-      enabledFor = readSetting(deps.userData);
+      const saved = readSetting(deps.userData);
+      enabledFor = saved?.accountId ?? null;
+      previewOn = saved?.preview === true;
       timer?.stop();
       timer = (deps.every ?? ((run, ms) => {
         const handle = setInterval(run, ms);
@@ -508,6 +581,7 @@ export function createRemoteControl(deps: RemoteControlDeps) {
     async command(value: unknown): Promise<RemoteControlView> {
       const input = remoteControlCommand.parse(value);
       if (input.action === "set") await set(input.enabled);
+      else if (input.action === "setPreview") await setPreview(input.enabled);
       return view();
     },
     /**

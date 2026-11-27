@@ -316,6 +316,23 @@ export function desktopRemoteControlEnabled() {
   return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED === "true";
 }
 
+/**
+ * Remote control's preview of file changes: the PC may report line counts, and a few redacted changed lines when the
+ * person turned that on at the PC. Off by default; while it is off the sync route removes those fields from a report.
+ */
+export function desktopRemotePreviewEnabled() {
+  return desktopRemoteControlEnabled() && process.env.TOMVERSE_DESKTOP_REMOTE_PREVIEW_ENABLED === "true";
+}
+
+/**
+ * Passkey confirmation of remote approvals (docs/ops/desktop-remote-control.md). Off by default, and only meaningful
+ * while remote control itself is on. While it is off nobody is asked for a passkey and none can be registered; the
+ * passkeys already registered stay where they are.
+ */
+export function desktopRemotePasskeyEnabled() {
+  return desktopRemoteControlEnabled() && process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED === "true";
+}
+
 export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
 export const DESKTOP_CHAT_HISTORY = "/api/conversations";
 export const DESKTOP_CHAT_SEARCH = "/api/conversations/search";

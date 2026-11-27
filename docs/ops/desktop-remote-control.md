@@ -4,12 +4,15 @@ A person watches the Code tasks their PC runs in Tomverse Desktop from a phone o
 
 ## Switches
 
-Both default off, and both must be on.
+The first two default off, and both must be on. The other three are extra choices inside remote control and default off too.
 
 | Where | Switch | Off |
 | --- | --- | --- |
 | Server | `TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED` (also needs `TOMVERSE_DESKTOP_AUTH_ENABLED`) | `/remote` is not found. The PC route answers 503 `NOT_AVAILABLE`, and the web routes answer 503 `NOT_AVAILABLE`. Nothing is read or written. |
 | Desktop | Settings > Execution and limits > Allow control of this PC from other devices | The PC sends nothing. The switch belongs to the account that turned it on, so another account starts with it off. Turning it on asks in a native dialog. |
+| Server | `TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED` | No passkey can be registered and nobody is asked for one (see "Passkey confirmation"). Passkeys already registered stay in the table. |
+| Server | `TOMVERSE_DESKTOP_REMOTE_PREVIEW_ENABLED` | `desktopRemotePreview` is not named, a Desktop reports no counts or lines, and the sync route removes those fields from a report that has them. |
+| Desktop | Settings > ... > Show a preview of file changes (appears only where the server names previews) | The report of a file change carries line counts only, or nothing of its content where the server does not name previews. Turning it on asks in a native dialog; turning remote control off forgets it. |
 
 The PC sends nothing while nothing runs. While tasks run, it reports every 8 seconds. While a request that may be answered from elsewhere is open, it reports every 2 seconds. After a failure it backs off from 5 seconds up to 5 minutes. After a `NOT_AVAILABLE` it waits 10 minutes. The PC always opens the connection. The server never connects to it.
 
@@ -19,8 +22,9 @@ The report is built in the Desktop main process (`apps/desktop/src/host/remote-c
 
 - For each running task (at most 8): its title, state, kind, the number of changed files, and the first prose line of its latest four messages (code blocks are skipped).
 - For the approval request on the PC's screen: its id, the PC's digest of the whole request, its kind, the command line or up to 10 file paths with their actions, and whether it may be answered from another device.
+- For a file change, where the server names `desktopRemotePreview` (`TOMVERSE_DESKTOP_REMOTE_PREVIEW_ENABLED`): the number of lines each file adds and removes; and, only when the person turned previews on at the PC, up to 8 changed lines per file and 40 in all (`+ ` or `- ` first, never unchanged lines), each redacted like every other line and cut to 120 characters, with its indentation kept. A file whose path may hold credentials (`.env`, key files, `.ssh`, ...) has neither counts nor lines, only `omitted: "secret"`; a binary or very large change says so. The preview is what the person decides on at a glance, not the change: the PC still applies an answer only to the request with the same digest, and the whole change is on the PC.
 
-File contents, diffs, command output, environment values, the browser text an agent would type, MCP arguments and credentials are never sent.
+File contents, whole diffs, command output, environment values, the browser text an agent would type, MCP arguments and credentials are never sent. Lines of a preview are the one place text of a file leaves the PC, and only after the person's own choice at the PC.
 
 `DesktopRemoteDevice` keeps the latest report for 3 minutes after the last sync. `DesktopRemoteCommand` keeps each answer for 15 minutes, and an answer can be picked up only within its first 2 minutes. The PC counts the time since it asked on top of the age the server reports, so an answer that was young at the server and old on arrival is refused as expired. An answer to an approval request is kept past the 15 minutes for as long as the PC's report still shows that request, because the row is what refuses a second answer for it; it goes once the PC reports the request closed. For the same reason the report that shows an answered request is kept, hidden from the screen and unable to receive anything, after the PC stops reporting: a PC that was away and comes back with the request still open finds its answer there, and a second answer is refused. That hidden report goes when the PC reports again without the request, when the PC turns the switch off, or when the device's sign-in ends. Both are deleted by `lib/maintenance.ts` (step `desktop_remote_control`), and the screen deletes what it finds expired. When the PC turns the switch off (`DELETE /api/desktop/remote/sync`) its report and the answers waiting for it are removed at once. The PC numbers every request to the server, each higher than the last, and the server takes a report only when its number is higher than the last one it took from that PC and than the PC's withdrawal. What stays after a withdrawal is an empty, hidden marker with the number of that request, kept for 2 minutes: a sync the PC had sent before, which reaches the server after it, is refused (409 `STALE_SYNC`) and puts nothing back. A withdrawal obeys the same order: one that arrives after a later sync of the same PC (off and on again) was sent before it and changes nothing. The withdrawal writes its marker before it removes the waiting answers; writing it takes the row's lock, so an answer recorded at that moment is either removed with the rest or finds no report to answer. The PC also waits for a sync it has already sent before it sends the delete (about 11 seconds at most when the switch is turned off, 2 at sign-out, then it cancels that sync; the delete itself may take 3 more). Rows are hidden and deleted once the device's token family is revoked at sign-out. They cascade from `MobileDevice`, so deleting the device or the account deletes them.
 
@@ -50,19 +54,30 @@ The server checks the same things before it stores an answer:
 - the request is the one it reported, with the same digest, as answerable from elsewhere
 - the request has not been answered yet
 
-The server is still trusted to say who answered. It can only answer a request the PC already has open. A stronger proof, such as a key held on the phone, is not part of this version.
+The server is still trusted to say who answered. It can only answer a request the PC already has open. A stronger proof exists for accounts that register a passkey ("Passkey confirmation" below); the PC itself does not check it, because the PC holds no key of the person's phone: the server does, before it stores the answer.
 
 ## Authentication
 
 - PC: `POST` and `DELETE /api/desktop/remote/sync` take the device's own Desktop bearer, with `Origin: tomverse://desktop` and no cookie. The path is enrolled in `desktopWriteApiRoute` while Desktop authentication is on.
 - Web: `GET /api/desktop/remote/devices` and `POST /api/desktop/remote/commands` take the signed-in browser session only. A bearer or a Desktop origin is refused.
 - Acting (answering, stopping, sending a follow-up) needs a web sign-in within the account step-up window (`hasRecentAccountAuthentication`, 30 minutes by default). A Desktop device's own sign-in time does not count. An older session can only look and is offered "Sign in again".
+- Stopping a task needs no more than that: it only reduces what happens. Remote control cannot start a command, widen an approval or answer a request kind that is answered at the PC; that boundary is unchanged.
 - Each action is written to the admin audit chain in the same transaction: `desktop_remote.approval_answered`, `desktop_remote.task_stop_requested` or `desktop_remote.follow_up_sent`, with target `DesktopRemoteCommand`. The entry carries ids, the decision and the digest. It never carries follow-up text, a command line or a path.
+
+## Passkey confirmation
+
+With `TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED` on, `/remote` offers a Passkey section. An account that registered a passkey confirms **"Allow once"** and **follow-ups** with it (fingerprint, face or device PIN: user verification is required). **Deny** and **stop** need no passkey: they only reduce what happens. An account without a passkey is asked for none, as before; the passkey is an addition to the recent web sign-in, never a replacement for it, and it widens nothing (a commit, push or pull request, MCP tools, web pages and the other kinds listed above are still answered at the PC only).
+
+- **What is checked** (`lib/webauthnCore.ts`, `lib/desktopRemotePasskeyStore.ts`; no new dependency): a WebAuthn assertion over a single-use random challenge (two minutes) that the server bound to this one command: its kind, PC, task, request id and digest, decision, and the digest of a follow-up's text. The signature, the origin (one of this deployment's own, https), the relying party (the host name the passkey was made for), user presence and user verification, and a signature counter that must rise (or stay 0 for an authenticator that does not count). ES256 and RS256 (2048 bits at least); attestation is not trusted. The challenge is taken once and is gone whatever the signature turns out to be, so an assertion cannot be replayed or used for another answer.
+- **Registering** needs a recent web sign-in; an account that already has a passkey adds the next one only with an assertion of an existing one over that registration (a stolen session on its own cannot add its own authenticator), and **removing** one needs an assertion of the passkey being removed or another. At most 5 passkeys per account. The route allows 20 passkey requests a minute and 300 a day per account. Losing every passkey leaves the account asking for one that cannot be given: allow once and follow-ups from another device are then unavailable (deny and stop still work), and there is no recovery path in this version; that is an operator decision (a support-assisted reset would need its own audit entry).
+- **Tables** (migration `20261128070000_desktop_remote_passkey`, two new tables, nothing existing touched): `DesktopRemotePasskey` (public key, credential id, host name, counter, name the person gave it) and `DesktopRemotePasskeyChallenge` (a random value and the digest of what it confirms, never the command). Both go with the account. Neither is part of the account export.
+- **Audit** (the same hash-chained writer, in the same transaction): `desktop_remote.passkey_registered` and `desktop_remote.passkey_removed`, with target `DesktopRemotePasskey`, carrying ids only; and the passkey that confirmed an answer or follow-up (`passkeyId`) in that action's own entry.
+- **Switch off**: nobody is asked for a passkey and none can be registered, so the check is as before. Passkeys stay in the table.
 
 ## Rollout
 
-1. Deploy with the server switch off. Migration `20261126120000_desktop_remote_control` adds the two tables and nothing else.
-2. Turn on `TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED` in Test, with `TOMVERSE_DESKTOP_AUTH_ENABLED` already on.
-3. Install a Desktop build that has the setting.
+1. Deploy with the server switches off. Migration `20261126120000_desktop_remote_control` adds the two tables of remote control, and `20261128070000_desktop_remote_passkey` the two of passkeys; nothing else.
+2. Turn on `TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED` in Test, with `TOMVERSE_DESKTOP_AUTH_ENABLED` already on. Then, separately, `TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED` and `TOMVERSE_DESKTOP_REMOTE_PREVIEW_ENABLED`.
+3. Install a Desktop build that has the settings. An older Desktop keeps working against a newer server, and a newer Desktop sends the preview fields only to a server that names `desktopRemotePreview`.
 
 To stop the feature, turn the server switch off. The rows left expire within 15 minutes and maintenance deletes them, except the hidden report of an answered request and its answer, which go when that device's sign-in ends.
