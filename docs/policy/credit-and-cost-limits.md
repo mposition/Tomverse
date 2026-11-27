@@ -1241,6 +1241,40 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
 - **계획·offer는 별도입니다.** offer/추정은 결정적 계산이며 모델을 부르지 않습니다. 계획
   생성은 사용자가 누른 명시적 동작이고 run 총액에서 예약합니다.
 
+### 예약 작업: 회차 하나 = 일반 Chat turn 하나, 1회 상한은 사용자가 승인한 견적 (2026-11-27)
+
+사용자 예약 작업(`lib/scheduledTaskRunner.ts`, 기본 꺼짐 `feature.scheduledTasksEnabled`)도
+새 가격이나 새 credit 층을 만들지 않습니다.
+
+- **회차 하나는 Chat route를 그대로 거치는 turn 하나입니다.** 실행기는 브라우저가 보내는
+  durable stored-Chat 요청을 만들어 같은 프로세스에서 Chat route handler에 넘깁니다. 예약·
+  정산·검색 surcharge·guardrail·provider 예산·만료 reconcile은 일반 Chat과 같습니다. 사용자
+  대신 실행하는 신원은 새 자격증명이 아니라 실행기가 claim한 작업 행이며, AsyncLocalStorage
+  범위로만 전달됩니다(`lib/scheduledTaskRunContext.ts`).
+- **1회 상한.** 저장할 때 `/api/chat/availability`와 같은 `createChatBudget` 견적을 보여 주고,
+  사용자가 그 숫자를 확인해야 저장됩니다(`creditsPerRun`). 실행 때 Chat route의
+  `acquireChatAccess`가 `withinReservationTransaction`으로 guard를 부르고
+  (`lib/scheduledTaskReservationGuard.ts`), 회차 누적 예약이 승인액을 넘으면 예약 트랜잭션
+  안에서 `SCHEDULED_TASK_CREDIT_CAP_EXCEEDED`(402)로 거절해 아무것도 잡지 않습니다. 작업은
+  `cost_changed`로 멈추고, 다시 시작할 때 새 견적을 확인받습니다.
+- **크레딧이 부족하면** Chat의 entitlement 거절이 그대로 나오고 작업은 `insufficient_credits`로
+  멈춥니다. 플랫폼 쪽 거절(guardrail, provider 예산, 관리자 정지, 동시 실행)은 건너뛰기만 하고
+  실패로 세지 않습니다. 연속 실패 3회면 멈춥니다.
+- **결과 불명은 다시 보내지 않습니다.** 회차의 assistant id는 회차 id에서 파생되므로 같은
+  회차를 다시 보내도 Chat attempt에 재연결될 뿐입니다. lease가 지난 회차는 attempt 행으로만
+  판정하고, 판정할 수 없으면 `unknown`으로 기록합니다.
+- **실행 위치와 시간.** 견적은 실행기가 보내는 turn을 Chat route와 같은 입력(질문, `buildChatTurnSystemBlocks`의 capability block)과 같은 예산 옵션으로 계산하고, `tests/integration/scheduled-task-chat-route.db.test.ts`가 실제 route의 예약액이 견적을 넘지 않는지 확인합니다. tick은 유지보수 요청의 `maxDuration` 안에 돌아오고, 남은 시간이 2분보다 적으면 새 회차를 시작하지 않습니다. 이미 시작한 회차는 요청이 끝난 뒤에도 답을 끝까지 읽고 스스로 정산합니다. 이것은 `next start` 서버(운영은 Railway)에서만 보장되므로(Next self-hosting 안내의 `after`), 서버리스 표지(`VERCEL`, `AWS_LAMBDA_FUNCTION_NAME`, `NETLIFY`, `FUNCTIONS_WORKER_RUNTIME`)가 있으면 아무 회차도 시작하지 않습니다(`scheduledTasksHostProblem`). 예약 회차는 계정의 Chat 동시 요청 자리 하나를 항상 사람 몫으로 남기므로(`subjectSlotsKeptFree`), 계정당 한도가 1인 배포(`CHAT_USER_CONCURRENT=1`)에서는 남길 자리가 없어 Chat route가 예약 회차를 거절하고, tick도 같은 검사로 아무 회차도 시작하지 않습니다(`chat_concurrency_too_low`). 기능 스위치(`feature.scheduledTasksEnabled`)와 kill switch(`SCHEDULED_TASKS_KILL_SWITCH`)는 tick 시작 때만이 아니라 새 회차를 시작하기 직전마다, 그리고 크레딧을 잡는 예약 트랜잭션 안에서 다시 읽습니다. 그래서 tick이 도는 중에 끄면 그 뒤로는 아무 회차도 시작하지 않고, 이미 claim된 회차도 크레딧을 잡지 못한 채 `feature_disabled`로 건너뜁니다(작업은 멈춤 처리하지 않습니다). 한 번만 실행하는 작업은 회차가 닫히면 완료되지만, 그 회차가 플랫폼 사정(운영 가드레일, provider 예산, 운영자의 Chat 중지, 동시 요청 한도, rate limit)이나 운영자의 중단(`feature_disabled`)으로 시작되지 못한 경우에는 완료하지 않고 최소 간격(20시간) 뒤에 다시 실행 대상이 됩니다(`onceTaskRetryAt`). 첫 실행 시각에서 72시간이 지나면 더 시도하지 않고 답 없이 완료합니다. 재시도에도 3시간 유예 규칙은 똑같이 적용됩니다. 배포 중 프로세스가 내려가 끊긴 회차는 일반 Chat turn처럼 attempt 행으로 판정합니다.
+- **빈도와 동시 실행.** 가장 잦은 일정은 매일이고, 실행기는 같은 작업의 두 회차를 20시간보다
+  가깝게 두지 않습니다. 간격은 예정 시각 사이와 실제 시작 시각 사이를 모두 재며, lease가
+  끊긴 뒤 Chat에 닿지 않았음을 확인하고 다시 시작한 회차는 다시 시작한 시각이 시작 시각입니다
+  (`ScheduledTaskRun.startedAt`). 계정당 예약 실행은 한 번에 하나이며(`runningUserId` unique), 계정의
+  Chat lease가 한도에서 하나 모자라면 기다립니다. 활성 작업은 계정당 5개, Pro·Max 전용입니다.
+- **한 tick이 보는 범위.** tick은 시작할 때가 된 작업을 오래된 순서로 20개씩 읽고, 지금 시작할
+  수 없어 기다리는 작업은 건너뛰고 그 뒤를 계속 봅니다. 예약 실행이 돌고 있는 계정의 작업은
+  읽지 않습니다. 한 tick은 최대 20회차를 시작하고 최대 200개 작업을 봅니다
+  (`claimBatch`, `dueScanLimit`). 보지 못한 작업은 그대로 다음 tick(15분 뒤)으로 넘어가고, 3시간
+  유예를 넘긴 회차는 늦게 몰아서 실행하지 않고 건너뜁니다.
+
 ## 5. 시간대와 reset
 
 일일 window는 사용자 IANA timezone 기준(`lib/userTimeZone.ts`)입니다. 모든

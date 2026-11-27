@@ -717,6 +717,34 @@ const REGISTRY = {
     reason:
       "user_revoked, and deliberately nothing else. Account deletion is the other way a device stops being usable and is absent on purpose: it takes the row with it through the cascade, so a value for it would be one nothing could ever write and a state nobody could query for.",
   },
+  ScheduledTask_frequency_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_FREQUENCIES",
+    reason:
+      "How often a scheduled task runs. Daily is the most frequent on purpose: there is no hourly value, so unattended spend is bounded by the schedule itself before the runner's minimum-interval guard. The route parses the same list.",
+  },
+  ScheduledTask_status_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_STATUSES",
+    reason:
+      "Active tasks are claimed by the runner; paused ones wait for the person; completed is a one-off that has run. Written only by lib/scheduledTaskService.ts and lib/scheduledTaskRunner.ts.",
+  },
+  ScheduledTask_pauseReason_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_PAUSE_REASONS",
+    reason:
+      "Why a task stopped: the person (user) or the runner refusing to spend on the account's behalf, each with a reason the settings screen explains. NULL exactly while not paused (ScheduledTask_pause_shape_check).",
+  },
+  ScheduledTaskRun_status_check: {
+    owner: "list",
+    module: "lib/scheduledTaskCore.ts",
+    list: "SCHEDULED_TASK_RUN_STATUSES",
+    reason:
+      "One occurrence's lifecycle. unknown is a run whose Chat attempt lease lapsed without a terminal state: its outcome cannot be confirmed, so it is recorded and never dispatched again.",
+  },
   CodeCloudJob_status_check: {
     owner: "list",
     module: "lib/codeCloudContract.ts",

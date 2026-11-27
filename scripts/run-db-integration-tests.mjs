@@ -683,6 +683,11 @@ run(
     // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
     // all look correct in one process while failing under PostgreSQL races.
     "tests/integration/chat-durable-recovery.db.test.ts",
+    // Scheduled tasks spend an account's credits unattended: the occurrence
+    // and one-in-flight unique keys, the reservation guard's transaction and
+    // lease reconciliation only mean anything against PostgreSQL.
+    "tests/integration/scheduled-tasks.db.test.ts",
+    "tests/integration/scheduled-task-chat-route.db.test.ts",
     "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
