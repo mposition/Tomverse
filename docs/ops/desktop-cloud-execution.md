@@ -37,8 +37,8 @@ as not offered.
    (`code-cloud/<job>/result.patch`), **releases the reservation** (unused credits returned), and deletes the bundle.
 7. **Review and apply (Desktop).** The person opens the task, reads its files and hunks (parsed with the review panel's
    own `parseUnifiedDiff`; `git apply --check` says whether it still fits the folder) and applies it to the same folder.
-   A patch with any file whose lines cannot be shown (binary, too large, a name the panel cannot read, past the file
-   limit) is not offered for applying.
+   A patch with any change the panel cannot show (a binary or too large file, a name it cannot read, more files than
+   it lists, or a header such as a mode change, a symbolic link or a rename) is not offered for applying.
    It becomes uncommitted changes, which the review panel shows and can revert. Nothing is pushed from the cloud.
 
 States: `uploading`, `queued`, `starting` (claimed, reserving), `running`, `completed`, `failed`, `cancelled`. Desktop
@@ -75,7 +75,8 @@ instruction, models, cap, states, up to 400 progress lines, a summary, and the o
 job ends; the row and its patch are deleted seven days after the job ends by the fifteen-minute maintenance sweep
 (`sweepCodeCloudJobsQuietly`, which also ends jobs whose runner stopped reporting and fails uploads and queue waits that
 ran out). Account deletion deletes the rows and queues both object keys of every job on the shared object cleanup queue
-(`lib/codeCloudDeletion.ts`). The account export includes the job rows without the token digest, runner name, storage
+(`lib/codeCloudDeletion.ts`). Bundles and patches are written only while their job row is locked, so a deletion
+that starts during a write waits for it and its tombstones always follow the object. The account export includes the job rows without the token digest, runner name, storage
 keys and reservation link.
 
 ## Switches and variables

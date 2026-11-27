@@ -148,9 +148,9 @@ test('Desktop cloud jobs reserve, call, settle and release through the managed C
       // The heartbeat arrives between the sweep's read and its conditional end.
       let beaten=false;
       const racing=new Proxy(db,{get(target,key){
-        if(key==='$executeRaw')return async(strings,...values)=>{
+        if(key==='$queryRaw'||key==='$executeRaw')return async(strings,...values)=>{
           if(!beaten&&values.includes('CODE_CLOUD_RUNNER_LOST')){beaten=true;await runner({action:'heartbeat',jobId:job.jobId,logs:['still here']},claim.token);}
-          return target.$executeRaw(strings,...values);
+          return target[key](strings,...values);
         };
         const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
       }});
@@ -162,16 +162,30 @@ test('Desktop cloud jobs reserve, call, settle and release through the managed C
       await runner({action:'finish',jobId:job.jobId,outcome:'failed',failureCode:'CODE_CLOUD_AGENT_ERROR'},claim.token);
       assert.equal((await reservation(job.jobId)).status,'closed');
     });
-    await t.test('an object written while the account was deleted is tombstoned again and removed',async()=>{
+    await t.test('an account deletion that starts during an upload waits for the write, so its tombstones come after the object',async()=>{
       const user=await newUser(),job=await service.handle(user,createBody());
-      // The account deletion commits (rows gone, tombstones drained) while the bundle bytes are being written.
-      const deleting={...storage,put:async(key,bytes)=>{await db.$transaction(tx=>enqueueCodeCloudCleanupForUser(tx,user));
-        await db.messageAttachmentCleanup.updateMany({where:{objectKey:key},data:{completedAt:new Date()}});await storage.put(key,bytes);}};
-      const racing=createCodeCloudService({storage:deleting,env,now:()=>new Date(clock)});
-      await rejectCode(()=>racing.uploadBundle(user,job.jobId,stream(bundle)),'CODE_CLOUD_JOB_NOT_FOUND');
-      assert.equal(objects.has(`code-cloud/${job.jobId}/bundle`),false);
+      let deletion,writtenAt=0;
+      // The deletion starts while the bundle bytes are being written and must not commit before they are.
+      const slow={...storage,put:async(key,bytes)=>{
+        deletion=db.$transaction(tx=>enqueueCodeCloudCleanupForUser(tx,user)).then(()=>Date.now());
+        await new Promise(resolve=>setTimeout(resolve,400));
+        await storage.put(key,bytes);writtenAt=Date.now();
+      }};
+      const uploading=createCodeCloudService({storage:slow,env,now:()=>new Date(clock)});
+      const outcome=await uploading.uploadBundle(user,job.jobId,stream(bundle)).then(view=>view.status,error=>error.code);
+      assert.ok(['queued','CODE_CLOUD_JOB_NOT_FOUND'].includes(outcome),String(outcome));
+      const deletedAt=await deletion;
+      assert.ok(writtenAt>0&&deletedAt>=writtenAt,'the deletion committed only after the write');
+      assert.equal(await db.codeCloudJob.count({where:{id:job.jobId}}),0);
+      // The object exists and its tombstone is still open, so the cleanup drain removes it on its next pass.
+      assert.equal(objects.has(`code-cloud/${job.jobId}/bundle`),true);
       const tombstone=await db.messageAttachmentCleanup.findUnique({where:{objectKey:`code-cloud/${job.jobId}/bundle`}});
       assert.equal(tombstone.completedAt,null);assert.equal(tombstone.reason,'account_deleted');
+      // A deletion that came first leaves no row, and nothing is written for it.
+      const late=await newUser(),gone=await service.handle(late,createBody());
+      await db.$transaction(tx=>enqueueCodeCloudCleanupForUser(tx,late));
+      await rejectCode(()=>service.uploadBundle(late,gone.jobId,stream(bundle)),'CODE_CLOUD_JOB_NOT_FOUND');
+      assert.equal(objects.has(`code-cloud/${gone.jobId}/bundle`),false);
     });
     await t.test('the same per-account task limit as the managed path',async()=>{
       const user=await newUser(),limit=codeTaskLimit();

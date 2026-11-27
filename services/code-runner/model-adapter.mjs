@@ -193,6 +193,7 @@ export function createModelAdapter({ model, callModel, onCall = () => {} }) {
   return {
     server,
     listen: (socketPath) => new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, () => resolve()); }),
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    // Ends connections still open (a model call the killed worker was waiting on) instead of waiting for them.
+    close: () => new Promise((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }),
   };
 }

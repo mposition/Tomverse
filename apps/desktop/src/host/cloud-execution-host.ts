@@ -21,6 +21,23 @@ function patchPaths(text: string) {
   });
 }
 
+/**
+ * The file header lines the review shows the effect of: a file's blob ids (with its unchanged mode), its creation or
+ * deletion as an ordinary file (mode 100644), and the two path lines. Anything else between `diff --git` and the first hunk -- a mode change
+ * (making a file executable), a symbolic link or submodule (120000, 160000), a rename or copy, binary data -- changes
+ * something the panel does not show.
+ */
+const SHOWN_HEADER = /^(?:index [0-9a-f]{7,64}\.\.[0-9a-f]{7,64}(?: 100644| 100755)?|new file mode 100644|deleted file mode 100644|--- (?:a\/.+|\/dev\/null)|\+\+\+ (?:b\/.+|\/dev\/null))$/;
+function headersShown(text: string) {
+  let header = false;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("diff --git ")) header = true;
+    else if (line.startsWith("@@")) header = false;
+    else if (header && line !== "" && !SHOWN_HEADER.test(line)) return false;
+  }
+  return true;
+}
+
 const item = (job: CodeCloudJobView): CloudJobItem => ({
   jobId: job.jobId, status: job.status, instruction: job.instruction, executorModelId: job.executorModelId, approvedCredits: job.approvedCredits,
   cancelRequested: job.cancelRequested, failureCode: job.failureCode, summary: job.summary,
@@ -142,11 +159,12 @@ export function createCloudExecutionHost(deps: {
     patches.set(jobId, patch.value);
     const text = patch.value.toString("utf8");
     const files = parseUnifiedDiff(text, patchPaths(text));
-    // A patch with any file whose lines the panel cannot show (binary, too large, a path it cannot read, or past the
-    // file limit) is not offered for applying: the person would be approving changes they could not see.
+    // A patch with any file whose change the panel cannot show (binary, too large, a path it cannot read, past the file
+    // limit, or a header such as a mode change or a link) is not offered for applying: the person would be approving
+    // changes they could not see.
     const headers = text.split("\n").filter((line) => line.startsWith("diff --git ")).length;
     const hidden = files.some((file) => file.omitted !== undefined) || files.length > MAX_REVIEW_FILES ||
-      files.length !== headers || patchPaths(text).length !== headers;
+      files.length !== headers || patchPaths(text).length !== headers || !headersShown(text);
     review = { jobId, files: files.slice(0, MAX_REVIEW_FILES), truncated: files.length > MAX_REVIEW_FILES, hidden,
       applies: hidden ? false : await patchApplies(target.project.git, patch.value).catch(() => null) };
     notice = null;

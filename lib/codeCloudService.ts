@@ -81,6 +81,13 @@ const billingOf = (receipt: unknown): CodeCloudBilling | null => {
 const digest = (value: string) => createHash("sha256").update(value).digest();
 const sameSecret = (given: string, expected: string) => timingSafeEqual(digest(given), digest(expected));
 const tokenHash = (token: string) => digest(token).toString("hex");
+/**
+ * A bundle or a patch is written to storage only inside a transaction that holds its job's row lock. An account
+ * deletion (lib/codeCloudDeletion.ts) queues both object keys of every job and then removes the rows; removing this row
+ * waits for the lock, so its tombstones commit after the write and the cleanup drain cannot run before the object
+ * exists. A deletion that came first leaves no row, and nothing is written. Long enough for an 8 MiB write.
+ */
+const WRITE_TRANSACTION = { maxWait: 15_000, timeout: 120_000 };
 
 export function codeCloudJobView(row: JobRow, logs: "all" | "none" | number = "all"): CodeCloudJobView {
   const billing = codeCloudBilling.safeParse(row.billing);
@@ -143,24 +150,6 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
     }
   }
 
-  /**
-   * An object whose job row is gone (the account was deleted while the bytes were being written, possibly after the
-   * deletion's tombstones were already drained) gets a fresh tombstone on the shared cleanup queue, reopened if that key
-   * was cleaned before, and is removed now when storage answers. Nothing else would ever name it again.
-   */
-  async function orphaned(key: string) {
-    await db.$executeRaw`INSERT INTO "MessageAttachmentCleanup" ("id","objectKey","reason","attempts","createdAt","updatedAt")
-      VALUES (${randomUUID()},${key},'account_deleted',0,NOW(),NOW())
-      ON CONFLICT ("objectKey") DO UPDATE SET "completedAt"=NULL,"attempts"=0,"lastError"=NULL,"updatedAt"=NOW()`;
-    await deps.storage.remove(key).catch(() => undefined);
-  }
-  /** After writing an object: whether its job still exists. When it does not, the object is handed to `orphaned`. */
-  async function keptAfterPut(jobId: string, key: string) {
-    if (await byId(db, jobId)) return true;
-    await orphaned(key);
-    return false;
-  }
-
   /** Ends a reservation; an unknown outcome is left to the managed lease, which returns unused credits on its own. */
   async function release(row: Pick<JobRow, "userId" | "reservationId">, reason: "completed" | "failed" | "cancelled" | "interrupted") {
     if (!row.reservationId) return null;
@@ -209,18 +198,18 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
     if (bytes.byteLength !== job.bundleBytes || createHash("sha256").update(bytes).digest("hex") !== job.bundleSha256 || !looksLikeGitBundle(bytes))
       return fail(400, "CODE_CLOUD_BUNDLE_INVALID");
     const key = codeCloudBundleKey(job.id);
-    await deps.storage.put(key, bytes, "application/x-git-bundle");
-    if (!(await keptAfterPut(job.id, key))) return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
-    const changed = await db.$executeRaw`UPDATE "CodeCloudJob" SET "status"='queued',"bundleObjectKey"=${key},"updatedAt"=${deps.now()},
-      "expiresAt"=${later(CODE_CLOUD_LIMITS.queueWindowMs)} WHERE "id"=${job.id} AND "status"='uploading'`;
+    await db.$transaction(async (tx) => {
+      // Written only while the job's row is locked (see WRITE_TRANSACTION); a job cancelled or queued by an identical
+      // repeat in the meantime keeps what it has.
+      const locked = (await tx.$queryRaw<JobRow[]>`SELECT * FROM "CodeCloudJob" WHERE "id"=${job.id} AND "userId"=${userId} FOR UPDATE`)[0];
+      if (!locked) return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
+      if (locked.status !== "uploading") return;
+      await deps.storage.put(key, bytes, "application/x-git-bundle");
+      await tx.$executeRaw`UPDATE "CodeCloudJob" SET "status"='queued',"bundleObjectKey"=${key},"updatedAt"=${deps.now()},
+        "expiresAt"=${later(CODE_CLOUD_LIMITS.queueWindowMs)} WHERE "id"=${job.id}`;
+    }, WRITE_TRANSACTION);
     const now = await owned(db, userId, jobId);
-    if (!now) {
-      await orphaned(key);
-      return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
-    }
-    // Cancelled or expired while the bytes were arriving: nothing will run them. A repeat that lost the race to an
-    // identical upload finds the job queued with the same key and leaves it alone.
-    if (changed !== 1 && codeCloudTerminal(now.status)) await dropBundle(job.id);
+    if (!now) return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
     return codeCloudJobView(now, "none");
   }
 
@@ -414,24 +403,22 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
   async function finish(jobId: string, token: string | null, request: Extract<CodeCloudRunnerRequest, { action: "finish" }>) {
     const job = await runnerJob(jobId, token);
     if (job.status !== "running") return fail(409, "CODE_CLOUD_JOB_NOT_RUNNING");
-    let patch: { key: string; bytes: number; sha256: string } | null = null;
+    let patch: { key: string; bytes: number; sha256: string; body: Buffer } | null = null;
     if (request.outcome === "completed" && request.patchBase64 !== undefined) {
       const bytes = Buffer.from(request.patchBase64, "base64");
       const sha = createHash("sha256").update(bytes).digest("hex");
       if (bytes.byteLength > CODE_CLOUD_LIMITS.patchMaxBytes || bytes.toString("base64") !== request.patchBase64 || sha !== request.patchSha256)
         return fail(400, "CODE_CLOUD_PATCH_INVALID");
-      if (bytes.byteLength > 0) {
-        patch = { key: codeCloudPatchKey(job.id), bytes: bytes.byteLength, sha256: sha };
-        await deps.storage.put(patch.key, bytes, "text/x-diff");
-        if (!(await keptAfterPut(job.id, patch.key))) return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
-      }
+      if (bytes.byteLength > 0) patch = { key: codeCloudPatchKey(job.id), bytes: bytes.byteLength, sha256: sha, body: bytes };
     }
     // The end is recorded first and the reservation released only by the request that recorded it, so a runner-lost
-    // sweep and a late finish never both release, and neither releases a job the other left running.
+    // sweep and a late finish never both release, and neither releases a job the other left running. The patch is
+    // written under the same row lock (WRITE_TRANSACTION), and only for a job that is still running.
     const ended = await db.$transaction(async (tx) => {
       const locked = (await tx.$queryRaw<JobRow[]>`SELECT * FROM "CodeCloudJob" WHERE "id"=${job.id} FOR UPDATE`)[0];
       if (!locked) return "gone" as const;
       if (locked.status !== "running") return "other" as const;
+      if (patch) await deps.storage.put(patch.key, patch.body, "text/x-diff");
       await appendLogs(tx, locked, request.logs ?? []);
       const now = deps.now();
       const failureCode = request.outcome === "failed" ? request.failureCode ?? "CODE_CLOUD_RUN_FAILED" : null;
@@ -440,11 +427,8 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
         "runnerTokenHash"=NULL,"runnerLeaseExpiresAt"=NULL,"finishedAt"=${now},"updatedAt"=${now},"expiresAt"=${later(CODE_CLOUD_LIMITS.retentionMs)}
         WHERE "id"=${job.id}`;
       return "ended" as const;
-    });
-    if (ended === "gone") {
-      if (patch) await orphaned(patch.key);
-      return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
-    }
+    }, WRITE_TRANSACTION);
+    if (ended === "gone") return fail(404, "CODE_CLOUD_JOB_NOT_FOUND");
     if (ended === "other") return fail(409, "CODE_CLOUD_JOB_NOT_RUNNING");
     const billing = await release(job, request.outcome === "completed" ? "completed" : request.outcome === "cancelled" ? "cancelled" : "failed");
     if (billing) await db.$executeRaw`UPDATE "CodeCloudJob" SET "billing"=${JSON.stringify(billing)}::jsonb WHERE "id"=${job.id}`;
@@ -479,12 +463,14 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
       const status = job.cancelRequestedAt ? "cancelled" : "failed";
       // The end is recorded only if the claim is still expired now (a heartbeat in between keeps the job), and only
       // then is the reservation released; the cleared token refuses any later report or model call of that runner.
-      const changed = await db.$executeRaw`UPDATE "CodeCloudJob" SET "status"=${status},"failureCode"=${status === "failed" ? "CODE_CLOUD_RUNNER_LOST" : null},
+      // The reservation is the one on the row as it was ended, not on the earlier read: a claim may have saved it since.
+      const [ended] = await db.$queryRaw<Array<Pick<JobRow, "userId" | "reservationId">>>`UPDATE "CodeCloudJob" SET "status"=${status},
+        "failureCode"=${status === "failed" ? "CODE_CLOUD_RUNNER_LOST" : null},
         "runnerTokenHash"=NULL,"runnerLeaseExpiresAt"=NULL,"finishedAt"=${now},"updatedAt"=${now},"expiresAt"=${later(CODE_CLOUD_LIMITS.retentionMs)}
-        WHERE "id"=${job.id} AND "status" IN ('starting','running') AND "runnerLeaseExpiresAt"<${now}`;
-      if (changed !== 1) continue;
+        WHERE "id"=${job.id} AND "status" IN ('starting','running') AND "runnerLeaseExpiresAt"<${now} RETURNING "userId","reservationId"`;
+      if (!ended) continue;
       lost += 1;
-      const billing = await release(job, "interrupted");
+      const billing = await release(ended, "interrupted");
       if (billing) await db.$executeRaw`UPDATE "CodeCloudJob" SET "billing"=${JSON.stringify(billing)}::jsonb WHERE "id"=${job.id}`;
       await dropBundle(job.id);
     }

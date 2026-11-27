@@ -20,12 +20,14 @@ import { sandboxCommand } from "./isolation.mjs";
 
 export const PATCH_MAX_BYTES = 6 * 1024 * 1024;
 const LOG_BATCH = 50;
+const KILL_GRACE_MS = 15_000;
 
 const gitEnv = (home) => ({
   PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
   GIT_TERMINAL_PROMPT: "0", GIT_ATTR_NOSYSTEM: "1", GIT_OPTIONAL_LOCKS: "0", ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot ?? "C:\\Windows" } : {}),
 });
-const SAFE_GIT = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.autocrlf=false", "-c", "diff.external=", "-c", "core.attributesFile=/dev/null"];
+// core.quotepath=false keeps UTF-8 file names readable in the patch, so Desktop can show and name them.
+const SAFE_GIT = ["-c", "core.quotepath=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.autocrlf=false", "-c", "diff.external=", "-c", "core.attributesFile=/dev/null"];
 
 function git(args, { cwd, env, input, maxBuffer = 64 * 1024 * 1024 }) {
   const result = spawnSync("git", [...SAFE_GIT, ...args], { cwd, env, input, maxBuffer, windowsHide: true });
@@ -87,10 +89,15 @@ export async function runJob(job, { server, config, log = () => {} }) {
   const dir = await mkdtemp(join(config.workRoot ?? tmpdir(), "tomverse-cloud-"));
   const lines = [];
   const push = (text) => { if (text) lines.push(String(text)); };
-  let stopReason = null, worker = null, adapter = null, heartbeatTimer = null, deadline = null;
+  let stopReason = null, worker = null, adapter = null, heartbeatTimer = null, deadline = null, gaveUp = null;
+  // Resolves the wait for the worker; a worker that does not end within KILL_GRACE_MS of being killed is not waited for.
+  let settleWorker = () => {};
   const kill = (reason) => {
     stopReason ??= reason;
-    if (worker && worker.exitCode === null) killTree(worker);
+    if (worker && worker.exitCode === null && worker.signalCode === null) {
+      killTree(worker);
+      gaveUp ??= setTimeout(() => settleWorker(null), KILL_GRACE_MS);
+    }
   };
   const report = async (body) => server.post({ action: "finish", jobId: job.jobId, ...body, logs: lines.splice(0, LOG_BATCH) }, job.token).catch((error) => log(`finish failed: ${error.message}`));
   try {
@@ -153,7 +160,12 @@ export async function runJob(job, { server, config, log = () => {} }) {
     });
     let stderr = "";
     worker.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString("utf8")).slice(-2000); });
-    const exited = new Promise((resolveExit) => worker.on("close", (code) => resolveExit(code)));
+    // "exit", not "close": a process the agent started can hold the worker's output pipes open after the worker ended.
+    const exited = new Promise((resolveExit) => {
+      settleWorker = resolveExit;
+      worker.once("exit", (code) => resolveExit(code));
+      worker.once("error", () => resolveExit(null));
+    });
     deadline = setTimeout(() => kill("time_limit"), job.limits.maxRuntimeMs);
     let lastBeat = Date.now();
     const beat = async () => {
@@ -202,6 +214,7 @@ export async function runJob(job, { server, config, log = () => {} }) {
   } finally {
     clearInterval(heartbeatTimer);
     clearTimeout(deadline);
+    clearTimeout(gaveUp);
     if (worker && worker.exitCode === null) killTree(worker);
     await adapter?.close().catch(() => {});
     await rm(dir, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});

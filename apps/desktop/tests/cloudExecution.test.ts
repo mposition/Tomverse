@@ -171,6 +171,21 @@ test("changes are applied only after a review of that patch, to the folder the t
   assert.equal(opaque.review?.hidden, true);
   assert.equal(opaque.review?.applies, false);
   assert.deepEqual((await host.run({ action: "apply", jobId: third.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" });
+  // And so do changes the hunks do not show: a mode change (here alone, with no hunk) or a new symbolic link.
+  for (const [instruction, lines] of [
+    ["Make it executable", ["diff --git a/a.txt b/a.txt", "old mode 100644", "new mode 100755", ""]],
+    ["Add a link", ["diff --git a/link b/link", "new file mode 120000", "index 0000000..1de5659", "--- /dev/null", "+++ b/link", "@@ -0,0 +1 @@", "+/etc/passwd", "\\ No newline at end of file", ""]],
+  ] as const) {
+    const bytes = Buffer.from(lines.join("\n"));
+    await host.run({ action: "start", instruction, executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 5 });
+    const row = [...server.jobs.values()].find((candidate) => candidate.instruction === instruction)!;
+    Object.assign(row, { status: "completed", patch: { bytes: bytes.length, sha256: sha(bytes) }, patchBytes: bytes });
+    await host.run({ action: "read" });
+    const shown = await host.run({ action: "review", jobId: row.jobId });
+    assert.equal(shown.review?.hidden, true, instruction);
+    assert.equal(shown.review?.applies, false, instruction);
+    assert.deepEqual((await host.run({ action: "apply", jobId: row.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" }, instruction);
+  }
   rmSync(root, { recursive: true, force: true });
   rmSync(other, { recursive: true, force: true });
 });
