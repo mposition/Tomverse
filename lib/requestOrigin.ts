@@ -77,6 +77,11 @@ const EXEMPT_MUTATION_PATHS = [
   // The coding API's web search for the agent engine, on the same key and the
   // same Bearer-only condition (default off: TOMVERSE_DESKTOP_WEB_SEARCH_ENABLED).
   "/api/code/v1/web-search",
+  // The Desktop cloud execution runner service (docs/ops/desktop-cloud-execution.md). A server, not a browser: it
+  // holds the runner secret and a per-claim job token and sends no Origin. Same condition, pinned by
+  // tests/codeCloudBoundary.test.mjs: the handler reads no session or cookie. Exact path only; the person's own job
+  // routes under /api/code/cloud keep this check.
+  "/api/code/cloud/runner",
 ];
 
 const parseOrigin = (value: string | null) => {

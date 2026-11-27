@@ -27,6 +27,7 @@ const capabilities = z.object({
   desktopManagedCode: z.boolean().optional(),
   // The Code agent's web_search (the coding API's paid search). An older server does not name it, and runs then have no such tool.
   desktopCodeWebSearch: z.boolean().optional(),
+  desktopCloudExecution: z.boolean().optional(),
   // What this server accepts in a Desktop turn. An older server names none of them, and the app then offers none.
   desktopTurnLocation: z.boolean().optional(),
   desktopChatPlugin: z.boolean().optional(),
@@ -66,6 +67,7 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     plugins: data.desktopPlugins === true, pluginSources: data.desktopPluginSources === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
     managedCode: data.desktopManagedCode === true,
     codeWebSearch: data.desktopCodeWebSearch === true,
+    cloudExecution: data.desktopCloudExecution === true,
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,
     reviewContext: data.desktopReviewContext === true,
     reviewTools: data.desktopReviewTools === true && data.desktopReviewContext === true,

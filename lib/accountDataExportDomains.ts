@@ -55,6 +55,9 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason: "Encryption envelopes and internal version fences are withheld. Unexpired pending arguments are decrypted for their owner; terminal arguments are erased." },
   {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
     withheldReason:"Provider cost basis, pricing snapshots, idempotency digests and internal lease data are withheld."},
+  // Desktop cloud execution (docs/ops/desktop-cloud-execution.md).
+  {domain:"codeCloudJob",publicName:"code_cloud_tasks",prismaModel:"CodeCloudJob",state:"included_filtered",
+    withheldReason:"The task's instruction, models, credit cap, state, progress lines, summary and times are included. Withheld: the runner's claim token digest and runner name, the storage keys and digests of the uploaded repository snapshot and the patch, the catalogue hash and the reservation link (the credits are in code_credit_usage). The patch itself is offered in Desktop until the task is removed seven days after it ends."},
   // --- wholly the user's own data ------------------------------------------
   { domain: "userSettings", publicName: "settings", prismaModel: "UserSettings", state: "included" },
   {

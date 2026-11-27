@@ -3,7 +3,7 @@ import type { Language } from "../lib/language";
 /**
  * Desktop > Execution and limits > Cloud and managed credits.
  *
- * Two things are said as plainly as they are true: "Tomverse cloud" does not run a project today, and a managed reservation
+ * Two things are said as plainly as they are true: "Tomverse cloud" runs a task only where the server offers it, and a managed reservation
  * only holds credits for model calls Tomverse makes for you. A sentence that promised more would be worse than none.
  */
 
@@ -19,7 +19,8 @@ const en = {
   locSsh: "Another computer over SSH",
   locSshDetail: "Not set up.",
   locCloud: "Tomverse cloud",
-  locCloudDetail: "Running a project on a Tomverse server needs server infrastructure that does not exist yet.",
+  locCloudDetail: "This Tomverse server does not offer it.",
+  locCloudOnDetail: "A task runs on a Tomverse runner on a copy of your tracked files. Its changes come back for you to review here before anything is applied.",
   creditsHeading: "Managed credits",
   creditsIntro: "Hold credits for model calls that Tomverse makes on your behalf. A reservation only holds credits: nothing is charged until a call runs, each call is settled from its real usage, and the rest is returned when you release it. It does not run your project on a server.",
   noRunner: "No managed runner is connected in this build, so a reservation is held only until you release it or the app stops.",
@@ -94,7 +95,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "SSH로 연결한 다른 컴퓨터",
     locSshDetail: "설정되지 않았습니다.",
     locCloud: "Tomverse 클라우드",
-    locCloudDetail: "Tomverse 서버에서 프로젝트를 실행하려면 아직 없는 서버 인프라가 필요합니다.",
+    locCloudDetail: "이 Tomverse 서버에서는 제공하지 않습니다.",
+    locCloudOnDetail: "작업이 추적 중인 파일의 사본으로 Tomverse 실행기에서 돌아갑니다. 바뀐 내용은 여기로 돌아오고, 확인한 뒤에만 적용됩니다.",
     creditsHeading: "관리형 크레딧",
     creditsIntro: "Tomverse가 대신 하는 모델 호출에 쓸 크레딧을 잡아 둡니다. 예약은 크레딧을 잡아 둘 뿐입니다. 호출이 실행되기 전에는 아무것도 차감되지 않고, 호출마다 실제 사용량으로 정산하며, 남은 크레딧은 예약을 해제할 때 돌려받습니다. 서버에서 프로젝트를 실행하지는 않습니다.",
     noRunner: "이 빌드에는 연결된 관리형 실행기가 없으므로, 예약은 해제하거나 앱이 종료될 때까지만 유지됩니다.",
@@ -164,7 +166,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "通过 SSH 连接的另一台电脑",
     locSshDetail: "尚未设置。",
     locCloud: "Tomverse 云端",
-    locCloudDetail: "在 Tomverse 服务器上运行项目需要尚不存在的服务器基础设施。",
+    locCloudDetail: "此 Tomverse 服务器未提供。",
+    locCloudOnDetail: "任务在 Tomverse 运行器上基于你已跟踪文件的副本运行。改动会回到这里，经你检查后才会应用。",
     creditsHeading: "托管额度",
     creditsIntro: "为 Tomverse 代你发起的模型调用预留额度。预留只是占用额度：调用运行之前不会扣费，每次调用按实际用量结算，剩余额度在你释放预留时退回。它不会在服务器上运行你的项目。",
     noRunner: "此版本没有连接托管运行器，因此预留只会保留到你释放它或应用退出为止。",
@@ -234,7 +237,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "透過 SSH 連線的另一台電腦",
     locSshDetail: "尚未設定。",
     locCloud: "Tomverse 雲端",
-    locCloudDetail: "在 Tomverse 伺服器上執行專案，需要目前尚不存在的伺服器基礎設施。",
+    locCloudDetail: "這台 Tomverse 伺服器未提供。",
+    locCloudOnDetail: "任務會在 Tomverse 執行器上，以你已追蹤檔案的副本執行。變更會回到這裡，經你檢查後才會套用。",
     creditsHeading: "託管額度",
     creditsIntro: "為 Tomverse 代你發出的模型呼叫預留額度。預留只是保留額度：呼叫執行之前不會扣款，每次呼叫依實際用量結算，剩餘額度會在你釋放預留時退回。它不會在伺服器上執行你的專案。",
     noRunner: "此版本沒有連接託管執行器，因此預留只會保留到你釋放它或應用程式結束為止。",
@@ -304,7 +308,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "Un autre ordinateur via SSH",
     locSshDetail: "Non configuré.",
     locCloud: "Cloud Tomverse",
-    locCloudDetail: "Exécuter un projet sur un serveur Tomverse demande une infrastructure serveur qui n'existe pas encore.",
+    locCloudDetail: "Ce serveur Tomverse ne le propose pas.",
+    locCloudOnDetail: "Une tâche s'exécute sur un exécuteur Tomverse à partir d'une copie de vos fichiers suivis. Ses modifications reviennent ici pour que vous les vérifiiez avant toute application.",
     creditsHeading: "Crédits gérés",
     creditsIntro: "Réservez des crédits pour les appels de modèle que Tomverse effectue pour vous. Une réservation ne fait que mettre des crédits de côté : rien n'est débité avant l'exécution d'un appel, chaque appel est réglé d'après son usage réel, et le reste vous est rendu quand vous libérez la réservation. Elle n'exécute pas votre projet sur un serveur.",
     noRunner: "Aucun exécuteur géré n'est connecté dans cette version : une réservation n'est conservée que jusqu'à sa libération ou l'arrêt de l'application.",
@@ -374,7 +379,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "Ein anderer Computer über SSH",
     locSshDetail: "Nicht eingerichtet.",
     locCloud: "Tomverse-Cloud",
-    locCloudDetail: "Ein Projekt auf einem Tomverse-Server auszuführen, braucht eine Server-Infrastruktur, die es noch nicht gibt.",
+    locCloudDetail: "Dieser Tomverse-Server bietet das nicht an.",
+    locCloudOnDetail: "Eine Aufgabe läuft auf einem Tomverse-Runner mit einer Kopie Ihrer versionierten Dateien. Die Änderungen kommen hierher zurück, und Sie prüfen sie, bevor etwas angewendet wird.",
     creditsHeading: "Verwaltete Guthaben",
     creditsIntro: "Reservieren Sie Guthaben für Modellaufrufe, die Tomverse für Sie ausführt. Eine Reservierung hält nur Guthaben zurück: Vor einem Aufruf wird nichts abgebucht, jeder Aufruf wird nach dem tatsächlichen Verbrauch abgerechnet, und der Rest wird zurückgegeben, wenn Sie die Reservierung freigeben. Ihr Projekt wird dadurch nicht auf einem Server ausgeführt.",
     noRunner: "In dieser Version ist kein verwalteter Runner verbunden. Eine Reservierung bleibt daher nur bis zur Freigabe oder zum Beenden der App bestehen.",
@@ -444,7 +450,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "Otro equipo por SSH",
     locSshDetail: "Sin configurar.",
     locCloud: "Nube de Tomverse",
-    locCloudDetail: "Ejecutar un proyecto en un servidor de Tomverse requiere una infraestructura de servidor que todavía no existe.",
+    locCloudDetail: "Este servidor de Tomverse no lo ofrece.",
+    locCloudOnDetail: "Una tarea se ejecuta en un ejecutor de Tomverse sobre una copia de tus archivos con seguimiento. Sus cambios vuelven aquí para que los revises antes de aplicar nada.",
     creditsHeading: "Créditos gestionados",
     creditsIntro: "Reserve créditos para las llamadas a modelos que Tomverse hace por usted. Una reserva solo retiene créditos: no se cobra nada hasta que se ejecuta una llamada, cada llamada se liquida con su uso real y el resto se devuelve al liberar la reserva. No ejecuta su proyecto en un servidor.",
     noRunner: "En esta versión no hay un ejecutor gestionado conectado, así que una reserva solo se mantiene hasta que la libere o se cierre la aplicación.",
@@ -514,7 +521,8 @@ export const desktopManagedCodeCopy: Record<Language, DesktopManagedCodeCopy> = 
     locSsh: "Outro computador via SSH",
     locSshDetail: "Não configurado.",
     locCloud: "Nuvem da Tomverse",
-    locCloudDetail: "Executar um projeto em um servidor da Tomverse exige uma infraestrutura de servidor que ainda não existe.",
+    locCloudDetail: "Este servidor da Tomverse não oferece isso.",
+    locCloudOnDetail: "Uma tarefa roda em um executor da Tomverse sobre uma cópia dos seus arquivos rastreados. As alterações voltam aqui para você revisar antes de qualquer aplicação.",
     creditsHeading: "Créditos gerenciados",
     creditsIntro: "Reserve créditos para as chamadas de modelo que a Tomverse faz por você. Uma reserva apenas retém créditos: nada é cobrado antes de uma chamada ser executada, cada chamada é liquidada pelo uso real e o restante é devolvido quando você libera a reserva. Ela não executa seu projeto em um servidor.",
     noRunner: "Nesta versão não há um executor gerenciado conectado, então uma reserva só é mantida até você liberá-la ou o aplicativo parar.",

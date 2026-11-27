@@ -7,6 +7,7 @@ import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepRes
 import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { codeWebSearchOffered } from "@/lib/codeWebSearch";
+import { desktopCloudExecutionEnabled } from "@/lib/desktopCloudExecutionSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
@@ -89,6 +90,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // The Code agent's web_search tool (POST /api/code/v1/web-search, the coding API's key and ledger). A Desktop build gives
     // its runs the tool only where the server it reached says so; the route checks the key, plan and credits again.
     desktopCodeWebSearch: codeWebSearchOffered(userId),
+    // Cloud execution of a Code task on a runner (docs/ops/desktop-cloud-execution.md). Desktop offers the cloud location only on this.
+    desktopCloudExecution: desktopCloudExecutionEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
     // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries (a switch of its own).
     desktopPluginSources: desktopPluginSourcesEnabled(),
