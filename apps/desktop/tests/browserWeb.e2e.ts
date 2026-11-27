@@ -128,10 +128,11 @@ test("the globe is in Chat, Review and Code with no project; a person opens a pu
     await globe.click();
     await expect(panel).toBeVisible();
     await expect(globe).toHaveAttribute("aria-expanded", "true");
-    for (const bad of ["http://example.com/", "https://localhost/", "https://192.168.0.1/", "https://user:pw@example.com/", "file:///C:/Windows/win.ini", "javascript:alert(1)"]) {
+    // Refused: plain http to a public name, a loopback name with no port, a public IP address, credentials and other schemes.
+    for (const bad of ["http://example.com/", "https://localhost/", "https://8.8.8.8/", "https://user:pw@example.com/", "file:///C:/Windows/win.ini", "javascript:alert(1)"]) {
       await address.fill(bad);
       await address.press("Enter");
-      await expect(page.getByRole("status").filter({ hasText: "Enter an https address or a local HTTP address with a port." }), bad).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "Enter a public https address, or an address on this computer or your network." }), bad).toBeVisible();
     }
     assert.deepEqual(sites.seen, [], "nothing was requested for an address that is refused");
     const home = `https://${SITE_ONE}:${sites.port}/`;
@@ -139,7 +140,9 @@ test("the globe is in Chat, Review and Code with no project; a person opens a pu
     await address.press("Enter");
     await expect.poll(() => panelPage(app!, home)?.title()).toBe("Site one");
     await expect(address).toHaveValue(home);
-    await expect(panel.getByText("This page is outside Tomverse.", { exact: false })).toBeVisible();
+    // An ordinary page carries no notice about Tomverse; only a page of Tomverse's own origin does.
+    await expect(panel.getByText("This page is outside Tomverse.", { exact: false })).toHaveCount(0);
+    await expect(panel.getByTestId("code-browser-account-notice")).toHaveCount(0);
     // Chat has no element picker and no sharing with Code.
     await expect(panel.getByRole("button", { name: "Select element" })).toHaveCount(0);
     await expect(panel.getByRole("button", { name: "Share this page with Code" })).toHaveCount(0);
@@ -147,11 +150,12 @@ test("the globe is in Chat, Review and Code with no project; a person opens a pu
     assert.deepEqual(await inPage.evaluate(() => [typeof (window as { desktop?: unknown }).desktop, typeof (globalThis as { require?: unknown }).require, typeof (globalThis as { process?: unknown }).process]), ["undefined", "undefined", "undefined"]);
     await shot(app, page, "chat-external-page");
 
-    // A new window loads in the same tab; a link to another public site is followed by the person.
+    // A new window opens a tab of the panel, under the same rules; a link to another public site is followed by the person.
     await inPage.locator("#popup").click();
     await expect.poll(() => panelPage(app!, `https://${SITE_ONE}:${sites.port}/second`) !== undefined).toBe(true);
+    await expect(page.getByRole("tab", { name: "Tabs 2" })).toHaveAttribute("aria-selected", "true");
     await expect(address).toHaveValue(`https://${SITE_ONE}:${sites.port}/second`);
-    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.getByRole("button", { name: "Close tab", exact: true }).click();
     await expect(address).toHaveValue(home);
     await panelPage(app, home)!.locator("#to-two").click();
     await expect.poll(() => panelPage(app!, `https://${SITE_TWO}/landing`)?.title()).toBe("Site two");
@@ -191,7 +195,7 @@ test("the globe is in Chat, Review and Code with no project; a person opens a pu
   }
 });
 
-test("a public name that resolves to a private address is cancelled, and a private address is never offered", { timeout: 90_000 }, async () => {
+test("a public name that a private DNS answers opens for the person only as a page pinned to its origin; a public page still cannot reach a private address", { timeout: 90_000 }, async () => {
   const folder = await mkdtemp(join(tmpdir(), "tomverse-browser-web-dns-"));
   const sites = await startSites(folder);
   const gateway = await new FakeGateway({ script: () => ({ text: "Done" }) }).start();
@@ -199,7 +203,7 @@ test("a public name that resolves to a private address is cancelled, and a priva
   let directory = "";
   try {
     ({ app, folder: directory } = await launch(gateway, sites.port, {}));
-    // This site's name resolves to a loopback address in the tab's own session: the request is cancelled before it is made.
+    // This site's name resolves to a loopback address in the tab's own session: the person typed it, so it opens as a private page.
     await app.evaluate(({ app: electronApp }) => {
       electronApp.on("session-created", (created) => {
         created.resolveHost = async (name: string) => ({ endpoints: [{ address: name.startsWith("site-two") ? "127.0.0.1" : "93.184.216.34", family: "ipv4" }] });
@@ -210,8 +214,11 @@ test("a public name that resolves to a private address is cancelled, and a priva
     const address = page.getByRole("textbox", { name: "Address" });
     await address.fill(`https://${SITE_TWO}:${sites.port}/`);
     await address.press("Enter");
-    await expect(page.getByRole("status").filter({ hasText: "The page could not load." })).toBeVisible();
-    assert.deepEqual(sites.seen, []);
+    await expect.poll(() => panelPage(app!, `https://${SITE_TWO}:${sites.port}/`)?.title()).toBe("Site two");
+    // Pinned to that origin: the page cannot send a request to another site (it never reaches the server).
+    const pinned = await panelPage(app, `https://${SITE_TWO}:${sites.port}/`)!.evaluate((target) => fetch(target, { mode: "no-cors" }).then(() => "reached", () => "blocked"), `https://${SITE_ONE}:${sites.port}/probe`);
+    assert.equal(pinned, "blocked");
+    assert.equal(sites.seen.some((entry) => entry.path === "/probe"), false, "nothing was sent to the other site");
     // A page of a public site cannot reach a loopback address: the subresource is cancelled.
     await address.fill(`https://${SITE_ONE}:${sites.port}/`);
     await address.press("Enter");
