@@ -4,10 +4,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { after, beforeEach, test } from "node:test";
 
 import { buildAccountDataExport } from "@/lib/accountDataExport";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import {
   ChatDraftRevisionConflictError,
   writeChatComposerDraft,
 } from "@/lib/chatComposerDraftPersistence";
+import { CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
+import { isCheckViolationDatabaseError } from "@/lib/databaseError";
 import {
   ActiveChatResponseAttemptError,
   deleteChatResponseAttemptsForModelHistory,
@@ -407,6 +410,50 @@ test("draft create and update races each have one CAS winner", async () => {
   assert.equal(primaryResult.text, "returned-exact");
   assert.equal(followerResult.revision, 4);
   assert.equal(followerResult.text, "follower-write");
+});
+
+test("the draft table stores a draft at the app limits and names its own refusals", async () => {
+  // 2026-11-24, production: the table still refused text past 50,000
+  // characters and more than 5 references after the app allowed both, and
+  // every send that saved such a draft failed. The references are written
+  // directly: what is under test is the table, not upload resolution.
+  const chat = await seedChat();
+  const text = "x".repeat(CHAT_MAX_MESSAGE_CHARACTERS);
+  const attachmentReferences = Array.from(
+    { length: CHAT_MAX_ATTACHMENTS_PER_MESSAGE },
+    (_, index) => ({ uploadId: `upload_${index}` })
+  );
+  const stored = await prisma.chatComposerDraft.create({
+    data: {
+      userId: chat.userId,
+      scopeKey: "new",
+      text,
+      attachmentReferences,
+      revision: 1,
+    },
+    select: { text: true, attachmentReferences: true },
+  });
+  assert.equal(stored.text.length, CHAT_MAX_MESSAGE_CHARACTERS);
+  assert.deepEqual(stored.attachmentReferences, attachmentReferences);
+
+  // A row the table refuses arrives in the shape the draft route turns into
+  // CHAT_DRAFT_STORAGE_LIMIT instead of a bare 500.
+  await assert.rejects(
+    prisma.chatComposerDraft.create({
+      data: {
+        userId: chat.userId,
+        scopeKey: chat.conversationId,
+        conversationId: chat.conversationId,
+        text: "",
+        attachmentReferences: [],
+        revision: 0,
+      },
+    }),
+    (error) => {
+      assert.equal(isCheckViolationDatabaseError(error), true, String(error));
+      return true;
+    }
+  );
 });
 
 test("attempt CAS rejects stale owners, stale revisions and changed committed prefixes", async () => {
