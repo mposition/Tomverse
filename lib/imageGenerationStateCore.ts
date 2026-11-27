@@ -114,11 +114,67 @@ export const IMAGE_ATTEMPT_WORST_CASE_MS =
 // refunding work that is still running. Reclaiming earlier matters because
 // the v1 executor dies with its process on a redeploy (observed on staging
 // during the beta rollout), and this window plus the 15-minute sweep cadence
-// is exactly how long a user waits for the automatic refund. Correctness does
-// not depend on the value: the `settling` claim is exactly-once, so a
-// pathologically slow worker that finishes after the sweep reclaimed its row
-// simply loses the claim and discards the result.
+// is exactly how long a user waits for the automatic refund. That wait now
+// applies to an attempt that had started (`processing`); one that had not is
+// re-driven on a much shorter window instead while the re-drive is switched on
+// (IMAGE_PENDING_REDRIVE_FLAG below). Correctness does not depend on the
+// value: the `settling` claim is exactly-once, so a pathologically slow worker
+// that finishes after the sweep reclaimed its row simply loses the claim and
+// discards the result.
 export const STALE_IMAGE_GENERATION_AFTER_MS = 12 * 60 * 1_000;
+
+/**
+ * The switch for the pending re-drive below. Off by default: a re-drive is the
+ * sweep starting a paid provider call on its own, so a deploy alone must not
+ * turn it on -- the operator does, with `IMAGE_PENDING_REDRIVE_ENABLED=on`.
+ * Any other value, absent included, is off, and off is exactly the sweep from
+ * before the re-drive existed: nothing is marked, and a pending row is refunded
+ * on the stale window like any other abandoned one.
+ */
+export const IMAGE_PENDING_REDRIVE_FLAG = "IMAGE_PENDING_REDRIVE_ENABLED";
+
+export const imagePendingRedriveEnabled = (
+  environment: Record<string, string | undefined> = process.env
+): boolean => environment[IMAGE_PENDING_REDRIVE_FLAG] === "on";
+
+// A `pending` row is one no executor has claimed, and the claim into
+// `processing` comes before the provider call, so its provider has provably
+// not been called. That is what lets the sweep run it instead of refunding it
+// -- the one recovery that does not lose the request -- and why it may look
+// far sooner than it looks at a `processing` row. An executor claims within
+// seconds of its 202. The one legitimate longer wait is a target queued behind
+// a live sibling of its own group (more targets on one provider than that
+// provider's job cap), and the sweep skips those by checking the group rather
+// than by waiting out the queue. A slower executor than that still cannot run
+// the row twice: the claim is a conditional update, and the loser walks away.
+export const IMAGE_PENDING_REDRIVE_AFTER_MS = 2 * 60 * 1_000;
+
+// Past this a pending row is refunded rather than re-driven, for two reasons.
+// The provider budget charged it to the day and month it was reserved in, so
+// running it later spends money a window that has moved on counted and the
+// current one does not see: an hour of requests makes that a rounding error,
+// while an unbounded age would let a sweep outage release a whole backlog past
+// today's ceiling. And an image that lands an hour after it was asked for is
+// no longer what its owner is waiting for. The window from
+// IMAGE_PENDING_REDRIVE_AFTER_MS to this must stay wider than the sweep
+// cadence, so every abandoned row meets at least one sweep that can run it
+// (tests/imageGenerationStateCore.test.mjs reads the cron schedule).
+export const IMAGE_PENDING_REDRIVE_MAX_AGE_MS = 60 * 60 * 1_000;
+
+// How many pending rows one sweep re-drives. The re-drive runs in the
+// maintenance route's `after()`, whose budget is that route's maxDuration
+// (300s), not the 968s an image route states -- and one attempt can
+// legitimately take longer than 300s (IMAGE_ATTEMPT_WORST_CASE_MS). So the
+// batch is small and every re-driven group runs in parallel at its own
+// per-provider job cap, as its original executor would have, instead of
+// queueing behind the rest. What a cut-off does is fixed either way: an
+// attempt it interrupts is left `processing` and refunded by the stale arm,
+// never run again, because its provider may have been called; a row it never
+// reached is still `pending` with its one re-drive spent, so it is refunded a
+// stale window after the re-drive was scheduled. Rows past this count are not
+// marked and wait for the next sweep. Two groups at the IMAGE_GROUP_MAX_MODELS
+// ceiling.
+export const IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP = 8;
 
 // The largest group the service will admit, and the smallest per-provider job
 // cap it will run one with (lib/imageGenerationService.ts bounds both). A
@@ -134,8 +190,10 @@ const IMAGE_PROVIDER_JOB_LIMIT_FLOOR = 2;
  * your route" (next/dist/docs .../functions/after.md), so a route that drives
  * a generation group from `after()` has to state a budget at least this large
  * -- otherwise an unstated platform default decides where the executor is cut
- * off, and a cut-off executor is not a delay: nothing re-drives a `pending`
- * generation, so the sweep refunds it and the request is lost.
+ * off, and a cut-off executor is not a delay: the attempt it was running is
+ * left `processing`, which the sweep can only refund, so that request is lost.
+ * Targets it had not started are still `pending`: the sweep re-drives those
+ * once while IMAGE_PENDING_REDRIVE_FLAG is on, and refunds them while it is off.
  */
 export const IMAGE_EXECUTOR_MAX_DURATION_SECONDS = Math.ceil(
   (Math.ceil(IMAGE_GROUP_MAX_MODELS_CEILING / IMAGE_PROVIDER_JOB_LIMIT_FLOOR) *
