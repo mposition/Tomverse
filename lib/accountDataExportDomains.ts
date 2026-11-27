@@ -476,6 +476,17 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason:
       "The visible partial response, model and provider attribution, status, revision and terminal metadata are the user's recovery record. Held back: the request fingerprint and the worker owner and lease fields, which are concurrency and execution internals rather than user content.",
   },
+  // What the account asked to be run on a schedule: the question, model,
+  // schedule, state and the per-run credits it approved.
+  { domain: "scheduledTask", publicName: "scheduled_tasks", prismaModel: "ScheduledTask", state: "included" },
+  {
+    domain: "scheduledTaskRun",
+    publicName: "scheduled_task_runs",
+    prismaModel: "ScheduledTaskRun",
+    state: "included_filtered",
+    withheldReason:
+      "When each occurrence ran, how it ended, the conversation it answered into and the credits it reserved and was charged are included. The run id, the one-in-flight slot, the lease, the derived message identities and the internal credit reservation id are execution internals and are withheld.",
+  },
   {
     domain: "researchPreviewRun",
     publicName: "research_preview_runs",

@@ -216,13 +216,14 @@ test("the repo-wide checks actually have something to check", () => {
  */
 const PATH_CALL_SITES = {
   chat_turn: {
-    budget: ["app/api/chat/route.ts"],
+    // The scheduled-task estimate quotes the same budget the chat route reserves.
+    budget: ["app/api/chat/route.ts", "lib/scheduledTaskService.ts"],
     request: ["app/api/chat/route.ts"],
     settlement: ["app/api/chat/route.ts"],
     viaVariable: true,
   },
   chat_turn_native_search: {
-    budget: ["app/api/chat/route.ts"],
+    budget: ["app/api/chat/route.ts", "lib/scheduledTaskService.ts"],
     request: ["app/api/chat/route.ts"],
     settlement: ["app/api/chat/route.ts"],
     viaVariable: true,

@@ -3,6 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { scheduledTaskReservationGuard, scheduledTaskSubjectSlotsKeptFree } from "@/lib/scheduledTaskReservationGuard";
 import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled, desktopReviewDeepResearchEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
@@ -528,6 +529,7 @@ import {
     claimChatResponseAttempt,
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
+import { markMessagesSuperseded, readSupersedesMessageIds, withoutSupersededChatMessages } from "@/lib/chatSupersededMessages";
 import {
     DatabaseWriteOutcomeUnknownError,
     databaseErrorMetadata,
@@ -1715,11 +1717,17 @@ async function handleChatPost(
                 }).length,
             };
         }
+        // The turn this send replaces ("Regenerate" / "edit") and every turn the
+        // conversation already replaced leave the context whatever the client
+        // sent (lib/chatSupersededMessages.ts).
+        const supersedesMessageIds = readSupersedesMessageIds(body);
         // Before anything reads the transcript, so the file a retry repeated is
         // resolved, measured, priced and sent once. The log line above keeps the
         // shape the client sent.
         const { messages, removedReferenceCount } =
-            collapseRepeatedAttachments(requestMessages);
+            collapseRepeatedAttachments(await withoutSupersededChatMessages({
+                userId: session?.user?.id, conversationId, messages: requestMessages, replacing: supersedesMessageIds,
+            }));
         if (removedReferenceCount > 0) {
             console.info(JSON.stringify({
                 event: "chat_repeated_attachments_collapsed",
@@ -5795,6 +5803,10 @@ async function handleChatPost(
                   // one comparison would each race for a slot, and a run could be
                   // admitted in part.
                   admissionToken: replanned ? undefined : admissionToken,
+                  // Undefined outside a scheduled run; inside one, the per-run credit ceiling.
+                  withinReservationTransaction: scheduledTaskReservationGuard(access.userId),
+                  // Undefined outside a scheduled run; inside one, the person keeps a slot.
+                  subjectSlotsKeptFree: scheduledTaskSubjectSlotsKeptFree(),
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
@@ -9094,6 +9106,9 @@ async function handleChatPost(
                                             failed: artifactCollector.failed,
                                         });
                                     }
+                                    // With the answer, so a regeneration that
+                                    // finishes after a reload is still recorded.
+                                    await markMessagesSuperseded(tx, conversationId, supersedesMessageIds);
                                     if (durableAttempt && durableFinalCheckpoint) {
                                         /*
                                           `length` is the attempt's only

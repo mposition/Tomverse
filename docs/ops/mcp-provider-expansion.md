@@ -72,11 +72,31 @@ Configure app callback URLs for `/api/mcp/oauth/callback`; loopback and Dev
 credentials are separate. Asana, Slack, HubSpot, Zoom and Amazon Selling Partner
 require static app registration.
 
-The 26 `configure` profiles are not emitted as callable presets. They include
-Google Workspace authentication, Cloudinary custom headers, a CockroachDB cluster
-header and Pigment's tenant-specific address. These need a separately reviewed
-adapter or the operator's existing supported server configuration. Missing
-configuration is not a successful connection.
+The 23 `configure` profiles are not emitted as callable presets. They include
+Cloudinary custom headers, a CockroachDB cluster header and Pigment's
+tenant-specific address. These need a separately reviewed adapter or the
+operator's existing supported server configuration. Missing configuration is not
+a successful connection.
+
+Gmail, Google Calendar and Google Drive (2026-11-27) are `oauth` profiles pinned
+to Google's own remote MCP servers (`gmailmcp`, `calendarmcp`, `drivemcp` on
+`googleapis.com`, `/mcp/v1`) and to Google's OAuth endpoints
+(`accounts.google.com/o/oauth2/v2/auth`, `oauth2.googleapis.com/token`,
+`client_secret_post`). Google offers no dynamic client registration, so each
+stays absent until the operator sets `MCP_PROVIDER_<ID>_CLIENT_ID` and
+`_CLIENT_SECRET` from a Google Cloud web OAuth client created with "Use this
+client for an AI-powered agent". `allowedScopes` is Google's published list for
+each server and the default asks for read access only. A refresh token comes
+from the authorization-request parameters `access_type=offline` and
+`prompt=consent` (Google issues one only on a consented grant), which these
+three profiles declare in `oauth.authorizationParams`, a closed list the policy
+schema accepts; no other profile declares it, so their authorization URLs are
+the SDK's unchanged. `offline_access` is not used: Google's OAuth web-server
+and OpenID Connect documents and its discovery document name no such scope.
+Gmail scopes and `drive.readonly` are
+Google *restricted* scopes: an app used by people outside the Workspace needs
+restricted-scope verification and a security assessment before more than test
+users can connect.
 
 New profile tools need explicit grants and confirmation for every call.
 `readOnlyHint`, directory entries and metadata responses never grant automatic

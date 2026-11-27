@@ -2799,6 +2799,14 @@ export const acquireChatAccess = async (
             tx: Prisma.TransactionClient,
             reservation: { reservationId: string; usageCredits: number }
         ) => Promise<void>;
+        /**
+         * Subject slots this request must leave free, enforced where the
+         * lease is claimed (inside the reservation transaction, under the
+         * concurrency locks). A scheduled run passes 1 so an unattended turn
+         * never takes the account's last Chat slot. With a limit of one
+         * there is none to keep free and the request is refused.
+         */
+        subjectSlotsKeptFree?: number;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**
@@ -2886,7 +2894,20 @@ export const acquireChatAccess = async (
     let addOnReservations: AddOnCreditReservationEntry[] = [];
     let durableReservation: ChatUsageReservation | null = null;
     let guestAutoConversionAuditLogId: string | null = null;
-    const concurrencyPlan = resolveChatConcurrencyPlan(access);
+    const resolvedConcurrencyPlan = resolveChatConcurrencyPlan(access);
+    const subjectSlotsKeptFree = Math.max(0, Math.floor(options?.subjectSlotsKeptFree ?? 0));
+    const concurrencyPlan: typeof resolvedConcurrencyPlan = subjectSlotsKeptFree > 0
+        ? {
+              ...resolvedConcurrencyPlan,
+              subject: {
+                  ...resolvedConcurrencyPlan.subject,
+                  // Down to zero: with a limit of one there is no slot to
+                  // keep free, so the caller is refused rather than given
+                  // the account's only slot.
+                  limit: Math.max(0, resolvedConcurrencyPlan.subject.limit - subjectSlotsKeptFree),
+              },
+          }
+        : resolvedConcurrencyPlan;
     const leaseTtlSeconds = resolveLeaseTtlSeconds();
     // Signature and subject binding are verified here; whether the slot is
     // still available is decided by the conditional claim inside the

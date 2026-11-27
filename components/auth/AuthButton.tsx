@@ -84,6 +84,7 @@ import {
     type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
 import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
+import { ScheduledTasksSettingsEntry } from "@/components/scheduledTasks/ScheduledTasksSettingsEntry";
 import { DeveloperSettingsTab } from "@/components/settings/DeveloperSettingsTab";
 import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
@@ -103,6 +104,7 @@ import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { exportNamingHeaders } from "@/lib/continuationTitleContext";
+import { AnswerNotificationSetting } from "@/components/settings/AnswerNotificationSetting";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -1779,6 +1781,7 @@ export function AuthButton({
                                             </span>
                                         </label>
 
+                                        <AnswerNotificationSetting />
                                     </div>
                                 )}
 
@@ -2070,6 +2073,11 @@ export function AuthButton({
                                                 />
                                             </div>
                                         </section>
+                                        <ScheduledTasksSettingsEntry
+                                            onNavigate={pageMode ? undefined : closeSettingsModal}
+                                            pendingFocus={pendingSettingsSection === "scheduled-tasks"}
+                                            onFocused={() => setPendingSettingsSection(null)}
+                                        />
                                     </div>
                                 )}
 

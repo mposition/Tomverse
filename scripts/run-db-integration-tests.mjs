@@ -685,6 +685,11 @@ run(
     // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
     // all look correct in one process while failing under PostgreSQL races.
     "tests/integration/chat-durable-recovery.db.test.ts",
+    // Scheduled tasks spend an account's credits unattended: the occurrence
+    // and one-in-flight unique keys, the reservation guard's transaction and
+    // lease reconciliation only mean anything against PostgreSQL.
+    "tests/integration/scheduled-tasks.db.test.ts",
+    "tests/integration/scheduled-task-chat-route.db.test.ts",
     "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
@@ -1578,6 +1583,23 @@ run(
     "tests/integration/chat-personalization-routes.db.test.ts",
   ],
   "Running the temporary Chat and answer rating route scenarios"
+);
+// Its own process: it replaces next-auth and the provider stream. Who may mark
+// a regenerated or edited turn replaced, that the conversation read carries
+// the mark, and that the chat route leaves marked turns out of the context and
+// records the turn a send replaces only with a saved answer.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/conversation-superseded-turns.db.test.ts",
+  ],
+  "Running the replaced-turn mark scenarios"
 );
 // Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
 // in its own process rather than changing another integration suite's client.

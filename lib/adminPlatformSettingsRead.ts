@@ -12,6 +12,7 @@ import {
   isMemoryInjectionEnabled,
 } from "@/lib/appSettings";
 import { isHelpAssistantEnabled } from "@/lib/helpAssistantSettings";
+import { isScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
 import { injectableExtractionPairs } from "@/lib/memoryInjectionGate";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
 
@@ -66,6 +67,8 @@ export async function readPlatformSettingsPanelProps() {
     assistantKnowledgeEnabled,
     chatStarterEnabled,
     helpAssistantEnabled: await isHelpAssistantEnabled(),
+    // The panel saves every switch it shows, so it must start from the stored value.
+    scheduledTasksEnabled: await isScheduledTasksEnabled(),
     assistantPackageImportEnabled,
     memoryExtractionEnabled,
     memoryInjectionEnabled,

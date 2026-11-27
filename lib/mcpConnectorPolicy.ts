@@ -27,6 +27,11 @@ export const mcpServerSchema = z.object({
     tokenAuthMethod: z.enum(["none", "client_secret_post", "client_secret_basic"]).optional(),
     tokenScope: z.string().max(500).optional(),
     scope: z.string().max(500),
+    // Extra authorization-request parameters a provider documents. A closed
+    // list, not a free map: Google returns a refresh token only for
+    // access_type=offline, and again on a later grant only with prompt=consent.
+    authorizationParams: z.object({ access_type: z.literal("offline").optional(), prompt: z.literal("consent").optional() })
+      .strict().optional(),
     // Upper bound a user chooses within at connect time; `scope` is the default choice.
     selectableScopes: z.array(mcpScopeToken).min(1).max(MCP_SCOPE_LIMITS.selectable).optional(), }).strict().optional(),
 }).strict().superRefine((server, context) => {
@@ -51,6 +56,19 @@ export const mcpServerSchema = z.object({
   if (server.githubRepositoryId && !server.githubRepository) context.addIssue({ code: "custom", message: "Repository ID requires a repository scope" });
 });
 export type McpServerPolicy = z.infer<typeof mcpServerSchema>;
+
+/**
+ * The authorization URL the browser is sent to. Without provider parameters
+ * this is the SDK's URL exactly, so every provider that declares none is
+ * byte-for-byte what it was; with them, each one is set (never appended
+ * twice) after the SDK's own URL checks have passed.
+ */
+export function mcpAuthorizationRedirect(url: URL, params: NonNullable<McpServerPolicy["oauth"]>["authorizationParams"]) {
+  if (!params) return url.href;
+  const next = new URL(url.href);
+  for (const [name, value] of Object.entries(params)) if (value !== undefined) next.searchParams.set(name, value);
+  return next.href;
+}
 export type McpGrant = { name: string; mode: "read" | "confirm"; inputSchema: Record<string, unknown> };
 export class McpConnectorError extends Error {
   constructor(public readonly code: string, public readonly status = 400) { super(code); }

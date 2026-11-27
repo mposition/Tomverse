@@ -155,6 +155,10 @@ rate는 preflight에서 읽기만 하고 실제 증가는 모델 요청마다** 
   maintenance(`/api/internal/maintenance/credit-reservations`)에서 만료 행을
   제거하고 `chat_lease_reconciliation`으로 개수를 남깁니다. 일일 cleanup은 너무
   느립니다 — orphan 하나는 실제 사용자가 기다리는 슬롯 하나입니다.
+- **예약 작업은 슬롯 하나까지만 씁니다**(2026-11-27). 예약 회차도 일반 Chat 요청이라
+  같은 lease를 잡지만, 계정당 동시에 하나만 돌고(`ScheduledTaskRun.runningUserId` unique),
+  계정의 활성 lease가 한도에서 하나 모자라면 그 회차는 다음 주기까지 기다립니다. 예약
+  작업이 사용자의 마지막 슬롯을 가져가지 않습니다(`lib/scheduledTaskRunner.ts`).
 
 ## 5. Identity namespace (guest → account)
 

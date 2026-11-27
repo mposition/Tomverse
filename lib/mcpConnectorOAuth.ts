@@ -5,7 +5,7 @@ import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprot
 import { prisma } from "@/lib/prisma";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { guardedMcpFetch, resolvePublicMcpEndpoint, validateMcpEndpoint } from "@/lib/mcpConnectorClient";
-import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, mcpScopedServer, splitMcpScope, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
+import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, mcpAuthorizationRedirect, mcpScopedServer, splitMcpScope, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { auditMcp, connectMcp, decryptMcpSecret, encryptMcpSecret, mcpPolicyDigest } from "@/lib/mcpConnectorStore";
 import { githubOAuthTokenRequest } from "@/lib/mcpConnectorGitHub";
@@ -78,7 +78,7 @@ async function runOAuth(input: { flowId: string; userId: string; server: McpServ
       const allowed = new URL(oauth.authorizationUrl);
       if (url.origin !== allowed.origin || url.pathname !== allowed.pathname || url.username || url.password || url.hash || url.searchParams.get("redirect_uri") !== input.redirectUri || url.searchParams.get("state") !== input.state || url.searchParams.get("code_challenge_method") !== "S256")
         throw new McpConnectorError("oauth_redirect_refused");
-      redirect = url.href;
+      redirect = mcpAuthorizationRedirect(url, oauth.authorizationParams);
     },
     saveCodeVerifier: async verifier => { state.verifier = verifier; await save(); },
     codeVerifier: () => { if (!state.verifier) throw new McpConnectorError("oauth_verifier_missing"); return state.verifier; },

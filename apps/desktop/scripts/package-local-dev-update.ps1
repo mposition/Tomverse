@@ -121,7 +121,8 @@ if (-not $BuildOnly) {
 <AppInstaller xmlns="http://schemas.microsoft.com/appx/appinstaller/2018" Version="$releaseVersion" Uri="$feedUri">
   <MainPackage Name="$identity" Publisher="$publisher" Version="$releaseVersion" ProcessorArchitecture="x64" Uri="$assetUri" />
   <UpdateSettings>
-    <OnLaunch HoursBetweenUpdateChecks="0" />
+    <OnLaunch HoursBetweenUpdateChecks="0" ShowPrompt="true" UpdateBlocksActivation="true" />
+    <AutomaticBackgroundTask />
   </UpdateSettings>
 </AppInstaller>
 "@

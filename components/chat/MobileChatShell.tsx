@@ -9,6 +9,8 @@ import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./use
 import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
 import { useConversationDocumentTitle } from "./useConversationDocumentTitle";
 import "./review-studio.css";
+import "./answer-math.css";
+import { ChatShortcutsHost } from "./ChatShortcutsHost";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import {
   useCallback,
@@ -329,7 +331,7 @@ type MobileChatShellProps = {
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string, options?: { includeSource?: boolean }) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */
@@ -1338,6 +1340,7 @@ export function MobileChatShell({
       }
       className="flex h-[100dvh] w-full max-w-full flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
+      <ChatShortcutsHost onNewChat={onNewChat} />
       {/*
         UX-028. The mobile shell had no <h1> at all. The only one on the page
         lived in ChatSidebar, which on this shell renders inside the drawer --

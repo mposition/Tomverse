@@ -12,6 +12,8 @@ import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome
 import { useConversationDocumentTitle } from "./useConversationDocumentTitle";
 import { reviewFocusHint, reviewReorderHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import "./review-studio.css";
+import "./answer-math.css";
+import { ChatShortcutsHost } from "./ChatShortcutsHost";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -296,7 +298,7 @@ export type DesktopChatShellProps = {
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string, options?: { includeSource?: boolean }) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */
@@ -1045,6 +1047,7 @@ export function DesktopChatShell({
       data-content-state={conversationContentState}
       className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
+      <ChatShortcutsHost onNewChat={onNewChat} />
       {studio ? <ReviewNavigation sidebar={sidebarElement} onNewChat={onNewChat}
         locked={productSwitchDisabled || isAnyModelResponding || review?.pending}
         product={currentProduct}

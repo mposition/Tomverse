@@ -8,6 +8,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useContext,
   useRef,
   useState,
 } from "react";
@@ -20,6 +21,22 @@ import type { ExtraProps } from "react-markdown";
 import type { ComponentPropsWithoutRef, MouseEventHandler, ReactNode } from "react";
 import { AnswerMarkdown } from "@tomverse/chat-ui";
 import rehypeHighlight from "rehype-highlight";
+import { ANSWER_MATH_REHYPE_PLUGIN, ANSWER_REMARK_PLUGINS } from "@/components/chat/answerMathPlugins";
+import {
+  ANSWER_RENDER_FINAL,
+  ANSWER_RENDER_STREAMING,
+  AnswerRenderContext,
+  MermaidDiagram,
+} from "@/components/chat/MermaidDiagram";
+import { chatTurnToolsCopy } from "@/locales/chatTurnTools";
+import { AnswerQuoteButton } from "@/components/chat/AnswerQuoteButton";
+import { AnswerTurnActions } from "@/components/chat/AnswerTurnActions";
+import { UserTurnEditor } from "@/components/chat/UserTurnEditor";
+import { useAnswerReadyNotice } from "@/components/chat/useAnswerReadyNotice";
+import { useSupersededIds } from "@/components/chat/useSupersededIds";
+import { canEditQuestion, lastReplaceableTurn } from "@/lib/chatSupersededTurns";
+import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
+import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
 import {
   ArrowDown,
   Bot,
@@ -98,6 +115,15 @@ type ChatMessageListProps = {
   onRetryQuestion?: (messageId: string) => void;
   /** Chat: open the model picker from a failed reply. */
   onChooseAnotherModel?: MouseEventHandler<HTMLButtonElement>;
+  /**
+   * Chat: ask the newest finished answer's question again as a new turn
+   * (the ordinary send path: checked and charged like any question).
+   */
+  onRegenerateAnswer?: () => void;
+  /** Chat: send an edited copy of the newest question (text only). */
+  onEditLastQuestion?: (text: string) => void;
+  /** Chat: selecting text in an answer offers to quote it into the composer. */
+  enableQuote?: boolean;
   /**
    * Chat: open this answer's question as a new Review draft
    * (lib/chatReviewHandoff.ts). Never sends, never changes this conversation.
@@ -385,8 +411,9 @@ type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
  * wiped by the very next streamed chunk, or by any parent re-render. Given a
  * stable type, each block keeps its own state for as long as it is on screen.
  */
-function MarkdownCodeBlock({ children }: MarkdownPreProps) {
-  const { t } = useLanguage();
+function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
+  const { t, lang } = useLanguage();
+  const answerRender = useContext(AnswerRenderContext);
   const preRef = useRef<HTMLPreElement | null>(null);
   const [copied, setCopied] = useState(false);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -429,7 +456,10 @@ function MarkdownCodeBlock({ children }: MarkdownPreProps) {
   // transcript (which would make the app's own toast assertions ambiguous).
   const label = copied ? t("chat.responseCopied") : t("chat.copyCode");
 
-  return (
+  // A display formula is rendered by KaTeX inside a <pre>; it is not code.
+  if (isMathPre(node)) return <>{children}</>;
+
+  const codeBlock = (
     <div className="relative mb-3 last:mb-0">
       {/*
         UX-031, same reasoning as the table above: a long line of code scrolls
@@ -473,6 +503,16 @@ function MarkdownCodeBlock({ children }: MarkdownPreProps) {
       </button>
     </div>
   );
+
+  // Only inside an assistant answer, and only the block's own source: the
+  // code block above stays as the fallback for every way a diagram can fail.
+  const mermaidSource = answerRender ? mermaidSourceFromPre(node) : null;
+  if (mermaidSource) {
+    return (
+      <MermaidDiagram source={mermaidSource} fallback={codeBlock} label={chatTurnToolsCopy[lang].mermaidDiagram} />
+    );
+  }
+  return codeBlock;
 }
 
 /** Stable map: an inline one would remount each code block on every render. */
@@ -602,6 +642,9 @@ export function ChatMessageList({
   onRestoreQuestion,
   onRetryQuestion,
   onChooseAnotherModel,
+  onRegenerateAnswer,
+  onEditLastQuestion,
+  enableQuote = false,
   onCompareInReview,
   compareRequiresCompleted = false,
   onRetryWithoutAttachments,
@@ -640,6 +683,12 @@ export function ChatMessageList({
     const { t, lang } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The newest question and its finished answer: the only turn that can be
+  // regenerated or edited (lib/chatSupersededTurns.ts).
+  const lastTurn = useMemo(() => lastReplaceableTurn(messages), [messages]);
+  const supersededIds = useSupersededIds(currentChatId);
+  useAnswerReadyNotice(isSending, messages[messages.length - 1]);
 
   const recoveryEnabled = Boolean(onRestoreQuestion);
   const recoveryPrompts = useMemo(
@@ -876,6 +925,7 @@ export function ChatMessageList({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
+      {enableQuote && <AnswerQuoteButton containerRef={containerRef} />}
       {/* aria-live + aria-atomic without role="status": the two are equivalent
           for announcement purposes, and an extra `status` role in the tree would
           make every existing getByRole("status") toast assertion ambiguous. */}
@@ -1156,9 +1206,10 @@ export function ChatMessageList({
                 data-message-status={msg.status || undefined}
                 data-error-code={msg.status === "error" ? msg.errorCode || undefined : undefined}
                 data-carried-answer={msg.carriedAnswer ? "true" : undefined}
+                data-superseded={supersededIds.has(msg.id) ? "true" : undefined}
                 data-message-source={imported ? "imported" : "native"}
                 data-search-focused={highlightedMessageId === msg.id ? "true" : undefined}
-                className={`flex w-full flex-col rounded-2xl transition-shadow focus:outline-none ${isUser ? "items-end" : "items-start"} ${
+                className={`flex w-full flex-col rounded-2xl transition-shadow focus:outline-none ${isUser ? "items-end" : "items-start"} ${supersededIds.has(msg.id) ? "opacity-60" : ""} ${
                   highlightedMessageId === msg.id
                     ? "ring-2 ring-blue-500/60 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950"
                     : ""
@@ -1398,6 +1449,7 @@ export function ChatMessageList({
                   {!isUser && msg.content && msg.status !== "error" && (
                     <button
                       type="button"
+                      data-testid="chat-copy-response"
                       onClick={() => void copyMessageContent(String(msg.id ?? idx), msg.content)}
                       title={t("chat.copyResponse")}
                       aria-label={t("chat.copyResponse")}
@@ -1448,9 +1500,13 @@ export function ChatMessageList({
                       <TypingIndicator label={t("chat.responseGenerating")} />
                     )
                   ) : msg.role === "assistant" ? (
+                    <AnswerRenderContext.Provider
+                      value={isActivelyGenerating ? ANSWER_RENDER_STREAMING : ANSWER_RENDER_FINAL}
+                    >
                     <CodeBlockStreamingScope streaming={isActivelyGenerating}>
                     <AnswerMarkdown
-                      rehypePlugins={[rehypeHighlight]}
+                      remarkPlugins={ANSWER_REMARK_PLUGINS}
+                      rehypePlugins={[rehypeHighlight, ANSWER_MATH_REHYPE_PLUGIN]}
                       components={{
                         /*
                           UI-026. No `whitespace-pre-wrap` here. CommonMark
@@ -1516,7 +1572,16 @@ export function ChatMessageList({
                         // could not hold the copied state (see
                         // MarkdownCodeBlock).
                         pre: MarkdownCodeBlock,
-                        code: ({ children, className, ...props }: MarkdownCodeProps) => (
+                        code: ({ children, className, ...props }: MarkdownCodeProps) =>
+                          // KaTeX output (lib/chatMathDelimiters.ts): a formula,
+                          // not a code span, so none of the inline-code chrome.
+                          className?.includes("language-math") ? (
+                            className.includes("math-display") ? (
+                              <div className="mb-3 max-w-full last:mb-0">{children}</div>
+                            ) : (
+                              <span>{children}</span>
+                            )
+                          ) : (
                           <code
                             {...props}
                             className={`rounded bg-zinc-200 px-1 py-0.5 text-[0.9em] text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100 ${className || ""}`}
@@ -1544,7 +1609,7 @@ export function ChatMessageList({
                         ),
                       }}
                     >
-                      {displayContent}
+                      {prepareMathMarkdown(displayContent)}
                     </AnswerMarkdown>
                     {isActivelyGenerating && (
                       <span
@@ -1617,6 +1682,28 @@ export function ChatMessageList({
                           </div>
                         );
                       })()}
+                    {!isUser && !imported && !isActivelyGenerating && !msg.researchRunId && !msg.imageTurn &&
+                      msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") && (
+                      <AnswerTurnActions
+                        messageId={msg.id}
+                        content={msg.content}
+                        regenerate={
+                          onRegenerateAnswer && lastTurn?.answer.id === msg.id && canEditQuestion(lastTurn)
+                            ? {
+                                onRegenerate: onRegenerateAnswer,
+                                onOpenModelPicker: onChooseAnotherModel,
+                                currentModelId,
+                                disabled: isSending || isSendPreparing,
+                              }
+                            : undefined
+                        }
+                      />
+                    )}
+                    {!isUser && supersededIds.has(msg.id) && (
+                      <p data-testid="chat-superseded-note" className="mt-2 text-[12px] leading-4 text-zinc-500 dark:text-zinc-400">
+                        {chatTurnToolsCopy[lang].superseded}
+                      </p>
+                    )}
                     {!isUser && msg.routedModelId && msg.autoRewrite && (
                       <AutoRewriteDisclosure
                         rewrite={msg.autoRewrite}
@@ -1680,6 +1767,7 @@ export function ChatMessageList({
                       <ProjectAnswerSources messageId={msg.id} />
                     )}
                     </CodeBlockStreamingScope>
+                    </AnswerRenderContext.Provider>
                   ) : (
                     <UserMessageContent content={msg.content} />
                   )}
@@ -2056,6 +2144,13 @@ export function ChatMessageList({
                     </div>
                   )}
                 </div>
+                {isUser && !imported && onEditLastQuestion && lastTurn?.question.id === msg.id && canEditQuestion(lastTurn) && (
+                  <UserTurnEditor
+                    initialText={msg.content}
+                    disabled={isSending || isSendPreparing}
+                    onSubmit={onEditLastQuestion}
+                  />
+                )}
               </div>
               {isLastImported &&
                 importedTranscript &&

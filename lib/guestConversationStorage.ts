@@ -33,20 +33,55 @@ export const guestMessageKeysForConversation = (
   return keys.filter((key) => key === legacyKey || key.startsWith(prefix));
 };
 
-/** Removes every per-model transcript for one guest conversation. */
+/**
+ * The turns a guest replaced (regenerate, edit) in one conversation. A signed-in
+ * conversation keeps this on the server; a guest's transcript lives here, so its
+ * note does too, or a reload would bring the replaced turn back into view and
+ * into the model's context. Its own prefix, outside `guest_messages_`, so the
+ * readers that walk transcript keys never take it for a model's transcript.
+ */
+const GUEST_SUPERSEDED_PREFIX = "guest_superseded_";
+const GUEST_SUPERSEDED_MAX_IDS = 400;
+
+export const guestSupersededStorageKey = (conversationId: string) =>
+  `${GUEST_SUPERSEDED_PREFIX}${conversationId}`;
+
+export const readGuestSupersededIds = (conversationId: string): string[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(guestSupersededStorageKey(conversationId)) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Adds to the stored note (a replaced turn is never restored). Best effort: storage may be full or blocked. */
+export const addGuestSupersededIds = (conversationId: string, ids: readonly string[]) => {
+  if (typeof window === "undefined" || ids.length === 0) return;
+  try {
+    const merged = [...new Set([...readGuestSupersededIds(conversationId), ...ids])].slice(-GUEST_SUPERSEDED_MAX_IDS);
+    window.localStorage.setItem(guestSupersededStorageKey(conversationId), JSON.stringify(merged));
+  } catch {
+    // The page still has its own note for as long as it is open.
+  }
+};
+
+/** Removes every per-model transcript for one guest conversation, and its replaced-turn note. */
 export const removeGuestConversationMessages = (conversationId: string) => {
   if (typeof window === "undefined") return;
   const keys = Object.keys(window.localStorage);
   for (const key of guestMessageKeysForConversation(keys, conversationId)) {
     window.localStorage.removeItem(key);
   }
+  window.localStorage.removeItem(guestSupersededStorageKey(conversationId));
 };
 
-/** Removes every guest transcript, for "delete all" style flows. */
+/** Removes every guest transcript and replaced-turn note, for "delete all" style flows. */
 export const removeAllGuestConversationMessages = () => {
   if (typeof window === "undefined") return;
   for (const key of Object.keys(window.localStorage)) {
-    if (key.startsWith(GUEST_MESSAGES_PREFIX)) {
+    if (key.startsWith(GUEST_MESSAGES_PREFIX) || key.startsWith(GUEST_SUPERSEDED_PREFIX)) {
       window.localStorage.removeItem(key);
     }
   }

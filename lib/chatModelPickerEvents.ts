@@ -16,3 +16,13 @@ export const openChatModelPicker = (trigger?: HTMLElement | null) => {
     })
   );
 };
+
+// Sent by the composer when the picker closes for any reason (pick, dismiss,
+// Escape, outside click). A control that opened the picker for one purpose,
+// such as "Try another model", uses it to end its wait instead of leaving it
+// live for the rest of its timeout.
+export const CHAT_MODEL_PICKER_CLOSED_EVENT = "tomverse:chat-model-picker-closed";
+
+export const notifyChatModelPickerClosed = () => {
+  window.dispatchEvent(new CustomEvent(CHAT_MODEL_PICKER_CLOSED_EVENT));
+};
