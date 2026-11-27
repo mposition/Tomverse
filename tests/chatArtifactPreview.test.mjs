@@ -101,7 +101,7 @@ test("the React document names every script it loads, and nothing else loads fro
   const urls = html.replace(`content="${reactPreviewCsp(ORIGIN)}"`, "").match(/https?:\/\/[^"'\s<>)]+/g) ?? [];
   assert.deepEqual(urls.sort(), reactPreviewScriptUrls(ORIGIN).map((s) => s.src).sort());
   assert.ok(!HTML_PREVIEW_CDN_HOSTS.some((host) => html.includes(host)), "no CDN anywhere in the React page");
-  assert.doesNotMatch(html, /<(iframe|object|embed|form|base|link)/i);
+  assert.doesNotMatch(html, /<(iframe|object|embed|form|base|link)\b/i);
 });
 
 test("with this application's origin the frame policy admits the vendored path on it and nothing else of it", () => {
