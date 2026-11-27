@@ -52,6 +52,18 @@ test("Deep Research in a Review is offered only where the server names it, with 
   assert.equal((await load())?.reviewDeepResearch, false);
 });
 
+test("plugins from a zip file, an npm package or a private repository are offered only where the server names them", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopPlugins: true };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  // An older server names nothing, and the connector switch does not stand in for it.
+  assert.deepEqual([(await load())?.plugins, (await load())?.pluginSources], [true, false]);
+  body = { ...body, desktopPluginSources: false };
+  assert.equal((await load())?.pluginSources, false);
+  body = { ...body, desktopPluginSources: true, desktopPlugins: false };
+  assert.deepEqual([(await load())?.plugins, (await load())?.pluginSources], [false, true]);
+});
+
 test("dictation and the voice conversation are offered only where Desktop's switch and the server's own voice switch are both on", async (t) => {
   let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true,
     voiceConversation: { enabled: true, maxSeconds: 300, continuous: true, reservationSeconds: 60 } };

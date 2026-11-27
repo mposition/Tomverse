@@ -20,6 +20,8 @@ const capabilities = z.object({
   desktopGoogleDrive: z.boolean().optional(),
   desktopDeepResearch: z.boolean().optional(),
   desktopPlugins: z.boolean().optional(),
+  // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries. An older server names none of it.
+  desktopPluginSources: z.boolean().optional(),
   desktopCodeMcp: z.boolean().optional(),
   desktopBilling: z.boolean().optional(),
   desktopManagedCode: z.boolean().optional(),
@@ -58,7 +60,7 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     chatImport: data.desktopImport === true, chatStarters: data.desktopStarters ?? [],
     review: data.desktopReview ?? null, images: data.desktopImages ?? null, attachments: data.desktopAttachments === true,
     googleDrive: data.desktopGoogleDrive === true, deepResearch: data.desktopDeepResearch === true,
-    plugins: data.desktopPlugins === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
+    plugins: data.desktopPlugins === true, pluginSources: data.desktopPluginSources === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
     managedCode: data.desktopManagedCode === true,
     codeWebSearch: data.desktopCodeWebSearch === true,
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,

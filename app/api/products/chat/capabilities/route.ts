@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { codeWebSearchOffered } from "@/lib/codeWebSearch";
@@ -89,6 +89,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // its runs the tool only where the server it reached says so; the route checks the key, plan and credits again.
     desktopCodeWebSearch: codeWebSearchOffered(userId),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
+    // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries (a switch of its own).
+    desktopPluginSources: desktopPluginSourcesEnabled(),
     // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
     // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
     desktopTurnLocation: desktopWrite || desktopReview,

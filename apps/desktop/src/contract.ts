@@ -409,6 +409,8 @@ export type Snapshot = {
     googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
+    /** Plugins from a zip file, an npm package or a private GitHub repository, and the marketplace Desktop carries. */
+    pluginSources?: boolean;
     billing?: boolean; managedCode?: boolean;
     /** The server offers the Code agent's web_search (charged to the account, approved per call). */
     codeWebSearch?: boolean;

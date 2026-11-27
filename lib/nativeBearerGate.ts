@@ -406,6 +406,17 @@ export function desktopPluginsEnabled() {
     process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED === "true";
 }
 
+/**
+ * Desktop's plugins from a zip file, an address of a zip file, an npm package or a private GitHub repository, and the marketplace
+ * Desktop carries. It touches no route: these downloads run on the person's own computer after the person confirms each one, so this
+ * is only the kill switch Desktop reads as the `desktopPluginSources` capability. It needs the Desktop session, not the connector
+ * preview, because local plugins do not use the connector routes.
+ */
+export function desktopPluginSourcesEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED === "true";
+}
+
 const DESKTOP_CHAT_TURN_FIELDS: ReadonlySet<string> = new Set(["messages", "modelId", "conversationId", "assistantMessageId",
   "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth", "currentLocation"]);
 
