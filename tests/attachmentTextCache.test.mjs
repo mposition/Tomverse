@@ -132,6 +132,10 @@ test("the route caches only an account's earlier, bound file, and never the turn
     assert.ok(!recordingRule.includes("textCacheEligible") && !recordingRule.includes("attachmentTextCacheEnabled"));
     assert.ok(route.includes("transcriptAttachmentId: recordingAttachmentId,"));
     assert.ok(route.includes('if (textCacheEligible && format.category !== "audio") {'));
+    // Review r-20261127-114544-4444fa: an earlier recording's stored transcript
+    // is read with the text cache off as well -- and this read comes before the
+    // file is ingested, so before the audio switch is ever consulted.
+    assert.ok(eligibility.includes('(attachmentTextCacheEnabled() || format.category === "audio")'));
     // A cache hit answers to the same past-file share and parse budget.
     const hit = route.slice(start, route.indexOf("let attachmentBuffer: Buffer;", start));
     assert.match(hit, /pastAttachmentTokens \+ tokens > pastAttachmentTokenBudget/);

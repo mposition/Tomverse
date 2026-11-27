@@ -155,3 +155,38 @@ export const releaseAttachmentTextClaim = (attachmentId: string, token: string) 
     WHERE "attachmentId" = ${attachmentId}
       AND "version" = ${ATTACHMENT_TEXT_CLAIM_VERSION}
       AND "entries"->>'claim' = ${token}`;
+
+/**
+ * What a recording's transcription came to: its text, or the fact that it
+ * held no speech, or null when neither is stored.
+ *
+ * A transcription that found no speech was paid for as well, and it will find
+ * none the next time (review r-20261127-114544-4444fa). It is kept as a row of
+ * the current version whose `entries` is the object `{ "outcome": "no_text" }`
+ * rather than a list, so `readAttachmentTextCache` -- and every other reader
+ * -- still sees a miss, and the claim never takes it over.
+ */
+export const readAttachmentTranscriptOutcome = async (
+  attachmentId: string
+): Promise<CachedAttachmentText[] | "no_text" | null> => {
+  const rows = await prisma.$queryRaw<Array<{ version: number; entries: unknown }>>`
+    SELECT "version", "entries" FROM "MessageAttachmentTextCache"
+    WHERE "attachmentId" = ${attachmentId}`;
+  const row = rows[0];
+  if (!row || row.version !== ATTACHMENT_TEXT_CACHE_VERSION) return null;
+  const entries = row.entries as { outcome?: unknown } | null;
+  if (entries && !Array.isArray(entries) && entries.outcome === "no_text") return "no_text";
+  return parseCachedAttachmentEntries(row.entries);
+};
+
+/** Stores "this recording holds no speech" over the claim that found it. */
+export const writeAttachmentNoTextOutcome = async (attachmentId: string) => {
+  await prisma.$executeRaw`
+    INSERT INTO "MessageAttachmentTextCache" ("attachmentId", "version", "entries")
+    VALUES (${attachmentId}, ${ATTACHMENT_TEXT_CACHE_VERSION}, ${JSON.stringify({ outcome: "no_text" })}::jsonb)
+    ON CONFLICT ("attachmentId") DO UPDATE
+      SET "version" = EXCLUDED."version",
+          "entries" = EXCLUDED."entries",
+          "createdAt" = CURRENT_TIMESTAMP`;
+  return true;
+};

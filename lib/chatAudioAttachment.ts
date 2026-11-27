@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 
 import {
     claimAttachmentTextCache,
-    readAttachmentTextCache,
+    readAttachmentTranscriptOutcome,
     releaseAttachmentTextClaim,
+    writeAttachmentNoTextOutcome,
     writeAttachmentTextCache,
     type CachedAttachmentText,
 } from "@/lib/attachmentTextCache";
@@ -253,9 +254,13 @@ export const resolveRecordingAttachmentId = async (input: {
 export const AUDIO_TRANSCRIPT_CLAIM_POLL_MS = 500;
 
 export type AudioTranscriptStore = {
-    read: (attachmentId: string) => Promise<CachedAttachmentText[] | null>;
+    /** The stored transcript, "no_text" for a recording found to hold no speech, or null. */
+    read: (attachmentId: string) => Promise<CachedAttachmentText[] | "no_text" | null>;
     claim: (attachmentId: string, token: string, staleSeconds: number) => Promise<boolean>;
-    write: (attachmentId: string, entries: readonly CachedAttachmentText[]) => Promise<unknown>;
+    /** Resolves true when the transcript is stored. */
+    write: (attachmentId: string, entries: readonly CachedAttachmentText[]) => Promise<boolean>;
+    /** Resolves true when "no speech" is stored. */
+    writeNoText: (attachmentId: string) => Promise<boolean>;
     release: (attachmentId: string, token: string) => Promise<unknown>;
     wait: (ms: number, signal?: AbortSignal) => Promise<void>;
     now: () => number;
@@ -276,30 +281,56 @@ const pause = (ms: number, signal?: AbortSignal) =>
     });
 
 const defaultStore = (): AudioTranscriptStore => ({
-    read: readAttachmentTextCache,
+    read: readAttachmentTranscriptOutcome,
     claim: claimAttachmentTextCache,
     write: writeAttachmentTextCache,
+    writeNoText: writeAttachmentNoTextOutcome,
     release: releaseAttachmentTextClaim,
     wait: pause,
     now: Date.now,
 });
 
+/** Retryable, and nothing was paid: another request has, or will. */
+const transcriptionBusy = () =>
+    new ChatAccessError(
+        503,
+        "AUDIO_TRANSCRIPTION_UNAVAILABLE",
+        "The recording could not be transcribed right now. Try again shortly."
+    );
+
+const noSpeech = () =>
+    new ChatAccessError(
+        422,
+        "ATTACHMENT_NO_TEXT",
+        "The attached recording contains no speech that could be transcribed."
+    );
+
 /**
- * The transcript of a bound attachment, paid for by one request only.
+ * The transcript of a bound attachment, paid for by the request that holds
+ * its claim and by no other.
  *
- * Review r-20261127-082100-427572: several models answering the same message
- * are several requests, and each used to miss the cache, transcribe and book
- * the seconds again. Now the first to claim the attachment
- * (`claimAttachmentTextCache`, one statement) transcribes and stores the
- * transcript; the others wait for it and read it. A claim is never extended,
- * so a request that died stops blocking the rest once it is
- * `AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS` old, and the next one takes over.
+ * Reviews r-20261127-082100-427572 and r-20261127-114544-4444fa: several
+ * models answering the same message are several requests, and each used to
+ * miss the cache, transcribe and book the seconds again. Now the first to
+ * claim the attachment (`claimAttachmentTextCache`, one statement) books,
+ * transcribes and stores the result; the others wait for it and read it.
  *
- * A failed transcription gives its claim back and the next waiter tries in
- * its turn -- one at a time, never side by side. A wait that outlives a stale
- * claim (a store that keeps answering "taken" without a transcript to read)
- * transcribes without the claim, the behaviour before it existed, rather than
- * failing a turn it could answer.
+ * - **No claim, no call.** A claim that cannot be taken -- the store failed,
+ *   or the wait ran out -- ends in a retryable refusal, never a transcription
+ *   without one. The caller answers it like any refusal: the message being
+ *   answered fails with it, an earlier one leaves the file out.
+ * - **What was paid for is kept.** The transcript, or the finding that the
+ *   recording holds no speech, is stored over the claim (one retry). If it
+ *   cannot be stored the claim is not given back: it stands until it goes
+ *   stale, so no other request pays again before then, and one log line says
+ *   so. The residue: once it is stale, the next request for that recording
+ *   transcribes it again -- at most once per stale window while storing keeps
+ *   failing.
+ * - **A failure that paid for nothing** (refused for budget, provider down)
+ *   gives the claim back, and the next waiter tries in its turn -- one at a
+ *   time, never side by side.
+ * - A claim is never extended; one whose request died is taken over once it
+ *   is `AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS` old.
  */
 export const transcribeAudioAttachmentOnce = async (
     input: Parameters<typeof transcribeAudioAttachment>[0] & {
@@ -313,31 +344,48 @@ export const transcribeAudioAttachmentOnce = async (
     const token = randomUUID();
     const giveUpAt =
         store.now() + AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 + 2 * AUDIO_TRANSCRIPT_CLAIM_POLL_MS;
+    /** Stores a paid result, once more on failure; false when it would not stay. */
+    const keep = async (write: () => Promise<boolean>) => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            if (await write().catch(() => false)) return true;
+        }
+        report({ outcome: "transcript_store_failed", traceId: input.traceId });
+        return false;
+    };
     for (;;) {
         signal?.throwIfAborted();
-        const cached = await store.read(attachmentId);
-        if (cached) return cached;
+        const stored = await store.read(attachmentId).catch(() => null);
+        if (stored === "no_text") throw noSpeech();
+        if (stored) return stored;
         let claimed: boolean;
         try {
             claimed = await store.claim(attachmentId, token, AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS);
         } catch {
-            // The claim is an economy, not a permission: without it the
-            // transcription is still booked against the seconds budget.
             report({ outcome: "claim_unavailable", traceId: input.traceId });
-            return [await transcribeAudioAttachment(transcription, deps.transcription)];
+            throw transcriptionBusy();
         }
         if (claimed) {
+            // Given back only when nothing paid for is left unstored.
+            let release = true;
             try {
-                const entry = await transcribeAudioAttachment(transcription, deps.transcription);
-                await store.write(attachmentId, [entry]).catch(() => undefined);
+                let entry: { kind: string; text: string };
+                try {
+                    entry = await transcribeAudioAttachment(transcription, deps.transcription);
+                } catch (error) {
+                    if ((error as { code?: unknown } | null)?.code === "ATTACHMENT_NO_TEXT") {
+                        release = await keep(() => store.writeNoText(attachmentId));
+                    }
+                    throw error;
+                }
+                release = await keep(() => store.write(attachmentId, [entry]));
                 return [entry];
             } finally {
-                await store.release(attachmentId, token).catch(() => undefined);
+                if (release) await store.release(attachmentId, token).catch(() => undefined);
             }
         }
         if (store.now() > giveUpAt) {
             report({ outcome: "claim_wait_exhausted", traceId: input.traceId });
-            return [await transcribeAudioAttachment(transcription, deps.transcription)];
+            throw transcriptionBusy();
         }
         await store.wait(AUDIO_TRANSCRIPT_CLAIM_POLL_MS, signal);
     }

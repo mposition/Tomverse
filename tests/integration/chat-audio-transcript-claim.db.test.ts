@@ -7,6 +7,9 @@ import {
   ATTACHMENT_TEXT_CLAIM_VERSION,
   claimAttachmentTextCache,
   readAttachmentTextCache,
+  readAttachmentTranscriptOutcome,
+  releaseAttachmentTextClaim,
+  writeAttachmentNoTextOutcome,
   writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
 import {
@@ -14,6 +17,7 @@ import {
   resolveRecordingAttachmentId,
   transcribeAudioAttachmentOnce,
   type AudioTranscriptionDeps,
+  type AudioTranscriptStore,
 } from "@/lib/chatAudioAttachment";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
@@ -92,7 +96,7 @@ const recording = async () => {
 };
 
 /** The production ledgers, with a provider that answers after a short delay. */
-const transcription = (calls: { count: number }): AudioTranscriptionDeps => ({
+const transcription = (calls: { count: number }, text = "Minutes of the meeting."): AudioTranscriptionDeps => ({
   reserve: reserveVoiceBudgets,
   settle: settleVoiceBudgets,
   release: releaseVoiceBudgets,
@@ -101,10 +105,32 @@ const transcription = (calls: { count: number }): AudioTranscriptionDeps => ({
     await new Promise((resolve) => setTimeout(resolve, 300));
     return {
       ok: true as const,
-      text: "Minutes of the meeting.",
+      text,
       usage: { kind: "duration" as const, seconds: 3 },
     };
   },
+});
+
+/** The production store, with one part replaced. */
+const productionStore = (overrides: Partial<AudioTranscriptStore> = {}): AudioTranscriptStore => ({
+  read: readAttachmentTranscriptOutcome,
+  claim: claimAttachmentTextCache,
+  write: writeAttachmentTextCache,
+  writeNoText: writeAttachmentNoTextOutcome,
+  release: releaseAttachmentTextClaim,
+  wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: Date.now,
+  ...overrides,
+});
+
+const input = (userId: string, attachmentId: string) => ({
+  bytes: new Uint8Array(16),
+  mediaType: "audio/mpeg",
+  extension: "mp3",
+  durationSeconds: 3,
+  subjectKey: `integration:user:${userId}`,
+  traceId: `trace-${randomUUID()}`,
+  attachmentId,
 });
 
 const askFor = (
@@ -256,4 +282,70 @@ test("with the text cache switched off, the recording is still transcribed once"
     if (previous === undefined) delete process.env.CHAT_ATTACHMENT_TEXT_CACHE;
     else process.env.CHAT_ATTACHMENT_TEXT_CACHE = previous;
   }
+});
+
+// Review r-20261127-114544-4444fa: no claim, no call.
+test("a claim the database will not write ends the request before anything is booked", async () => {
+  const { userId } = await recording();
+  const calls = { count: 0 };
+  // No such attachment row: the claim's INSERT fails on the foreign key.
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(userId, `missing-${randomUUID()}`), {
+      transcription: transcription(calls),
+    })),
+    (error: { code?: string }) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE"
+  );
+  assert.equal(calls.count, 0, "nothing transcribed");
+  assert.equal(await bucketTotal("voice-seconds-day"), 0, "nothing booked");
+  assert.equal(await bucketTotal(VOICE_PROVIDER_BUDGET_PERIODS.day), 0);
+});
+
+test("a transcript that cannot be stored keeps its claim, so no later request pays before it is stale", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  const paid = await quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+    transcription: transcription(calls),
+    store: productionStore({ write: async () => false }),
+  }));
+  assert.deepEqual(paid, [{ kind: "audio transcript", text: "Minutes of the meeting." }], "used for the turn that paid");
+  const row = await prisma.messageAttachmentTextCache.findUniqueOrThrow({ where: { attachmentId } });
+  assert.equal(row.version, ATTACHMENT_TEXT_CLAIM_VERSION, "the claim stands");
+  // A later request finds it taken and waits; it does not pay. Cut off after
+  // a few looks -- the claim is 150 seconds from stale.
+  let looks = 0;
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+      transcription: transcription(calls),
+      store: productionStore({
+        wait: async (ms) => {
+          looks += 1;
+          if (looks > 3) throw new Error("still waiting");
+          await new Promise((resolve) => setTimeout(resolve, ms));
+        },
+      }),
+    })),
+    /still waiting/
+  );
+  assert.equal(calls.count, 1);
+  assert.equal(await bucketTotal("voice-seconds-day"), 3, "booked once");
+});
+
+// Same review: a recording with no speech is not paid for again on every turn.
+test("a recording found to hold no speech is stored as such and never transcribed again", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  const ask = () => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+    transcription: transcription(calls, "   "),
+  });
+  const silent = (error: { code?: string }) => error.code === "ATTACHMENT_NO_TEXT";
+  const [first, second] = await quietly(() => Promise.allSettled([ask(), ask()]));
+  assert.ok(first.status === "rejected" && silent(first.reason));
+  assert.ok(second.status === "rejected" && silent(second.reason));
+  await assert.rejects(quietly(ask), silent);
+  assert.equal(calls.count, 1, "one paid transcription");
+  assert.equal(await bucketTotal("voice-seconds-day"), 3);
+  assert.equal(await readAttachmentTranscriptOutcome(attachmentId), "no_text");
+  // Every other reader sees a miss, and the claim cannot take it over.
+  assert.equal(await readAttachmentTextCache(attachmentId), null);
+  assert.equal(await claimAttachmentTextCache(attachmentId, "x", AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS), false);
 });

@@ -4994,6 +4994,10 @@ async function handleChatPost(
                   It answers to the same past-file share and parse budget as a
                   freshly read one, and does not count towards the request's
                   byte total, because no bytes are read.
+
+                  A recording's stored transcript is read whatever either switch
+                  says: it was paid for, and reading it costs nothing. Only a new
+                  transcription waits on the audio switch (the audio branch).
                 */
                 const textCacheEligible =
                     !isLatestMessage &&
@@ -5001,7 +5005,7 @@ async function handleChatPost(
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
-                    attachmentTextCacheEnabled();
+                    (attachmentTextCacheEnabled() || format.category === "audio");
                 if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for

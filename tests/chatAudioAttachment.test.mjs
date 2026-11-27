@@ -424,20 +424,26 @@ test("an exhausted seconds budget is its own refusal and never reaches the provi
 const memoryStore = (overrides = {}) => {
   const rows = new Map();
   let clock = 0;
-  return {
+  const store = {
     rows,
-    read: async (id) => (rows.get(id)?.entries ?? null),
-    claim: async (id, token) => {
-      if (rows.has(id)) return false;
-      rows.set(id, { claim: token });
+    read: async (id) => {
+      const row = rows.get(id);
+      return row?.noText ? "no_text" : (row?.entries ?? null);
+    },
+    // As the SQL does: a missing row or a stale claim is taken, nothing else.
+    claim: async (id, token, staleSeconds) => {
+      const row = rows.get(id);
+      if (row && !(row.claim && clock - row.at > staleSeconds * 1000)) return false;
+      rows.set(id, { claim: token, at: clock });
       return true;
     },
-    write: async (id, entries) => { rows.set(id, { entries }); },
+    write: async (id, entries) => { rows.set(id, { entries }); return true; },
+    writeNoText: async (id) => { rows.set(id, { noText: true }); return true; },
     release: async (id, token) => { if (rows.get(id)?.claim === token) rows.delete(id); },
     wait: async (ms) => { clock += ms; await new Promise((resolve) => setImmediate(resolve)); },
     now: () => clock,
-    ...overrides,
   };
+  return Object.assign(store, overrides);
 };
 const slowTranscription = (events, outcome = { ok: true, text: "Minutes.", usage: { kind: "duration", seconds: 3 } }) => {
   const deps = fakeDeps(outcome, events);
@@ -474,17 +480,74 @@ test("a failed transcription gives its claim back and the next request tries in 
   assert.deepEqual(retried, [{ kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes." }]);
 });
 
-test("a claim that never resolves is waited out, not waited on forever", async () => {
+// Review r-20261127-114544-4444fa: a request that holds no claim never pays.
+test("no claim, no call: a store that will not claim, or a wait that runs out, is a retryable refusal", async () => {
+  // Taken, with nothing ever written: a store that keeps answering "taken".
   const events = [];
-  // Taken, with nothing ever written: a holder that died, as the store sees it.
-  const store = memoryStore({ claim: async () => false });
-  const entries = await once(store, slowTranscription(events));
-  assert.deepEqual(entries, [{ kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes." }]);
-  assert.ok(store.now() > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000);
-  assert.equal(events.filter(([event]) => event === "transcribe").length, 1);
-  // A store that cannot claim at all is no reason to fail the turn.
+  const taken = memoryStore({ claim: async () => false });
+  await assert.rejects(once(taken, slowTranscription(events)),
+    (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE" && error.status === 503);
+  assert.ok(taken.now() > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000);
+  assert.deepEqual(events, [], "nothing reserved, nothing transcribed");
+  // A claim that cannot be written at all.
   const broken = memoryStore({ claim: async () => { throw new Error("database down"); } });
-  assert.equal((await once(broken, slowTranscription([]))).length, 1);
+  const brokenEvents = [];
+  await assert.rejects(once(broken, slowTranscription(brokenEvents)),
+    (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+  assert.deepEqual(brokenEvents, []);
+});
+
+test("a transcript that cannot be stored is used, and its claim kept until it goes stale", async () => {
+  // Before the claim goes stale, no later request pays again.
+  const kept = memoryStore();
+  let writes = 0;
+  kept.write = async () => { writes += 1; throw new Error("store down"); };
+  const events = [];
+  const transcribed = () => events.filter(([event]) => event === "transcribe").length;
+  const paid = await once(kept, slowTranscription(events));
+  assert.deepEqual(paid, [{ kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes." }], "used for this turn");
+  assert.equal(writes, 2, "stored once more before giving up");
+  assert.ok(kept.rows.get("att-1")?.claim, "the claim stands");
+  const wait = kept.wait;
+  kept.wait = async (ms) => {
+    if (kept.now() + ms > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000) throw new Error("stale from here on");
+    await wait(ms);
+  };
+  await assert.rejects(once(kept, slowTranscription(events)), /stale from here on/);
+  assert.equal(transcribed(), 1);
+
+  // The residue: a request still waiting when the claim goes stale takes it
+  // over and pays once more -- not before.
+  const both = memoryStore();
+  both.write = async () => false;
+  const bothEvents = [];
+  const transcription = slowTranscription(bothEvents);
+  const [first, second] = await Promise.all([once(both, transcription), once(both, transcription)]);
+  assert.deepEqual(second, first);
+  assert.equal(bothEvents.filter(([event]) => event === "transcribe").length, 2);
+  assert.ok(both.now() > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000, "the second paid only after the stale point");
+});
+
+test("a write that fails once is retried, and the claim then given back", async () => {
+  const store = memoryStore();
+  const write = store.write;
+  let attempts = 0;
+  store.write = async (id, entries) => { attempts += 1; if (attempts === 1) throw new Error("blip"); return write(id, entries); };
+  const entries = await once(store, slowTranscription([]));
+  assert.equal(attempts, 2);
+  assert.deepEqual(store.rows.get("att-1"), { entries });
+});
+
+// Same review: a recording with no speech will have none next turn either.
+test("a recording found to hold no speech is not transcribed again", async () => {
+  const store = memoryStore();
+  const events = [];
+  const silent = slowTranscription(events, { ok: true, text: "  ", usage: { kind: "duration", seconds: 3 } });
+  await assert.rejects(once(store, silent), (error) => error.code === "ATTACHMENT_NO_TEXT");
+  assert.deepEqual(store.rows.get("att-1"), { noText: true });
+  await assert.rejects(once(store, silent), (error) => error.code === "ATTACHMENT_NO_TEXT");
+  assert.equal(events.filter(([event]) => event === "transcribe").length, 1);
+  assert.equal(events.filter(([event]) => event === "reserve").length, 1);
 });
 
 // -- The claim lasts longer than the call that holds it ----------------------
