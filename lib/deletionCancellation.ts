@@ -116,23 +116,34 @@ export async function stopDeletionPendingDraftRenewals(
   const renewals: { id: string; status: string }[] = [];
   let scanned = 0;
   let complete = true;
-  // One listing of every status, filtered here: two listings by status would
-  // miss a renewal that moved from draft to open between them. Every page, so
-  // manual invoices on the subscription cannot hide a renewal.
+  // Two listings, every page of each, so manual invoices cannot hide a renewal:
+  //   1. every open invoice, however old -- a renewal still in dunning keeps
+  //      retrying long after its invoice.created;
+  //   2. then every invoice of any status created in the recent window, so a
+  //      draft that turned open after listing 1 is still caught here.
+  // Status is filtered in code; the last status seen for an invoice wins.
+  const found = new Map<string, string>();
   const createdSince = Math.floor(Date.now() / 1000) - RENEWAL_LOOKBACK_SECONDS;
-  for await (const invoice of getStripe().invoices.list(
+  const listings = [
+    { subscription: subscriptionId, status: "open" as const, limit: 100 },
     { subscription: subscriptionId, created: { gte: createdSince }, limit: 100 },
-    { timeout: STRIPE_REQUEST_TIMEOUT_MS, maxNetworkRetries: 0 }
-  )) {
-    scanned += 1;
-    if (scanned > RENEWAL_SCAN_LIMIT) {
-      complete = false;
-      break;
+  ];
+  scan: for (const params of listings) {
+    for await (const invoice of getStripe().invoices.list(params, {
+      timeout: STRIPE_REQUEST_TIMEOUT_MS,
+      maxNetworkRetries: 0,
+    })) {
+      scanned += 1;
+      if (scanned > RENEWAL_SCAN_LIMIT) {
+        complete = false;
+        break scan;
+      }
+      if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
+      found.set(invoice.id, invoice.status ?? "unknown");
     }
-    if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
-    if (invoice.status === "draft" || invoice.status === "open") {
-      renewals.push({ id: invoice.id, status: invoice.status });
-    }
+  }
+  for (const [id, status] of found) {
+    if (status === "draft" || status === "open") renewals.push({ id, status });
   }
   // Renewals found open, plus any that left draft between the list and its
   // re-read under the lock: all of them are for a person to check.

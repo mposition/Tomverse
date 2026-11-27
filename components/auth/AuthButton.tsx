@@ -2426,6 +2426,7 @@ export function AuthButton({
                                         <button
                                             type="button"
                                             data-testid="account-plan-change-mobile"
+                                            data-target-plan={planChangeTier}
                                             onClick={(event) => {
                                                     // Whichever button opened it gets focus back.
                                                     planChangeTriggerRef.current = event.currentTarget;

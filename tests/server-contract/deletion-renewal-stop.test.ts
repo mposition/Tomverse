@@ -20,6 +20,7 @@ const state = {
   noOpen: false,
   secondDraft: false,
   listParams: [] as { status?: string; created?: { gte: number } }[],
+  oldDunning: false,
   subscriptionStatus: "active",
   failCancel: false,
   cancels: [] as { id: string; params: Record<string, unknown> }[],
@@ -35,6 +36,7 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     noOpen: false,
     secondDraft: false,
     listParams: [],
+    oldDunning: false,
     subscriptionStatus: "active",
     failCancel: false,
     cancels: [],
@@ -63,7 +65,11 @@ mock.module(mod("lib/stripe.ts"), {
       invoices: {
         retrieve: async (id: string) => ({
           id,
-          status: state.paidAfterList.includes(id) ? "paid" : id === "in_open" ? "open" : state.invoiceStatus,
+          status: state.paidAfterList.includes(id)
+            ? "paid"
+            : id === "in_open" || id === "in_dunning"
+              ? "open"
+              : state.invoiceStatus,
         }),
         // Auto-paginating list: the renewal sits behind a full page of manual drafts.
         // One listing of every status: the caller filters, so a renewal that
@@ -71,6 +77,12 @@ mock.module(mod("lib/stripe.ts"), {
         list: (params: { status?: string; created?: { gte: number } }) =>
           (async function* () {
             state.listParams.push(params);
+            if (params.status === "open") {
+              // An old renewal still in dunning: outside the recent window.
+              if (state.oldDunning) yield { id: "in_dunning", status: "open", billing_reason: "subscription_cycle" };
+              if (!state.noOpen) yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
+              return;
+            }
             yield { id: "in_paid_old", status: "paid", billing_reason: "subscription_cycle" };
             if (!state.noOpen) yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
             for (let i = 0; i < state.manualDrafts; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
@@ -201,12 +213,24 @@ test("after the cancellation the remaining renewals are re-read, and one paid me
   assert.equal(state.cancels.length, 1);
 });
 
-test("the renewal lookup is one listing of every status over the recent window", async () => {
+test("the renewal lookup lists every open invoice, then every status over the recent window", async () => {
   reset();
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
   await stopDeletionPendingDraftRenewals("sub_1");
-  assert.equal(state.listParams.length, 1);
-  assert.equal(state.listParams[0]!.status, undefined);
-  const ageDays = (Date.now() / 1000 - state.listParams[0]!.created!.gte) / 86_400;
+  assert.equal(state.listParams.length, 2);
+  assert.equal(state.listParams[0]!.status, "open");
+  assert.equal(state.listParams[0]!.created, undefined);
+  assert.equal(state.listParams[1]!.status, undefined);
+  const ageDays = (Date.now() / 1000 - state.listParams[1]!.created!.gte) / 86_400;
   assert.ok(ageDays > 3.9 && ageDays < 4.01, String(ageDays));
+});
+
+test("an old renewal still in dunning is found and counted, not only recent ones", async () => {
+  reset({ oldDunning: true, paidAfterList: ["in_open", "in_1"] });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  const result = await stopDeletionPendingDraftRenewals("sub_1");
+  // The dunning renewal is the one still collectible: it ends the subscription.
+  assert.equal(result.stopped, 1);
+  assert.equal(result.finalized, 3);
+  assert.equal(state.cancels.length, 1);
 });
