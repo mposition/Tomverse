@@ -1,4 +1,4 @@
-import { selectDriveFiles } from "./drive-picker";
+import { DriveSelectionTimeout, selectDriveFiles } from "./drive-picker";
 import { desktopResearchAnswerId } from "../../../../lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, utilityProcess } from "electron";
@@ -133,7 +133,10 @@ import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
 import { imageRequest } from "../images-contract";
 import { imageDownloadExtension, imageDownloadFilename } from "../../../../lib/imageAssetDownload";
 import { IMAGE_QUALITY_BY_PRESET } from "../../../../lib/imageGenerationPricing";
-import { attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentUpload, type DriveImportInput } from "../attachment-contract";
+import {
+  attachmentBytesInput, driveImportInput, type AttachmentBytesInput, type AttachmentPhaseEvent, type AttachmentUpload, type DriveImportInput,
+  type DriveImportResult,
+} from "../attachment-contract";
 import { CHAT_MAX_TOTAL_ATTACHMENT_BYTES } from "../../../../lib/chatAttachmentLimits";
 import { requireArtifactFormat, sanitizeArtifactFilename } from "../../../../lib/generatedArtifactCore";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "../../../../lib/language";
@@ -2538,7 +2541,7 @@ async function uploadAttachment(input: AttachmentBytesInput) {
   }
 }
 
-async function importDriveAttachments(input: DriveImportInput) {
+async function importDriveAttachments(input: DriveImportInput): Promise<DriveImportResult> {
   if (!state.capabilities?.attachments || !state.capabilities.googleDrive || !browserSession || signingOut ||
       closing || attachmentTransfer || chatWriting || state.update.stage === "installing") {
     throw new Error("Google Drive attachments are unavailable.");
@@ -2549,12 +2552,21 @@ async function importDriveAttachments(input: DriveImportInput) {
   const files: AttachmentUpload[] = [];
   attachmentTransfer = transfer;
   try {
-    const selection = await selectDriveFiles({
-      origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, language: state.language ?? "en", slots: input.slots, signal,
-      openExternal: (url) => shell.openExternal(url),
-    });
+    let selection: Awaited<ReturnType<typeof selectDriveFiles>>;
+    try {
+      selection = await selectDriveFiles({
+        origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN, language: state.language ?? "en", slots: input.slots, signal,
+        openExternal: (url) => shell.openExternal(url),
+      });
+    } catch (error) {
+      if (error instanceof DriveSelectionTimeout) return { files, incomplete: false, timedOut: true };
+      throw error;
+    }
     signal.throwIfAborted();
     if (!selection) return { files, incomplete: false };
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send("attachment:phase", { requestId: input.requestId, phase: "uploading" } satisfies AttachmentPhaseEvent);
+    }
     const active = browserSession;
     if (!active) throw new Error("The Desktop account changed.");
     if (active.expiresAt <= Date.now() + 60_000) await renewBrowserSession(active);

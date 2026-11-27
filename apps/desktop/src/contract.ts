@@ -605,7 +605,8 @@ export type DesktopApi = {
   pluginInventory(): Promise<DesktopPluginInventory>;
   connectorInventory(): Promise<ConnectorInventory>;
   connectorAction(input: ConnectorInput): Promise<ConnectorResult>;
-  importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
+  importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<import("./attachment-contract").DriveImportResult>;
+  subscribeAttachmentPhase(listener: (event: import("./attachment-contract").AttachmentPhaseEvent) => void): () => void;
   checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;
   uploadAttachment(input: AttachmentBytesInput): Promise<AttachmentUpload>;
   cancelAttachmentUpload(requestId: string): Promise<void>;

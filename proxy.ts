@@ -493,7 +493,7 @@ export function proxy(request: NextRequest) {
     : Buffer.from(crypto.randomUUID()).toString("base64");
   const csp = request.nextUrl.pathname === "/chat-offline.html"
     ? createOfflineChatCsp()
-    : nonce ? createStrictCsp(nonce) : createStaticMarketingCsp(staticMarketingHashes || undefined);
+    : nonce ? createStrictCsp(nonce, request.nextUrl.pathname) : createStaticMarketingCsp(staticMarketingHashes || undefined);
   const enforce = process.env.CSP_MODE === "enforce";
   const policyHeader = enforce
     ? "Content-Security-Policy"
