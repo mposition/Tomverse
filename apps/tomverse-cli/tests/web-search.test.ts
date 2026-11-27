@@ -54,23 +54,49 @@ test("web_search asks with its queries, sends one request with its own key, and 
     }
 });
 
-test("a declined search, an empty query and a query carrying the key send nothing", async () => {
+test("a declined search, an empty query and a query carrying a key send nothing, with no redactor from the host (the CLI)", async () => {
+    const secret = TEST_KEY.slice(13);
     const gateway = await new FakeGateway({
-        script: searchScript([{ query: "fine" }, { query: ["ok", "   "] }, { query: `look up ${TEST_KEY}` }]),
+        script: searchScript([
+            { query: "fine" },
+            { query: ["ok", "   "] },
+            { query: `look up ${TEST_KEY}` },
+            { query: ["fine", `what is ${secret}`] },
+            { query: "tvk_zzzzzzzz_somebodyelsesKey0123" },
+        ]),
         webSearch: (body) => ({ status: 200, body: webSearchAnswer([].concat(body.query)) }),
     }).start();
     try {
         const asked: ApprovalView[] = [];
         const prompter: Prompter = { approve: async (view) => (asked.push(view), false), confirm: async () => false };
-        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter, runner: { webSearch: true, redactText: (text) => text.replaceAll(TEST_KEY, "[key]") } });
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { prompter, runner: { webSearch: true } });
         assert.equal(await runner.runTask("Search."), "success");
         assert.equal(asked.length, 1, "only the sendable search was put to the person");
+        assert.ok(!JSON.stringify(asked).includes(secret), "the key is never shown on an approval");
         assert.equal(gateway.searches.length, 0, "nothing was searched");
         assert.equal(journal.state.tools.filter((tool) => tool.toolName === "web_search").length, 0);
         const messages = lastToolMessages(gateway);
         assert.match(messages, /The user declined/);
         assert.match(messages, /non-empty queries/);
-        assert.match(messages, /contains a credential/);
+        assert.equal(messages.match(/contains a credential/g)?.length, 3, "the whole key, its secret part and any Tomverse key");
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a host's redactor is applied on top: what it would remove is not sent", async () => {
+    const gateway = await new FakeGateway({
+        script: searchScript([{ query: "my token sk-private-123" }]),
+        webSearch: (body) => ({ status: 200, body: webSearchAnswer([].concat(body.query)) }),
+    }).start();
+    try {
+        const asked: ApprovalView[] = [];
+        const prompter: Prompter = { approve: async (view) => (asked.push(view), true), confirm: async () => false };
+        const { runner } = await makeRunner(gateway, makeRepo(), { prompter, runner: { webSearch: true, redactText: (text) => text.replaceAll("sk-private-123", "[removed]") } });
+        assert.equal(await runner.runTask("Search."), "success");
+        assert.equal(asked.length, 0);
+        assert.equal(gateway.searches.length, 0);
+        assert.match(lastToolMessages(gateway), /contains a credential/);
     } finally {
         await gateway.stop();
     }

@@ -57,7 +57,11 @@ export type ToolContext = {
      * Searching the web through the Tomverse API, charged to the account; without it the web_search tool does not exist. Each
      * call passes the approval and permission mode like a command, and is sent once with its own Idempotency-Key.
      */
-    webSearch?: { search: (input: WebSearchInput, idempotencyKey: string, signal: AbortSignal) => Promise<WebSearchReply> };
+    webSearch?: {
+        search: (input: WebSearchInput, idempotencyKey: string, signal: AbortSignal) => Promise<WebSearchReply>;
+        /** Whether text carries the gateway's own key; read whatever the host's redactor does or does not do. */
+        carriesKey: (text: string) => boolean;
+    };
     signal: () => AbortSignal;
     /** The host runs commands inside a sandbox it enforces; run_command then says so instead of "not sandboxed". Off: commands run with the user's own permissions. */
     sandboxed?: boolean;
@@ -142,6 +146,20 @@ export const webSearchQueries = (input: unknown): string[] => {
     const list = Array.isArray(query) ? query : [query];
     if (!list.length || list.length > WEB_SEARCH_MAX_QUERIES || list.some((value) => typeof value !== "string" || !value.trim())) return [];
     return list.map((value) => (value as string).trim().replace(/\s+/g, " "));
+};
+
+const TOMVERSE_KEY_PATTERN = /tvk_[A-Za-z0-9_-]{12,}/;
+
+/**
+ * Whether a web_search call would send a credential: this session's own key (whole or its secret part), any Tomverse key, or
+ * anything the host's redactor would remove. Read on the call's raw strings and on the queries as they would be sent, and not
+ * left to the host: a CLI run has no redactor.
+ */
+export const webSearchCarriesCredential = (ctx: Pick<ToolContext, "redactText" | "webSearch">, input: unknown, queries: string[]) => {
+    const query = (input as { query?: unknown } | null)?.query;
+    const raw = (Array.isArray(query) ? query : [query]).filter((value): value is string => typeof value === "string");
+    return [...raw, ...queries].some((text) => TOMVERSE_KEY_PATTERN.test(text) || ctx.webSearch?.carriesKey(text) === true ||
+        (ctx.redactText !== undefined && ctx.redactText(text) !== text));
 };
 
 export type PatchInput = z.infer<typeof patchSchema>;
@@ -727,7 +745,7 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
                 // Judged on its text first: a query that cannot be sent needs no approval, no request and no money.
                 const queries = webSearchQueries(input);
                 if (!queries.length) return { status: "error", error: `Give one to ${WEB_SEARCH_MAX_QUERIES} non-empty queries.` };
-                if (ctx.redactText && queries.some((query) => ctx.redactText!(query) !== query)) {
+                if (webSearchCarriesCredential(ctx, input, queries)) {
                     return { status: "error", error: "A query contains a credential, so nothing was searched." };
                 }
                 const decision = gate(ctx, "web_search", toolCallId, input);

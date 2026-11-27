@@ -212,6 +212,12 @@ export class Gateway {
         return this.key.slice(0, 12);
     }
 
+    /** Whether text carries this key, whole or its secret part: such text is never sent anywhere but as the key itself. */
+    carriesKey(text: string) {
+        const secret = this.key.slice(13);
+        return text.includes(this.key) || (secret.length >= 16 && text.includes(secret));
+    }
+
     /** Builds a URL under the API root, refusing anything that leaves it. */
     url(path: string) {
         const url = new URL(`${this.endpoint.base}${path}`);

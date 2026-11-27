@@ -14,7 +14,7 @@ import { classifyWebUrl, type HostResolver, type WebTransport } from "./web.js";
 import { NestedInstructions } from "./instructions.js";
 import type { ProjectMemory } from "./memory.js";
 import { createGitTools, type GitToolHost } from "./git-tools.js";
-import { createTools, imageMessage, planCommandCall, planPatchCall, READ_TOOLS, trimOldImages, VIEW_IMAGE_MARK, webSearchQueries, WEB_SEARCH_MAX_QUERIES, type ImageAttachment, type ToolContext } from "./tools.js";
+import { createTools, imageMessage, planCommandCall, planPatchCall, READ_TOOLS, trimOldImages, VIEW_IMAGE_MARK, webSearchCarriesCredential, webSearchQueries, WEB_SEARCH_MAX_QUERIES, type ImageAttachment, type ToolContext } from "./tools.js";
 import { estimateTokens } from "./tokens.js";
 import { Subagents, type ApprovalOrigin } from "./subagent.js";
 import { describeOrchestration } from "./orchestrate-config.js";
@@ -396,7 +396,10 @@ export class Runner {
                 if (this.pendingImages.length < MAX_IMAGES_PER_STEP) this.pendingImages.push(image);
             } } : {}),
             ...(options.web ? { web: options.web } : {}),
-            ...(options.webSearch ? { webSearch: { search: (input, idempotencyKey, signal) => options.gateway.webSearch(input, idempotencyKey, signal) } } : {}),
+            ...(options.webSearch ? { webSearch: {
+                search: (input, idempotencyKey, signal) => options.gateway.webSearch(input, idempotencyKey, signal),
+                carriesKey: (text) => options.gateway.carriesKey(text),
+            } } : {}),
             // One read may use at most about a quarter of the model's window.
             readByteLimit: Math.max(8 * 1024, Math.min(100 * 1024, Math.floor(window * 0.25 * 3))),
             workspace: options.workspace,
@@ -1365,8 +1368,7 @@ export class Runner {
                 // query carries a credential, is never shown to the person: the call answers with the reason and sends nothing.
                 ...(this.tools.web_search ? { web_search: (input: unknown) => {
                     const queries = webSearchQueries(input);
-                    const redact = options.redactText;
-                    return queries.length && !(redact && queries.some((query) => redact(query) !== query)) ? "user-approval" as const : undefined;
+                    return queries.length && !webSearchCarriesCredential(this.toolContext, input, queries) ? "user-approval" as const : undefined;
                 } } : {}),
                 // Opening a public site is approved per site like web_fetch; a local page and an address that cannot be opened need no question.
                 ...(this.browser?.navigateNeedsApproval ? { browser_navigate: (input: { url?: unknown }) => this.browser!.navigateNeedsApproval(input?.url) ? "user-approval" as const : undefined } : {}),
