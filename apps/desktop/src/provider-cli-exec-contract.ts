@@ -20,10 +20,10 @@ export function liveCliProviderForModel(id: string): LiveCliProvider | null {
 /** How much each permission mode lets a task do, lowest first. The CLI is never started above the mode the person chose. */
 export const permissionRank: Record<PermissionModeId, number> = { read_only: 0, ask: 1, auto_review: 2, allow_all: 3 };
 
-/** Who answers an approval the CLI asks for: nobody (it is never asked), the person on the approval card, or the CLI's own reviewer. */
-export type CliApprovals = "none" | "card" | "cli_reviewer";
+/** Who answers an approval the CLI asks for: nobody (it is never asked), or the person on the approval card. The CLI's own reviewer never does. */
+export type CliApprovals = "none" | "card";
 /** One line shown in the task when the CLI could not honour the chosen mode as is and the run is narrower. */
-export type CliPermissionNotice = "cliAskReadOnly" | "cliAllowAllScoped" | "cliAllowAllCommandsAsk";
+export type CliPermissionNotice = "cliAskReadOnly" | "cliAutoReviewScoped" | "cliAutoReviewAsks" | "cliAllowAllScoped" | "cliAllowAllCommandsAsk";
 export type CliPermissionPlan = {
   /** What the CLI is allowed to do in this run; its rank is never above the chosen mode's. */
   grants: PermissionModeId;
@@ -33,23 +33,25 @@ export type CliPermissionPlan = {
 
 /**
  * Codex runs `codex exec`, which has no way to ask a person: it never asks for approval, so "ask" runs read-only (the
- * safer side) and says why. Its own automatic reviewer (`--approve-for-me`) is the Auto review mode. Allow all stays
- * inside Codex's project sandbox (writes in the project, no network), which is narrower than no sandbox.
+ * safer side) and says why. Auto review and Allow all stay inside Codex's project sandbox (writes in the project, no
+ * network, nothing that needs an escalation), which is narrower than no sandbox. Codex's own automatic reviewer
+ * (`--approve-for-me`) and Claude Code's auto mode are not used: they could approve a push or an upload that, in Tomverse,
+ * stays the person's to approve.
  * Claude Code runs the stream protocol, which sends each approval to the host, so Ask and Auto review use the card. Its shell
- * cannot be confined on every system, so Allow all pre-approves its file edits only: commands still come to the card, which
- * keeps "actions that leave this app still ask you" true.
+ * cannot be confined on every system, so Allow all pre-approves its file edits only (never a credential file): commands
+ * still come to the card, which keeps "actions that leave this app still ask you" true.
  */
 export const cliPermissionPlans: Record<LiveCliProvider, Record<PermissionModeId, CliPermissionPlan>> = {
   openai: {
     read_only: { grants: "read_only", approvals: "none" },
     ask: { grants: "read_only", approvals: "none", notice: "cliAskReadOnly" },
-    auto_review: { grants: "auto_review", approvals: "cli_reviewer" },
+    auto_review: { grants: "auto_review", approvals: "none", notice: "cliAutoReviewScoped" },
     allow_all: { grants: "allow_all", approvals: "none", notice: "cliAllowAllScoped" },
   },
   anthropic: {
     read_only: { grants: "read_only", approvals: "none" },
     ask: { grants: "ask", approvals: "card" },
-    auto_review: { grants: "auto_review", approvals: "card" },
+    auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },
     allow_all: { grants: "allow_all", approvals: "card", notice: "cliAllowAllCommandsAsk" },
   },
 };

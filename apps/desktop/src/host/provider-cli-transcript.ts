@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { ApprovalRequest, Change, Entry } from "../contract";
 import { LIVE_CLI_LIMITS } from "../provider-cli-exec-contract";
 import type { CliApproval, ExecEvent } from "./provider-cli-exec";
@@ -80,26 +81,58 @@ export function createTranscript(clean: (text: string) => string) {
   };
 }
 
+const SHOWN_LIMITS = { command: 8_000, content: 20_000, path: 2_048, other: 4_000 } as const;
+const JSON_LIMIT = SHOWN_LIMITS.other;
+
 /**
- * The approval card for something Claude Code asks to do. The card only shows what the CLI sent, as text; the answer is the
- * person's alone, and "run" (remember) is not offered because the CLI's own rule files are never written from here.
+ * The approval card for something Claude Code asks to do, or null when it must not be asked: a request the card cannot show
+ * in full (a longer command or file text would be approved unseen), or one naming a file that can hold credentials. The
+ * answer is the person's alone, and "run" (remember) is not offered because the CLI's own rule files are never written from here.
+ * Every field of the request is on the card: the ones that have no place of their own go into the explanation.
  */
-export function approvalRequestFor(approval: CliApproval, root: string, clean: (text: string) => string): ApprovalRequest {
+export function approvalRequestFor(approval: CliApproval, root: string, clean: (text: string) => string): ApprovalRequest | null {
   const { input } = approval;
-  const str = (value: unknown, max = 20_000) => (typeof value === "string" ? clean(value.slice(0, max)) : null);
+  // A value is shown whole or not at all.
+  const whole = (value: unknown, max: number): string | null | undefined =>
+    value === undefined ? undefined : typeof value === "string" && value.length <= max ? clean(value) : null;
   const base = { id: randomUUID(), root: clean(root), tool: clean(approval.tool.slice(0, 160)), canRemember: false } as const;
+  const rest = (shown: readonly string[]) => {
+    const extras = Object.fromEntries(Object.entries(input).filter(([key]) => !shown.includes(key)));
+    if (!Object.keys(extras).length) return {};
+    const json = JSON.stringify(extras, null, 2);
+    return json.length <= JSON_LIMIT ? { explanation: clean(json) } : null;
+  };
   if (approval.tool === "Bash" || approval.tool === "PowerShell") {
-    const command = str(input.command, 8_000) ?? "";
-    return { ...base, command: { mode: "shell", file: base.tool, args: [], cwd: clean(root), display: command, env: [],
+    const command = whole(input.command, SHOWN_LIMITS.command);
+    const extras = rest(["command", "timeout", "run_in_background"]);
+    if (typeof command !== "string" || !extras || (input.timeout !== undefined && typeof input.timeout !== "number") ||
+        (input.run_in_background !== undefined && typeof input.run_in_background !== "boolean")) return null;
+    return { ...base, ...extras, command: { mode: "shell", file: base.tool, args: [], cwd: clean(root), display: command, env: [],
       timeoutMs: typeof input.timeout === "number" && input.timeout > 0 ? Math.min(input.timeout, 3_600_000) : 120_000,
       ...(input.run_in_background === true ? { background: true } : {}) } };
   }
-  const path = str(input.file_path, 2_048) ?? str(input.notebook_path, 2_048);
-  if (path && (approval.tool === "Write" || approval.tool === "Edit" || approval.tool === "MultiEdit" || approval.tool === "NotebookEdit")) {
-    const before = approval.tool === "Edit" ? str(input.old_string) : null;
-    const after = approval.tool === "Write" ? str(input.content) : approval.tool === "Edit" ? str(input.new_string) : str(JSON.stringify(input), 8_000);
-    return { ...base, files: [{ path, action: approval.tool === "Write" ? "create" : "update", eol: "lf", bom: false,
-      preimage: null, postimage: null, before, after }] };
+  const named = whole(input.file_path ?? input.notebook_path, SHOWN_LIMITS.path);
+  if (approval.tool === "Write" || approval.tool === "Edit" || approval.tool === "MultiEdit" || approval.tool === "NotebookEdit") {
+    if (typeof named !== "string" || isSecretPath(named)) return null;
+    const file = { path: named, action: approval.tool === "Write" ? "create" : "update", eol: "lf", bom: false, preimage: null, postimage: null } as const;
+    if (approval.tool === "Write") {
+      const content = whole(input.content, SHOWN_LIMITS.content);
+      const extras = rest(["file_path", "content"]);
+      return typeof content === "string" && extras ? { ...base, ...extras, files: [{ ...file, before: null, after: content }] } : null;
+    }
+    if (approval.tool === "Edit") {
+      const old = whole(input.old_string, SHOWN_LIMITS.content);
+      const replacement = whole(input.new_string, SHOWN_LIMITS.content);
+      const extras = rest(["file_path", "old_string", "new_string"]);
+      return typeof old === "string" && typeof replacement === "string" && extras
+        ? { ...base, ...extras, files: [{ ...file, before: old, after: replacement }] } : null;
+    }
+    const serialized = JSON.stringify(input, null, 2);
+    return serialized.length <= SHOWN_LIMITS.content ? { ...base, files: [{ ...file, before: null, after: clean(serialized) }] } : null;
   }
-  return { ...base, explanation: clean(JSON.stringify(input, null, 2).slice(0, 4_000)) };
+  // Any other tool: its whole input is the card.
+  const json = JSON.stringify(input, null, 2);
+  const path = typeof input.file_path === "string" ? input.file_path : typeof input.path === "string" ? input.path : undefined;
+  if (json.length > JSON_LIMIT || (path !== undefined && isSecretPath(path))) return null;
+  return { ...base, explanation: clean(json) };
 }

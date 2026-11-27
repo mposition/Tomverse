@@ -79,8 +79,10 @@ test("A long run stays bounded and says how many calls were left out", () => {
   assert.ok(long.entries[0]!.role === "event" && long.entries[0]!.text.length < LIVE_CLI_LIMITS.commandOutput + 400);
 });
 
+const need = <T>(value: T | null): T => { assert.ok(value, "the request has a card"); return value; };
+
 test("The approval card shows what the CLI asked for and never offers to remember it", () => {
-  const shell = approvalRequestFor({ id: "r1", tool: "Bash", input: { command: "rm -rf build SECRET", timeout: 5_000 } }, "/work", clean);
+  const shell = need(approvalRequestFor({ id: "r1", tool: "Bash", input: { command: "rm -rf build SECRET", timeout: 5_000 } }, "/work", clean));
   assert.equal(shell.canRemember, false);
   assert.equal(shell.root, "/work");
   assert.equal(shell.command?.display, "rm -rf build [removed]");
@@ -88,14 +90,37 @@ test("The approval card shows what the CLI asked for and never offers to remembe
   assert.equal(shell.command?.timeoutMs, 5_000);
   assert.match(shell.id, /^[0-9a-f-]{36}$/);
 
-  const write = approvalRequestFor({ id: "r2", tool: "Write", input: { file_path: "docs/a.md", content: "hello" } }, "/work", clean);
+  const write = need(approvalRequestFor({ id: "r2", tool: "Write", input: { file_path: "docs/a.md", content: "hello" } }, "/work", clean));
   assert.deepEqual(write.files, [{ path: "docs/a.md", action: "create", eol: "lf", bom: false, preimage: null, postimage: null, before: null, after: "hello" }]);
-  const edit = approvalRequestFor({ id: "r3", tool: "Edit", input: { file_path: "a.ts", old_string: "a", new_string: "b" } }, "/work", clean);
+  const edit = need(approvalRequestFor({ id: "r3", tool: "Edit", input: { file_path: "a.ts", old_string: "a", new_string: "b" } }, "/work", clean));
   assert.equal(edit.files?.[0]?.action, "update");
   assert.deepEqual([edit.files?.[0]?.before, edit.files?.[0]?.after], ["a", "b"]);
 
-  const other = approvalRequestFor({ id: "r4", tool: "WebFetch", input: { url: "https://example.com" } }, "/work", clean);
+  const other = need(approvalRequestFor({ id: "r4", tool: "WebFetch", input: { url: "https://example.com" } }, "/work", clean));
   assert.match(other.explanation ?? "", /example\.com/);
   assert.equal(other.command, undefined);
   assert.equal(other.files, undefined);
+});
+
+test("A request the card cannot show in full, or that names a credential file, gets no card", () => {
+  const ask = (tool: string, input: Record<string, unknown>) => approvalRequestFor({ id: "r", tool, input }, "/work", clean);
+  // Nothing is approved that the person did not see: a longer command or file text is refused, not cut.
+  assert.equal(ask("Bash", { command: "echo " + "x".repeat(8_000) }), null);
+  assert.ok(ask("Bash", { command: "x".repeat(8_000) }));
+  assert.equal(ask("Write", { file_path: "a.md", content: "y".repeat(20_001) }), null);
+  assert.equal(ask("Edit", { file_path: "a.md", old_string: "a", new_string: "b".repeat(20_001) }), null);
+  assert.equal(ask("Other", { value: "z".repeat(4_001) }), null);
+  assert.equal(ask("Bash", { command: "ls", timeout: "soon" }), null);
+  // Every field is on the card: the ones with no place of their own go into the explanation.
+  const withFlag = need(ask("Bash", { command: "ls", dangerouslyDisableSandbox: true }));
+  assert.match(withFlag.explanation ?? "", /dangerouslyDisableSandbox/);
+  const replaceAll = need(ask("Edit", { file_path: "a.ts", old_string: "a", new_string: "b", replace_all: true }));
+  assert.match(replaceAll.explanation ?? "", /replace_all/);
+  // A credential file is never asked about, in any tool that names a path.
+  for (const path of [".env", "config/.npmrc", "keys/server.pem", ".ssh/config", "a/.git/config", "credentials.json"]) {
+    assert.equal(ask("Write", { file_path: path, content: "x" }), null, path);
+    assert.equal(ask("Edit", { file_path: path, old_string: "a", new_string: "b" }), null, path);
+    assert.equal(ask("Read", { file_path: path }), null, path);
+  }
+  assert.ok(ask("Read", { file_path: "src/a.ts" }));
 });

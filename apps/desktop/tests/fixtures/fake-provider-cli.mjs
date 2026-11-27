@@ -30,6 +30,15 @@ async function codex() {
     hold();
     return;
   }
+  if (scenario === "codex-orphan") {
+    // The CLI finishes and exits, and leaves a background command running.
+    const child = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
+    child.unref();
+    fs.writeFileSync(options.pidFile, JSON.stringify({ parent: process.pid, child: child.pid }));
+    out({ type: "thread.started", thread_id: "thread-orphan" });
+    out({ type: "turn.completed", usage: {} });
+    return;
+  }
   if (scenario === "codex-flood") {
     out({ type: "thread.started", thread_id: "thread-flood" });
     process.stdout.write(`${"x".repeat(3 * 1024 * 1024)}\n`);
@@ -71,6 +80,12 @@ function claude() {
     const prompt = first.message.content[0].text;
     const scenario = options.scenario !== "auto" ? options.scenario : prompt.includes("[hang]") ? "claude-hang" : "claude-approve";
     out({ type: "system", subtype: "init", session_id: first.session_id, model: "claude-test", permissionMode: "default" });
+    if (scenario === "claude-gone") {
+      // The CLI asks, then ends without waiting for the answer.
+      out({ type: "control_request", request_id: "r-gone", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: "ls" }, tool_use_id: "t-gone" } });
+      setTimeout(() => process.exit(3), 200);
+      return;
+    }
     if (scenario === "claude-hang") {
       record({ prompt });
       const child = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });

@@ -33,6 +33,15 @@ const text = (value: unknown, max = 4_000) => (typeof value === "string" ? value
 
 const claudeShell = ["Bash", "PowerShell"];
 
+/** Claude Code's rule patterns for the files that can hold credentials, by name (the same names as isSecretPath). */
+const secretNames = [".env*", ".npmrc", ".netrc", ".pgpass", ".htpasswd", ".git-credentials", ".pypirc", "*.pem", "*.key", "*.p12", "*.pfx", "*.keystore",
+  "*.jks", "*.asc", "*.ppk", "id_rsa*", "id_ed25519*", "id_dsa*", "id_ecdsa*", "credential*", "secret*", "*service?account*.json", "*service-account*.json", "*gcp?key*.json", "*gcp-key*.json"];
+const secretFolders = [".ssh", ".aws", ".gnupg", ".git", ".tomverse"];
+/** Reading or changing one of these is denied in every mode, as Tomverse's own file tools do; a request naming one is never shown to the person. */
+export const claudeSecretRules = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"].flatMap((tool) => [
+  ...secretNames.map((name) => `${tool}(**/${name})`), ...secretFolders.map((folder) => `${tool}(**/${folder}/**)`),
+]);
+
 /** Names of Claude Code's built-in tools a run may use, by the permission it was granted. */
 export function claudeTools(grants: PermissionModeId, platform: NodeJS.Platform = process.platform): string[] {
   const read = ["Read", "Glob", "Grep"];
@@ -47,8 +56,7 @@ export function claudeTools(grants: PermissionModeId, platform: NodeJS.Platform 
 export function codexArguments(input: { cwd: string; plan: CliPermissionPlan }): string[] {
   const { grants } = input.plan;
   const permission = grants === "read_only" ? ["--sandbox", "read-only"]
-    : grants === "auto_review" ? ["--approve-for-me"]
-    : grants === "allow_all" ? ["--sandbox", "workspace-write"] : null;
+    : grants === "auto_review" || grants === "allow_all" ? ["--sandbox", "workspace-write"] : null;
   if (!permission) throw new Error("Codex has no approval route for this permission.");
   return ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "-C", input.cwd, ...permission, "-"];
 }
@@ -63,11 +71,11 @@ export function claudeArguments(input: { plan: CliPermissionPlan; sessionId: str
   const { grants } = input.plan;
   const tools = claudeTools(grants, input.platform);
   const mode = grants === "read_only" ? ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
-    : grants === "auto_review" ? ["--permission-mode", "auto", "--permission-prompts", "host"]
     : ["--permission-mode", "default", "--permission-prompts", "host"];
   return ["--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     "--restricted", "--no-session-persistence", "--session-id", input.sessionId, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-    "--tools", tools.join(","), ...(grants === "allow_all" ? ["--allowedTools", tools.filter((tool) => !claudeShell.includes(tool)).join(",")] : []), ...mode];
+    "--tools", tools.join(","), "--disallowedTools", claudeSecretRules.join(","),
+    ...(grants === "allow_all" ? ["--allowedTools", tools.filter((tool) => !claudeShell.includes(tool)).join(",")] : []), ...mode];
 }
 
 const inherited = ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "ProgramData", "ProgramFiles",
@@ -394,6 +402,10 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     child.once("error", () => { spawnFailed = true; done(null); });
     child.once("close", (code) => done(code));
     child.once("exit", (code) => {
+      // Whatever the CLI left running (a background command, a child of a crashed CLI) ends with it, and a question
+      // nobody can answer any more is cancelled. This runs at the exit itself, before the process id can mean anything else.
+      for (const controller of pendingApprovals.values()) controller.abort();
+      void kill();
       // A grandchild that kept the pipes open must not hold the run: give the pipes a moment to flush, then let go.
       setTimeout(() => { child.stdout?.destroy(); child.stderr?.destroy(); done(code); }, closeDeadline).unref();
     });
@@ -424,7 +436,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   } finally {
     run.signal.removeEventListener("abort", onAbort);
     process.removeListener("exit", onExit);
-    if (child.exitCode === null && child.signalCode === null) await kill();
+    await kill();
     stdin.destroy();
   }
 }

@@ -620,6 +620,12 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
       approve: async (approval, signal) => {
         signal.throwIfAborted();
         const request = approvalRequestFor(approval, command.project.path, clean);
+        // A request the card cannot show in full, or that names a credential file, is refused without asking.
+        if (!request) {
+          if (!leading.some((entry) => entry.role === "event" && entry.notice === "cliApprovalRefused")) leading.push(desktopCodeNotice("cliApprovalRefused"));
+          refresh();
+          return false;
+        }
         refresh();
         const action = await new Promise<Decision["action"]>((resolve) => {
           const cancel = () => settle("deny");

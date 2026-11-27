@@ -143,8 +143,9 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await setPermission("auto_review");
     await send("Change the project with review");
     await expect(page.getByText("done: Change the project with review", { exact: true })).toBeVisible({ timeout: 30_000 });
-    assert.ok((await seen()).args.includes("--approve-for-me"));
-    assert.ok(!(await seen()).args.includes("--sandbox"));
+    await expect(page.locator("summary", { hasText: "Auto review runs in Codex's project sandbox" })).toBeAttached();
+    assert.equal(sandbox((await seen()).args), "workspace-write");
+    assert.ok(!(await seen()).args.includes("--approve-for-me"), "Codex's own reviewer is never used");
 
     // A saved task reopens from history with its messages, and reads as a provider CLI task.
     await page.evaluate(() => window.desktop.newTask());

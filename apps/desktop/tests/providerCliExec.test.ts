@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes, type PermissionModeId } from "../src/permission-contract";
 import { cliPermissionPlan, cliPermissionPlans, liveCliModelId, liveCliProviderForModel, liveCliProviders, permissionRank } from "../src/provider-cli-exec-contract";
-import { claudeArguments, claudeParser, claudeTools, cliExecEnvironment, codexArguments, codexParser, runProviderCli,
+import { claudeArguments, claudeParser, claudeSecretRules, claudeTools, cliExecEnvironment, codexArguments, codexParser, runProviderCli,
   type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
 
 const fake = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-provider-cli.mjs");
@@ -33,14 +33,15 @@ test("The permission table, as the CLI's own options", () => {
   assert.equal(pair(codex("read_only"), "--sandbox"), "read-only");
   assert.equal(pair(codex("ask"), "--sandbox"), "read-only");
   assert.equal(cliPermissionPlan("openai", "ask").notice, "cliAskReadOnly");
-  assert.ok(codex("auto_review").includes("--approve-for-me"));
-  assert.ok(!codex("auto_review").includes("--sandbox"));
+  // Codex's own reviewer could approve a push or an upload that Tomverse leaves to the person, so it is never used.
+  assert.equal(pair(codex("auto_review"), "--sandbox"), "workspace-write");
+  assert.equal(cliPermissionPlan("openai", "auto_review").notice, "cliAutoReviewScoped");
   assert.equal(pair(codex("allow_all"), "--sandbox"), "workspace-write");
   assert.equal(cliPermissionPlan("openai", "allow_all").notice, "cliAllowAllScoped");
   for (const mode of permissionModes) {
     const args = codex(mode);
     // No mode reaches the unsandboxed or bypass options, the user's config file or rule files; the prompt comes on stdin.
-    for (const forbidden of ["danger-full-access", "--dangerously-bypass-approvals-and-sandbox", "--full-auto", "--yolo"]) assert.ok(!args.includes(forbidden), `${mode} ${forbidden}`);
+    for (const forbidden of ["danger-full-access", "--dangerously-bypass-approvals-and-sandbox", "--full-auto", "--yolo", "--approve-for-me", "--not-so-yolo"]) assert.ok(!args.includes(forbidden), `${mode} ${forbidden}`);
     for (const required of ["exec", "--json", "--ignore-user-config", "--ignore-rules", "--ephemeral"]) assert.ok(args.includes(required), `${mode} ${required}`);
     assert.equal(args.at(-1), "-");
     assert.equal(pair(args, "-C"), "/work");
@@ -54,9 +55,12 @@ test("The permission table, as the CLI's own options", () => {
   for (const mode of ["ask", "auto_review", "allow_all"] as const) {
     assert.deepEqual(claudeTools(mode, "linux"), ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]);
     assert.equal(pair(claude(mode), "--permission-prompts"), "host", mode);
+    assert.equal(pair(claude(mode), "--permission-mode"), "default", mode);
   }
-  assert.equal(pair(claude("ask"), "--permission-mode"), "default");
-  assert.equal(pair(claude("auto_review"), "--permission-mode"), "auto");
+  // Claude Code's own auto mode could approve a shell command that publishes; Auto review asks the person instead and says so.
+  assert.equal(cliPermissionPlan("anthropic", "auto_review").approvals, "card");
+  assert.equal(cliPermissionPlan("anthropic", "auto_review").notice, "cliAutoReviewAsks");
+  assert.ok(!claude("auto_review").includes("auto"));
   assert.ok(!claude("ask").includes("--allowedTools"), "Ask never pre-approves a tool");
   // Allow all pre-approves file edits; a command is still the person's to approve.
   assert.equal(pair(claude("allow_all"), "--allowedTools"), "Read,Glob,Grep,Edit,Write");
@@ -67,6 +71,10 @@ test("The permission table, as the CLI's own options", () => {
   for (const mode of permissionModes) {
     const args = claude(mode);
     for (const required of ["--restricted", "--strict-mcp-config", "--no-session-persistence", "--print"]) assert.ok(args.includes(required), `${mode} ${required}`);
+    // Credential files are denied for every tool and every mode, whatever an allow rule or a mode says.
+    const denied = pair(args, "--disallowedTools").split(",");
+    for (const rule of ["Read(**/.env*)", "Edit(**/.env*)", "Write(**/id_rsa*)", "Read(**/.ssh/**)", "Edit(**/.git/**)", "Read(**/*.pem)"]) assert.ok(denied.includes(rule), `${mode} ${rule}`);
+    assert.deepEqual(denied, claudeSecretRules);
     for (const forbidden of ["bypassPermissions", "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions"]) assert.ok(!args.includes(forbidden), `${mode} ${forbidden}`);
   }
   assert.equal(liveCliProviderForModel(liveCliModelId("anthropic")), "anthropic");
@@ -74,6 +82,21 @@ test("The permission table, as the CLI's own options", () => {
 });
 
 // -------------------------------------------------------------- environment
+
+test("The names Claude Code is denied are the names Tomverse's own file tools refuse", async () => {
+  const { isSecretPath } = await import("../../tomverse-cli/src/workspace.js");
+  for (const name of [".env", ".env.local", "config/.npmrc", "id_rsa", "keys/server.pem", "a/secrets.yaml", "credentials.json", ".ssh/config", "x/.git/config", "gcp-key.json"]) {
+    assert.ok(isSecretPath(name), name);
+    const base = name.split("/").pop()!;
+    const covered = claudeSecretRules.some((rule) => {
+      const pattern = rule.slice(rule.indexOf("(**/") + 4, -1);
+      if (pattern.endsWith("/**")) return name.split("/").includes(pattern.slice(0, -3));
+      const source = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".");
+      return new RegExp(`^${source}$`).test(base);
+    });
+    assert.ok(covered, `${name} is covered by a deny rule`);
+  }
+});
 
 test("The CLI gets what it needs to find its own sign-in and nothing of this app's", () => {
   const env = {
@@ -238,6 +261,26 @@ test("Stop ends the CLI and everything it started", { timeout: 60_000 }, async (
     assert.equal(result.status, "stopped");
     assert.ok(await dead(pids.parent), "the CLI is gone");
     assert.ok(await dead(pids.child), "its child is gone");
+  });
+});
+
+test("What the CLI left running ends with it, and a question nobody can answer any more is cancelled", { timeout: 60_000 }, async () => {
+  await withFake(async (directory) => {
+    const pidFile = join(directory, "pids.json");
+    const result = await runProviderCli(baseRun(directory, { scenario: "codex-orphan", pidFile }));
+    assert.equal(result.status, "completed");
+    const pids = JSON.parse(await readFile(pidFile, "utf8")) as { parent: number; child: number };
+    assert.ok(await dead(pids.parent));
+    assert.ok(await dead(pids.child), "the background command did not outlive the CLI");
+
+    let cancelled = false;
+    const gone = await runProviderCli(baseRun(directory, { scenario: "claude-gone" }, {
+      provider: "anthropic", mode: "ask",
+      approve: (_request, signal) => new Promise<boolean>((resolve) => signal.addEventListener("abort", () => { cancelled = true; resolve(false); }, { once: true })),
+    }));
+    assert.ok(cancelled, "the waiting approval was cancelled when the CLI ended");
+    assert.equal(gone.status, "unknown");
+    assert.equal(gone.exitCode, 3);
   });
 });
 
