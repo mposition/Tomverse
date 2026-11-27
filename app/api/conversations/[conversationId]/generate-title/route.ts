@@ -23,6 +23,7 @@ import {
 } from "@/lib/conversationTitle";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
+import { TEMPORARY_CHAT_NOT_ALLOWED } from "@/lib/temporaryChatAccess";
 
 const requestSchema = z
   .object({
@@ -82,6 +83,7 @@ export async function POST(
         // D1 applies to every title writer, not only rename
         // (lib/continuationTitlePreservation.ts).
         continuationBridge: { select: { id: true } },
+        temporaryExpiresAt: true,
       },
     });
     if (!existingConv) {
@@ -94,6 +96,14 @@ export async function POST(
       return NextResponse.json(
         { error: "You do not have access to this conversation." },
         { status: 403 }
+      );
+    }
+    // A temporary Chat gets no generated title: it is never listed, and the
+    // title call would send its first message to another model for nothing.
+    if (existingConv.temporaryExpiresAt) {
+      return NextResponse.json(
+        { error: "A temporary chat has no generated title.", code: TEMPORARY_CHAT_NOT_ALLOWED },
+        { status: 409 }
       );
     }
     if (

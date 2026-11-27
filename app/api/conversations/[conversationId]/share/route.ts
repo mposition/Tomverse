@@ -6,6 +6,7 @@ import { z } from "zod";
 import { loadReviewAnalysisReport, reviewReportSelectionSchema, ReviewReportSourceChanged } from "@/lib/reviewAnalysisReportServer";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { continuationShareRefusal } from "@/lib/continuationSharingPolicy";
+import { TEMPORARY_CHAT_NOT_ALLOWED } from "@/lib/temporaryChatAccess";
 import { prisma } from "@/lib/prisma";
 import { isMemoryInjectionEnabled } from "@/lib/appSettings";
 import { createShareToken } from "@/lib/shareTokens";
@@ -106,11 +107,19 @@ export async function POST(
       shareEnabled: true,
       shareRevokedAt: true,
       chatRecoveryEpoch: true,
+      temporaryExpiresAt: true,
     },
   });
 
   if (!accessConversation || accessConversation.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  // A temporary Chat is never published (lib/temporaryChatAccess.ts).
+  if (accessConversation.temporaryExpiresAt) {
+    return NextResponse.json(
+      { error: "A temporary chat cannot be shared.", code: TEMPORARY_CHAT_NOT_ALLOWED },
+      { status: 409 }
+    );
   }
   // Sharing an image conversation is explicitly out of scope for v1: the
   // share snapshot schema carries text messages only and publishing R2

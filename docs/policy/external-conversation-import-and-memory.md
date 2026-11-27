@@ -871,6 +871,13 @@ Profile instructions·knowledge의 기존 역할은 유지합니다. Memory data
 독립이며 Deep Research에도 유지됩니다. rules와 data의 실제 비용을 각각 더하고
 두 내용·query plan을 retrieval hash/context bundle에 결속합니다.
 
+계정 소유자의 맞춤 지침(설정 › AI 개인화, `lib/chatPersonalizationCore.ts`)은 2번
+구획의 마지막, 즉 profile·프로젝트 지침 바로 뒤에 들어갑니다. 소유자가 직접 쓴 글이라
+system 블록에 두되, 앞에 규칙(정책·안전 지침을 대신하지 않고, profile·프로젝트 지침과
+충돌하면 그쪽이 우선)을 먼저 적고 marker로 구획합니다. 로그인한 Chat·Review 턴에만
+붙고 외부 API에는 붙지 않으며, 토큰은 `preferenceTokens`로 따로 가격을 매기고 해시는
+context bundle에 결속합니다(편집하면 bundle이 stale이 됩니다).
+
 프로젝트 항목은 각 항목에 명시된 프로젝트의 사실로 구분합니다. 기존 답변 모델은 현재
 질문과 대화의 최신 명시적 전환·정정을 기준으로 프로젝트를 해석하고 다른 프로젝트의
 업무·역할·마감을 가져와 빈칸을 채우지 않습니다. 비교 요청은 프로젝트별로 구분하고,
