@@ -185,3 +185,14 @@ test("only the two providers can be linked and cancel carries nothing", () => {
     assert.equal(desktopAccountDataInput.safeParse(bad).success, false, JSON.stringify(bad));
   }
 });
+
+test("a cancel that arrives while the server is answering never opens the provider page", async () => {
+  const cancel = new AbortController();
+  const opened: string[] = [];
+  const result = await linkLoginMethodThroughBrowser({
+    call: async () => { cancel.abort(); return Response.json({ ok: true, url: providerPage, linkState }); },
+    openExternal: async (url) => { opened.push(url); }, provider: "google", signal: cancel.signal,
+  });
+  assert.deepEqual(result, { status: "cancelled" });
+  assert.deepEqual(opened, []);
+});

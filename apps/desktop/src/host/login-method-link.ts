@@ -101,6 +101,8 @@ export async function linkLoginMethodThroughBrowser(options: {
       path: "/api/user/login-methods/oauth/desktop/start", method: "POST",
       body: { provider: options.provider, redirectUri: "http://" + host + DESKTOP_CALLBACK_PATH, codeChallenge: challenge },
     })).json());
+    // A cancel or a sign-out while the server was answering must not open a provider page afterwards.
+    signal.throwIfAborted();
     linkState = begin.linkState;
     await Promise.race([options.openExternal(providerUrl(begin.url, options.provider)), callback]);
     const answer = await callback;
