@@ -38,6 +38,7 @@ import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 import { runKnowledgeMaintenanceQuietly } from "@/lib/assistantKnowledgeLifecycle";
 import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
 import { runMessageAttachmentMaintenanceQuietly } from "@/lib/messageAttachmentStorage";
+import { runTemporaryConversationSweepQuietly } from "@/lib/temporaryConversationSweep";
 import { runDecisionMakerRetentionMaintenanceQuietly } from "@/lib/amux/decisionMakerRetentionSweep";
 import { runMarketingLlmExpiryQuietly } from "@/lib/marketingLlmExpiry";
 import { runSupportTriageCycleQuietly } from "@/lib/supportTriageCycle";
@@ -150,6 +151,11 @@ export async function POST(request: Request) {
     const requestLeases = await reconcileExpiredChatRequestLeases().catch(
       () => ({ removed: 0 })
     );
+    // Temporary Chats past their expiry, deleted through the ordinary
+    // conversation deletion path (lib/temporaryConversationSweep.ts). Before
+    // the tombstone drains below, so the files it queues are deleted in this
+    // same run. DB-only, runs whatever the switch says, never throws.
+    const temporaryChats = await runTemporaryConversationSweepQuietly();
     // Rides along like the queues above: drains the DB-first image asset
     // deletion tombstones against R2 and audits the image invariants (an
     // image conversation with no generation, a generation whose worker
@@ -289,6 +295,7 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        temporaryChats,
         imageAssets,
         generatedArtifacts,
         messageAttachments,
@@ -315,6 +322,7 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        temporaryChats,
         imageAssets,
         generatedArtifacts,
         messageAttachments,

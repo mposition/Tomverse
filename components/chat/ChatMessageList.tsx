@@ -53,6 +53,7 @@ import { citationsOutsideResearchBody } from "@/lib/researchCitationDisplay";
 import { getImageModel, imageModelOwner } from "@/lib/imageModelRegistry";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { AnswerRatingButtons } from "@/components/chat/AnswerRatingButtons";
 import { ProjectAnswerSources } from "@/components/projects/ProjectAnswerSources";
 import { ProjectSaveToProject } from "@/components/projects/ProjectSaveToProject";
 import {
@@ -1551,6 +1552,7 @@ export function ChatMessageList({
                                 triggerClassName="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
                                 triggerIconClassName="h-3 w-3 text-blue-500" />
                             )}
+                            {canReport && !isGuestMode && <AnswerRatingButtons conversationId={currentChatId ?? null} messageId={msg.id} />}
                             {/*
                               Which model answered, on a turn Auto routed
                               (docs/ui-contracts/auto-model-selection.md).

@@ -73,6 +73,7 @@ model User {
   emailLoginEnabled             Boolean       @default(true)
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
+  personalization               UserPersonalization?
   ga4UserId                     Ga4UserId?
 
   accounts                             Account[]
@@ -108,6 +109,7 @@ model User {
   conversations                        Conversation[]
   comparisonReviews                    ComparisonReview[]
   comparisonReviewItemFeedback         ComparisonReviewItemFeedback[]
+  chatAnswerRatings                    ChatAnswerRating[]
   productAnalyticsEvents               ProductAnalyticsEvent[]
   privacyRequests                      PrivacyRequest[]
   planChangeRequests                   PlanChangeRequest[]
@@ -296,6 +298,29 @@ model UserSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// What the account owner asked every Chat and Review answer to know and to
+/// follow (lib/chatPersonalizationCore.ts). Typed by the owner, so it is sent
+/// as the owner's preferences inside the turn's context block, below an
+/// assistant profile's and a project's instructions and never above
+/// Tomverse's own rules. Not sent on the external APIs.
+///
+/// A table of its own rather than UserSettings columns: that row is written
+/// by the settings panel's every-dirty-field save, and it cannot be created
+/// without naming a default model.
+model UserPersonalization {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "What should Tomverse know about you". At most 1,500 characters (CHECK).
+  aboutMe             String   @default("")
+  /// "How should Tomverse answer". At most 1,500 characters (CHECK).
+  responsePreferences String   @default("")
+  /// One of RESPONSE_STYLES (CHECK UserPersonalization_responseStyle_check).
+  responseStyle       String   @default("default")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Account {
@@ -558,9 +583,20 @@ model Conversation {
   passwordVersion  Int     @default(0)
   importedGuestKey String?
 
+  /// Set only when the conversation was started as a temporary Chat
+  /// (lib/temporaryChatAccess.ts), never written afterwards, and NULL for
+  /// every other conversation. The value is when the server deletes it; it is
+  /// the only column the deletion sweep may select on, so a conversation
+  /// without it can never be chosen (lib/temporaryConversationSweep.ts).
+  /// `Conversation_temporary_scope_check` keeps a temporary row out of every
+  /// project and its memory off.
+  temporaryExpiresAt DateTime?
+  answerRatings      ChatAnswerRating[]
+
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
   @@index([userId, kind])
+  @@index([temporaryExpiresAt])
 }
 
 model ConversationProject {
@@ -659,6 +695,9 @@ model Message {
   /// The assistant id is deliberately not a Message relation: the attempt is
   /// claimed before an assistant Message exists.
   responseAttempts ChatResponseAttempt[] @relation("ChatResponseAttemptSource")
+
+  /// The signed-in owner's thumbs up or down on this answer.
+  answerRatings ChatAnswerRating[]
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1020,6 +1059,38 @@ model ComparisonReviewItemFeedback {
   @@unique([comparisonReviewId, userId, reviewItemId])
   @@index([userId, createdAt])
   @@index([verdict, createdAt])
+}
+
+/// A signed-in owner's thumbs up or down on one assistant answer in Chat or
+/// Review (lib/chatAnswerRatingCore.ts). One row per person per answer:
+/// changed by updating, withdrawn by deleting.
+///
+/// `modelId` is copied from the answer's own Message row by the server, never
+/// taken from the request, so it names the model that actually answered
+/// (after any fallback). It is kept for a later Auto routing quality signal;
+/// nothing reads it for routing yet.
+///
+/// No free text: the optional reason is a closed list, and anything a person
+/// wants to say in prose belongs in the existing Feedback report.
+model ChatAnswerRating {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId      String
+  message        Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  modelId        String?
+  /// "up" | "down" (CHECK ChatAnswerRating_rating_check).
+  rating         String
+  /// One of CHAT_ANSWER_RATING_REASONS, only on "down" (two CHECKs).
+  reason         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([messageId, userId])
+  @@index([userId, conversationId])
+  @@index([modelId, createdAt])
 }
 
 /// Content-free operational record of one AI Review run, written by the server

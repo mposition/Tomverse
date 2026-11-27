@@ -308,6 +308,9 @@ export async function searchConversationMessages(input: {
                       -- tool requests, which are not conversation history
                       -- (lib/studioImageReference.ts).
                       AND c.kind <> 'image'
+                      -- A temporary Chat is never searchable
+                      -- (lib/temporaryChatAccess.ts).
+                      AND c."temporaryExpiresAt" IS NULL
                       AND (${projectScope}::text IS NULL OR c."projectId" = ${projectScope})
                       AND c.id <> ${excluded}
                       AND NOT (c.id = ANY(${deniedConversationIds}::text[]))
