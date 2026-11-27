@@ -122,7 +122,7 @@ test("deleting the last Review conversation preserves Chat and unrelated storage
   );
 });
 
-test("a guest's replaced-turn note survives a reload, leaves with its conversation, and is not imported", () => {
+test("a guest's replaced-turn note survives a reload, leaves with its conversation, and is imported marked replaced", () => {
   withGuestStorage(
     {
       guest_conversations: JSON.stringify([{ id: "g1", title: "Guest", selectedModels: ["m1"], createdAt: "2026-11-27T00:00:00.000Z" }]),
@@ -147,9 +147,12 @@ test("a guest's replaced-turn note survives a reload, leaves with its conversati
       restoreGuestSuperseded("g1");
       assert.deepEqual([...getSupersededIds("g1")].sort(), ["a1", "u1"]);
 
-      // Signing in imports only the turns that stand.
+      // Signing in imports the whole history, the replaced turn marked replaced (the guest copy is removed after).
       const payload = buildGuestImportPayload("g1");
-      assert.deepEqual(payload.messages.map((message) => message.content), ["asked again", "new answer"]);
+      assert.deepEqual(
+        payload.messages.map((message) => [message.content, message.superseded === true]),
+        [["first question", true], ["first answer", true], ["asked again", false], ["new answer", false]]
+      );
 
       // Deleting the conversation removes its note, and only its note.
       removeGuestConversationStorage("g1");

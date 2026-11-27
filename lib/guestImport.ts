@@ -28,6 +28,8 @@ export type GuestImportPayloadMessage = {
   status: "normal" | "incomplete" | "error" | "cancelled";
   modelId: string | null;
   createdAt: string;
+  /** Replaced by a regenerate or an edit: kept in the account's history, left out of model context. */
+  superseded?: true;
 };
 
 export type GuestImportPayload = {
@@ -154,8 +156,9 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
 
   const seenUserIds = new Set<string>();
   const merged: GuestImportPayloadMessage[] = [];
-  // A turn the guest replaced (regenerate, edit) is not carried into the account:
-  // imported, it would come back as an ordinary turn in the model's context.
+  // A turn the guest replaced (regenerate, edit) is carried into the account
+  // marked replaced: the guest copy is removed after the import, so leaving it
+  // out would lose it, and importing it unmarked would put it back in context.
   const replaced = new Set(readGuestSupersededIds(guestConversationId));
 
   modelIds.forEach((modelId, panelIndex) => {
@@ -171,7 +174,6 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
 
     parsedMessages.forEach((message, indexInPanel) => {
       if (message.id === "welcome") return;
-      if (replaced.has(message.id)) return;
       if (message.role === "user") {
         if (seenUserIds.has(message.id)) return;
         seenUserIds.add(message.id);
@@ -190,6 +192,7 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
           // stable, monotonically increasing timestamp from position so
           // ordering survives even without a real chat-time timestamp.
           new Date(Date.parse(conversation.createdAt || new Date().toISOString()) + panelIndex * 1000 + indexInPanel).toISOString(),
+        ...(replaced.has(message.id) ? { superseded: true as const } : {}),
       });
     });
   });

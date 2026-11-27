@@ -42,6 +42,10 @@ const importMessageSchema = z
       .default("normal"),
     modelId: modelIdSchema.nullable().optional(),
     createdAt: z.string().datetime(),
+    // A turn the guest replaced (regenerate, edit) is imported as it stands in
+    // the guest's history, marked replaced, so the account keeps it and the
+    // model is not shown it again (Message.supersededAt).
+    superseded: z.literal(true).optional(),
   })
   // Every message, question or answer, is held to one limit and stored whole:
   // the guest already has the full answer on screen, and an import that cut it
@@ -149,6 +153,7 @@ export async function POST(req: Request) {
         contentBytes
       );
 
+      const importedAt = new Date();
       await tx.message.createMany({
         data: body.messages.map((message) => ({
           conversationId: conversation.id,
@@ -157,6 +162,7 @@ export async function POST(req: Request) {
           status: message.status,
           modelId: message.modelId || null,
           createdAt: new Date(message.createdAt),
+          ...(message.superseded ? { supersededAt: importedAt } : {}),
         })),
       });
 

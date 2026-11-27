@@ -82,6 +82,7 @@ let createConversationUnlockCookie: (typeof import("@/lib/conversationLock"))["c
 let superseded: { PUT: Handler };
 let conversationRoute: { GET: Handler };
 let chatRoute: { POST: Handler };
+let importGuest: { POST: Handler };
 
 before(async () => {
   ({ prisma } = (await import(mod("lib/prisma.ts"))) as typeof import("@/lib/prisma"));
@@ -90,6 +91,7 @@ before(async () => {
   superseded = await import(mod("app/api/conversations/[conversationId]/superseded/route.ts"));
   conversationRoute = await import(mod("app/api/conversations/[conversationId]/route.ts"));
   chatRoute = await import(mod("app/api/chat/route.ts"));
+  importGuest = await import(mod("app/api/conversations/import-guest/route.ts"));
 });
 
 const reset = () =>
@@ -412,4 +414,55 @@ test("a malformed replaced-turn list is refused before anything runs", async () 
   assert.equal(response.status, 400);
   assert.equal((await response.json()).code, "INVALID_SUPERSEDED_MESSAGES");
   assert.equal(providerMessages.length, 0);
+});
+
+test("a guest conversation imported on sign-in keeps its replaced turn in its history, marked replaced", async () => {
+  const owner = await createUser();
+  signInAs(owner);
+  const at = (seconds: number) => new Date(Date.UTC(2026, 10, 27, 0, 0, seconds)).toISOString();
+  const response = await importGuest.POST(
+    new Request("https://tomverse.test/api/conversations/import-guest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://tomverse.test" },
+      body: JSON.stringify({
+        guestConversationId: "guest-superseded-1",
+        title: "Guest chat",
+        selectedModels: [MODEL_ID],
+        createdAt: at(0),
+        messages: [
+          { role: "user", content: "first question", createdAt: at(1), superseded: true },
+          { role: "assistant", content: "first answer", modelId: MODEL_ID, createdAt: at(2), superseded: true },
+          { role: "user", content: "asked again", createdAt: at(3) },
+          { role: "assistant", content: "new answer", modelId: MODEL_ID, createdAt: at(4) },
+        ],
+      }),
+    })
+  );
+  assert.equal(response.status, 200, await response.clone().text());
+  const { conversationId } = (await response.json()) as { conversationId: string };
+  const rows = await prisma.message.findMany({
+    where: { conversationId },
+    orderBy: { createdAt: "asc" },
+    select: { content: true, supersededAt: true },
+  });
+  // The account holds the whole history; only the replaced turn carries the mark.
+  assert.deepEqual(
+    rows.map((row) => [row.content, row.supersededAt !== null]),
+    [["first question", true], ["first answer", true], ["asked again", false], ["new answer", false]]
+  );
+  // A value other than true is not a mark.
+  const refused = await importGuest.POST(
+    new Request("https://tomverse.test/api/conversations/import-guest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://tomverse.test" },
+      body: JSON.stringify({
+        guestConversationId: "guest-superseded-2",
+        title: "Guest chat",
+        selectedModels: [MODEL_ID],
+        createdAt: at(0),
+        messages: [{ role: "user", content: "x", createdAt: at(1), superseded: "yes" }],
+      }),
+    })
+  );
+  assert.equal(refused.status, 400);
 });
