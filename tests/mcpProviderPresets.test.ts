@@ -38,6 +38,40 @@ test("known OAuth providers use pinned endpoints, explicit scopes and confirmati
   assert.equal(servers.find(s => s.id === "figma")!.oauth!.scope, "mcp:connect");
 });
 
+test("Google Gmail, Calendar and Drive stay closed until the operator registers a Google OAuth client", () => {
+  const google = "gmail,google-calendar,google-drive";
+  // Selected but without a client: nothing is callable (Google has no dynamic client registration).
+  assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: google }), []);
+  // A client id without its secret is refused too.
+  assert.deepEqual(mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "gmail",
+    MCP_PROVIDER_GMAIL_CLIENT_ID: "synthetic-client" }), []);
+  const env: Record<string, string> = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: google };
+  for (const id of google.split(",")) {
+    const prefix = providerEnvironmentPrefix(id);
+    env[`${prefix}_CLIENT_ID`] = "synthetic-client";
+    env[`${prefix}_CLIENT_SECRET`] = "synthetic-client-secret";
+  }
+  const servers = mcpServers(env);
+  assert.deepEqual(servers.map(s => s.id).sort(), ["gmail", "google-calendar", "google-drive"]);
+  const hosts = { gmail: "gmailmcp.googleapis.com", "google-calendar": "calendarmcp.googleapis.com", "google-drive": "drivemcp.googleapis.com" };
+  for (const server of servers) {
+    assert.equal(new URL(server.url).hostname, hosts[server.id as keyof typeof hosts]);
+    assert.equal(server.oauth?.issuer, "https://accounts.google.com");
+    assert.equal(server.oauth?.authorizationUrl, "https://accounts.google.com/o/oauth2/v2/auth");
+    assert.equal(server.oauth?.tokenUrl, "https://oauth2.googleapis.com/token");
+    assert.equal(server.oauth?.registrationUrl, undefined);
+    assert.equal(server.oauth?.clientSecretEnv, `${providerEnvironmentPrefix(server.id)}_CLIENT_SECRET`);
+    // Refresh tokens need offline access; the default asks only for read access.
+    assert.ok(server.oauth?.scope.split(" ").includes("offline_access"), server.id);
+    assert.ok(server.oauth?.scope.split(" ").every(scope => scope === "offline_access" || /readonly$/.test(scope)), server.id);
+    assert.ok(server.oauth?.selectableScopes?.includes("offline_access"), server.id);
+    assert.deepEqual(server.readTools, []);
+    assert.equal(JSON.stringify(server).includes("synthetic-client-secret"), false);
+  }
+  // An operator scope outside Google's published list closes the provider rather than widening it.
+  assert.deepEqual(mcpServers({ ...env, MCP_CONNECTOR_PROVIDERS: "gmail", MCP_PROVIDER_GMAIL_SCOPE: "https://mail.google.com/" }), []);
+});
+
 test("static app setup and unspecified scope requirements remain closed", () => {
   const env = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: "asana,slack,zoom" };
   assert.deepEqual(mcpServers(env), []);
