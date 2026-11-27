@@ -44,18 +44,36 @@
  * case. Headers move the phase (which is what the diagnostics record) and
  * deliberately do not extend the deadline.
  *
- * `mid_stream` keeps the inter-chunk watchdog the old timer already was, at
- * the value it already had.
+ * ## Silence once the headers are in
  *
- * ## Why keepalives do not extend the first-response deadline
+ * From the headers on, a second watchdog measures *silence*: time with
+ * neither visible text nor a server keepalive (nor any other out-of-band
+ * chunk) on the wire. `idleMs` is that budget, stretched to
+ * `CHAT_LIVENESS_MISSED_KEEPALIVES` server intervals when the server says its
+ * interval is longer. It applies in `first_response` and `mid_stream` alike:
+ * a server that has stopped writing is a dead connection whether or not the
+ * answer had started, and waiting out the absolute ten-minute deadline to
+ * notice one is what made a dropped connection before the first token look
+ * like a model that was still thinking.
+ *
+ * Before this, `mid_stream` counted only visible text. A turn that wrote a
+ * preamble and then spent two minutes writing a tool input (a document
+ * specification) or reasoning between tool steps was ended as idle while the
+ * provider was working. The server now keeps writing keepalives after the
+ * first token -- but only while the provider stream is delivering parts, see
+ * lib/chatStreamKeepalive.ts -- and those reset the silence clock.
+ *
+ * ## Why keepalives still do not extend the first-response deadline
  *
  * The server sends out-of-band keepalive chunks while it waits for the
  * provider's first token (lib/chatStreamKeepalive.ts), because the deployment
- * sits behind a proxy whose read timeout is far shorter than this budget. If
- * those chunks reset the deadline, a provider that has permanently stopped
- * would be hidden for as long as the server kept writing them -- which is the
- * one thing a keepalive must never buy. They prove the transport is alive;
- * they say nothing about the provider, so the absolute deadline stands.
+ * sits behind a proxy whose read timeout is far shorter than this budget.
+ * Before the first token those chunks are written on a timer, so they prove
+ * the transport is alive and say nothing about the provider. If they reset
+ * the absolute deadline, a provider that has permanently stopped would be
+ * hidden for as long as the server kept writing them -- which is the one
+ * thing a keepalive must never buy. So they feed only the silence watchdog,
+ * and the absolute deadline stands.
  *
  * Everything here is pure: no timers of its own, no `Date`, no DOM. The
  * watchdog takes its clock and its scheduler as arguments so a test can drive
@@ -79,7 +97,7 @@ export type ChatAbortCause =
   | "user_stop_all"
   /** No visible token inside `firstResponseMs`. */
   | "first_response_timeout"
-  /** A visible token arrived, then nothing for `idleMs`. */
+  /** Headers arrived, then nothing at all -- no text, no keepalive -- for the silence budget. */
   | "stream_idle_timeout"
   /**
    * The tab moved into another identity namespace -- signing in, signing out,
@@ -147,18 +165,41 @@ export type ChatLivenessBudgets = {
    * move the phase, never the deadline.
    */
   firstResponseMs: number;
-  /** Visible token -> next visible token. */
+  /**
+   * Headers seen -> the longest silence allowed: no visible chunk and no
+   * keepalive. The floor of the silence budget; see
+   * `CHAT_LIVENESS_MISSED_KEEPALIVES`.
+   */
   idleMs: number;
 };
+
+/**
+ * How many consecutive server keepalive intervals may go missing before the
+ * connection is called dead, when the server reports an interval long enough
+ * for that to exceed `idleMs`. At the default 20s interval the 90s floor is
+ * the larger of the two and decides.
+ */
+export const CHAT_LIVENESS_MISSED_KEEPALIVES = 3;
+
+/**
+ * Bytes buffered while a page was frozen are delivered when it wakes, and the
+ * order of that delivery against a late timer is not specified. A silence
+ * verdict reached on a clock that jumped (a backgrounded tab, a locked phone)
+ * waits this long for those bytes before it is acted on.
+ */
+export const CHAT_LIVENESS_RESUME_GRACE_MS = 3_000;
+/** How late a timer has to fire to count as the page having been suspended. */
+const SUSPENDED_TIMER_LATENESS_MS = 5_000;
 
 export const CHAT_LIVENESS_BUDGETS: ChatLivenessBudgets = {
   firstResponseMs:
     CHAT_SERVER_FIRST_TOKEN_DEADLINE_MS + CHAT_CLIENT_FIRST_RESPONSE_GRACE_MS,
   /**
    * Unchanged from the timer this replaces, and deliberately below the 125s
-   * proxy read timeout above: a mid-stream stall should be ended by this app,
-   * with this app's own wording and this app's own trace, rather than by an
-   * edge that can only produce a broken connection.
+   * proxy read timeout above: a stall should be ended by this app, with this
+   * app's own wording and this app's own trace, rather than by an edge that
+   * can only produce a broken connection. At the server's 20s keepalive
+   * interval this is four missed keepalives.
    */
   idleMs: 90_000,
 };
@@ -224,8 +265,9 @@ export type ChatLivenessExpiry = {
   /** Since the request was issued. */
   elapsedMs: number;
   /**
-   * Since the last visible progress. Equal to `elapsedMs` before the first
-   * token, because nothing visible has happened yet.
+   * For `stream_idle_timeout`, the silence that ended it: since the last
+   * thing the server wrote. For `first_response_timeout`, equal to
+   * `elapsedMs`, because nothing visible has happened yet.
    */
   idleMs: number;
 };
@@ -243,15 +285,29 @@ export type ChatLivenessWatchdog = {
   /** Response headers arrived: `pre_headers` -> `first_response`. */
   noteHeaders: () => void;
   /**
-   * A server keepalive arrived. Records that the transport is alive and
-   * nothing else -- see the module comment.
+   * A server keepalive arrived. Resets the silence clock and never the
+   * absolute first-response deadline -- see the module comment. The
+   * interval, when the server reported one, sizes the silence budget.
    */
-  noteKeepalive: () => void;
+  noteKeepalive: (serverIntervalMs?: number) => void;
+  /**
+   * Any other out-of-band chunk the server wrote (a routing notice, a
+   * progress marker, the trailer). The server is writing, so the silence
+   * clock resets; nothing visible happened, so the phase does not move.
+   */
+  noteServerSignal: () => void;
   /**
    * A chunk the user can actually see. The first one enters `mid_stream`;
-   * every one re-arms the idle watchdog.
+   * every one resets the silence clock.
    */
   noteVisibleChunk: () => void;
+  /**
+   * The page came back (visible again, or back online). Timers in a frozen
+   * page fire late or not at all, so the deadlines are checked against the
+   * clock now; a silence verdict still waits
+   * `CHAT_LIVENESS_RESUME_GRACE_MS` for bytes buffered while suspended.
+   */
+  checkNow: () => void;
   /**
    * The request settled (or handed itself to a poller). Cancels the pending
    * timer; the watchdog can never fire afterwards.
@@ -271,9 +327,16 @@ export const createChatLivenessWatchdog = (input: {
   const startedAt = timers.now();
   let phase: ChatLivenessPhase = "pre_headers";
   let lastVisibleAt = startedAt;
+  // The last thing the server wrote: headers, a keepalive, any chunk.
+  let lastSignalAt = startedAt;
+  let silenceBudgetMs = budgets.idleMs;
+  // Set while a silence verdict waits out the resume grace. Any server signal
+  // clears it, which is the point of waiting.
+  let graceUntil: number | null = null;
   let keepalives = 0;
   let stopped = false;
   let handle: unknown = null;
+  let dueAt = 0;
 
   const clear = () => {
     if (handle === null) return;
@@ -283,7 +346,7 @@ export const createChatLivenessWatchdog = (input: {
 
   const expire = (
     cause: ChatLivenessExpiry["cause"],
-    referenceAt: () => number
+    referenceAt: number
   ) => {
     if (stopped) return;
     stopped = true;
@@ -293,46 +356,103 @@ export const createChatLivenessWatchdog = (input: {
       cause,
       phase,
       elapsedMs: now - startedAt,
-      idleMs: now - referenceAt(),
+      idleMs: now - referenceAt,
     });
   };
 
-  const armFirstResponse = () => {
+  /*
+    One timer for whichever deadline is nearer.
+
+    The first-response deadline is measured from the start, not from now: it
+    is absolute, and re-arming it with the full budget on every phase change
+    is exactly the chained-budget mistake the module comment rules out. The
+    silence deadline is measured from the last server signal, and exists only
+    once there could have been one.
+  */
+  const firstResponseDueAt = () =>
+    phase === "mid_stream" ? Infinity : startedAt + budgets.firstResponseMs;
+  const silenceDueAt = () =>
+    phase === "pre_headers"
+      ? Infinity
+      : (graceUntil ?? lastSignalAt + silenceBudgetMs);
+
+  const arm = () => {
     clear();
-    // Measured from the start, not from now: this deadline is absolute, and
-    // re-arming it with the full budget on every phase change is exactly the
-    // chained-budget mistake the module comment rules out.
-    const remaining = budgets.firstResponseMs - (timers.now() - startedAt);
+    if (stopped) return;
+    dueAt = Math.min(firstResponseDueAt(), silenceDueAt());
+    if (!Number.isFinite(dueAt)) return;
     handle = timers.setTimeout(
-      () => expire("first_response_timeout", () => startedAt),
-      Math.max(0, remaining)
+      () => evaluate(false),
+      Math.max(0, dueAt - timers.now())
     );
   };
 
-  const armIdle = () => {
-    clear();
-    handle = timers.setTimeout(
-      () => expire("stream_idle_timeout", () => lastVisibleAt),
-      budgets.idleMs
-    );
+  const evaluate = (resumed: boolean) => {
+    handle = null;
+    if (stopped) return;
+    const now = timers.now();
+    if (now >= firstResponseDueAt()) {
+      expire("first_response_timeout", startedAt);
+      return;
+    }
+    if (now >= lastSignalAt + silenceBudgetMs && phase !== "pre_headers") {
+      const suspended =
+        resumed || now - dueAt > SUSPENDED_TIMER_LATENESS_MS;
+      if (graceUntil === null && suspended) {
+        // The clock jumped. Whatever the server wrote meanwhile may still be
+        // in the socket's buffer, about to be read.
+        graceUntil = now + CHAT_LIVENESS_RESUME_GRACE_MS;
+      } else if (graceUntil === null || now >= graceUntil) {
+        expire("stream_idle_timeout", lastSignalAt);
+        return;
+      }
+    }
+    arm();
   };
 
-  armFirstResponse();
+  const noteSignal = () => {
+    lastSignalAt = timers.now();
+    graceUntil = null;
+    arm();
+  };
+
+  arm();
 
   return {
     noteHeaders: () => {
       if (stopped || phase !== "pre_headers") return;
       phase = "first_response";
+      noteSignal();
     },
-    noteKeepalive: () => {
+    noteKeepalive: (serverIntervalMs?: number) => {
       if (stopped) return;
       keepalives += 1;
+      if (
+        typeof serverIntervalMs === "number" &&
+        Number.isFinite(serverIntervalMs) &&
+        serverIntervalMs > 0
+      ) {
+        silenceBudgetMs = Math.max(
+          budgets.idleMs,
+          CHAT_LIVENESS_MISSED_KEEPALIVES * serverIntervalMs
+        );
+      }
+      noteSignal();
+    },
+    noteServerSignal: () => {
+      if (stopped) return;
+      noteSignal();
     },
     noteVisibleChunk: () => {
       if (stopped) return;
       phase = "mid_stream";
       lastVisibleAt = timers.now();
-      armIdle();
+      noteSignal();
+    },
+    checkNow: () => {
+      if (stopped) return;
+      clear();
+      evaluate(true);
     },
     stop: () => {
       stopped = true;

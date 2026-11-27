@@ -1,6 +1,7 @@
 import { parseContinuationReceipt, type ContinuationReceipt } from "./continuationReceipt";
 import {
   isChatCompletionStatus,
+  isChatIncompleteReason,
   type ChatCompletionStatus,
   type ChatIncompleteReason,
 } from "@tomverse/chat-core";
@@ -78,6 +79,15 @@ export type ChatStreamTrailer = {
    * `emptyResponseCause`). Absent otherwise; an older client ignores it.
    */
   failure?: { kind: "attachment_rejected" };
+  /**
+   * The answer streamed in full, but its Message was not saved -- on a turn
+   * with no durable attempt row, so nothing else will tell the browser.
+   * `not_saved`: the server's retries failed and it checked that nothing
+   * landed, so a reload will not show it. `unknown`: whether it landed could
+   * not be checked, so a reload is the way to find out. Billing is unaffected
+   * (the provider ran and the answer was shown). Absent otherwise.
+   */
+  persistence?: "not_saved" | "unknown";
 };
 
 const ERROR_REPORT_TOKEN_MAX_LENGTH = 2_048;
@@ -115,7 +125,8 @@ export function parseChatStreamTrailer(
     !("artifacts" in record) &&
     !("fileGenerationRetry" in record) &&
     !("errorReport" in record) &&
-    !("failure" in record)
+    !("failure" in record) &&
+    !("persistence" in record)
   ) {
     return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
@@ -157,8 +168,8 @@ export function parseChatStreamTrailer(
       ? {
           completion: {
             status: completionRecord.status,
-            ...(completionRecord.incompleteReason === "length"
-              ? { incompleteReason: "length" as const }
+            ...(isChatIncompleteReason(completionRecord.incompleteReason)
+              ? { incompleteReason: completionRecord.incompleteReason }
               : {}),
           },
         }
@@ -173,6 +184,9 @@ export function parseChatStreamTrailer(
     typeof record.failure === "object" &&
     (record.failure as Record<string, unknown>).kind === "attachment_rejected"
       ? { failure: { kind: "attachment_rejected" as const } }
+      : {}),
+    ...(record.persistence === "not_saved" || record.persistence === "unknown"
+      ? { persistence: record.persistence }
       : {}),
   };
 }

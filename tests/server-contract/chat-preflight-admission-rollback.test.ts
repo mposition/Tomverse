@@ -116,6 +116,13 @@ mock.module(mod("lib/billingEntitlements.ts"), {
 // The memory context is a database read; what it returns is not this
 // contract's subject, only that it produces a context the bundle step then
 // tries to sign.
+// Personal instructions are a database read too, and not this contract's
+// subject either: the account here has none.
+mock.module(mod("lib/chatPersonalization.ts"), {
+  namedExports: {
+    readPersonalizationTurnBlock: async () => ({ prompt: null, tokens: 0, hash: "none" }),
+  },
+});
 const realMemoryContext = original("lib/chatMemoryContext.ts");
 mock.module(mod("lib/chatMemoryContext.ts"), {
   namedExports: {

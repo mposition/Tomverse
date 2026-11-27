@@ -398,8 +398,9 @@ import {
     buildProjectChatTools,
     projectToolsAvailable,
     PROJECT_TOOL_MAX_STEPS,
-    type ProjectChatTools,
 } from "@/lib/projectChatTools";
+import { withChatReadTools } from "@/lib/chatReadTools";
+import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
 import { projectContextRequiresBundle, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
@@ -501,6 +502,7 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
@@ -519,6 +521,12 @@ import {
     claimChatResponseAttempt,
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
+import {
+    DatabaseWriteOutcomeUnknownError,
+    databaseErrorMetadata,
+    isDatabaseError,
+    runRetryableDatabaseWrite,
+} from "@/lib/databaseError";
 import {
     createChatResponseAttemptCheckpointWriter,
     type ChatResponseAttemptCheckpointWriter,
@@ -1336,7 +1344,9 @@ async function handleChatPost(
     const latency = createServerLatency(traceId);
     let mcpConnector: Awaited<ReturnType<typeof buildMcpChatTools>> | null = null;
     // Project workspace: project_search / project_read, priced like MCP tools.
-    let projectTools: ProjectChatTools | null = null;
+    let projectTools: ChatToolSlot | null = null;
+    // Pages read and past chats used by read_url / search_past_chats (lib/chatReadTools.ts).
+    let chatReadCitations: () => Array<{ url: string; title?: string; sourceProvider?: string }> = () => [];
     // One timing line per turn, whichever path ends it: the stream's
     // settlement or the request failure path below. Shared, so a turn that
     // settled and then threw on its way out is not written twice.
@@ -2240,9 +2250,15 @@ async function handleChatPost(
                           productKey: true,
                           projectId: true,
                           continuationBridge: { select: { id: true, reviewHandoff: true } },
+                          temporaryExpiresAt: true,
                       },
                   })
                 : null;
+        // A temporary Chat takes no answer past its expiry; the sweep deletes it
+        // shortly after (lib/temporaryChatAccess.ts).
+        if (isTemporaryConversationExpired(conversationRouting?.temporaryExpiresAt, new Date())) {
+            throw new ChatAccessError(410, TEMPORARY_CHAT_EXPIRED, "This temporary chat has ended.");
+        }
         if (conversationRouting?.continuationBridge) continuation.receipt = continuationReceipt({
             traceId, assistantMessageId: assistantMessageId ?? "", selected: req.headers.has(PASSAGE_HEADER), outcome: "not_prepared" });
         if (guestAutoCapability) {
@@ -3738,6 +3754,7 @@ async function handleChatPost(
                   memoryTokens: number;
                   profileTokens: number;
                   projectTokens: number;
+                  preferenceTokens: number;
                   project: ProjectTurnScope | null;
                   projectMaterialSources: Array<{ fileId: string; ordinal: number; fileName: string }>;
                   projectReferenceSources: Array<{ ref: string; status: "included" | "unavailable"; title: string | null }>;
@@ -3797,6 +3814,7 @@ async function handleChatPost(
                 memoryTokens: verification.payload.memoryTokens,
                 profileTokens: verification.payload.profileTokens,
                 projectTokens: verification.payload.projectTokens ?? 0,
+                preferenceTokens: verification.payload.preferenceTokens ?? 0,
                 project: turnContext.project?.project ?? null,
                 projectMaterialSources: turnContext.project?.materialSources ?? [],
                 projectReferenceSources: turnContext.project?.references ?? [],
@@ -4057,7 +4075,8 @@ async function handleChatPost(
                 if (bucket) void recordMemoryCounter(bucket);
             }
             const quotedContextTokens =
-                verifiedContext.memoryTokens + verifiedContext.profileTokens + verifiedContext.projectTokens;
+                verifiedContext.memoryTokens + verifiedContext.profileTokens + verifiedContext.projectTokens +
+                verifiedContext.preferenceTokens;
             estimatedInputTokens += quotedContextTokens;
             inputEstimate.addTokens(quotedContextTokens);
         }
@@ -4158,7 +4177,7 @@ async function handleChatPost(
             memoryData,
             blocks: turnSystemBlocks,
         });
-        projectTools =
+        const projectToolsOnly =
             session?.user?.id && conversationId && verifiedContext?.project &&
             !isResearchPreview && !isDeepResearchTurn &&
             projectToolsAvailable({
@@ -4174,6 +4193,28 @@ async function handleChatPost(
                       signal: req.signal,
                   })
                 : null;
+        // read_url / search_past_chats: default-off switches, priced in the same slot.
+        const chatRead = await withChatReadTools({
+            userId: session?.user?.id,
+            conversationId,
+            productKey: conversationProductKey,
+            model: modelConfig,
+            nativeSearch: nativeSearchEnabled,
+            otherToolOwner: Boolean(mcpConnector),
+            researchTurn: isResearchPreview || isDeepResearchTurn,
+            profileActive: Boolean(conversationProfileVersionId),
+            // The user's own messages, not executionMessages: the Auto router and the Prompt Refiner can replace
+            // those with model-written text, and read_url may fetch only a link the user wrote.
+            userMessages: messages.filter((m) => m.role === "user").map((m) => m.content),
+            request: req,
+            signal: req.signal,
+            base: projectToolsOnly,
+            onProgress: (state) => {
+                try { streamController?.enqueue(buildMcpProgressChunk(state)); } catch { /* The client has closed its stream. */ }
+            },
+        });
+        projectTools = chatRead.tools;
+        chatReadCitations = chatRead.citations;
         if (mcpConnector) {
             formattedMessages.push({ role: "system", content: MCP_UNTRUSTED_NOTICE });
             inputEstimate.addText(MCP_UNTRUSTED_NOTICE);
@@ -6499,6 +6540,33 @@ async function handleChatPost(
         }
         if (hasContinuation) recordAutoSelection();
         const initialAttemptAbortController = new AbortController();
+        /*
+          Evidence that the current provider stream is producing parts.
+
+          Bumped by every SDK stream part of whichever attempt is current --
+          reasoning, tool input, step boundaries, text -- and read by the
+          keepalive tick below. After the first visible token a keepalive goes
+          out only when this moved since the previous tick, so a provider that
+          stopped producing parts stops vouching for itself
+          (lib/chatStreamKeepalive.ts).
+        */
+        let providerPartsObserved = 0;
+        type ProviderPartObserver = (event: {
+            chunk: unknown;
+        }) => PromiseLike<void> | void;
+        const observeProviderParts =
+            (forward: ProviderPartObserver | null): ProviderPartObserver =>
+            (event) => {
+                providerPartsObserved += 1;
+                return forward?.(event);
+            };
+        const forwardedOnChunk = (config: unknown) => {
+            const candidate = (config as { onChunk?: unknown } | null | undefined)
+                ?.onChunk;
+            return typeof candidate === "function"
+                ? (candidate as ProviderPartObserver)
+                : null;
+        };
         // The last error the active provider stream reported through `onError`.
         // Read only by the in-stream error report: an empty answer settles as
         // the SDK's "no output" error, and this is what caused it.
@@ -6618,6 +6686,14 @@ async function handleChatPost(
                             ...projectTools!.prepareStep(options),
                         }),
                     } : {}),
+                    // After every spread, so it wraps the artifact tool's own
+                    // observer (the only other `onChunk` a turn can carry)
+                    // rather than replacing it.
+                    onChunk: observeProviderParts(
+                        researchPreviewExecution
+                            ? null
+                            : forwardedOnChunk(combinedToolConfig)
+                    ),
                     onError: observeStreamError({
                         traceId,
                         modelId: modelConfig.id,
@@ -6790,6 +6866,27 @@ async function handleChatPost(
         let usageSettlement: Promise<void> | null = null;
         let turnCancellation: Promise<void> | null = null;
         let completionCommitted = false;
+        /**
+         * Set by the completion branch when it is about to write the
+         * assistant Message. The Message transaction then performs the
+         * attempt's terminal CAS itself (and its failure path terminalizes
+         * the attempt as failed), so `settleSafely` must not terminalize the
+         * attempt first for a non-`completed` settlement.
+         */
+        let attemptTerminalWithMessage = false;
+        /**
+         * The provider's text stream reported done. From here every failure
+         * is the completion handling's -- checkpoint, settlement, Message
+         * write -- and the catch below classifies it as such.
+         */
+        let providerStreamFinished = false;
+        /**
+         * The durable Message write failed and whether it committed is still
+         * unknown. The stream then ends without a signed failure trailer, so
+         * the browser reads the attempt row -- the one record that will say
+         * `completed` or `failed` -- instead of being told it failed.
+         */
+        let messagePersistOutcomeUnknown = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
         let detachRequestAbortListener: () => void = () => {};
         let fallbackTransition: Promise<void> | null = null;
@@ -6808,6 +6905,12 @@ async function handleChatPost(
          * Set once, by the same line that sets `visibleTokenEmitted`.
          */
         let firstVisibleTokenAt: Date | null = null;
+        /**
+         * When the latest visible chunk was handed to the response stream.
+         * The keepalive tick skips an interval in which text went out: the
+         * wire was not silent, so there is nothing to keep alive.
+         */
+        let lastVisibleWriteAt = 0;
         /**
          * Cancels the keepalive writer and the first-token deadline below.
          *
@@ -6935,7 +7038,11 @@ async function handleChatPost(
             if (!reservation) return Promise.resolve();
             usageSettlement = (async () => {
                 try {
-                    if (durableAttempt && outcome !== "completed") {
+                    if (
+                        durableAttempt &&
+                        outcome !== "completed" &&
+                        !attemptTerminalWithMessage
+                    ) {
                         try {
                             const checkpoint = durableCheckpointWriter
                                 ? await durableCheckpointWriter.flush(generatedText)
@@ -7440,8 +7547,8 @@ async function handleChatPost(
             }
         };
         /*
-          Keeping the connection alive while the provider thinks, and giving
-          up on it when it never stops.
+          Keeping the connection alive while the provider works, and giving
+          up on it when it never starts.
 
           lib/chatStreamKeepalive.ts carries the whole rationale. In short:
           this deployment sits behind an edge proxy whose read timeout is far
@@ -7454,24 +7561,37 @@ async function handleChatPost(
           can lower either without a deploy.
 
           The keepalive covers whichever attempt is current -- the primary and
-          §7's automatic fallback alike -- because it is tied to "no visible
-          token yet", which is precisely the window a fallback is allowed to
-          happen in. The deadline is absolute from the first pull and is not
-          restarted by a swap: a turn that has shown the user nothing for nine
-          minutes is over regardless of how many models were tried inside it.
+          the automatic fallback of `docs/policy/tomverse-chat-routing.md §7` alike. Before the first visible token it is
+          written on the timer, which is precisely the window a fallback is
+          allowed to happen in, and the deadline below bounds it: absolute from
+          the first pull and not restarted by a swap, because a turn that has
+          shown the user nothing for nine minutes is over regardless of how
+          many models were tried inside it.
+
+          After the first visible token there is no deadline of the server's
+          own, so the timer alone may not vouch for the provider: a tick writes
+          only when the provider stream delivered a part since the previous
+          tick and no visible text went out in that interval. A provider that
+          goes quiet produces no keepalives, and the client's silence watchdog
+          ends the turn exactly as it always did.
         */
         const firstTokenWatchStartedAt = Date.now();
         let keepaliveWriter: ReturnType<typeof setInterval> | null = null;
         let firstTokenDeadline: ReturnType<typeof setTimeout> | null = null;
+        let firstTokenWatchStarted = false;
+        let providerPartsAtLastTick = 0;
+        const clearFirstTokenDeadline = () => {
+            if (firstTokenDeadline) {
+                clearTimeout(firstTokenDeadline);
+                firstTokenDeadline = null;
+            }
+        };
         stopFirstTokenWatch = () => {
             if (keepaliveWriter) {
                 clearInterval(keepaliveWriter);
                 keepaliveWriter = null;
             }
-            if (firstTokenDeadline) {
-                clearTimeout(firstTokenDeadline);
-                firstTokenDeadline = null;
-            }
+            clearFirstTokenDeadline();
         };
         /**
          * Ends a turn whose provider never produced a visible token.
@@ -7532,33 +7652,62 @@ async function handleChatPost(
         const startFirstTokenWatch = (
             controller: ReadableStreamDefaultController<string>
         ) => {
-            if (keepaliveWriter || visibleTokenEmitted) return;
+            // Once per turn. A writer stopped on a terminal path is never
+            // restarted by a later pull.
+            if (firstTokenWatchStarted || visibleTokenEmitted) return;
+            firstTokenWatchStarted = true;
             const plan = resolveChatStreamKeepalivePlan();
             keepaliveWriter = setInterval(() => {
-                if (visibleTokenEmitted || streamState !== "open") {
+                if (streamState !== "open") {
                     stopFirstTokenWatch();
+                    return;
+                }
+                // Checkpoints renew the attempt's lease only when text
+                // arrives; a first token minutes away -- or minutes of tool
+                // input after one -- would otherwise find it expired at the
+                // terminal CAS (2026-11-21).
+                durableCheckpointWriter?.renewLease();
+                const partsArrived =
+                    providerPartsObserved !== providerPartsAtLastTick;
+                providerPartsAtLastTick = providerPartsObserved;
+                if (!visibleTokenEmitted) {
+                    enqueueSafely(
+                        controller,
+                        buildStreamKeepaliveChunk({
+                            state: "awaiting_first_token",
+                            elapsedMs: Date.now() - firstTokenWatchStartedAt,
+                            intervalMs: plan.intervalMs,
+                        })
+                    );
+                    return;
+                }
+                // After the first token: on evidence, and only into silence.
+                if (
+                    !partsArrived ||
+                    Date.now() - lastVisibleWriteAt < plan.intervalMs
+                ) {
                     return;
                 }
                 enqueueSafely(
                     controller,
                     buildStreamKeepaliveChunk({
-                        state: "awaiting_first_token",
+                        state: "provider_active",
                         elapsedMs: Date.now() - firstTokenWatchStartedAt,
+                        intervalMs: plan.intervalMs,
                     })
                 );
-                // Checkpoints renew the attempt's lease only once text
-                // arrives; a first token minutes away would otherwise find
-                // it expired at the terminal CAS (2026-11-21).
-                durableCheckpointWriter?.renewLease();
             }, plan.intervalMs);
             // Same reason as the lease heartbeat: a pending timer must never
             // be why a worker stays up after its request is done.
             keepaliveWriter.unref?.();
             firstTokenDeadline = setTimeout(() => {
-                if (visibleTokenEmitted || streamState !== "open") {
+                firstTokenDeadline = null;
+                if (streamState !== "open") {
                     stopFirstTokenWatch();
                     return;
                 }
+                // Answered in time: the writer carries on, on evidence.
+                if (visibleTokenEmitted) return;
                 void endOnFirstTokenDeadline(controller);
             }, plan.firstTokenDeadlineMs);
             firstTokenDeadline.unref?.();
@@ -7610,12 +7759,13 @@ async function handleChatPost(
         const attemptFallbackWithinTransition = async (
             controller: ReadableStreamDefaultController<string>,
             error: unknown,
-            nextAttemptAbortController: AbortController
+            nextAttemptAbortController: AbortController,
+            phase: "read" | "completion"
         ): Promise<boolean> => {
             if (isResearchPreview) return false;
             const classified = classifyStreamFailure({
                 error,
-                phase: "read",
+                phase,
                 visibleTokenEmitted: generatedText.length > 0,
                 downstreamOpen: streamState === "open",
             });
@@ -7887,6 +8037,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
+                    onChunk: observeProviderParts(null),
                     onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
@@ -8124,7 +8275,13 @@ async function handleChatPost(
         };
         const attemptFallback = async (
             controller: ReadableStreamDefaultController<string>,
-            error: unknown
+            error: unknown,
+            /**
+             * `completion` once the provider's stream has finished: whatever
+             * failed after that is Tomverse's own handling, never a reason to
+             * try another model (lib/routingStreamFailure.ts).
+             */
+            phase: "read" | "completion"
         ): Promise<boolean> => {
             const nextAttemptAbortController = new AbortController();
             let finishTransition!: () => void;
@@ -8137,7 +8294,8 @@ async function handleChatPost(
                 return await attemptFallbackWithinTransition(
                     controller,
                     error,
-                    nextAttemptAbortController
+                    nextAttemptAbortController,
+                    phase
                 );
             } finally {
                 if (
@@ -8229,6 +8387,7 @@ async function handleChatPost(
                     if (done) {
                         // The provider finished. Whatever it produced, it is
                         // no longer being waited for.
+                        providerStreamFinished = true;
                         stopFirstTokenWatch();
                         const completionResults = await Promise.allSettled([
                             dispatched.stream.response,
@@ -8377,16 +8536,40 @@ async function handleChatPost(
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
                             ]);
                         }
+                        const readCitations = chatReadCitations();
+                        if (readCitations.length) {
+                            webSearchExecution.citations = sanitizeWebSearchCitations([
+                                ...webSearchExecution.citations, ...readCitations,
+                            ]);
+                        }
                         searchObservation?.sourceCards(webSearchExecution.citations.length);
                         // A provider that hit its output ceiling returns HTTP
                         // 200 with real text and a `length` finish reason.
                         // Recorded so the answer is never presented as
                         // finished; settlement, cancellation and the
                         // empty-response path are untouched by it.
-                        const completionOutcome = resolveChatCompletionOutcome({
+                        /*
+                          And a provider that broke off mid-answer. The AI
+                          SDK does not throw from `textStream` for an error
+                          part the provider sent mid-stream: the text stream
+                          closes normally and the finish reason resolves as
+                          `error` (`interrupted` when the stream ended without
+                          its completion signal), and a later step with no
+                          output rejects the finish metadata instead. Either
+                          way the answer stops short, and is recorded so. A
+                          Research Preview answer is its accepted report,
+                          checked above, not what the stream did after it.
+                        */
+                        const resolvedCompletionOutcome = resolveChatCompletionOutcome({
                             finishReason,
                             rawFinishReason,
+                            streamFailed: Boolean(completionError),
                         });
+                        const completionOutcome =
+                            isResearchPreview &&
+                            resolvedCompletionOutcome.incompleteReason === "interrupted"
+                                ? { status: "normal" as const }
+                                : resolvedCompletionOutcome;
                         if (completionOutcome.status === "incomplete") {
                             console.warn(
                                 JSON.stringify({
@@ -8415,8 +8598,14 @@ async function handleChatPost(
                               card the user sees while it streams and the row
                               they reload into are the same card
                               (docs/policy/generated-artifacts.md section 9).
+                              The output ceiling only, as section 9 states: a
+                              stream that broke off is not that card's case.
                             */
-                            if (artifactCollector && artifactToolCallTracker) {
+                            if (
+                                artifactCollector &&
+                                artifactToolCallTracker &&
+                                completionOutcome.incompleteReason === "length"
+                            ) {
                                 artifactCollector.recordIncompleteToolCalls(
                                     artifactToolCallTracker.abandonedCalls()
                                 );
@@ -8468,42 +8657,157 @@ async function handleChatPost(
                         completionCommitted = true;
                         detachRequestAbortListener();
 
-                        if (usageResult.status === "fulfilled") {
-                            const usage = usageResult.value;
-                            const providerCalls = await providerCallUsage(dispatched.stream);
-                            await settleSafely(
-                                generatedText.trim() ? "completed" : "empty",
-                                {
-                                    inputTokens: usage.inputTokens,
-                                    cachedInputTokens:
-                                        usage.inputTokenDetails.cacheReadTokens,
-                                    // `usage.inputTokens` is the *total* --
-                                    // the SDK builds it as noCache + cacheRead
-                                    // + cacheWrite, unlike the Anthropic API's
-                                    // own `input_tokens`, which is the
-                                    // uncached remainder. So the write count
-                                    // is carved out of that total rather than
-                                    // added to it; settlement prices it at
-                                    // 1.25x instead of the 1.0x it was
-                                    // silently getting as part of the
-                                    // "uncached" remainder.
-                                    cacheWriteInputTokens:
-                                        usage.inputTokenDetails.cacheWriteTokens,
-                                    outputTokens: usage.outputTokens,
-                                    reasoningTokens:
-                                        usage.outputTokenDetails
-                                            .reasoningTokens,
-                                    usageFromProvider: true,
-                                    providerCalls,
-                                    ...searchSettlementFields,
-                                }
-                            );
-                        } else {
-                            await settleSafely(
-                                generatedText.trim() ? "completed" : "empty",
-                                searchSettlementFields
-                            );
-                        }
+                        /*
+                          A generated file is an answer
+                          (docs/policy/generated-artifacts.md section 8).
+
+                          A turn whose tool stored a file and whose model then
+                          wrote no prose -- or ran out of steps before it could
+                          -- delivered what was asked for. It keeps the file,
+                          its message and its charge, exactly as an answer
+                          with a sentence above the card would. Only a file
+                          that reached storage counts, and only where there is
+                          a conversation to write the message into: a turn
+                          with nowhere to persist keeps the old empty path,
+                          because its file would be unreachable the moment it
+                          was written. The body stays empty; the sentence
+                          above the card is the screen's own, in its language.
+
+                          A failure card alone (a call cut off by the output
+                          ceiling, `turn_incomplete`, or a generation that
+                          failed) is kept too, because section 9 promises the
+                          card survives a reload -- but nothing was delivered,
+                          so the turn still settles as the empty answer it is.
+                        */
+                        const answerHasText = Boolean(generatedText.trim());
+                        const canPersistAnswer = Boolean(
+                            conversationId && assistantMessageId
+                        );
+                        const deliveredFiles =
+                            canPersistAnswer &&
+                            (artifactCollector?.stored.length ?? 0) > 0;
+                        const failureCardsOnly =
+                            canPersistAnswer &&
+                            !answerHasText &&
+                            !deliveredFiles &&
+                            (artifactCollector?.failed.length ?? 0) > 0;
+                        const persistAnswer =
+                            canPersistAnswer &&
+                            (answerHasText || deliveredFiles || failureCardsOnly);
+                        const answerDelivered = answerHasText || deliveredFiles;
+                        // The Message transaction owns this turn's attempt
+                        // terminal whenever it will write one -- including an
+                        // `empty` settlement that keeps a failure card -- so
+                        // the attempt and the Message agree on reload.
+                        attemptTerminalWithMessage = persistAnswer;
+
+                        /*
+                          A provider that broke off after delivering something
+                          -- visible text, or a file that reached storage --
+                          did not complete an answer (see `completionOutcome`).
+                          It is settled the way a stop is -- prorated on what
+                          was used, never the flat completed charge: on the
+                          provider's own usage when it reported any, otherwise
+                          on the estimate a cancelled turn uses. A file-only
+                          answer is no exception: the file is kept, but the
+                          provider still broke off, so the delivered file does
+                          not turn the interruption into a completion. The
+                          attempt record says what it was, a post-token
+                          provider failure, rather than a cancellation.
+                        */
+                        const providerInterrupted =
+                            answerDelivered &&
+                            completionOutcome.incompleteReason === "interrupted";
+                        const interruptionCause = observedStreamError ?? completionError;
+                        const interruption = providerInterrupted
+                            ? classifyStreamFailure({
+                                  error: interruptionCause,
+                                  phase: "read",
+                                  visibleTokenEmitted: true,
+                                  downstreamOpen: true,
+                              })
+                            : null;
+                        const settledAs = providerInterrupted
+                            ? "cancelled"
+                            : answerDelivered
+                              ? "completed"
+                              : "empty";
+                        const interruptionInstrumentation = interruption
+                            ? {
+                                  outcome: interruption.observedOutcome,
+                                  failureLayer: interruption.failureLayer,
+                                  errorClass: interruption.errorClass,
+                              }
+                            : undefined;
+                        // A stream that ended on an error part usually
+                        // resolves usage with no counts at all; that is not
+                        // a measurement, and the estimate is used instead.
+                        const reportedUsage =
+                            usageResult.status === "fulfilled" &&
+                            (!providerInterrupted ||
+                                Number.isFinite(usageResult.value.outputTokens))
+                                ? usageResult.value
+                                : null;
+
+                        /*
+                          When this turn is charged.
+
+                          Text the user has already read is delivered whether
+                          or not its Message is saved, so it settles now, as it
+                          always has. A file-only answer delivers nothing until
+                          its Message and file rows exist: a known rollback
+                          discards the file, and the user then received
+                          neither text nor file. It settles once the save
+                          outcome is known -- as `settledAs` when the rows
+                          committed (or may have: an unknown outcome keeps the
+                          file for a reload to show), as `empty` when they are
+                          known not to have. `settleSafely` settles once; the
+                          first call wins.
+                        */
+                        const fileOnlyAnswer = deliveredFiles && !answerHasText;
+                        const settleAnswer = async (
+                            outcome: typeof settledAs
+                        ) => {
+                            if (reportedUsage) {
+                                const usage = reportedUsage;
+                                const providerCalls = await providerCallUsage(dispatched.stream);
+                                await settleSafely(
+                                    outcome,
+                                    {
+                                        inputTokens: usage.inputTokens,
+                                        cachedInputTokens:
+                                            usage.inputTokenDetails.cacheReadTokens,
+                                        // `usage.inputTokens` is the *total* --
+                                        // the SDK builds it as noCache + cacheRead
+                                        // + cacheWrite, unlike the Anthropic API's
+                                        // own `input_tokens`, which is the
+                                        // uncached remainder. So the write count
+                                        // is carved out of that total rather than
+                                        // added to it; settlement prices it at
+                                        // 1.25x instead of the 1.0x it was
+                                        // silently getting as part of the
+                                        // "uncached" remainder.
+                                        cacheWriteInputTokens:
+                                            usage.inputTokenDetails.cacheWriteTokens,
+                                        outputTokens: usage.outputTokens,
+                                        reasoningTokens:
+                                            usage.outputTokenDetails
+                                                .reasoningTokens,
+                                        usageFromProvider: true,
+                                        providerCalls,
+                                        ...searchSettlementFields,
+                                    },
+                                    interruptionInstrumentation
+                                );
+                            } else {
+                                await settleSafely(
+                                    outcome,
+                                    searchSettlementFields,
+                                    interruptionInstrumentation
+                                );
+                            }
+                        };
+                        if (!fileOnlyAnswer) await settleAnswer(settledAs);
                         /*
                           The files this turn produced, as the client will be
                           told about them.
@@ -8517,20 +8821,26 @@ async function handleChatPost(
                         */
                         let artifactsForTrailer: ChatStreamArtifact[] =
                             artifactCollector?.toStreamArtifacts() ?? [];
-                        if (
-                            conversationId &&
-                            assistantMessageId &&
-                            generatedText.trim()
-                        ) {
+                        /** The Message transaction committed (or was found to have). */
+                        let messageCommitted = false;
+                        /**
+                         * For a non-durable answer the browser is showing:
+                         * known not saved, or not known to be saved.
+                         */
+                        let answerPersistence: "not_saved" | "unknown" | null = null;
+                        if (persistAnswer && conversationId && assistantMessageId) {
                             try {
-                                const storedContent =
-                                    generatedText.length >
-                                    MAX_STORED_MESSAGE_CHARACTERS
-                                        ? `${generatedText.slice(
-                                              0,
-                                              MAX_STORED_MESSAGE_CHARACTERS
-                                          )}\n\n[Response truncated for storage]`
-                                        : generatedText;
+                                // A file-only answer is stored with no body,
+                                // not with whitespace a model happened to emit.
+                                const storedContent = !answerHasText
+                                    ? ""
+                                    : generatedText.length >
+                                        MAX_STORED_MESSAGE_CHARACTERS
+                                      ? `${generatedText.slice(
+                                            0,
+                                            MAX_STORED_MESSAGE_CHARACTERS
+                                        )}\n\n[Response truncated for storage]`
+                                      : generatedText;
                                 /*
                                   Provider-private state for replaying a
                                   reasoning model exactly -- and not stored at
@@ -8563,7 +8873,17 @@ async function handleChatPost(
                                               responseResult.value.messages
                                           )
                                         : null;
-                                await prisma.$transaction(async (tx) => {
+                                /*
+                                  One transaction, safe to run again: a
+                                  rollback undoes the Message, its receipt,
+                                  provider context and artifact rows (which
+                                  are `skipDuplicates` besides) and the
+                                  attempt's terminal CAS, whose expected
+                                  revision is the final checkpoint's and does
+                                  not move. Nothing outside it changes. See
+                                  `runRetryableDatabaseWrite` below.
+                                */
+                                const writeAssistantMessage = () => prisma.$transaction(async (tx) => {
                                     await assertMessageCapacity(
                                         tx,
                                         session!.user!.id,
@@ -8674,6 +8994,23 @@ async function handleChatPost(
                                         });
                                     }
                                     if (durableAttempt && durableFinalCheckpoint) {
+                                        /*
+                                          `length` is the attempt's only
+                                          "incomplete" marker: the
+                                          ChatResponseAttempt CHECK allows a
+                                          completed row stop, length,
+                                          content_filter or tool_call, and the
+                                          recovery client binds a completed
+                                          attempt's `length` to the Message's
+                                          `incomplete` status. It therefore
+                                          also stands for a provider that broke
+                                          off. Neither row records *why* an
+                                          answer is incomplete, so a reloaded
+                                          one says only that it did not finish
+                                          (chat.responseUnfinishedNotice); the
+                                          live stream's trailer carries the
+                                          precise reason.
+                                        */
                                         const normalizedFinishReason =
                                             completionOutcome.status === "incomplete"
                                                 ? "length"
@@ -8718,6 +9055,51 @@ async function handleChatPost(
                                         );
                                     }
                                 });
+                                /*
+                                  A transient database failure here used to
+                                  lose an answer the user had already read
+                                  (and paid for). It is run again, up to twice
+                                  -- but a failed COMMIT leaves its outcome
+                                  unknown, so before each re-run the Message is
+                                  looked up: this turn's own row, with this
+                                  turn's own body and model, means the earlier
+                                  try landed and nothing is written twice.
+                                */
+                                await runRetryableDatabaseWrite({
+                                    write: writeAssistantMessage,
+                                    committed: async () => {
+                                        const landed = await prisma.message.findFirst({
+                                            where: {
+                                                id: assistantMessageId,
+                                                conversationId,
+                                                role: "assistant",
+                                            },
+                                            select: { content: true, modelId: true },
+                                        });
+                                        return (
+                                            landed !== null &&
+                                            landed.content === storedContent &&
+                                            landed.modelId === dispatched.modelId
+                                        );
+                                    },
+                                    onRetry: ({ attempt, error }) => {
+                                        const metadata = databaseErrorMetadata(error);
+                                        console.warn(
+                                            JSON.stringify({
+                                                event: "assistant_message_persist_retry",
+                                                traceId,
+                                                modelId: dispatched.modelId,
+                                                attempt,
+                                                errorName: metadata.errorName,
+                                                errorCode: metadata.errorCode ?? null,
+                                                driverKind: metadata.driverKind ?? null,
+                                                driverCode: metadata.driverCode ?? null,
+                                                timestamp: new Date().toISOString(),
+                                            })
+                                        );
+                                    },
+                                });
+                                messageCommitted = true;
                                 durableAttempt = null;
                                 durableCheckpointWriter = null;
                                 if (artifactCollector && !artifactCollector.isEmpty) {
@@ -8755,18 +9137,69 @@ async function handleChatPost(
                                     dispatched.modelId
                                 );
                                 /*
-                                  The message did not land, so nothing can
-                                  ever reach these objects: no row references
-                                  them and no route accepts a key. Reclaimed
-                                  now, and swept later if this fails too.
-
-                                  The cards are dropped from the trailer in
-                                  the same breath. Showing a download button
-                                  for a file whose row does not exist would be
-                                  the one failure this feature must not have.
+                                  Three outcomes, and only one of them may
+                                  delete anything: committed (only the
+                                  read-back after it failed), known not
+                                  committed (the commit check found no row),
+                                  and unknown (the check itself failed --
+                                  `DatabaseWriteOutcomeUnknownError`).
                                 */
-                                await artifactCollector?.discard();
-                                artifactsForTrailer = [];
+                                const outcomeUnknown =
+                                    !messageCommitted &&
+                                    error instanceof DatabaseWriteOutcomeUnknownError;
+                                if (messageCommitted) {
+                                    // The Message and its rows exist, so their
+                                    // objects stay and the answer is saved;
+                                    // the cards keep the ids they had.
+                                    artifactsPersisted = true;
+                                } else if (outcomeUnknown) {
+                                    /*
+                                      The transaction may have committed, and
+                                      its rows may point at these objects:
+                                      nothing is deleted on a guess. If it did
+                                      not commit, the orphan sweep removes
+                                      them later -- it deletes only objects
+                                      older than ARTIFACT_ORPHAN_TTL_MS that no
+                                      MessageArtifact row references
+                                      (lib/generatedArtifactStorage.ts). The
+                                      cards are still dropped: a download
+                                      button for a row that may not exist is
+                                      worse than none, and a reload shows them
+                                      if it does.
+                                    */
+                                    artifactsPersisted = true;
+                                    artifactsForTrailer = [];
+                                    messagePersistOutcomeUnknown = true;
+                                    if (!durableAttempt) answerPersistence = "unknown";
+                                } else {
+                                    /*
+                                      The message did not land, so nothing can
+                                      ever reach these objects: no row
+                                      references them and no route accepts a
+                                      key. Reclaimed now, and swept later if
+                                      this fails too.
+
+                                      The cards are dropped from the trailer in
+                                      the same breath. Showing a download
+                                      button for a file whose row does not
+                                      exist would be the one failure this
+                                      feature must not have.
+                                    */
+                                    await artifactCollector?.discard();
+                                    artifactsForTrailer = [];
+                                    // A turn without an attempt row has no
+                                    // other way to tell the browser: the
+                                    // answer it is showing will be gone on
+                                    // reload.
+                                    if (!durableAttempt) answerPersistence = "not_saved";
+                                }
+                                // A file-only answer whose save outcome is
+                                // known: committed keeps its charge, a
+                                // rollback delivered nothing. An unknown
+                                // outcome is decided below.
+                                if (fileOnlyAnswer && !outcomeUnknown) {
+                                    await settleAnswer(messageCommitted ? settledAs : "empty");
+                                }
                                 if (durableAttempt && durableFinalCheckpoint) {
                                     // Billing has already settled above and is
                                     // intentionally not rolled back with the
@@ -8774,21 +9207,51 @@ async function handleChatPost(
                                     // failure immediately outside that aborted
                                     // transaction so recovery never advertises
                                     // an active attempt until lease expiry.
-                                    await terminalChatResponseAttempt({
-                                        userId: durableAttempt.userId,
-                                        assistantMessageId:
-                                            durableAttempt.assistantMessageId,
-                                        ownerId: durableAttempt.ownerId,
-                                        expectedRevision:
-                                            durableFinalCheckpoint.revision,
-                                        status: "failed",
-                                        finalContent:
-                                            durableFinalCheckpoint.partialContent,
-                                        actualModelId: dispatched.modelId,
-                                        provider: dispatched.provider,
-                                        finishReason: "error",
-                                        failureCode: "internal_error",
-                                    });
+                                    //
+                                    // For an unknown outcome this CAS also
+                                    // decides it. The Message transaction
+                                    // carries this attempt's own terminal CAS,
+                                    // so the attempt can still take `failed`
+                                    // only if that transaction did not commit;
+                                    // if it did, the row is `completed` and
+                                    // this is refused, and the attempt row --
+                                    // which the browser reads when the stream
+                                    // breaks without a signed failure -- tells
+                                    // the truth either way.
+                                    try {
+                                        await terminalChatResponseAttempt({
+                                            userId: durableAttempt.userId,
+                                            assistantMessageId:
+                                                durableAttempt.assistantMessageId,
+                                            ownerId: durableAttempt.ownerId,
+                                            expectedRevision:
+                                                durableFinalCheckpoint.revision,
+                                            status: "failed",
+                                            finalContent:
+                                                durableFinalCheckpoint.partialContent,
+                                            actualModelId: dispatched.modelId,
+                                            provider: dispatched.provider,
+                                            finishReason: "error",
+                                            failureCode: "internal_error",
+                                        });
+                                    } catch (casError) {
+                                        // Refused: the Message transaction
+                                        // committed and closed the attempt, so
+                                        // the file was delivered (or the CAS
+                                        // itself failed, and the outcome stays
+                                        // unknown with the file kept).
+                                        if (fileOnlyAnswer) await settleAnswer(settledAs);
+                                        throw casError;
+                                    }
+                                    if (outcomeUnknown) {
+                                        // Not committed after all: known now.
+                                        messagePersistOutcomeUnknown = false;
+                                        artifactsPersisted = false;
+                                        await artifactCollector?.discard();
+                                    }
+                                    // The attempt is failed: a file-only
+                                    // answer delivered nothing.
+                                    if (fileOnlyAnswer) await settleAnswer("empty");
                                     durableAttempt = null;
                                     durableCheckpointWriter = null;
                                     throw error;
@@ -8796,19 +9259,18 @@ async function handleChatPost(
                             }
                         } else if (artifactCollector?.stored.length) {
                             /*
-                              A turn that called the tool and then wrote no
-                              text at all, or that has no conversation to
-                              write to.
+                              A turn that stored a file and has no
+                              conversation to write it to.
 
-                              The answer is reported as empty by the branch
-                              below, and an empty answer keeps no file: there
-                              is no message for the row to reference, so the
-                              object would be unreachable from the moment it
-                              was written. The event is logged separately
-                              because it is the one shape where a successful
-                              generation is deliberately thrown away, and a
-                              rate that stops being near-zero means the
-                              instructions have stopped working.
+                              Reported as empty by the branch below, and it
+                              keeps no file: there is no message for the row
+                              to reference, so the object would be
+                              unreachable from the moment it was written. A
+                              turn that has a conversation keeps its file even
+                              with no text (`deliveredFiles` above). The event
+                              is logged separately because it is the one shape
+                              where a successful generation is deliberately
+                              thrown away.
                             */
                             console.warn(
                                 JSON.stringify({
@@ -8823,13 +9285,30 @@ async function handleChatPost(
                             await artifactCollector.discard();
                             artifactsForTrailer = [];
                         }
-                        const isEmptyResponse = !generatedText.trim();
+                        // A file-only answer that reached here was saved, or
+                        // its outcome is unknown and its file is kept for a
+                        // reload to show; a rollback settled above as empty.
+                        if (fileOnlyAnswer) await settleAnswer(settledAs);
+                        // A delivered file is not an empty answer: no
+                        // provider failure, no error report, no failed
+                        // attempt.
+                        const isEmptyResponse = !answerDelivered;
                         let streamErrorReport: ReturnType<
                             typeof issueStreamErrorReport
                         > = null;
                         let attachmentRejected = false;
+                        /*
+                          One terminal transition per attempt. When this turn
+                          wrote a Message (`attemptTerminalWithMessage`) -- a
+                          failure card with no text included -- the Message
+                          transaction closed the attempt, or its failure path
+                          did; nothing here may close it again. This is only
+                          for an empty turn with nothing to save whose
+                          settlement could not write its own `failed`.
+                        */
                         if (
                             isEmptyResponse &&
+                            !attemptTerminalWithMessage &&
                             durableAttempt &&
                             durableFinalCheckpoint
                         ) {
@@ -8929,6 +9408,46 @@ async function handleChatPost(
                                     dispatched.modelId
                                 );
                             }
+                        } else if (providerInterrupted) {
+                            // The same record a provider stream that threw
+                            // mid-answer gets in the catch below: it is that
+                            // event, reported through the finish reason.
+                            const interruptionMetadata = safeErrorMetadata(
+                                interruptionCause
+                            );
+                            const interruptionCode = interruptionCause
+                                ? providerDiagnosticCode(
+                                      "AI_STREAM_FAILED",
+                                      interruptionCause
+                                  )
+                                : "AI_STREAM_FAILED.INTERRUPTED";
+                            try {
+                                await recordProviderFailure(
+                                    dispatched.provider,
+                                    interruptionCode,
+                                    {
+                                        modelId: dispatched.modelId,
+                                        phase: "stream",
+                                        traceId,
+                                        errorName: interruptionMetadata.name,
+                                        errorCode: interruptionMetadata.code,
+                                        httpStatus: interruptionMetadata.statusCode,
+                                        retryable: interruptionMetadata.isRetryable,
+                                    }
+                                );
+                                await recordModelFailure(
+                                    dispatched.modelId,
+                                    dispatched.provider,
+                                    interruptionCode
+                                );
+                            } catch (error) {
+                                logRequestError(
+                                    "provider_failure_record_failed",
+                                    traceId,
+                                    error,
+                                    dispatched.modelId
+                                );
+                            }
                         } else {
                             try {
                                 await recordProviderSuccess(
@@ -8969,6 +9488,7 @@ async function handleChatPost(
                                 ...(attachmentRejected
                                     ? { failure: { kind: "attachment_rejected" as const } }
                                     : {}),
+                                ...(answerPersistence ? { persistence: answerPersistence } : {}),
                             })
                         );
                         closeSafely(controller);
@@ -8983,16 +9503,19 @@ async function handleChatPost(
                     if (value.length === 0) return;
                     generatedText += value;
                     if (continuation.receipt?.status === "unknown") continuation.receipt.status = "dispatched";
-                    // The user is about to see something, so the keepalive
-                    // window is over -- for this attempt and for the turn:
+                    // The user is about to see something, so the first-token
+                    // deadline is over -- for this attempt and for the turn:
                     // §7 forbids a fallback once a visible token has gone
                     // out, so nothing can put this turn back into the wait.
+                    // The keepalive writer stays, and from here writes only
+                    // on provider evidence (see `startFirstTokenWatch`).
                     visibleTokenEmitted = true;
-                    stopFirstTokenWatch();
+                    clearFirstTokenDeadline();
                     if (!enqueueSafely(controller, value)) {
                         await cancelTurnSafely("response stream is no longer open");
                         return;
                     }
+                    lastVisibleWriteAt = Date.now();
                     // After the enqueue, not before it: a chunk the closed
                     // response refused never reached the stream, and a first
                     // token recorded for it would feed the Router's TTFT
@@ -9041,10 +9564,23 @@ async function handleChatPost(
                       as `AI_STREAM_FAILED` it would count against the provider
                       -- the same misattribution the outer catch was fixed for,
                       one layer down. The typed error is what tells them apart.
+
+                      The same goes for the completion handling that runs
+                      after the provider's stream reported done: a refused
+                      attempt CAS or a database error in the final
+                      checkpoint, the settlement or the Message write is this
+                      application's, and was being filed as a provider and a
+                      model failure (always `phase: "read"`).
                     */
+                    const completionFailureIsLocal =
+                        providerStreamFinished &&
+                        (error instanceof ChatAttemptCasError ||
+                            error instanceof DatabaseWriteOutcomeUnknownError ||
+                            isDatabaseError(error));
                     const streamFailureIsLocal =
                         isStorageError(error) ||
                         isChatLocalFailure(error) ||
+                        completionFailureIsLocal ||
                         error instanceof ResearchPreviewBudgetExhaustedError ||
                         error instanceof ResearchPreviewUsageUnknownError ||
                         error instanceof ResearchPreviewMissingReportError ||
@@ -9080,7 +9616,9 @@ async function handleChatPost(
                                 failureLayer: isStorageError(error)
                                     ? "storage"
                                     : "application",
-                                phase: "stream",
+                                phase: completionFailureIsLocal
+                                    ? "persistence"
+                                    : "stream",
                                 storageStatus: storageErrorStatus(error),
                             }
                         );
@@ -9120,7 +9658,13 @@ async function handleChatPost(
                     // whether or not another model rescued the answer -- the
                     // fallback is a recovery for the user, not an amnesty for
                     // the provider. Off by default; see lib/autoFallbackGate.
-                    if (await attemptFallback(controller, error)) {
+                    if (
+                        await attemptFallback(
+                            controller,
+                            error,
+                            providerStreamFinished ? "completion" : "read"
+                        )
+                    ) {
                         // The response is now being served by another model.
                         // The next pull() reads from its stream.
                         return;
@@ -9211,7 +9755,11 @@ async function handleChatPost(
                     // The failed turn's error report, on the same terms as the
                     // empty answer's. A Research Preview stop is a limit doing
                     // its job, not a failure to report.
-                    const streamErrorReport = researchStopReason
+                    // No signed failure for a durable answer whose save is
+                    // still unknown: the stream breaks bare, so the browser
+                    // reads the attempt row (lib/chatStreamReattach.ts), which
+                    // ends `completed` with the Message or `failed` without.
+                    const streamErrorReport = researchStopReason || messagePersistOutcomeUnknown
                         ? null
                         : issueStreamErrorReport(
                               "AI_STREAM_FAILED",
@@ -9244,6 +9792,7 @@ async function handleChatPost(
                     await releaseSafely();
                 }
             },
+
             async cancel(reason) {
                 await cancelTurnSafely(reason);
             },

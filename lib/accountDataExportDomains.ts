@@ -66,6 +66,13 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "UserMemorySettings",
     state: "included",
   },
+  // The owner's own words and chosen answer style, wholly theirs.
+  {
+    domain: "userPersonalization",
+    publicName: "personal_instructions",
+    prismaModel: "UserPersonalization",
+    state: "included",
+  },
   // The account's GA4 User-ID and when it was created: an identifier held
   // about the person, so they are told it exists
   // (docs/policy/marketing-automation.md §10.2).
@@ -101,6 +108,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "comparisonReviewItemFeedback",
     publicName: "ai_review_item_feedback",
     prismaModel: "ComparisonReviewItemFeedback",
+    state: "included",
+  },
+  // The person's thumbs up or down on an answer, its optional closed reason,
+  // and the model that answered -- which they could see on the answer.
+  {
+    domain: "chatAnswerRating",
+    publicName: "answer_ratings",
+    prismaModel: "ChatAnswerRating",
     state: "included",
   },
   // Registered on 2026-08-27 having escaped the sweep entirely: both carry
