@@ -80,6 +80,8 @@ import {
   beginReplacement,
   canResendQuestion,
   lastReplaceableTurn,
+  parkReplacement,
+  settleParkedReplacement,
   takeArmedSupersede,
   withoutSuperseded,
 } from "@/lib/chatSupersededTurns";
@@ -1147,6 +1149,7 @@ function ChatAppComponent({
               if (attempt.conversationId !== initialConversationId || !hasJourneySource(panelIdentityKey, initialConversationId, attempt.sourceUserMessageId) ||
                 !data.messages.some((message: Message) => message.role === "user" && message.id === attempt.sourceUserMessageId)) continue;
               const completed = parseCompletedChatResponseMessage(data.messages.find((message: Message) => message.id === attempt.assistantMessageId), attempt);
+              if (completed) settleParkedReplacement(attempt.assistantMessageId, completed.status);
               if (completed) observeJourneyReply({ owner: panelIdentityKey, epoch: hydrationJourneyEpoch,
                 conversationId: initialConversationId, sourceUserMessageId: attempt.sourceUserMessageId,
                 status: completed.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completed.content.trim()) });
@@ -1396,6 +1399,9 @@ function ChatAppComponent({
             )
           );
         }
+        // A regenerated answer that finished while polled is the replacement.
+        if (completedMessage) settleParkedReplacement(assistantMessageId, completedMessage.status);
+        else if (!isActiveChatResponseAttempt(attempt)) settleParkedReplacement(assistantMessageId, null);
         if (completedMessage) {
           writeChatRuntimeMessages(key, (current) => {
             if (!attemptBackedMessageIdsRef.current.has(assistantMessageId)) {
@@ -1613,8 +1619,9 @@ function ChatAppComponent({
     let sourceReceipt: ContinuationReceipt | undefined;
     // The turn this send replaces ("Regenerate" / "edit"). It is excluded from
     // this request's context at once but is recorded as replaced only when the
-    // new answer is written as finished: a refused, failed or stopped send
-    // leaves the earlier answer as it was (lib/chatSupersededTurns.ts).
+    // new answer is reported finished (`replacement.complete`, at each place a
+    // finished answer is known): a refused, failed or stopped send leaves the
+    // earlier answer as it was (lib/chatSupersededTurns.ts).
     let replacement = beginReplacement(targetChatId, null);
     const writeAssistantMessage = assistantMessageWriter(runKey);
     const setAssistantMessage: typeof writeAssistantMessage = (
@@ -1624,7 +1631,6 @@ function ChatAppComponent({
       errorMeta,
       extraFields
     ) => {
-      replacement.answerWritten(status);
       if (status === "error") {
         onTurnErrorRef.current?.(
           analyticsPromptId,
@@ -2437,6 +2443,8 @@ function ChatAppComponent({
               : message
           )
         );
+        if (completedMessage) replacement.complete(completedMessage.status);
+        else if (isActiveChatResponseAttempt(attempt)) parkReplacement(assistantMessageId, replacement);
         if (isActiveChatResponseAttempt(attempt)) {
           durableAttemptPollStartedRef.current.set(
             assistantMessageId,
@@ -2625,6 +2633,7 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
+        replacement.complete(completionStatus);
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: completionStatus, nonempty: Boolean(assistantText.trim()) });
         onResponseComplete?.(

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -8,7 +9,9 @@ import {
   getSupersededIds,
   lastReplaceableTurn,
   markTurnSuperseded,
+  parkReplacement,
   resetSupersededForTests,
+  settleParkedReplacement,
   subscribeSuperseded,
   takeArmedSupersede,
   withoutSuperseded,
@@ -120,21 +123,21 @@ test("a replacement is recorded only once the new answer is written as finished"
   const failed = beginReplacement("c1", ["u1", "a1"]);
   assert.deepEqual([...failed.excludedIds()].sort(), ["a1", "u1"]);
   // Refused, failed or stopped: nothing is recorded and the earlier answer stands.
-  for (const status of ["pending", "error", "cancelled", undefined]) failed.answerWritten(status);
+  for (const status of ["pending", "error", "cancelled", undefined]) failed.complete(status);
   assert.equal(getSupersededIds("c1").size, 0);
 
   const done = beginReplacement("c1", ["u1", "a1"]);
-  done.answerWritten("pending");
+  done.complete("pending");
   assert.equal(getSupersededIds("c1").size, 0);
-  done.answerWritten("normal");
+  done.complete("normal");
   assert.deepEqual([...getSupersededIds("c1")].sort(), ["a1", "u1"]);
 
   // A cut-off answer still counts as the replacement, and an ordinary send changes nothing.
   const cutOff = beginReplacement("c2", ["u2", "a2"]);
-  cutOff.answerWritten("incomplete");
+  cutOff.complete("incomplete");
   assert.deepEqual([...getSupersededIds("c2")].sort(), ["a2", "u2"]);
   const ordinary = beginReplacement("c3", null);
-  ordinary.answerWritten("normal");
+  ordinary.complete("normal");
   assert.equal(getSupersededIds("c3").size, 0);
 });
 
@@ -186,4 +189,50 @@ test("two tabs share the replaced-turn note instead of overwriting each other", 
     globalThis.window = previousWindow;
     resetSupersededForTests();
   }
+});
+
+test("nothing is recorded before the answer is reported finished", () => {
+  resetSupersededForTests();
+  // Streaming progress writes carry "normal" too; only `complete` records, so
+  // a send that is interrupted after the first chunk restores the old turn.
+  const interrupted = beginReplacement("c1", ["u1", "a1"]);
+  interrupted.excludedIds();
+  assert.equal(getSupersededIds("c1").size, 0);
+  settleParkedReplacement("never-parked", "normal");
+  assert.equal(getSupersededIds("c1").size, 0);
+});
+
+test("a durable attempt records the replacement from every place it is found finished", () => {
+  resetSupersededForTests();
+  // Arrives already completed: recorded at once.
+  beginReplacement("c1", ["u1", "a1"]).complete("normal");
+  assert.deepEqual([...getSupersededIds("c1")].sort(), ["a1", "u1"]);
+
+  // Still running when the request returned: parked, recorded when a poll or a
+  // history load finds it completed, and not before.
+  const waiting = beginReplacement("c2", ["u2", "a2"]);
+  parkReplacement("answer-2", waiting);
+  assert.equal(getSupersededIds("c2").size, 0);
+  settleParkedReplacement("answer-2", "incomplete");
+  assert.deepEqual([...getSupersededIds("c2")].sort(), ["a2", "u2"]);
+  // Settled once: a second report changes nothing.
+  settleParkedReplacement("answer-2", "normal");
+
+  // The attempt ended without an answer: nothing is recorded, even if a late
+  // completion is reported for the same id.
+  const failed = beginReplacement("c3", ["u3", "a3"]);
+  parkReplacement("answer-3", failed);
+  settleParkedReplacement("answer-3", null);
+  settleParkedReplacement("answer-3", "normal");
+  assert.equal(getSupersededIds("c3").size, 0);
+});
+
+test("the chat panel reports completion at each finished-answer path, never from a progress write", () => {
+  const source = readFileSync(new URL("../components/chat/ChatApp.tsx", import.meta.url), "utf8");
+  // Completion is explicit; the status of a write is not a completion signal.
+  assert.ok(!source.includes("answerWritten"));
+  assert.ok(source.includes("replacement.complete(completionStatus)"));
+  assert.ok(source.includes("replacement.complete(completedMessage.status)"));
+  assert.ok(source.includes("parkReplacement(assistantMessageId, replacement)"));
+  assert.ok(source.includes("settleParkedReplacement(assistantMessageId, completedMessage.status)"));
 });

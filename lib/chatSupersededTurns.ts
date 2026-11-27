@@ -199,8 +199,15 @@ export function refreshSupersededFromStorage() {
 /**
  * One send that replaces a turn. The replaced messages leave this request's
  * context at once, but they are recorded as replaced only when the new answer
- * is written as finished: a send that is refused (no credits), fails or is
- * stopped leaves the earlier answer standing, undimmed and in later context.
+ * is reported finished through `complete`: a send that is refused (no
+ * credits), fails or is stopped leaves the earlier answer standing, undimmed
+ * and in later context.
+ *
+ * The progress writes of a streaming answer carry the same "normal" status as
+ * the final one, so the status of a write says nothing about completion. Only
+ * the code that knows the answer is finished calls `complete`: the end of the
+ * stream, a durable attempt that arrives completed, and the poll or history
+ * load that later finds it completed (`parkReplacement`).
  */
 export function beginReplacement(conversationId: string, ids: readonly string[] | null) {
   let pending = ids && ids.length > 0 ? [...ids] : null;
@@ -212,8 +219,8 @@ export function beginReplacement(conversationId: string, ids: readonly string[] 
       const saved = getSupersededIds(conversationId);
       return pending ? new Set([...saved, ...pending]) : saved;
     },
-    /** Call with the status of each write to the new answer. */
-    answerWritten(status: Message["status"]) {
+    /** The new answer is finished: as written, or cut short by the provider. */
+    complete(status: Message["status"]) {
       if (!pending || (status !== "normal" && status !== "incomplete")) return;
       const done = pending;
       pending = null;
@@ -222,9 +229,31 @@ export function beginReplacement(conversationId: string, ids: readonly string[] 
   };
 }
 
+export type Replacement = ReturnType<typeof beginReplacement>;
+
+/**
+ * A durable attempt that has not finished when the request returns: the
+ * replacement waits here, under the new answer's id, until a poll or a history
+ * load finds the answer finished, or the attempt ends without one.
+ */
+const parked = new Map<string, Replacement>();
+
+export function parkReplacement(answerId: string, replacement: Replacement) {
+  parked.set(answerId, replacement);
+}
+
+/** `status` null: the attempt ended without a finished answer. */
+export function settleParkedReplacement(answerId: string, status: Message["status"] | null) {
+  const replacement = parked.get(answerId);
+  if (!replacement) return;
+  parked.delete(answerId);
+  if (status) replacement.complete(status);
+}
+
 /** Test seam: forget everything held in memory (storage is not touched). */
 export function resetSupersededForTests() {
   sets.clear();
+  parked.clear();
   loaded = false;
   armed = null;
 }
