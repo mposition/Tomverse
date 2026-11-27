@@ -690,7 +690,8 @@ export async function confirmPlanChange({
     throw error;
   }
   if ("ok" in context) {
-    await spend(context.code);
+    // Best effort, like the other refusals: a failed write leaves the claim to expire.
+    await spend(context.code).catch(() => {});
     return context;
   }
 

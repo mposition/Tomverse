@@ -88,14 +88,8 @@ export async function keepDeletionCancellation(
   );
 }
 
-/** Far beyond any real subscription; bounds the deletion request if Stripe returns more. */
+/** Decades of monthly invoices; bounds the deletion request if Stripe returns more. */
 const RENEWAL_SCAN_LIMIT = 500;
-/**
- * Stripe holds a renewal in draft for about an hour, and at most 72 hours
- * while its invoice.created fails; anything older has long been collected or
- * not. Four days covers that with room.
- */
-const RENEWAL_LOOKBACK_SECONDS = 4 * 24 * 60 * 60;
 
 /**
  * Run by the deletion flow once pending_deletion is committed. A renewal
@@ -118,37 +112,30 @@ export async function stopDeletionPendingDraftRenewals(
   const renewals: { id: string; status: string }[] = [];
   let scanned = 0;
   let complete = true;
-  // Two listings, every page of each, so manual invoices cannot hide a renewal:
-  //   1. every open invoice, however old -- a renewal still in dunning keeps
-  //      retrying long after its invoice.created;
-  //   2. then every invoice of any status created in the recent window, so a
-  //      draft that turned open after listing 1 is still caught here.
-  // Status is filtered in code; the last status seen for an invoice wins.
+  // One listing of every invoice of the subscription, every page, filtered
+  // here. No status filter, so an invoice changing status while the listing
+  // pages is still in it; no date floor, so an old renewal still retrying in
+  // dunning is too. The scan limit covers decades of monthly renewals.
   const found = new Map<string, string>();
   // A renewal paid after the deletion started was collected from an account
   // asking to leave; renewals paid before it are the period already bought.
+  // Stripe stamps whole seconds, so the start is compared in whole seconds.
+  const startedAtSeconds = Math.floor(deletionStartedAt.getTime() / 1000);
   const paidSinceDeletion = new Set<string>();
-  const createdSince = Math.floor(Date.now() / 1000) - RENEWAL_LOOKBACK_SECONDS;
-  const listings = [
-    { subscription: subscriptionId, status: "open" as const, limit: 100 },
-    { subscription: subscriptionId, created: { gte: createdSince }, limit: 100 },
-  ];
-  scan: for (const params of listings) {
-    for await (const invoice of getStripe().invoices.list(params, {
-      timeout: STRIPE_REQUEST_TIMEOUT_MS,
-      maxNetworkRetries: 0,
-    })) {
-      scanned += 1;
-      if (scanned > RENEWAL_SCAN_LIMIT) {
-        complete = false;
-        break scan;
-      }
-      if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
-      found.set(invoice.id, invoice.status ?? "unknown");
-      const paidAt = invoice.status_transitions?.paid_at;
-      if (invoice.status === "paid" && paidAt && paidAt * 1000 >= deletionStartedAt.getTime()) {
-        paidSinceDeletion.add(invoice.id);
-      }
+  for await (const invoice of getStripe().invoices.list(
+    { subscription: subscriptionId, limit: 100 },
+    { timeout: STRIPE_REQUEST_TIMEOUT_MS, maxNetworkRetries: 0 }
+  )) {
+    scanned += 1;
+    if (scanned > RENEWAL_SCAN_LIMIT) {
+      complete = false;
+      break;
+    }
+    if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
+    found.set(invoice.id, invoice.status ?? "unknown");
+    const paidAt = invoice.status_transitions?.paid_at;
+    if (invoice.status === "paid" && paidAt && paidAt >= startedAtSeconds) {
+      paidSinceDeletion.add(invoice.id);
     }
   }
   for (const [id, status] of found) {

@@ -79,12 +79,8 @@ mock.module(mod("lib/stripe.ts"), {
         list: (params: { status?: string; created?: { gte: number } }) =>
           (async function* () {
             state.listParams.push(params);
-            if (params.status === "open") {
-              // An old renewal still in dunning: outside the recent window.
-              if (state.oldDunning) yield { id: "in_dunning", status: "open", billing_reason: "subscription_cycle" };
-              if (!state.noOpen) yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
-              return;
-            }
+            // An old renewal still in dunning: a listing with a date floor would miss it.
+            if (state.oldDunning) yield { id: "in_dunning", status: "open", billing_reason: "subscription_cycle" };
             yield { id: "in_paid_old", status: "paid", billing_reason: "subscription_cycle" };
             if (state.paidJustNow) {
               yield {
@@ -223,16 +219,13 @@ test("after the cancellation the remaining renewals are re-read, and one paid me
   assert.equal(state.cancels.length, 1);
 });
 
-test("the renewal lookup lists every open invoice, then every status over the recent window", async () => {
+test("the renewal lookup is one listing of every invoice, with no status or date filter", async () => {
   reset();
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
   await stopDeletionPendingDraftRenewals("sub_1", new Date(0));
-  assert.equal(state.listParams.length, 2);
-  assert.equal(state.listParams[0]!.status, "open");
+  assert.equal(state.listParams.length, 1);
+  assert.equal(state.listParams[0]!.status, undefined);
   assert.equal(state.listParams[0]!.created, undefined);
-  assert.equal(state.listParams[1]!.status, undefined);
-  const ageDays = (Date.now() / 1000 - state.listParams[1]!.created!.gte) / 86_400;
-  assert.ok(ageDays > 3.9 && ageDays < 4.01, String(ageDays));
 });
 
 test("an old renewal still in dunning is found and counted, not only recent ones", async () => {
@@ -243,6 +236,14 @@ test("an old renewal still in dunning is found and counted, not only recent ones
   assert.equal(result.stopped, 1);
   assert.equal(result.finalized, 3);
   assert.equal(state.cancels.length, 1);
+});
+
+test("a renewal paid in the same second the deletion started is counted", async () => {
+  reset({ paidJustNow: true, noOpen: true });
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  // Started later within the same second as paid_at (whole seconds at Stripe).
+  const sameSecond = new Date(Math.floor(Date.now() / 1000) * 1000 + 999);
+  assert.equal((await stopDeletionPendingDraftRenewals("sub_1", sameSecond)).finalized, 1);
 });
 
 test("a renewal paid after the deletion started is counted for a person; one paid before is not", async () => {
