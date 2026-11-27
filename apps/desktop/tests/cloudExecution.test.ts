@@ -157,7 +157,20 @@ test("changes are applied only after a review of that patch, to the folder the t
   await host.run({ action: "read" });
   const unseen = await host.run({ action: "review", jobId: second.jobId });
   assert.equal(unseen.review?.applies, false);
+  assert.equal(unseen.review?.hidden, true);
   assert.deepEqual((await host.run({ action: "apply", jobId: second.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" });
+  // So does a binary file, whose content the panel cannot show either, even when the patch would apply.
+  const binary = Buffer.from(["diff --git a/logo.bin b/logo.bin", "new file mode 100644", "index 0000000..f2e4113", "GIT binary patch",
+    "literal 3", "KcmZQzWB>pF00961", "", "literal 0", "HcmV?d00001", "", ""].join("\n"));
+  await host.run({ action: "start", instruction: "Add a logo", executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 5 });
+  const third = [...server.jobs.values()].find((row) => row.instruction === "Add a logo")!;
+  Object.assign(third, { status: "completed", patch: { bytes: binary.length, sha256: sha(binary) }, patchBytes: binary });
+  await host.run({ action: "read" });
+  const opaque = await host.run({ action: "review", jobId: third.jobId });
+  assert.equal(opaque.review?.files[0]?.omitted, "binary");
+  assert.equal(opaque.review?.hidden, true);
+  assert.equal(opaque.review?.applies, false);
+  assert.deepEqual((await host.run({ action: "apply", jobId: third.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" });
   rmSync(root, { recursive: true, force: true });
   rmSync(other, { recursive: true, force: true });
 });

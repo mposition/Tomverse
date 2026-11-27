@@ -83,6 +83,8 @@ export type CloudReview = {
   truncated: boolean;
   /** Whether `git apply --check` accepts the patch on the folder as it is now; null when it could not be asked. */
   applies: boolean | null;
+  /** Some file of the patch cannot be shown (binary, too large, a path the panel cannot read, past the file limit): not offered for applying. */
+  hidden: boolean;
 };
 
 export type CloudExecutionView = {

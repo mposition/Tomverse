@@ -46,7 +46,8 @@ function Review({ copy, review, busy, run }: { copy: Copy; review: CloudReview; 
   const [confirming, setConfirming] = useState(false);
   return <div className="cloud-review" data-testid="cloud-review" role="group" aria-label={copy.reviewHeading}>
     <h4>{copy.reviewHeading}</h4>
-    <p role="status" data-testid="cloud-review-applies" data-applies={String(review.applies)}>{review.applies ? copy.applies : copy.conflicts}</p>
+    <p role="status" data-testid="cloud-review-applies" data-applies={String(review.applies)} data-hidden={String(review.hidden)}>
+      {review.hidden ? copy.hidden : review.applies ? copy.applies : copy.conflicts}</p>
     {review.files.map((file) => <details key={file.id} className="cloud-review-file" data-testid="cloud-review-file" open={review.files.length <= 3}>
       <summary><code>{file.path}</code> <small>+{file.added} −{file.removed}</small></summary>
       {file.omitted ? <small>{file.omitted === "binary" ? copy.omittedBinary : file.omitted === "large" ? copy.omittedLarge : copy.omittedOther}</small>

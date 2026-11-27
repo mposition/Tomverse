@@ -142,12 +142,13 @@ export function createCloudExecutionHost(deps: {
     patches.set(jobId, patch.value);
     const text = patch.value.toString("utf8");
     const files = parseUnifiedDiff(text, patchPaths(text));
-    // A patch with a file the panel cannot name, or more files than it shows, is not offered for applying: the person
-    // would be approving changes they could not see.
-    const shown = !files.some((file) => file.omitted === "unreadable") && files.length <= MAX_REVIEW_FILES && files.length === patchPaths(text).length &&
-      files.length === text.split("\n").filter((line) => line.startsWith("diff --git ")).length;
-    review = { jobId, files: files.slice(0, MAX_REVIEW_FILES), truncated: files.length > MAX_REVIEW_FILES,
-      applies: shown ? await patchApplies(target.project.git, patch.value).catch(() => null) : false };
+    // A patch with any file whose lines the panel cannot show (binary, too large, a path it cannot read, or past the
+    // file limit) is not offered for applying: the person would be approving changes they could not see.
+    const headers = text.split("\n").filter((line) => line.startsWith("diff --git ")).length;
+    const hidden = files.some((file) => file.omitted !== undefined) || files.length > MAX_REVIEW_FILES ||
+      files.length !== headers || patchPaths(text).length !== headers;
+    review = { jobId, files: files.slice(0, MAX_REVIEW_FILES), truncated: files.length > MAX_REVIEW_FILES, hidden,
+      applies: hidden ? false : await patchApplies(target.project.git, patch.value).catch(() => null) };
     notice = null;
   }
 

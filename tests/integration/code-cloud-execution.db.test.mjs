@@ -142,6 +142,37 @@ test('Desktop cloud jobs reserve, call, settle and release through the managed C
       assert.equal(lost.status,'failed');assert.equal(lost.failureCode,'CODE_CLOUD_RUNNER_LOST');
       const held=await reservation(job.jobId);assert.notEqual(held.status,'active');assert.equal(held.settledCredits,0);assert.equal(held.releasedCredits,20);
     });
+    await t.test('a heartbeat that lands after the sweep read a stale claim keeps the job and its reservation',async()=>{
+      const user=await newUser(),job=await queuedJob(user),claim=await claimed();
+      clock+=120000;
+      // The heartbeat arrives between the sweep's read and its conditional end.
+      let beaten=false;
+      const racing=new Proxy(db,{get(target,key){
+        if(key==='$executeRaw')return async(strings,...values)=>{
+          if(!beaten&&values.includes('CODE_CLOUD_RUNNER_LOST')){beaten=true;await runner({action:'heartbeat',jobId:job.jobId,logs:['still here']},claim.token);}
+          return target.$executeRaw(strings,...values);
+        };
+        const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
+      }});
+      const sweeper=createCodeCloudService({storage,env,now:()=>new Date(clock),db:racing});
+      try{await sweeper.sweep();}finally{clock-=120000;}
+      assert.equal(beaten,true);
+      assert.equal((await service.handle(user,{action:'status',jobId:job.jobId})).status,'running');
+      assert.equal((await reservation(job.jobId)).status,'active');
+      await runner({action:'finish',jobId:job.jobId,outcome:'failed',failureCode:'CODE_CLOUD_AGENT_ERROR'},claim.token);
+      assert.equal((await reservation(job.jobId)).status,'closed');
+    });
+    await t.test('an object written while the account was deleted is tombstoned again and removed',async()=>{
+      const user=await newUser(),job=await service.handle(user,createBody());
+      // The account deletion commits (rows gone, tombstones drained) while the bundle bytes are being written.
+      const deleting={...storage,put:async(key,bytes)=>{await db.$transaction(tx=>enqueueCodeCloudCleanupForUser(tx,user));
+        await db.messageAttachmentCleanup.updateMany({where:{objectKey:key},data:{completedAt:new Date()}});await storage.put(key,bytes);}};
+      const racing=createCodeCloudService({storage:deleting,env,now:()=>new Date(clock)});
+      await rejectCode(()=>racing.uploadBundle(user,job.jobId,stream(bundle)),'CODE_CLOUD_JOB_NOT_FOUND');
+      assert.equal(objects.has(`code-cloud/${job.jobId}/bundle`),false);
+      const tombstone=await db.messageAttachmentCleanup.findUnique({where:{objectKey:`code-cloud/${job.jobId}/bundle`}});
+      assert.equal(tombstone.completedAt,null);assert.equal(tombstone.reason,'account_deleted');
+    });
     await t.test('the same per-account task limit as the managed path',async()=>{
       const user=await newUser(),limit=codeTaskLimit();
       for(let i=0;i<limit;i++)await service.handle(user,createBody());

@@ -37,6 +37,8 @@ as not offered.
    (`code-cloud/<job>/result.patch`), **releases the reservation** (unused credits returned), and deletes the bundle.
 7. **Review and apply (Desktop).** The person opens the task, reads its files and hunks (parsed with the review panel's
    own `parseUnifiedDiff`; `git apply --check` says whether it still fits the folder) and applies it to the same folder.
+   A patch with any file whose lines cannot be shown (binary, too large, a name the panel cannot read, past the file
+   limit) is not offered for applying.
    It becomes uncommitted changes, which the review panel shows and can revert. Nothing is pushed from the cloud.
 
 States: `uploading`, `queued`, `starting` (claimed, reserving), `running`, `completed`, `failed`, `cancelled`. Desktop
