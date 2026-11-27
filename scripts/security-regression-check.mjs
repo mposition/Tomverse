@@ -208,7 +208,11 @@ const checks = [
     file: "app/api/chat/route.ts",
     test: (source) =>
       source.includes('"MODEL_RETIRED"') &&
-      source.includes("const isEmptyResponse = !generatedText.trim()") &&
+      // A response is empty when it delivered neither text nor a file; a
+      // file-only answer is not an empty provider stream.
+      source.includes("const answerHasText = Boolean(generatedText.trim())") &&
+      source.includes("const answerDelivered = answerHasText || deliveredFiles") &&
+      source.includes("const isEmptyResponse = !answerDelivered") &&
       source.includes('"AI_EMPTY_RESPONSE"') &&
       source.indexOf("if (isEmptyResponse)") <
         source.indexOf("await recordProviderSuccess"),

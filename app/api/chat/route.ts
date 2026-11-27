@@ -7389,7 +7389,7 @@ async function handleChatPost(
           can lower either without a deploy.
 
           The keepalive covers whichever attempt is current -- the primary and
-          §7's automatic fallback alike. Before the first visible token it is
+          the automatic fallback of `docs/policy/tomverse-chat-routing.md §7` alike. Before the first visible token it is
           written on the timer, which is precisely the window a fallback is
           allowed to happen in, and the deadline below bounds it: absolute from
           the first pull and not restarted by a swap, because a turn that has
