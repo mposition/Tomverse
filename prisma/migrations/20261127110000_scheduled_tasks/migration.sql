@@ -12,6 +12,9 @@
 --                     account has one scheduled run in flight at a time.
 --                     `assistantMessageId` is the Chat attempt identity, derived
 --                     from the run id: a second dispatch can only reattach.
+--                     `taskRevision` is the task version the run was claimed
+--                     for; once a pause or edit moves the task past it, the
+--                     reservation guard refuses the run any credit.
 --
 -- Both cascade from User, so deleting the account deletes them. A task's
 -- conversation is SET NULL when the conversation is deleted; the next run
@@ -83,6 +86,7 @@ CREATE TABLE "ScheduledTaskRun" (
     "taskId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "runningUserId" TEXT,
+    "taskRevision" INTEGER NOT NULL,
     "scheduledFor" TIMESTAMPTZ(3) NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'running',
     "outcome" TEXT,
@@ -106,7 +110,7 @@ CREATE TABLE "ScheduledTaskRun" (
     ),
     -- A short machine code, never provider text or an exception message.
     CONSTRAINT "ScheduledTaskRun_outcome_shape_check" CHECK ("outcome" IS NULL OR "outcome" ~ '^[A-Za-z0-9_]{1,64}$'),
-    CONSTRAINT "ScheduledTaskRun_credits_check" CHECK ("reservedCredits" >= 0 AND ("chargedCredits" IS NULL OR "chargedCredits" >= 0))
+    CONSTRAINT "ScheduledTaskRun_credits_check" CHECK ("reservedCredits" >= 0 AND ("chargedCredits" IS NULL OR "chargedCredits" >= 0) AND "taskRevision" >= 1)
 );
 
 CREATE INDEX "ScheduledTask_status_nextRunAt_idx" ON "ScheduledTask"("status", "nextRunAt");

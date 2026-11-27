@@ -53,8 +53,10 @@ export type ChatDispatch = (request: Request) => Promise<Response>;
 export type ScheduledTaskTickResult = {
   enabled: boolean;
   reconciled: number;
+  resumed: number;
   claimed: number;
   skippedLate: number;
+  skippedTooSoon: number;
   deferred: number;
   executed: Record<string, number>;
 };
@@ -85,13 +87,20 @@ const scheduleOf = (task: {
 
 /* ----------------------------------------------------------- finalising -- */
 
+type RunRef = { id: string; taskId: string; userId: string; taskRevision: number };
+
 /**
  * Closes a run and applies its consequence to the task, in one transaction.
  * Conditional on the run still being `running`, so a reconciliation and a
  * finishing worker cannot both apply a result.
+ *
+ * The consequence (failure streak, a pause, a one-off completing) applies only
+ * to the task version the run was claimed for. A person who paused, resumed or
+ * edited the task meanwhile has already decided its state; an old run's verdict
+ * must not clear the schedule they just saved.
  */
 async function finalizeRun(
-  run: { id: string; taskId: string; userId: string },
+  run: RunRef,
   classification: RunClassification,
   extra: { chargedCredits?: number | null; conversationId?: string | null } = {}
 ) {
@@ -109,24 +118,22 @@ async function finalizeRun(
     if (!closed.count) return;
     const task = await tx.scheduledTask.findUnique({
       where: { id: run.taskId },
-      select: { status: true, frequency: true, consecutiveFailures: true },
+      select: { status: true, frequency: true, consecutiveFailures: true, revision: true },
     });
-    if (!task) return;
-    const streak = failureStreakAfter(task.consecutiveFailures, classification);
-    // A person's own pause (or a delete) during the run wins over the run's verdict.
-    const stillActive = task.status === "active";
-    const pause = stillActive ? streak.pause : null;
-    await tx.scheduledTask.update({
-      where: { id: run.taskId },
-      data: {
-        consecutiveFailures: streak.consecutiveFailures,
-        ...(pause
-          ? { status: "paused", pauseReason: pause, nextRunAt: null }
-          : stillActive && task.frequency === "once"
-            ? { status: "completed", nextRunAt: null }
-            : {}),
-      },
-    });
+    if (task && task.status === "active" && task.revision === run.taskRevision) {
+      const streak = failureStreakAfter(task.consecutiveFailures, classification);
+      await tx.scheduledTask.update({
+        where: { id: run.taskId },
+        data: {
+          consecutiveFailures: streak.consecutiveFailures,
+          ...(streak.pause
+            ? { status: "paused", pauseReason: streak.pause, nextRunAt: null }
+            : task.frequency === "once"
+              ? { status: "completed", nextRunAt: null }
+              : {}),
+        },
+      });
+    }
     // The sidebar is ordered by updatedAt: a fresh answer moves its
     // conversation to the top, which is the whole of the notification.
     if (classification.status === "succeeded" && extra.conversationId) {
@@ -138,73 +145,106 @@ async function finalizeRun(
   });
 }
 
-const chargedCreditsOf = async (chatReservationId: string | null) => {
-  if (!chatReservationId) return null;
+/**
+ * What the run was charged, when that is knowable from its one reservation.
+ * The Chat route reserves once per request; if the run's own total says more
+ * than that reservation held, the figure is left unknown rather than reported
+ * low.
+ */
+const chargedCreditsOf = async (run: { chatReservationId: string | null; reservedCredits: number }) => {
+  if (!run.chatReservationId) return null;
   const reservation = await prisma.chatCreditReservation.findUnique({
-    where: { id: chatReservationId },
-    select: { settledAt: true, settledCredits: true },
+    where: { id: run.chatReservationId },
+    select: { settledAt: true, settledCredits: true, reservedCredits: true },
   });
-  return reservation?.settledAt ? reservation.settledCredits : null;
+  if (!reservation?.settledAt || reservation.reservedCredits !== run.reservedCredits) return null;
+  return reservation.settledCredits;
 };
 
 /* -------------------------------------------------------- reconciliation -- */
 
-/** Runs whose lease lapsed: settled from the durable attempt, never re-sent. */
+type ClaimedRun = RunRef & { assistantMessageId: string };
+
+/**
+ * Runs whose lease lapsed, settled from the durable Chat attempt.
+ *
+ * One case is resumed rather than closed: no attempt and no reservation means
+ * the run stopped before the Chat route claimed anything, so nothing was sent
+ * and nothing was charged -- verified, not assumed. If its occurrence is still
+ * within the grace window it is handed back to this tick under a fresh lease,
+ * with the same run id, so the same question and answer identities: a second
+ * worker that does reach Chat can only reattach. Every other lapsed run is
+ * closed from its attempt and never sent again.
+ */
 export async function reconcileExpiredScheduledRuns(now = new Date()) {
   const stale = await prisma.scheduledTaskRun.findMany({
     where: { status: "running", leaseExpiresAt: { lt: now } },
     orderBy: { leaseExpiresAt: "asc" },
     take: 100,
-    select: { id: true, taskId: true, userId: true, assistantMessageId: true, conversationId: true, chatReservationId: true },
+    select: {
+      id: true, taskId: true, userId: true, taskRevision: true, assistantMessageId: true, conversationId: true,
+      chatReservationId: true, reservedCredits: true, scheduledFor: true,
+    },
   });
   let reconciled = 0;
+  const resumable: ClaimedRun[] = [];
   for (const run of stale) {
     const attempt = await prisma.chatResponseAttempt.findFirst({
       where: { assistantMessageId: run.assistantMessageId, userId: run.userId },
       select: { status: true, failureCode: true, leaseExpiresAt: true },
     });
-    // No attempt and no reservation: the run died before the Chat route
-    // claimed anything, so nothing was sent and nothing was charged.
-    const classification = !attempt && !run.chatReservationId
-      ? ({ status: "failed", outcome: "interrupted", pause: null } as const)
-      : classifyAttempt(attempt, now);
+    if (!attempt && !run.chatReservationId) {
+      if (now.getTime() - run.scheduledFor.getTime() <= SCHEDULED_TASK_LIMITS.lateGraceMs) {
+        const renewed = await prisma.scheduledTaskRun.updateMany({
+          where: { id: run.id, status: "running", leaseExpiresAt: { lt: now } },
+          data: { leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs) },
+        });
+        if (renewed.count) resumable.push(run);
+        continue;
+      }
+      await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null });
+      reconciled += 1;
+      continue;
+    }
+    const classification = classifyAttempt(attempt, now);
     if (!classification) continue;
     await finalizeRun(run, classification, {
-      chargedCredits: await chargedCreditsOf(run.chatReservationId),
+      chargedCredits: await chargedCreditsOf(run),
       conversationId: run.conversationId,
     });
     reconciled += 1;
   }
-  return reconciled;
+  return { reconciled, resumable };
 }
 
 /* ---------------------------------------------------------------- claim -- */
 
-type ClaimedRun = { id: string; taskId: string; userId: string; assistantMessageId: string };
-
-const accountSubjectKey = (userId: string) =>
-  identifyChatCaller(new Request("https://scheduled-task.invalid/"), userId).subjectKey;
-
 /** The account's own Chat in flight leaves at least one slot free for it. */
 const accountChatBusy = async (tx: Prisma.TransactionClient, userId: string) => {
+  // The same subject key and limit the Chat route computes for this account.
   const access = identifyChatCaller(new Request("https://scheduled-task.invalid/"), userId);
   const limit = resolveChatConcurrencyPlan({ kind: "user", subjectKey: access.subjectKey, ipKey: access.ipKey }).subject.limit;
   const rows = await tx.$queryRaw<Array<{ count: bigint }>>`
     SELECT COUNT(*)::bigint AS "count" FROM "ChatRequestLease"
-    WHERE "subjectKey" = ${accountSubjectKey(userId)} AND "expiresAt" > NOW()`;
+    WHERE "subjectKey" = ${access.subjectKey} AND "expiresAt" > NOW()`;
   return Number(rows[0]?.count ?? 0) >= Math.max(1, limit - 1);
 };
 
-type ClaimOutcome = { kind: "claimed"; run: ClaimedRun } | { kind: "late" } | { kind: "deferred" } | { kind: "none" };
+type ClaimOutcome =
+  | { kind: "claimed"; run: ClaimedRun }
+  | { kind: "late" }
+  | { kind: "too_soon" }
+  | { kind: "deferred" }
+  | { kind: "none" };
 
 async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
   try {
     return await prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{
-        id: string; userId: string; nextRunAt: Date; frequency: string; timeOfDay: string;
+        id: string; userId: string; revision: number; nextRunAt: Date; frequency: string; timeOfDay: string;
         dayOfWeek: number | null; dayOfMonth: number | null; runOnDate: string | null; timeZone: string;
       }>>`
-        SELECT "id", "userId", "nextRunAt", "frequency", "timeOfDay", "dayOfWeek", "dayOfMonth", "runOnDate", "timeZone"
+        SELECT "id", "userId", "revision", "nextRunAt", "frequency", "timeOfDay", "dayOfWeek", "dayOfMonth", "runOnDate", "timeZone"
         FROM "ScheduledTask"
         WHERE "id" = ${taskId} AND "status" = 'active' AND "nextRunAt" IS NOT NULL AND "nextRunAt" <= ${now}
         FOR UPDATE SKIP LOCKED`;
@@ -227,7 +267,7 @@ async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
           where: { id: taskId },
           data: decision.next ? { nextRunAt: decision.next } : { nextRunAt: null, status: "completed" },
         });
-        return { kind: "late" } as const;
+        return { kind: decision.kind === "skip_late" ? "late" : "too_soon" } as const;
       }
       if (await tx.scheduledTaskRun.findUnique({ where: { runningUserId: task.userId }, select: { id: true } })) {
         return { kind: "deferred" } as const;
@@ -240,11 +280,14 @@ async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
           taskId,
           userId: task.userId,
           runningUserId: task.userId,
+          taskRevision: task.revision,
           scheduledFor: decision.scheduledFor,
           assistantMessageId: scheduledRunAssistantMessageId(runId),
-          leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs),
+          // Claimed by the worker that is about to execute it, so the lease
+          // covers the run itself and not a wait behind other runs.
+          leaseExpiresAt: new Date(Date.now() + SCHEDULED_TASK_LIMITS.runLeaseMs),
         },
-        select: { id: true, taskId: true, userId: true, assistantMessageId: true },
+        select: { id: true, taskId: true, userId: true, taskRevision: true, assistantMessageId: true },
       });
       await tx.scheduledTask.update({
         where: { id: taskId },
@@ -315,6 +358,13 @@ async function prepareConversation(
   const questionRequestId = scheduledRunQuestionRequestId(run.id);
   try {
     return await prisma.$transaction(async (tx) => {
+      // Serialised with a pause or an edit: one that committed first wins and
+      // nothing is written to Chat for this run.
+      const current = await tx.$queryRaw<Array<{ status: string; revision: number }>>`
+        SELECT "status", "revision" FROM "ScheduledTask" WHERE "id" = ${task.id} FOR UPDATE`;
+      if (current[0]?.status !== "active" || current[0].revision !== run.taskRevision) {
+        return { kind: "skip", classification: { status: "skipped", outcome: "task_changed", pause: null } } as const;
+      }
       let conversationId: string | null = null;
       if (task.conversationId) {
         const existing = await tx.conversation.findFirst({
@@ -353,7 +403,8 @@ async function prepareConversation(
       });
       await tx.scheduledTaskRun.updateMany({
         where: { id: run.id, status: "running" },
-        data: { conversationId, userMessageId },
+        // The lease restarts as the dispatch begins, so it covers the dispatch.
+        data: { conversationId, userMessageId, leaseExpiresAt: new Date(Date.now() + SCHEDULED_TASK_LIMITS.runLeaseMs) },
       });
       return { kind: "ready", conversationId, userMessageId, questionRequestId } as const;
     });
@@ -398,12 +449,19 @@ async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>
     where: { id: run.taskId },
     select: {
       id: true, userId: true, title: true, prompt: true, modelId: true, webSearch: true, creditsPerRun: true, conversationId: true,
+      status: true, revision: true,
       user: { select: { id: true, name: true, email: true, image: true, accountStatus: true, accountDeletionRequestedAt: true,
         settings: { select: { language: true } } } },
     },
   });
   // Deleted while queued: the cascade took the run row too.
   if (!task || task.userId !== run.userId) return "task_deleted";
+  // Paused or edited since the claim: this version of the task is not run.
+  if (task.status !== "active" || task.revision !== run.taskRevision) {
+    const changed: RunClassification = { status: "skipped", outcome: "task_changed", pause: null };
+    await finalizeRun(run, changed);
+    return changed.outcome;
+  }
 
   const refusal = await eligibility(task, task.user);
   if (refusal) {
@@ -454,11 +512,12 @@ async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>
 
   const closed = await prisma.scheduledTaskRun.findUnique({
     where: { id: run.id },
-    select: { chatReservationId: true },
+    select: { chatReservationId: true, reservedCredits: true },
   });
+  const charged = closed ? await chargedCreditsOf(closed) : null;
   if (refusalClassification) {
     await finalizeRun(run, refusalClassification, {
-      chargedCredits: await chargedCreditsOf(closed?.chatReservationId ?? null),
+      chargedCredits: charged,
       conversationId: prepared.conversationId,
     });
     return refusalClassification.outcome;
@@ -471,7 +530,7 @@ async function executeRun(run: ClaimedRun, dispatch: () => Promise<ChatDispatch>
   // Still owned and alive: reconciliation settles it once the lease decides.
   if (!classification) return "pending_reconciliation";
   await finalizeRun(run, classification, {
-    chargedCredits: await chargedCreditsOf(closed?.chatReservationId ?? null),
+    chargedCredits: charged,
     conversationId: prepared.conversationId,
   });
   return classification.outcome;
@@ -485,12 +544,14 @@ export async function runScheduledTasksTick(input: {
   now?: () => Date;
 }): Promise<ScheduledTaskTickResult> {
   const result: ScheduledTaskTickResult = {
-    enabled: false, reconciled: 0, claimed: 0, skippedLate: 0, deferred: 0, executed: {},
+    enabled: false, reconciled: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0, executed: {},
   };
   if (!(await (input.enabled ?? isScheduledTasksEnabled)())) return result;
   result.enabled = true;
   const now = input.now?.() ?? new Date();
-  result.reconciled = await reconcileExpiredScheduledRuns(now);
+  const reconciliation = await reconcileExpiredScheduledRuns(now);
+  result.reconciled = reconciliation.reconciled;
+  result.resumed = reconciliation.resumable.length;
 
   const due = await prisma.scheduledTask.findMany({
     where: { status: "active", nextRunAt: { lte: now } },
@@ -498,19 +559,29 @@ export async function runScheduledTasksTick(input: {
     take: SCHEDULED_TASK_LIMITS.claimBatch,
     select: { id: true },
   });
-  const claimed: ClaimedRun[] = [];
-  for (const { id } of due) {
-    const outcome = await claimTask(id, now);
-    if (outcome.kind === "claimed") claimed.push(outcome.run);
-    else if (outcome.kind === "late") result.skippedLate += 1;
-    else if (outcome.kind === "deferred") result.deferred += 1;
-  }
-  result.claimed = claimed.length;
 
-  let next = 0;
+  // Work is claimed by the worker that is about to run it, never in advance:
+  // a claim starts a lease, and a lease spent waiting behind other runs would
+  // lapse before its run began.
+  const resumable = [...reconciliation.resumable];
+  let nextDue = 0;
+  const takeWork = async (): Promise<ClaimedRun | null> => {
+    const resumed = resumable.shift();
+    if (resumed) return resumed;
+    while (nextDue < due.length) {
+      const outcome = await claimTask(due[nextDue++]!.id, now);
+      if (outcome.kind === "claimed") {
+        result.claimed += 1;
+        return outcome.run;
+      }
+      if (outcome.kind === "late") result.skippedLate += 1;
+      else if (outcome.kind === "too_soon") result.skippedTooSoon += 1;
+      else if (outcome.kind === "deferred") result.deferred += 1;
+    }
+    return null;
+  };
   const worker = async () => {
-    while (next < claimed.length) {
-      const run = claimed[next++]!;
+    for (let run = await takeWork(); run; run = await takeWork()) {
       let outcome: string;
       try {
         outcome = await executeRun(run, input.dispatch);
@@ -528,7 +599,7 @@ export async function runScheduledTasksTick(input: {
       result.executed[outcome] = (result.executed[outcome] ?? 0) + 1;
     }
   };
-  await Promise.all(Array.from({ length: Math.min(SCHEDULED_TASK_LIMITS.executionConcurrency, claimed.length) }, worker));
+  await Promise.all(Array.from({ length: SCHEDULED_TASK_LIMITS.executionConcurrency }, worker));
   return result;
 }
 

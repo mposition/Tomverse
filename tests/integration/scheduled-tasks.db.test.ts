@@ -201,21 +201,30 @@ test("two ticks racing for one occurrence produce one run", async () => {
   assert.equal(calls.length, 1);
 });
 
-test("an account has one scheduled run in flight; its second due task waits for the next tick", async () => {
+test("an account's two due tasks never run at once, and both are answered", async () => {
   await enable();
   const userId = await seedUser();
-  const first = await seedTask(userId, { nextRunAt: new Date(Date.now() - 120_000) });
+  await seedTask(userId, { nextRunAt: new Date(Date.now() - 120_000) });
   const second = await seedTask(userId, { title: "Second" });
   const calls: Call[] = [];
-  const result = await runScheduledTasksTick({ dispatch: async () => completingChat(calls) });
-  assert.equal(result.claimed, 1);
-  assert.equal(result.deferred, 1);
-  assert.equal(calls.length, 1);
-  assert.equal((await prisma.scheduledTaskRun.findFirstOrThrow()).taskId, first.id);
-  // Still due, and taken once the first run has released the slot.
-  const next = await runScheduledTasksTick({ dispatch: async () => completingChat(calls) });
-  assert.equal(next.claimed, 1);
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const counting: ChatDispatch = async (request) => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    try {
+      return await completingChat(calls)(request);
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  const first = await runScheduledTasksTick({ dispatch: async () => counting });
+  assert.ok(first.claimed >= 1);
+  // A task that found the account's slot taken is still due and is taken next tick.
+  if (first.claimed === 1) await runScheduledTasksTick({ dispatch: async () => counting });
+  assert.equal(maxInFlight, 1);
   assert.equal(calls.length, 2);
+  assert.equal(await prisma.scheduledTaskRun.count({ where: { status: "succeeded" } }), 2);
   assert.equal(await prisma.scheduledTaskRun.count({ where: { taskId: second.id, status: "succeeded" } }), 1);
 });
 
@@ -224,15 +233,15 @@ test("the one-in-flight slot is a database rule, not a convention", async () => 
   const a = await seedTask(userId);
   const b = await seedTask(userId, { title: "Other" });
   const row = (taskId: string) => ({
-    id: randomUUID(), taskId, userId, runningUserId: userId, scheduledFor: new Date(),
+    id: randomUUID(), taskId, userId, runningUserId: userId, taskRevision: 1, scheduledFor: new Date(),
     assistantMessageId: randomUUID(), leaseExpiresAt: new Date(Date.now() + 60_000),
   });
   await prisma.scheduledTaskRun.create({ data: row(a.id) });
   await assert.rejects(prisma.scheduledTaskRun.create({ data: row(b.id) }), /Unique constraint/);
   // A running row must hold the slot, and only for its own account.
   await assert.rejects(prisma.$executeRawUnsafe(
-    `INSERT INTO "ScheduledTaskRun" ("id","taskId","userId","runningUserId","scheduledFor","status","assistantMessageId","leaseExpiresAt")
-     VALUES ('${randomUUID()}','${b.id}','${userId}',NULL,NOW(),'running','${randomUUID()}',NOW())`), /ScheduledTaskRun_running_shape_check/);
+    `INSERT INTO "ScheduledTaskRun" ("id","taskId","userId","runningUserId","taskRevision","scheduledFor","status","assistantMessageId","leaseExpiresAt")
+     VALUES ('${randomUUID()}','${b.id}','${userId}',NULL,1,NOW(),'running','${randomUUID()}',NOW())`), /ScheduledTaskRun_running_shape_check/);
   await assert.rejects(prisma.$executeRawUnsafe(
     `UPDATE "ScheduledTask" SET "frequency" = 'hourly' WHERE "id" = '${a.id}'`), /ScheduledTask_frequency_check/);
   await assert.rejects(prisma.$executeRawUnsafe(
@@ -294,7 +303,7 @@ test("the reservation guard is cumulative over a run and absent outside one", as
   const task = await seedTask(userId, { creditsPerRun: 5 });
   const runId = randomUUID();
   await prisma.scheduledTaskRun.create({
-    data: { id: runId, taskId: task.id, userId, runningUserId: userId, scheduledFor: new Date(),
+    data: { id: runId, taskId: task.id, userId, runningUserId: userId, taskRevision: task.revision, scheduledFor: new Date(),
       assistantMessageId: scheduledRunAssistantMessageId(runId), leaseExpiresAt: new Date(Date.now() + 60_000) },
   });
   assert.equal(scheduledTaskReservationGuard(userId), undefined);
@@ -315,6 +324,72 @@ test("the reservation guard is cumulative over a run and absent outside one", as
   assert.equal(run.reservedCredits, 5);
   assert.equal(run.chatReservationId, "first");
   assert.equal(scheduledTaskRunSession(request), null);
+
+  // Once the person pauses the task, the same run may not reserve anything.
+  await prisma.scheduledTask.update({ where: { id: task.id }, data: { creditsPerRun: 50 } });
+  await prisma.scheduledTask.update({ where: { id: task.id }, data: { status: "paused", pauseReason: "user", revision: { increment: 1 } } });
+  await runAsScheduledTask({ runId, userId, session, request, creditCeiling: 50 }, async () => {
+    const guard = scheduledTaskReservationGuard(userId)!;
+    await assert.rejects(prisma.$transaction((tx) => guard(tx, { reservationId: "late", usageCredits: 1 })),
+      (error: { code?: string }) => error.code === "SCHEDULED_TASK_RUN_CLOSED");
+  });
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } })).reservedCredits, 5);
+});
+
+test("a pause that lands after the claim stops the run before it spends", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const { pauseScheduledTask } = await import("@/lib/scheduledTaskService");
+  const calls: Call[] = [];
+  // The person pauses while the run is on its way to Chat.
+  const pausingChat: ChatDispatch = async (request) => {
+    await pauseScheduledTask(userId, task.id, task.revision);
+    return completingChat(calls)(request);
+  };
+  await runScheduledTasksTick({ dispatch: async () => pausingChat });
+  const run = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { taskId: task.id } });
+  assert.equal(run.status, "skipped");
+  assert.equal(run.outcome, "task_changed");
+  assert.equal(run.reservedCredits, 0);
+  assert.equal(await prisma.chatResponseAttempt.count(), 0);
+  const paused = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(paused.status, "paused");
+  assert.equal(paused.pauseReason, "user");
+  assert.equal(paused.consecutiveFailures, 0);
+});
+
+test("a one-off edited to a new time while its run is answering keeps the new schedule", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId, { frequency: "once", runOnDate: new Date().toISOString().slice(0, 10) });
+  const later = new Date(Date.now() + 3 * 86_400_000);
+  const calls: Call[] = [];
+  // The reservation is made first, then the person saves a new date.
+  const editingChat: ChatDispatch = async (request) => {
+    const response = await completingChat(calls)(request);
+    await prisma.scheduledTask.update({
+      where: { id: task.id },
+      data: { runOnDate: later.toISOString().slice(0, 10), nextRunAt: later, revision: { increment: 1 } },
+    });
+    return response;
+  };
+  await runScheduledTasksTick({ dispatch: async () => editingChat });
+  const run = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { taskId: task.id } });
+  assert.equal(run.status, "succeeded");
+  const edited = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(edited.status, "active");
+  assert.equal(edited.nextRunAt?.getTime(), later.getTime());
+});
+
+test("a one-off that ran is completed", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId, { frequency: "once", runOnDate: new Date().toISOString().slice(0, 10) });
+  await runScheduledTasksTick({ dispatch: async () => completingChat([]) });
+  const done = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(done.status, "completed");
+  assert.equal(done.nextRunAt, null);
 });
 
 test("three failed runs in a row pause the task", async () => {
@@ -353,11 +428,13 @@ test("a run whose lease lapsed is settled from its attempt and never sent again"
     data: { userId, title: "Morning news", productKey: "chat", kind: "chat", selectedModels: JSON.stringify([MODEL_ID]) },
   });
   const question = await prisma.message.create({ data: { conversationId: conversation.id, role: "user", content: task.prompt } });
-  const lapsed = async (attemptStatus: "streaming" | null, reservation: string | null) => {
+  let day = 0;
+  const lapsed = async (attemptStatus: "streaming" | null, reservation: string | null, scheduledFor?: Date) => {
     const runId = randomUUID();
-    const scheduledFor = new Date(Date.now() - Math.floor(Math.random() * 1e9));
+    day += 1;
     await prisma.scheduledTaskRun.create({
-      data: { id: runId, taskId: task.id, userId, runningUserId: userId, scheduledFor, conversationId: conversation.id,
+      data: { id: runId, taskId: task.id, userId, runningUserId: userId, taskRevision: task.revision,
+        scheduledFor: scheduledFor ?? new Date(Date.now() - day * 86_400_000), conversationId: conversation.id,
         userMessageId: question.id, assistantMessageId: scheduledRunAssistantMessageId(runId), chatReservationId: reservation,
         leaseExpiresAt: new Date(Date.now() - 1_000) },
     });
@@ -374,18 +451,49 @@ test("a run whose lease lapsed is settled from its attempt and never sent again"
         SET "updatedAt" = NOW() - interval '10 minutes', "leaseExpiresAt" = NOW() - interval '9 minutes'
         WHERE "assistantMessageId" = ${assistantMessageId}`;
     }
-    await reconcileExpiredScheduledRuns(new Date());
-    return prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } });
+    const reconciliation = await reconcileExpiredScheduledRuns(new Date());
+    return { run: await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } }), reconciliation };
   };
-  const unknown = await lapsed("streaming", "held-reservation");
+  const unknown = (await lapsed("streaming", "held-reservation")).run;
   assert.equal(unknown.status, "unknown");
   assert.equal(unknown.outcome, "outcome_unknown");
   assert.equal(unknown.runningUserId, null);
-  const interrupted = await lapsed(null, null);
+  // Nothing claimed in Chat and past the grace window: closed, not sent.
+  const interrupted = (await lapsed(null, null)).run;
   assert.equal(interrupted.status, "failed");
   assert.equal(interrupted.outcome, "interrupted");
   const settled = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
   assert.equal(settled.consecutiveFailures, 2);
+  // Nothing claimed in Chat and still within the grace window: verified unsent,
+  // so the same run (same message identities) is handed back under a new lease.
+  const resumed = await lapsed(null, null, new Date(Date.now() - 60_000));
+  assert.equal(resumed.run.status, "running");
+  assert.ok(resumed.run.leaseExpiresAt.getTime() > Date.now());
+  assert.deepEqual(resumed.reconciliation.resumable.map((run) => run.id), [resumed.run.id]);
+  // A held reservation is never resumed, whatever the window says. (The
+  // resumed run above still holds the account's one slot; release it first.)
+  await prisma.scheduledTaskRun.update({ where: { id: resumed.run.id },
+    data: { status: "failed", outcome: "test_closed", runningUserId: null, finishedAt: new Date() } });
+  const held = await lapsed(null, "held-reservation", new Date(Date.now() - 30_000));
+  assert.equal(held.reconciliation.resumable.length, 0);
+});
+
+test("a tick resumes a verified-unsent run with its own identities and answers it once", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId, { nextRunAt: null });
+  const runId = randomUUID();
+  await prisma.scheduledTaskRun.create({
+    data: { id: runId, taskId: task.id, userId, runningUserId: userId, taskRevision: task.revision,
+      scheduledFor: new Date(Date.now() - 60_000), assistantMessageId: scheduledRunAssistantMessageId(runId),
+      leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+  const calls: Call[] = [];
+  const result = await runScheduledTasksTick({ dispatch: async () => completingChat(calls) });
+  assert.equal(result.resumed, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.body.assistantMessageId, scheduledRunAssistantMessageId(runId));
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } })).status, "succeeded");
 });
 
 test("a plan without scheduled tasks is skipped and paused before anything is written to Chat", async () => {

@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { ChatAccessError } from "@/lib/chatSecurity";
-import { SCHEDULED_TASK_CREDIT_CAP_CODE } from "@/lib/scheduledTaskCore";
+import { SCHEDULED_TASK_CREDIT_CAP_CODE, SCHEDULED_TASK_RUN_CLOSED_CODE } from "@/lib/scheduledTaskCore";
 import { currentScheduledTaskRun } from "@/lib/scheduledTaskRunContext";
 
 /**
@@ -34,13 +34,23 @@ export const scheduledTaskReservationGuard = (userId: string | null | undefined)
     if (!userId || userId !== scope.userId) {
       throw new ChatAccessError(403, "SCHEDULED_TASK_SCOPE_MISMATCH", "This scheduled run belongs to another account.");
     }
-    const rows = await tx.$queryRaw<Array<{ status: string; reservedCredits: number }>>`
-      SELECT "status", "reservedCredits" FROM "ScheduledTaskRun"
+    // Run row, then task row: the order finalizeRun takes them in.
+    const rows = await tx.$queryRaw<Array<{ status: string; reservedCredits: number; taskId: string; taskRevision: number }>>`
+      SELECT "status", "reservedCredits", "taskId", "taskRevision" FROM "ScheduledTaskRun"
       WHERE "id" = ${scope.runId} AND "userId" = ${scope.userId}
       FOR UPDATE`;
     const run = rows[0];
     if (!run || run.status !== "running") {
-      throw new ChatAccessError(409, "SCHEDULED_TASK_RUN_CLOSED", "This scheduled run is no longer running.");
+      throw new ChatAccessError(409, SCHEDULED_TASK_RUN_CLOSED_CODE, "This scheduled run is no longer running.");
+    }
+    // A pause, an edit or a delete that committed before this reservation
+    // moved the task past the version this run was claimed for: the person
+    // has taken it back, so the run may not spend.
+    const tasks = await tx.$queryRaw<Array<{ status: string; revision: number }>>`
+      SELECT "status", "revision" FROM "ScheduledTask" WHERE "id" = ${run.taskId} FOR UPDATE`;
+    const task = tasks[0];
+    if (!task || task.status !== "active" || task.revision !== run.taskRevision) {
+      throw new ChatAccessError(409, SCHEDULED_TASK_RUN_CLOSED_CODE, "This scheduled task changed after the run started.");
     }
     if (
       !Number.isSafeInteger(reservation.usageCredits) ||

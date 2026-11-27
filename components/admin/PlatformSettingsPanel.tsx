@@ -143,6 +143,12 @@ type Props = {
    */
   helpAssistantEnabled?: boolean;
   /**
+   * Scheduled tasks (lib/scheduledTaskAccess.ts): unattended Chat turns paid
+   * from each account's own credits. Default-off; read on the server so a save
+   * of the other switches writes back the stored value, never a placeholder.
+   */
+  scheduledTasksEnabled?: boolean;
+  /**
    * Release B (account memory), reported and never edited here. Enabling
    * either one is the import/memory policy §12.4 human procedure, so this
    * screen has no control for them -- and `/api/admin/app-settings` refuses a
@@ -182,6 +188,7 @@ export function PlatformSettingsPanel({
   assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
   chatStarterEnabled: initialChatStarterEnabled,
   helpAssistantEnabled: initialHelpAssistantEnabled = false,
+  scheduledTasksEnabled: initialScheduledTasksEnabled,
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
@@ -359,8 +366,11 @@ export function PlatformSettingsPanel({
   const [helpAssistantEnabled, setHelpAssistantEnabled] = useState(
     initialHelpAssistantEnabled
   );
-  // Scheduled tasks (lib/scheduledTaskAccess.ts): read from the route on load, default off.
-  const [scheduledTasksEnabled, setScheduledTasksEnabled] = useState(false);
+  // Scheduled tasks (lib/scheduledTaskAccess.ts). Undefined until the stored
+  // value is known: a save never sends a value nobody read.
+  const [scheduledTasksEnabled, setScheduledTasksEnabled] = useState<boolean | undefined>(
+    initialScheduledTasksEnabled
+  );
   // One state object rather than three: they are read together and are only
   // ever meaningful together, and no control writes any of them.
   const [memoryStatus, setMemoryStatus] = useState<MemoryReleaseStatus>({
@@ -916,7 +926,7 @@ export function PlatformSettingsPanel({
   const flagRows = [
     { testId: "admin-chat-starter-flag", copy: m.switches.items.chatStarter, enabled: chatStarterEnabled, set: setChatStarterEnabled, waiting: false },
     { testId: "admin-help-assistant-flag", copy: m.switches.items.helpAssistant, enabled: helpAssistantEnabled, set: setHelpAssistantEnabled, waiting: false },
-    { testId: "admin-scheduled-tasks-flag", copy: m.switches.items.scheduledTasks, enabled: scheduledTasksEnabled, set: setScheduledTasksEnabled, waiting: false },
+    { testId: "admin-scheduled-tasks-flag", copy: m.switches.items.scheduledTasks, enabled: scheduledTasksEnabled === true, set: setScheduledTasksEnabled, waiting: false },
     { testId: "admin-image-generation-flag", copy: m.switches.items.imageGeneration, enabled: imageGenerationEnabled, set: setImageGenerationEnabled, waiting: false },
     { testId: "admin-external-import-flag", copy: m.switches.items.externalImport, enabled: externalImportEnabled, set: setExternalImportEnabled, waiting: false },
     { testId: "admin-external-continuation-flag", copy: m.switches.items.externalContinuation, enabled: externalContinuationEnabled, set: setExternalContinuationEnabled, waiting: false },

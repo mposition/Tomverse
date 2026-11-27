@@ -1722,6 +1722,10 @@ model ScheduledTaskRun {
   taskId             String
   userId             String
   runningUserId      String?   @unique
+  /// The task's revision when the run was claimed. A pause or edit moves the
+  /// task's revision, after which this run may spend nothing and its verdict
+  /// no longer changes the task.
+  taskRevision       Int
   scheduledFor       DateTime  @db.Timestamptz(3)
   /// running | succeeded | failed | skipped | unknown
   status             String    @default("running")
