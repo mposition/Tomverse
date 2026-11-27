@@ -143,6 +143,12 @@ test("Create project registers folders, the picker lists, searches and favourite
     // The open conversation says which project it belongs to; choosing another starts a new one.
     await openPicker(page);
     await expect(page.getByText("Choosing another project starts a new conversation.")).toBeVisible();
+    // Choosing the project that is open already leaves its conversation alone.
+    const open = (await state(page)).task?.id;
+    await page.getByTestId(/^environment-project-/).filter({ hasText: "Alpha app" }).click();
+    await expect(page.getByTestId("code-project-popover")).toHaveCount(0);
+    assert.equal((await state(page)).task?.id, open);
+    await openPicker(page);
     await page.getByTestId(/^environment-project-/).filter({ hasText: "beta" }).click();
     await expect(picker(page)).toContainText("beta");
     assert.equal((await state(page)).task, null);

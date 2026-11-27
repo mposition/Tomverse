@@ -101,7 +101,8 @@ export function createCodeProjectHost(deps: CodeProjectHostDeps) {
     const bound = canonicalProjectFolder(project.folder);
     if (!bound.ok) return fail(bound.failure);
     const switching = !deps.current() || !same(deps.current()!, bound.folder);
-    await deps.open(bound.folder);
+    // The project that is open already is not opened again: that would drop the conversation on screen.
+    if (switching) await deps.open(bound.folder);
     if (!deps.current() || !same(deps.current()!, bound.folder)) return fail("failed");
     updateProject(entry.data, project.id, { folder: bound.folder, lastUsedAt: deps.now() });
     const mode = startMode(project, switching);
@@ -168,7 +169,12 @@ export function createCodeProjectHost(deps: CodeProjectHostDeps) {
           case "select": return openProject(entry, project);
           case "rename": updateProject(entry.data, project.id, { name: input.name }); break;
           case "favorite": updateProject(entry.data, project.id, { favorite: input.favorite }); break;
-          case "set-location": updateProject(entry.data, project.id, { defaultLocation: input.location }); break;
+          case "set-location":
+            // Only Local is a default that can be applied: a cloud task needs the person's credit approval each time, and an SSH
+            // project names its own remote folder. The other two stay in the contract for when they can be.
+            if (input.location !== "local") return fail("failed");
+            updateProject(entry.data, project.id, { defaultLocation: "local" });
+            break;
           case "set-worktree": updateProject(entry.data, project.id, { worktree: input.worktree }); break;
           case "relocate": {
             if (!deps.canChange()) return fail("busy");

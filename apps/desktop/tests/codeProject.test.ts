@@ -251,6 +251,7 @@ test("adding an existing folder registers it once, opens it, and a folder that i
   const second = await t.host.run({ action: "add-existing" });
   assert.ok(second.result.ok);
   assert.equal(second.result.changed, false, "the same project again keeps what hangs on it");
+  assert.deepEqual(t.opened, [root], "and the open project is not opened a second time");
   assert.equal(t.host.view().items.length, 1);
   assert.deepEqual(await t.host.run({ action: "add-existing" }), { result: { ok: false, failure: "cancelled" } });
   t.picks.push(join(root, "missing"));
@@ -286,10 +287,11 @@ test("rename, favourite, default location and the Worktree choice are saved, and
   const id = added.result.id!;
   assert.ok((await t.host.run({ action: "rename", id, name: "Billing" })).result.ok);
   assert.ok((await t.host.run({ action: "favorite", id, favorite: true })).result.ok);
-  assert.ok((await t.host.run({ action: "set-location", id, location: "cloud" })).result.ok);
+  assert.ok((await t.host.run({ action: "set-location", id, location: "local" })).result.ok);
+  assert.deepEqual((await t.host.run({ action: "set-location", id, location: "cloud" })).result, { ok: false, failure: "failed" }, "a default that cannot be applied is not saved");
   assert.ok((await t.host.run({ action: "set-worktree", id, worktree: false })).result.ok);
   const saved = readCodeProjects(t.file).projects[0]!;
-  assert.deepEqual([saved.name, saved.favorite, saved.defaultLocation, saved.worktree], ["Billing", true, "cloud", false]);
+  assert.deepEqual([saved.name, saved.favorite, saved.defaultLocation, saved.worktree], ["Billing", true, "local", false]);
 
   assert.deepEqual((await t.host.run({ action: "rename", id: crypto.randomUUID(), name: "x" })).result, { ok: false, failure: "not-found" });
   assert.ok((await t.host.run({ action: "remove", id })).result.ok);

@@ -1415,6 +1415,11 @@ async function chooseRemote(project: ProjectRoot) {
     if (state.root !== project.path || projectRoot?.identity !== project.identity) {
       codeReferences.clear();
       workspaceHandoff = null;
+      // Allow all never follows the person to another project, a remote one included.
+      if (permissionHost.current === "allow_all" && permissionHost.run({ action: "set-mode", mode: "ask" }).ok) {
+        worker?.postMessage(permissionHost.runtimeMessage());
+        parallel.permissionChanged();
+      }
     }
     projectRoot = project;
     codeGitProject = null;

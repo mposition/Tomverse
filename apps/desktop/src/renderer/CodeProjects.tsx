@@ -129,8 +129,8 @@ export function CreateProjectMenu({ language, disabled, variant, onOpened }: {
   </div>;
 }
 
-function ProjectSettings({ project, language, cloudOffered, onBack, onChanged, setMessage }: {
-  project: CodeProject; language: Language; cloudOffered: boolean; onBack: () => void; onChanged: () => void; setMessage: (text: string) => void;
+function ProjectSettings({ project, language, onBack, onChanged, setMessage }: {
+  project: CodeProject; language: Language; onBack: () => void; onChanged: () => void; setMessage: (text: string) => void;
 }) {
   const copy = desktopCodeProjectsCopy[language];
   const [name, setName] = useState(project.name);
@@ -164,9 +164,10 @@ function ProjectSettings({ project, language, cloudOffered, onBack, onChanged, s
       <select data-testid="project-settings-location" value={project.defaultLocation} disabled={working}
         onChange={(event) => void call({ action: "set-location", id: project.id, location: event.currentTarget.value as CodeProjectLocation })}>
         <option value="local">{copy.locationLocal}</option>
-        <option value="cloud" disabled={!cloudOffered}>{copy.locationCloud}</option>
+        <option value="cloud" disabled>{copy.locationCloud}</option>
         <option value="ssh" disabled>{copy.locationSsh}</option>
       </select>
+      <small>{copy.locationNote}</small>
     </label>
     {confirming
       ? <div className="project-confirm" role="alertdialog" aria-label={copy.remove} data-testid="project-remove-confirm">
@@ -297,7 +298,7 @@ export function CodeProjectPicker(props: PickerProps) {
     {open && <div className="project-popover project-picker-popover" role="dialog" aria-label={copy.environmentLabel} data-testid="code-project-popover" onKeyDown={onKeyDown}
       onSubmit={(event) => event.stopPropagation() /* the SSH form inside must not submit the composer around it */}>
       {settingsProject
-        ? <ProjectSettings project={settingsProject} language={language} cloudOffered={cloudOffered} setMessage={setMessage}
+        ? <ProjectSettings project={settingsProject} language={language} setMessage={setMessage}
           onBack={() => { setSettingsId(null); search.current?.focus(); }} onChanged={() => undefined} />
         : <>
           <label className="project-search"><Search size={14} aria-hidden="true" />
