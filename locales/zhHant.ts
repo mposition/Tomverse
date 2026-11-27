@@ -424,6 +424,8 @@ export const zhHant = {
         responseComplete: "回覆已完成。",
         responseIncomplete: "回覆因輸出長度上限而中斷。",
         responseIncompleteNotice: "回覆因輸出長度上限而中斷。你可以透過追問繼續。",
+        responseUnfinished: "回覆未能完成。",
+        responseUnfinishedNotice: "回覆未能完成。你可以重試，或透過追問繼續。",
         responseNotSavedNotice: "此回覆未能儲存，重新整理後將不再顯示。",
         responseSaveUnknownNotice: "無法確認此回覆是否已儲存，重新整理後即可查看。",
         responseInterruptedNotice: "由於 AI 提供方發生問題，回覆在中途被中斷。你可以重試，或透過追問繼續。",

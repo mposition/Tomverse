@@ -207,3 +207,32 @@ test("the page coming back re-checks a durable stream's liveness", () => {
   assert.match(source, /window\.addEventListener\("online", recheckLiveness\)/);
   assert.match(source, /detachPageLivenessListeners\(\);/);
 });
+
+// Review r-20261127-041211-93f81f: a handed-off turn is measured when the
+// poller settles it, not as a failure at the moment of the hand-off.
+test("a reattached turn's latency is recorded when the poller settles it", () => {
+  const handOff = source.slice(
+    source.indexOf("const handOffInterruptedStream"),
+    source.indexOf("// The bundle actually presented")
+  );
+  assert.match(handOff, /completed: \(\) => latency\.finish\("completed"\)/);
+  assert.match(handOff, /latency\.finish\(interruption\.kind === "timeout" \? "cancelled" : "failed"\)/);
+  assert.match(handOff, /latencyHandedOff = true;/);
+  assert.match(source, /if \(!latencyHandedOff\) latency\.finish\(/);
+  const poll = source.slice(source.indexOf("const pollOne = async"), source.indexOf("const loop = async"));
+  assert.match(poll, /settleInterruptedChatAttempt\(key, assistantMessageId\)\?\.completed\?\.\(\)/);
+});
+
+test("a settled hand-off carries the completion callback it was given", () => {
+  resetInterruptedChatAttempts();
+  const stop = watchInterruptedChatAttempts("k", () => {});
+  let completed = 0;
+  handOffInterruptedChatAttempt("k", {
+    assistantMessageId: "a", conversationId: "c", sourceUserMessageId: "u",
+    analyticsPromptId: null, finish: () => {}, completed: () => { completed += 1; },
+  });
+  settleInterruptedChatAttempt("k", "a")?.completed?.();
+  assert.equal(completed, 1);
+  assert.equal(settleInterruptedChatAttempt("k", "a"), null);
+  stop();
+});

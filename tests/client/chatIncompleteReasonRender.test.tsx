@@ -9,8 +9,10 @@ import type { Message } from "@/components/chat/types";
 /*
   S2: an answer the provider broke off mid-stream is `incomplete` like one
   that ran out of room, but it must not be explained as the output ceiling.
-  The trailer's reason picks the notice; a reloaded answer has no reason and
-  keeps the ceiling notice it always had.
+  The trailer's reason picks the notice. A reloaded answer has no reason --
+  neither the Message nor the attempt row stores one -- so it says only that
+  the answer did not finish, rather than claiming the output ceiling for an
+  answer the provider may have broken off (review r-20261127-041211-93f81f).
 */
 
 const question: Message = { id: "u", role: "user", content: "Question" };
@@ -34,9 +36,15 @@ test("an interrupted answer keeps its text and says the provider cut it off", ()
   assert.doesNotMatch(html, /output length limit/);
 });
 
-test("a length-truncated or reloaded incomplete answer keeps the ceiling notice", () => {
-  for (const extra of [{ incompleteReason: "length" as const }, {}]) {
-    const html = render([question, incomplete(extra)]);
-    assert.match(html, /data-testid="response-incomplete-notice"[^>]*>The response was cut off by the output length limit/);
-  }
+test("a length-truncated answer keeps the ceiling notice", () => {
+  const html = render([question, incomplete({ incompleteReason: "length" })]);
+  assert.match(html, /data-testid="response-incomplete-notice"[^>]*>The response was cut off by the output length limit/);
+});
+
+test("a reloaded incomplete answer, whose reason is unknown, does not claim a cause", () => {
+  const html = render([question, incomplete({})]);
+  assert.match(html, /Half an answer/);
+  assert.match(html, /data-testid="response-incomplete-notice"[^>]*>The response did not finish\./);
+  assert.doesNotMatch(html, /output length limit/);
+  assert.doesNotMatch(html, /AI provider/);
 });

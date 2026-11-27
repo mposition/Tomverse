@@ -409,6 +409,8 @@ export const de = {
         responseComplete: "Antwort abgeschlossen.",
         responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
         responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",
+        responseUnfinished: "Die Antwort wurde nicht fertiggestellt.",
+        responseUnfinishedNotice: "Die Antwort wurde nicht fertiggestellt. Sie können es erneut versuchen oder mit einer Anschlussfrage fortfahren.",
         responseNotSavedNotice: "Diese Antwort wurde nicht gespeichert. Nach dem Neuladen ist sie nicht mehr zu sehen.",
         responseSaveUnknownNotice: "Wir konnten nicht bestätigen, dass diese Antwort gespeichert wurde. Laden Sie die Seite neu, um es zu prüfen.",
         responseInterruptedNotice: "Die Antwort wurde durch ein Problem beim KI-Anbieter abgebrochen. Sie können es erneut versuchen oder mit einer Anschlussfrage fortfahren.",

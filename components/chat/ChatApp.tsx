@@ -1494,7 +1494,7 @@ function ChatAppComponent({
           });
         }
         if (completedMessage) {
-          settleInterruptedChatAttempt(key, assistantMessageId);
+          settleInterruptedChatAttempt(key, assistantMessageId)?.completed?.();
           writeChatRuntimeMessages(key, (current) => {
             if (!attemptBackedMessageIdsRef.current.has(assistantMessageId)) {
               return current;
@@ -1818,6 +1818,7 @@ function ChatAppComponent({
       }),
     });
     let latencyCompleted = false;
+    let latencyHandedOff = false;
 
     let requestTraceId: string | null = null;
     /*
@@ -2017,9 +2018,17 @@ function ChatAppComponent({
         finish: (checkpointed) => {
           assistantText = recoveredPartialText(assistantText, checkpointed);
           endAsInterrupted(interruption);
+          latency.finish(interruption.kind === "timeout" ? "cancelled" : "failed");
         },
+        // The poller showed the server's completed answer: the turn the user
+        // sees is a completion, and its latency is recorded as one.
+        completed: () => latency.finish("completed"),
       });
       if (!handedOff) return false;
+      // The send's own `finally` must not record the hand-off as the turn's
+      // end: the turn ends when the poller settles it, through one of the two
+      // callbacks above.
+      latencyHandedOff = true;
       // Diagnostics only, and only these fields.
       console.warn(
         JSON.stringify({
@@ -3147,7 +3156,7 @@ function ChatAppComponent({
     } finally {
 	  liveness.stop();
       detachPageLivenessListeners();
-      latency.finish(latencyCompleted ? "completed" :
+      if (!latencyHandedOff) latency.finish(latencyCompleted ? "completed" :
         controller.signal.aborted && classifyChatAbort(getChatRuntimeAbortCause(runKey, controller)).kind !== "timeout"
           ? "cancelled" : "failed");
 

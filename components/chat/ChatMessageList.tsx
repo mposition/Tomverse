@@ -671,7 +671,9 @@ export function ChatMessageList({
     if (lastMessage.status === "incomplete") {
       return t(lastMessage.incompleteReason === "interrupted"
         ? "chat.responseInterruptedNotice"
-        : "chat.responseIncomplete");
+        : lastMessage.incompleteReason === "length"
+          ? "chat.responseIncomplete"
+          : "chat.responseUnfinished");
     }
     // A file-only answer has an empty body and is finished: its cards arrive
     // with the trailer, after the last streamed chunk.
@@ -1935,11 +1937,15 @@ export function ChatMessageList({
                     );
                   })()}
                   {/*
-                    The provider stopped at its output-token ceiling. The
-                    answer above is kept exactly as it arrived -- this only
-                    says it is unfinished and how to continue. No follow-up
-                    is sent from here: another turn costs credits, so asking
-                    for one stays the user's action.
+                    The answer stopped short: at the output-token ceiling, or
+                    because the provider broke off. The answer above is kept
+                    exactly as it arrived -- this only says it is unfinished
+                    and how to continue. No follow-up is sent from here:
+                    another turn costs credits, so asking for one stays the
+                    user's action. The reason is known only on the live
+                    stream; a reloaded message carries none (neither the
+                    Message nor the attempt row stores it), so it says only
+                    that the answer did not finish rather than guess.
                   */}
                   {!isUser && msg.status === "incomplete" && (
                     <p
@@ -1948,7 +1954,9 @@ export function ChatMessageList({
                     >
                       {t(msg.incompleteReason === "interrupted"
                         ? "chat.responseInterruptedNotice"
-                        : "chat.responseIncompleteNotice")}
+                        : msg.incompleteReason === "length"
+                          ? "chat.responseIncompleteNotice"
+                          : "chat.responseUnfinishedNotice")}
                     </p>
                   )}
                   {/*

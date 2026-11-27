@@ -8524,17 +8524,21 @@ async function handleChatPost(
                         attemptTerminalWithMessage = persistAnswer;
 
                         /*
-                          A provider that broke off after visible text did not
-                          complete an answer (see `completionOutcome`). It is
-                          settled the way a stop is -- prorated on what was
-                          used, never the flat completed charge: on the
+                          A provider that broke off after delivering something
+                          -- visible text, or a file that reached storage --
+                          did not complete an answer (see `completionOutcome`).
+                          It is settled the way a stop is -- prorated on what
+                          was used, never the flat completed charge: on the
                           provider's own usage when it reported any, otherwise
-                          on the estimate a cancelled turn uses. The attempt
-                          record says what it was, a post-token provider
-                          failure, rather than a cancellation.
+                          on the estimate a cancelled turn uses. A file-only
+                          answer is no exception: the file is kept, but the
+                          provider still broke off, so the delivered file does
+                          not turn the interruption into a completion. The
+                          attempt record says what it was, a post-token
+                          provider failure, rather than a cancellation.
                         */
                         const providerInterrupted =
-                            answerHasText &&
+                            answerDelivered &&
                             completionOutcome.incompleteReason === "interrupted";
                         const interruptionCause = observedStreamError ?? completionError;
                         const interruption = providerInterrupted
@@ -8791,6 +8795,23 @@ async function handleChatPost(
                                         });
                                     }
                                     if (durableAttempt && durableFinalCheckpoint) {
+                                        /*
+                                          `length` is the attempt's only
+                                          "incomplete" marker: the
+                                          ChatResponseAttempt CHECK allows a
+                                          completed row stop, length,
+                                          content_filter or tool_call, and the
+                                          recovery client binds a completed
+                                          attempt's `length` to the Message's
+                                          `incomplete` status. It therefore
+                                          also stands for a provider that broke
+                                          off. Neither row records *why* an
+                                          answer is incomplete, so a reloaded
+                                          one says only that it did not finish
+                                          (chat.responseUnfinishedNotice); the
+                                          live stream's trailer carries the
+                                          precise reason.
+                                        */
                                         const normalizedFinishReason =
                                             completionOutcome.status === "incomplete"
                                                 ? "length"

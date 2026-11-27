@@ -402,6 +402,8 @@ export const en = {
         responseComplete: "Response complete.",
         responseIncomplete: "The response stopped at the output length limit.",
         responseIncompleteNotice: "The response was cut off by the output length limit. You can ask a follow-up question to continue.",
+        responseUnfinished: "The response did not finish.",
+        responseUnfinishedNotice: "The response did not finish. You can try again or ask a follow-up question to continue.",
         responseNotSavedNotice: "This answer was not saved. It will not appear after you reload.",
         responseSaveUnknownNotice: "We could not confirm that this answer was saved. Reload to check.",
         responseInterruptedNotice: "The response was cut off by a problem on the AI provider's side. You can try again or ask a follow-up question to continue.",

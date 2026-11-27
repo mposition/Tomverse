@@ -401,6 +401,8 @@ export const ko = {
         responseComplete: "응답이 완료되었습니다.",
         responseIncomplete: "출력 길이 제한으로 답변이 중단되었습니다.",
         responseIncompleteNotice: "출력 길이 제한으로 답변이 중단되었습니다. 후속 질문으로 이어서 요청할 수 있습니다.",
+        responseUnfinished: "답변이 끝까지 완성되지 않았습니다.",
+        responseUnfinishedNotice: "답변이 끝까지 완성되지 않았습니다. 다시 시도하거나 후속 질문으로 이어서 요청할 수 있습니다.",
         responseNotSavedNotice: "이 답변은 저장되지 않았습니다. 새로고침하면 보이지 않습니다.",
         responseSaveUnknownNotice: "이 답변이 저장됐는지 확인하지 못했습니다. 새로고침하면 확인할 수 있습니다.",
         responseInterruptedNotice: "AI 제공자 쪽 문제로 답변이 중간에 끊겼습니다. 다시 시도하거나 후속 질문으로 이어서 요청할 수 있습니다.",

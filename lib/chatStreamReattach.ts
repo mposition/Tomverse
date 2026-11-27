@@ -136,6 +136,12 @@ export type InterruptedChatAttempt = {
    * only when the attempt ends without an answer or nobody is left to poll it.
    */
   finish: (checkpointed: string | null) => void;
+  /**
+   * Called once when the poller shows the server's completed answer for this
+   * turn instead, so the send that handed it off can record the turn as the
+   * completion it became rather than the broken stream it handed off.
+   */
+  completed?: () => void;
 };
 
 const pendingByKey = new Map<string, Map<string, InterruptedChatAttempt>>();

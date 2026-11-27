@@ -703,6 +703,31 @@ test("a durable answer the provider broke off is saved incomplete, settled prora
   assert.deepEqual(health.modelFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
 });
 
+test("a file-only durable answer the provider broke off keeps its file and is settled prorated", async () => {
+  health.providerFailures = [];
+  health.modelFailures = [];
+  const { readToEnd } = await start({
+    first: "",
+    then: "finish",
+    rest: "",
+    finishReason: "error",
+    tool: {
+      toolName: "create_text_file",
+      toolCallId: "call_html_cut",
+      execute: true,
+      input: { filename: "page.html", format: "html", content: "<!doctype html><title>ok</title><p>ok</p>" },
+    },
+  });
+  releaseRest();
+  await readToEnd();
+  await until("the saved answer", () => world.messages.length > 0);
+  assert.equal((world.messages[0] as { status?: string }).status, "incomplete");
+  assert.deepEqual(world.artifactRows.map((r) => r.status), ["ready"]);
+  assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["cancelled"]);
+  assert.deepEqual(terminals.map((t) => t.status), ["completed"]);
+  assert.deepEqual(health.providerFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
+});
+
 /*
   Major 2 on the durable path. The COMMIT went through, its acknowledgement
   was lost, and the commit check failed too: the outcome is unknown. Nothing
@@ -819,6 +844,11 @@ const durableShapes: Array<{
   { name: "an answer the provider broke off",
     script: { first: "Partial.", then: "finish", rest: " The en", finishReason: "error" },
     settlement: "cancelled", terminal: "completed", saved: true, cards: [] },
+  // Review r-20261127-041211-93f81f: the file is kept, but the provider broke
+  // off, so the delivered file does not earn the flat completed charge.
+  { name: "a file with no text the provider broke off",
+    script: { first: "", then: "finish", rest: "", finishReason: "error", tool: htmlFile },
+    settlement: "cancelled", terminal: "completed", saved: true, cards: ["ready"] },
   { name: "neither text nor any card", script: { first: "", then: "finish", rest: "" },
     settlement: "empty", terminal: "failed", saved: false, cards: [] },
 ];
