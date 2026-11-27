@@ -1041,6 +1041,9 @@ run(
     // match cannot take an authorised hit's candidate slot is a property of
     // the SQL and the snapshot it runs in, not of the ranking function.
     "tests/integration/conversation-search.db.test.ts",
+    // What the model's past-chat search is never shown (locked, current, image, project, imported, memory-off):
+    // a query and a post-filter, so only a database can say it.
+    "tests/integration/chat-history-reference.db.test.ts",
     // The TXT that carries the imported original: one snapshot of two halves,
     // and permission decided after the bytes exist.
     "tests/integration/continuation-source-export.db.test.ts",
