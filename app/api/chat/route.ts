@@ -9057,6 +9057,7 @@ async function handleChatPost(
                                                   : finishReason === "tool-calls"
                                                     ? "tool_call"
                                                     : "stop";
+                                        const attemptIdentity = durableAttempt;
                                         await terminalChatResponseAttempt(
                                             {
                                                 userId: durableAttempt.userId,
@@ -9090,7 +9091,56 @@ async function handleChatPost(
                                                 } : {}),
                                             },
                                             tx
-                                        );
+                                        ).catch(async (terminalError: unknown) => {
+                                            /*
+                                              The user's stop, too late.
+
+                                              The final checkpoint's CAS
+                                              proved no stop was recorded,
+                                              and from that moment the
+                                              completed settlement owns the
+                                              turn -- it may already have
+                                              charged. A stop the attempt
+                                              endpoint records after that
+                                              (before or during this
+                                              transaction) finds the row
+                                              still active and turns it
+                                              `cancelled`, and this CAS is
+                                              then refused. Refusing the
+                                              Message as well would leave an
+                                              answer the user read and paid
+                                              for unsaved. So the Message is
+                                              written and the row keeps the
+                                              stop: a terminal row is never
+                                              rewritten, the reload shows the
+                                              Message (a stored Message
+                                              always wins over its attempt),
+                                              and a stop that came too late is
+                                              what an abort after completion
+                                              always was. Only a stop: any
+                                              other refusal still fails the
+                                              write. A rejected UPDATE is not
+                                              a database error, so the
+                                              transaction itself stays usable.
+                                            */
+                                            if (!(terminalError instanceof ChatAttemptCasError)) {
+                                                throw terminalError;
+                                            }
+                                            const current = await peekChatResponseAttempt(
+                                                attemptIdentity.userId,
+                                                attemptIdentity.assistantMessageId
+                                            );
+                                            if (!isStoppedChatAttempt(current)) throw terminalError;
+                                            attemptStoppedByUser = true;
+                                            console.info(
+                                                JSON.stringify({
+                                                    event: "chat_attempt_stop_after_completion",
+                                                    traceId,
+                                                    modelId: dispatched.modelId,
+                                                    timestamp: new Date().toISOString(),
+                                                })
+                                            );
+                                        });
                                     }
                                 });
                                 /*

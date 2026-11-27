@@ -190,6 +190,23 @@ settlement; a stop that meets the completion branch's final CAS settles as a
 stop, never as an unbilled failure. With the switch off the endpoint answers
 with the current state and writes nothing.
 
+The completion branch's final checkpoint is the boundary between the two. Its
+CAS proves no stop had been recorded, and from that moment the completed
+settlement owns the turn. A stop recorded after it -- before the settlement,
+between the settlement and the Message transaction, or inside that
+transaction before its terminal CAS -- is too late, as an abort after
+completion always was: the terminal CAS is refused by the now-`cancelled`
+row, and the Message transaction still writes the Message and its artifact
+rows instead of failing. So a turn settled as `completed` is always saved, and
+a stop that wins (before the final CAS) never reaches a completed settlement.
+The row keeps the user's stop (terminal rows are never rewritten); a reload
+shows the saved Message, which always wins over its attempt, and only a panel
+still polling that attempt shows it as stopped with the final checkpoint's
+text. No column can mark "completing" on an active row without a migration --
+the database requires an active row's `finishReason`, `failureCode` and
+`terminalAt` to be NULL and allows only `claimed`/`streaming` as active
+statuses -- so the stop's own UPDATE is left unchanged.
+
 Only a disconnect after the streaming Response was handed back is detached.
 Before that the browser has received nothing -- not even the
 `X-Chat-Continue-After-Disconnect` header that tells it a stop must be said --

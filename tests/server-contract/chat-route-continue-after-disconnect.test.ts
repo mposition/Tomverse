@@ -174,6 +174,12 @@ type Row = {
   updatedAt: Date;
 };
 let row: Row | null = null;
+/** Points in the completion branch a test may act at. */
+const hooks: {
+  afterCheckpoint?: (written: Row) => void;
+  afterSettle?: (outcome: string) => void;
+  inMessageTransaction?: () => void;
+} = {};
 /** Errors the next checkpoint writes throw, in order. */
 let checkpointFailures: unknown[] = [];
 const terminals: Array<{ status: string; writer: "owner" }> = [];
@@ -227,7 +233,9 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
       if (isTerminal(row.status)) throw new CasError("terminal");
       if (row.checkpointRevision !== input.expectedRevision) throw new CasError("revision_conflict");
       row = { ...row, status: "streaming", partialContent: input.partialContent, checkpointRevision: row.checkpointRevision + 1 };
-      return row;
+      const written = row;
+      hooks.afterCheckpoint?.(written);
+      return written;
     },
     terminalChatResponseAttempt: async (input: { status: string; finalContent: string; expectedRevision: number }) => {
       assert.ok(row);
@@ -318,6 +326,7 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     create: (args: { data: { id: string; content?: unknown } }) => {
       const failure = world.createFailures.shift();
       if (failure) throw failure;
+      hooks.inMessageTransaction?.();
       world.messages.push({ ...args.data });
       return args.data;
     },
@@ -344,7 +353,15 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
     if (property === "$transaction") {
       return async (arg: unknown) => {
         if (typeof arg !== "function") return Promise.all(arg as unknown[]);
-        const result = await (arg as (tx: unknown) => unknown)(prismaProxy);
+        // A transaction that throws rolls its Message back, as Postgres would.
+        const messagesBefore = world.messages.length;
+        let result: unknown;
+        try {
+          result = await (arg as (tx: unknown) => unknown)(prismaProxy);
+        } catch (error) {
+          world.messages.length = messagesBefore;
+          throw error;
+        }
         // The COMMIT went through and its acknowledgement was lost.
         const lostAck = world.commitAckLost.shift();
         if (lostAck) throw lostAck;
@@ -393,6 +410,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
     heartbeatChatAccess: async () => true,
     settleChatUsage: async (_reservation: unknown, usage: { outcome?: string }) => {
       ledger.settlements.push({ outcome: usage?.outcome ?? "unknown" });
+      hooks.afterSettle?.(usage?.outcome ?? "unknown");
     },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async () => ({ ok: true, entries: [] }),
@@ -833,4 +851,75 @@ test("a durable write known not to have committed still ends with its signed fai
     if (previousSecret === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
     else process.env.ERROR_REPORT_SIGNING_SECRET = previousSecret;
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* Review r-20261127-025915-939c77                                             */
+/* -------------------------------------------------------------------------- */
+
+/*
+  Major 1. Once the final checkpoint's CAS has passed, the completed
+  settlement owns the turn. A stop the attempt endpoint records after that --
+  before the settlement, between it and the Message transaction, or inside
+  that transaction -- used to leave the turn charged as completed with its
+  Message refused by the terminal CAS. The invariant: a turn settled as
+  completed is saved. The row keeps the user's stop; the Message is written.
+*/
+const FULL_ANSWER = "Partial. The end.";
+const lateStopOrders: Array<[string, () => void]> = [
+  ["right after the final checkpoint, before the settlement", () => {
+    hooks.afterCheckpoint = (written) => {
+      if (written.partialContent === FULL_ANSWER && !isTerminal(written.status)) {
+        hooks.afterCheckpoint = undefined;
+        stopFromEndpoint();
+      }
+    };
+  }],
+  ["after the settlement, before the Message transaction", () => {
+    hooks.afterSettle = (outcome) => {
+      hooks.afterSettle = undefined;
+      if (outcome === "completed") stopFromEndpoint();
+    };
+  }],
+  ["inside the Message transaction, before its terminal CAS", () => {
+    hooks.inMessageTransaction = () => {
+      hooks.inMessageTransaction = undefined;
+      stopFromEndpoint();
+    };
+  }],
+];
+for (const [when, arm] of lateStopOrders) {
+  test(`a stop recorded ${when} never leaves a completed charge without its saved answer`, async () => {
+    try {
+      const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
+      arm();
+      releaseRest();
+      await readToEnd();
+      await until("the lease release", () => ledger.releases.length > 0);
+      const outcomes = ledger.settlements.map((s) => s.outcome);
+      assert.deepEqual(outcomes, ["completed"], "the completed settlement already owned the turn");
+      // completed <=> saved.
+      assert.equal(world.messages.length, 1, "a turn charged as completed was not saved");
+      assert.equal(world.messages[0].content, FULL_ANSWER);
+      // The row keeps the user's stop; the owner wrote nothing over it.
+      assert.equal(row?.status, "cancelled");
+      assert.deepEqual(terminals, []);
+    } finally {
+      hooks.afterCheckpoint = undefined;
+      hooks.afterSettle = undefined;
+      hooks.inMessageTransaction = undefined;
+    }
+  });
+}
+
+test("a stop that the final checkpoint meets is still a prorated stop with nothing saved", async () => {
+  // The other side of the same boundary (unchanged): stop first, then the
+  // final CAS refuses, and the turn never becomes completed.
+  const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, true);
+  stopFromEndpoint();
+  releaseRest();
+  await readToEnd();
+  await until("the settlement", () => ledger.settlements.length > 0);
+  assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["cancelled"]);
+  assert.deepEqual(world.messages, []);
 });
