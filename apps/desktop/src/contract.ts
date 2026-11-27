@@ -36,7 +36,7 @@ import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
 import type { CodeOrchestration } from "./orchestrate-contract";
 import type { Language } from "../../../lib/language";
 import type { desktopNativeCopy } from "../../../locales/desktopNative";
-import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider,
+import { codeExecutionMode, type CliAccount, type CliLoginOpen, type CliPathCheck, type CliScan, type CliPaths, type CliProtocolCheck, type CliProvider,
   type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
@@ -511,6 +511,13 @@ export type DesktopApi = {
   chooseCliPath(provider?: CliProvider): Promise<string | null>;
   saveCliPath(input: { provider: CliProvider; path: string }): Promise<CliPathCheck>;
   removeCliPath(provider: CliProvider): Promise<void>;
+  /** Looks for installed provider CLIs in fixed places. Starts a program only for a file that matches its pinned release. */
+  scanCliProviders(): Promise<CliScan>;
+  /** Trusts one exact unverified file and saves it. */
+  trustCliPath(input: { provider: CliProvider; path: string }): Promise<CliPathCheck>;
+  dismissCliOffer(): Promise<void>;
+  /** Types the provider's official sign-in command into a task terminal. */
+  openCliLogin(input: { provider: CliProvider; path: string }): Promise<CliLoginOpen>;
   checkCliAccount(provider: CliProvider): Promise<CliAccount>;
   openCliAuthGuide(provider: CliProvider): Promise<void>;
   checkCliProtocol(provider: CliProvider): Promise<CliProtocolCheck>;

@@ -26,9 +26,9 @@ export const cliPathInput = z.object({ provider: cliProvider, path: cliFilePath 
 
 export type CliPathCheck =
   | { status: "pathVerified"; version: string }
-  | { status: "versionUnverified" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "checkFailed" | "unsupportedPlatform" };
+  | { status: "versionUnverified" | "userTrusted" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "checkFailed" | "unsupportedPlatform" };
 export type SavedCliPath = { path: string } & (
-  { status: "pathVerified"; version: string } | { status: "checkRequired" | "versionUnverified" }
+  { status: "pathVerified"; version: string } | { status: "checkRequired" | "versionUnverified" | "userTrusted" }
 );
 export type CliPaths = Partial<Record<CliProvider, SavedCliPath>>;
 
@@ -46,6 +46,28 @@ const cliProtocolProviders = ["openai", "anthropic", "google", "xai", "qwen", "m
 export const cliUsesReleaseArchive = (provider: CliProvider) => provider === "qwen" || provider === "mistral" || provider === "deepseek";
 export const cliUsesInstallationFolder = (provider?: CliProvider) => provider === "minimax" || provider === "zhipu";
 export type CliProtocolProvider = (typeof cliProtocolProviders)[number];
+
+// The scan looks for executables that the pinned release check can verify file by file. Release archives and
+// installation folders are chosen by hand.
+export const cliScanProviders = cliProviders.filter((provider) => !cliUsesReleaseArchive(provider) && !cliUsesInstallationFolder(provider));
+export const isCliScanProvider = (provider: CliProvider) => cliScanProviders.some((candidate) => candidate === provider);
+export type CliLogin = "loggedIn" | "loginRequired" | "unknown";
+export type CliScanCandidate = {
+  /** The file to save: the executable itself, or the native executable a command wrapper starts. */
+  path: string;
+  /** The command wrapper this executable was found through. */
+  via?: string;
+  status: "pathVerified" | "versionUnverified";
+  version?: string;
+  login: CliLogin;
+  /** The person trusted this exact file; it is shown as unverified until then. */
+  trusted: boolean;
+};
+export type CliScanEntry = { provider: CliProvider; candidates: CliScanCandidate[]; unresolvedShims: number };
+export type CliScan = { providers: CliScanEntry[]; offer: boolean };
+export type CliLoginOpen = "opened" | "terminalOff" | "noTask" | "unavailable";
+/** Fixed arguments of the official sign-in command. A provider without an entry has no documented command. */
+export const cliLoginArguments: Partial<Record<CliProvider, readonly string[]>> = { openai: ["login"], anthropic: ["auth", "login"] };
 export const isCliProtocolProvider = (provider: CliProvider): provider is CliProtocolProvider =>
   cliProtocolProviders.some((candidate) => candidate === provider);
 export type CliProtocolModel = { id: string; name: string; efforts: string[] };
