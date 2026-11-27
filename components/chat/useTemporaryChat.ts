@@ -38,10 +38,13 @@ export type TemporaryChatController = {
   matchesPending: (conversationId: string) => boolean;
 };
 
-const deleteConversation = (conversationId: string, keepalive = false) =>
-  fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE", keepalive })
+/** Deletes, and remembers that this tab deleted it so it is never reused. */
+const deleteConversation = (deleted: Set<string>, conversationId: string, keepalive = false) => {
+  deleted.add(conversationId);
+  return fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE", keepalive })
     .then(discardResponseBody)
     .catch(() => undefined);
+};
 
 export function useTemporaryChat(input: {
   /** Signed in, on the Chat surface. Off means the feature is not offered at all. */
@@ -56,6 +59,10 @@ export function useTemporaryChat(input: {
   const [active, setActive] = useState<TemporaryChatTracker>(null);
   const activeRef = useRef(active);
   useEffect(() => { activeRef.current = active; }, [active]);
+  // Read when a create answers, which happens after the renders in between.
+  const currentChatIdRef = useRef(currentChatId);
+  useEffect(() => { currentChatIdRef.current = currentChatId; }, [currentChatId]);
+  const deletedRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (!enabled || !ownerKey) return;
@@ -74,7 +81,7 @@ export function useTemporaryChat(input: {
   // change it observed.
   useEffect(() => {
     const step = temporaryChatOnView(active, { ownerKey, currentChatId });
-    if (step.deleteId) void deleteConversation(step.deleteId);
+    if (step.deleteId) void deleteConversation(deletedRef.current, step.deleteId);
     if (step.next === active && !step.disarm) return;
     queueMicrotask(() => {
       setActive((current) => (current?.id === active?.id ? step.next : current));
@@ -90,10 +97,11 @@ export function useTemporaryChat(input: {
   const screenLeftRef = useRef(false);
   useEffect(() => {
     screenLeftRef.current = false;
+    const deleted = deletedRef.current;
     const leave = () => {
       screenLeftRef.current = true;
       const id = temporaryChatOnLeave(activeRef.current);
-      if (id) void deleteConversation(id, true);
+      if (id) void deleteConversation(deleted, id, true);
     };
     // A page restored from the back/forward cache is on screen again.
     const returned = () => { screenLeftRef.current = false; };
@@ -116,18 +124,23 @@ export function useTemporaryChat(input: {
   );
   const createFields = useCallback((): { temporary?: true } => (armed ? { temporary: true } : {}), [armed]);
   const adoptCreated = useCallback((created: unknown) => {
-    const step = temporaryChatOnCreated({ ownerKey, created, screenLeft: screenLeftRef.current });
-    if (step.deleteId) {
-      void deleteConversation(step.deleteId, true);
-      return;
-    }
-    if (!step.track) return;
+    const step = temporaryChatOnCreated({
+      ownerKey,
+      created,
+      screenLeft: screenLeftRef.current,
+      currentChatId: currentChatIdRef.current,
+      previous: activeRef.current,
+    });
+    for (const id of step.deleteIds) void deleteConversation(deletedRef.current, id, true);
+    if (step.track === activeRef.current) return;
     // Read by the unmount and pagehide paths before the next render commits.
     activeRef.current = step.track;
     setActive(step.track);
   }, [ownerKey]);
   const matchesPending = useCallback(
-    (conversationId: string) => armed === Boolean(active?.owner === ownerKey && active?.id === conversationId),
+    (conversationId: string) =>
+      !deletedRef.current.has(conversationId) &&
+      armed === Boolean(active?.owner === ownerKey && active?.id === conversationId),
     [active, armed, ownerKey]
   );
 

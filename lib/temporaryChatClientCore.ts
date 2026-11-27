@@ -6,10 +6,13 @@
  *
  * Leaving is any of:
  *   - opening another conversation, or a new one, after the temporary one was
- *     open;
+ *     open -- or opening another conversation while it was still being
+ *     created or its first message still being saved;
  *   - the Chat screen going away: an in-app navigation that unmounts it, a
  *     reload, closing the tab (`pagehide`);
- *   - the signed-in account changing.
+ *   - the signed-in account changing;
+ *   - a newer temporary Chat being created in the same tab, which replaces an
+ *     older one that was never opened.
  *
  * Each deletes through the ordinary conversation delete. A delete that cannot
  * reach the server (the account already signed out, the network gone) is
@@ -39,9 +42,10 @@ export function temporaryChatOnView(
     if (view.currentChatId === tracker.id) {
         return tracker.entered ? unchanged(tracker) : { next: { ...tracker, entered: true }, deleteId: null, disarm: true };
     }
-    // Created but not opened yet: the first message is still being saved, and
-    // the composer is still on the new-chat screen.
-    if (!tracker.entered) return unchanged(tracker);
+    // Created but not opened yet, and the screen is still on a new chat: the
+    // first message is still being saved.
+    if (!tracker.entered && view.currentChatId === null) return unchanged(tracker);
+    // Opened and then left, or another conversation opened before it ever was.
     return { next: null, deleteId: tracker.id, disarm: false };
 }
 
@@ -49,18 +53,29 @@ export function temporaryChatOnView(
 export const temporaryChatOnLeave = (tracker: TemporaryChatTracker): string | null => tracker?.id ?? null;
 
 /**
- * A create response arrived. Normally the conversation is tracked from here;
- * but when the person already left the Chat screen while the request was in
- * flight, the leave found nothing to delete, so the conversation is deleted
- * as soon as its id is known.
+ * A create response arrived.
+ *
+ * It is tracked only when the person is still where they started it: on the
+ * Chat screen, on a new chat. If they left the screen, or opened another
+ * conversation while the request was in flight, the leave had nothing to
+ * delete yet, so the conversation is deleted as soon as its id is known. A
+ * newer temporary Chat replaces an older one that was never opened, and the
+ * older one is deleted.
  */
 export function temporaryChatOnCreated(input: {
     ownerKey: string | null;
     created: unknown;
     screenLeft: boolean;
-}): { track: TemporaryChatTracker; deleteId: string | null } {
+    currentChatId: string | null;
+    previous: TemporaryChatTracker;
+}): { track: TemporaryChatTracker; deleteIds: string[] } {
     const record = input.created as { id?: unknown; temporary?: unknown } | null;
-    if (record?.temporary !== true || typeof record.id !== "string") return { track: null, deleteId: null };
-    if (input.screenLeft || !input.ownerKey) return { track: null, deleteId: record.id };
-    return { track: { owner: input.ownerKey, id: record.id, entered: false }, deleteId: null };
+    if (record?.temporary !== true || typeof record.id !== "string") return { track: input.previous, deleteIds: [] };
+    if (input.screenLeft || !input.ownerKey || (input.currentChatId !== null && input.currentChatId !== record.id)) {
+        return { track: input.previous, deleteIds: [record.id] };
+    }
+    return {
+        track: { owner: input.ownerKey, id: record.id, entered: false },
+        deleteIds: input.previous && input.previous.id !== record.id ? [input.previous.id] : [],
+    };
 }

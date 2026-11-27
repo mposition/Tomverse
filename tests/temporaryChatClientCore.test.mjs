@@ -54,21 +54,41 @@ test("while its first message is still being saved it is kept, and opening it ma
     });
 });
 
-test("a create that answers after the person left is deleted on arrival", () => {
-    const response = { id: "c-temp", temporary: true };
-    assert.deepEqual(temporaryChatOnCreated({ ownerKey: "u-1", created: response, screenLeft: true }), {
-        track: null, deleteId: "c-temp",
+test("opening another conversation before the temporary one was ever opened deletes it", () => {
+    assert.deepEqual(temporaryChatOnView(created, { ownerKey: "u-1", currentChatId: "c-other" }), {
+        next: null, deleteId: "c-temp", disarm: false,
     });
-    assert.deepEqual(temporaryChatOnCreated({ ownerKey: null, created: response, screenLeft: false }), {
-        track: null, deleteId: "c-temp",
-    });
-    assert.deepEqual(temporaryChatOnCreated({ ownerKey: "u-1", created: response, screenLeft: false }), {
-        track: created, deleteId: null,
-    });
-    // An ordinary conversation, or a response that is not one, is never deleted here.
+});
+
+const onCreated = (overrides) => temporaryChatOnCreated({
+    ownerKey: "u-1",
+    created: { id: "c-temp", temporary: true },
+    screenLeft: false,
+    currentChatId: null,
+    previous: null,
+    ...overrides,
+});
+
+test("a create that answers after the person left the screen or opened another conversation is deleted on arrival", () => {
+    assert.deepEqual(onCreated({ screenLeft: true }), { track: null, deleteIds: ["c-temp"] });
+    assert.deepEqual(onCreated({ ownerKey: null }), { track: null, deleteIds: ["c-temp"] });
+    assert.deepEqual(onCreated({ currentChatId: "c-other" }), { track: null, deleteIds: ["c-temp"] });
+    // Still on the new chat it was started from: tracked.
+    assert.deepEqual(onCreated({}), { track: created, deleteIds: [] });
+});
+
+test("a newer temporary Chat replaces an older one that was never opened, which is deleted", () => {
+    const older = { owner: "u-1", id: "c-older", entered: false };
+    assert.deepEqual(onCreated({ previous: older }), { track: created, deleteIds: ["c-older"] });
+    // The same response twice changes nothing.
+    assert.deepEqual(onCreated({ previous: created }), { track: created, deleteIds: [] });
+});
+
+test("an ordinary conversation, or a response that is not one, is never deleted here", () => {
+    const older = { owner: "u-1", id: "c-older", entered: false };
     for (const other of [{ id: "c-1", temporary: false }, { id: "c-1" }, null, { temporary: true }]) {
-        assert.deepEqual(temporaryChatOnCreated({ ownerKey: "u-1", created: other, screenLeft: true }), {
-            track: null, deleteId: null,
+        assert.deepEqual(onCreated({ created: other, screenLeft: true, previous: older }), {
+            track: older, deleteIds: [],
         });
     }
 });
