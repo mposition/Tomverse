@@ -8,12 +8,23 @@ import { isSecretPath } from "./workspace.js";
  * option cannot be injected by a name, and the one place that quotes text for the remote shell is `shellQuote`.
  */
 
+/**
+ * How a command the agent runs on the remote machine is started there. `sh`: `sh -c`, which needs nothing and reads no profile
+ * (the default, and what every file read or write always uses). `bash-login`: `bash -lc`, which reads the remote user's profile first
+ * (so a PATH set there is found), at the cost that anything the profile prints is part of the command's output. Only a command of the
+ * agent is affected; the scripts that read and write files never run in a login shell.
+ */
+export const REMOTE_SHELLS = ["sh", "bash-login"] as const;
+export type RemoteShell = (typeof REMOTE_SHELLS)[number];
+
 export type RemoteTarget = {
     /** A Host alias of ~/.ssh/config, a host name, or user@host. Never starts with "-". */
     destination: string;
     port?: number;
     /** Absolute, normalised folder on the remote machine. */
     folder: string;
+    /** The shell that starts the agent's commands there; `sh` when absent. Not part of what names the project (`targetKey`). */
+    shell?: RemoteShell;
 };
 
 export type RemoteErrorCode =
@@ -98,11 +109,17 @@ export const parseRemoteFolder = (input: unknown) => {
     return folder;
 };
 
-export const parseRemoteTarget = (input: { destination?: unknown; port?: unknown; folder?: unknown }): RemoteTarget => {
+export const parseRemoteShell = (input: unknown): RemoteShell => {
+    if (input === undefined || input === null || input === "") return "sh";
+    return (REMOTE_SHELLS as readonly unknown[]).includes(input) ? (input as RemoteShell) : invalid("The command shell must be sh or bash-login.");
+};
+
+export const parseRemoteTarget = (input: { destination?: unknown; port?: unknown; folder?: unknown; shell?: unknown }): RemoteTarget => {
     const destination = parseDestination(input.destination);
     const port = parsePort(input.port);
     const folder = parseRemoteFolder(input.folder);
-    return { destination, ...(port !== undefined ? { port } : {}), folder };
+    const shell = parseRemoteShell(input.shell);
+    return { destination, ...(port !== undefined ? { port } : {}), folder, ...(shell !== "sh" ? { shell } : {}) };
 };
 
 /** How the person sees the machine: the alias or user@host, with the port when there is one. */
@@ -129,7 +146,10 @@ export type SshOptions = { connectTimeoutSeconds?: number; platform?: NodeJS.Pla
 
 /**
  * The arguments for one ssh run, as an array (never a string a shell would read). `BatchMode=yes` means ssh never asks for a
- * password, a passphrase or a host key answer: it fails and says what is missing. StrictHostKeyChecking is not touched.
+ * password, a passphrase or a host key answer: it fails and says what is missing. `StrictHostKeyChecking=yes` is given on the
+ * command line, which wins over ~/.ssh/config: a host that is not in known_hosts is refused whatever the configuration says
+ * (`accept-new` or `no` would otherwise let the app connect to an unknown host and write its key), and a changed key is refused
+ * as ever. `UpdateHostKeys=no` keeps the app from changing known_hosts at all: the person alone adds a host, in a terminal.
  */
 export const sshArguments = (target: Pick<RemoteTarget, "destination" | "port">, remoteCommand: string, options: SshOptions = {}) => {
     const destination = parseDestination(target.destination);
@@ -138,6 +158,8 @@ export const sshArguments = (target: Pick<RemoteTarget, "destination" | "port">,
     return [
         "-T",
         "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "UpdateHostKeys=no",
         "-o", `ConnectTimeout=${Math.max(1, Math.min(60, Math.round(options.connectTimeoutSeconds ?? 15)))}`,
         "-o", "ServerAliveInterval=15",
         "-o", "ServerAliveCountMax=3",
@@ -174,7 +196,7 @@ export const classifySshFailure = (failure: SshFailure, label = "the remote mach
     if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Offending .* key in|host key for .* has changed/i.test(text)) {
         return new RemoteError("host-key-changed", `The host key of ${label} changed. This can mean someone is intercepting the connection. ${GUIDE_HOST_KEY}`);
     }
-    if (/Host key verification failed|No .* host key is known|host key.*not (?:known|verified)/i.test(text)) {
+    if (/Host key verification failed|No .* host key is known|host key.*not (?:known|verified)|strict checking/i.test(text)) {
         return new RemoteError("host-key", `The host key of ${label} is not known yet. ${GUIDE_HOST_KEY}`);
     }
     if (/Permission denied|Too many authentication failures|no more authentication methods|passphrase|Authentication failed|Authentication refused/i.test(text)) {

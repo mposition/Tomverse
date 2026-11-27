@@ -22,10 +22,10 @@ const target = { destination: "devbox", folder: "/srv/app" };
 
 test("the switch and the recent list are kept in the app's own folder, off by default, and a damaged file means off", () => {
   const directory = join(folder("settings"), "remote-projects");
-  assert.deepEqual(readRemoteSettings(directory), { enabled: false, recent: [] });
-  assert.deepEqual(readRemoteSettings(undefined), { enabled: false, recent: [] });
-  writeRemoteSettings(directory, withRecent({ enabled: true, recent: [] }, target));
-  assert.deepEqual(readRemoteSettings(directory), { enabled: true, recent: [target] });
+  assert.deepEqual(readRemoteSettings(directory), { enabled: false, recent: [], shells: {} });
+  assert.deepEqual(readRemoteSettings(undefined), { enabled: false, recent: [], shells: {} });
+  writeRemoteSettings(directory, withRecent({ enabled: true, recent: [], shells: {} }, target));
+  assert.deepEqual(readRemoteSettings(directory), { enabled: true, recent: [target], shells: {} });
   const again = withRecent(withRecent(readRemoteSettings(directory), { destination: "b", port: 2200, folder: "/x/y" }), target);
   assert.deepEqual(again.recent.map((item) => item.destination), ["devbox", "b"], "an entry moves to the front, never twice");
   let settings = again;
@@ -33,9 +33,9 @@ test("the switch and the recent list are kept in the app's own folder, off by de
   assert.equal(settings.recent.length, 8);
   // A recent entry that is no longer a valid target is dropped; "enabled" must be exactly true.
   writeFileSync(join(directory, "settings.json"), JSON.stringify({ enabled: "yes", recent: [{ destination: "-oProxyCommand=x", folder: "/srv/app" }, target, 5] }));
-  assert.deepEqual(readRemoteSettings(directory), { enabled: false, recent: [target] });
+  assert.deepEqual(readRemoteSettings(directory), { enabled: false, recent: [target], shells: {} });
   writeFileSync(join(directory, "settings.json"), "{ broken");
-  assert.deepEqual(readRemoteSettings(directory), { enabled: false, recent: [] });
+  assert.deepEqual(readRemoteSettings(directory), { enabled: false, recent: [], shells: {} });
 });
 
 test("a remote project is a shadow folder of the app's own, and only the app's own shadow folders are remote", () => {
@@ -171,7 +171,7 @@ test("the host: with the switch off nothing starts ssh; on, a target is checked,
     assert.equal(project.remote?.port, 2222);
     assert.equal(project.remote?.folder, (await new RemoteWorkspace(fake.target, fake.runner).connect()).root, "the folder is the one the machine itself names");
     assert.deepEqual(readRemoteSettings(settingsDirectory).recent.map((item) => item.destination), ["devbox"]);
-    assert.deepEqual(reply.view.current, { label: "devbox:2222", folder: project.remote!.folder, state: "connected" });
+    assert.deepEqual(reply.view.current, { label: "devbox:2222", folder: project.remote!.folder, state: "connected", shell: "sh" });
     assert.equal(reply.view.sandboxOutside, true);
     assert.deepEqual(host.snapshot(), { label: "devbox:2222", folder: project.remote!.folder, state: "connected", sandboxOutside: true });
 
@@ -206,7 +206,7 @@ test("the runtime reaches a remote project only while the switch is on, and says
   const settings = join(folder("run-settings"), "remote-projects");
   const fixtureEnv = { TOMVERSE_DESKTOP_REMOTE_SETTINGS: settings, TOMVERSE_DESKTOP_SSH_FIXTURE: JSON.stringify({ file: process.execPath, args: [new URL("../../tomverse-cli/tests/fake-ssh.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")] }) };
   await assert.rejects(openRemoteWorkspace(projectFor(fake), { env: fixtureEnv, fixtureAllowed: true }), (error) => error instanceof RemoteRunError && error.notice === "remoteDisabled");
-  writeRemoteSettings(settings, { enabled: true, recent: [] });
+  writeRemoteSettings(settings, { enabled: true, recent: [], shells: {} });
   const remote = await openRemoteWorkspace(projectFor(fake), { env: fixtureEnv, fixtureAllowed: true });
   assert.equal(remote.state, "connected");
   assert.equal(remote.root, (await new RemoteWorkspace(fake.target, fake.runner).connect()).root);
@@ -221,7 +221,7 @@ test("the runtime reaches a remote project only while the switch is on, and says
 test("a change of a remote task is shown from the remote file and put back there, and an unreachable machine offers nothing", { skip }, async () => {
   const fake = makeFakeRemote();
   const settings = join(folder("undo-settings"), "remote-projects");
-  writeRemoteSettings(settings, { enabled: true, recent: [] });
+  writeRemoteSettings(settings, { enabled: true, recent: [], shells: {} });
   const fixtureEnv = { TOMVERSE_DESKTOP_REMOTE_SETTINGS: settings, TOMVERSE_DESKTOP_SSH_FIXTURE: JSON.stringify({ file: process.execPath, args: [new URL("../../tomverse-cli/tests/fake-ssh.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")] }) };
   const previous = { ...process.env };
   Object.assign(process.env, fixtureEnv);
@@ -278,5 +278,62 @@ test("a change of a remote task is shown from the remote file and put back there
   } finally {
     for (const key of Object.keys(fixtureEnv)) delete process.env[key];
     Object.assign(process.env, previous);
+  }
+});
+
+test("the command shell of a remote project is the person's choice in Settings, per project, and only the open project's", { skip }, async () => {
+  const fake = makeFakeRemote();
+  const settingsDirectory = join(folder("shell-settings"), "remote-projects");
+  const base = join(folder("shell-shadow"), "Tomverse Desktop Remote Projects");
+  setRemoteShadowBase(base);
+  let opened: ProjectRoot | null = null;
+  let busy = false;
+  const host = createRemoteProjectHost({
+    settingsDirectory: () => settingsDirectory, runner: () => fake.runner, sandboxOn: () => false, canChange: () => !busy,
+    open: async (project) => { opened = project; return true; },
+    current: () => (opened?.remote ? { project: opened, target: opened.remote } : null),
+    changed: () => undefined,
+  });
+  const typed = { destination: fake.target.destination, folder: fake.target.folder };
+  try {
+    await host.run({ action: "set-enabled", enabled: true });
+    // Nothing open: there is no project to set.
+    assert.equal((await host.run({ action: "set-shell", shell: "bash-login" })).view.current, null);
+    assert.deepEqual(readRemoteSettings(settingsDirectory).shells, {});
+    assert.equal((await host.run({ action: "open", target: typed })).result?.ok, true);
+    assert.equal(host.snapshot()?.label, "devbox");
+    assert.equal((await host.run({ action: "read" })).view.current?.shell, "sh");
+
+    busy = true;
+    assert.equal((await host.run({ action: "set-shell", shell: "bash-login" })).result?.ok, false);
+    busy = false;
+    const chosen = await host.run({ action: "set-shell", shell: "bash-login" });
+    assert.equal(chosen.view.current?.shell, "bash-login");
+    const key = `${opened!.remote!.destination}||${opened!.remote!.folder}`;
+    assert.deepEqual(readRemoteSettings(settingsDirectory).shells, { [key]: "bash-login" });
+    // The setting does not become part of what names the project, the recent list or the shadow marker.
+    assert.deepEqual(readRemoteSettings(settingsDirectory).recent.map((item) => Object.keys(item).sort()), [["destination", "folder"]]);
+    assert.equal(remoteOfPath(opened!.path)?.shell, undefined);
+    assert.equal("shell" in (opened!.remote ?? {}), false);
+
+    // The runtime reads it when a task connects: the open project's commands start in a login shell, another project's do not.
+    const env = {
+      TOMVERSE_DESKTOP_REMOTE_SETTINGS: settingsDirectory,
+      TOMVERSE_DESKTOP_SSH_FIXTURE: JSON.stringify({ file: process.execPath, args: [new URL("../../tomverse-cli/tests/fake-ssh.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")] }),
+    };
+    const login = await openRemoteWorkspace(opened!, { env, fixtureAllowed: true });
+    assert.equal(login.target.shell, "bash-login");
+    const other = await openRemoteWorkspace({ ...opened!, remote: { ...opened!.remote!, folder: fake.target.folder } }, { env, fixtureAllowed: true });
+    assert.equal(other.target.shell, "bash-login", "the same machine and folder is the same project");
+    const elsewhere = await openRemoteWorkspace({ ...opened!, remote: { destination: "devbox", port: 2200, folder: opened!.remote!.folder } }, { env, fixtureAllowed: true });
+    assert.equal(elsewhere.target.shell, undefined, "another port is another project");
+
+    assert.equal((await host.run({ action: "set-shell", shell: "sh" })).view.current?.shell, "sh");
+    assert.deepEqual(readRemoteSettings(settingsDirectory).shells, {});
+    // Anything but the two known shells is dropped when the file is read.
+    writeFileSync(join(settingsDirectory, "settings.json"), JSON.stringify({ enabled: true, recent: [], shells: { a: "zsh", b: "bash-login", c: 5 } }));
+    assert.deepEqual(readRemoteSettings(settingsDirectory).shells, { b: "bash-login" });
+  } finally {
+    setRemoteShadowBase(undefined);
   }
 });
