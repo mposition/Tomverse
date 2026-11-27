@@ -173,3 +173,92 @@ for (const { modelId, webSearch, prompt } of CASES) {
     assert.ok(run.reservedCredits <= quote, `reserved ${run.reservedCredits} > quote ${quote}`);
   });
 }
+
+/**
+ * The runner checks for a free Chat slot before it claims a run, but the
+ * person can take a slot between that check and the run's own lease. So the
+ * route applies the same rule where every Chat lease is claimed: inside a
+ * scheduled run, one subject slot stays free. With all but one slot taken the
+ * run is refused before any credit is held; with one more free it reserves.
+ */
+test("inside a scheduled run the route leaves the account's last Chat slot free", async () => {
+  const { identifyChatCaller } = await import("@/lib/chatSecurity");
+  const { resolveChatConcurrencyPlan } = await import("@/lib/chatConcurrencyCore");
+  const { quoteScheduledRunCredits } = await import("@/lib/scheduledTaskService");
+  const { scheduledRunAssistantMessageId } = await import("@/lib/scheduledTaskRunner");
+  const { scopedMessageId } = await import("@/lib/messageRequestIdentity");
+  const { POST } = await import("@/app/api/chat/route");
+  const userId = randomUUID();
+  ids.quoteUserIds.push(userId);
+  await prisma.user.create({
+    data: {
+      id: userId, email: `${userId}@example.invalid`, plan: "Pro",
+      subscriptionStatus: "active", subscriptionCurrentPeriodEnd: new Date(Date.now() + 30 * 86_400_000),
+    },
+  });
+  const modelId = "gpt-6-luna";
+  const prompt = "Summarise today's AI news in five bullets.";
+  const access = identifyChatCaller(new Request("https://scheduled-task.invalid/"), userId);
+  const limit = resolveChatConcurrencyPlan({ kind: "user", subjectKey: access.subjectKey, ipKey: access.ipKey }).subject.limit;
+  assert.ok(limit >= 2, "the test needs room for one user slot and the kept one");
+  const quote = await quoteScheduledRunCredits({ userId, modelId, prompt, webSearch: false });
+
+  const attempt = async (busySlots: number) => {
+    await prisma.chatRequestLease.deleteMany({ where: { subjectKey: access.subjectKey } });
+    for (let index = 0; index < busySlots; index += 1) {
+      await prisma.chatRequestLease.create({
+        data: { id: randomUUID(), subjectKey: access.subjectKey, claimedAt: new Date(), expiresAt: new Date(Date.now() + 120_000) },
+      });
+    }
+    const conversation = await prisma.conversation.create({
+      data: { userId, title: "Scheduled", productKey: "chat", kind: "chat", selectedModels: JSON.stringify([modelId]) },
+    });
+    const task = await prisma.scheduledTask.create({
+      data: {
+        userId, title: "Morning news", prompt, modelId, webSearch: false, frequency: "daily", timeOfDay: "08:00",
+        timeZone: "UTC", status: "active", creditsPerRun: quote, nextRunAt: new Date(), conversationId: conversation.id,
+      },
+    });
+    const runId = randomUUID();
+    const assistantMessageId = scheduledRunAssistantMessageId(runId);
+    await prisma.scheduledTaskRun.create({
+      data: {
+        id: runId, taskId: task.id, userId, runningUserId: userId, taskRevision: task.revision, scheduledFor: new Date(),
+        conversationId: conversation.id, assistantMessageId, leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
+      },
+    });
+    const questionId = randomUUID();
+    const sourceUserMessageId = scopedMessageId(conversation.id, questionId);
+    await prisma.message.create({ data: { id: sourceUserMessageId, conversationId: conversation.id, role: "user", content: prompt } });
+    const request = new Request("http://localhost/api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept-language": "en" },
+      body: JSON.stringify({
+        messages: [{ id: questionId, role: "user", content: prompt }],
+        modelId, conversationId: conversation.id, assistantMessageId, sourceUserMessageId, webSearchMode: "off",
+      }),
+    });
+    const session = { user: { id: userId, email: `${userId}@example.invalid` }, expires: new Date(Date.now() + 60_000).toISOString() };
+    const response = await runAsScheduledTask(
+      { runId, userId, session, request, creditCeiling: quote },
+      async () => {
+        const answer = await POST(request);
+        await answer.clone().text().catch(() => "");
+        return answer;
+      }
+    );
+    const code = response.ok ? null : ((await response.json().catch(() => ({}))) as { code?: string }).code ?? null;
+    const run = await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId }, select: { reservedCredits: true } });
+    // Close the run so the next attempt can take the account's one running slot.
+    await prisma.scheduledTaskRun.update({ where: { id: runId }, data: { status: "failed", runningUserId: null, finishedAt: new Date() } });
+    return { code, reservedCredits: run.reservedCredits };
+  };
+
+  const crowded = await attempt(limit - 1);
+  assert.equal(crowded.code, "CHAT_CONCURRENCY_EXCEEDED");
+  assert.equal(crowded.reservedCredits, 0);
+  const roomy = await attempt(limit - 2);
+  assert.notEqual(roomy.code, "CHAT_CONCURRENCY_EXCEEDED");
+  assert.ok(roomy.reservedCredits > 0, `the run never reached its reservation (code ${roomy.code})`);
+  await prisma.chatRequestLease.deleteMany({ where: { subjectKey: access.subjectKey } });
+});

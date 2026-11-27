@@ -475,8 +475,8 @@ test("three failed runs in a row pause the task", async () => {
   const userId = await seedUser();
   const task = await seedTask(userId);
   for (let index = 0; index < SCHEDULED_TASK_LIMITS.maxConsecutiveFailures; index += 1) {
-    // Earlier runs move two days back, so the interval guard never interferes.
-    await prisma.$executeRaw`UPDATE "ScheduledTaskRun" SET "scheduledFor" = "scheduledFor" - interval '2 days' WHERE "taskId" = ${task.id}`;
+    // Earlier runs move two days back (occurrence and real start), so the interval guard never interferes.
+    await prisma.$executeRaw`UPDATE "ScheduledTaskRun" SET "scheduledFor" = "scheduledFor" - interval '2 days', "startedAt" = "startedAt" - interval '2 days' WHERE "taskId" = ${task.id}`;
     await prisma.scheduledTask.update({ where: { id: task.id }, data: { nextRunAt: new Date(Date.now() - 60_000) } });
     await runScheduledTasksTick({ dispatch: async () => refusingChat(500, "MODEL_TEMPORARILY_UNAVAILABLE") });
   }

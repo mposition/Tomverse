@@ -24,6 +24,15 @@ import { currentScheduledTaskRun } from "@/lib/scheduledTaskRunContext";
  * Outside a scheduled run this returns undefined and the reservation is
  * exactly what it always was.
  */
+/**
+ * Inside a scheduled run, the Chat slots the turn must leave free for the
+ * person: one, applied where the lease is claimed (acquireChatAccess), so a
+ * request the person sends between the runner's own check and this claim
+ * cannot be the one left without a slot. Undefined outside a run.
+ */
+export const scheduledTaskSubjectSlotsKeptFree = (): number | undefined =>
+  currentScheduledTaskRun() ? 1 : undefined;
+
 export const scheduledTaskReservationGuard = (userId: string | null | undefined) => {
   const scope = currentScheduledTaskRun();
   if (!scope) return undefined;

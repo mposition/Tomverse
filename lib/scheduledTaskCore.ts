@@ -293,14 +293,23 @@ export const decideDueOccurrence = (input: {
   now: Date;
   /** The latest earlier run's occurrence, if any. */
   previousScheduledFor: Date | null;
+  /**
+   * When the task's latest run actually started, if any. The minimum interval
+   * is a promise about paid runs, so it holds between real start times too: a
+   * late run followed by a schedule moved earlier is still kept apart.
+   */
+  previousStartedAt?: Date | null;
 }): DueDecision => {
-  const { schedule, dueAt, now, previousScheduledFor } = input;
+  const { schedule, dueAt, now, previousScheduledFor, previousStartedAt } = input;
   const next = nextOccurrence(schedule, now);
   if (now.getTime() - dueAt.getTime() > SCHEDULED_TASK_LIMITS.lateGraceMs) return { kind: "skip_late", next };
   if (
     previousScheduledFor &&
     dueAt.getTime() - previousScheduledFor.getTime() < SCHEDULED_TASK_LIMITS.minRunIntervalMs
   ) {
+    return { kind: "skip_too_soon", next };
+  }
+  if (previousStartedAt && now.getTime() - previousStartedAt.getTime() < SCHEDULED_TASK_LIMITS.minRunIntervalMs) {
     return { kind: "skip_too_soon", next };
   }
   return { kind: "run", scheduledFor: dueAt };

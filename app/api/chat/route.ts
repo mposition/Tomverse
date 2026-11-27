@@ -3,7 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { scheduledTaskReservationGuard } from "@/lib/scheduledTaskReservationGuard";
+import { scheduledTaskReservationGuard, scheduledTaskSubjectSlotsKeptFree } from "@/lib/scheduledTaskReservationGuard";
 import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
@@ -5520,6 +5520,8 @@ async function handleChatPost(
                   admissionToken: replanned ? undefined : admissionToken,
                   // Undefined outside a scheduled run; inside one, the per-run credit ceiling.
                   withinReservationTransaction: scheduledTaskReservationGuard(access.userId),
+                  // Undefined outside a scheduled run; inside one, the person keeps a slot.
+                  subjectSlotsKeptFree: scheduledTaskSubjectSlotsKeptFree(),
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;

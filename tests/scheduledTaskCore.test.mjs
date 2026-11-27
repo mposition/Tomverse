@@ -185,3 +185,20 @@ test("unattended runs start only on a long-lived server, never on a serverless h
   }
   assert.equal(scheduledTasksHostProblem({ VERCEL: "  " }), null);
 });
+
+test("the minimum interval holds between real start times, not only between occurrences", () => {
+  // Yesterday's 08:00 run started late at 10:59; the schedule was then moved to 04:00.
+  const early = schedule({ timeZone: "UTC", timeOfDay: "04:00" });
+  const dueAt = new Date("2026-11-28T04:00:00Z");
+  const input = {
+    schedule: early, dueAt, now: new Date("2026-11-28T04:01:00Z"),
+    previousScheduledFor: new Date("2026-11-27T08:00:00Z"),
+  };
+  // Twenty hours between the two occurrences: allowed by the occurrence check alone.
+  assert.equal(decideDueOccurrence(input).kind, "run");
+  const decision = decideDueOccurrence({ ...input, previousStartedAt: new Date("2026-11-27T10:59:00Z") });
+  assert.equal(decision.kind, "skip_too_soon");
+  assert.equal(decision.next?.toISOString(), "2026-11-29T04:00:00.000Z");
+  assert.equal(decideDueOccurrence({ ...input, now: new Date("2026-11-28T07:00:00Z"), previousStartedAt: new Date("2026-11-27T10:59:00Z") }).kind,
+    "run");
+});

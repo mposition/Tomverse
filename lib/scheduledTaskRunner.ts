@@ -306,11 +306,18 @@ async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
         orderBy: { scheduledFor: "desc" },
         select: { scheduledFor: true },
       });
+      // The latest run by when it really started, whatever occurrence it was.
+      const lastStarted = await tx.scheduledTaskRun.findFirst({
+        where: { taskId },
+        orderBy: { startedAt: "desc" },
+        select: { startedAt: true },
+      });
       const decision = decideDueOccurrence({
         schedule,
         dueAt: task.nextRunAt,
         now,
         previousScheduledFor: previous?.scheduledFor ?? null,
+        previousStartedAt: lastStarted?.startedAt ?? null,
       });
       if (decision.kind !== "run") {
         await tx.scheduledTask.update({
