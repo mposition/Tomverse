@@ -52,6 +52,19 @@ export const PAST_ATTACHMENT_OMITTED_TEXT =
   "If the answer needs it, say so and ask the user to attach it again.";
 
 /**
+ * Same kind as above, for an earlier file that could not be delivered to *this*
+ * model (a model without image input, a parser that failed or timed out, an
+ * archive or OCR step that refused it). The message being sent is refused for
+ * the same causes; an earlier one must not be, or one file the user can no
+ * longer see would make every later turn of the conversation fail.
+ */
+export const PAST_ATTACHMENT_UNDELIVERABLE_TEXT =
+  "This file was attached to an earlier message and is not included in this turn: " +
+  "it could not be delivered to this model (the model cannot read this kind of file, or the file could not be processed). " +
+  "Its contents are unknown to you. Do not describe, summarise, quote, or infer anything about it. " +
+  "If the answer needs it, say so and ask the user to attach it again.";
+
+/**
  * What a signed-in account may attach (operator decision 2026-11-18, after a
  * comparison with Claude.ai, Gemini, Perplexity and ChatGPT). Was 5 files of
  * 10 MB and 25 MB a request. Guests keep their own, smaller limits.

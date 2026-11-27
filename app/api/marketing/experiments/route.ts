@@ -5,10 +5,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveAnalyticsConsentPolicy } from "@/lib/analyticsConsentPolicy";
 import {
+  ApiSecurityError,
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { DATABASE_TEMPORARILY_UNAVAILABLE_CODE } from "@/lib/databaseError";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
@@ -138,8 +140,13 @@ export async function POST(request: Request) {
         // A refusal (rate limit, origin) is the security layer's answer. Anything
         // else is the same database the state is read from being down, which is
         // an unreadable state like the one below: the beacon puts the default
-        // copy on a variant page for it.
-        if (apiSecurityResponse(error)) throw error;
+        // copy on a variant page for it. The rate limit reports its own
+        // database being down as a 503 security error; that is the same
+        // unreadable state, not a refusal, and keeps the beacon's body.
+        const databaseDown =
+          error instanceof ApiSecurityError &&
+          error.code === DATABASE_TEMPORARILY_UNAVAILABLE_CODE;
+        if (!databaseDown && apiSecurityResponse(error)) throw error;
         return unreadable();
       }
     }
