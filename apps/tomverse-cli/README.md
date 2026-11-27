@@ -234,7 +234,18 @@ per task".
   the next model request, and the transmission record lists the address. A
   `--read-only` session has no `web_fetch` (it has no approvals at all, and the
   address of a request can itself carry information out), and neither do
-  `exec` runs without a terminal. There is no web search tool.
+  `exec` runs without a terminal.
+- **Web search (`web_search`), off by default:** `tomverse config set web-search on`
+  (Desktop: only where the server offers it) gives the model a search through
+  Tomverse's own web search (`POST /api/code/v1/web-search` on the same endpoint
+  and key). One call holds up to five independent queries and is charged to the
+  account like Chat's web search: one flat price per call, nothing when no search
+  could be served, listed with the key's receipts. **Every call is asked about**
+  with its queries shown (the permission mode and a `web_search` rule decide as for
+  a command), is sent once with its own Idempotency-Key and never again, and a
+  query that contains your key is refused. Results come back as titles, addresses
+  and short extracts marked as untrusted; the addresses are shown to you as the
+  tool's sources. Not in a `--read-only` or plan session, and not for subagents.
 - **Background commands:** a command can be approved to keep running after the call
   returns (a dev server, a watcher). The approval says "background" and "no
   time limit", and is bound to that: approving a foreground command never
@@ -371,6 +382,7 @@ asks, an allow rule skips the question except where noted).
 | File change (`apply_patch`) | refuse | person | review | allow |
 | Command (`run_command`) | refuse | person | review | allow |
 | Web page (`web_fetch`) | person | person | person | person (a rule naming the host skips it) |
+| Web search (`web_search`, charged to the account) | person | person | review | allow |
 | Opening a public site in the browser tab (`browser_navigate`, Desktop, when the person allowed public sites) | person | person | person | person (no allow rule skips it) |
 | Click or typing in the browser tab | refuse | person | person | person |
 | MCP tool (`mcp__server__tool`) | refuse | person | person | person (a rule naming the tool or server skips it) |

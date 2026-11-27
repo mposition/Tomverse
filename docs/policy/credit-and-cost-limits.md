@@ -1060,6 +1060,11 @@ production에는 기본값이 없습니다. credential이 있는데 예산을 �
 - 사용자 크레딧: 검색 0회면 8크레딧 전액 환불, 1~5회면 기존 flat 8크레딧.
   **질의 수로 사용자에게 추가 과금하지 않습니다.**
 - 가격 변경은 소급되지 않습니다. 동결된 rate가 정산을 매깁니다.
+- **coding API의 웹 검색(`POST /api/code/v1/web-search`, 2026-11-27)도 같은
+  규칙입니다.** 에이전트 엔진의 `web_search` 호출 한 번이 검색 세션 하나(최대
+  5 backend 요청)이고, 모델 없이 surcharge와 vendor 최악값만 예약합니다
+  (`createSearchOnlyChatBudget`, model id `tomverse-web-search`). 새 단가는
+  없습니다. 상세는 `docs/policy/external-api.md` 11.1절.
 
 #### fallback
 

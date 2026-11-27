@@ -147,7 +147,7 @@ export const pluginHooks = (plugin: Pick<ActivePlugin, "name" | "dir" | "digest"
 
 /** Claude Code's names for the tools that have one, so a hook written there (`matcher: "Bash"`) still matches. */
 const CLAUDE_NAMES: Record<string, string> = {
-    run_command: "Bash", apply_patch: "Edit|Write", read_file: "Read", list_files: "LS", search_text: "Grep", web_fetch: "WebFetch", delegate: "Task",
+    run_command: "Bash", apply_patch: "Edit|Write", read_file: "Read", list_files: "LS", search_text: "Grep", web_fetch: "WebFetch", web_search: "WebSearch", delegate: "Task",
 };
 
 /** Matcher rules of Claude Code: empty or `*` is everything; letters, digits, `_`, `-`, spaces, `,` and `|` is a list of exact names; anything else is an unanchored regular expression. */

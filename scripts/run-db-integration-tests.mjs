@@ -1227,6 +1227,16 @@ run(
     "tests/integration/external-api-coding.db.test.mjs"],
   "Running the coding API's catalogue, dedicated-row billing and general-API refusal scenarios",
 );
+// The coding API's web search: the flat search surcharge and the search vendor
+// bucket on the shared ledger, key cap, Idempotency-Key, cancellation and
+// expiry. Fakes only the search backend and Prisma's client; own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-web-search.db.test.mjs"],
+  "Running the coding API web search's surcharge, vendor budget, cap, idempotency, cancellation and expiry scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

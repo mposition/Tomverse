@@ -591,6 +591,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
     ...(view.web ? { web: { url: clean(view.web.url), host: clean(view.web.host) } } : {}),
+    ...(view.webSearch ? { webSearch: { queries: view.webSearch.queries.map(clean) } } : {}),
     ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
       selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
       ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
@@ -1030,6 +1031,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
+      // The main process gives it only where the server offers it (desktopCodeWebSearch); each call is an approval card.
+      webSearch: command.webSearch === true,
       ...(extensions ? { mcp: extensions.mcp, lifecycleHooks: extensions.hooks } : {}),
       backgroundCommands: !remote,
       images: true,
@@ -1060,7 +1063,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.computer?.text, view.computer?.window.title, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, ...(view.webSearch?.queries ?? []), view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.computer?.text, view.computer?.window.title, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];

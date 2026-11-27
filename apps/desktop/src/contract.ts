@@ -410,6 +410,8 @@ export type Snapshot = {
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
     billing?: boolean; managedCode?: boolean;
+    /** The server offers the Code agent's web_search (charged to the account, approved per call). */
+    codeWebSearch?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */
     turnLocation?: boolean; chatPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;
     /** Deep Research from the Review "+" menu: the server accepts it for a Review and polls its result. */
@@ -450,6 +452,8 @@ export type ApprovalRequest = {
   command?: { mode: string; file: string; args: string[]; cwd: string; display: string; env: string[]; timeoutMs: number; background?: boolean };
   /** A public web page the task asks to read: the address, and the site the approval is for. */
   web?: { url: string; host: string };
+  /** A web search through Tomverse, charged to the account: the queries it would send. */
+  webSearch?: { queries: string[] };
   /** A click or typing in the local browser tab: the site, the page, the element and the text the agent would type. */
   browser?: { action: "click" | "type"; origin: string; url: string; selector: string; text?: string; clear?: boolean; submit?: boolean };
   /** A click, typing, key or scroll in the one desktop window the person chose for the task. */
