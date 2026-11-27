@@ -5,7 +5,7 @@
  * Pure on purpose -- no Prisma, no Node built-ins -- so the settings screen,
  * the API routes, the runner and the tests all read the same limits, the same
  * schedule arithmetic and the same outcome classification. The database CHECKs
- * in `20261127110000_scheduled_tasks` repeat the closed lists below and
+ * in `20261128090000_scheduled_tasks` repeat the closed lists below and
  * `npm run check:enum-constraints` compares the two.
  *
  * The unattended-spend boundary is deterministic code, not configuration:

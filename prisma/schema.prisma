@@ -1740,7 +1740,7 @@ model ChatResponseAttempt {
 /// into one dedicated Chat conversation (lib/scheduledTaskCore.ts). Created only
 /// by the account through /api/scheduled-tasks; run only while
 /// `feature.scheduledTasksEnabled` is on. Closed lists and the schedule shape
-/// are CHECKs in 20261127110000_scheduled_tasks.
+/// are CHECKs in 20261128090000_scheduled_tasks.
 model ScheduledTask {
   id                    String    @id @default(cuid())
   userId                String
