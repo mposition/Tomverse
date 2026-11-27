@@ -49,7 +49,9 @@ import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
 import { z } from "zod";
+import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationStatus } from "./os-location";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand } from "../permission-contract";
@@ -3727,6 +3729,28 @@ function chatLocationAllowed() {
     !suspended && !signingOut && !closing;
 }
 
+/** The operating-system side of a failed position read. Asked only after a failure; the renderer passes nothing. */
+async function osLocationStatus(): Promise<OsLocationStatus> {
+  if (!chatLocationAllowed()) return "unknown";
+  // A test build with the account fixture never reads this computer's registry: the answer is the fixture's, or unknown.
+  if (DESKTOP_FIXTURE_ALLOWED && DESKTOP_AUTH_FIXTURE_ORIGIN) {
+    const fixed = process.env.TOMVERSE_DESKTOP_OS_LOCATION_FIXTURE;
+    return fixed === "off" || fixed === "on" ? fixed : "unknown";
+  }
+  return readOsLocationStatus({
+    platform: process.platform, executablePath: process.execPath,
+    query: (args) => new Promise((resolve, reject) => execFile(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "reg.exe"), args,
+      { windowsHide: true, timeout: 4_000, maxBuffer: 16_384 }, (error, stdout) => (error ? reject(error) : resolve(stdout)))),
+  });
+}
+
+/** Opens the Windows location settings page. The address is the fixed constant, never a value from the renderer. */
+async function openOsLocationSettings() {
+  if (process.platform !== "win32" || !chatLocationAllowed()) return false;
+  await shell.openExternal(WINDOWS_LOCATION_SETTINGS_URI);
+  return true;
+}
+
 function mayRequestChatLocation(contents: Electron.WebContents | null) {
   return Boolean(chatLocationAllowed() && geolocationGrant && !geolocationGrant.session.aborted &&
     Date.now() < geolocationGrant.expiry && mainWindow && !mainWindow.isDestroyed() &&
@@ -3804,6 +3828,8 @@ function registerIpc() {
     geolocationGrant = { session: chatSession.signal, expiry: Date.now() + 12_000 };
     return true;
   });
+  main("desktop:location-os-status", () => osLocationStatus());
+  main("desktop:location-open-settings", () => openOsLocationSettings());
   main("desktop:voice-arm", () => voice.arm());
   main("desktop:voice-disarm", () => voice.disarm());
   main("desktop:voice-request", (value) => voice.request(voiceRequestInput.parse(value)));

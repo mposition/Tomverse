@@ -605,6 +605,8 @@ export const zhHant = {
         locationErrordenied: "位置權限被拒絕。請在瀏覽器或裝置設定中允許後重試。",
         locationErrortimeout: "取得位置逾時，此則訊息將不使用位置。可在 + 工具中重試。",
         locationErrorunavailable: "無法取得目前位置，將不使用位置繼續對話。您也可以直接輸入地點。",
+        locationWindowsOff: "Windows 位置服務已關閉，無法取得目前位置。您也可以直接輸入地點。",
+        locationOpenWindowsSettings: "開啟 Windows 位置設定",
         toolsWebSearchOffDescription: "不搜尋網頁作答。",
         toolsWebSearchOnDescription: "需要最新資訊或來源時會自動搜尋網頁。",
         toolsWebSearchCostNote: "每個執行搜尋的模型會額外扣除 {credits} 點數。未執行搜尋則不額外扣費。",

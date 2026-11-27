@@ -602,6 +602,8 @@ export const fr = {
         locationErrordenied: "Accès à la position refusé. Autorisez-le dans les paramètres du navigateur ou de l’appareil, puis réessayez.",
         locationErrortimeout: "Délai de localisation dépassé. Le message continue sans position. Réessayez depuis + outils.",
         locationErrorunavailable: "Position indisponible. Le message continue sans elle. Vous pouvez saisir un lieu.",
+        locationWindowsOff: "La localisation de Windows est désactivée : votre position actuelle est introuvable. Vous pouvez saisir un lieu.",
+        locationOpenWindowsSettings: "Ouvrir les paramètres de localisation Windows",
         toolsWebSearchOffDescription: "Les réponses sont données sans recherche web.",
         toolsWebSearchOnDescription: "Recherche automatiquement sur le web lorsque des informations récentes ou des sources sont nécessaires.",
         toolsWebSearchCostNote: "{credits} crédits supplémentaires s'appliquent pour chaque modèle qui effectue une recherche. Sans recherche, aucun crédit supplémentaire.",

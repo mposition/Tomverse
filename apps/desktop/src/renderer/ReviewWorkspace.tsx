@@ -19,6 +19,7 @@ import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
 import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
+import { sendToolOptions, shownWebSearchMode } from "./new-conversation-search";
 import { useSendGuard } from "./send-guard";
 import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
 import { DesktopCompareSummary } from "./DesktopCompareSummary";
@@ -180,6 +181,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
   const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
   const location = useChatLocation(deviceLocation && history.account ? history.account : null);
+  // A new Review starts with search on, as on the web; what the switch shows is what the first request carries.
+  const sendTools = sendToolOptions(Boolean(id), toolChanges);
   const { preparing, guarded } = useSendGuard(toolsScope, history.draft);
   const speak = useSpokenCommand(history.draft, () => (document.getElementById("review-draft-input") as HTMLTextAreaElement | null)?.form?.requestSubmit());
   const [arranged, setArranged] = useState<{ key: string; ids: string[] }>();
@@ -391,7 +394,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         // A fresh fix for this message only; a failed read continues without a location.
         const currentLocation = await location.read();
         if (stale()) return;
-        if (await run.send(mode, choices, actualEffort, attachmentUploadIds, undefined, { currentLocation, tools: composerTools ? toolChanges : undefined })) {
+        if (await run.send(mode, choices, actualEffort, attachmentUploadIds, undefined, { currentLocation, tools: composerTools ? sendTools : undefined })) {
           attachments.clear();
           setToolDraft(undefined);
         }
@@ -445,7 +448,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           onResearch={researchOffer ? () => setResearchSetup(toolsScope) : undefined}
           researchBlocked={researchRoom ? undefined : copy.researchNeedsRoom}
           onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
-          options={composerTools ? { webSearchMode: history.conversation?.webSearchMode, memoryMode: history.conversation?.memoryMode,
+          options={composerTools ? { webSearchMode: shownWebSearchMode(Boolean(id), history.conversation?.webSearchMode, undefined), memoryMode: history.conversation?.memoryMode,
             assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
           setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
           {deviceLocation && <ChatLocationTool location={location} disabled={run.running || attachments.uploading || preparing} />}
