@@ -76,7 +76,7 @@ test("Desktop starts, steers and reads Deep Research and Research Preview inside
         if (path === "/api/auth/desktop/session") return Response.json({ ok: true, account: { id: "fixture-account", name: "Research Fixture", email: null } });
         if (path === "/api/auth/desktop/logout") return Response.json({ ok: true });
         if (path === "/api/auth/desktop/settings-session") return Response.json({ token: "fixture..settings.web.session", expiresAt: Date.now() + 300_000 });
-        if (path === "/api/products/chat/capabilities") return Response.json({ autoSelection: { offered: false }, desktopWrite: true, desktopImport: true, desktopPlugins: true,
+        if (path === "/api/products/chat/capabilities") return Response.json({ autoSelection: { offered: false }, desktopWrite: true, desktopImport: true, desktopPlugins: true, desktopChatPlugin: true,
           desktopReview: { easy: true, plan: "Pro", modelLimit: 3 } });
         if (path === "/api/models/catalog") return Response.json({ models: [{ id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", minimumPlan: "Guest", enabled: true, status: "enabled" }] });
         if (path === "/api/user/usage") return Response.json({ plan: "Pro", usage: { creditsMonth: 1 }, limits: { creditsMonth: 100 }, balances: { dailyRemainingCredits: 3, planRemainingCredits: 63, purchasedRemainingCredits: 0 } });

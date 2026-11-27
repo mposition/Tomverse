@@ -338,6 +338,8 @@ test("the templates that had to move are the ones that moved", () => {
     "founding_tester_pass_reminder",
     "founding_tester_pass_ended",
     "admin_plan_changed",
+    "plan_change_upgraded",
+    "plan_change_downgrade_scheduled",
   ]) {
     assert.equal(roleOf(key), "billing", key);
   }

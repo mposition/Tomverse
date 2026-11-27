@@ -405,6 +405,19 @@ async function loadProcessor() {
         settlePlanChangesForSubscription: async () => undefined,
       },
     });
+    // Deletion reconciliation has its own tests
+    // (tests/server-contract/deletion-renewal-stop.test.ts); no account here is
+    // pending deletion.
+    mock.module(mod("lib/deletionCancellation.ts"), {
+      namedExports: {
+        keepDeletionCancellation: async () => ({ pendingDeletion: false, cancelled: false }),
+        stopDeletionPendingRenewal: async () => ({
+          pendingDeletion: false,
+          cancelled: false,
+          invoiceFinalized: false,
+        }),
+      },
+    });
     mock.module(mod("lib/productAnalyticsServer.ts"), {
       namedExports: {
         ...original("lib/productAnalyticsServer.ts"),

@@ -12,6 +12,7 @@ import {
   buildAdminPlanChangedEmail,
   buildBillingWelcomeEmail,
   buildFoundingTesterPassEmail,
+  buildPlanChangeEmail,
 } from "@/lib/billingEmails";
 import {
   buildEmailLoginCodeEmail,
@@ -145,6 +146,13 @@ export type BillingWelcomePayload = {
  * renderer already did for a missing date.
  */
 export type FoundingTesterPassPayload = { periodEnd: string | null };
+/** The two plan-change confirmations. Dates are ISO strings resolved by the caller. */
+export type PlanChangeEmailPayload = {
+  fromPlan: string | null;
+  toPlan: string | null;
+  billingInterval: string | null;
+  effectiveAt: string | null;
+};
 export type AdminPlanChangedPayload = {
   plan: string | null;
   billingInterval: string | null;
@@ -185,6 +193,10 @@ export const FOUNDING_TESTER_PASS_REMINDER_TEMPLATE =
   "founding_tester_pass_reminder";
 export const FOUNDING_TESTER_PASS_ENDED_TEMPLATE = "founding_tester_pass_ended";
 export const ADMIN_PLAN_CHANGED_TEMPLATE = "admin_plan_changed";
+/** Two keys for the same reason as the pass notices above: one hash per message. */
+export const PLAN_CHANGE_UPGRADED_TEMPLATE = "plan_change_upgraded";
+export const PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE =
+  "plan_change_downgrade_scheduled";
 /**
  * The two login-method notices. Two keys rather than one with a branch: the
  * registry hashes one `placeholderPayload` per template, so a template that
@@ -410,6 +422,38 @@ const definitions: AnyDefinition[] = [
       plan: "{{plan}}",
       billingInterval: "{{billingInterval}}",
       periodEnd: null,
+    },
+  },
+  // Confirmation of a change the customer made themselves; transactional like
+  // the receipt it follows (docs/policy/plan-change.md section 9).
+  {
+    key: PLAN_CHANGE_UPGRADED_TEMPLATE,
+    senderRole: "billing",
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: PlanChangeEmailPayload, language) =>
+      buildPlanChangeEmail("upgraded", { ...payload, language }),
+    placeholderPayload: {
+      fromPlan: "{{fromPlan}}",
+      toPlan: "{{toPlan}}",
+      billingInterval: "{{billingInterval}}",
+      effectiveAt: null,
+    },
+  },
+  {
+    key: PLAN_CHANGE_DOWNGRADE_SCHEDULED_TEMPLATE,
+    senderRole: "billing",
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: PlanChangeEmailPayload, language) =>
+      buildPlanChangeEmail("downgrade_scheduled", { ...payload, language }),
+    placeholderPayload: {
+      fromPlan: "{{fromPlan}}",
+      toPlan: "{{toPlan}}",
+      billingInterval: "{{billingInterval}}",
+      effectiveAt: null,
     },
   },
   // The plan a person is on is what they are owed for their money, so the four

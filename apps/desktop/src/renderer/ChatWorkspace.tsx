@@ -33,6 +33,9 @@ import { zh } from "../../../../locales/zh";
 import { zhHant } from "../../../../locales/zhHant";
 import { reviewSeedFromChat } from "../../../../lib/chatReviewHandoff";
 import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
+import { useSendGuard } from "./send-guard";
+import { DesktopVoiceConversation } from "./DesktopVoiceConversation";
+import type { VoiceConversationCapability } from "../voice-contract";
 import { DraftDictation } from "./DraftDictation";
 import { ImportedSourceUnlock } from "./ImportedSourceUnlock";
 import { AnswerModel, ChatMarkdown, CopyAnswer, UserMessageContent } from "./ChatTranscript";
@@ -427,9 +430,11 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setRefresh((value) => value + 1);
   }
 
-  async function send(input: Omit<ChatTurnInput, "requestId" | "conversationId" | "prompt">) {
+  /** Sends the draft; the voice conversation sends the words it heard instead. The whole result comes back. */
+  async function dispatch(input: Omit<ChatTurnInput, "requestId" | "conversationId" | "prompt">, spoken?: string) {
+    const prompt = spoken ?? draft;
     if (writing || changingConversation.current || sendingId.current || selectedRow?.isLocked ||
-      (!draft.trim() && !input.attachmentUploadIds?.length && !input.handoffId) || (selected && !conversation)) return false;
+      (!prompt.trim() && !input.attachmentUploadIds?.length && !input.handoffId) || (selected && !conversation)) return null;
     const requestId = crypto.randomUUID();
     const previous = conversation;
     sendingId.current = requestId;
@@ -437,10 +442,10 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     setLive(null);
     setNotice(null);
     try {
-      const result = await window.desktop.sendChat({ ...input, prompt: draft, requestId, conversationId: previous?.id,
+      const result = await window.desktop.sendChat({ ...input, prompt, requestId, conversationId: previous?.id,
         ...(!previous && newChatProject ? { projectId: newChatProject.id } : {}) });
-      if (sendingId.current !== requestId) return false;
-      if (result.savedQuestion) setDraft("");
+      if (sendingId.current !== requestId) return null;
+      if (result.savedQuestion && spoken === undefined) setDraft("");
       if (result.conversation) { applyConversation(result.conversation); setNewChatProject(null); }
       setLive(result.partial && result.conversation ? {
         requestId, conversationId: result.conversation.id, text: result.partial, modelId: result.modelId, applied: result.applied,
@@ -448,10 +453,10 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
       if (result.imageOffer) showImageOffer(result.imageOffer);
       setNotice(result.imageOffer ? null : result.contextChanged ? "contextChanged" : statusNotice[result.status]);
       if (!result.conversation) setRefresh((value) => value + 1);
-      return result.savedQuestion;
+      return result;
     } catch {
       if (sendingId.current === requestId) setNotice(statusNotice.failed);
-      return false;
+      return null;
     } finally {
       if (sendingId.current === requestId) {
         sendingId.current = null;
@@ -460,12 +465,14 @@ export function useChatHistory(active: boolean, product: DesktopTextProduct, acc
     }
   }
 
+  const send = async (input: Parameters<typeof dispatch>[0]) => (await dispatch(input))?.savedQuestion ?? false;
+
   return { account, rows: rows.map(row => pins[row.id] === undefined ? row : { ...row, pinned: pins[row.id] }),
     hits: result?.hits ?? [], query, setQuery, listStatus, searchFailed: result?.failed === true, listQuery,
     selected: selectedRow && { ...selectedRow, pinned: selectedPinned ?? undefined },
     conversation: selectedRow?.isLocked ? null : conversation, language,
     notice: notice === "contextChanged" ? desktopPrivacyCopy(language).contextChanged : notice ? desktopChatCopy[language][notice] : "",
-    opening, writing, open, more, rename, remove, togglePin, applyConversation, projects, refreshProjects, moveToProject, updateConversationActions,
+    opening, writing, open, more, rename, remove, togglePin, applyConversation, dispatch, projects, refreshProjects, moveToProject, updateConversationActions,
     projectRoute, setProjectRoute, newChatProject, openProjectChat, openConversationRow, showConversation,
     withConversationWrite, draft, setDraft, newDraft: () => readDesktopDraft(draftAccount.current, `${product}:new`),
     sending, send, live: selectedRow?.isLocked ? null : live, reload: () => setRefresh((value) => value + 1) };
@@ -872,14 +879,16 @@ export function ImportedSource({ id, language }: { id: string; language: Languag
   </section>;
 }
 
-export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, deviceFixture, deviceLocation,
+export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompare, preferredModelId, starters, attachments, online, handoff, dictation, voiceConversation, deviceLocation,
   plan, imageCapability, onModelImage, composerTools, searchReadiness, deepResearch, connectors, onManageConnectors }: {
   chat: History; chatWrite: boolean; autoOffered: boolean; onImport?: () => void; onCompare?: (prompt: string, continuationId?: string) => void; starters?: ChatStarter[];
   preferredModelId?: string;
   attachments: DesktopAttachmentDraft;
   online: boolean;
   handoff?: WorkspaceHandoff;
-  deviceFixture: boolean;
+  dictation: boolean;
+  /** The two-way voice conversation, where the server offers it. */
+  voiceConversation?: VoiceConversationCapability | null;
   /** The host can read the device position for a message the person switched "Current location" on for. */
   deviceLocation: boolean;
   plan: ModelTier; imageCapability: ImageCapability | null; onModelImage(modelId: string, prompt: string): void;
@@ -949,22 +958,12 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     if (scroll.current && nearBottom.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat.live, chat.conversation]);
 
-  // Uploads and the position read take time. A message is sent only if the account and conversation never
-  // changed meanwhile (leaving and coming back counts as a change) and the draft is still the one it was.
-  const scopeChanges = useRef(0);
-  useLayoutEffect(() => { scopeChanges.current += 1; }, [toolsScope]);
-  const latestDraft = useRef(chat.draft);
-  useLayoutEffect(() => { latestDraft.current = chat.draft; });
-  const [preparing, setPreparing] = useState(false);
+  const { preparing, guarded } = useSendGuard(toolsScope, chat.draft);
   async function send(depth?: DeepResearchDepth) {
     const model = depth ? researchModel : selectedModel;
     if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || preparing ||
         chat.sending || chat.writing || location.state.pending || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
-    const changes = scopeChanges.current;
-    const draft = chat.draft;
-    const stale = () => scopeChanges.current !== changes || latestDraft.current !== draft;
-    setPreparing(true);
-    try {
+    await guarded(async (stale) => {
       const attachmentUploadIds = await attachments.prepare();
       if (!attachmentUploadIds || stale()) return;
       // A fresh fix for this message only; a failed read continues without a location.
@@ -976,9 +975,20 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
         tools: composerTools ? toolChanges : undefined });
       if (saved) { attachments.clear(); setToolDraft(undefined); }
-    } finally {
-      setPreparing(false);
-    }
+    });
+  }
+
+  // The voice conversation is for a plain, unlocked Chat: no words typed, no files, no excerpt waiting.
+  const voicePrimary = Boolean(voiceConversation && chatWrite && !chat.sending && !chat.draft.trim() && !attachments.files.length &&
+    !attachments.uploading && !draftExcerpt && !chat.selected?.isLocked);
+  /** What the voice heard goes through the ordinary Send: the same model choice, tools, credits and saved messages. */
+  async function requestVoiceAnswer(text: string) {
+    if (!chatWrite || !online || !selectedModel || chat.draft.trim() || attachments.files.length || draftExcerpt) throw new Error("The composer is busy.");
+    const result = await chat.dispatch({ modelId: selectedModel.id, selectionMode: mode, effort: effortEnabled ? effort : "default",
+      attachmentUploadIds: [], currentLocation: await location.read(), tools: composerTools ? toolChanges : undefined }, text);
+    if (result?.savedQuestion) setToolDraft(undefined);
+    if (!result?.conversation || !result.sourceUserMessageId || result.status !== "saved") throw new Error("The voice answer did not finish.");
+    return { conversationId: result.conversation.id, sourceUserMessageId: result.sourceUserMessageId };
   }
 
   const live = chat.live;
@@ -1146,11 +1156,18 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
             {mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
             {effortEnabled && effort !== "default" && ` · ${effortLabels[effort]}`}
           </DesktopModelPicker>
-          {deviceFixture && <DraftDictation language={language} scope={"chat:" + (activeId ?? "new")}
+          {dictation && <DraftDictation language={language} scope={"chat:" + (activeId ?? "new")}
             disabled={chat.sending || attachments.uploading || preparing} draft={chat.draft} setDraft={chat.setDraft} />}
+          {/* With an empty draft the voice conversation takes the Send button's place, as on the web. It stays mounted while an answer is sent. */}
+          {voiceConversation && chatWrite && <DesktopVoiceConversation language={language} capability={voiceConversation}
+            conversationId={activeId ?? null} scopeKey={chat.account ?? ""} primary={voicePrimary}
+            disabled={!online || !selectedModel || chat.writing || preparing}
+            selectionLabel={mode === "auto" ? autoCopy.label : selectedModel?.name ?? shellCopy.model}
+            searchEnabled={(toolChanges?.webSearchMode ?? chat.conversation?.webSearchMode) === "always"}
+            onRequest={requestVoiceAnswer} />}
           {chat.sending
             ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={17} /></button>
-            : <button className="send" type="submit" aria-label={copy.send}
+            : !voicePrimary && <button className="send" type="submit" aria-label={copy.send}
               disabled={!chatWrite || !online || !selectedModel || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || chat.writing || attachments.uploading || preparing}><ArrowUp size={18} /></button>}
         </div>
       </form>

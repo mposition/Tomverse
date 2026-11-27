@@ -30,7 +30,7 @@ import type { AccountPreferences, AccountTheme } from "../account-settings-contr
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
-import { DraftDictation } from "./DraftDictation";
+import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { ChatDraftPlace } from "./ChatDraftLocation";
 import { TaskGithubPulls } from "./TaskGithubPulls";
 import { GitPanel } from "./GitPanel";
@@ -341,6 +341,7 @@ function Desktop() {
   const scrollViewport = useRef<{ width: number; height: number } | null>(null);
   const nearBottom = useRef(true);
   const composer = useRef<HTMLTextAreaElement>(null);
+  const speakCode = useSpokenCommand(prompt, () => composer.current?.form?.requestSubmit());
   const historyHeading = useRef<HTMLHeadingElement>(null);
   const historyToggle = useRef<HTMLButtonElement>(null);
   const historySearchToggle = useRef<HTMLButtonElement>(null);
@@ -1154,15 +1155,20 @@ ${text}` : text;
                     <small>{copy.effortFallback}</small>}
                 </div>
               </details>}
-              {snapshot?.deviceFixtureAvailable && snapshot.draftNamespace && <DraftDictation language={language} disabled={busy}
+              {snapshot?.dictationAvailable && snapshot.draftNamespace && <DraftDictation language={language} disabled={busy}
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
               {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftPlace language={language}
                 draft={prompt} setDraft={changeDraft} maxLength={MAX_CODE_PROMPT_CHARACTERS} disabled={Boolean(busy || pausedForInput)} />}
               {queueTarget && <button className="soft" type="button" disabled={!canQueue} onClick={() => void queueDraft()}>
                 {desktopCodeEngineCopy[language].queueAdd}</button>}
-              <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
-                title={queueTarget ? desktopCodeEngineCopy[language].sendNow : undefined}
-                disabled={!canSendCode && !(canQueue && !!task?.pendingFollowUp)}><ArrowUp size={19} /></button>
+              {/* With an empty draft, a spoken instruction takes the Send button's place. Approvals stay on screen: nothing is approved by voice. */}
+              {snapshot?.dictationAvailable && snapshot.draftNamespace && !prompt.trim() && !codeHandoff && online && snapshot.root && !requesting
+                ? <DraftDictation language={language} disabled={false} maxLength={MAX_CODE_PROMPT_CHARACTERS}
+                  scope={snapshot.draftNamespace + ":command:" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft}
+                  onCommand={speakCode} />
+                : <button className="send" type="submit" aria-label={snapshot?.busy || pausedForInput ? copy.sendFollowUp : copy.sendCode}
+                  title={queueTarget ? desktopCodeEngineCopy[language].sendNow : undefined}
+                  disabled={!canSendCode && !(canQueue && !!task?.pendingFollowUp)}><ArrowUp size={19} /></button>}
               {snapshot?.busy && <button className="icon stop" type="button" aria-label={copy.stopCode} onClick={() => void act(() => window.desktop.stop())}><Square size={15} /></button>}
             </div>
           </form>
@@ -1182,17 +1188,19 @@ ${text}` : text;
         plan={(usage?.account === accountDraft ? usage?.plan : undefined) ?? snapshot?.capabilities?.review?.plan ?? "Free"}
         imageCapability={imageCapability} onModelImage={openImageModel}
         deepResearch={snapshot?.capabilities?.deepResearch} composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
-        connectors={snapshot?.capabilities?.plugins === true} onManageConnectors={() => select("plugins")}
+        connectors={snapshot?.capabilities?.chatPlugin === true} onManageConnectors={() => select("plugins")}
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
-        deviceFixture={snapshot?.deviceFixtureAvailable === true} deviceLocation={snapshot?.chatLocationAvailable === true}
+        dictation={snapshot?.dictationAvailable === true} voiceConversation={snapshot?.capabilities?.voiceConversation}
+        deviceLocation={snapshot?.chatLocationAvailable === true}
         handoff={handoff?.target === "chat" ? handoff : undefined} /></> : nativeReview ? <ReviewWorkspace history={review}
           capability={snapshot?.capabilities?.review ?? null} run={reviewRun} preferredModelIds={accountModels}
           analysisEnabled={snapshot?.capabilities?.reviewAnalysis} searchReadiness={snapshot?.capabilities?.searchReadiness}
           imageCapability={imageCapability} onModelImage={openImageModel}
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
-          attachments={reviewAttachments} online={online} dictation={snapshot?.deviceFixtureAvailable === true}
+          attachments={reviewAttachments} online={online} dictation={snapshot?.dictationAvailable === true}
+          composerTools={snapshot?.capabilities?.reviewTools} deviceLocation={snapshot?.chatLocationAvailable === true}
           onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">

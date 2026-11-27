@@ -60,6 +60,8 @@ import {
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
+import { PlanChangeDialog } from "@/components/billing/PlanChangeDialog";
+import { planChangeText } from "@/components/billing/planChangeCopy";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 import type { ConversationProductKey } from "@/lib/conversationProduct";
@@ -224,6 +226,9 @@ export function AuthButton({
     const [isRequestingRefund, setIsRequestingRefund] = useState(false);
     const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
     const [subscriptionCancelAtPeriodEnd, setSubscriptionCancelAtPeriodEnd] = useState(false);
+    const [isResumingRenewal, setIsResumingRenewal] = useState(false);
+    const [planChangeOpen, setPlanChangeOpen] = useState(false);
+    const planChangeTriggerRef = useRef<HTMLButtonElement | null>(null);
     const [refundReason, setRefundReason] = useState("");
     const [refundRequestedAt, setRefundRequestedAt] = useState<string | null>(() => {
         if (typeof window === "undefined") return null;
@@ -272,6 +277,27 @@ export function AuthButton({
                 : null;
     const mobileUpgradePlan =
         accountPlan === "Free" ? "Pro" : accountPlan === "Pro" ? "Max" : null;
+    // A live web subscription is changed, never bought again: a second
+    // Checkout is refused by /api/billing/checkout with 409, on purpose
+    // (docs/policy/plan-change.md section 5). So Pro <-> Max here opens the
+    // plan-change screen, in both directions.
+    const hasLiveWebSubscription = ["active", "trialing", "past_due"].includes(
+        accountUsage?.subscription?.status ?? ""
+    );
+    const planChangeTier: "Pro" | "Max" | null = !hasLiveWebSubscription
+        ? null
+        : accountPlan === "Pro"
+            ? "Max"
+            : accountPlan === "Max"
+                ? "Pro"
+                : null;
+    const planChangeCopy = planChangeText(globalLang);
+    const planChangeLabel =
+        planChangeTier === "Max"
+            ? planChangeCopy.settingsUpgradeTo("Max")
+            : planChangeTier === "Pro"
+                ? planChangeCopy.settingsChangeTo("Pro")
+                : "";
     const timeZoneOptions = useMemo(() => {
         const intl = Intl as typeof Intl & {
             supportedValuesOf?: (key: "timeZone") => string[];
@@ -1194,6 +1220,38 @@ export function AuthButton({
             );
         } finally {
             setIsCancellingSubscription(false);
+        }
+    };
+
+    // Undo a scheduled cancellation. Its own control: a plan change never does
+    // this as a side effect, and the downgrade refusal for a cancelled
+    // subscription tells the customer to do exactly this first.
+    const handleResumeRenewal = async () => {
+        if (isResumingRenewal || !subscriptionCancelAtPeriodEnd) return;
+        setIsResumingRenewal(true);
+        try {
+            const response = await fetch("/api/billing/cancel-subscription", {
+                method: "DELETE",
+            });
+            const data = (await response.json().catch(() => null)) as
+                | { code?: string; cancelAtPeriodEnd?: boolean }
+                | null;
+            if (!response.ok) {
+                dispatchAppToast(
+                    data?.code === "ACCOUNT_DELETION_PENDING"
+                        ? planChangeCopy.resumeRenewalBlocked
+                        : planChangeCopy.resumeRenewalFailed,
+                    "error"
+                );
+                return;
+            }
+            setSubscriptionCancelAtPeriodEnd(Boolean(data?.cancelAtPeriodEnd));
+            notifyUserUsageChanged();
+            dispatchAppToast(planChangeCopy.resumeRenewalDone, "success");
+        } catch {
+            dispatchAppToast(planChangeCopy.resumeRenewalFailed, "error");
+        } finally {
+            setIsResumingRenewal(false);
         }
     };
 
@@ -2210,6 +2268,21 @@ export function AuthButton({
                                                             {t("auth.cancelPlanNotice")}
                                                         </p>
                                                     )}
+                                                    {subscriptionCancelAtPeriodEnd &&
+                                                        ["active", "trialing"].includes(accountUsage?.subscription?.status ?? "") && (
+                                                        <button
+                                                            type="button"
+                                                            data-testid="account-resume-renewal"
+                                                            onClick={handleResumeRenewal}
+                                                            disabled={isResumingRenewal}
+                                                            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        >
+                                                            <CreditCard className="h-4 w-4" />
+                                                            {isResumingRenewal
+                                                                ? planChangeCopy.working
+                                                                : planChangeCopy.resumeRenewalButton}
+                                                        </button>
+                                                    )}
                                                 </section>
 
                                                 <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
@@ -2292,7 +2365,22 @@ export function AuthButton({
                                             </ul>
                                         </section>
                                         <div className="grid gap-2 sm:grid-cols-2">
-                                            {accountPlan !== "Max" && <UpgradeInterestButton
+                                            {planChangeTier ? (
+                                                <button
+                                                    type="button"
+                                                    data-testid="account-plan-change"
+                                                    data-target-plan={planChangeTier}
+                                                    onClick={(event) => {
+                                                    // Whichever button opened it gets focus back.
+                                                    planChangeTriggerRef.current = event.currentTarget;
+                                                    setPlanChangeOpen(true);
+                                                }}
+                                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500"
+                                                >
+                                                    <CreditCard className="h-4 w-4" />
+                                                    {planChangeLabel}
+                                                </button>
+                                            ) : accountPlan !== "Max" && <UpgradeInterestButton
                                                 plan={accountPlan === "Pro" ? "Max" : "Pro"}
                                                 trigger="account"
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-70"
@@ -2310,15 +2398,46 @@ export function AuthButton({
                                                 {globalLang === "ko" ? "추가 크레딧 구매" : "Buy additional credits"}
                                             </CreditPackPurchaseButton>
                                         </div>
+                                        {planChangeTier ? (
+                                            <PlanChangeDialog
+                                                open={planChangeOpen}
+                                                onOpenChange={setPlanChangeOpen}
+                                                targetTier={planChangeTier}
+                                                billingInterval={
+                                                    accountUsage?.subscription?.billingInterval === "annual" ||
+                                                    accountUsage?.subscription?.billingInterval === "monthly"
+                                                        ? accountUsage.subscription.billingInterval
+                                                        : null
+                                                }
+                                                lang={globalLang}
+                                                onSettled={notifyUserUsageChanged}
+                                                returnFocusToRef={planChangeTriggerRef}
+                                            />
+                                        ) : null}
                                     </div>
                                 )}
                             </div>
                         </div>
 
                         <div className="border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">
-                            {activeSettingsTab === "plan" && mobileUpgradePlan ? (
+                            {activeSettingsTab === "plan" && (mobileUpgradePlan || planChangeTier) ? (
                                 <div className="flex w-full flex-col gap-2 sm:hidden">
-                                    <UpgradeInterestButton
+                                    {planChangeTier ? (
+                                        <button
+                                            type="button"
+                                            data-testid="account-plan-change-mobile"
+                                            data-target-plan={planChangeTier}
+                                            onClick={(event) => {
+                                                    // Whichever button opened it gets focus back.
+                                                    planChangeTriggerRef.current = event.currentTarget;
+                                                    setPlanChangeOpen(true);
+                                                }}
+                                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent-plan-max-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-accent-plan-max-500"
+                                        >
+                                            <CreditCard className="h-4 w-4" />
+                                            {planChangeLabel}
+                                        </button>
+                                    ) : mobileUpgradePlan ? <UpgradeInterestButton
                                         plan={mobileUpgradePlan}
                                         trigger="account"
                                         className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
@@ -2331,7 +2450,7 @@ export function AuthButton({
                                         {mobileUpgradePlan === "Max"
                                             ? t("billing.joinMaxWaitlist")
                                             : t("billing.joinProWaitlist")}
-                                    </UpgradeInterestButton>
+                                    </UpgradeInterestButton> : null}
                                     <button
                                         type="button"
                                         onClick={handleSaveSettings}
@@ -2344,7 +2463,7 @@ export function AuthButton({
                             ) : null}
                             <div
                                 className={`justify-end gap-2 ${
-                                    activeSettingsTab === "plan" && mobileUpgradePlan
+                                    activeSettingsTab === "plan" && (mobileUpgradePlan || planChangeTier)
                                         ? "hidden sm:flex"
                                         : "flex"
                                 }`}

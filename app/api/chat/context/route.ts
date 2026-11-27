@@ -8,7 +8,7 @@ import {
     readLimitedJson,
 } from "@/lib/apiSecurity";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
+import { DESKTOP_APP_ORIGIN, desktopConversationWriteProduct } from "@/lib/desktopReadApiContract";
 import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
         let query = payload.prompt;
         if (conversationId) {
             const conversation = await prisma.conversation.findUnique({
-                where: { id: conversationId, userId, ...(desktopPayload ? { productKey: "chat", kind: "chat" } : {}) },
+                where: { id: conversationId, userId, ...(desktopPayload ? { kind: "chat" } : {}) },
                 select: {
                     userId: true,
                     password: true, passwordVersion: true,
@@ -160,10 +160,12 @@ export async function POST(request: Request) {
                     memoryMode: true,
                     assistantProfileVersionId: true,
                     projectId: true,
-                    ...(desktopPayload ? { selectedModels: true, disabledPanels: true } : {}),
+                    ...(desktopPayload ? { selectedModels: true, disabledPanels: true, productKey: true } : {}),
                 },
             });
-            if (!conversation || conversation.userId !== userId) {
+            // Desktop prepares a context for a conversation it may write: a Chat, or a Review turn that one model answers alone.
+            if (!conversation || conversation.userId !== userId ||
+                (desktopPayload && !desktopConversationWriteProduct({ kind: conversation.kind, productKey: conversation.productKey ?? null }))) {
                 return Response.json(
                     {
                         error: "Conversation access denied.",
@@ -189,7 +191,7 @@ export async function POST(request: Request) {
             if (desktopPayload) {
                 if (conversation.password !== null) return conversationLockedResponse();
                 const saved = await prisma.message.findFirst({
-                    where: { conversationId, role: "user", conversation: { userId, productKey: "chat", kind: "chat", password: null } },
+                    where: { conversationId, role: "user", conversation: { userId, kind: "chat", password: null } },
                     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
                     select: { id: true, content: true },
                 });
