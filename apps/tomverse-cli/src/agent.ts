@@ -189,6 +189,8 @@ const COMPACT_AT = 0.75;
 const MAX_TIMER_MS = 2_147_483_647;
 const MAX_QUEUED_MESSAGES = 20;
 const MAX_IMAGES_PER_STEP = 4;
+/** The history keeps the newest three images as data (trimOldImages), so the person's instruction carries at most that many. */
+export const MAX_PERSON_PICTURES = 3;
 export { VIEW_IMAGE_MARK, estimateTokens };
 const GOAL_SYSTEM = [
     "You judge whether a coding agent has finished the request its user gave it. You get the request and the session so far.",
@@ -347,6 +349,8 @@ export class Runner {
     private readonly epoch = randomBytes(4).toString("hex");
     /** Images view_image read during the current step; they join the history right after its tool results. */
     private pendingImages: ImageAttachment[] = [];
+    /** Pictures the person sent with a follow-up that waits for the next step (kept in memory only; a resumed session has none). */
+    private followUpPictures = new WeakMap<object, ImageAttachment[]>();
     /** Pictures that are sent with the next request only and never saved (window screenshots). */
     private ephemeralMessages: ModelMessage[] = [];
     private readonly nested: NestedInstructions | undefined;
@@ -735,6 +739,16 @@ export class Runner {
         return [`The background commands of earlier runs of this session (before it was resumed) were ended with their task and are not tracked now; start one again if you need it: ${shown.join("; ")}.`];
     }
 
+    /** The person's own pictures follow their instruction as one message of the user's role; a model that cannot see images gets none. */
+    private attachPictures(pictures: ImageAttachment[]) {
+        if (!pictures.length) return;
+        let sees = false;
+        try { sees = this.model().vision; } catch { /* The loop reports a model that is gone. */ }
+        if (!sees) return;
+        this.journal.state.messages.push(imageMessage(pictures.slice(0, MAX_PERSON_PICTURES)));
+        trimOldImages(this.journal.state.messages);
+    }
+
     /** The tools this model is offered: view_image only for a model whose catalogue entry says it takes images. */
     private toolsFor(model: CatalogModel): ToolSet {
         if (model.vision || !(this.tools.view_image || this.tools.browser_screenshot || this.computer)) return this.tools;
@@ -892,9 +906,13 @@ export class Runner {
         if (!isEffort(effort)) throw new GatewayError("protocol", "Effort must be default or a level the model offers (see `tomverse models`).");
     }
 
+    /**
+     * `pictures`: images the person sent with the instruction (an element they picked in the browser panel). They go to the model right
+     * after the instruction, only when this model takes images; for any other model the task is text only, as before.
+     */
     async runTask(prompt: string, effort: Effort = "default", context?: {
         visiblePrompt: string; references: import("./workspace.js").WorkspaceReference[];
-    }): Promise<Outcome> {
+    }, pictures: ImageAttachment[] = []): Promise<Outcome> {
         this.assertEffort(effort);
         const { journal } = this;
         await this.ext.sessionStart();
@@ -912,6 +930,7 @@ export class Runner {
         this.markTurn("prompt", journal.state.tasks.length, context?.visiblePrompt ?? prompt);
         this.subagents?.newTask();
         journal.state.messages.push({ role: "user", content: message });
+        this.attachPictures(pictures);
         journal.state.tasks.push({
             prompt: context?.visiblePrompt ?? prompt,
             ...(references.length ? { references } : {}),
@@ -946,13 +965,15 @@ export class Runner {
     }
 
     /** Holds one explicit instruction for the next model step in the current task. */
-    queueFollowUp(text: string): boolean {
+    queueFollowUp(text: string, pictures: ImageAttachment[] = []): boolean {
         const { journal, options } = this;
         const task = journal.state.tasks.at(-1);
         if (!task || journal.state.status !== "running" || this.controller.signal.aborted ||
             task.requests >= task.allowance || task.activeMs >= task.timeAllowanceMs || this.pendingFollowUp()) return false;
         options.assertAllowed?.();
-        (task.followUps ??= []).push({ text });
+        const entry = { text };
+        (task.followUps ??= []).push(entry);
+        if (pictures.length) this.followUpPictures.set(entry, pictures);
         journal.commit();
         return true;
     }
@@ -1327,6 +1348,7 @@ export class Runner {
                 if (!followUp.auto) this.markTurn("follow_up", journal.state.tasks.length - 1, followUp.text);
                 const expanded = followUp.auto ? null : options.expandFollowUp?.(followUp.text) ?? null;
                 journal.state.messages.push({ role: "user", content: expanded?.prompt ?? followUp.text });
+                this.attachPictures(this.followUpPictures.get(followUp) ?? []);
                 const task = this.currentTask();
                 const plan = task.plan;
                 if (plan) {
