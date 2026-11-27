@@ -352,7 +352,11 @@ export type UpdateState = {
 export type TaskSummary = { id: string; title: string; status: string; unreadable?: true };
 export type AccountState = ({ stage: "unavailable" | "idle" | "waiting" | "restoring" | "signing-out" | "failed" | "expired" }
   | { stage: "connected"; label: string; storage: "device" | "session"; draftNamespace: string }) & { detail?: DesktopDetail };
-export type CodeKeyState = ({ stage: "missing" | "checking" } | { stage: "connected"; prefix: string; storage: "device" | "session" }) & { detail?: DesktopDetail };
+/**
+ * How Code reaches the Tomverse API. `account`: the signed-in Desktop session itself (the server reports
+ * `desktopCodeSession`), so there is no key to connect; the other stages are the Code key path an older server needs.
+ */
+export type CodeKeyState = ({ stage: "missing" | "checking" | "account" } | { stage: "connected"; prefix: string; storage: "device" | "session" }) & { detail?: DesktopDetail };
 
 export type Snapshot = {
   codeGitWorkspace?: CodeGitWorkspace;
@@ -373,7 +377,8 @@ export type Snapshot = {
   draftNamespace: string | null;
   handoff: WorkspaceHandoff | null;
   models: Model[];
-  codeCatalog: "unavailable" | "loading" | "ready" | "failed";
+  /** `planRequired`: the server refused the account's plan for Code (Pro and above), with a key or the session alike. */
+  codeCatalog: "unavailable" | "loading" | "ready" | "failed" | "planRequired";
   task: Task | null;
   history: TaskSummary[];
   moreHistory: boolean;
@@ -418,6 +423,8 @@ export type Snapshot = {
     billing?: boolean; managedCode?: boolean;
     /** The server offers the Code agent's web_search (charged to the account, approved per call). */
     codeWebSearch?: boolean;
+    /** Code runs on the signed-in Desktop session; no Code key is connected or used. */
+    codeSession?: boolean;
     /** Code tasks on a Tomverse runner (cloud-execution-contract.ts): the server names it only when its switch is on. */
     cloudExecution?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */

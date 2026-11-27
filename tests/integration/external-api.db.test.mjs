@@ -1510,7 +1510,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             keys.updateExternalApiKey({ userId: other, keyId: summary.id, name: "stolen" }, { session: sessionFor(other), request: auditRequest() }),
             (error) => error.status === 404
         );
-        assert.deepEqual(await keys.externalApiKeyUsage(otherKey.summary.id), []);
+        assert.deepEqual(await keys.externalApiKeyUsage({ keyId: otherKey.summary.id }), []);
     });
 
     await t.test("request status lookup: own key only, by receipt id or Idempotency-Key, read only", async () => {
@@ -1591,7 +1591,7 @@ test("external inference API over the real shared credit ledger", { skip: !datab
 
         // Older than the 100 receipts /usage lists: still found by its key.
         for (let i = 0; i < 100; i += 1) assert.equal((await call(key, body())).status, 200);
-        const listed = await keys.externalApiKeyUsage((await keys.listExternalApiKeys(userId)).find((k) => k.keyPrefix === key.slice(0, 12)).id, 100);
+        const listed = await keys.externalApiKeyUsage({ keyId: (await keys.listExternalApiKeys(userId)).find((k) => k.keyPrefix === key.slice(0, 12)).id }, 100);
         assert.ok(!listed.some((receipt) => receipt.requestId === requestId), "pushed out of the recent list");
         assert.equal((await lookup(key, { idempotencyKey: "cli-step-1" })).status, 200);
 

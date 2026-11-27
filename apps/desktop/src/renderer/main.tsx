@@ -620,7 +620,8 @@ function Desktop() {
     : (prompt.trim() || codeHandoff) && codeRoute.executionMode === "tomverse_api" &&
       (codeGit?.kind !== "unavailable" || workspaceChoice?.kind === "local");
   const canSendCode = online && snapshot?.root && !requesting && (snapshot.busy || pausedForInput ? canFollowUp && prompt.trim() : canStartCode);
-  const handoffSource = account?.stage === "connected" && !nativeImages && (snapshot?.localFixture || snapshot?.codeKey.stage === "connected")
+  const handoffSource = account?.stage === "connected" && !nativeImages &&
+    (snapshot?.localFixture || snapshot?.codeKey.stage === "connected" || snapshot?.codeKey.stage === "account")
     ? nativeChat && chat.conversation ? "chat" : surface === "code" && snapshot?.capabilities?.chatWrite && task?.id ? "code" : null : null;
   const selectedExcerpt = useHandoffSelection(handoffSource, handoffSource === "chat" ? chat.conversation?.id : task?.id);
   function openReviewReference(reference: string) {
@@ -634,10 +635,15 @@ function Desktop() {
   const visibleCodeHistory = surface === "code" ? snapshot?.history
     .map((entry) => ({ ...entry, title: entry.unreadable ? native.unreadableTask : entry.title || copy.codeTask }))
     .filter(({ title }) => title.toLowerCase().includes(historyFilter)) ?? [] : [];
-  const catalogUnavailable = codeCatalog === "failed" || (codeCatalog === "ready" && !selectedModel);
+  const catalogUnavailable = codeCatalog === "failed" || codeCatalog === "planRequired" || (codeCatalog === "ready" && !selectedModel);
   const canReloadCatalog = !busy && online && !cliFixtureModel && catalogUnavailable &&
-    (snapshot?.localFixture || codeKey?.stage === "connected");
-  const needsCodeConnection = snapshot && !snapshot.localFixture && codeKey?.stage === "missing" && !selectedModel;
+    (snapshot?.localFixture || codeKey?.stage === "connected" || codeKey?.stage === "account");
+  // A Code key is asked for only on the Tomverse engine route, and only by a server that does not run Code on the
+  // signed-in session (an older one): it answered its capabilities without desktopCodeSession.
+  const tomverseRoute = (snapshot?.codeExecutionPreference ?? "tomverse_api") === "tomverse_api";
+  const capabilitiesPending = account?.stage === "connected" && !snapshot?.capabilities;
+  const needsCodeConnection = snapshot && !snapshot.localFixture && codeKey?.stage === "missing" && !selectedModel &&
+    tomverseRoute && !capabilitiesPending && !snapshot.capabilities?.codeSession;
   const needsCodeProject = !busy && online && selectedModel && !snapshot?.root;
   const canChooseApi = !busy && online && !pausedForInput && !cliFixtureModel && snapshot?.root &&
     selectedModel && codeRoute.executionMode !== "tomverse_api";
@@ -659,8 +665,11 @@ function Desktop() {
         : account?.stage === "restoring" ? controls.restoring
         : account?.stage === "waiting" ? controls.continueSignin : copy.signInForCode;
     } else if (codeKey?.stage === "checking") codeStatus = controls.checkingKey;
-    else if (codeCatalog === "loading") codeStatus = copy.loadingCodeModels;
+    else if (codeCatalog === "loading" || (capabilitiesPending && codeKey?.stage === "missing")) codeStatus = copy.loadingCodeModels;
+    else if (codeCatalog === "planRequired") codeStatus = native.codePlanRequired;
     else if (codeCatalog === "failed") codeStatus = native.codeCatalogFailure;
+    // The provider CLI route without models: this build runs no local CLI task, and Tomverse is not asked for a key.
+    else if (!tomverseRoute && !snapshot.localFixture) codeStatus = cliCopy.localExecutionUnavailable;
     else if (codeCatalog === "ready") codeStatus = copy.noConnectedModels;
   }
 
@@ -1268,17 +1277,25 @@ ${text}` : text;
             : <button className="soft" disabled={update?.stage !== "idle" && update?.stage !== "failed"} onClick={() => void act(() => window.desktop.checkUpdate())}>{controls.checkUpdates}</button>}
           {busy && update?.stage === "ready" && <p>{controls.restartWait}</p>}
           </section>}
-          {settingsView === "developer" && account?.stage === "connected" && <section className="desktop-setting-section">
+          {settingsView === "developer" && account?.stage === "connected" && (codeKey?.stage === "account"
+            ? <section className="desktop-setting-section" data-testid="desktop-code-account">
+              <h3 id="desktop-code-key" tabIndex={-1}>Tomverse Code</h3>
+              <p>{controls.codeAccount}</p>
+              {codeCatalog === "planRequired" && <p role="status">{native.codePlanRequired}</p>}
+              {codeCatalog === "failed" && <p role="status">{native.codeCatalogFailure}</p>}
+            </section>
+            : <section className="desktop-setting-section">
             <h3 id="desktop-code-key" tabIndex={-1}>{controls.codeKey}</h3>
             {codeKey?.stage === "connected" && <p>{(codeKey.storage === "session" ? controls.sessionKey : controls.connectedAs)
               .replace("{account}", () => codeKey.prefix)}</p>}
             {codeKey?.detail && <p role="status">{native[codeKey.detail]}</p>}
+            {codeCatalog === "planRequired" && <p role="status">{native.codePlanRequired}</p>}
             {codeCatalog === "failed" && <p role="status">{native.codeCatalogFailure}</p>}
             <button className="soft" type="button" disabled={busy || codeKey?.stage === "checking"}
               onClick={() => void act(() => window.desktop.connectCopiedCodeKey())}>
               {codeKey?.stage === "checking" ? controls.checkingKey : controls.connectCopiedKey}
             </button>
-          </section>}
+          </section>)}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
           ? <ConnectorWorkspace key={account.label} language={language} lane={historyOpen ? pluginsLane : null} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
           <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>

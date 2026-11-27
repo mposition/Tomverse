@@ -51,6 +51,8 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/auth/desktop/refresh",
   "/api/auth/desktop/logout",
   "/api/auth/desktop/code-key",
+  // The short Code token for Desktop Code's runtimes: the Desktop session bearer only, no Origin or cookie accepted.
+  "/api/auth/desktop/code-token",
   // App-owned email proof; default-off, no ambient session, existing OTP limits.
   "/api/auth/mobile/email",
   "/api/auth/desktop/email",
