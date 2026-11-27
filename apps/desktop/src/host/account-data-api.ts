@@ -5,6 +5,7 @@ import {
 import type { AccountSettingsApi } from "./account-settings-api";
 import { AccountDataRefusal } from "./account-data-refusal";
 import { createAssistantData, type PickFile } from "./assistant-data";
+import { linkLoginMethodThroughBrowser } from "./login-method-link";
 
 // File downloads and irreversible account actions that run in the main process
 // on the shared Desktop account session. The renderer sends a typed action; the
@@ -75,12 +76,17 @@ export function createAccountDataApi(options: {
   language: () => string;
   origin?: string;
   pickFile?: PickFile;
+  /** Adding Google or Microsoft: the system browser, the providers this server offers, and the account session's end. */
+  openExternal?: (url: string) => Promise<void>;
+  linkProviders?: () => readonly string[];
+  signal?: AbortSignal;
   transport?: typeof fetch;
   now?: () => number;
 }) {
   const { settings, save } = options;
   const now = options.now ?? Date.now;
   let ticket: { path: string; expiresAt: number } | undefined;
+  let linking: AbortController | undefined;
 
   async function call(request: Parameters<Session["send"]>[0], accept = "application/json", timeout?: number, headers?: Record<string, string>) {
     const res = await settings.send(request, accept, timeout, headers);
@@ -203,6 +209,21 @@ export function createAccountDataApi(options: {
     return { status: "saved" as const };
   }
 
+  async function linkLoginMethod(method: "google" | "azure-ad") {
+    if (!options.openExternal || !options.linkProviders?.().includes(method)) return { status: "unavailable" as const };
+    if (linking) return { status: "failed" as const };
+    const attempt = new AbortController();
+    linking = attempt;
+    try {
+      return await linkLoginMethodThroughBrowser({
+        call: request => call(request), openExternal: options.openExternal, provider: method,
+        signal: options.signal ? AbortSignal.any([options.signal, attempt.signal]) : attempt.signal,
+      });
+    } finally {
+      if (linking === attempt) linking = undefined;
+    }
+  }
+
   async function removeLoginMethod(method: string) {
     await call({ path: "/api/user/login-methods", method: "DELETE", body: { method } });
     // The server revokes every session of the account, including this Desktop device.
@@ -233,6 +254,8 @@ export function createAccountDataApi(options: {
           case "requestEmailLogin": return requestEmailLogin();
           case "verifyEmailLogin": return verifyEmailLogin(input.code);
           case "removeLoginMethod": return removeLoginMethod(input.method);
+          case "linkLoginMethod": return linkLoginMethod(input.method);
+          case "cancelLinkLoginMethod": linking?.abort(); return { status: "cancelled" as const };
           case "saveAssistant": return assistants.savePackage(input.id, input.name);
           case "uploadKnowledge": return assistants.uploadKnowledge(input.id);
           case "deleteAllMemories": return deleteAllMemories(input.confirmation);

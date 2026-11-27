@@ -5,7 +5,7 @@ import { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
 import type { Journal } from "../../../tomverse-cli/src/session.js";
 import type { ChangeInspection } from "../contract";
 import type { ProjectRoot } from "./project-root";
-import { readRemoteSettings, sshRunnerFor } from "./remote-project";
+import { readRemoteSettings, shellOf, sshRunnerFor } from "./remote-project";
 
 /**
  * What the Code runtime does for a project on another machine (the parts that are not the agent's own tools): finding the machine,
@@ -37,7 +37,11 @@ export async function openRemoteWorkspace(project: ProjectRoot, options: { env?:
   const env = options.env ?? process.env;
   if (!project.remote) throw new RemoteRunError("remoteUnavailable", "This project is not on a remote machine.");
   if (!remoteProjectsEnabled(env)) throw new RemoteRunError("remoteDisabled", "Remote projects are turned off in Settings.");
-  const target = parseRemoteTarget(project.remote);
+  const parsed = parseRemoteTarget(project.remote);
+  // How this project's commands are started is the person's choice in Settings, read when the task connects; a marker file in the
+  // shadow folder (which only names the machine and the folder) cannot ask for a login shell.
+  const shell = shellOf(readRemoteSettings(env.TOMVERSE_DESKTOP_REMOTE_SETTINGS), parsed);
+  const target = { ...parsed, ...(shell !== "sh" ? { shell } : {}) };
   const runner = sshRunnerFor({
     forwardedEnvironment: env.TOMVERSE_DESKTOP_SSH_ENV,
     fixture: options.fixtureAllowed ? fixtureRunner(env.TOMVERSE_DESKTOP_SSH_FIXTURE) : undefined,

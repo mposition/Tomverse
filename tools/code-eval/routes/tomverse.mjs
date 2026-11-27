@@ -12,7 +12,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 /**
  * The engine features a measurement turns on, by the Runner option each one is. They are the ones that change how the agent works
- * on a code task. Left out on purpose: web_fetch (the tasks use no network, and a page read would also need an approval) and the
+ * on a code task. Left out on purpose: web_fetch and web_search (the tasks use no network, a page read or a search would also need an
+ * approval, and a search is charged to the account) and the
  * Code memory (notes kept between tasks would carry one task's lessons into the next, and the runs would no longer be independent).
  */
 export const ENGINE_FEATURES = ["backgroundCommands", "images", "nestedInstructions", "subagents"];

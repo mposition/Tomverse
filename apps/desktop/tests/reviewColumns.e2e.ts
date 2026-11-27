@@ -231,3 +231,80 @@ test("Desktop Review shows one column per model, as the web does", { timeout: 12
     await closeReviewColumns(session);
   }
 });
+
+test("Deep Research in the Review \"+\" menu is one more column, put to that model alone and polled to its report", { timeout: 120_000, skip: !columnsOrigin }, async (t) => {
+  const research = "perplexity/sonar-deep-research";
+  const session = await launchReviewColumns({ width: 1600, height: 1000, research: true });
+  const { app, desktop } = session;
+  try {
+    const column = (model: { id: string }) => desktop.locator(`[data-testid="review-column"][data-model-id="${model.id}"]`);
+    const composer = desktop.locator(".review-composer-slot form");
+    const row = composer.getByRole("button", { name: /^Deep Research/ });
+    const openTools = () => composer.locator(".composer-tools > summary").click();
+
+    await t.test("with every place taken the row says so and starts nothing", async () => {
+      await desktop.getByRole("button", { name: "Professional", exact: true }).click();
+      await desktop.getByRole("textbox", { name: "Review question" }).fill("What do primary sources say about the 1970s oil shocks?");
+      await openTools();
+      await expect(row).toBeDisabled();
+      await expect(row).toContainText("needs a free model place");
+      await desktop.keyboard.press("Escape");
+    });
+
+    await t.test("with a place free it asks for the depth and sends the question to Deep Research alone", async () => {
+      await column(grok!).getByRole("button", { name: /^Pause panel \d, Grok 4\.5/ }).click();
+      await openTools();
+      await expect(row).toBeEnabled();
+      await row.click();
+      const setup = desktop.getByRole("dialog", { name: "Start Deep Research" });
+      await expect(setup).toBeVisible();
+      await setup.getByRole("button", { name: "Start research", exact: true }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(1);
+      const state = await columnsState(app);
+      const [dispatch] = state.dispatches;
+      assert.equal(dispatch!.modelId, research);
+      assert.equal(dispatch!.deepResearchDepth, "standard");
+      assert.equal(dispatch!.admissionToken, undefined, "a run for one model has no shared admission");
+      assert.deepEqual(state.contexts, [research], "the research prepares its own context");
+      assert.deepEqual(state.saves.at(-1), { clientRequestId: state.saves.at(-1)!.clientRequestId,
+        content: "What do primary sources say about the 1970s oil shocks?", modelId: research }, "the question is saved for Deep Research only");
+      assert.deepEqual(state.models, [gpt!.id, gemini!.id, research], "the Review holds the models that are on, plus Deep Research");
+      assert.equal(state.dispatches.filter(({ modelId }) => modelId !== research).length, 0, "no other model answers a research question");
+    });
+
+    await t.test("the column shows the report once the status check finishes, and has no follow-up box", async () => {
+      await expect(desktop.getByTestId("review-column")).toHaveCount(3);
+      // The column also carries the earlier answer of the model that left the Review, drawn under its own name; the report is Deep Research's own.
+      await expect(column({ id: research }).locator(`[data-testid="review-answer"][data-model-id="${research}"]`)).toContainText("Research report with a reference.", { timeout: 20_000 });
+      assert.equal((await columnsState(app)).polls, 1);
+      await expect(column({ id: research }).getByTestId("review-model-only-form")).toHaveCount(0);
+      await expect(column({ id: research }).locator(".review-column-title strong")).toHaveText("Perplexity Sonar Deep Research");
+      await expect(column(gpt!).getByTestId("review-answer")).toHaveCount(1);
+    });
+
+    await t.test("a later question goes to the models that are on and the research column stays", async () => {
+      await desktop.getByRole("textbox", { name: "Review question" }).fill("And what do the models think?");
+      await desktop.getByRole("button", { name: "Send Review question" }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(3);
+      const state = await columnsState(app);
+      assert.deepEqual(state.dispatches.slice(1).map(({ modelId }) => modelId).sort(), [gemini!.id, gpt!.id].sort());
+      assert.ok(state.dispatches.slice(1).every(({ deepResearchDepth }) => deepResearchDepth === undefined));
+      assert.deepEqual(state.models, [gpt!.id, gemini!.id, research]);
+      await expect(desktop.getByTestId("review-column")).toHaveCount(3);
+    });
+
+    await t.test("Easy mode routes its providers to models and keeps the research column", async () => {
+      await desktop.getByRole("button", { name: "Easy", exact: true }).click();
+      await desktop.getByRole("textbox", { name: "Review question" }).fill("One more question for the providers.");
+      await desktop.getByRole("button", { name: "Send Review question" }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(5);
+      const state = await columnsState(app);
+      assert.deepEqual(state.dispatches.slice(3).map(({ modelId }) => modelId).sort(), [gemini!.id, gpt!.id].sort());
+      assert.deepEqual(state.models, [gpt!.id, gemini!.id, research], "the Review holds models, never provider names");
+      assert.ok(state.updates.every((update) => !update.selectedModels || (update.selectedModels as string[]).every((id) => id === research || columnModels.some((model) => model.id === id))));
+      await expect(desktop.getByTestId("review-column")).toHaveCount(3);
+    });
+  } finally {
+    await closeReviewColumns(session);
+  }
+});

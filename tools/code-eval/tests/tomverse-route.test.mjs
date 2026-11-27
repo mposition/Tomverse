@@ -72,6 +72,7 @@ test("the tomverse route fixes a task through the runtime API with automatic, fo
         assert.ok(names.includes("delegate"), "subagents are on");
         assert.ok(names.includes("read_background_output"), "background commands are on");
         assert.ok(!names.includes("web_fetch"), "web_fetch is never on in a measurement");
+        assert.ok(!names.includes("web_search"), "web_search is never on in a measurement");
         assert.ok(!names.includes("remember_fact"), "the Code memory is never on in a measurement");
     } finally {
         await fake.stop();

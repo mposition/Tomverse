@@ -1,6 +1,8 @@
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { listDesktopRemoteDevices } from "@/lib/desktopRemoteControlStore";
 import { desktopRemoteMayAct, desktopRemoteWebSession, remoteJson } from "@/lib/desktopRemoteControlWeb";
+import { listPasskeys } from "@/lib/desktopRemotePasskeyStore";
+import { desktopRemotePasskeyEnabled } from "@/lib/nativeBearerGate";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,8 @@ export async function GET(request: Request) {
     // The screen refreshes every few seconds while it is open.
     await consumeApiRateLimit(request, userId, "desktop-remote-read", { minute: 60, day: 20_000 });
     const devices = await listDesktopRemoteDevices(userId);
-    return remoteJson(200, { ok: true, canAct: desktopRemoteMayAct(auth.session), devices });
+    const enabled = desktopRemotePasskeyEnabled();
+    return remoteJson(200, { ok: true, canAct: desktopRemoteMayAct(auth.session), passkey: { enabled, passkeys: enabled ? await listPasskeys(userId) : [] }, devices });
   } catch (error) {
     return apiSecurityResponse(error) ?? remoteJson(500, { ok: false, code: "READ_FAILED" });
   }

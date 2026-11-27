@@ -37,6 +37,10 @@ const BEARER_FILES = [
     "app/api/code/anthropic/v1/models/route.ts",
     "lib/codingCatalogChannels.ts",
     "lib/codingRowRuntime.ts",
+    // The coding API's web search for the agent engine: the same condition.
+    "app/api/code/v1/web-search/route.ts",
+    "lib/codeWebSearch.ts",
+    "lib/codeWebSearchCore.ts",
 ];
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -62,7 +66,7 @@ test("only the exact completion path skips the Origin check", () => {
     }
     assert.equal(requiresMutationOriginCheck("POST", "/api/anthropic/v1/other"), true);
     // The coding API's generation routes, on the same exact-path condition.
-    for (const exact of ["/api/code/v1/chat/completions", "/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens"]) {
+    for (const exact of ["/api/code/v1/chat/completions", "/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens", "/api/code/v1/web-search"]) {
         assert.equal(requiresMutationOriginCheck("POST", exact), false, exact);
         assert.equal(requiresMutationOriginCheck("POST", `${exact}/x`), true, `${exact}/x`);
     }

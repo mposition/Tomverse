@@ -26,6 +26,14 @@ const read = (path) => {
 const SCANNED_DIRECTORIES = ["app", "components", "lib", "public"];
 const SCANNED_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json"]);
 
+/**
+ * Third-party library files served as they were published, like node_modules:
+ * the chat preview's React and Babel (lib/chatArtifactPreview.ts pins each by
+ * sha384, so nothing of ours can be added to them). Babel's list of browser
+ * globals names PushManager and friends; that is not push infrastructure.
+ */
+const VENDORED_DIRECTORIES = new Set([join("public", "vendor", "artifact-preview")]);
+
 const walk = (dir, found = []) => {
     let entries;
     try {
@@ -36,6 +44,7 @@ const walk = (dir, found = []) => {
     for (const entry of entries) {
         if (entry === "node_modules" || entry === ".next") continue;
         const full = join(dir, entry);
+        if (VENDORED_DIRECTORIES.has(full)) continue;
         if (statSync(join(root, full)).isDirectory()) walk(full, found);
         else found.push(full);
     }

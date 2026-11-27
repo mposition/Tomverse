@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { createSshRunner, sshEnvironment, type SshRunner } from "../../../tomverse-cli/src/remote-ssh.js";
-import { parseRemoteTarget, RemoteError, targetKey, type RemoteTarget } from "../../../tomverse-cli/src/remote-target.js";
+import { parseRemoteShell, parseRemoteTarget, RemoteError, targetKey, type RemoteShell, type RemoteTarget } from "../../../tomverse-cli/src/remote-target.js";
 import { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
 import type { RemoteFailure, RemoteRecent, RemoteResult } from "../remote-contract";
 
@@ -16,16 +16,18 @@ import type { RemoteFailure, RemoteRecent, RemoteResult } from "../remote-contra
  * the review panel, Git, attaching files) is not offered for it.
  */
 
-export type RemoteSettings = { enabled: boolean; recent: RemoteRecent[] };
+/** `shells`: the projects (by `targetKey`) whose commands are started by a login shell; a project that is not here uses sh. */
+export type RemoteSettings = { enabled: boolean; recent: RemoteRecent[]; shells: Record<string, RemoteShell> };
 
 const SETTINGS = "settings.json";
 const MAX_RECENT = 8;
+const MAX_SHELLS = 32;
 
 export function readRemoteSettings(directory: string | undefined): RemoteSettings {
-  const off: RemoteSettings = { enabled: false, recent: [] };
+  const off: RemoteSettings = { enabled: false, recent: [], shells: {} };
   if (!directory) return off;
   try {
-    const parsed = JSON.parse(readFileSync(join(directory, SETTINGS), "utf8")) as { enabled?: unknown; recent?: unknown };
+    const parsed = JSON.parse(readFileSync(join(directory, SETTINGS), "utf8")) as { enabled?: unknown; recent?: unknown; shells?: unknown };
     const recent: RemoteRecent[] = [];
     if (Array.isArray(parsed.recent)) {
       for (const item of parsed.recent.slice(0, MAX_RECENT)) {
@@ -35,7 +37,14 @@ export function readRemoteSettings(directory: string | undefined): RemoteSetting
         } catch { /* a recent entry that is no longer a valid target is dropped */ }
       }
     }
-    return { enabled: parsed.enabled === true, recent };
+    const shells: Record<string, RemoteShell> = {};
+    if (parsed.shells && typeof parsed.shells === "object" && !Array.isArray(parsed.shells)) {
+      for (const [key, value] of Object.entries(parsed.shells).slice(0, MAX_SHELLS)) {
+        // Only a login shell is written down; anything else is read as the default.
+        try { if (parseRemoteShell(value) === "bash-login") shells[key] = "bash-login"; } catch { /* an unknown value is the default */ }
+      }
+    }
+    return { enabled: parsed.enabled === true, recent, shells };
   } catch {
     return off;
   }
@@ -45,9 +54,13 @@ export function writeRemoteSettings(directory: string, settings: RemoteSettings)
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const file = join(directory, SETTINGS);
   const temporary = `${file}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify({ enabled: settings.enabled, recent: settings.recent.slice(0, MAX_RECENT) }), { mode: 0o600 });
+  writeFileSync(temporary, JSON.stringify({ enabled: settings.enabled, recent: settings.recent.slice(0, MAX_RECENT),
+    shells: Object.fromEntries(Object.entries(settings.shells).filter(([, shell]) => shell === "bash-login").slice(0, MAX_SHELLS)) }), { mode: 0o600 });
   renameSync(temporary, file);
 }
+
+/** How commands of this project are started: what Settings say, `sh` for a project they do not name. */
+export const shellOf = (settings: RemoteSettings, target: RemoteTarget): RemoteShell => settings.shells[targetKey(target)] ?? "sh";
 
 /** The target moves to the front of the recent list. */
 export const withRecent = (settings: RemoteSettings, target: RemoteTarget): RemoteSettings => {

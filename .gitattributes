@@ -116,3 +116,8 @@ prisma/migrations/20260802020000_registry_prices_inherit_profile/migration.sql t
 # checkout used to fail three of its comparisons on Windows.
 docs/policy/email-consent-copy-draft.md text eol=lf
 tests/emailConsentCopy.test.mjs text eol=lf
+
+# Chat preview libraries are loaded with a subresource-integrity hash
+# (lib/chatArtifactPreview.ts). One changed byte -- an LF rewritten to CRLF at
+# checkout -- and the browser refuses to run the file, so Git never converts them.
+public/vendor/artifact-preview/*.js -text

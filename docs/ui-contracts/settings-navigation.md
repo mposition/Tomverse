@@ -110,6 +110,13 @@ which tab happened to exist first:
 The tabs, in order: account, preferences, AI assistants, AI personalization, data,
 **developer**, plan.
 
+Personal instructions (what Tomverse should know about the account owner, how
+to answer, and the answer style) are a card on the AI personalization tab
+(`components/settings/PersonalInstructionsSettings.tsx`), not a row: the whole
+setting fits on the tab, so it has no detail page and no section id. It saves
+through its own `/api/user/personalization`, never through the panel's
+every-dirty-field save.
+
 Email notifications live on the default Account tab because they are choices
 about communication to the signed-in identity, not stored-data operations.
 The account quick menu also links directly to the same detail page. That entry

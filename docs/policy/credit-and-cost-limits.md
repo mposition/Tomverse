@@ -886,6 +886,25 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 `pricingVersion`·`costSource`·`longContextThresholdTokens`가 reservation payload와
 `pricingSnapshot`에 저장되고, 정산은 그 값으로 이뤄집니다.
 
+### 완료 분기의 정산 (2026-11-27)
+
+provider 스트림이 끝난 뒤 완료 분기가 고르는 정산 outcome입니다. 정산은 Message
+저장보다 먼저 하고, 저장이 실패해도 되돌리지 않습니다(답은 화면에 나갔고 provider
+비용은 발생함). 저장 결과를 알 수 없을 때(COMMIT 결과 불명 + 확인 조회 실패)는 생성
+파일 객체를 지우지 않습니다(`docs/policy/chat-durable-draft-and-attempt-recovery.md` §4).
+
+- 본문이 있으면 `completed`. 본문이 없어도 **저장소에 저장된 생성 파일이 하나라도**
+  있고 메시지를 쓸 대화가 있으면 `completed`입니다(파일이 전달됨).
+- 본문도 저장된 파일도 없으면 `empty`(0 크레딧). 실패 카드만 있는 turn도 카드는
+  저장하되 `empty`입니다(`docs/policy/generated-artifacts.md` §8).
+- **provider가 답변 도중 끊은 turn**: AI SDK는 스트림 중간의 provider 오류를
+  `textStream`에서 throw하지 않고 finish reason을 `error`(완료 신호 없이 끝나면
+  `interrupted`)로 resolve합니다. 본문이 있는 이런 turn은 `incomplete`로 저장하고
+  `cancelled`와 같은 비례 방식으로 정산합니다 — provider가 usage를 보고했으면 그
+  수치로, 없으면 취소 turn과 같은 추정으로. 정액 `completed` 과금을 하지 않습니다.
+  routing attempt 기록은 취소가 아니라 post-token provider 실패이고, provider·모델
+  실패로 기록합니다. Research Preview는 채택된 보고서가 답이므로 제외합니다.
+
 ## 4. 예약 정확도
 
 - 입력 토큰 추정은 `lib/chatTokenEstimate.ts` 하나로 통일했습니다. CJK 문자는
@@ -1071,6 +1090,11 @@ production에는 기본값이 없습니다. credential이 있는데 예산을 �
 - 사용자 크레딧: 검색 0회면 8크레딧 전액 환불, 1~5회면 기존 flat 8크레딧.
   **질의 수로 사용자에게 추가 과금하지 않습니다.**
 - 가격 변경은 소급되지 않습니다. 동결된 rate가 정산을 매깁니다.
+- **coding API의 웹 검색(`POST /api/code/v1/web-search`, 2026-11-27)도 같은
+  규칙입니다.** 에이전트 엔진의 `web_search` 호출 한 번이 검색 세션 하나(최대
+  5 backend 요청)이고, 모델 없이 surcharge와 vendor 최악값만 예약합니다
+  (`createSearchOnlyChatBudget`, model id `tomverse-web-search`). 새 단가는
+  없습니다. 상세는 `docs/policy/external-api.md` 11.1절.
 
 #### fallback
 

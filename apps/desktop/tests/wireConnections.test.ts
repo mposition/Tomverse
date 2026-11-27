@@ -62,10 +62,11 @@ test("the switch is a typed command with no address or path in it", () => {
 
 const pick = { id: "pick-01234567", tab: crypto.randomUUID(), url: "http://localhost:3000/", selector: "#add", tag: "button", text: "Add", box: { x: 1, y: 2, width: 30, height: 10 } };
 
-test("an element comment mentions the picture only when the agent has the tool that can read it", () => {
-  assert.match(serializeElementComments([{ pick, comment: "Blue." }]), /picture pick-01234567 \(browser_screenshot with pick/);
+test("an element comment names the tool that reads the picture only when the agent has it; the attached picture is named either way", () => {
+  assert.match(serializeElementComments([{ pick, comment: "Blue." }]), /picture pick-01234567 \(attached as an image when the model can see images; browser_screenshot with pick/);
   const without = serializeElementComments([{ pick, comment: "Blue." }], { picture: false });
-  assert.doesNotMatch(without, /picture|browser_screenshot/);
+  assert.match(without, /picture pick-01234567 \(attached as an image when the model can see images\)/);
+  assert.doesNotMatch(without, /browser_screenshot/);
   assert.match(without, /selector "#add"/);
   assert.match(without, /comment: Blue\./);
 });

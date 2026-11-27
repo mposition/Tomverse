@@ -71,7 +71,12 @@ async function withAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T
   });
 }
 
-export async function fetchResearchUrl(target: string, signal?: AbortSignal): Promise<ResearchFetchResult> {
+/**
+ * `options.maxBytes` lowers the response ceiling for a caller that needs less than
+ * a Research read (chat page reading); it can never raise it.
+ */
+export async function fetchResearchUrl(target: string, signal?: AbortSignal, options: { maxBytes?: number } = {}): Promise<ResearchFetchResult> {
+  const maxBytes = Math.min(options.maxBytes ?? RESEARCH_RESOURCE_LIMITS.maxReadBytes, RESEARCH_RESOURCE_LIMITS.maxReadBytes);
   const controller = new AbortController();
   const combined = AbortSignal.any([controller.signal, ...(signal ? [signal] : [])]);
   const timer = setTimeout(() => controller.abort(new DOMException("Research read deadline", "TimeoutError")), RESEARCH_READ_DEADLINE_MS);
@@ -110,9 +115,9 @@ export async function fetchResearchUrl(target: string, signal?: AbortSignal): Pr
       const mediaType = (response.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
       if (!mediaType) throw new FetchFailure("unsupported_content");
       const declared = response.headers.get("content-length");
-      if (declared && (!/^\d+$/u.test(declared) || Number(declared) > RESEARCH_RESOURCE_LIMITS.maxReadBytes)) throw new FetchFailure("response_too_large");
+      if (declared && (!/^\d+$/u.test(declared) || Number(declared) > maxBytes)) throw new FetchFailure("response_too_large");
       if (!response.body) throw new FetchFailure("unsupported_content");
-      const bytes = await readWebStreamToBuffer(response.body, RESEARCH_RESOURCE_LIMITS.maxReadBytes, combined);
+      const bytes = await readWebStreamToBuffer(response.body, maxBytes, combined);
       const lastModified = response.headers.get("last-modified") ?? undefined;
       return { ok: true, finalUrl: url.href, mediaType, bytes: Buffer.from(bytes), ...(lastModified ? { lastModified } : {}) };
     }

@@ -66,6 +66,27 @@ const REGISTRY = {
     reason:
       "Optional explicit assessment of an owned assistant answer. The request schema and client payload share this list; NULL represents reports without a verified answer link or assessment.",
   },
+  UserPersonalization_responseStyle_check: {
+    owner: "list",
+    module: "lib/chatPersonalizationCore.ts",
+    list: "RESPONSE_STYLES",
+    reason:
+      "The answer style an account owner picks in personal instructions. The settings form, the PUT schema and the prompt builder read this list; 'default' adds no instruction.",
+  },
+  ChatAnswerRating_rating_check: {
+    owner: "list",
+    module: "lib/chatAnswerRatingCore.ts",
+    list: "CHAT_ANSWER_RATINGS",
+    reason:
+      "A thumbs up or down on one assistant answer. Withdrawing a rating deletes the row, so there is no neutral value.",
+  },
+  ChatAnswerRating_reason_check: {
+    owner: "list",
+    module: "lib/chatAnswerRatingCore.ts",
+    list: "CHAT_ANSWER_RATING_REASONS",
+    reason:
+      "The optional reason for a down rating, a closed list so no prose is stored. NULL is a rating without a reason; a separate CHECK refuses a reason on an up rating.",
+  },
   ProductAnalyticsEvent_name_check: {
     owner: "list",
     module: "lib/productAnalyticsShared.ts",
@@ -695,6 +716,18 @@ const REGISTRY = {
     list: "MOBILE_DEVICE_REVOKED_REASONS",
     reason:
       "user_revoked, and deliberately nothing else. Account deletion is the other way a device stops being usable and is absent on purpose: it takes the row with it through the cascade, so a value for it would be one nothing could ever write and a state nobody could query for.",
+  },
+  CodeCloudJob_status_check: {
+    owner: "list",
+    module: "lib/codeCloudContract.ts",
+    list: "CODE_CLOUD_JOB_STATUSES",
+    reason:
+      "A Desktop cloud Code task from creation to its end: waiting for its bundle, queued, claimed by a runner while its credits are reserved, running, and the three ends. Written only by lib/codeCloudService.ts; the runner reports an outcome from the same contract's finish list, never a stored status.",
+  },
+  DesktopRemotePasskeyChallenge_purpose_check: {
+    owner: "type_only",
+    reason:
+      "ChallengePurpose in lib/desktopRemotePasskeyStore.ts: register, enroll, command or remove. A challenge is single use and taken by its own purpose, so a passkey confirmation made for one action can never authorize another; the sibling binding CHECK ties register to a null binding hash.",
   },
   DesktopRemoteCommand_kind_check: {
     owner: "list",

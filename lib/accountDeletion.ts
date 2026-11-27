@@ -7,6 +7,7 @@ import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
+import { enqueueCodeCloudCleanupForUser } from "@/lib/codeCloudDeletion";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
@@ -347,6 +348,10 @@ export async function deleteTomverseAccount(
     // including the uploads it finalised and never sent, which no conversation
     // would ever have named (docs/policy/user-attachment-persistence.md).
     await enqueueMessageAttachmentCleanupForUser(tx, user.id, "account_deleted");
+    // Desktop cloud Code jobs: their uploaded repository bundles and result
+    // patches get tombstones on the same queue, then the rows go. The User
+    // cascade would take the rows too, but not the objects they name.
+    await enqueueCodeCloudCleanupForUser(tx, user.id);
 
     // Not covered by any cascade: PerplexityAsyncJob names a conversationId
     // but declares no relation, so deleting the conversations would leave the

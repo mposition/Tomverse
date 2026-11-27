@@ -316,6 +316,23 @@ export function desktopRemoteControlEnabled() {
   return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED === "true";
 }
 
+/**
+ * Remote control's preview of file changes: the PC may report line counts, and a few redacted changed lines when the
+ * person turned that on at the PC. Off by default; while it is off the sync route removes those fields from a report.
+ */
+export function desktopRemotePreviewEnabled() {
+  return desktopRemoteControlEnabled() && process.env.TOMVERSE_DESKTOP_REMOTE_PREVIEW_ENABLED === "true";
+}
+
+/**
+ * Passkey confirmation of remote approvals (docs/ops/desktop-remote-control.md). Off by default, and only meaningful
+ * while remote control itself is on. While it is off nobody is asked for a passkey and none can be registered; the
+ * passkeys already registered stay where they are.
+ */
+export function desktopRemotePasskeyEnabled() {
+  return desktopRemoteControlEnabled() && process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED === "true";
+}
+
 export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
 export const DESKTOP_CHAT_HISTORY = "/api/conversations";
 export const DESKTOP_CHAT_SEARCH = "/api/conversations/search";
@@ -376,6 +393,14 @@ export function desktopDeepResearchEnabled() {
 }
 
 /**
+ * Deep Research from a Desktop Review: one Deep Research answer is a column of the Review, put to that model alone.
+ * Its own switch, default off, on top of the Review writes: the paid run is a separate decision from Chat's.
+ */
+export function desktopReviewDeepResearchEnabled() {
+  return desktopReviewWriteEnabled() && process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED === "true";
+}
+
+/**
  * Desktop's in-app plan and payment screens. A display switch only: Desktop
  * calls the same billing routes as the web through the account settings
  * session, so it stays off unless that session is enabled too.
@@ -398,6 +423,17 @@ export function desktopPluginsEnabled() {
     process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED === "true";
 }
 
+/**
+ * Desktop's plugins from a zip file, an address of a zip file, an npm package or a private GitHub repository, and the marketplace
+ * Desktop carries. It touches no route: these downloads run on the person's own computer after the person confirms each one, so this
+ * is only the kill switch Desktop reads as the `desktopPluginSources` capability. It needs the Desktop session, not the connector
+ * preview, because local plugins do not use the connector routes.
+ */
+export function desktopPluginSourcesEnabled() {
+  return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED === "true";
+}
+
 const DESKTOP_CHAT_TURN_FIELDS: ReadonlySet<string> = new Set(["messages", "modelId", "conversationId", "assistantMessageId",
   "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth", "currentLocation"]);
 
@@ -406,12 +442,12 @@ const DESKTOP_CHAT_TURN_FIELDS: ReadonlySet<string> = new Set(["messages", "mode
  * message ("Current location"), as on the web. A chosen plugin needs the plugins switch; the route keeps it to Chat.
  */
 export function desktopChatTurnField(key: string): boolean {
-  return DESKTOP_CHAT_TURN_FIELDS.has(key) || (key === "mcpConnectionId" && desktopPluginsEnabled());
+  return DESKTOP_CHAT_TURN_FIELDS.has(key) || (key === "mcpConnectionId" && desktopPluginsEnabled()) || (key === "promptRefinerDecision" && desktopPromptRefinerEnabled());
 }
 
 export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
-  if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
+  if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && (desktopDeepResearchEnabled() || desktopReviewDeepResearchEnabled());
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && (desktopChatWriteEnabled() || desktopReviewWriteEnabled());
   if (path === DESKTOP_VOICE_CONVERSATION || path === DESKTOP_VOICE_TRANSCRIPTION) return method === "POST" && desktopVoiceEnabled();
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
@@ -423,4 +459,15 @@ export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_CHAT_CREATE || method === "DELETE") return false;
   return desktopChatWriteRoute(path, method) || (method === "POST" &&
     [DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_ROUTING, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_IMAGE_GENERATIONS].includes(path));
+}
+
+/**
+ * Desktop's use of the Prompt Refiner, Chat only. Enrollment: a Desktop turn may carry the server-held decision the
+ * Auto send preparation returned. The release authority, kill switch, budget and one-time consume stay the
+ * server's own (lib/promptRefinerChatExecutionStore.ts); this switch does not widen any of them. Desktop prepares
+ * the draft and the scope through the account settings session, so that session has to be enabled too.
+ */
+export function desktopPromptRefinerEnabled() {
+  return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED === "true";
 }
