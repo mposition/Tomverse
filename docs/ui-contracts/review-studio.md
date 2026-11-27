@@ -84,22 +84,30 @@ fixtures) and `tests/comparisonReviewDialogMount.test.mjs`.
 One account review runs at a time per input. The signed-in POST claims
 `(account, input hash)` before its cache read, Free quota and reviewers, and
 answers a second request for the same input with `409 DUPLICATE_REQUEST`
-without running, charging or reserving anything. The claim is released on
-every outcome and expires after 15 minutes if its process dies
-(`lib/comparisonReviewInFlight.ts` derives the bound; it uses the existing
-`ChatUsageBucket` table, no migration). Classic, mobile web and Studio answer
-that 409 with one localized notice (`chat.aiReviewAlreadyRunningRetryLater`:
-the review of these answers is already running; open it again shortly to see
-the result) instead of a failure or the server's message. They do not poll;
-the run button (Studio: retry) stays available, and pressing it again is
-refused while that run is in flight and served from the saved row through the
-existing cache path once it has finished. A refused attempt is not counted as
-`comparison_review_started`: an account start is counted when the server
-answers (or never does), a guest start on the click as before. The GET is
-unchanged: the latest turn and the chosen criteria. Coverage:
-`tests/server-contract/comparison-review-route.test.ts`,
+without running, charging or reserving anything -- unless a fresh saved row
+of that input already exists (the other request is a cache hit, or a run that
+has saved), which it then returns as the usual 0-credit cache answer. The
+claim is released on every outcome and expires after 15 minutes if its
+process dies (`lib/comparisonReviewInFlight.ts` derives the bound; it uses the
+existing `ChatUsageBucket` table, no migration). Classic, mobile web and Studio
+answer that 409 with one localized notice (`chat.aiReviewAlreadyRunningRetryLater`:
+the review of these answers is already running; once it finishes, running it
+again returns the saved result at no extra charge, and if answers are added
+meanwhile it runs as a new review) instead of a failure or the server's
+message. They do not poll. In the dialog the notice is not cleared by a setup
+refresh -- only by the next run or by closing -- and the setup's scope line
+shows how many answers a run would now cover. The run button stays available;
+Studio's entry reads "check for the result" rather than a failure and retry.
+A refused attempt is not counted as `comparison_review_started`: an account
+start is counted when the server answers (or never does), a guest start on the
+click as before. The GET is unchanged: the latest turn and the chosen
+criteria. Coverage: `tests/server-contract/comparison-review-route.test.ts`,
 `tests/server-contract/comparison-review-run-claim.test.ts`,
 `tests/comparisonReviewInFlight.test.mjs` and both browser harnesses.
+
+Known limitation (unchanged by this work): the GET serves the latest turn
+only, so a saved review of an earlier turn shape (two answers, before a third
+finished) has no way back into view once the latest turn has moved on.
 
 ## Continue a saved analysis in Chat (2026-11-14)
 

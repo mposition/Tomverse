@@ -510,6 +510,14 @@ export function ComparisonReviewDialog({
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  /**
+   * "This review is already running" (409 DUPLICATE_REQUEST). Kept apart from
+   * `error`, which every setup refresh clears: an answer finishing right
+   * after the refusal refreshes the setup at once, and that must not erase
+   * the explanation. Cleared only by the next run (and by closing, which
+   * unmounts the dialog).
+   */
+  const [alreadyRunningNotice, setAlreadyRunningNotice] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
   /**
    * The answers revision the setup on screen was loaded for.
@@ -683,6 +691,7 @@ export function ComparisonReviewDialog({
     }
     setRunning(true);
     setError("");
+    setAlreadyRunningNotice("");
     let receivedPrimary = false;
     // An account request the server answers with "this review is already
     // running" (409 DUPLICATE_REQUEST) started and billed nothing, so it is
@@ -759,7 +768,7 @@ export function ComparisonReviewDialog({
         // once. Say so and leave the button available -- pressed again it is
         // refused while the run is in flight and served from the saved row
         // once it has finished.
-        setError(t("chat.aiReviewAlreadyRunningRetryLater"));
+        setAlreadyRunningNotice(t("chat.aiReviewAlreadyRunningRetryLater"));
         return;
       }
       trackStarted();
@@ -1328,6 +1337,17 @@ export function ComparisonReviewDialog({
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
               <p className="min-w-0 break-words text-sm leading-6">{error}</p>
+            </div>
+          )}
+          {alreadyRunningNotice && (
+            // Not a failure, so not the red alert: nothing ran or was charged.
+            <div
+              role="status"
+              data-testid="comparison-review-already-running"
+              className="mt-5 flex gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <p className="min-w-0 break-words text-sm leading-6">{alreadyRunningNotice}</p>
             </div>
           )}
         </div>

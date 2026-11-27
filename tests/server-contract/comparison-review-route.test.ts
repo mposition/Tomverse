@@ -316,7 +316,9 @@ test("a second request while the same review runs is refused before any spend", 
   const body = await json(second);
   assert.equal(second.status, 409);
   assert.equal(body.code, "DUPLICATE_REQUEST");
-  assert.deepEqual(world.events, ["claim:refused"], "the duplicate read, reserved or ran something");
+  // Refused, then one read for a fresh saved row (there is none yet): no
+  // quota, no run.
+  assert.deepEqual(world.events, ["claim:refused", "cache:read"], "the duplicate reserved or ran something");
   assert.equal(world.runs, 1, "the duplicate ran and billed the review again");
   assert.equal(world.quotaHeld, 1, "the duplicate reserved a second Free slot");
 
@@ -394,6 +396,40 @@ for (const [label, setup, status] of [
     const retry = await POST(post(), context);
     assert.equal(retry.status, 200);
     assert.equal(world.runs, 2);
+  });
+}
+
+// --- a refused request and the saved row --------------------------------------
+
+/** Another request holds this input's claim (a cache hit or a run in progress). */
+const holdClaimFor = (call: World["claimCalls"][number]) =>
+  world.claims.set(`${call.subjectKey}:${call.scope}:${call.runKey}`, 999);
+
+for (const [label, prepare, expected] of [
+  ["a fresh saved row answers from the cache", () => {}, 200],
+  ["a stale saved row is still 409", (w: World) => { for (const row of w.stored.values()) row.isStale = true; }, 409],
+  ["no saved row is 409", (w: World) => { w.stored.clear(); }, 409],
+] as const) {
+  test(`a refused request: ${label}, and nothing is reserved or run`, async () => {
+    const { POST } = await loadRoute();
+    assert.equal((await POST(post(), context)).status, 200);
+    prepare(world);
+    holdClaimFor(world.claimCalls[0]);
+    world.events = [];
+    const quotaBefore = world.quotaHeld;
+    const refused = await POST(post(), context);
+    const body = await json(refused);
+    assert.equal(refused.status, expected);
+    if (expected === 200) {
+      assert.equal(body.cached, true);
+      assert.equal(body.usageCredits, 0);
+    } else {
+      assert.equal(body.code, "DUPLICATE_REQUEST");
+    }
+    // The read comes only after the refusal; nothing else happens.
+    assert.deepEqual(world.events, ["claim:refused", "cache:read"]);
+    assert.equal(world.runs, 1, "a refused request ran the review");
+    assert.equal(world.quotaHeld, quotaBefore, "a refused request reserved a Free slot");
   });
 }
 

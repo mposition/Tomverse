@@ -131,15 +131,45 @@ try {
   // 5. The server says this exact review is already running (another tab,
   //    Studio, or a stream this dialog lost): 409 DUPLICATE_REQUEST. The
   //    dialog says so in its own words -- not a generic failure, not the
-  //    server's English -- polls nothing, and leaves the run button available:
-  //    pressed again it is refused while the run is in flight and gets the
-  //    saved row (the route's cache path) once it has finished.
+  //    server's English -- polls nothing, and leaves the run button available.
+  //    A third answer finishing right after the refusal refreshes the setup
+  //    onto the 3-answer turn; the notice survives that refresh, and the
+  //    setup's scope line says what a run would now cover. Pressed again the
+  //    button is refused while the run is in flight and gets the saved row
+  //    (the route's cache path) once it has finished.
   const saved = mock.getStoredReview();
-  const alreadyRunning = "이 답변들의 교차검토가 이미 실행 중입니다. 잠시 후 다시 열어 결과를 확인해 주세요.";
+  const alreadyRunning = "이 답변들의 교차검토가 이미 실행 중입니다. 끝난 뒤 다시 실행하면 저장된 결과를 추가 과금 없이 받을 수 있고, 그 사이 답변이 추가되면 새 검토로 실행됩니다.";
+  const answerIds = [
+    "21111111-1111-4111-8111-111111111111",
+    "31111111-1111-4111-8111-111111111111",
+    "41111111-1111-4111-8111-111111111111",
+  ];
+  let latestAnswers = 2;
+  const setupFor = (count) => ({
+    available: true,
+    source: {
+      question: "Compare these approaches",
+      responses: answerIds.slice(0, count).map((messageId, index) => ({ messageId, content: `Answer ${index + 1}.` })),
+    },
+    promptMessageId: "11111111-1111-4111-8111-111111111111",
+    assistantMessageIds: answerIds.slice(0, count),
+    responses: answerIds.slice(0, count).map((messageId, index) => ({
+      messageId,
+      modelId: ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"][index],
+      modelName: ["GPT-5.4 mini", "Claude Haiku 4.5", "Gemini 3.5 Flash-Lite"][index],
+    })),
+    estimatedCredits: 4,
+    reviewerClass: "Advanced",
+    freeMonthlyReviews: 3,
+    disclaimer: "This compares only supplied answers and does not externally verify facts.",
+  });
   let duplicatePosts = 0;
   let duplicateAnswer = "already-running";
   await page.route(endpoint, async (route) => {
-    if (route.request().method() !== "POST") return route.fallback();
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(setupFor(latestAnswers)) });
+      return;
+    }
     duplicatePosts += 1;
     if (duplicateAnswer === "saved") {
       await route.fulfill({
@@ -155,30 +185,45 @@ try {
       body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST" }),
     });
   });
-  const getsBeforeDuplicate = gets.length;
-  const startedBeforeDuplicate = await startedEvents();
+  const scope = page.getByTestId("comparison-review-scope");
+  const notice = page.getByTestId("comparison-review-already-running");
   const runButton = page.getByRole("button", { name: /교차검토 실행/ });
-  const errorBox = page.getByTestId("comparison-review-error");
+  // The setup on screen covers the 2-answer turn the other tab is reviewing.
+  await answerFinished();
+  await expect(scope).toHaveText("완료된 2개 답변을 비교합니다.");
+  const startedBeforeDuplicate = await startedEvents();
   await runButton.click();
-  await expect(errorBox).toHaveText(alreadyRunning);
+  await expect(notice).toHaveText(alreadyRunning);
+  await expect(page.getByTestId("comparison-review-error")).toHaveCount(0);
   await expect(runButton).toBeEnabled();
+
+  // The third answer finishes: the setup refreshes onto the 3-answer turn,
+  // the notice stays.
+  const getsBeforeThird = gets.length;
+  latestAnswers = 3;
+  await answerFinished();
+  await expect.poll(() => gets.length).toBe(getsBeforeThird + 1);
+  await expect(scope).toHaveText("완료된 3개 답변을 비교합니다.");
+  await settle();
+  await expect(notice).toHaveText(alreadyRunning);
   // Longer than the first poll any waiting client would have made.
   await page.waitForTimeout(5_000);
-  assert.equal(gets.length, getsBeforeDuplicate, "the dialog sent a request after the 409");
+  assert.equal(gets.length, getsBeforeThird + 1, "the dialog sent a request after the 409");
   assert.equal(duplicatePosts, 1);
   assert.equal(await startedEvents(), startedBeforeDuplicate, "a refused attempt was counted as a started review");
 
+  // Pressed again: refused again while the run is in flight...
   await runButton.click();
   await expect.poll(() => duplicatePosts).toBe(2);
-  await expect(errorBox).toHaveText(alreadyRunning);
+  await expect(notice).toHaveText(alreadyRunning);
   await expect(runButton).toBeEnabled();
 
+  // ...and served from the saved row once it has finished; the notice goes.
   duplicateAnswer = "saved";
   await runButton.click();
   await expect(result).toBeVisible();
-  await expect(errorBox).toHaveCount(0);
+  await expect(notice).toHaveCount(0);
   assert.equal(duplicatePosts, 3);
-  assert.equal(gets.length, getsBeforeDuplicate, "no lookup but the run itself was needed");
   assert.equal(mock.getRunCount(), 1);
 
   // 6. Guest: the setup previews the page's latest local turn, so an answer

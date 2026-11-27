@@ -366,18 +366,18 @@ async function runPost(
     // DUPLICATE_REQUEST; once the run has saved, the same request is a cache
     // hit. Released in `finally` on every outcome; it expires on its own if
     // this process dies first (lib/comparisonReviewInFlight.ts derives the TTL).
-    runClaim = await claimInFlightRun(
-      getUserChatUsageKey(session.user.id),
-      "comparison-review",
-      inputHash,
-      COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
-    );
-    const cached = await prisma.comparisonReview.findUnique({
-      where: {
-        userId_inputHash: { userId: session.user.id, inputHash },
-      },
-    });
-    if (cached && !cached.isStale) {
+    const findSaved = () =>
+      prisma.comparisonReview.findUnique({
+        where: {
+          userId_inputHash: { userId: session.user.id, inputHash },
+        },
+      });
+    // The cache answer for a fresh, valid saved row: 0 credits, nothing run,
+    // nothing reserved. Null when the row cannot be served.
+    const servedFromSaved = async (
+      cached: NonNullable<Awaited<ReturnType<typeof findSaved>>>
+    ): Promise<Response | null> => {
+      if (cached.isStale) return null;
       const result = dualComparisonReviewResultSchema.safeParse(cached.result);
       const responseMap = responseMapForStoredReview(
         cached.assistantMessageIds,
@@ -446,7 +446,30 @@ async function runPost(
           { headers: { "Cache-Control": "no-store" } }
         );
       }
+      return null;
+    };
+    try {
+      runClaim = await claimInFlightRun(
+        getUserChatUsageKey(session.user.id),
+        "comparison-review",
+        inputHash,
+        COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
+      );
+    } catch (error) {
+      if (!(error instanceof ChatAccessError && error.code === "DUPLICATE_REQUEST")) throw error;
+      // Refused: another request holds this input's claim. When that one is
+      // a cache hit, or a run that has already saved, the fresh row answers
+      // this request too; otherwise it is 409. Read only after the refusal,
+      // and only a fresh row is served, so nothing is run or reserved either
+      // way.
+      const saved = await findSaved();
+      const served = saved ? await servedFromSaved(saved) : null;
+      if (served) return served;
+      throw error;
     }
+    const cached = await findSaved();
+    const served = cached ? await servedFromSaved(cached) : null;
+    if (served) return served;
 
     const billingPlan = await getUserBillingPlan(session.user.id);
     const access = identifyChatCaller(request, session.user.id, billingPlan.tier, {

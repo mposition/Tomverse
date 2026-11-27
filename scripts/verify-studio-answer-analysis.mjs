@@ -173,7 +173,7 @@ try {
   const startedEvents = () => page.evaluate(() =>
     JSON.parse(sessionStorage.getItem("tomverse_analytics_pending_events_v1") || "[]")
       .filter((event) => event.eventName === "comparison_review_started").length);
-  const alreadyRunning = "이 답변들의 교차검토가 이미 실행 중입니다. 잠시 후 다시 열어 결과를 확인해 주세요.";
+  const alreadyRunning = "이 답변들의 교차검토가 이미 실행 중입니다. 끝난 뒤 다시 실행하면 저장된 결과를 추가 과금 없이 받을 수 있고, 그 사이 답변이 추가되면 새 검토로 실행됩니다.";
   let duplicatePosts = 0;
   let duplicateAnswer = "already-running";
   const duplicateGets = [];
@@ -192,17 +192,27 @@ try {
   await expect.poll(() => duplicateGets.length).toBe(1);
   const startedBeforeDuplicate = await startedEvents();
   await entry.getByRole("button").click();
-  await expect(dialog.getByRole("alert")).toContainText(alreadyRunning);
-  await expect(dialog.getByRole("alert")).not.toContainText("This request");
+  // Not a failure: a status, not an alert, and no retry wording.
+  const notice = dialog.getByRole("status").filter({ hasText: alreadyRunning });
+  await expect(notice).toBeVisible();
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.getByText("This request", { exact: false })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "다시 시도", exact: true })).toHaveCount(0);
   await page.waitForTimeout(5_000);
   assert.equal(duplicatePosts, 1);
   assert.equal(duplicateGets.length, 1, "the session sent a lookup after the 409");
   assert.equal(await startedEvents(), startedBeforeDuplicate, "a refused attempt was counted as a started analysis");
-  await dialog.getByRole("button", { name: "다시 시도", exact: true }).click();
+  // The closed entry does not read as a failure either.
+  await page.keyboard.press("Escape");
+  await expect(entry).toHaveAttribute("data-state", "running-elsewhere");
+  await expect(entry.getByRole("button")).toContainText("결과 확인하기");
+  await expect(entry).toContainText("이 AI Review는 이미 실행 중입니다.");
+  await expect(entry).not.toContainText("다시 시도");
+  await entry.getByRole("button").click();
   await expect.poll(() => duplicatePosts).toBe(2);
-  await expect(dialog.getByRole("alert")).toContainText(alreadyRunning);
+  await expect(notice).toBeVisible();
   duplicateAnswer = "saved";
-  await dialog.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await dialog.getByRole("button", { name: "결과 확인하기", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible();
   assert.equal(duplicatePosts, 3);
   await page.keyboard.press("Escape");
