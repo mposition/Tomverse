@@ -23,13 +23,7 @@ import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { ComparisonReviewWorkspace } from "@/components/chat/ComparisonReviewWorkspace";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
-import {
-  isComparisonReviewAlreadyRunning,
-  joinedRunSavedBefore,
-  lookupStoredComparisonReview,
-  storedComparisonReviewPath,
-  waitForStoredComparisonReview,
-} from "@/lib/comparisonReviewInFlight";
+import { isComparisonReviewAlreadyRunning } from "@/lib/comparisonReviewInFlight";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   toSourceGrounding,
@@ -515,22 +509,7 @@ export function ComparisonReviewDialog({
   const [includeSynthesis, setIncludeSynthesis] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  /**
-   * The server answered that this exact review is already running (another
-   * tab, Studio, or a run whose stream this dialog lost). Nothing was started
-   * or charged; the dialog waits for that run's saved result instead.
-   */
-  const [waiting, setWaiting] = useState(false);
-  const waitControllerRef = useRef<AbortController | null>(null);
-  useEffect(() => () => waitControllerRef.current?.abort(), []);
   const [error, setError] = useState("");
-  /**
-   * Why a wait on an already-running review ended without a result. Kept
-   * apart from `error`, which the setup refresh clears: a wait that ends after
-   * answers finished meanwhile returns to a setup step that catches up at
-   * once, and that refresh must not erase the explanation.
-   */
-  const [waitNotice, setWaitNotice] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
   /**
    * The answers revision the setup on screen was loaded for.
@@ -545,7 +524,7 @@ export function ComparisonReviewDialog({
    * step, and caught up as soon as it returns there.
    */
   const [setupRevision, setSetupRevision] = useState(sourceRevision);
-  if (!running && !waiting && !review && setupRevision !== sourceRevision) {
+  if (!running && !review && setupRevision !== sourceRevision) {
     setSetupRevision(sourceRevision);
   }
 
@@ -694,59 +673,6 @@ export function ComparisonReviewDialog({
   } : null;
   if (!open || (!conversationId && !guestSource)) return null;
 
-  /**
-   * Joins a run the server is already executing for this exact input. It only
-   * ever reads: the saved row appears when that run finishes, and the exact
-   * ids keep the lookup on the turn it reviews even if the latest turn moved.
-   */
-  const waitForRunningReview = async (input: {
-    conversationId: string;
-    promptMessageId: string;
-    assistantMessageIds: string[];
-    reviewMode: ReviewMode;
-    includeSynthesis: boolean;
-    /** From the 409: the row this wait must not accept (see the route's GET). */
-    savedBefore: string | null;
-  }) => {
-    waitControllerRef.current?.abort();
-    const controller = new AbortController();
-    waitControllerRef.current = controller;
-    setWaiting(true);
-    setError("");
-    setWaitNotice("");
-    try {
-      const path = storedComparisonReviewPath(input.conversationId, input);
-      const wait = await waitForStoredComparisonReview<ComparisonReview>({
-        signal: controller.signal,
-        lookup: () => lookupStoredComparisonReview<ComparisonReview>(path, { signal: controller.signal }),
-      });
-      if (wait.outcome === "aborted" || controller.signal.aborted) return;
-      if (wait.outcome === "gone") {
-        setWaitNotice(t("chat.aiReviewAlreadyRunningTurnGone"));
-        return;
-      }
-      if (wait.outcome === "ended") {
-        setWaitNotice(t("chat.aiReviewAlreadyRunningEnded"));
-        return;
-      }
-      if (wait.outcome === "expired") {
-        setWaitNotice(t("chat.aiReviewAlreadyRunningTimeout"));
-        return;
-      }
-      setReview(wait.review);
-      setActiveReviewer("primary");
-    } catch {
-      // A gone or locked conversation: stop waiting; nothing was spent.
-      if (controller.signal.aborted) return;
-      setWaitNotice(t("chat.aiReviewPrepareFailed"));
-    } finally {
-      if (waitControllerRef.current === controller) {
-        waitControllerRef.current = null;
-        setWaiting(false);
-      }
-    }
-  };
-
   const runReview = async () => {
     if (!setup?.available) return;
     if (
@@ -757,11 +683,12 @@ export function ComparisonReviewDialog({
     }
     setRunning(true);
     setError("");
-    setWaitNotice("");
     let receivedPrimary = false;
-    // Counted once the server has answered with anything other than "this
-    // review is already running": joining someone else's run starts and
-    // bills nothing here. A request that never got an answer still counts.
+    // An account request the server answers with "this review is already
+    // running" (409 DUPLICATE_REQUEST) started and billed nothing, so it is
+    // not counted as started. That can only be known from the answer, so an
+    // account start is counted when the server answers (or never does); a
+    // guest start is counted on the click, as before.
     let startTracked = false;
     const trackStarted = () => {
       if (startTracked) return;
@@ -772,6 +699,7 @@ export function ComparisonReviewDialog({
         { review_mode: mode }
       );
     };
+    if (guestSource) trackStarted();
     // The guest run sends exactly the turn the setup on screen previewed.
     const runGuestSource = guestSource ? setupGuestSource ?? guestSource : null;
     try {
@@ -816,7 +744,7 @@ export function ComparisonReviewDialog({
           response = await sendGuestRun(token);
         }
       }
-      if (guestSource || response.status !== 409) trackStarted();
+      if (response.status !== 409) trackStarted();
       const data = (await readReviewProgress(response, value => {
         const primary = value as ComparisonReview;
         if (!primary?.result?.primary || !Array.isArray(primary.responseMap)) return;
@@ -826,26 +754,12 @@ export function ComparisonReviewDialog({
       })) as
         | ComparisonReview
         | { error?: string; traceId?: string; code?: string };
-      const { promptMessageId, assistantMessageIds } = setup;
-      const savedBefore = joinedRunSavedBefore(data);
-      if (
-        !guestSource &&
-        conversationId &&
-        promptMessageId &&
-        assistantMessageIds &&
-        savedBefore !== undefined &&
-        isComparisonReviewAlreadyRunning(response.status, data)
-      ) {
-        // Not a failure: the same review is already running and billed once.
-        // Wait for its saved result rather than offering a second run.
-        void waitForRunningReview({
-          conversationId,
-          promptMessageId,
-          assistantMessageIds,
-          reviewMode: mode,
-          includeSynthesis,
-          savedBefore,
-        });
+      if (!guestSource && isComparisonReviewAlreadyRunning(response.status, data)) {
+        // Not a failure: the same review is already running and was billed
+        // once. Say so and leave the button available -- pressed again it is
+        // refused while the run is in flight and served from the saved row
+        // once it has finished.
+        setError(t("chat.aiReviewAlreadyRunningRetryLater"));
         return;
       }
       trackStarted();
@@ -1321,9 +1235,7 @@ export function ComparisonReviewDialog({
                         type="button"
                         aria-pressed={mode === item.id}
                         onClick={() => setMode(item.id)}
-                        // The criteria of the run being waited on are fixed.
-                        disabled={waiting}
-                        className={`rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 dark:focus-visible:ring-offset-zinc-900 ${
+                        className={`rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
                           mode === item.id
                             ? "border-tomverse-review-selected-border bg-tomverse-review-selected ring-2 ring-tomverse-review-selected-border/20"
                             : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-950"
@@ -1352,7 +1264,6 @@ export function ComparisonReviewDialog({
                       type="checkbox"
                       checked={includeSynthesis}
                       onChange={(event) => setIncludeSynthesis(event.target.checked)}
-                      disabled={waiting}
                       className="mt-1 h-4 w-4 rounded border-zinc-300"
                     />
                     <span>
@@ -1405,7 +1316,7 @@ export function ComparisonReviewDialog({
             </div>
           )}
 
-          {(error || waitNotice) && (
+          {error && (
             // UI-004: a review that fails after the user has committed the
             // click is an error they must notice, not a paragraph that
             // silently appears below the fold -- so it announces like every
@@ -1416,7 +1327,7 @@ export function ComparisonReviewDialog({
               className="mt-5 flex gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="min-w-0 break-words text-sm leading-6">{error || waitNotice}</p>
+              <p className="min-w-0 break-words text-sm leading-6">{error}</p>
             </div>
           )}
         </div>
@@ -1428,25 +1339,15 @@ export function ComparisonReviewDialog({
             <p className="mb-3 text-xs leading-5 text-zinc-500">
               {setup.disclaimer || t("chat.aiReviewDisclaimer")}
             </p>
-            {waiting && (
-              <p
-                role="status"
-                data-testid="ai-review-already-running"
-                className="mb-3 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300"
-              >
-                <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
-                {t("chat.aiReviewAlreadyRunningWaiting")}
-              </p>
-            )}
             <button
               type="button"
               onClick={runReview}
-              disabled={running || waiting}
+              disabled={running}
               className="flex h-11 w-full items-center justify-center gap-3 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
             >
               <span className="flex min-w-0 items-center gap-2">
-                {running || waiting ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}
-                <span className="truncate">{running || waiting ? t("chat.aiReviewRunning") : t("chat.aiReviewRun")}</span>
+                {running ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}
+                <span className="truncate">{running ? t("chat.aiReviewRunning") : t("chat.aiReviewRun")}</span>
               </span>
             </button>
           </footer>

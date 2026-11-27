@@ -123,24 +123,6 @@ test("release removes only the holder's own claim", async () => {
   assert.equal(where.count, BigInt(claim.token));
 });
 
-test("liveness reads the claim's own row by the claim's own expiry, and writes nothing", async () => {
-  const claim = await claims.claimInFlightRun(SUBJECT, "comparison-review", RUN_KEY, 900);
-  statements.length = 0;
-  nextRows = [[{ count: BigInt(1) }]];
-  assert.equal(await claims.isInFlightRunLive(SUBJECT, "comparison-review", RUN_KEY, 900), true);
-  nextRows = [[]];
-  assert.equal(await claims.isInFlightRunLive(SUBJECT, "comparison-review", RUN_KEY, 900), false);
-
-  const [{ sql, values }] = statements;
-  assert.match(sql, /^\s*SELECT 1 AS "live" FROM "ChatUsageBucket"/);
-  assert.doesNotMatch(sql, /INSERT|UPDATE|DELETE/);
-  // Live means "younger than the TTL", the complement of the claim's own
-  // takeover condition, so the two can never disagree about a row.
-  assert.match(sql, /"updatedAt" >= NOW\(\) - \?::int \* INTERVAL '1 second'/);
-  assert.deepEqual(values.slice(0, 3), [claim.key, claim.period, claim.periodStart]);
-  assert.equal(values[3], 900);
-});
-
 test("two claims never share a token, so neither can release the other", async () => {
   const tokens = new Set<number>();
   for (let index = 0; index < 50; index += 1) {

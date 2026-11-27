@@ -18,7 +18,7 @@ import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
-import { isComparisonReviewAlreadyRunning, joinedRunSavedBefore, lookupStoredComparisonReview, storedComparisonReviewPath, waitForStoredComparisonReview } from "@/lib/comparisonReviewInFlight";
+import { isComparisonReviewAlreadyRunning } from "@/lib/comparisonReviewInFlight";
 import type { ComparisonReview, ReviewSetup } from "../../packages/chat-core/src/review";
 import type { AiReviewAccess } from "./ComparisonActionRail";
 import "./studio-answer-analysis.css";
@@ -63,25 +63,8 @@ export function StudioAnswerAnalysis({
   const [tab, setTab] = useState<"summary" | "detail">("summary");
   const [reviewer, setReviewer] = useState<"primary" | "secondary">("primary");
   const keys = useRef(new Map<string, string>());
-  /**
-   * The scope whose analysis joined a run that was already in flight, and how
-   * that wait ended if it ended without a result.
-   */
-  const [joined, setJoined] = useState<{ scope: string; ended: null | "gone" | "ended" | "expired" } | null>(null);
-  /**
-   * Bounds a join's polling. A join is session work like a run, so it survives
-   * dismissal and tab switches the way a pending run does; but it is aborted
-   * when the session is discarded (identity change), when the conversation
-   * changes, and on unmount -- nothing would ever show what it finds. Created
-   * in the effect, not the memo, so StrictMode's rehearsal cleanup cannot
-   * leave a live session holding an aborted signal.
-   */
-  const joinLifetime = useRef<AbortController | null>(null);
-  useEffect(() => {
-    const lifetime = new AbortController();
-    joinLifetime.current = lifetime;
-    return () => lifetime.abort();
-  }, [session, conversationId]);
+  /** The scope whose last attempt was refused because that analysis is already running. */
+  const [alreadyRunningScope, setAlreadyRunningScope] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -146,57 +129,34 @@ export function StudioAnswerAnalysis({
           reviewMode: "balanced", includeSynthesis: false,
         }),
       });
-      // Counted once the server has answered with anything other than "this
-      // analysis is already running": a join starts and bills nothing here. A
-      // request that never got an answer still counts.
+      // An account request the server answers with "this analysis is already
+      // running" (409 DUPLICATE_REQUEST) started and billed nothing, so it is
+      // not counted as started. That is only known from the answer, so an
+      // account start is counted when the server answers (or never does); a
+      // guest start is counted here, as before.
       let startTracked = false;
       const trackStarted = () => {
         if (startTracked) return;
         startTracked = true;
         trackProductEvent("comparison_review_started", setup.responses?.length ?? 0, { review_mode: "balanced" });
       };
-      setJoined((current) => current?.scope === scope ? null : current);
-      // The lifetime of the session and conversation this request belongs to,
-      // captured now: a 409 that arrives after the user switched conversation
-      // or account must not start polling under the new session's lifetime.
-      const signal = joinLifetime.current?.signal;
+      if (guest) trackStarted();
+      setAlreadyRunningScope((current) => current === scope ? null : current);
       let response = await send().catch((error: unknown) => {
         trackStarted();
         throw error;
       });
-      if (!guest && conversationId && setup.promptMessageId && setup.assistantMessageIds && response.status === 409) {
+      if (!guest && response.status === 409) {
         const refusal = await response.clone().json().catch(() => ({}));
-        const savedBefore = joinedRunSavedBefore(refusal);
-        if (savedBefore !== undefined && isComparisonReviewAlreadyRunning(response.status, refusal)) {
-          // The same balanced review is already running for this account
-          // (Classic, another tab, or a stream this session lost). It was
-          // billed once; this session waits for its saved row and never runs.
+        if (isComparisonReviewAlreadyRunning(response.status, refusal)) {
+          // The same balanced analysis is already running for this account
+          // (Classic, another tab, or a stream this session lost) and was
+          // billed once. Say so and offer the retry: pressed again it is
+          // refused while that run is in flight and served from the saved row
+          // once it has finished.
           await discardResponseBody(response);
-          // Its session was discarded while the request was out: nobody is
-          // left to show a result, so do not start waiting at all.
-          if (signal?.aborted) throw new StudioAnalysisKnownFailure("Joined analysis abandoned");
-          setJoined({ scope, ended: null });
-          const lookupPath = storedComparisonReviewPath(conversationId, {
-            reviewMode: "balanced", includeSynthesis: false,
-            promptMessageId: setup.promptMessageId, assistantMessageIds: setup.assistantMessageIds,
-            savedBefore,
-          });
-          const wait = await waitForStoredComparisonReview<ComparisonReview>({
-            signal,
-            lookup: () => lookupStoredComparisonReview<ComparisonReview>(lookupPath, { signal }),
-          }).catch((error: unknown) => {
-            setJoined((current) => current?.scope === scope ? null : current);
-            throw error;
-          });
-          if (wait.outcome === "saved") {
-            setJoined((current) => current?.scope === scope ? null : current);
-            return wait.review;
-          }
-          // Gone, expired or abandoned: a retry is safe -- the server either
-          // joins a run again or runs it once.
-          setJoined((current) => current?.scope !== scope ? current
-            : wait.outcome === "aborted" ? null : { scope, ended: wait.outcome });
-          throw new StudioAnalysisKnownFailure(`Joined analysis ${wait.outcome}`);
+          setAlreadyRunningScope(scope);
+          throw new StudioAnalysisKnownFailure("Analysis already running");
         }
       }
       trackStarted();
@@ -268,14 +228,11 @@ export function StudioAnswerAnalysis({
             {!review && entry?.phase !== "error" && <div className="studio-analysis-loading" role="status" aria-live="polite">
               <span className="studio-analysis-mark"><Sparkles size={30} /></span>
               <h3>{entry?.phase === "checking" ? copy.checking : copy.running}</h3><p>{copy.progress}</p>
-              {joined?.scope === scope && !joined.ended && busy && <p data-testid="studio-analysis-already-running">{t("chat.aiReviewAlreadyRunningWaiting")}</p>}
               <div className="studio-analysis-progress" role="progressbar" aria-label={copy.running}><span /></div>
               <ol><li aria-current={entry?.phase === "checking" ? "step" : undefined}>{entry?.phase !== "checking" && <Check size={15} />}{t("chat.aiReviewResponse")}</li><li aria-current={entry?.phase === "running" ? "step" : undefined}>{copy.detail}</li><li>{copy.summary}</li></ol>
               <p>{copy.background}</p>
             </div>}
-            {entry?.phase === "error" && <div className="studio-analysis-error" role="alert"><p>{joined?.scope === scope && joined.ended === "gone" ? t("chat.aiReviewAlreadyRunningTurnGone")
-              : joined?.scope === scope && joined.ended === "ended" ? t("chat.aiReviewAlreadyRunningEnded")
-              : joined?.scope === scope && joined.ended === "expired" ? t("chat.aiReviewAlreadyRunningTimeout") : copy.failed}</p>
+            {entry?.phase === "error" && <div className="studio-analysis-error" role="alert"><p>{alreadyRunningScope === scope ? t("chat.aiReviewAlreadyRunningRetryLater") : copy.failed}</p>
               <button type="button" onClick={show}>{copy.retry}</button>
               {isGuest && <button type="button" onClick={() => { close(); onSignIn?.(); }}>{copy.signIn}</button>}
             </div>}

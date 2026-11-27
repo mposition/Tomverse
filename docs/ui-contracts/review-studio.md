@@ -87,32 +87,16 @@ answers a second request for the same input with `409 DUPLICATE_REQUEST`
 without running, charging or reserving anything. The claim is released on
 every outcome and expires after 15 minutes if its process dies
 (`lib/comparisonReviewInFlight.ts` derives the bound; it uses the existing
-`ChatUsageBucket` table, no migration). Classic, mobile web and Studio treat
-that 409 as "already running": they say so and read the saved result through
-the GET with the exact `promptMessageId`/`assistantMessageIds` of that run
-until it appears, never re-run it, and offer a retry only once the claim could
-have expired. The 409 carries `savedBefore`: the row's `updatedAt` read after
-the claim was refused (fresh or stale), or null when there is no row. That
-exact-turn GET answers only for its turn and reads claim liveness before the
-row: a row whose `updatedAt` differs from `savedBefore` (or any row when it is
-null) is the result; an unchanged row is pending while the claim is live,
-the result once no claim is live if the row is fresh, and ended if it is
-stale; no row is pending while live and ended otherwise; `404
-COMPARISON_REVIEW_TURN_NOT_FOUND` once an answer was deleted or regenerated,
-never the latest turn's review. So an older stale result of the same input is
-never shown as the new one; the check compares the column with its own
-earlier value, never two clocks. One narrow case reads ended although a
-result exists (saved, marked stale, duplicate arrives before the release):
-missed, never wrong. The GET does not depend on the latest turn being
-comparable or within the size limit, refuses a malformed lookup before
-spending rate limit, and has its own rate limit (10 a minute, 120 a day, apart
-from the setup preview's 20 and 300); one wait backs off to a lookup a minute
-and makes at most 18 lookups, honouring `Retry-After`. A wait's ending message
-survives the setup refresh that follows it. Studio binds a wait to the session
-and conversation that sent the request, stops it when either is discarded
-(identity or conversation change, unmount) and never starts one for a 409
-that arrives after that; dismissal does not stop it. A join is not counted as
-`comparison_review_started`. Coverage:
+`ChatUsageBucket` table, no migration). Classic, mobile web and Studio answer
+that 409 with one localized notice (`chat.aiReviewAlreadyRunningRetryLater`:
+the review of these answers is already running; open it again shortly to see
+the result) instead of a failure or the server's message. They do not poll;
+the run button (Studio: retry) stays available, and pressing it again is
+refused while that run is in flight and served from the saved row through the
+existing cache path once it has finished. A refused attempt is not counted as
+`comparison_review_started`: an account start is counted when the server
+answers (or never does), a guest start on the click as before. The GET is
+unchanged: the latest turn and the chosen criteria. Coverage:
 `tests/server-contract/comparison-review-route.test.ts`,
 `tests/server-contract/comparison-review-run-claim.test.ts`,
 `tests/comparisonReviewInFlight.test.mjs` and both browser harnesses.

@@ -130,136 +130,58 @@ try {
 
   // 5. The server says this exact review is already running (another tab,
   //    Studio, or a stream this dialog lost): 409 DUPLICATE_REQUEST. The
-  //    dialog neither fails nor offers another run; it reads the saved result
-  //    by the exact turn until it appears. The first lookup is rate limited:
-  //    the wait backs off and carries on rather than retrying at once.
+  //    dialog says so in its own words -- not a generic failure, not the
+  //    server's English -- polls nothing, and leaves the run button available:
+  //    pressed again it is refused while the run is in flight and gets the
+  //    saved row (the route's cache path) once it has finished.
   const saved = mock.getStoredReview();
+  const alreadyRunning = "이 답변들의 교차검토가 이미 실행 중입니다. 잠시 후 다시 열어 결과를 확인해 주세요.";
   let duplicatePosts = 0;
-  const exactLookups = [];
-  let exactBehaviour = "rate-limited-then-saved";
-  await page.route(endpoint, async (route) => {
-    const request = route.request();
-    if (request.method() === "POST") {
-      duplicatePosts += 1;
-      await route.fulfill({
-        status: 409,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST", savedBefore: null }),
-      });
-      return;
-    }
-    const query = new URL(request.url()).searchParams;
-    if (!query.has("assistantMessageIds")) return route.fallback();
-    exactLookups.push({ query, at: Date.now() });
-    if (exactBehaviour === "ended") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ available: true, storedReview: null, running: false }),
-      });
-      return;
-    }
-    if (exactBehaviour === "gone") {
-      await route.fulfill({
-        status: 404,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "The answers this review was running on are no longer available.", code: "COMPARISON_REVIEW_TURN_NOT_FOUND" }),
-      });
-      return;
-    }
-    if (exactLookups.length === 1) {
-      await route.fulfill({
-        status: 429,
-        headers: { "Retry-After": "1" },
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Too many requests.", code: "API_RATE_LIMITED" }),
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ available: true, storedReview: { ...saved, cached: true, usageCredits: 0 } }),
-    });
-  });
-  const setupGets = () => gets.filter((url) => !new URL(url).searchParams.has("assistantMessageIds")).length;
-  const setupGetsBefore = setupGets();
-  await page.getByRole("button", { name: /교차검토 실행/ }).click();
-  const waitingStatus = page.getByTestId("ai-review-already-running");
-  await expect(waitingStatus).toBeVisible();
-  await expect(page.getByTestId("comparison-review-error")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /답변을 검토하는 중/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: /^균형 검토/ })).toBeDisabled();
-  // Waiting spends nothing, so the dialog may be closed meanwhile.
-  await expect(page.getByRole("button", { name: "닫기" }).first()).toBeEnabled();
-  // A finished answer while waiting must not swap the setup under it either.
-  await answerFinished();
-  await expect(result).toBeVisible({ timeout: 15_000 });
-  await expect(waitingStatus).toHaveCount(0);
-  assert.equal(duplicatePosts, 1, "the dialog sent another run instead of waiting");
-  assert.equal(setupGets(), setupGetsBefore, "the setup was re-fetched while waiting");
-  assert.equal(exactLookups.length, 2, "a rate-limited lookup was retried more than once");
-  assert.ok(exactLookups[1].at - exactLookups[0].at >= 4_000, "the wait retried a rate-limited lookup too soon");
-  for (const { query } of exactLookups) {
-    assert.equal(query.get("promptMessageId"), "11111111-1111-4111-8111-111111111111");
-    assert.equal(query.get("reviewMode"), "balanced");
-    // The 409's pre-run fingerprint travels with every lookup.
-    assert.equal(query.get("savedBefore"), "none");
-  }
-  assert.equal(mock.getRunCount(), 1);
-  assert.equal(await startedEvents(), 1, "joining a run already in flight was counted as a start");
-
-  // 6. The turn being waited on is gone (an answer deleted or regenerated):
-  //    the wait ends with its own message, shows nothing in its place, and
-  //    the run button comes back.
-  exactBehaviour = "gone";
-  await page.getByRole("button", { name: "검토 기준 변경" }).click();
-  await expect(setupScreen).toBeVisible();
-  await page.getByRole("button", { name: /교차검토 실행/ }).click();
-  await expect(page.getByTestId("comparison-review-error")).toContainText("결과를 표시할 수 없습니다", { timeout: 15_000 });
-  await expect(waitingStatus).toHaveCount(0);
-  await expect(result).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /교차검토 실행/ })).toBeEnabled();
-  assert.equal(duplicatePosts, 2);
-  assert.equal(exactLookups.length, 3, "the wait kept polling a turn that is gone");
-  assert.equal(await startedEvents(), 1);
-
-  // 7. The joined run ended without saving (every reviewer failed, or its
-  //    process died and the claim expired): the wait stops with its own
-  //    message instead of polling to the deadline, and a retry is offered.
-  //    An answer finishes during the wait, so ending it returns to a setup
-  //    step that refreshes at once -- and that refresh must not erase the
-  //    explanation.
-  exactBehaviour = "ended";
-  await page.getByRole("button", { name: /교차검토 실행/ }).click();
-  await expect(waitingStatus).toBeVisible();
-  const setupGetsBeforeEnd = setupGets();
-  await answerFinished();
-  await expect(page.getByTestId("comparison-review-error")).toContainText("저장된 결과 없이 끝났습니다", { timeout: 15_000 });
-  await expect.poll(setupGets).toBe(setupGetsBeforeEnd + 1);
-  await settle();
-  await expect(page.getByTestId("comparison-review-error")).toContainText("저장된 결과 없이 끝났습니다");
-  await expect(result).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /교차검토 실행/ })).toBeEnabled();
-  assert.equal(exactLookups.length, 4, "the wait kept polling a run that ended");
-
-  // 8. A 409 without the pre-run fingerprint cannot be told apart from an
-  //    older row of the same input, so the dialog does not wait on it.
+  let duplicateAnswer = "already-running";
   await page.route(endpoint, async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     duplicatePosts += 1;
+    if (duplicateAnswer === "saved") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...saved, cached: true, usageCredits: 0 }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 409,
       contentType: "application/json",
       body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST" }),
     });
   });
-  await page.getByRole("button", { name: /교차검토 실행/ }).click();
-  await expect(page.getByTestId("comparison-review-error")).toContainText("이미 실행 중입니다");
-  await page.waitForTimeout(4_000);
-  assert.equal(exactLookups.length, 4, "a 409 without a fingerprint started a wait");
+  const getsBeforeDuplicate = gets.length;
+  const startedBeforeDuplicate = await startedEvents();
+  const runButton = page.getByRole("button", { name: /교차검토 실행/ });
+  const errorBox = page.getByTestId("comparison-review-error");
+  await runButton.click();
+  await expect(errorBox).toHaveText(alreadyRunning);
+  await expect(runButton).toBeEnabled();
+  // Longer than the first poll any waiting client would have made.
+  await page.waitForTimeout(5_000);
+  assert.equal(gets.length, getsBeforeDuplicate, "the dialog sent a request after the 409");
+  assert.equal(duplicatePosts, 1);
+  assert.equal(await startedEvents(), startedBeforeDuplicate, "a refused attempt was counted as a started review");
 
-  // 9. Guest: the setup previews the page's latest local turn, so an answer
+  await runButton.click();
+  await expect.poll(() => duplicatePosts).toBe(2);
+  await expect(errorBox).toHaveText(alreadyRunning);
+  await expect(runButton).toBeEnabled();
+
+  duplicateAnswer = "saved";
+  await runButton.click();
+  await expect(result).toBeVisible();
+  await expect(errorBox).toHaveCount(0);
+  assert.equal(duplicatePosts, 3);
+  assert.equal(gets.length, getsBeforeDuplicate, "no lookup but the run itself was needed");
+  assert.equal(mock.getRunCount(), 1);
+
+  // 6. Guest: the setup previews the page's latest local turn, so an answer
   //    finishing on the setup step is included in the preview and in the run;
   //    once the run starts, more answers change nothing.
   const guestPreviews = [];
@@ -316,7 +238,7 @@ try {
 
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Classic AI Review dialog; setup refreshes on new answers (guest included), a running review and a displayed result survive them, the setup catches up afterwards, and an already-running review is waited on, not re-run.",
+    "PASS: Classic AI Review dialog; setup refreshes on new answers (guest included), a running review and a displayed result survive them, the setup catches up afterwards, and an already-running review is reported in the dialog's own words, with no polling.",
   );
 } finally {
   await browser?.close();

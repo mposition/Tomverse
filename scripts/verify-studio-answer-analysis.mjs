@@ -167,91 +167,45 @@ try {
   await page.keyboard.press("Escape");
 
   // The same account analysis already running elsewhere (Classic, another
-  // tab): the server answers 409 DUPLICATE_REQUEST and the session waits for
-  // the saved row by the exact turn instead of failing or running it again.
-  // The first lookup is rate limited; the wait backs off and carries on.
+  // tab): the server answers 409 DUPLICATE_REQUEST. The session says so in its
+  // own words, polls nothing, does not count a start, and offers the retry:
+  // refused again while that run is in flight, the saved row once it is done.
   const startedEvents = () => page.evaluate(() =>
     JSON.parse(sessionStorage.getItem("tomverse_analytics_pending_events_v1") || "[]")
       .filter((event) => event.eventName === "comparison_review_started").length);
-  let joinedPosts = 0;
-  const joinedLookups = [];
-  let joinedBehaviour = "rate-limited-then-saved";
-  /** When set, the 409 is held until the test releases it. */
-  let duplicateGate = null;
+  const alreadyRunning = "이 답변들의 교차검토가 이미 실행 중입니다. 잠시 후 다시 열어 결과를 확인해 주세요.";
+  let duplicatePosts = 0;
+  let duplicateAnswer = "already-running";
+  const duplicateGets = [];
   await page.route(endpoint, async (route) => {
     const request = route.request();
     if (request.method() === "POST") {
-      joinedPosts++;
-      if (duplicateGate) await duplicateGate.promise;
-      await route.fulfill({ status: 409, json: { error: "This request is already being processed.", code: "DUPLICATE_REQUEST", savedBefore: null } });
+      duplicatePosts++;
+      if (duplicateAnswer === "saved") return route.fulfill({ json: { ...saved, cached: true } });
+      await route.fulfill({ status: 409, json: { error: "This request is already being processed.", code: "DUPLICATE_REQUEST" } });
       return;
     }
-    const query = new URL(request.url()).searchParams;
-    if (!query.has("assistantMessageIds")) return route.fulfill({ json: originalSetup });
-    joinedLookups.push({ query, at: Date.now() });
-    if (joinedBehaviour === "gone") {
-      await route.fulfill({ status: 404, json: { error: "Gone.", code: "COMPARISON_REVIEW_TURN_NOT_FOUND" } });
-    } else if (joinedBehaviour === "pending") {
-      await route.fulfill({ json: { available: true, storedReview: null } });
-    } else if (joinedLookups.length === 1) {
-      await route.fulfill({ status: 429, headers: { "Retry-After": "1" }, json: { error: "Too many requests.", code: "API_RATE_LIMITED" } });
-    } else {
-      await route.fulfill({ json: { available: true, storedReview: { ...saved, cached: true } } });
-    }
+    duplicateGets.push(request.url());
+    await route.fulfill({ json: originalSetup });
   });
   await page.reload();
-  const startedBeforeJoin = await startedEvents();
+  await expect.poll(() => duplicateGets.length).toBe(1);
+  const startedBeforeDuplicate = await startedEvents();
   await entry.getByRole("button").click();
-  await expect(dialog.getByTestId("studio-analysis-already-running")).toBeVisible();
-  await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(dialog.getByRole("alert")).toHaveCount(0);
-  assert.equal(joinedPosts, 1, "a joined analysis must not be submitted again");
-  assert.equal(joinedLookups.length, 2, "a rate-limited lookup was retried more than once");
-  assert.ok(joinedLookups[1].at - joinedLookups[0].at >= 4_000, "a rate-limited lookup was retried too soon");
-  assert.equal(joinedLookups[0].query.get("reviewMode"), "balanced");
-  assert.equal(joinedLookups[0].query.get("includeSynthesis"), "false");
-  assert.equal(joinedLookups[0].query.get("promptMessageId"), originalSetup.promptMessageId);
-  assert.equal(joinedLookups[0].query.get("assistantMessageIds"), originalSetup.assistantMessageIds.join(","));
-  assert.equal(joinedLookups[0].query.get("savedBefore"), "none", "the 409's pre-run fingerprint must travel with the lookup");
-  assert.equal(await startedEvents(), startedBeforeJoin, "joining a run already in flight was counted as a start");
+  await expect(dialog.getByRole("alert")).toContainText(alreadyRunning);
+  await expect(dialog.getByRole("alert")).not.toContainText("This request");
+  await page.waitForTimeout(5_000);
+  assert.equal(duplicatePosts, 1);
+  assert.equal(duplicateGets.length, 1, "the session sent a lookup after the 409");
+  assert.equal(await startedEvents(), startedBeforeDuplicate, "a refused attempt was counted as a started analysis");
+  await dialog.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect.poll(() => duplicatePosts).toBe(2);
+  await expect(dialog.getByRole("alert")).toContainText(alreadyRunning);
+  duplicateAnswer = "saved";
+  await dialog.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible();
+  assert.equal(duplicatePosts, 3);
   await page.keyboard.press("Escape");
-
-  // The turn being waited on is gone: the wait ends with its own message,
-  // never another turn's analysis, and a retry is offered.
-  joinedBehaviour = "gone";
-  await page.reload();
-  await entry.getByRole("button").click();
-  await expect(dialog.getByRole("alert")).toContainText("결과를 표시할 수 없습니다", { timeout: 15_000 });
-  await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toHaveCount(0);
-  assert.equal(joinedPosts, 2);
-  assert.equal(joinedLookups.length, 3, "the wait kept polling a turn that is gone");
-  await page.keyboard.press("Escape");
-
-  // Dismissal keeps a join alive like any pending analysis, but discarding
-  // the session (identity change) stops its polling.
-  joinedBehaviour = "pending";
-  await page.reload();
-  await entry.getByRole("button").click();
-  await expect.poll(() => joinedLookups.length, { timeout: 10_000 }).toBe(4);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Switch identity", exact: true }).click();
-  await page.waitForTimeout(8_000);
-  assert.equal(joinedLookups.length, 4, "a discarded session kept polling");
-  assert.equal(joinedPosts, 3);
-
-  // A 409 that arrives only after the session was discarded belongs to the
-  // old session: it must not start polling under the new session's lifetime.
-  await page.reload();
-  let releaseDuplicate = () => {};
-  duplicateGate = { promise: new Promise((done) => { releaseDuplicate = done; }) };
-  await entry.getByRole("button").click();
-  await expect.poll(() => joinedPosts, { timeout: 10_000 }).toBe(4);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Switch identity", exact: true }).click();
-  releaseDuplicate();
-  duplicateGate = null;
-  await page.waitForTimeout(8_000);
-  assert.equal(joinedLookups.length, 4, "a late 409 for a discarded session started polling");
 
   // Mobile has neither the new entry/modal nor a background analysis lookup.
   await page.setViewportSize({ width: 390, height: 844 });
@@ -264,7 +218,7 @@ try {
   assert.equal(getCount, mobileGets);
   assert.equal(mock.getRunCount(), 2);
   assert.deepEqual(errors, []);
-  console.log("PASS: single execution, background completion, saved reopen/remount, tabs/reviewers/evidence, changed answers, identity isolation, guest reuse, joined in-flight run, no credit copy, desktop/dark/mobile exclusion.");
+  console.log("PASS: single execution, background completion, saved reopen/remount, tabs/reviewers/evidence, changed answers, identity isolation, guest reuse, already-running notice, no credit copy, desktop/dark/mobile exclusion.");
 } finally {
   await browser?.close();
   if (server) await new Promise((done) => server.close(done));
