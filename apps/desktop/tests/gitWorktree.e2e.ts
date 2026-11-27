@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -59,13 +60,13 @@ test("Agent edits are isolated by task and a stopped saved task resumes in its o
       application = await launchNativeFixture(descriptor);
       const page = await application.firstWindow();
       await page.getByRole("button", { name: "Code", exact: true }).click();
-      await page.getByRole("button", { name: "Open local folder" }).click();
+      await openCodeProject(page);
       return page;
     };
     let page = await openProject();
     const task = () => page.evaluate(() => window.desktop.state().then(state => state.task));
     const editor = () => page.getByRole("textbox", { name: "Code request", exact: true });
-    const workspaceMenu = () => page.locator('summary[aria-label="Code workspace"]');
+    const worktreeBox = () => page.getByTestId("worktree-checkbox");
     const send = () => page.getByRole("button", { name: "Send Code request", exact: true }).click();
     const approve = async (trigger: () => Promise<void>) => {
       const prompted = application!.waitForEvent("window", { timeout: 15_000 });
@@ -73,15 +74,12 @@ test("Agent edits are isolated by task and a stopped saved task resumes in its o
       await trigger();
       await decideNativePatch(await prompted);
     };
-    await expect(workspaceMenu()).toHaveText("New worktree · main");
-    await workspaceMenu().click();
-    await expect(page.getByRole("combobox", { name: "Code workspace" })).toHaveValue("worktree");
+    await expect(worktreeBox()).toBeChecked();
     await page.getByRole("combobox", { name: "Starting branch" }).selectOption("refs/heads/candidate");
     const planned = (await page.evaluate(() => window.desktop.state())).codeGitWorkspace;
     assert.equal(planned?.kind, "git");
     assert.ok(planned.path.startsWith(join(profileParent, "Tomverse Worktrees")));
-    await expect(page.getByText(planned.path, { exact: true })).toBeVisible();
-    await workspaceMenu().click();
+    await expect(page.getByTestId("worktree-toggle")).toHaveAttribute("data-worktree-path", planned.path);
     await editor().fill(firstPrompt);
     const firstApproval = application!.waitForEvent("window", { timeout: 15_000 });
     void firstApproval.catch(() => undefined);
@@ -144,9 +142,7 @@ test("Agent edits are isolated by task and a stopped saved task resumes in its o
 
     await page.getByRole("button", { name: "New task", exact: true }).click();
     await expect.poll(task).toBeNull();
-    await workspaceMenu().click();
-    await page.getByRole("combobox", { name: "Code workspace" }).selectOption("local");
-    await workspaceMenu().click();
+    await worktreeBox().uncheck();
     await editor().fill("Edit the current folder");
     await approve(send);
     await expect(page.getByText("Workspace edit complete.", { exact: true })).toBeVisible();
@@ -156,7 +152,9 @@ test("Agent edits are isolated by task and a stopped saved task resumes in its o
     assert.equal(git(root, "branch", "--show-current"), "main");
 
     await page.getByRole("button", { name: "New task", exact: true }).click();
-    await expect(workspaceMenu()).toHaveText("New worktree · main");
+    // The Worktree box is remembered per project: it stays off after the person turned it off.
+    await expect(worktreeBox()).not.toBeChecked();
+    await worktreeBox().check();
     await editor().fill("Refuse an edit after an external branch switch");
     const switchedApproval = application!.waitForEvent("window", { timeout: 15_000 });
     void switchedApproval.catch(() => undefined);

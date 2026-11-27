@@ -27,6 +27,7 @@ import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contra
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
 import type { CloudExecutionView, DesktopCloudExecutionInput } from "./cloud-execution-contract";
+import type { CodeProjectInput, CodeProjectReply, CodeProjectsView } from "./code-project-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -78,6 +79,7 @@ export const startInput = z.object({
   pluginConnectionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
   workspace: codeWorktreeChoice.optional(),
   prompt: z.string().trim().max(MAX_CODE_PROMPT_CHARACTERS),
+  /** The window sends `ask` for Read only and `agent` for every other permission mode. `plan` stays for what already uses it (saved conversations, continuations); no screen starts it. */
   mode: z.enum(["ask", "agent", "plan"]),
   model: z.string().min(1).max(240),
   effort: codeEffort,
@@ -439,6 +441,8 @@ export type Snapshot = {
   remote?: RemoteSnapshot | null;
   /** The switch for remote projects is on: the start screen offers them. */
   remoteEnabled?: boolean;
+  /** The register of Code projects of the signed-in account, and the one that is open. */
+  codeProjects?: CodeProjectsView;
 };
 
 export type ApprovalRequest = {
@@ -516,7 +520,8 @@ export type DesktopApi = {
   checkCliProtocol(provider: CliProvider): Promise<CliProtocolCheck>;
   cancelCliCheck(kind: "account" | "protocol"): Promise<void>;
   subscribe(listener: (snapshot: Snapshot) => void): () => void;
-  chooseRoot(): Promise<boolean>;
+  /** Code projects (code-project-contract.ts): the register of this account's folders, and opening one. */
+  codeProjects(input: CodeProjectInput): Promise<CodeProjectReply>;
   retryCodeCatalog(): Promise<void>;
   chooseCodeReferences(kind: WorkspaceReference["kind"]): Promise<{ references: CodeReference[]; rejected: number }>;
   removeCodeReference(id: string): Promise<void>;

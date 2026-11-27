@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { MAX_CODE_PROMPT_CHARACTERS } from "../src/contract";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
@@ -96,7 +97,7 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
     await page.getByRole("button", { name: "Sign in with your browser", exact: true }).click();
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).account.stage).toBe("connected");
     await rail.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect(page.getByRole("button", { name: "Add a place", exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Plugin for this task", { exact: true })).toHaveCount(0);
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).models.length).toBeGreaterThan(0);
@@ -105,7 +106,7 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
       return window.desktop.start({ prompt: "Reject this Agent invocation", mode: "agent", model, effort: "default", saveHistory: false,
         pluginConnectionId: "account-mcp" });
     }), /Code plugins require a connected account and an Ask task/);
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     const codeDraft = page.getByRole("textbox", { name: "Code request" });
     await codeDraft.fill("x".repeat(MAX_CODE_PROMPT_CHARACTERS));
     await page.getByRole("button", { name: "Add a place", exact: true }).click();

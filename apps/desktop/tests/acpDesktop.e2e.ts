@@ -5,6 +5,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode, startPlanOnly } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { decideNativePatch, launchNativeFixture } from "./launch-native-fixture";
@@ -192,12 +193,11 @@ for (const vendor of vendors) test(`${vendor.name} uses the ACP file boundary an
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
-    const mode = page.getByLabel("Code mode");
     const composer = page.getByRole("textbox", { name: "Code request" });
     const send = page.getByRole("button", { name: "Send Code request", exact: true });
-    await mode.selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill(askTitle);
     await send.click();
     await expect.poll(async () => (await state()).task?.status, { timeout: nativeStartWait }).toBe("completed");
@@ -214,9 +214,7 @@ for (const vendor of vendors) test(`${vendor.name} uses the ACP file boundary an
     let planApproval = false;
     app.on("window", () => { if (phase === "plan") planApproval = true; });
     phase = "plan";
-    await mode.selectOption("plan");
-    await composer.fill(planTitle);
-    await send.click();
+    await startPlanOnly(page, planTitle);
     await expect.poll(async () => {
       assert.ifError(fixtureError);
       const { task } = await state();
@@ -236,7 +234,7 @@ for (const vendor of vendors) test(`${vendor.name} uses the ACP file boundary an
     await assert.rejects(readFile(join(root, "plan-denied.txt")), { code: "ENOENT" });
 
     phase = "outside";
-    await mode.selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill(outsideTitle);
     await send.click();
     await expect.poll(async () => {
@@ -248,7 +246,7 @@ for (const vendor of vendors) test(`${vendor.name} uses the ACP file boundary an
     await expect(page.getByText(privateMarker, { exact: true })).toHaveCount(0);
 
     phase = "quick";
-    await mode.selectOption("agent");
+    await selectCodeMode(page, "agent");
     await page.getByRole("checkbox", { name: "Save to local history" }).check();
     await composer.fill(quickTitle);
     await send.click();
@@ -334,7 +332,7 @@ for (const vendor of vendors) test(`${vendor.name} uses the ACP file boundary an
     phase = "resume";
     app = await launchNativeFixture(descriptor);
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: agentTitle, exact: true }).click();
     await expect(restored.getByRole("region", { name: "Request analysis" })).toContainText(followUpText);
     await expect(restored.locator(".entry--user").filter({ hasText: followUpText })).toHaveCount(1);
@@ -382,7 +380,7 @@ for (const vendor of vendors) test(`${vendor.name} uses the ACP file boundary an
       await app.close();
       app = await launchNativeFixture(descriptor);
       const reopened = await app.firstWindow();
-      await reopened.getByRole("button", { name: "Open local folder" }).click();
+      await openCodeProject(reopened);
       await reopened.getByRole("complementary", { name: "History" }).getByRole("button", { name: agentTitle, exact: true }).click();
       await verifyUsage(reopened);
       assert.deepEqual(await reopened.evaluate(() => window.desktop.state().then(({ task }) => task?.nativeRuns?.at(-1)?.usage)), finalUsage);

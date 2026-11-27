@@ -960,7 +960,7 @@ test("Desktop keeps the compact history drawer reachable at 200 percent zoom", {
     const heading = history.getByRole("heading", { name: "Tomverse Code" });
     await expect(heading).toBeFocused();
     await expectWindowsAccessibleNames(application, page, {
-      "Hide history": "ControlType.Button", "Search history": "ControlType.Button", "Open local folder": "ControlType.Button",
+      "Hide history": "ControlType.Button", "Search history": "ControlType.Button", "Create project": "ControlType.Button",
     });
     await capture("history-zoom-dark.png");
     await page.keyboard.press("Tab");
@@ -985,7 +985,7 @@ test("Desktop keeps the compact history drawer reachable at 200 percent zoom", {
     await expect(history).toHaveCount(0);
     await toggle.press("Enter");
     await expect(heading).toBeFocused();
-    await history.getByRole("button", { name: "Open local folder" }).focus();
+    await history.locator(".open-folder").focus();
     await page.keyboard.press("Tab");
     // The browser button now sits just before the theme button in every workspace.
     await expect(page.getByRole("button", { name: "Browser", exact: true })).toBeFocused();
@@ -1146,7 +1146,7 @@ test("Desktop isolates its shell and restores its preferences after a renderer c
     await page.keyboard.press("Enter");
     const openHistory = page.getByRole("complementary", { name: "History", exact: true });
     await expect(openHistory).toBeVisible();
-    await openHistory.getByRole("button", { name: "Open local folder" }).focus();
+    await openHistory.locator(".open-folder").focus();
     await page.keyboard.press("Escape");
     await expect(historyToggle).toBeFocused();
     const composer = page.getByRole("form", { name: "Code composer" });

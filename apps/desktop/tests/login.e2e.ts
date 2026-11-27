@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -440,7 +441,7 @@ test("Desktop connects the selected web account through Chromium and the local c
       }
       if (gateway) {
         await restored.getByRole("button", { name: "Code", exact: true }).click();
-        await restored.getByRole("button", { name: "Open local folder" }).click();
+        await openCodeProject(restored);
         await restored.getByRole("textbox", { name: "Code request" }).fill("Keep this fixture task running");
         await restored.getByRole("button", { name: "Send Code request" }).click();
         await expect.poll(() => gateway!.completions.length).toBe(1);
@@ -487,7 +488,7 @@ test("Desktop connects the selected web account through Chromium and the local c
           await web.getByRole("button", { name: "Continue in Desktop" }).click();
           await expect(restored.getByText(`Connected as ${secondEmail}`)).toBeVisible();
           await restored.getByRole("button", { name: "Code", exact: true }).click();
-          await restored.getByRole("button", { name: "Open local folder" }).click();
+          await openCodeProject(restored);
           await expect(restored.getByText("test-project", { exact: true }).first()).toBeVisible();
           await expect(restored.getByRole("textbox", { name: "Code request" })).toHaveValue("");
           const nextState = await restored.evaluate(() => window.desktop.state());
