@@ -19,6 +19,7 @@ const state = {
   manualDrafts: 100,
   noOpen: false,
   secondDraft: false,
+  listParams: [] as { status?: string; created?: { gte: number } }[],
   subscriptionStatus: "active",
   failCancel: false,
   cancels: [] as { id: string; params: Record<string, unknown> }[],
@@ -33,6 +34,7 @@ const reset = (overrides: Partial<typeof state> = {}) => {
     manualDrafts: 100,
     noOpen: false,
     secondDraft: false,
+    listParams: [],
     subscriptionStatus: "active",
     failCancel: false,
     cancels: [],
@@ -64,13 +66,13 @@ mock.module(mod("lib/stripe.ts"), {
           status: state.paidAfterList.includes(id) ? "paid" : id === "in_open" ? "open" : state.invoiceStatus,
         }),
         // Auto-paginating list: the renewal sits behind a full page of manual drafts.
-        list: ({ status }: { status: string }) =>
+        // One listing of every status: the caller filters, so a renewal that
+        // moves from draft to open during the listing is still in it.
+        list: (params: { status?: string; created?: { gte: number } }) =>
           (async function* () {
-            if (status === "open" && state.noOpen) return;
-            if (status === "open") {
-              yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
-              return;
-            }
+            state.listParams.push(params);
+            yield { id: "in_paid_old", status: "paid", billing_reason: "subscription_cycle" };
+            if (!state.noOpen) yield { id: "in_open", status: "open", billing_reason: "subscription_cycle" };
             for (let i = 0; i < state.manualDrafts; i += 1) yield { id: `in_m${i}`, status: "draft", billing_reason: "manual" };
             yield { id: "in_1", status: "draft", billing_reason: "subscription_cycle" };
             if (state.secondDraft) yield { id: "in_2", status: "draft", billing_reason: "subscription_cycle" };
@@ -197,4 +199,14 @@ test("after the cancellation the remaining renewals are re-read, and one paid me
   const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
   assert.deepEqual(await stopDeletionPendingDraftRenewals("sub_1"), { stopped: 1, finalized: 1 });
   assert.equal(state.cancels.length, 1);
+});
+
+test("the renewal lookup is one listing of every status over the recent window", async () => {
+  reset();
+  const { stopDeletionPendingDraftRenewals } = await import(mod("lib/deletionCancellation.ts"));
+  await stopDeletionPendingDraftRenewals("sub_1");
+  assert.equal(state.listParams.length, 1);
+  assert.equal(state.listParams[0]!.status, undefined);
+  const ageDays = (Date.now() / 1000 - state.listParams[0]!.created!.gte) / 86_400;
+  assert.ok(ageDays > 3.9 && ageDays < 4.01, String(ageDays));
 });

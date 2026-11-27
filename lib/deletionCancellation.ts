@@ -90,6 +90,12 @@ export async function keepDeletionCancellation(
 
 /** Far beyond any real subscription; bounds the deletion request if Stripe returns more. */
 const RENEWAL_SCAN_LIMIT = 500;
+/**
+ * Stripe holds a renewal in draft for about an hour, and at most 72 hours
+ * while its invoice.created fails; anything older has long been collected or
+ * not. Four days covers that with room.
+ */
+const RENEWAL_LOOKBACK_SECONDS = 4 * 24 * 60 * 60;
 
 /**
  * Run by the deletion flow once pending_deletion is committed. A renewal
@@ -110,20 +116,22 @@ export async function stopDeletionPendingDraftRenewals(
   const renewals: { id: string; status: string }[] = [];
   let scanned = 0;
   let complete = true;
-  scan: for (const status of ["open", "draft"] as const) {
-    // Every page: manual invoices on the subscription must not hide a renewal.
-    for await (const invoice of getStripe().invoices.list(
-      { subscription: subscriptionId, status, limit: 100 },
-      { timeout: STRIPE_REQUEST_TIMEOUT_MS }
-    )) {
-      scanned += 1;
-      if (scanned > RENEWAL_SCAN_LIMIT) {
-        complete = false;
-        break scan;
-      }
-      if (invoice.billing_reason === "subscription_cycle" && invoice.id) {
-        renewals.push({ id: invoice.id, status });
-      }
+  // One listing of every status, filtered here: two listings by status would
+  // miss a renewal that moved from draft to open between them. Every page, so
+  // manual invoices on the subscription cannot hide a renewal.
+  const createdSince = Math.floor(Date.now() / 1000) - RENEWAL_LOOKBACK_SECONDS;
+  for await (const invoice of getStripe().invoices.list(
+    { subscription: subscriptionId, created: { gte: createdSince }, limit: 100 },
+    { timeout: STRIPE_REQUEST_TIMEOUT_MS, maxNetworkRetries: 0 }
+  )) {
+    scanned += 1;
+    if (scanned > RENEWAL_SCAN_LIMIT) {
+      complete = false;
+      break;
+    }
+    if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) continue;
+    if (invoice.status === "draft" || invoice.status === "open") {
+      renewals.push({ id: invoice.id, status: invoice.status });
     }
   }
   // Renewals found open, plus any that left draft between the list and its
@@ -154,6 +162,7 @@ export async function stopDeletionPendingDraftRenewals(
       if (finalizedIds.has(renewal.id)) continue;
       const current = await getStripe().invoices.retrieve(renewal.id, {}, {
         timeout: STRIPE_REQUEST_TIMEOUT_MS,
+        maxNetworkRetries: 0,
       });
       if (current.status !== "draft") finalizedIds.add(renewal.id);
     }
