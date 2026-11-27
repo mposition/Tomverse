@@ -21,10 +21,10 @@ test("the saved browser data is one partition for each account and each project,
   const a = browserProfile("account-1", "H:\\Project\\Shop", "win32");
   assert.equal(a.partition.startsWith("persist:tomverse-code-browser-"), true, "persistent, and not the app's own partition");
   assert.deepEqual(browserProfile("account-1", "H:/Project/Shop/", "win32"), a, "the same folder written another way is the same project");
-  assert.deepEqual(browserProfile("account-1", "h:\\project\\shop", "win32"), a, "Windows compares the folder without case");
-  assert.deepEqual(browserProfile("account-1", "/Users/dev/Shop", "darwin"), browserProfile("account-1", "/users/dev/shop/", "darwin"), "macOS compares the folder without case");
-  assert.notEqual(browserProfile("account-1", "/work/App", "linux").partition, browserProfile("account-1", "/work/app", "linux").partition,
-    "elsewhere two folders that differ only in case are two projects");
+  // Case is never folded: the folder is the canonical path the app opened, and a volume may tell /work/App from /work/app.
+  for (const platform of ["win32", "darwin", "linux"] as const) {
+    assert.notEqual(browserProfile("account-1", "/work/App", platform).partition, browserProfile("account-1", "/work/app", platform).partition, platform);
+  }
   assert.deepEqual(browserProfile("account-1", "/work/App/", "linux"), browserProfile("account-1", "/work/App", "linux"));
   assert.notEqual(browserProfile("account-2", "H:\\Project\\Shop", "win32").partition, a.partition, "another account has its own data");
   assert.notEqual(browserProfile("account-1", "H:\\Project\\Blog", "win32").partition, a.partition, "another project has its own data");

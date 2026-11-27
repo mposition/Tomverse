@@ -20,9 +20,9 @@ import { linkViewUrl } from "../web-view-contract";
  */
 export function browserProfile(accountId: string | null, projectPath: string | null, platform: NodeJS.Platform = process.platform) {
   const digest = (label: string, value: string) => createHash("sha256").update(label + "\0" + value).digest("hex").slice(0, 16);
-  // Windows and macOS compare folder names without case; elsewhere `/work/App` and `/work/app` are two projects.
-  const folded = (text: string) => platform === "win32" || platform === "darwin" ? text.toLowerCase() : text;
-  const folder = projectPath ? folded(projectPath.replace(/\\/g, platform === "win32" ? "/" : "\\").replace(/\/+$/, "")) || null : null;
+  // The folder is the canonical path the app already opened (realpath), so its case is the file system's own and never folded: two folders
+  // that differ only in case (a case-sensitive volume) are two projects, and the same folder always gives the same text.
+  const folder = projectPath ? projectPath.replace(/\\/g, platform === "win32" ? "/" : "\\").replace(/\/+$/, "") || null : null;
   const id = digest("account", accountId ?? "device") + "-" + (folder ? digest("project", folder) : "none");
   return { id, partition: "persist:tomverse-code-browser-" + id };
 }
