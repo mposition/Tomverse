@@ -397,8 +397,9 @@ import {
     buildProjectChatTools,
     projectToolsAvailable,
     PROJECT_TOOL_MAX_STEPS,
-    type ProjectChatTools,
 } from "@/lib/projectChatTools";
+import { withChatReadTools } from "@/lib/chatReadTools";
+import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
 import { projectContextRequiresBundle, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
@@ -1330,7 +1331,9 @@ async function handleChatPost(
     const latency = createServerLatency(traceId);
     let mcpConnector: Awaited<ReturnType<typeof buildMcpChatTools>> | null = null;
     // Project workspace: project_search / project_read, priced like MCP tools.
-    let projectTools: ProjectChatTools | null = null;
+    let projectTools: ChatToolSlot | null = null;
+    // Pages read and past chats used by read_url / search_past_chats (lib/chatReadTools.ts).
+    let chatReadCitations: () => Array<{ url: string; title?: string; sourceProvider?: string }> = () => [];
     // One timing line per turn, whichever path ends it: the stream's
     // settlement or the request failure path below. Shared, so a turn that
     // settled and then threw on its way out is not written twice.
@@ -4138,7 +4141,7 @@ async function handleChatPost(
             memoryData,
             blocks: turnSystemBlocks,
         });
-        projectTools =
+        const projectToolsOnly =
             session?.user?.id && conversationId && verifiedContext?.project &&
             !isResearchPreview && !isDeepResearchTurn &&
             projectToolsAvailable({
@@ -4154,6 +4157,26 @@ async function handleChatPost(
                       signal: req.signal,
                   })
                 : null;
+        // read_url / search_past_chats: default-off switches, priced in the same slot.
+        const chatRead = await withChatReadTools({
+            userId: session?.user?.id,
+            conversationId,
+            productKey: conversationProductKey,
+            model: modelConfig,
+            nativeSearch: nativeSearchEnabled,
+            otherToolOwner: Boolean(mcpConnector),
+            researchTurn: isResearchPreview || isDeepResearchTurn,
+            profileActive: Boolean(conversationProfileVersionId),
+            userMessages: executionMessages.filter((m) => m.role === "user").map((m) => String(m.content ?? "")),
+            request: req,
+            signal: req.signal,
+            base: projectToolsOnly,
+            onProgress: (state) => {
+                try { streamController?.enqueue(buildMcpProgressChunk(state)); } catch { /* The client has closed its stream. */ }
+            },
+        });
+        projectTools = chatRead.tools;
+        chatReadCitations = chatRead.citations;
         if (mcpConnector) {
             formattedMessages.push({ role: "system", content: MCP_UNTRUSTED_NOTICE });
             inputEstimate.addText(MCP_UNTRUSTED_NOTICE);
@@ -8238,6 +8261,12 @@ async function handleChatPost(
                         if (mcpConnector) {
                             webSearchExecution.citations = sanitizeWebSearchCitations([
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
+                            ]);
+                        }
+                        const readCitations = chatReadCitations();
+                        if (readCitations.length) {
+                            webSearchExecution.citations = sanitizeWebSearchCitations([
+                                ...webSearchExecution.citations, ...readCitations,
                             ]);
                         }
                         searchObservation?.sourceCards(webSearchExecution.citations.length);

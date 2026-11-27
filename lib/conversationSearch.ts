@@ -173,6 +173,12 @@ export async function searchConversationMessages(input: {
     projectId?: string;
     /** The current conversation, whose transcript the model already has. */
     excludeConversationId?: string;
+    /**
+     * Skip the imported transcripts: only this account's own Tomverse
+     * messages are searched. The model's past-chat tool uses this, because
+     * imported text reaches a live prompt only as a validated memory.
+     */
+    nativeOnly?: boolean;
 }): Promise<ConversationSearchAnswer> {
     const { request, userId, query, displayTimeZone } = input;
     const projectScope = input.projectId ?? null;
@@ -349,7 +355,7 @@ export async function searchConversationMessages(input: {
                 messages: [],
                 ordinals: new Map(),
             };
-            if (authorizedSnapshotIds.length > 0) {
+            if (authorizedSnapshotIds.length > 0 && !input.nativeOnly) {
                 const startedAt = Date.now();
                 const remaining = () => {
                     const left = sourceTimeoutMs - (Date.now() - startedAt);
