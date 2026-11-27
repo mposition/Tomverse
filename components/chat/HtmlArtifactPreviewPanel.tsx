@@ -1,13 +1,14 @@
 "use client";
 
 import { createApiClient } from "@tomverse/api-client";
-import { Loader2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
+import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPanelShell";
 import { useLanguage } from "@/components/LanguageProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { artifactDownloadPath, type ChatStreamArtifact } from "@/lib/generatedArtifactCore";
+import { buildCodePreviewDocument, type PreviewDocumentLabels } from "@/lib/chatArtifactPreview";
 import {
   HTML_PREVIEW_MAX_BYTES,
   HTML_PREVIEW_SANDBOX,
@@ -18,7 +19,7 @@ import {
 
 /**
  * The side panel (desktop) or full-screen sheet (phone) that runs a generated
- * HTML page in an isolated frame.
+ * HTML page, or a React source file, in an isolated frame.
  *
  * Policy: docs/policy/generated-artifacts.md section 9. The isolation itself
  * (sandbox tokens, CSP, srcdoc) is `lib/htmlArtifactPreview.ts`; this file is
@@ -50,18 +51,42 @@ export function HtmlArtifactPreviewFrame({ html, title }: { html: string; title:
   );
 }
 
+/** The sentences a React preview shows inside its own frame when it cannot run. */
+export function usePreviewDocumentLabels(): PreviewDocumentLabels {
+  const { t } = useLanguage();
+  return useMemo(
+    () => ({
+      errorTitle: t("chat.artifactWorkspaceErrorTitle"),
+      loadFailed: t("chat.artifactWorkspaceLoadFailed"),
+      noComponent: t("chat.artifactWorkspaceNoComponent"),
+      missingPackage: t("chat.artifactWorkspaceMissingPackage"),
+    }),
+    [t]
+  );
+}
+
 type Loaded =
   | { status: "loading" }
   | { status: "ready"; html: string }
   | { status: "failed"; message: string }
   | { status: "too_large" };
 
-export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: ChatStreamArtifact; onClose: () => void }) {
+export function HtmlArtifactPreviewPanel({
+  artifact,
+  onClose,
+  onRevise,
+}: {
+  artifact: ChatStreamArtifact;
+  onClose: () => void;
+  /** Present only when a change can be asked for from here (see GeneratedArtifactCard). */
+  onRevise?: (request: string) => Promise<string | null>;
+}) {
   const { t } = useLanguage();
+  const labels = usePreviewDocumentLabels();
   const [loaded, setLoaded] = useState<Loaded>(
     isHtmlPreviewSmallEnough(artifact.byteSize) ? { status: "loading" } : { status: "too_large" }
   );
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const format = artifact.format.toLowerCase();
 
   useEffect(() => {
     if (!isHtmlPreviewSmallEnough(artifact.byteSize)) return;
@@ -81,8 +106,18 @@ export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: Chat
         }
         const bytes = await response.arrayBuffer();
         if (cancelled) return;
-        if (bytes.byteLength > HTML_PREVIEW_MAX_BYTES) setLoaded({ status: "too_large" });
-        else setLoaded({ status: "ready", html: new TextDecoder("utf-8").decode(bytes) });
+        if (bytes.byteLength > HTML_PREVIEW_MAX_BYTES) {
+          setLoaded({ status: "too_large" });
+          return;
+        }
+        const text = new TextDecoder("utf-8").decode(bytes);
+        if (format === "jsx" || format === "tsx") {
+          // React source is a file the model wrote, not a page: it becomes one here, and runs in the same frame.
+          const built = buildCodePreviewDocument("react", text, { language: format, labels });
+          setLoaded(built.ok ? { status: "ready", html: built.html } : { status: "too_large" });
+        } else {
+          setLoaded({ status: "ready", html: text });
+        }
       } catch {
         if (!cancelled) setLoaded({ status: "failed", message: t("chat.artifactPreviewFailed") });
       }
@@ -90,21 +125,7 @@ export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: Chat
     return () => {
       cancelled = true;
     };
-  }, [artifact.byteSize, artifact.id, t]);
-
-  // Keyboard: Escape closes; focus moves in on open and returns to the opener on close.
-  useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      opener?.focus();
-    };
-  }, [onClose]);
+  }, [artifact.byteSize, artifact.id, format, labels, t]);
 
   const title = t("chat.artifactPreviewAlt").replaceAll("{filename}", artifact.filename);
   const notice =
@@ -112,43 +133,18 @@ export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: Chat
     : loaded.status === "too_large" ? t("chat.artifactPreviewTooLarge")
     : null;
 
-  return createPortal(
-    <div
-      role="dialog"
-      aria-label={title}
-      data-testid="html-artifact-preview-panel"
-      // Phone: a full-screen sheet. md and up: a panel on the right edge.
-      className="fixed inset-0 z-50 flex flex-col bg-white shadow-xl dark:bg-zinc-950 md:left-auto md:w-[min(560px,46vw)] md:border-l md:border-zinc-200 md:dark:border-zinc-700"
-    >
-      <header className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-700">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold text-zinc-800 dark:text-zinc-100" title={artifact.filename}>{artifact.filename}</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("chat.artifactPreviewSandboxNote")}</p>
-        </div>
-        <button
-          ref={closeRef}
-          type="button"
-          data-testid="html-artifact-preview-close"
-          onClick={onClose}
-          aria-label={t("chat.artifactPreviewClose")}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-zinc-600 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          <X className="h-5 w-5" />
-        </button>
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col">
-        {notice ? (
-          <p role="alert" data-testid="html-artifact-preview-notice" className="p-4 text-sm text-zinc-600 dark:text-zinc-300">{notice}</p>
-        ) : loaded.status === "loading" ? (
-          <p role="status" className="flex items-center gap-2 p-4 text-sm text-zinc-500 dark:text-zinc-400">
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-            {t("chat.artifactPreviewLoading")}
-          </p>
-        ) : loaded.status === "ready" ? (
-          <HtmlArtifactPreviewFrame html={loaded.html} title={title} />
-        ) : null}
-      </div>
-    </div>,
-    document.body
+  return (
+    <ArtifactPreviewPanelShell title={title} heading={artifact.filename} onClose={onClose} onRevise={onRevise}>
+      {notice ? (
+        <p role="alert" data-testid="html-artifact-preview-notice" className="p-4 text-sm text-zinc-600 dark:text-zinc-300">{notice}</p>
+      ) : loaded.status === "loading" ? (
+        <p role="status" className="flex items-center gap-2 p-4 text-sm text-zinc-500 dark:text-zinc-400">
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+          {t("chat.artifactPreviewLoading")}
+        </p>
+      ) : loaded.status === "ready" ? (
+        <HtmlArtifactPreviewFrame html={loaded.html} title={title} />
+      ) : null}
+    </ArtifactPreviewPanelShell>
   );
 }
