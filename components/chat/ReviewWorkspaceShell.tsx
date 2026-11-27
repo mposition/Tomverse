@@ -71,6 +71,8 @@ import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import { voiceConversationConfig } from "@tomverse/chat-core";
+import { ChatAudioAttachmentProvider } from "@/components/chat/ChatAudioAttachmentContext";
+import { chatAudioAttachmentEnabled } from "@/lib/chatAudioAttachment";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -391,6 +393,7 @@ export async function ReviewWorkspaceShell({
       ) : null}
       {/* The catalogue crosses as context, not as a module global (see the provider). */}
       <ImageModelCatalogProvider models={imageModels}>
+      <ChatAudioAttachmentProvider enabled={chatAudioAttachmentEnabled()}>
       <ChatPageClient
         reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
@@ -424,6 +427,7 @@ export async function ReviewWorkspaceShell({
         mountedSurface={mountedSurface}
         continuationProduct={continuationProduct}
       />
+      </ChatAudioAttachmentProvider>
       </ImageModelCatalogProvider>
       </HelpGuideAccessProvider>
     </GuestVerificationProvider>

@@ -508,6 +508,12 @@ export const es = {
         attachFormatGroupMarkup: "Marcado",
         attachFormatGroupCode: "Código",
         attachFormatGroupArchive: "Comprimidos",
+        attachFormatGroupAudio: "Audio",
+        attachmentAudioTooLong: "Las grabaciones pueden durar hasta 10 minutos. Recorta el archivo o divídelo en partes más cortas.",
+        audioTranscriptionUnavailable: "No se pudo transcribir la grabación en este momento. Inténtalo de nuevo en unos instantes.",
+        audioTranscriptionLimitReached: "Has usado el tiempo de transcripción de audio disponible hoy. Inténtalo mañana o adjunta una grabación más corta.",
+        codeExecutionCodeSummary: "Código ejecutado",
+        codeExecutionOutputSummary: "Resultado de la ejecución",
         attachFormatsOverflow: "+{count} más",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "Los invitados pueden adjuntar un archivo local",

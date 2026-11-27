@@ -490,6 +490,12 @@ export const en = {
         attachFormatGroupMarkup: "Markup",
         attachFormatGroupCode: "Code",
         attachFormatGroupArchive: "Archives",
+        attachFormatGroupAudio: "Audio",
+        attachmentAudioTooLong: "Recordings can be up to 10 minutes long. Trim the file or split it into shorter parts.",
+        audioTranscriptionUnavailable: "The recording couldn't be transcribed right now. Please try again shortly.",
+        audioTranscriptionLimitReached: "You've used today's audio transcription allowance. Try again tomorrow or attach a shorter recording.",
+        codeExecutionCodeSummary: "Code that was run",
+        codeExecutionOutputSummary: "Run output",
         attachFormatsOverflow: "+{count} more",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "Guests can attach one local file",

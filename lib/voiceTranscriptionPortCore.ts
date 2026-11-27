@@ -58,6 +58,12 @@ export type VoiceTranscriptionRequest = {
    * detected.
    */
   languageHint: string | null;
+  /**
+   * How long to wait, when the default is not enough. Voice clips are at most
+   * two minutes and keep the default; a chat attachment may be ten
+   * (`lib/chatAudioAttachmentCore.ts`).
+   */
+  timeoutMs?: number;
 };
 
 /**
@@ -355,7 +361,7 @@ export const transcribeWithOpenAi = async (
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    config.timeoutMs ?? VOICE_TRANSCRIPTION_TIMEOUT_MS
+    request.timeoutMs ?? config.timeoutMs ?? VOICE_TRANSCRIPTION_TIMEOUT_MS
   );
 
   let response: Response;

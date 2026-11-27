@@ -65,7 +65,13 @@ export type ChatAttachmentCategory =
      */
     | "iwork"
     | "text"
-    | "archive";
+    | "archive"
+    /**
+     * A recording, transcribed on the turn that sends it
+     * (`lib/chatAudioAttachment.ts`). Only in `CHAT_AUDIO_ATTACHMENT_FORMATS`,
+     * never in the main table, so the switch that offers it is the only way in.
+     */
+    | "audio";
 
 /**
  * Which parser owns the format once the bytes are on the server. The category
@@ -80,7 +86,9 @@ export type ChatAttachmentParser =
     | "utf-text-decoder"
     | "archive-expander"
     /** Checked as a package and passed through unread (`lib/iworkPackage.ts`). */
-    | "iwork-passthrough";
+    | "iwork-passthrough"
+    /** Container and length checked, then transcribed (`lib/chatAudioAttachment.ts`). */
+    | "audio-transcriber";
 
 /**
  * How the first bytes are proven to match the claim. `utf-text` has no magic
@@ -97,7 +105,9 @@ export type ChatAttachmentSignature =
     /** The compound-file magic a `.doc`, `.xls` or `.ppt` opens with. */
     | "cfbf"
     | "rtf"
-    | "utf-text";
+    | "utf-text"
+    /** Read by the container walker in `lib/chatAudioAttachmentCore.ts`. */
+    | "audio-container";
 
 /** How the format is grouped when a person is told what they may attach. */
 export type ChatAttachmentUiGroup =
@@ -136,7 +146,12 @@ export type ChatAttachmentFormat = {
     readonly guestAllowed: boolean;
     /** Does sending it require a model that accepts image input? */
     readonly requiresImageInput: boolean;
-    readonly uiGroup: ChatAttachmentUiGroup;
+    /**
+     * `"audio"` only for `CHAT_AUDIO_ATTACHMENT_FORMATS`, and deliberately not
+     * a member of `ChatAttachmentUiGroup`: every surface keyed on that union
+     * (the help guide, the marketing page) lists what is always offered.
+     */
+    readonly uiGroup: ChatAttachmentUiGroup | "audio";
     /**
      * The noun used in the prompt header for this file
      * (`lib/attachmentContextPrompt.ts`). The three that existed before this
@@ -631,10 +646,78 @@ for (const format of CHAT_ATTACHMENT_FORMATS) {
     }
 }
 
+/**
+ * Recordings, offered only while `CHAT_AUDIO_ATTACHMENT_ENABLED` is on.
+ *
+ * A table of their own rather than rows in the one above, because the switch
+ * has to leave everything derived from that table exactly as it was: the
+ * picker's `accept`, the upload allowlist, the guest subset and the sentence
+ * that lists formats. Every function below takes `audio` and reads this table
+ * only when it is true; the server decides it (`lib/chatAudioAttachment.ts`)
+ * and the composer is told, never the other way round.
+ *
+ * Four containers, each one whose length can be read before anything is paid
+ * for (`lib/chatAudioAttachmentCore.ts`). Ogg is accepted by the transcription
+ * provider but has no length reader here yet, so it is not offered: a file
+ * whose length is unknown cannot be reserved against the seconds budget
+ * (docs/policy/chat-attachment-formats.md section 2.4).
+ */
+const audio = (
+    id: string,
+    extension: string,
+    mediaType: string,
+    mediaTypeAliases: readonly string[]
+): ChatAttachmentFormat => ({
+    id,
+    extensions: [extension],
+    mediaType,
+    mediaTypeAliases,
+    category: "audio",
+    parser: "audio-transcriber",
+    signature: "audio-container",
+    // A recording inside a ZIP would be a paid transcription nobody listed.
+    allowedInArchive: false,
+    // A guest object has no row to cache the transcript on, so every later
+    // message would pay to transcribe the same recording again.
+    guestAllowed: false,
+    requiresImageInput: false,
+    uiGroup: "audio",
+    promptKind: "audio transcript",
+});
+
+export const CHAT_AUDIO_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
+    audio("mp3", "mp3", "audio/mpeg", ["audio/mp3", "audio/mpeg3", "audio/x-mpeg-3"]),
+    audio("m4a", "m4a", "audio/mp4", ["audio/x-m4a", "audio/m4a"]),
+    audio("wav", "wav", "audio/wav", ["audio/x-wav", "audio/wave", "audio/vnd.wave"]),
+    audio("webm-audio", "webm", "audio/webm", []),
+];
+
+const audioByExtension = new Map<string, ChatAttachmentFormat>();
+const audioByMediaType = new Map<string, ChatAttachmentFormat>();
+for (const format of CHAT_AUDIO_ATTACHMENT_FORMATS) {
+    for (const extension of format.extensions) audioByExtension.set(extension, format);
+    audioByMediaType.set(format.mediaType, format);
+    for (const alias of format.mediaTypeAliases) {
+        if (!audioByMediaType.has(alias)) audioByMediaType.set(alias, format);
+    }
+}
+
 /** Canonical types only -- what an upload is allowed to declare and store. */
 export const CHAT_ATTACHMENT_MEDIA_TYPES: ReadonlySet<string> = new Set(
     CHAT_ATTACHMENT_FORMATS.map((format) => format.mediaType)
 );
+
+const CHAT_AUDIO_ATTACHMENT_MEDIA_TYPES: ReadonlySet<string> = new Set(
+    CHAT_AUDIO_ATTACHMENT_FORMATS.map((format) => format.mediaType)
+);
+
+/** `CHAT_ATTACHMENT_MEDIA_TYPES`, plus the recordings when they are offered. */
+export const chatAttachmentMediaTypeAccepted = (
+    mediaType: string,
+    { audio = false }: { audio?: boolean } = {}
+) =>
+    CHAT_ATTACHMENT_MEDIA_TYPES.has(mediaType) ||
+    (audio && CHAT_AUDIO_ATTACHMENT_MEDIA_TYPES.has(mediaType));
 
 export const GUEST_CHAT_ATTACHMENT_MEDIA_TYPES: ReadonlySet<string> = new Set(
     CHAT_ATTACHMENT_FORMATS.filter((format) => format.guestAllowed).map(
@@ -661,8 +744,17 @@ export const attachmentFileExtension = (filename: string) => {
 export const attachmentBaseName = (filename: string) =>
     (filename.split(/[\\/]/).pop() || "").toLowerCase();
 
-export const formatByMediaType = (mediaType: string) =>
-    byMediaType.get(normalizeDeclaredMediaType(mediaType)) || null;
+export const formatByMediaType = (
+    mediaType: string,
+    { audio = false }: { audio?: boolean } = {}
+) => {
+    const normalized = normalizeDeclaredMediaType(mediaType);
+    return (
+        byMediaType.get(normalized) ||
+        (audio ? audioByMediaType.get(normalized) : undefined) ||
+        null
+    );
+};
 
 /**
  * Which format a file is, from its name and whatever the browser said about
@@ -715,9 +807,12 @@ export const ASSOCIATION_OWNER_MEDIA_TYPES: ReadonlyArray<{
 export function resolveChatAttachmentFormat({
     filename,
     declaredMediaType,
+    audio = false,
 }: {
     filename: string;
     declaredMediaType?: string | null;
+    /** Also read `CHAT_AUDIO_ATTACHMENT_FORMATS`. Only the server decides this. */
+    audio?: boolean;
 }): ChatAttachmentFormat | null {
     const extension = attachmentFileExtension(filename);
     if (extension && REFUSED_ATTACHMENT_EXTENSIONS.has(extension)) return null;
@@ -725,6 +820,7 @@ export function resolveChatAttachmentFormat({
     const declared = normalizeDeclaredMediaType(declaredMediaType);
     const fromName =
         (extension ? byExtension.get(extension) : undefined) ||
+        (audio && extension ? audioByExtension.get(extension) : undefined) ||
         byFilename.get(attachmentBaseName(filename)) ||
         null;
 
@@ -735,7 +831,9 @@ export function resolveChatAttachmentFormat({
         // "text/plain" is what a browser falls back to for text it cannot
         // place, which is most of the code formats above.
         if (fromName.category === "text" && declared === "text/plain") return fromName;
-        const fromType = byMediaType.get(declared);
+        const fromType =
+            byMediaType.get(declared) ||
+            (audio ? audioByMediaType.get(declared) : undefined);
         if (fromType) return fromType === fromName ? fromName : null;
         // A declared type this product has never heard of says nothing at
         // all; the extension is still good.
@@ -765,15 +863,22 @@ export const attachmentKindForFormat = (format: ChatAttachmentFormat) =>
  */
 export function chatAttachmentAcceptAttribute({
     guest = false,
-}: { guest?: boolean } = {}) {
-    const formats = CHAT_ATTACHMENT_FORMATS.filter(
-        (format) => !guest || format.guestAllowed
-    );
+    audio = false,
+}: { guest?: boolean; audio?: boolean } = {}) {
+    const entries = (formats: readonly ChatAttachmentFormat[]) => {
+        const offered = formats.filter((format) => !guest || format.guestAllowed);
+        return [
+            ...offered.map((format) => format.mediaType),
+            ...offered.flatMap((format) =>
+                format.extensions.map((extension) => `.${extension}`)
+            ),
+        ];
+    };
     return [
-        ...formats.map((format) => format.mediaType),
-        ...formats.flatMap((format) =>
-            format.extensions.map((extension) => `.${extension}`)
-        ),
+        ...entries(CHAT_ATTACHMENT_FORMATS),
+        // Appended after the whole existing list, so the string with the
+        // switch off is the one it always was.
+        ...(audio ? entries(CHAT_AUDIO_ATTACHMENT_FORMATS) : []),
     ].join(",");
 }
 
@@ -784,8 +889,11 @@ export function chatAttachmentAcceptAttribute({
  */
 export function chatAttachmentExtensionsByGroup({
     guest = false,
-}: { guest?: boolean } = {}): Record<ChatAttachmentUiGroup, string[]> {
-    const groups: Record<ChatAttachmentUiGroup, string[]> = {
+    audio = false,
+}: { guest?: boolean; audio?: boolean } = {}): Record<ChatAttachmentUiGroup, string[]> & {
+    audio?: string[];
+} {
+    const groups: Record<ChatAttachmentUiGroup, string[]> & { audio?: string[] } = {
         image: [],
         document: [],
         data: [],
@@ -795,7 +903,13 @@ export function chatAttachmentExtensionsByGroup({
     };
     for (const format of CHAT_ATTACHMENT_FORMATS) {
         if (guest && !format.guestAllowed) continue;
+        if (format.uiGroup === "audio") continue;
         groups[format.uiGroup].push(...format.extensions);
+    }
+    // The key exists only when recordings are offered, so every reader of the
+    // switched-off shape sees exactly the object it always did.
+    if (audio && !guest) {
+        groups.audio = CHAT_AUDIO_ATTACHMENT_FORMATS.flatMap((format) => format.extensions);
     }
     return groups;
 }

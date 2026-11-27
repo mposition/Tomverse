@@ -94,7 +94,9 @@ test("what is stored is read back exactly, and anything else is a miss", () => {
 });
 
 test("only model-independent extractors are cached", () => {
-    assert.deepEqual([...ATTACHMENT_TEXT_CACHE_CATEGORIES].sort(), ["legacy-office", "office", "pdf", "text"]);
+    // "audio" is a transcript: the configured transcription model is fixed per
+    // deployment, not chosen per turn (docs/policy/chat-attachment-formats.md 2.4.1).
+    assert.deepEqual([...ATTACHMENT_TEXT_CACHE_CATEGORIES].sort(), ["audio", "legacy-office", "office", "pdf", "text"]);
     for (const category of ["image", "archive", "iwork"]) {
         assert.equal(ATTACHMENT_TEXT_CACHE_CATEGORIES.has(category), false, category);
     }

@@ -46,6 +46,7 @@ import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { codeExecutionFenceKind } from "@/lib/chatCodeExecutionCore";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
 import { SearchCitationList } from "@/components/chat/SearchCitationList";
@@ -382,8 +383,10 @@ type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
  * wiped by the very next streamed chunk, or by any parent re-render. Given a
  * stable type, each block keeps its own state for as long as it is on screen.
  */
-function MarkdownCodeBlock({ children }: MarkdownPreProps) {
+function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
   const { t } = useLanguage();
+  // A code run the server wrote into the answer (lib/chatCodeExecutionCore.ts).
+  const runFold = codeExecutionFenceKind(node);
   const preRef = useRef<HTMLPreElement | null>(null);
   const [copied, setCopied] = useState(false);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -426,7 +429,7 @@ function MarkdownCodeBlock({ children }: MarkdownPreProps) {
   // transcript (which would make the app's own toast assertions ambiguous).
   const label = copied ? t("chat.responseCopied") : t("chat.copyCode");
 
-  return (
+  const block = (
     <div className="relative mb-3 last:mb-0">
       {/*
         UX-031, same reasoning as the table above: a long line of code scrolls
@@ -468,6 +471,16 @@ function MarkdownCodeBlock({ children }: MarkdownPreProps) {
         )}
       </button>
     </div>
+  );
+
+  if (!runFold) return block;
+  return (
+    <details data-testid="chat-code-execution-block" className="mb-3 last:mb-0">
+      <summary className="cursor-pointer select-none text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        {t(runFold === "code" ? "chat.codeExecutionCodeSummary" : "chat.codeExecutionOutputSummary")}
+      </summary>
+      <div className="mt-2">{block}</div>
+    </details>
   );
 }
 

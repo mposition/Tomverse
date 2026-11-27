@@ -27,6 +27,10 @@ import {
 import { assertSafeOfficeArchive, OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import { IworkPackageError, assertSafeIworkPackage } from "@/lib/iworkPackage";
 import {
+    CHAT_AUDIO_ATTACHMENT_MAX_BYTES,
+    inspectAudioAttachment,
+} from "@/lib/chatAudioAttachmentCore";
+import {
     extractLegacyOfficeText,
     LegacyOfficeError,
     type LegacyOfficeFormatId,
@@ -78,7 +82,9 @@ export type ChatAttachmentValidationCode =
     | "ATTACHMENT_ENCRYPTED"
     | "ATTACHMENT_UNREADABLE"
     /** The file expands past what may be stored (an iWork package). */
-    | "ATTACHMENT_TOO_LARGE";
+    | "ATTACHMENT_TOO_LARGE"
+    /** A recording longer than one transcription covers (`lib/chatAudioAttachmentCore.ts`). */
+    | "ATTACHMENT_AUDIO_TOO_LONG";
 
 export class ChatAttachmentValidationError extends Error {
     constructor(
@@ -284,6 +290,26 @@ export async function validateChatAttachmentUpload({
             extracted.length > maxExtractedCharacters
         ) {
             throw new ChatAttachmentValidationError("ATTACHMENT_TEXT_TOO_LARGE", 413);
+        }
+        return { bytes: buffer, mediaType: format.mediaType };
+    }
+
+    if (format.category === "audio") {
+        // The container and its length, read from the bytes. Nothing is
+        // transcribed here: that is paid for, and happens on the turn that
+        // sends the file, once (docs/policy/chat-attachment-formats.md 2.4).
+        if (buffer.byteLength > CHAT_AUDIO_ATTACHMENT_MAX_BYTES) {
+            throw new ChatAttachmentValidationError("ATTACHMENT_TOO_LARGE", 413);
+        }
+        const inspection = inspectAudioAttachment({
+            bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+            mediaType: format.mediaType,
+        });
+        if (!inspection.ok) {
+            throw new ChatAttachmentValidationError(
+                inspection.code,
+                inspection.code === "ATTACHMENT_AUDIO_TOO_LONG" ? 413 : 400
+            );
         }
         return { bytes: buffer, mediaType: format.mediaType };
     }

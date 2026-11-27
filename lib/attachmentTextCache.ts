@@ -52,6 +52,9 @@ export const ATTACHMENT_TEXT_CACHE_CATEGORIES: ReadonlySet<string> = new Set([
   "office",
   "legacy-office",
   "text",
+  // A transcript, which is the one entry here that was paid for: re-reading it
+  // from the recording would transcribe and bill it again on every turn.
+  "audio",
 ]);
 
 /** Null for anything that is not a non-empty list of `{ kind, text }`. */

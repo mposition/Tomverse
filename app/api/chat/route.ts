@@ -32,12 +32,16 @@ import {
 } from "@/lib/attachmentContextPrompt";
 import {
     attachmentKindForFormat,
-    CHAT_ATTACHMENT_MEDIA_TYPES,
+    chatAttachmentMediaTypeAccepted,
     formatByMediaType,
     providerMediaTypeForFormat,
     resolveChatAttachmentFormat,
     type ChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
+import { chatAudioAttachmentEnabled, transcribeAudioAttachment } from "@/lib/chatAudioAttachment";
+import { createCodeExecutionTextStream, resolveCodeExecution } from "@/lib/chatCodeExecutionCore";
+import { withCodeExecutionTool } from "@/lib/chatCodeExecutionTool";
+import { CHAT_AUDIO_ATTACHMENT_MAX_BYTES, inspectAudioAttachment } from "@/lib/chatAudioAttachmentCore";
 import { decodeAttachmentText } from "@/lib/chatAttachmentText";
 import { ChatArchiveError, expandChatArchive } from "@/lib/chatArchive";
 import {
@@ -783,7 +787,7 @@ const uploadPreparationSchema = z.union([
             name: z.string().trim().min(1).max(120),
             mediaType: z
                 .string()
-                .refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
+                .refine((value) => chatAttachmentMediaTypeAccepted(value, { audio: chatAudioAttachmentEnabled() })),
             size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
         })
         .strict(),
@@ -800,7 +804,7 @@ const finalizeAttachmentSchema = z
     .object({
         key: z.string().min(1).max(512),
         name: z.string().trim().min(1).max(200),
-        mediaType: z.string().refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
+        mediaType: z.string().refine((value) => chatAttachmentMediaTypeAccepted(value, { audio: chatAudioAttachmentEnabled() })),
         size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
     })
     .strict();
@@ -1003,6 +1007,7 @@ export async function PUT(req: Request) {
         const preparedFormat = resolveChatAttachmentFormat({
             filename: name,
             declaredMediaType: mediaType,
+            audio: chatAudioAttachmentEnabled(),
         });
         if (
             !name ||
@@ -1018,7 +1023,11 @@ export async function PUT(req: Request) {
                 { status: 400 }
             );
         }
-        if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_SIZE) {
+        if (
+            !Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_SIZE ||
+            // The transcription provider's own per-file ceiling is lower.
+            (preparedFormat.category === "audio" && size > CHAT_AUDIO_ATTACHMENT_MAX_BYTES)
+        ) {
             return Response.json(
                 { error: "Attachment is too large." },
                 { status: 400 }
@@ -1097,7 +1106,7 @@ export async function PATCH(req: Request) {
         // an animated GIF surfaced as a failed chat turn rather than a
         // rejected file. The object is read back and put through the same
         // parsers the guest path has always run.
-        const format = formatByMediaType(mediaType);
+        const format = formatByMediaType(mediaType, { audio: chatAudioAttachmentEnabled() });
         if (!format) {
             return Response.json(
                 { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
@@ -4378,6 +4387,41 @@ async function handleChatPost(
                     textAttachments.push({ name, kind, text });
                 };
 
+                if (format.category === "audio") {
+                    // docs/policy/chat-attachment-formats.md 2.4. Transcribed
+                    // once and cached on the attachment row; an earlier file is
+                    // named and left out rather than failing today's turn.
+                    if (!chatAudioAttachmentEnabled() || !access.subjectKey) {
+                        if (!isLatestMessage) return omitPastAttachment();
+                        throw new ChatAccessError(400, "UNSUPPORTED_ATTACHMENT_TYPE",
+                            "Audio attachments are not available.");
+                    }
+                    const inspection = inspectAudioAttachment({
+                        bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+                        mediaType: format.mediaType,
+                    });
+                    if (!inspection.ok) {
+                        if (!isLatestMessage) return omitPastAttachment();
+                        throw new ChatAccessError(inspection.code === "ATTACHMENT_AUDIO_TOO_LONG" ? 413 : 400,
+                            inspection.code, "The attached recording cannot be transcribed.");
+                    }
+                    try {
+                        const entry = await transcribeAudioAttachment({
+                            bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+                            mediaType: format.mediaType,
+                            extension: format.extensions[0],
+                            durationSeconds: inspection.durationSeconds,
+                            subjectKey: access.subjectKey,
+                            traceId,
+                        });
+                        addExtractedText(entry.kind, entry.text);
+                    } catch (error) {
+                        if (!isLatestMessage && error instanceof ChatAccessError) return omitPastAttachment();
+                        throw error;
+                    }
+                    return "ok";
+                }
+
                 if (format.category === "pdf") {
                     let extractedPdfText = "";
                     let pdfValidated = false;
@@ -4673,6 +4717,10 @@ async function handleChatPost(
                 const format = resolveChatAttachmentFormat({
                     filename: attachment.name,
                     declaredMediaType: attachment.mediaType,
+                    // Recognised whatever the switch says, so a conversation
+                    // that once carried a recording still opens after it is
+                    // turned off; the audio branch decides what to do with it.
+                    audio: true,
                 });
                 if (!format || format.mediaType !== attachment.mediaType) {
                     throw new Error("Unsupported attachment.");
@@ -4770,6 +4818,15 @@ async function handleChatPost(
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
+                    attachmentTextCacheEnabled();
+                // A transcript is paid for, so it is stored on the turn that
+                // first sends the recording too, not only when an earlier
+                // message is re-read; the read rule above is unchanged.
+                const audioTranscriptCacheWrite =
+                    isLatestMessage &&
+                    format.category === "audio" &&
+                    !isGuestObject &&
+                    Boolean(resolved?.attachmentId) &&
                     attachmentTextCacheEnabled();
                 if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
@@ -5029,7 +5086,7 @@ async function handleChatPost(
                         buffer: attachmentBuffer,
                         fromArchive: false,
                     });
-                    if (textCacheEligible) {
+                    if (textCacheEligible || audioTranscriptCacheWrite) {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).
@@ -6110,6 +6167,17 @@ async function handleChatPost(
         // authorized are the same number by construction. Merged into
         // `providerOptions.openai` beside `reasoningEffort` rather than over
         // it -- see `getModelGenerationSettings`.
+        // Code execution, on the answering model's own provider when it has a
+        // tool this product attaches (docs/policy/chat-attachment-formats.md
+        // 2.3.1). Refused turns keep the exact tool configuration above.
+        const codeExecution = resolveCodeExecution({
+            env: process.env,
+            model: modelConfig,
+            accessKind: access.kind,
+            // A deep-research model has already answered by this point.
+            researchTurn: isResearchPreview,
+        });
+        combinedToolConfig = withCodeExecutionTool(combinedToolConfig, codeExecution) as typeof combinedToolConfig;
         const generationSettings = getModelGenerationSettings(modelConfig, {
             openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
                 capability: webSearchCapability,
@@ -6541,7 +6609,12 @@ async function handleChatPost(
                           result.usage,
                           result.steps
                       )
-                    : result.textStream
+                    : codeExecution.enabled
+                      ? createCodeExecutionTextStream(result.fullStream, {
+                            maxCalls: codeExecution.maxCalls,
+                            onCeiling: () => initialAttemptAbortController.abort(),
+                        })
+                      : result.textStream
                 ).getReader(),
                 injectedFault,
                 0

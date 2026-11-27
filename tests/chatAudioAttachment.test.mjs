@@ -1,0 +1,313 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import {
+  CHAT_ATTACHMENT_FORMATS,
+  CHAT_ATTACHMENT_MEDIA_TYPES,
+  CHAT_AUDIO_ATTACHMENT_FORMATS,
+  GUEST_CHAT_ATTACHMENT_MEDIA_TYPES,
+  chatAttachmentAcceptAttribute,
+  chatAttachmentExtensionsByGroup,
+  chatAttachmentMediaTypeAccepted,
+  formatByMediaType,
+  resolveChatAttachmentFormat,
+} from "../lib/chatAttachmentFormats.ts";
+import {
+  AUDIO_TRANSCRIPT_KIND,
+  AUDIO_TRANSCRIPT_MAY_BE_INCOMPLETE_KIND,
+  CHAT_AUDIO_ATTACHMENT_MAX_BYTES,
+  CHAT_AUDIO_ATTACHMENT_MAX_SECONDS,
+  CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS,
+  audioTranscriptEntry,
+  chatAudioAttachmentSwitchOn,
+  inspectAudioAttachment,
+  mp3DurationSeconds,
+} from "../lib/chatAudioAttachmentCore.ts";
+import { transcribeAudioAttachment, chatAudioAttachmentEnabled } from "../lib/chatAudioAttachment.ts";
+import {
+  ChatAttachmentValidationError,
+  validateChatAttachmentUpload,
+} from "../lib/chatAttachmentValidation.ts";
+import { ATTACHMENT_TEXT_CACHE_CATEGORIES } from "../lib/attachmentTextCache.ts";
+import { createRequire } from "node:module";
+
+// The class the library itself throws and catches. A .ts module reached by
+// `import` from this .mjs file is a second instance of the one the library
+// reaches by `require`, and `instanceof` would be comparing the two.
+const { VoiceBudgetError } = createRequire(import.meta.url)("../lib/voiceInputBudget.ts");
+
+/**
+ * Audio attachments: docs/policy/chat-attachment-formats.md section 2.4.1.
+ *
+ * The mp3 happy path is two real encoder outputs (LAME through ffmpeg 8.1.2,
+ * one constant and one variable bitrate); the WebM and MP4 ones are the
+ * Chromium recordings voice input is already tested with. Refusals are built
+ * byte by byte, because a malformed stream has to be malformed in one way.
+ */
+
+const fixture = (path) =>
+  new Uint8Array(readFileSync(fileURLToPath(new URL(`./fixtures/${path}`, import.meta.url))));
+
+const MP3_CBR_3000MS = fixture("audio/ffmpeg-lame-cbr32k-22050hz-3000ms.mp3");
+const MP3_VBR_2500MS = fixture("audio/ffmpeg-lame-vbr-44100hz-2500ms.mp3");
+const WEBM_2500MS = fixture("voice/chromium-webm-opus-2500ms.webm");
+const MP4_3000MS = fixture("voice/chromium-mp4-aac-3000ms.mp4");
+
+// MPEG 2.5 Layer III, 8 kbit/s, 8 kHz: 72-byte frames of 576 samples (72 ms).
+const tinyMp3Frame = () => {
+  const frame = new Uint8Array(72);
+  frame.set([0xff, 0xe3, 0x18, 0x00]);
+  return frame;
+};
+const mp3OfFrames = (count, tail = new Uint8Array(0)) => {
+  const bytes = new Uint8Array(count * 72 + tail.length);
+  for (let i = 0; i < count; i += 1) bytes.set(tinyMp3Frame(), i * 72);
+  bytes.set(tail, count * 72);
+  return bytes;
+};
+
+// -- The switch leaves the format table exactly as it was -------------------
+
+test("switched off, nothing derived from the format table changes", () => {
+  assert.equal(CHAT_ATTACHMENT_FORMATS.some((format) => format.category === "audio"), false);
+  for (const format of CHAT_AUDIO_ATTACHMENT_FORMATS) {
+    assert.equal(CHAT_ATTACHMENT_MEDIA_TYPES.has(format.mediaType), false, format.id);
+    assert.equal(GUEST_CHAT_ATTACHMENT_MEDIA_TYPES.has(format.mediaType), false, format.id);
+    assert.equal(chatAttachmentMediaTypeAccepted(format.mediaType), false, format.id);
+    assert.equal(formatByMediaType(format.mediaType), null, format.id);
+  }
+  assert.equal(chatAttachmentAcceptAttribute(), chatAttachmentAcceptAttribute({ audio: false }));
+  assert.equal(chatAttachmentAcceptAttribute().includes(".mp3"), false);
+  assert.deepEqual(Object.keys(chatAttachmentExtensionsByGroup()), [
+    "image", "document", "data", "markup", "code", "archive",
+  ]);
+  for (const [name, type] of [["meeting.mp3", "audio/mpeg"], ["memo.m4a", "audio/x-m4a"],
+    ["call.wav", "audio/wav"], ["clip.webm", "video/webm"]]) {
+    assert.equal(resolveChatAttachmentFormat({ filename: name, declaredMediaType: type }), null, name);
+  }
+});
+
+test("switched on, recordings resolve from the names and types browsers report", () => {
+  const resolve = (filename, declaredMediaType) =>
+    resolveChatAttachmentFormat({ filename, declaredMediaType, audio: true })?.id ?? null;
+  assert.equal(resolve("meeting.mp3", "audio/mpeg"), "mp3");
+  assert.equal(resolve("meeting.MP3", ""), "mp3");
+  assert.equal(resolve("memo.m4a", "audio/x-m4a"), "m4a");
+  assert.equal(resolve("call.wav", "audio/x-wav"), "wav");
+  // Windows reports a WebM as video; the name decides.
+  assert.equal(resolve("clip.webm", "video/webm"), "webm-audio");
+  // A name and a type naming two different formats is still a refusal.
+  assert.equal(resolve("notes.txt", "audio/mpeg"), null);
+  assert.equal(resolve("meeting.mp3", "application/pdf"), null);
+  // Ogg has no length reader yet, so it is not offered.
+  assert.equal(resolve("voice.ogg", "audio/ogg"), null);
+  assert.equal(chatAttachmentMediaTypeAccepted("audio/mpeg", { audio: true }), true);
+  assert.equal(formatByMediaType("audio/x-m4a", { audio: true })?.mediaType, "audio/mp4");
+});
+
+test("recordings are appended for an account and never offered to a guest", () => {
+  const accept = chatAttachmentAcceptAttribute({ audio: true });
+  assert.ok(accept.startsWith(chatAttachmentAcceptAttribute()));
+  assert.ok(accept.includes(".mp3") && accept.includes("audio/mp4"));
+  assert.equal(
+    chatAttachmentAcceptAttribute({ guest: true, audio: true }),
+    chatAttachmentAcceptAttribute({ guest: true })
+  );
+  assert.deepEqual(chatAttachmentExtensionsByGroup({ audio: true }).audio, ["mp3", "m4a", "wav", "webm"]);
+  assert.equal("audio" in chatAttachmentExtensionsByGroup({ guest: true, audio: true }), false);
+  for (const format of CHAT_AUDIO_ATTACHMENT_FORMATS) {
+    assert.equal(format.guestAllowed, false, format.id);
+    assert.equal(format.allowedInArchive, false, format.id);
+  }
+  // The transcript is cached; re-reading the recording would bill it again.
+  assert.equal(ATTACHMENT_TEXT_CACHE_CATEGORIES.has("audio"), true);
+});
+
+test("the switch reads the string true and nothing else", () => {
+  for (const value of [undefined, "", "1", "TRUE", "yes", "false"]) {
+    assert.equal(chatAudioAttachmentSwitchOn({ CHAT_AUDIO_ATTACHMENT_ENABLED: value }), false, String(value));
+    assert.equal(chatAudioAttachmentEnabled({ CHAT_AUDIO_ATTACHMENT_ENABLED: value }), false, String(value));
+  }
+  assert.equal(chatAudioAttachmentSwitchOn({ CHAT_AUDIO_ATTACHMENT_ENABLED: "true" }), true);
+  assert.equal(chatAudioAttachmentEnabled({ CHAT_AUDIO_ATTACHMENT_ENABLED: "true" }), true);
+  // A transcription model without an observed price keeps it off.
+  assert.equal(
+    chatAudioAttachmentEnabled({ CHAT_AUDIO_ATTACHMENT_ENABLED: "true", VOICE_TRANSCRIPTION_MODEL: "whisper-9" }),
+    false
+  );
+});
+
+// -- Length is read before anything is paid for -----------------------------
+
+test("an mp3's length is what its frames add up to, measured on real encoder output", () => {
+  // ffprobe says 3.000 and 2.500 after LAME's gapless trim; the frame walk
+  // also counts the one metadata frame and the encoder padding, which only
+  // ever errs towards reserving slightly more.
+  const cbr = mp3DurationSeconds(MP3_CBR_3000MS);
+  const vbr = mp3DurationSeconds(MP3_VBR_2500MS);
+  assert.ok(cbr >= 3.0 && cbr < 3.15, String(cbr));
+  assert.ok(vbr >= 2.5 && vbr < 2.65, String(vbr));
+  assert.deepEqual(inspectAudioAttachment({ bytes: MP3_CBR_3000MS, mediaType: "audio/mpeg" }), {
+    ok: true, durationSeconds: cbr, durationSource: "mpeg-frames",
+  });
+});
+
+test("WebM and MP4 recordings are read by voice input's container reader", () => {
+  const webm = inspectAudioAttachment({ bytes: WEBM_2500MS, mediaType: "audio/webm" });
+  assert.equal(webm.ok, true);
+  assert.ok(Math.abs(webm.durationSeconds - 2.5) < 0.2);
+  const m4a = inspectAudioAttachment({ bytes: MP4_3000MS, mediaType: "audio/mp4" });
+  assert.equal(m4a.ok, true);
+  assert.ok(Math.abs(m4a.durationSeconds - 3.0) < 0.2);
+  // Bytes of one container named as another.
+  assert.deepEqual(inspectAudioAttachment({ bytes: MP3_CBR_3000MS, mediaType: "audio/wav" }), {
+    ok: false, code: "ATTACHMENT_TYPE_MISMATCH",
+  });
+});
+
+test("a recording past the ceiling, or of no readable length, is refused", () => {
+  const frames = Math.ceil((CHAT_AUDIO_ATTACHMENT_MAX_SECONDS + 1) / 0.072);
+  assert.deepEqual(inspectAudioAttachment({ bytes: mp3OfFrames(frames), mediaType: "audio/mpeg" }), {
+    ok: false, code: "ATTACHMENT_AUDIO_TOO_LONG",
+  });
+  const justUnder = Math.floor((CHAT_AUDIO_ATTACHMENT_MAX_SECONDS - 1) / 0.072);
+  assert.equal(inspectAudioAttachment({ bytes: mp3OfFrames(justUnder), mediaType: "audio/mpeg" }).ok, true);
+  // No frames at all, and frames followed by more than a tag's worth of
+  // something a decoder could resynchronise on.
+  assert.equal(mp3DurationSeconds(new Uint8Array(4096)), null);
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array(300 * 1024))), null);
+  assert.ok(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array(128))) > 0.7);
+  // Free-format and reserved fields are not a length.
+  assert.equal(mp3DurationSeconds(new Uint8Array([0xff, 0xe3, 0x08, 0x00, ...new Uint8Array(68)])), null);
+  assert.deepEqual(inspectAudioAttachment({ bytes: new Uint8Array(4096), mediaType: "audio/mpeg" }), {
+    ok: false, code: "ATTACHMENT_UNREADABLE",
+  });
+});
+
+test("finalize checks the container and length, and the provider's size ceiling", async () => {
+  const mp3 = formatByMediaType("audio/mpeg", { audio: true });
+  const validated = await validateChatAttachmentUpload({
+    buffer: Buffer.from(MP3_CBR_3000MS), format: mp3, scope: "account",
+  });
+  assert.equal(validated.mediaType, "audio/mpeg");
+  const refusal = async (buffer) => {
+    try {
+      await validateChatAttachmentUpload({ buffer, format: mp3, scope: "account" });
+    } catch (error) {
+      assert.ok(error instanceof ChatAttachmentValidationError);
+      return [error.code, error.status];
+    }
+    assert.fail("expected a refusal");
+  };
+  const frames = Math.ceil((CHAT_AUDIO_ATTACHMENT_MAX_SECONDS + 1) / 0.072);
+  assert.deepEqual(await refusal(Buffer.from(mp3OfFrames(frames))), ["ATTACHMENT_AUDIO_TOO_LONG", 413]);
+  assert.deepEqual(await refusal(Buffer.alloc(CHAT_AUDIO_ATTACHMENT_MAX_BYTES + 1)), ["ATTACHMENT_TOO_LARGE", 413]);
+  assert.deepEqual(await refusal(Buffer.alloc(4096)), ["ATTACHMENT_UNREADABLE", 400]);
+});
+
+// -- The transcript, and the seconds it is booked against ------------------
+
+test("a transcript is an extracted-text entry, flagged when it may have been cut", () => {
+  assert.equal(audioTranscriptEntry({ text: "   ", outputTokens: 3 }), null);
+  assert.deepEqual(audioTranscriptEntry({ text: " Hello team. ", outputTokens: 120 }), {
+    kind: AUDIO_TRANSCRIPT_KIND, text: "Hello team.",
+  });
+  assert.equal(audioTranscriptEntry({ text: "...", outputTokens: 1_995 }).kind, AUDIO_TRANSCRIPT_MAY_BE_INCOMPLETE_KIND);
+  assert.equal(audioTranscriptEntry({ text: "...", outputTokens: null }).kind, AUDIO_TRANSCRIPT_KIND);
+});
+
+const fakeDeps = (result, events) => ({
+  reserve: async (input) => {
+    events.push(["reserve", input.subjectKey, input.seconds]);
+    return { subject: {}, provider: {} };
+  },
+  settle: async ({ basis }) => {
+    events.push(["settle", basis]);
+    return { releasedSeconds: 0 };
+  },
+  release: async () => {
+    events.push(["release"]);
+    return { releasedSeconds: 0 };
+  },
+  transcribe: async (request) => {
+    events.push(["transcribe", request.mediaType, request.extension, request.timeoutMs]);
+    if (result instanceof Error) throw result;
+    return result;
+  },
+});
+const attachment = {
+  bytes: MP3_CBR_3000MS, mediaType: "audio/mpeg", extension: "mp3",
+  durationSeconds: 184.2, subjectKey: "user:abc", traceId: "trace-1",
+};
+const quietly = async (run) => {
+  const { log, warn } = console;
+  console.log = () => {};
+  console.warn = () => {};
+  try {
+    return await run();
+  } finally {
+    console.log = log;
+    console.warn = warn;
+  }
+};
+
+test("a transcription reserves the measured seconds and settles on them", async () => {
+  const events = [];
+  // The documented token-billed response shape (OpenAI /v1/audio/transcriptions).
+  const entry = await quietly(() => transcribeAudioAttachment(attachment, fakeDeps(
+    { ok: true, text: "Minutes of the meeting.", usage: { kind: "tokens", inputTokens: 1800, outputTokens: 210 } },
+    events
+  )));
+  assert.deepEqual(entry, { kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes of the meeting." });
+  assert.deepEqual(events, [
+    ["reserve", "user:abc", 185],
+    ["transcribe", "audio/mpeg", "mp3", CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS],
+    ["settle", { kind: "measured_clip", seconds: 184.2 }],
+  ]);
+});
+
+test("a provider's own seconds win, and an unknown outcome keeps the reservation", async () => {
+  const events = [];
+  await quietly(() => transcribeAudioAttachment(attachment, fakeDeps(
+    { ok: true, text: "Hi.", usage: { kind: "duration", seconds: 183 } }, events)));
+  assert.deepEqual(events.at(-1), ["settle", { kind: "provider_seconds", seconds: 183 }]);
+
+  for (const [disposition, basis] of [["indeterminate", "reservation"], ["refused", "not_billed"], ["not_sent", "not_billed"]]) {
+    const log = [];
+    await assert.rejects(
+      quietly(() => transcribeAudioAttachment(attachment, fakeDeps(
+        { ok: false, code: "provider_unavailable", status: 503, disposition }, log))),
+      (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE" && error.status === 502
+    );
+    assert.deepEqual(log.at(-1), ["settle", { kind: basis }], disposition);
+  }
+});
+
+test("no speech is a refusal after settling, and a throw before the provider releases", async () => {
+  const events = [];
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachment(attachment, fakeDeps(
+      { ok: true, text: "  ", usage: { kind: "absent" } }, events))),
+    (error) => error.code === "ATTACHMENT_NO_TEXT"
+  );
+  assert.deepEqual(events.at(-1), ["settle", { kind: "measured_clip", seconds: 184.2 }]);
+
+  const thrown = [];
+  await assert.rejects(quietly(() => transcribeAudioAttachment(attachment, fakeDeps(new Error("boom"), thrown))));
+  assert.deepEqual(thrown.at(-1), ["release"]);
+});
+
+test("an exhausted seconds budget is its own refusal and never reaches the provider", async () => {
+  const events = [];
+  const deps = fakeDeps({ ok: true, text: "never", usage: { kind: "absent" } }, events);
+  deps.reserve = async () => {
+    throw new VoiceBudgetError(429, "VOICE_OPERATIONAL_LIMIT_REACHED", "limit", 3600);
+  };
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachment(attachment, deps)),
+    (error) => error.code === "AUDIO_TRANSCRIPTION_LIMIT_REACHED" && error.status === 429 && error.retryAfter === 3600
+  );
+  assert.deepEqual(events, []);
+});

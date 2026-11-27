@@ -89,6 +89,7 @@ import {
   chatAttachmentExtensionsByGroup,
   resolveChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
+import { useChatAudioAttachmentsEnabled } from "@/components/chat/ChatAudioAttachmentContext";
 import { isReattachableDocument } from "@/lib/chatReviewHandoff";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
@@ -389,6 +390,7 @@ export function ChatInputAutoCapabilityPendingNotice({
  * server was ever asked, which is a rejection the server would not have made.
  */
 const ACCEPTED_FILE_TYPES = chatAttachmentAcceptAttribute();
+const ACCEPTED_FILE_TYPES_WITH_AUDIO = chatAttachmentAcceptAttribute({ audio: true });
 
 const GUEST_ACCEPT_ATTRIBUTE = chatAttachmentAcceptAttribute({ guest: true });
 
@@ -411,10 +413,11 @@ const DEFAULT_ATTACHMENT_CAPABILITIES: ChatAttachmentCapabilities = {
  * the same function decides in both places, so the client can pre-empt a
  * rejection without being able to invent one.
  */
-const getFileFormat = (file: File) =>
+const getFileFormat = (file: File, audio = false) =>
   resolveChatAttachmentFormat({
     filename: file.name,
     declaredMediaType: file.type,
+    audio,
   });
 
 const fileToDataUrl = (file: File) =>
@@ -1112,9 +1115,14 @@ export function ChatInput({
     const maxAttachmentBytes = attachmentCapabilities.maxAttachmentBytes;
     const isEphemeralAttachment =
       attachmentCapabilities.attachmentPersistence === "ephemeral";
+    // Recordings are never offered to an ephemeral (guest) composer.
+    const audioAttachmentsEnabled =
+      useChatAudioAttachmentsEnabled() && !isEphemeralAttachment;
     const acceptedFileTypes = isEphemeralAttachment
       ? GUEST_ACCEPT_ATTRIBUTE
-      : ACCEPTED_FILE_TYPES;
+      : audioAttachmentsEnabled
+        ? ACCEPTED_FILE_TYPES_WITH_AUDIO
+        : ACCEPTED_FILE_TYPES;
     const { requestToken: requestGuestVerificationToken } = useGuestVerification();
     /**
      * Every upload rejection the server can produce, mapped to the one
@@ -1187,6 +1195,7 @@ export function ChatInput({
     const supportedFormatGroups = useMemo(() => {
       const groups = chatAttachmentExtensionsByGroup({
         guest: isEphemeralAttachment,
+        audio: audioAttachmentsEnabled,
       });
       const labels: Record<string, string> = {
         image: t("chat.attachFormatGroupImage"),
@@ -1195,6 +1204,7 @@ export function ChatInput({
         markup: t("chat.attachFormatGroupMarkup"),
         code: t("chat.attachFormatGroupCode"),
         archive: t("chat.attachFormatGroupArchive"),
+        audio: t("chat.attachFormatGroupAudio"),
       };
       const VISIBLE = 10;
       return Object.entries(groups)
@@ -1206,7 +1216,7 @@ export function ChatInput({
           overflow: Math.max(0, extensions.length - VISIBLE),
           all: extensions.join(", "),
         }));
-    }, [isEphemeralAttachment, t]);
+    }, [audioAttachmentsEnabled, isEphemeralAttachment, t]);
   const maxSelectableModels = singleModelSelection ? 1 : isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
@@ -2350,7 +2360,7 @@ export function ChatInput({
    */
   const uploadOneFile = useCallback(
     async (file: File, trackingId: string, scopeId: string) => {
-      const format = getFileFormat(file);
+      const format = getFileFormat(file, audioAttachmentsEnabled);
       const mediaType = format?.mediaType || file.type || "application/octet-stream";
       const fail = (reason: string) => {
         setPendingAttachments((current) =>
@@ -2601,6 +2611,7 @@ export function ChatInput({
     },
     [
       attachmentErrorMessage,
+      audioAttachmentsEnabled,
       guestAttachmentErrorMessage,
       isEphemeralAttachment,
       maxAttachmentBytes,
