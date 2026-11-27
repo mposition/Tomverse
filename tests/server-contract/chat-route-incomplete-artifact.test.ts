@@ -129,7 +129,11 @@ type ArtifactRow = {
 
 const world = {
   artifactRows: [] as ArtifactRow[],
-  messages: [] as Array<{ id: string; status: string; modelId: string }>,
+  messages: [] as Array<{ id: string; status: string; modelId: string; content?: string }>,
+  /** The outcome each settlement was asked for, in order. */
+  settlements: [] as string[],
+  /** How many stored objects the route handed back for reclamation. */
+  discarded: 0,
   providerContexts: [] as Array<{ messageId: string }>,
   uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
     sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
@@ -293,11 +297,12 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
   },
   message: {
     findFirst: () => ({ id: "user-message-1" }),
-    create: (args: { data: { id: string; status: string; modelId: string } }) => {
+    create: (args: { data: { id: string; status: string; modelId: string; content?: string } }) => {
       world.messages.push({
         id: args.data.id,
         status: args.data.status,
         modelId: args.data.modelId,
+        content: args.data.content,
       });
       return args.data;
     },
@@ -406,7 +411,9 @@ mock.module(mod("lib/chatSecurity.ts"), {
     }),
     releaseChatAccess: async () => undefined,
     heartbeatChatAccess: async () => undefined,
-    settleChatUsage: async () => undefined,
+    settleChatUsage: async (_reservation: unknown, usage: { outcome: string }) => {
+      world.settlements.push(usage.outcome);
+    },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async () => ({ ok: true, entries: [] }),
     releaseAttemptProviderBudget: async () => undefined,
@@ -583,7 +590,9 @@ mock.module(mod("lib/generatedArtifactStorage.ts"), {
       objectKey: `message-artifacts/${USER_ID}/${CONVERSATION_ID}/art_${input.ordinal}.${input.format}`,
       modelId: input.modelId,
     }),
-    discardStoredArtifacts: async () => undefined,
+    discardStoredArtifacts: async (artifacts: unknown[]) => {
+      world.discarded += artifacts.length;
+    },
   },
 });
 
@@ -684,6 +693,8 @@ const ask = async (
   world.artifactRows = [];
   world.messages = [];
   world.providerContexts = [];
+  world.settlements = [];
+  world.discarded = 0;
   lastStreamTextOptions = null;
   networkCalls = 0;
 
@@ -1702,4 +1713,59 @@ test("a broken stream with signing off raises the same error and sends no traile
   } finally {
     if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* A file with no prose above it                                                */
+/* -------------------------------------------------------------------------- */
+
+/*
+  docs/policy/generated-artifacts.md section 8 (2026-11-27). A tool that stored
+  a file and a model that then wrote nothing -- or ran out of steps -- used to
+  end as "empty response": the stored file was deleted and the turn settled as
+  empty. The file is the answer, so it is kept with its message and charged as
+  one.
+*/
+test("a file stored with no prose keeps its message and its row, and settles completed", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({
+      begins: [beganTextFile],
+      executes: [beganTextFile.toolCallId],
+      text: "",
+    });
+    assert.equal(trailer?.completion?.status, "normal");
+    assert.equal(trailer?.artifacts?.length, 1);
+    assert.equal(trailer?.artifacts?.[0]!.status, "ready");
+    // The persisted row's id, so the card survives a reload.
+    assert.equal(trailer?.artifacts?.[0]!.id, "row_1");
+    // A delivered file is not a failed turn.
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+  // An empty body: the sentence above the card is the screen's own.
+  assert.deepEqual(
+    world.messages.map((message) => [message.id, message.status, message.content]),
+    [[ASSISTANT_MESSAGE_ID, "normal", ""]]
+  );
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.artifactRows[0]!.status, "ready");
+  assert.equal(world.artifactRows[0]!.messageId, ASSISTANT_MESSAGE_ID);
+  assert.deepEqual(world.settlements, ["completed"]);
+  assert.equal(world.discarded, 0, "the delivered file was reclaimed");
+});
+
+test("whitespace a model emitted around a file is not stored as its body", async () => {
+  await ask({
+    begins: [beganTextFile],
+    executes: [beganTextFile.toolCallId],
+    text: "\n  \n",
+  });
+  assert.deepEqual(world.messages.map((message) => message.content), [""]);
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+test("an answer with neither text nor a file is still empty: no message, no charge", async () => {
+  await ask({ text: "" });
+  assert.deepEqual(world.messages, []);
+  assert.deepEqual(world.artifactRows, []);
+  assert.deepEqual(world.settlements, ["empty"]);
 });

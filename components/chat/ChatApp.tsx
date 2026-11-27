@@ -2787,6 +2787,12 @@ function ChatAppComponent({
         all rather than a spinner that never resolves.
       */
       const artifacts = trailer?.artifacts ?? [];
+      // A file the server kept is the answer even with no prose above it
+      // (docs/policy/generated-artifacts.md section 8): the card is shown,
+      // with this screen's own sentence, instead of "empty response".
+      const fileOnlyAnswer =
+        !assistantText.trim() &&
+        artifacts.some((artifact) => artifact.status === "ready");
 
       // The server stopped waiting for the provider and said so. Checked
       // before the empty-response branch below, and that order is the whole
@@ -2802,7 +2808,7 @@ function ChatAppComponent({
           ERROR_CLASSIFICATION_SOURCE.server,
           assistantText
         );
-      } else if (!assistantText.trim()) {
+      } else if (!assistantText.trim() && !fileOnlyAnswer) {
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: "normal", nonempty: false });
         if (requestTraceId && typeof window !== "undefined") {
@@ -2871,7 +2877,8 @@ function ChatAppComponent({
           }
         );
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
-          conversationId: targetChatId, sourceUserMessageId, status: completionStatus, nonempty: Boolean(assistantText.trim()) });
+          conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
+          nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
         onResponseComplete?.(
           analyticsPromptId,
           answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),

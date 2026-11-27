@@ -745,6 +745,7 @@ export const zh = {
         artifactFailedFormat: "该文件格式暂不支持。",
         artifactFailedLimit: "请求的文件过大，无法创建。",
         artifactFailedIncomplete: "回答在文件完成前就结束了。",
+        artifactOnlyAnswer: "已为你生成所需的文件。",
         artifactRetry: "重新创建文件",
         artifactSignInTitle: "登录后可创建文件",
         artifactSignInDescription: "生成的文件保存在您的账户中，因此需要登录。",

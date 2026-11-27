@@ -694,6 +694,7 @@ export const es = {
         artifactFailedFormat: "Ese formato de archivo aún no es compatible.",
         artifactFailedLimit: "El archivo solicitado es demasiado grande para crearlo.",
         artifactFailedIncomplete: "La respuesta terminó antes de completar el archivo.",
+        artifactOnlyAnswer: "Aquí tienes el archivo que pediste.",
         artifactRetry: "Crear el archivo de nuevo",
         artifactSignInTitle: "Inicia sesión para crear archivos",
         artifactSignInDescription: "Los archivos generados se guardan en tu cuenta, por lo que hace falta iniciar sesión.",

@@ -694,6 +694,7 @@ export const fr = {
         artifactFailedFormat: "Ce format de fichier n'est pas encore pris en charge.",
         artifactFailedLimit: "Le fichier demandé est trop volumineux pour être créé.",
         artifactFailedIncomplete: "La réponse s'est terminée avant la fin du fichier.",
+        artifactOnlyAnswer: "Voici le fichier demandé.",
         artifactRetry: "Recréer le fichier",
         artifactSignInTitle: "Connectez-vous pour créer des fichiers",
         artifactSignInDescription: "Les fichiers générés sont enregistrés dans votre compte, une connexion est donc nécessaire.",

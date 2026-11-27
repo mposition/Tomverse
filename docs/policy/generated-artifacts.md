@@ -353,10 +353,14 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
 - `artifactsPersisted`가 true가 아닌 모든 종료 경로(취소, provider 오류, 클라이언트
   연결 끊김, fallback swap, 메시지 쓰기 실패)는 `releaseSafely()`에서
   `discard()`로 객체를 회수한다. 기본값이 "회수"다.
-- **텍스트 없이 tool만 호출한 turn**은 빈 응답으로 보고되고 파일을 남기지
-  않는다(참조할 메시지가 없으므로 쓰는 순간 도달 불가능한 객체가 된다).
-  `generated_artifact_discarded_empty_answer`로 따로 기록하며, 이 비율이
-  0 근처를 벗어나면 지시문이 작동하지 않는다는 뜻이다.
+- **텍스트 없이 파일만 만든 turn**(모델이 본문 없이 끝났거나 tool step이 모두
+  소진된 turn)도 파일이 저장소에 하나라도 저장됐으면 답변이다. 빈 본문의
+  assistant 메시지와 파일 행을 같은 트랜잭션에 쓰고 `completed`로 정산한다(파일이
+  전달됐으므로). 서버는 본문에 어떤 언어의 문장도 써 넣지 않고, 카드 위의 한 문장
+  (`chat.artifactOnlyAnswer`)은 화면이 사용자 언어로 그린다. 2026-11-27 변경.
+- 메시지를 쓸 대화가 없는 turn(게스트 등)의 저장된 파일만 예전처럼 빈 응답으로
+  보고되고 파일을 남기지 않는다(참조할 메시지가 없으므로 쓰는 순간 도달 불가능한
+  객체가 된다). `generated_artifact_discarded_empty_answer`로 따로 기록한다.
 - **삭제**: 대화 삭제, 대화 일괄 삭제, 계정 삭제, 모델별 메시지 초기화 모두
   같은 트랜잭션에서 `MessageArtifactCleanup` tombstone을 남긴다.
 - **sweep**: 15분 유지보수 cron이 (a) tombstone queue를 drain하고,

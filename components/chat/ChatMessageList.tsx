@@ -669,7 +669,9 @@ export function ChatMessageList({
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
     if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
-    if (!lastMessage.content) return t("chat.responseGenerating");
+    // A file-only answer has an empty body and is finished: its cards arrive
+    // with the trailer, after the last streamed chunk.
+    if (!lastMessage.content && !lastMessage.artifacts?.length) return t("chat.responseGenerating");
     return t("chat.responseComplete");
   })();
 
@@ -1084,8 +1086,19 @@ export function ChatMessageList({
             // rendered separately below as a de-emphasized auxiliary layer
             // (see errorAuxiliaryLines) rather than dropped entirely.
             const errorText = msg.recoveryNotice ?? msg.content;
-            const displayContent =
-              !isUser && msg.status === "error" && msg.recoveryNotice === undefined
+            // An answer whose only output is a file the server kept
+            // (docs/policy/generated-artifacts.md section 8). The stored body
+            // is empty on purpose; the sentence above the card is this
+            // screen's own, so it is in the reader's language.
+            const fileOnlyAnswer =
+              !isUser &&
+              msg.role === "assistant" &&
+              msg.status !== "error" &&
+              !msg.content.trim() &&
+              Boolean(msg.artifacts?.some((artifact) => artifact.status === "ready"));
+            const displayContent = fileOnlyAnswer
+              ? t("chat.artifactOnlyAnswer")
+              : !isUser && msg.status === "error" && msg.recoveryNotice === undefined
                 ? msg.content.split("\n")[0]
                 : msg.content;
             const errorAuxiliaryLines =
@@ -1410,7 +1423,7 @@ export function ChatMessageList({
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
                     <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
-                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
+                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" && !fileOnlyAnswer ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />

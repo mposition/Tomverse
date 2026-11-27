@@ -738,6 +738,7 @@ export const en = {
         artifactFailedFormat: "That file format is not supported yet.",
         artifactFailedLimit: "The requested file is too large to create.",
         artifactFailedIncomplete: "The answer ended before the file was finished.",
+        artifactOnlyAnswer: "Here is the file you asked for.",
         artifactRetry: "Create the file again",
         artifactSignInTitle: "Sign in to create files",
         artifactSignInDescription: "Generated files are saved to your account, so creating one needs a log-in.",

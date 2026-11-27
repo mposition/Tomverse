@@ -737,6 +737,7 @@ export const ko = {
         artifactFailedFormat: "아직 지원하지 않는 파일 형식입니다.",
         artifactFailedLimit: "요청한 파일이 너무 커서 만들 수 없습니다.",
         artifactFailedIncomplete: "파일이 완성되기 전에 답변이 끝났습니다.",
+        artifactOnlyAnswer: "요청하신 파일을 만들었습니다.",
         artifactRetry: "파일 다시 만들기",
         artifactSignInTitle: "파일을 만들려면 로그인하세요",
         artifactSignInDescription: "생성된 파일은 계정에 저장되므로 로그인이 필요합니다.",

@@ -740,6 +740,7 @@ export const zhHant = {
         artifactFailedFormat: "此檔案格式暫不支援。",
         artifactFailedLimit: "要求的檔案過大，無法建立。",
         artifactFailedIncomplete: "回答在檔案完成前就結束了。",
+        artifactOnlyAnswer: "已為你產生所需的檔案。",
         artifactRetry: "重新建立檔案",
         artifactSignInTitle: "登入後可建立檔案",
         artifactSignInDescription: "生成的檔案儲存在您的帳戶中，因此需要登入。",

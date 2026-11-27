@@ -8650,11 +8650,38 @@ async function handleChatPost(
                         completionCommitted = true;
                         detachRequestAbortListener();
 
+                        /*
+                          A generated file is an answer
+                          (docs/policy/generated-artifacts.md section 8).
+
+                          A turn whose tool stored a file and whose model then
+                          wrote no prose -- or ran out of steps before it could
+                          -- delivered what was asked for. It keeps the file,
+                          its message and its charge, exactly as an answer
+                          with a sentence above the card would. Only a file
+                          that reached storage counts, and only where there is
+                          a conversation to write the message into: a turn
+                          with nowhere to persist keeps the old empty path,
+                          because its file would be unreachable the moment it
+                          was written. The body stays empty; the sentence
+                          above the card is the screen's own, in its language.
+                        */
+                        const answerHasText = Boolean(generatedText.trim());
+                        const canPersistAnswer = Boolean(
+                            conversationId && assistantMessageId
+                        );
+                        const deliveredFiles =
+                            canPersistAnswer &&
+                            (artifactCollector?.stored.length ?? 0) > 0;
+                        const persistAnswer =
+                            canPersistAnswer && (answerHasText || deliveredFiles);
+                        const answerDelivered = answerHasText || deliveredFiles;
+
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
                             const providerCalls = await providerCallUsage(dispatched.stream);
                             await settleSafely(
-                                generatedText.trim() ? "completed" : "empty",
+                                answerDelivered ? "completed" : "empty",
                                 {
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
@@ -8682,7 +8709,7 @@ async function handleChatPost(
                             );
                         } else {
                             await settleSafely(
-                                generatedText.trim() ? "completed" : "empty",
+                                answerDelivered ? "completed" : "empty",
                                 searchSettlementFields
                             );
                         }
@@ -8699,20 +8726,19 @@ async function handleChatPost(
                         */
                         let artifactsForTrailer: ChatStreamArtifact[] =
                             artifactCollector?.toStreamArtifacts() ?? [];
-                        if (
-                            conversationId &&
-                            assistantMessageId &&
-                            generatedText.trim()
-                        ) {
+                        if (persistAnswer && conversationId && assistantMessageId) {
                             try {
-                                const storedContent =
-                                    generatedText.length >
-                                    MAX_STORED_MESSAGE_CHARACTERS
-                                        ? `${generatedText.slice(
-                                              0,
-                                              MAX_STORED_MESSAGE_CHARACTERS
-                                          )}\n\n[Response truncated for storage]`
-                                        : generatedText;
+                                // A file-only answer is stored with no body,
+                                // not with whitespace a model happened to emit.
+                                const storedContent = !answerHasText
+                                    ? ""
+                                    : generatedText.length >
+                                        MAX_STORED_MESSAGE_CHARACTERS
+                                      ? `${generatedText.slice(
+                                            0,
+                                            MAX_STORED_MESSAGE_CHARACTERS
+                                        )}\n\n[Response truncated for storage]`
+                                      : generatedText;
                                 /*
                                   Provider-private state for replaying a
                                   reasoning model exactly -- and not stored at
@@ -8978,19 +9004,18 @@ async function handleChatPost(
                             }
                         } else if (artifactCollector?.stored.length) {
                             /*
-                              A turn that called the tool and then wrote no
-                              text at all, or that has no conversation to
-                              write to.
+                              A turn that stored a file and has no
+                              conversation to write it to.
 
-                              The answer is reported as empty by the branch
-                              below, and an empty answer keeps no file: there
-                              is no message for the row to reference, so the
-                              object would be unreachable from the moment it
-                              was written. The event is logged separately
-                              because it is the one shape where a successful
-                              generation is deliberately thrown away, and a
-                              rate that stops being near-zero means the
-                              instructions have stopped working.
+                              Reported as empty by the branch below, and it
+                              keeps no file: there is no message for the row
+                              to reference, so the object would be
+                              unreachable from the moment it was written. A
+                              turn that has a conversation keeps its file even
+                              with no text (`deliveredFiles` above). The event
+                              is logged separately because it is the one shape
+                              where a successful generation is deliberately
+                              thrown away.
                             */
                             console.warn(
                                 JSON.stringify({
@@ -9005,7 +9030,10 @@ async function handleChatPost(
                             await artifactCollector.discard();
                             artifactsForTrailer = [];
                         }
-                        const isEmptyResponse = !generatedText.trim();
+                        // A delivered file is not an empty answer: no
+                        // provider failure, no error report, no failed
+                        // attempt.
+                        const isEmptyResponse = !answerDelivered;
                         let streamErrorReport: ReturnType<
                             typeof issueStreamErrorReport
                         > = null;

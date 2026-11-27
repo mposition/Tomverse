@@ -683,6 +683,7 @@ export const de = {
         artifactFailedFormat: "Dieses Dateiformat wird noch nicht unterstützt.",
         artifactFailedLimit: "Die angeforderte Datei ist zu groß zum Erstellen.",
         artifactFailedIncomplete: "Die Antwort endete, bevor die Datei fertig war.",
+        artifactOnlyAnswer: "Hier ist die angeforderte Datei.",
         artifactRetry: "Datei erneut erstellen",
         artifactSignInTitle: "Zum Erstellen von Dateien anmelden",
         artifactSignInDescription: "Erzeugte Dateien werden in Ihrem Konto gespeichert, daher ist eine Anmeldung erforderlich.",
