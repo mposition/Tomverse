@@ -1245,6 +1245,42 @@ const parseReservationPayload = (
       )
     : [];
 
+/**
+ * Gives a reservation's user credits back: the plan buckets it incremented and
+ * the purchased-credit lots it reserved. Never the provider budget -- whether
+ * that is released depends on whether the provider may have been called, which
+ * only the caller knows. Call it only after winning the reservation's
+ * `reserved -> settling` claim, inside the same transaction.
+ */
+const refundReservedUserCredits = async (
+  tx: Prisma.TransactionClient,
+  userId: string,
+  reservation: {
+    id: string;
+    planReservedCredits: number;
+    reservationPayload: Prisma.JsonValue;
+    createdAt: Date;
+  }
+) => {
+  await refundPlanCredits(
+    tx,
+    userId,
+    reservation.planReservedCredits,
+    reservation.createdAt
+  );
+  const entries = parseReservationPayload(reservation.reservationPayload);
+  if (entries.length > 0) {
+    await settleAddOnCredits(tx, {
+      userId,
+      reservationId: reservation.id,
+      entries,
+      settledCredits: 0,
+      settledFundedCostMicroUsd: 0,
+      outcome: "failed",
+    });
+  }
+};
+
 const finalizeFailure = async (input: {
   generationId: string;
   failurePhase: ImageGenerationFailurePhase;
@@ -1338,23 +1374,7 @@ const finalizeFailure = async (input: {
         where: { generationId: input.generationId },
       });
       if (reservation) {
-        await refundPlanCredits(
-          tx,
-          generation.userId,
-          reservation.planReservedCredits,
-          reservation.createdAt
-        );
-        const entries = parseReservationPayload(reservation.reservationPayload);
-        if (entries.length > 0) {
-          await settleAddOnCredits(tx, {
-            userId: generation.userId,
-            reservationId: reservation.id,
-            entries,
-            settledCredits: 0,
-            settledFundedCostMicroUsd: 0,
-            outcome: "failed",
-          });
-        }
+        await refundReservedUserCredits(tx, generation.userId, reservation);
         const incurredCostMicroUsd = input.releaseProviderBudget
           ? null
           : failureIncurredCostMicroUsd(reservation.pricingSnapshot, input.billed);
@@ -1715,19 +1735,40 @@ export const processImageGeneration = async (
     const requestedSize = parseSize(generation.size);
     const width = result.outputWidth ?? requestedSize.width;
     const height = result.outputHeight ?? requestedSize.height;
-    await prisma.imageAsset.create({
-      data: {
-        generationId,
-        role: "original",
-        status: "ready",
-        r2Key: originalKey,
-        mimeType: result.mimeType,
-        width,
-        height,
-        byteSize: result.imageBytes.byteLength,
-        sha256: sha256Hex(result.imageBytes),
-      },
-    });
+    try {
+      await prisma.imageAsset.create({
+        data: {
+          generationId,
+          role: "original",
+          status: "ready",
+          r2Key: originalKey,
+          mimeType: result.mimeType,
+          width,
+          height,
+          byteSize: result.imageBytes.byteLength,
+          sha256: sha256Hex(result.imageBytes),
+        },
+      });
+    } catch (error) {
+      // The bytes are in R2 and no row names them: the conversation was deleted
+      // under this run, cascading the generation away, or the write failed.
+      // The deletion's own tombstones came from the rows it saw, so nothing
+      // else would ever remove the object. Checked first, because a create
+      // that reported failure may still have committed, and a tombstone on a
+      // key a row names deletes a live original.
+      const recorded = await prisma.imageAsset
+        .findUnique({ where: { r2Key: originalKey }, select: { id: true } })
+        .catch(() => undefined);
+      if (recorded === null) {
+        await prisma.imageAssetCleanup
+          .createMany({
+            data: [{ r2Key: originalKey, reason: "storage_rollback" }],
+            skipDuplicates: true,
+          })
+          .catch(() => undefined);
+      }
+      throw error;
+    }
 
     // Thumbnail is a derived asset: its failure never demotes the original
     // (policy section 9). Derivation re-encodes on purpose -- only the
@@ -2272,6 +2313,93 @@ export const reconcileStaleImageGenerations = async (
     });
   }
   return { examined: stale.length, refunded, settlementStranded, redriven };
+};
+
+/**
+ * Refunds the user credits of reservations whose generation is gone.
+ *
+ * Deleting a conversation cascades its generations away and leaves their
+ * reservations -- which deliberately have no foreign key, so the financial
+ * record survives -- in `reserved`. Every other path that closes one
+ * (finalizeFailure, the stale sweep, the success settlement) starts from the
+ * generation row, so nothing else could reach it, and the person's plan
+ * credits and purchased lots stayed held for good.
+ *
+ * Exactly once by the claim every settler uses: `reserved -> settling` inside
+ * the transaction that closes the row. A settlement that committed first left
+ * it `settled`, and one still open holds the row until it does, so this then
+ * sees nothing to claim.
+ *
+ * The provider budget keeps its hold: the generation may have reached the
+ * provider before it was deleted -- a live executor keeps running -- so the
+ * reservation is recorded as spent, finalizeFailure's rule for an unknown
+ * outcome. A reservation with no user left (the account was deleted) has no
+ * credits to return and is not touched.
+ */
+export const refundOrphanedImageCreditReservations = async (
+  now = new Date(),
+  limit = 25
+): Promise<{ examined: number; refunded: number }> => {
+  const orphans = await prisma.$queryRaw<
+    { id: string; userId: string; generationId: string }[]
+  >`
+    SELECT r."id", r."userId", r."generationId"
+    FROM "ImageCreditReservation" r
+    WHERE r."status" = 'reserved'
+      AND r."userId" IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "ImageGeneration" g WHERE g."id" = r."generationId"
+      )
+    ORDER BY r."createdAt" ASC
+    LIMIT ${limit}
+  `;
+  let refunded = 0;
+  for (const orphan of orphans) {
+    const closed = await prisma
+      .$transaction(async (tx) => {
+        await lockCreditAccount(tx, orphan.userId);
+        // A generation id is never reused, so a missing row stays missing;
+        // checked again under the lock all the same, before anything moves.
+        const generation = await tx.imageGeneration.findUnique({
+          where: { id: orphan.generationId },
+          select: { id: true },
+        });
+        if (generation) return false;
+        const claim = await tx.imageCreditReservation.updateMany({
+          where: { id: orphan.id, status: "reserved" },
+          data: { status: "settling" },
+        });
+        if (claim.count === 0) return false;
+        const reservation = await tx.imageCreditReservation.findUniqueOrThrow({
+          where: { id: orphan.id },
+        });
+        await refundReservedUserCredits(tx, orphan.userId, reservation);
+        await tx.imageCreditReservation.update({
+          where: { id: reservation.id },
+          data: {
+            status: "settled",
+            outcome: "failed",
+            settledCredits: 0,
+            settledCostMicroUsd: reservation.reservedCostMicroUsd,
+            settledFundedCostMicroUsd: BigInt(0),
+            refundedAt: now,
+            settledAt: now,
+            // The generation that would have said why is gone; the record says it.
+            lastError: "generation_missing",
+          },
+        });
+        return true;
+      })
+      .catch((error) => {
+        console.error("Orphaned image reservation refund failed:", {
+          reservationId: orphan.id,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        return false;
+      });
+    if (closed) refunded += 1;
+  }
+  return { examined: orphans.length, refunded };
 };
 
 /**

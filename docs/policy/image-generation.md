@@ -171,6 +171,24 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `ChatCreditReservation`처럼 대화 삭제에 cascade되지 않고 금융 감사
   snapshot(pricingVersion, provider request ID, lot별 예약 내역
   `reservationPayload`)을 보존한다. 대화 삭제 시 prompt·자산 연결만 끊는다.
+- **삭제된 대화의 미종결 예약도 환급한다.** 생성 중에 대화를 지우면
+  generation 행은 cascade로 사라지고 예약은 `reserved`로 남는다. generation
+  행에서 출발하는 정산 경로(`finalizeFailure`, stale sweep, 성공 정산)는 이
+  예약에 닿지 못하므로, 15분 sweep의 고아 예약 arm
+  (`refundOrphanedImageCreditReservations`)이 generation이 없는 `reserved`
+  예약의 **사용자 크레딧**(플랜 사용량 bucket, 구매 크레딧 lot)을 돌려주고
+  `settled`/`failed`로 닫는다(`lastError: "generation_missing"`). 단건·전체
+  삭제를 포함한 모든 삭제 경로와 이미 고아가 된 행을 같은 arm이 처리한다.
+  - exactly-once는 정산 경로와 같은 예약의 `reserved → settling` claim이
+    보장한다. 먼저 커밋된 정산이 있으면 예약은 이미 `settled`다.
+  - **provider budget은 되돌리지 않는다.** 삭제 전에 provider가 호출됐을 수
+    있으므로(살아 있는 실행자는 계속 돈다) 예약의 hold를 지출로 기록한다.
+  - 계정이 삭제돼 `userId`가 없는 예약은 돌려줄 크레딧이 없으므로 건드리지
+    않고, invariant audit의 `orphanedReservations`에 남는다.
+  - 삭제 transaction 안에서 환급하는 방식은 택하지 않았다. 대화 삭제
+    transaction에 credit 계정 lock을 더하지 않고, 모든 삭제 경로와 기존
+    고아 행을 한 곳에서 닫기 위해서다. 대가로 환급은 다음 sweep(최대 15분)에
+    도착한다.
 - ledger idempotency key: `image-credit-reservation:{generationId}:v1` + DB
   unique constraint. 사용자 요청 idempotency는 `(userId, idempotencyKey)`
   unique — race의 패자는 오류가 아니라 승자의 현재 상태를 멱등 반환한다.
@@ -401,6 +419,12 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   → 성공 후 행 삭제/완료 처리. 실패는 같은 tombstone으로 재시도하고 15분
   reconciliation이 회수한다. R2를 먼저 지우고 DB 삭제가 실패하는 순서는
   금지한다.
+- 실행자가 원본을 R2에 쓴 뒤 원본 asset 행을 만들지 못하면(실행 중 대화가
+  삭제돼 generation이 사라졌거나 쓰기가 실패한 경우) 그 key를 가리키는 행이
+  없음을 확인하고 방금 쓴 원본 key를 `storage_rollback` tombstone으로 넣는다.
+  삭제 transaction의 tombstone은 그때 존재한 행에서만 나오므로, 이 경로가
+  없으면 원본이 R2에 영원히 남는다. 행이 있는지 확인하지 못하면 넣지 않는다
+  — 커밋됐을 수 있는 원본을 지우지 않기 위해서다.
 - v1 retention: 대화가 존재하는 동안 무기한 보존. 숨은 TTL·사용자별 용량
   상한 금지. 저장량·전송량 지표를 상시 관측하고, 비용 임계 초과 시 고지된
   retention 등 대안을 이 문서 개정으로 결정한다.

@@ -20,6 +20,7 @@ import {
 import {
   processImageGeneration,
   reconcileStaleImageGenerations,
+  refundOrphanedImageCreditReservations,
   requestImageGeneration,
 } from "@/lib/imageGenerationService";
 import {
@@ -2038,4 +2039,139 @@ test("one sweep re-drives at most its batch and leaves the rest unmarked for the
   const second = await reconcileStaleImageGenerations(minutesLater(6), 25, redrive.options);
   assert.equal(second.redriven, 1);
   assert.equal(redrive.runs.length, 2);
+});
+
+/* ------------------------------------------------------------------------- */
+/* A conversation deleted mid-generation: credits back once, R2 cleaned.     */
+/* ------------------------------------------------------------------------- */
+
+/** The delete route's transaction: tombstones first, then the cascade. */
+const deleteConversationLikeTheRoute = (conversationId: string) =>
+  prisma.$transaction(async (tx) => {
+    await enqueueImageAssetCleanupForConversations(tx, [conversationId]);
+    await tx.conversation.delete({ where: { id: conversationId } });
+  });
+
+test("a conversation deleted mid-generation has its reserved credits returned once, the provider hold kept", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  // Plan credits short of the image by a few, so the reservation takes both
+  // a plan share and a purchased-lot share.
+  await spendMonthlyPlanCredits(user.id, 3_000 - 10);
+  await createCreditLot(user.id, 500, 750_000, 30);
+  const before = await purchasedBalance(user.id);
+  const result = await requestImageGeneration(requestInput(user.id));
+  const held = await imageReservation(result.generationId);
+  assert.ok(held.planReservedCredits > 0);
+  assert.ok(held.addOnReservedCredits > 0);
+
+  await deleteConversationLikeTheRoute(result.conversationId);
+  assert.equal(await prisma.imageGeneration.count(), 0);
+  // The refund paths that start from the generation cannot reach it.
+  assert.equal((await reconcileStaleImageGenerations(minutesLater(61))).refunded, 0);
+  assert.equal((await auditImageGenerationInvariants()).orphanedReservations, 1);
+
+  const sweep = await refundOrphanedImageCreditReservations();
+  assert.deepEqual(sweep, { examined: 1, refunded: 1 });
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 3_000 - 10);
+  assert.deepEqual(await purchasedBalance(user.id), before);
+  const closed = await imageReservation(result.generationId);
+  assert.equal(closed.status, "settled");
+  assert.equal(closed.outcome, "failed");
+  assert.equal(closed.settledCredits, 0);
+  assert.ok(closed.refundedAt);
+  assert.equal(closed.lastError, "generation_missing");
+  // The provider may have been called before the delete: its hold stays.
+  assert.equal(closed.settledCostMicroUsd, closed.reservedCostMicroUsd);
+  assert.equal(await openAiBudgetHeld(), 11_000);
+  assert.equal((await auditImageGenerationInvariants()).orphanedReservations, 0);
+
+  const again = await refundOrphanedImageCreditReservations();
+  assert.deepEqual(again, { examined: 0, refunded: 0 });
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 3_000 - 10);
+  assert.deepEqual(await purchasedBalance(user.id), before);
+  const ledger = await prisma.creditLedgerEntry.aggregate({
+    where: { userId: user.id },
+    _sum: { creditsDelta: true, fundedCostMicroUsdDelta: true },
+  });
+  assert.equal(ledger._sum.creditsDelta, 0);
+  assert.equal(Number(ledger._sum.fundedCostMicroUsdDelta), 0);
+});
+
+test("a settlement that committed before the delete is not refunded by the orphan arm", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  await withImageExecutionStandIns(() => processImageGeneration(result.generationId));
+  assert.equal((await imageReservation(result.generationId)).outcome, "completed");
+
+  await deleteConversationLikeTheRoute(result.conversationId);
+  assert.deepEqual(await refundOrphanedImageCreditReservations(), {
+    examined: 0,
+    refunded: 0,
+  });
+  assert.equal((await imageReservation(result.generationId)).outcome, "completed");
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 15);
+  // Its stored assets were tombstoned by the delete itself.
+  assert.equal(await prisma.imageAssetCleanup.count(), 2);
+});
+
+test("an executor whose conversation is deleted mid-run tombstones the original it wrote and settles nothing", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  const originalKey = imageAssetR2Key({
+    userId: user.id,
+    conversationId: result.conversationId,
+    generationId: result.generationId,
+    role: "original",
+  });
+
+  // The person deletes the conversation while the provider is answering.
+  await withImageExecutionStandIns(async () => {
+    const answer = globalThis.fetch;
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const response = await answer(...args);
+      await deleteConversationLikeTheRoute(result.conversationId);
+      return response;
+    }) as typeof fetch;
+    try {
+      await processImageGeneration(result.generationId);
+    } finally {
+      globalThis.fetch = answer;
+    }
+  });
+
+  const tombstone = await prisma.imageAssetCleanup.findUnique({
+    where: { r2Key: originalKey },
+  });
+  assert.ok(tombstone, "the original written after the delete is queued for removal");
+  assert.equal(tombstone.reason, "storage_rollback");
+  assert.equal(tombstone.completedAt, null);
+  assert.equal(await prisma.imageAsset.count(), 0);
+  assert.equal((await imageReservation(result.generationId)).status, "reserved");
+
+  assert.deepEqual(await refundOrphanedImageCreditReservations(), {
+    examined: 1,
+    refunded: 1,
+  });
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
+  // The provider was called, so the hold stays on its budget.
+  assert.equal(await openAiBudgetHeld(), 11_000);
+});
+
+test("a reservation whose account was deleted is left for the audit, with nothing to refund", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  await prisma.user.delete({ where: { id: user.id } });
+
+  assert.deepEqual(await refundOrphanedImageCreditReservations(), {
+    examined: 0,
+    refunded: 0,
+  });
+  const reservation = await imageReservation(result.generationId);
+  assert.equal(reservation.userId, null);
+  assert.equal(reservation.status, "reserved");
+  assert.equal((await auditImageGenerationInvariants()).orphanedReservations, 1);
 });
