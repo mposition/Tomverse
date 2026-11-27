@@ -144,6 +144,8 @@ model User {
   credentialBindings                   CredentialBinding[]
   deploymentCacheAffinities            DeploymentCacheAffinity[]
   routingCandidateVerdicts             RoutingCandidateVerdict[]
+  scheduledTasks                       ScheduledTask[]
+  scheduledTaskRuns                    ScheduledTaskRun[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -502,6 +504,7 @@ model Conversation {
   cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
   researchPreviewRuns   ResearchPreviewRun[]
+  scheduledTasks        ScheduledTask[]
   user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime                        @default(now())
@@ -1657,6 +1660,91 @@ model ChatResponseAttempt {
   @@index([conversationId, updatedAt])
   @@index([status, leaseExpiresAt])
   @@index([sourceUserMessageId])
+}
+
+/// A question the server asks on the account's behalf on a schedule, answered
+/// into one dedicated Chat conversation (lib/scheduledTaskCore.ts). Created only
+/// by the account through /api/scheduled-tasks; run only while
+/// `feature.scheduledTasksEnabled` is on. Closed lists and the schedule shape
+/// are CHECKs in 20261127110000_scheduled_tasks.
+model ScheduledTask {
+  id                    String    @id @default(cuid())
+  userId                String
+  title                 String
+  /// The question, sent as one ordinary Chat turn each time.
+  prompt                String
+  modelId               String
+  webSearch             Boolean   @default(true)
+  /// once | daily | weekly | monthly -- never more often than daily.
+  frequency             String
+  /// "HH:MM", 24-hour, read in `timeZone`.
+  timeOfDay             String
+  dayOfWeek             Int?
+  dayOfMonth            Int?
+  /// "YYYY-MM-DD", once only.
+  runOnDate             String?
+  /// The account's zone when the schedule was saved (UserSettings.timeZone).
+  timeZone              String
+  /// active | paused | completed
+  status                String    @default("active")
+  /// Why the runner stopped it, or "user". NULL while active.
+  pauseReason           String?
+  /// The most one run may reserve, quoted from Chat pricing and approved by the
+  /// account on save. The reservation guard refuses anything above it.
+  creditsPerRun         Int
+  nextRunAt             DateTime? @db.Timestamptz(3)
+  consecutiveFailures   Int       @default(0)
+  /// The conversation the answers go to. Made on the first run; a deleted one
+  /// is replaced on the next.
+  conversationId        String?
+  revision              Int       @default(1)
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  runs         ScheduledTaskRun[]
+
+  @@index([status, nextRunAt])
+  @@index([userId, createdAt])
+  @@index([conversationId])
+}
+
+/// One occurrence of a scheduled task. (taskId, scheduledFor) is unique, so an
+/// occurrence is claimed once. `runningUserId` is the account id while the run
+/// is `running` and NULL after (a CHECK ties the two), and it is unique: one
+/// scheduled run in flight per account, so scheduled work never takes more than
+/// one of its Chat slots -- the PlanChangeRequest.pendingForUserId pattern.
+/// `assistantMessageId` is derived from the run id and is the Chat attempt's
+/// identity, so a second dispatch of the same run can only reattach.
+model ScheduledTaskRun {
+  id                 String    @id @default(cuid())
+  taskId             String
+  userId             String
+  runningUserId      String?   @unique
+  scheduledFor       DateTime  @db.Timestamptz(3)
+  /// running | succeeded | failed | skipped | unknown
+  status             String    @default("running")
+  /// A short closed-vocabulary reason; never provider text.
+  outcome            String?
+  conversationId     String?
+  userMessageId      String?
+  assistantMessageId String    @unique
+  /// The first Chat reservation this run made, bound inside its transaction.
+  chatReservationId  String?
+  reservedCredits    Int       @default(0)
+  /// What the reservation settled at, read back after the run.
+  chargedCredits     Int?
+  leaseExpiresAt     DateTime  @db.Timestamptz(3)
+  startedAt          DateTime  @default(now()) @db.Timestamptz(3)
+  finishedAt         DateTime? @db.Timestamptz(3)
+
+  task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, scheduledFor])
+  @@index([userId, startedAt])
+  @@index([status, leaseExpiresAt])
 }
 
 /// One Router call per fresh saved question while its location decision can be resumed.

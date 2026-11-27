@@ -46,6 +46,7 @@ import { runDevelopCiRepairQuietly } from "@/lib/developCiRepair";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
 import { recoverResearchEngine } from "@/lib/researchEngineRecovery";
+import { runScheduledTasksQuietly } from "@/lib/scheduledTaskRunner";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -265,6 +266,8 @@ export async function POST(request: Request) {
     after(() => runTraceReportAnalysisQuietly());
     // Off unless the owner turned it on; reads develop CI and calls no model.
     after(() => runDevelopCiRepairQuietly());
+    // Off (and touching nothing) unless feature.scheduledTasksEnabled; never throws.
+    after(() => runScheduledTasksQuietly());
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,

@@ -3,6 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { scheduledTaskReservationGuard } from "@/lib/scheduledTaskReservationGuard";
 import { desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
@@ -5519,6 +5520,8 @@ async function handleChatPost(
                   // one comparison would each race for a slot, and a run could be
                   // admitted in part.
                   admissionToken: replanned ? undefined : admissionToken,
+                  // Undefined outside a scheduled run; inside one, the per-run credit ceiling.
+                  withinReservationTransaction: scheduledTaskReservationGuard(access.userId),
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;

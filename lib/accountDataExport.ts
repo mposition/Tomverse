@@ -336,6 +336,53 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  scheduledTask: (userId) =>
+    prisma.scheduledTask.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        title: true,
+        prompt: true,
+        modelId: true,
+        webSearch: true,
+        frequency: true,
+        timeOfDay: true,
+        dayOfWeek: true,
+        dayOfMonth: true,
+        runOnDate: true,
+        timeZone: true,
+        status: true,
+        pauseReason: true,
+        creditsPerRun: true,
+        nextRunAt: true,
+        consecutiveFailures: true,
+        conversationId: true,
+        revision: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  scheduledTaskRun: (userId) =>
+    prisma.scheduledTaskRun.findMany({
+      where: { userId },
+      select: {
+        taskId: true,
+        scheduledFor: true,
+        status: true,
+        outcome: true,
+        conversationId: true,
+        reservedCredits: true,
+        chargedCredits: true,
+        startedAt: true,
+        finishedAt: true,
+      },
+      orderBy: { startedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   // Private Research sources are re-checked once at the start of buildAccountDataExport.
   researchPreviewRun: async (userId) => {
     return prisma.researchPreviewRun.findMany({

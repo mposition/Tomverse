@@ -400,6 +400,36 @@ domains:
       foreign key because the attempt must be claimed before an assistant
       Message exists.
 
+  - domain: scheduledTask
+    prismaModel: ScheduledTask
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      A question the account asked the server to send on a schedule, with its
+      model, schedule, state and the per-run credits it approved. Deleting the
+      account deletes it; deleting its conversation only clears the link and
+      the next run starts a new conversation.
+
+  - domain: scheduledTaskRun
+    prismaModel: ScheduledTaskRun
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One occurrence of a scheduled task: when it ran, how it ended and the
+      credits it reserved and was charged. The answer itself is an ordinary
+      Message in the task's conversation and is exported there. Cascades from
+      the user and from its task.
+
   - domain: comparisonReview
     prismaModel: ComparisonReview
     userLinkageRole: subject
