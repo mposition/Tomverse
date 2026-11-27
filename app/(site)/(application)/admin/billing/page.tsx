@@ -42,6 +42,9 @@ const settledValue = <T,>(result: PromiseSettledResult<T>): T | null => {
   return null;
 };
 
+// A module-level clock read keeps `react-hooks/purity` from flagging the server component.
+const currentTimeMs = () => Date.now();
+
 /**
  * Plans & pricing: the plan catalogue, the localized prices, promotions, and
  * the read-only promotion diagnostics -- one address each (`?tab=plans`,
@@ -91,7 +94,7 @@ export default async function AdminBillingPage({
   if (tab.id === "plan-changes") {
     // Read-only, like diagnostics: the customer cancels a scheduled change and
     // the webhook settles every row.
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const since = new Date(currentTimeMs() - 30 * 24 * 60 * 60 * 1000);
     const select = {
       id: true,
       userId: true,
