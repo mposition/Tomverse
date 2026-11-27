@@ -49,11 +49,13 @@ export type CodeCloudStorage = {
   put(key: string, bytes: Buffer, contentType: string): Promise<void>;
   get(key: string, maxBytes: number): Promise<Buffer>;
   remove(key: string): Promise<void>;
-  /** Keys under `prefix` last written before `olderThan`, at most `max`. */
-  listOlderThan(prefix: string, olderThan: Date, max: number): Promise<string[]>;
+  /** Every key under `prefix` last written before `olderThan`, across all listing pages. */
+  listOlderThan(prefix: string, olderThan: Date): Promise<string[]>;
 };
 /** Far longer than any write can take (its transaction allows two minutes), so an object this old is never mid-write. */
 const ORPHAN_AGE_MS = 60 * 60_000;
+/** Deletes one maintenance pass makes at most; the rest wait for the next pass, fifteen minutes later. */
+const ORPHAN_REMOVALS_PER_PASS = 1_000;
 type Db = Pick<typeof prisma, "$queryRaw" | "$executeRaw" | "$transaction">;
 type Tx = Pick<typeof prisma, "$queryRaw" | "$executeRaw">;
 export type CodeCloudDeps = {
@@ -69,7 +71,8 @@ const r2Storage: CodeCloudStorage = {
   put: (key, bytes, type) => writeR2Object(key, bytes, type),
   get: (key, maxBytes) => readOwnR2ObjectBytes(key, { maxBytes }),
   remove: (key) => deleteR2Object(key),
-  listOlderThan: (prefix, olderThan, max) => listExpiredR2Objects(prefix, olderThan, max),
+  // No key cap: the listing reads every page, so the orphan pass sees the whole prefix (lib/r2.ts).
+  listOlderThan: (prefix, olderThan) => listExpiredR2Objects(prefix, olderThan, Number.MAX_SAFE_INTEGER),
 };
 
 /** A managed refusal carries its code and whether a provider call may have gone out (lib/codeManagedService.ts). */
@@ -509,19 +512,25 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
    * exists is removed. It covers whatever left one behind -- a write that outlived its transaction and landed after an
    * account deletion and its cleanup, a process that died between writing and recording, a purge whose delete failed.
    * A row is created before any of its objects is written, so a live job's object always has its row.
+   *
+   * Every old key under the prefix is read on every pass (at most two objects per job in retention), and only removals
+   * count against the per-pass bound, so objects of live jobs can never stand between the sweep and an orphan.
    */
   async function removeOrphans(now: Date) {
-    const keys = await deps.storage.listOlderThan("code-cloud/", new Date(now.getTime() - ORPHAN_AGE_MS), 500);
+    const keys = await deps.storage.listOlderThan("code-cloud/", new Date(now.getTime() - ORPHAN_AGE_MS));
     const owner = (key: string) => /^code-cloud\/([0-9a-f-]{36})\//.exec(key)?.[1] ?? null;
-    const ids = [...new Set(keys.map(owner).filter((id): id is string => id !== null))];
-    if (!keys.length) return 0;
-    const live = new Set((await db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "CodeCloudJob" WHERE "id" = ANY(${ids}::text[])`).map((row) => row.id));
     let removed = 0;
-    for (const key of keys) {
-      const id = owner(key);
-      if (id && live.has(id)) continue;
-      await deps.storage.remove(key);
-      removed++;
+    for (let at = 0; at < keys.length && removed < ORPHAN_REMOVALS_PER_PASS; at += 1_000) {
+      const page = keys.slice(at, at + 1_000);
+      const ids = [...new Set(page.map(owner).filter((id): id is string => id !== null))];
+      const live = new Set((await db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "CodeCloudJob" WHERE "id" = ANY(${ids}::text[])`).map((row) => row.id));
+      for (const key of page) {
+        const id = owner(key);
+        if (id && live.has(id)) continue;
+        if (removed >= ORPHAN_REMOVALS_PER_PASS) break;
+        await deps.storage.remove(key);
+        removed++;
+      }
     }
     return removed;
   }
