@@ -13,6 +13,7 @@ import type { ImageBytes, ImageCapability, ImageGenerationResult, ImageGroup, Im
 import type { PullEvidence, taskPullCommand } from "./github-pr-contract";
 import type { GitApprovalView, GitCommand, GitResultMap } from "./git-actions-contract";
 import type { DictationClip, DictationReply } from "./dictation-contract";
+import type { VoiceConversationCapability, VoiceReply, VoiceRequestInput, VoiceStreamEvent } from "./voice-contract";
 import type { BrowserCommand, BrowserState, ElementPick } from "./browser-contract";
 import type { ComputerCommand, ComputerResult, ComputerState } from "./computer-contract";
 import type { TerminalCommand, TerminalEvent, TerminalInfo, TerminalListing, TerminalReplayResult } from "./terminal-contract";
@@ -361,7 +362,8 @@ export type Snapshot = {
   codeBrowserAgent?: boolean;
   /** The agent may also open public https sites: the person's second switch (on top of codeBrowserAgent), or a test fixture. */
   codeBrowserWeb?: boolean;
-  deviceFixtureAvailable?: boolean;
+  /** Dictation: the server offers it to this account, or this is a test build with the device fixture. */
+  dictationAvailable?: boolean;
   /** A signed-in account can switch "Current location" on in Chat; the host reads the position only for a message sent while it is on. */
   chatLocationAvailable?: boolean;
   root: string | null;
@@ -410,6 +412,8 @@ export type Snapshot = {
     billing?: boolean; managedCode?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */
     turnLocation?: boolean; chatPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;
+    /** Dictation in every composer, and the two-way voice conversation in Chat. */
+    voiceInput?: boolean; voiceConversation?: VoiceConversationCapability | null;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
@@ -462,6 +466,14 @@ export type DesktopApi = {
   cancelDictation: (id: string) => Promise<void>;
   transcribeDictation: (input: DictationClip) => Promise<DictationReply>;
   subscribeDictationStop: (listener: () => void) => () => void;
+  /** The person pressed Start in the voice conversation: the main window may open the microphone once. */
+  armVoice: () => Promise<boolean>;
+  /** That press is over (the conversation was closed, ended or failed): it starts no session later. */
+  disarmVoice: () => Promise<void>;
+  voiceRequest: (input: VoiceRequestInput) => Promise<VoiceReply>;
+  abortVoice: (id: string) => Promise<void>;
+  subscribeVoiceStream: (listener: (event: VoiceStreamEvent) => void) => () => void;
+  subscribeVoiceStop: (listener: () => void) => () => void;
   taskPulls: (command: z.infer<typeof taskPullCommand>) => Promise<PullEvidence[]>;
   git<Type extends GitCommand["type"]>(command: Extract<GitCommand, { type: Type }>): Promise<GitResultMap[Type]>;
   codeBrowser: (command: BrowserCommand) => Promise<boolean | void>;
