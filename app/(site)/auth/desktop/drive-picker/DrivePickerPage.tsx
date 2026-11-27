@@ -34,8 +34,9 @@ export function DrivePickerPage({ config }: { config: GooglePickerConfig }) {
     return driveCallbackUrl(target);
   }
 
-  // Closing this window without choosing tells Desktop to stop waiting. Best effort: the Cancel button in Desktop and its
-  // own time limit end the wait too. Leaving through the callback below (a choice or Cancel) must not send it a second time.
+  // Closing this window without choosing tells Desktop to stop waiting. Best effort: the policy admits this one loopback request
+  // (lib/csp.ts), but a browser that asks permission before a site reaches this computer may refuse it, so the Cancel button
+  // in Desktop and its own time limit end the wait too. Leaving through the callback below (a choice or Cancel) must not send it twice.
   const port = target?.port;
   const state = target?.state;
   useEffect(() => {

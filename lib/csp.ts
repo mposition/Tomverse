@@ -50,7 +50,8 @@ const r2Origin = (() => {
 const directives = (
   scriptDirective: string,
   styleDirective: string,
-  styleAttributeDirective: string
+  styleAttributeDirective: string,
+  extraConnectSources = ""
 ) => [
   "default-src 'self'",
   scriptDirective,
@@ -62,7 +63,7 @@ const directives = (
     isDevelopment ? " ws: http:" : ""
   } https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://*.googleapis.com https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://*.r2.cloudflarestorage.com https://challenges.cloudflare.com${
     r2Origin ? ` ${r2Origin}` : ""
-  }`,
+  }${extraConnectSources}`,
   "frame-src https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://challenges.cloudflare.com https://supademo.com https://*.supademo.com",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
@@ -74,7 +75,13 @@ const directives = (
   ...(shouldUpgradeInsecureRequests ? ["upgrade-insecure-requests"] : []),
 ];
 
-export const createStrictCsp = (nonce: string) =>
+/**
+ * The Desktop Google Drive picker page (lib/desktopDrivePickerContract.ts) tells the Tomverse app on this computer that its
+ * window was closed without a choice, with one request to a loopback port. Only that page may reach a loopback address.
+ */
+export const DESKTOP_DRIVE_PICKER_PATH = "/auth/desktop/drive-picker";
+
+export const createStrictCsp = (nonce: string, pathname?: string) =>
   [
     ...directives(
       `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
@@ -83,7 +90,8 @@ export const createStrictCsp = (nonce: string) =>
       `style-src 'self' 'nonce-${nonce}'${
         isDevelopment ? " 'unsafe-inline'" : ""
       } https://accounts.google.com https://challenges.cloudflare.com`,
-      "style-src-attr 'unsafe-inline'"
+      "style-src-attr 'unsafe-inline'",
+      pathname === DESKTOP_DRIVE_PICKER_PATH ? " http://127.0.0.1:*" : ""
     ),
     "report-uri /api/security/csp-report",
     "report-to csp-endpoint",
