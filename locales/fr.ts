@@ -563,6 +563,8 @@ export const fr = {
         guestAiReviewVerifySignIn: "Connectez-vous pour enregistrer, partager ou vérifier par recherche web.",
         guestAiReviewSignInCta: "Se connecter",
         aiReviewDuplicateRequest: "Cette AI Review est déjà en cours.",
+        aiReviewAlreadyRunningWaiting: "Cette AI Review est déjà en cours. Le résultat s’affichera ici dès qu’il sera prêt, sans la relancer.",
+        aiReviewAlreadyRunningTimeout: "L’AI Review déjà en cours n’est pas encore terminée. Réessayez dans quelques minutes.",
         attachmentUploadError: "Le fichier n'a pas pu être téléversé. Réessayez.",
         attachmentUploadingLabel: "Envoi en cours",
         attachmentUploadingHint: "Le fichier est en cours d'envoi. Veuillez patienter jusqu'à la fin.",

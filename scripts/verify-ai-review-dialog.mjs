@@ -120,9 +120,59 @@ try {
   assert.equal(gets.length, 3);
   assert.equal(mock.getRunCount(), 1);
 
+  // 5. The server says this exact review is already running (another tab,
+  //    Studio, or a stream this dialog lost): 409 DUPLICATE_REQUEST. The
+  //    dialog neither fails nor offers another run; it reads the saved result
+  //    by the exact turn until it appears.
+  const saved = mock.getStoredReview();
+  let duplicatePosts = 0;
+  const exactLookups = [];
+  await page.route(endpoint, async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      duplicatePosts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST" }),
+      });
+      return;
+    }
+    const query = new URL(request.url()).searchParams;
+    if (!query.has("assistantMessageIds")) return route.fallback();
+    exactLookups.push(query);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ available: true, storedReview: exactLookups.length >= 2 ? { ...saved, cached: true, usageCredits: 0 } : undefined }),
+    });
+  });
+  const setupGets = () => gets.filter((url) => !new URL(url).searchParams.has("assistantMessageIds")).length;
+  const setupGetsBefore = setupGets();
+  await page.getByRole("button", { name: /교차검토 실행/ }).click();
+  const waitingStatus = page.getByTestId("ai-review-already-running");
+  await expect(waitingStatus).toBeVisible();
+  await expect(page.getByTestId("comparison-review-error")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /답변을 검토하는 중/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^균형 검토/ })).toBeDisabled();
+  // Waiting spends nothing, so the dialog may be closed meanwhile.
+  await expect(page.getByRole("button", { name: "닫기" }).first()).toBeEnabled();
+  // A finished answer while waiting must not swap the setup under it either.
+  await answerFinished();
+  await expect(result).toBeVisible({ timeout: 15_000 });
+  await expect(waitingStatus).toHaveCount(0);
+  assert.equal(duplicatePosts, 1, "the dialog sent another run instead of waiting");
+  assert.equal(setupGets(), setupGetsBefore, "the setup was re-fetched while waiting");
+  assert.equal(exactLookups.length, 2);
+  for (const query of exactLookups) {
+    assert.equal(query.get("promptMessageId"), "11111111-1111-4111-8111-111111111111");
+    assert.equal(query.get("reviewMode"), "balanced");
+  }
+  assert.equal(mock.getRunCount(), 1);
+
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Classic AI Review dialog; setup refreshes on new answers, a running review and a displayed result survive them, and the setup catches up afterwards.",
+    "PASS: Classic AI Review dialog; setup refreshes on new answers, a running review and a displayed result survive them, the setup catches up afterwards, and an already-running review is waited on, not re-run.",
   );
 } finally {
   await browser?.close();

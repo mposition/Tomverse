@@ -552,6 +552,8 @@ export const de = {
         guestAiReviewVerifySignIn: "Melden Sie sich an, um zu speichern, zu teilen oder per Websuche zu prüfen.",
         guestAiReviewSignInCta: "Anmelden",
         aiReviewDuplicateRequest: "Diese AI Review läuft bereits.",
+        aiReviewAlreadyRunningWaiting: "Diese AI Review läuft bereits. Das Ergebnis erscheint hier, sobald es fertig ist, ohne sie erneut auszuführen.",
+        aiReviewAlreadyRunningTimeout: "Die bereits laufende AI Review ist noch nicht abgeschlossen. Versuchen Sie es in einigen Minuten erneut.",
         attachmentUploadError: "Die Datei konnte nicht hochgeladen werden. Bitte erneut versuchen.",
         attachmentUploadingLabel: "Wird hochgeladen",
         attachmentUploadingHint: "Die Datei wird gesendet. Bitte warten Sie, bis der Vorgang abgeschlossen ist.",

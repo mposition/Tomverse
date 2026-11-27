@@ -563,6 +563,8 @@ export const pt = {
         guestAiReviewVerifySignIn: "Entre para salvar, compartilhar ou verificar com busca na web.",
         guestAiReviewSignInCta: "Entrar",
         aiReviewDuplicateRequest: "Esta AI Review já está em execução.",
+        aiReviewAlreadyRunningWaiting: "Esta AI Review já está em execução. O resultado aparecerá aqui quando estiver pronto, sem executá-la novamente.",
+        aiReviewAlreadyRunningTimeout: "A AI Review que já estava em execução ainda não terminou. Tente novamente em alguns minutos.",
         attachmentUploadError: "O arquivo não pôde ser enviado. Tente novamente.",
         attachmentUploadingLabel: "Enviando",
         attachmentUploadingHint: "O arquivo está sendo enviado. Aguarde a conclusão.",

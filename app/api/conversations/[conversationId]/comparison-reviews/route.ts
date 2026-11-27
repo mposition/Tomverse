@@ -39,8 +39,15 @@ import {
 import {
   chatErrorResponse,
   ChatAccessError,
+  getUserChatUsageKey,
   identifyChatCaller,
 } from "@/lib/chatSecurity";
+import {
+  claimInFlightRun,
+  releaseInFlightRun,
+  type InFlightRunClaim,
+} from "@/lib/guestIdempotency";
+import { COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS } from "@/lib/comparisonReviewInFlight";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
@@ -71,6 +78,12 @@ const reviewRequestSchema = z
       });
     }
   });
+
+/** The exact turn a saved-result lookup may name (see GET). */
+const storedTurnLookupSchema = z.object({
+  promptMessageId: z.string().uuid(),
+  assistantMessageIds: z.array(z.string().uuid()).min(2).max(3),
+});
 
 const jsonError = (
   error: string,
@@ -208,11 +221,27 @@ export async function GET(
     const query = new URL(request.url).searchParams;
     const requestedMode = comparisonReviewModeSchema.safeParse(query.get("reviewMode"));
     if (requestedMode.success) {
-      const inputHash = createComparisonReviewHash({ promptMessageId: turn.prompt.id, question: turn.prompt.content, responses: turn.responses, reviewMode: requestedMode.data, includeSynthesis: query.get("includeSynthesis") === "true" });
+      // A client waiting on a run that is already in flight (POST answered
+      // 409 DUPLICATE_REQUEST) names the exact turn that run reviews: another
+      // answer may have finished since it started, and the latest turn would
+      // then never find its row. Unknown or invalid ids fall back to the
+      // latest turn, exactly as before.
+      const exact = storedTurnLookupSchema.safeParse({
+        promptMessageId: query.get("promptMessageId"),
+        assistantMessageIds: query.get("assistantMessageIds")?.split(","),
+      });
+      const lookupTurn = (exact.success
+        ? await requestedComparableConversationTurn(conversationId, exact.data.promptMessageId, exact.data.assistantMessageIds)
+        : null) ?? turn;
+      const inputHash = createComparisonReviewHash({ promptMessageId: lookupTurn.prompt.id, question: lookupTurn.prompt.content, responses: lookupTurn.responses, reviewMode: requestedMode.data, includeSynthesis: query.get("includeSynthesis") === "true" });
       const stored = await prisma.comparisonReview.findUnique({ where: { userId_inputHash: { userId: session.user.id, inputHash } } });
       const parsed = stored && !stored.isStale ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
-      const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
-      if (stored && parsed?.success && responseMap) return Response.json({ available: true, source, storedReview: { id: stored.id, result: parsed.data, reviewItems: reviewItemIds(parsed.data), responseMap, reviewerModelId: stored.reviewerModelId, usageCredits: 0, originalUsageCredits: stored.usageCredits, cached: true, disclaimer: "This AI review compares supplied answers and is not external fact verification." } }, { headers: { "Cache-Control": "no-store" } });
+      const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, lookupTurn.responses) : null;
+      const storedSource = lookupTurn === turn ? source : {
+        question: lookupTurn.prompt.content,
+        responses: lookupTurn.responses.map(({ messageId, content }) => ({ messageId, content })),
+      };
+      if (stored && parsed?.success && responseMap) return Response.json({ available: true, source: storedSource, storedReview: { id: stored.id, result: parsed.data, reviewItems: reviewItemIds(parsed.data), responseMap, reviewerModelId: stored.reviewerModelId, usageCredits: 0, originalUsageCredits: stored.usageCredits, cached: true, disclaimer: "This AI review compares supplied answers and is not external fact verification." } }, { headers: { "Cache-Control": "no-store" } });
     }
     const billingPlan = await getUserBillingPlan(session.user.id);
     const access = identifyChatCaller(request, session.user.id, billingPlan.tier, {
@@ -301,6 +330,7 @@ async function runPost(
 ): Promise<Response> {
   const traceId = randomUUID();
   let freeQuota: ComparisonReviewQuotaReservation | null = null;
+  let runClaim: InFlightRunClaim | null = null;
   let completed = false;
   try {
     const authentication = await resolveChatRouteSession(request);
@@ -348,6 +378,22 @@ async function runPost(
       reviewMode: payload.reviewMode,
       includeSynthesis: payload.includeSynthesis,
     });
+    // One run per (account, input) at a time. The row below is written only
+    // when the reviewers finish, so until then the cache cannot see a run in
+    // flight: a second tab, a retry after a dropped stream, or Studio and the
+    // Classic dialog both asking used to run and bill the whole review again
+    // and reserve a second Free slot. Claimed before the cache read so a run
+    // that finishes between the two is still served from its row, and before
+    // the quota so a duplicate spends nothing. The loser gets 409
+    // DUPLICATE_REQUEST and waits for the saved result through GET. Released
+    // in `finally` on every outcome; it expires on its own if this process
+    // dies first (lib/comparisonReviewInFlight.ts derives the TTL).
+    runClaim = await claimInFlightRun(
+      getUserChatUsageKey(session.user.id),
+      "comparison-review",
+      inputHash,
+      COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
+    );
     const cached = await prisma.comparisonReview.findUnique({
       where: {
         userId_inputHash: { userId: session.user.id, inputHash },
@@ -567,6 +613,17 @@ async function runPost(
     if (freeQuota && !completed) {
       await releaseComparisonReviewQuota(freeQuota).catch((error) =>
         console.error("Comparison review quota refund failed:", {
+          traceId,
+          error,
+        })
+      );
+    }
+    if (runClaim) {
+      // After a success the saved row answers the next request; after a
+      // failure the user may genuinely retry. A release that fails leaves the
+      // claim to expire on its own.
+      await releaseInFlightRun(runClaim).catch((error) =>
+        console.error("Comparison review run claim release failed:", {
           traceId,
           error,
         })

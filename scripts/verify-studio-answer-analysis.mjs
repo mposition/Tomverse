@@ -164,6 +164,37 @@ try {
   await dialog.getByRole("button", { name: "다시 시도", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible();
   assert.equal(failedMock.getRunCount(), 2);
+  await page.keyboard.press("Escape");
+
+  // The same account analysis already running elsewhere (Classic, another
+  // tab): the server answers 409 DUPLICATE_REQUEST and the session waits for
+  // the saved row by the exact turn instead of failing or running it again.
+  let joinedPosts = 0;
+  const joinedLookups = [];
+  await page.route(endpoint, async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      joinedPosts++;
+      await route.fulfill({ status: 409, json: { error: "This request is already being processed.", code: "DUPLICATE_REQUEST" } });
+      return;
+    }
+    const query = new URL(request.url()).searchParams;
+    if (!query.has("assistantMessageIds")) return route.fulfill({ json: originalSetup });
+    joinedLookups.push(query);
+    await route.fulfill({ json: { available: true, storedReview: joinedLookups.length >= 2 ? { ...saved, cached: true } : undefined } });
+  });
+  await page.reload();
+  await entry.getByRole("button").click();
+  await expect(dialog.getByTestId("studio-analysis-already-running")).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  assert.equal(joinedPosts, 1, "a joined analysis must not be submitted again");
+  assert.equal(joinedLookups.length, 2);
+  assert.equal(joinedLookups[0].get("reviewMode"), "balanced");
+  assert.equal(joinedLookups[0].get("includeSynthesis"), "false");
+  assert.equal(joinedLookups[0].get("promptMessageId"), originalSetup.promptMessageId);
+  assert.equal(joinedLookups[0].get("assistantMessageIds"), originalSetup.assistantMessageIds.join(","));
+  await page.keyboard.press("Escape");
 
   // Mobile has neither the new entry/modal nor a background analysis lookup.
   await page.setViewportSize({ width: 390, height: 844 });
@@ -176,7 +207,7 @@ try {
   assert.equal(getCount, mobileGets);
   assert.equal(mock.getRunCount(), 2);
   assert.deepEqual(errors, []);
-  console.log("PASS: single execution, background completion, saved reopen/remount, tabs/reviewers/evidence, changed answers, identity isolation, guest reuse, no credit copy, desktop/dark/mobile exclusion.");
+  console.log("PASS: single execution, background completion, saved reopen/remount, tabs/reviewers/evidence, changed answers, identity isolation, guest reuse, joined in-flight run, no credit copy, desktop/dark/mobile exclusion.");
 } finally {
   await browser?.close();
   if (server) await new Promise((done) => server.close(done));

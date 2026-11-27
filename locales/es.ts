@@ -563,6 +563,8 @@ export const es = {
         guestAiReviewVerifySignIn: "Inicia sesión para guardar, compartir o verificar con búsqueda web.",
         guestAiReviewSignInCta: "Iniciar sesión",
         aiReviewDuplicateRequest: "Esta AI Review ya se está ejecutando.",
+        aiReviewAlreadyRunningWaiting: "Esta AI Review ya se está ejecutando. El resultado aparecerá aquí cuando esté listo, sin volver a ejecutarla.",
+        aiReviewAlreadyRunningTimeout: "La AI Review que ya se estaba ejecutando aún no ha terminado. Inténtalo de nuevo en unos minutos.",
         attachmentUploadError: "No se pudo subir el archivo. Inténtalo de nuevo.",
         attachmentUploadingLabel: "Subiendo",
         attachmentUploadingHint: "Se está enviando el archivo. Espera a que termine.",

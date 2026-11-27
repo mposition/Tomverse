@@ -23,6 +23,11 @@ import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { ComparisonReviewWorkspace } from "@/components/chat/ComparisonReviewWorkspace";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
+import {
+  isComparisonReviewAlreadyRunning,
+  storedComparisonReviewPath,
+  waitForStoredComparisonReview,
+} from "@/lib/comparisonReviewInFlight";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   toSourceGrounding,
@@ -499,6 +504,14 @@ export function ComparisonReviewDialog({
   const [includeSynthesis, setIncludeSynthesis] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  /**
+   * The server answered that this exact review is already running (another
+   * tab, Studio, or a run whose stream this dialog lost). Nothing was started
+   * or charged; the dialog waits for that run's saved result instead.
+   */
+  const [waiting, setWaiting] = useState(false);
+  const waitControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => waitControllerRef.current?.abort(), []);
   const [error, setError] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
   /**
@@ -514,7 +527,7 @@ export function ComparisonReviewDialog({
    * step, and caught up as soon as it returns there.
    */
   const [setupRevision, setSetupRevision] = useState(sourceRevision);
-  if (!running && !review && setupRevision !== sourceRevision) {
+  if (!running && !waiting && !review && setupRevision !== sourceRevision) {
     setSetupRevision(sourceRevision);
   }
 
@@ -652,6 +665,65 @@ export function ComparisonReviewDialog({
   } : null;
   if (!open || (!conversationId && !guestSource)) return null;
 
+  /**
+   * Joins a run the server is already executing for this exact input. It only
+   * ever reads: the saved row appears when that run finishes, and the exact
+   * ids keep the lookup on the turn it reviews even if the latest turn moved.
+   */
+  const waitForRunningReview = async (input: {
+    conversationId: string;
+    promptMessageId: string;
+    assistantMessageIds: string[];
+    reviewMode: ReviewMode;
+    includeSynthesis: boolean;
+  }) => {
+    waitControllerRef.current?.abort();
+    const controller = new AbortController();
+    waitControllerRef.current = controller;
+    setWaiting(true);
+    setError("");
+    try {
+      const stored = await waitForStoredComparisonReview<ComparisonReview>({
+        signal: controller.signal,
+        lookup: async () => {
+          let lookup: Response;
+          try {
+            lookup = await fetch(storedComparisonReviewPath(input.conversationId, input), {
+              cache: "no-store",
+              signal: controller.signal,
+            });
+          } catch {
+            return undefined;
+          }
+          if (!lookup.ok) {
+            await discardResponseBody(lookup);
+            // A rate limit or a server hiccup is worth another look; a gone or
+            // locked conversation is not.
+            if (lookup.status === 429 || lookup.status >= 500) return undefined;
+            throw new Error(t("chat.aiReviewPrepareFailed"));
+          }
+          const data = (await lookup.json().catch(() => ({}))) as ReviewSetup;
+          return data.storedReview;
+        },
+      });
+      if (controller.signal.aborted) return;
+      if (!stored) {
+        setError(t("chat.aiReviewAlreadyRunningTimeout"));
+        return;
+      }
+      setReview(stored);
+      setActiveReviewer("primary");
+    } catch (waitError) {
+      if (controller.signal.aborted) return;
+      setError(waitError instanceof Error ? waitError.message : t("chat.aiReviewFailed"));
+    } finally {
+      if (waitControllerRef.current === controller) {
+        waitControllerRef.current = null;
+        setWaiting(false);
+      }
+    }
+  };
+
   const runReview = async () => {
     if (!setup?.available) return;
     if (
@@ -719,6 +791,25 @@ export function ComparisonReviewDialog({
       })) as
         | ComparisonReview
         | { error?: string; traceId?: string; code?: string };
+      const { promptMessageId, assistantMessageIds } = setup;
+      if (
+        !guestSource &&
+        conversationId &&
+        promptMessageId &&
+        assistantMessageIds &&
+        isComparisonReviewAlreadyRunning(response.status, data)
+      ) {
+        // Not a failure: the same review is already running and billed once.
+        // Wait for its saved result rather than offering a second run.
+        void waitForRunningReview({
+          conversationId,
+          promptMessageId,
+          assistantMessageIds,
+          reviewMode: mode,
+          includeSynthesis,
+        });
+        return;
+      }
       if (!response.ok || !("result" in data)) {
         const code = "code" in data ? data.code : undefined;
         // The two guest-specific refusals have their own sentences: one is
@@ -1190,7 +1281,9 @@ export function ComparisonReviewDialog({
                         type="button"
                         aria-pressed={mode === item.id}
                         onClick={() => setMode(item.id)}
-                        className={`rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900 ${
+                        // The criteria of the run being waited on are fixed.
+                        disabled={waiting}
+                        className={`rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-60 dark:focus-visible:ring-offset-zinc-900 ${
                           mode === item.id
                             ? "border-tomverse-review-selected-border bg-tomverse-review-selected ring-2 ring-tomverse-review-selected-border/20"
                             : "border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-950"
@@ -1219,6 +1312,7 @@ export function ComparisonReviewDialog({
                       type="checkbox"
                       checked={includeSynthesis}
                       onChange={(event) => setIncludeSynthesis(event.target.checked)}
+                      disabled={waiting}
                       className="mt-1 h-4 w-4 rounded border-zinc-300"
                     />
                     <span>
@@ -1294,15 +1388,25 @@ export function ComparisonReviewDialog({
             <p className="mb-3 text-xs leading-5 text-zinc-500">
               {setup.disclaimer || t("chat.aiReviewDisclaimer")}
             </p>
+            {waiting && (
+              <p
+                role="status"
+                data-testid="ai-review-already-running"
+                className="mb-3 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300"
+              >
+                <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                {t("chat.aiReviewAlreadyRunningWaiting")}
+              </p>
+            )}
             <button
               type="button"
               onClick={runReview}
-              disabled={running}
+              disabled={running || waiting}
               className="flex h-11 w-full items-center justify-center gap-3 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-60 sm:ml-auto sm:w-auto sm:min-w-48"
             >
               <span className="flex min-w-0 items-center gap-2">
-                {running ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}
-                <span className="truncate">{running ? t("chat.aiReviewRunning") : t("chat.aiReviewRun")}</span>
+                {running || waiting ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" /> : <Sparkles className="h-4 w-4 shrink-0" />}
+                <span className="truncate">{running || waiting ? t("chat.aiReviewRunning") : t("chat.aiReviewRun")}</span>
               </span>
             </button>
           </footer>

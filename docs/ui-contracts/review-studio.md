@@ -79,6 +79,20 @@ looked up by that turn. Returning to the setup step catches up with the latest
 turn. Coverage: `node --import tsx scripts/verify-ai-review-dialog.mjs` (real
 dialog, loopback fixtures) and `tests/comparisonReviewDialogMount.test.mjs`.
 
+One account review runs at a time per input. The signed-in POST claims
+`(account, input hash)` before its cache read, Free quota and reviewers, and
+answers a second request for the same input with `409 DUPLICATE_REQUEST`
+without running, charging or reserving anything. The claim is released on
+every outcome and expires after 15 minutes if its process dies
+(`lib/comparisonReviewInFlight.ts` derives the bound; it uses the existing
+`ChatUsageBucket` table, no migration). Classic, mobile web and Studio treat
+that 409 as "already running": they say so and read the saved result through
+the GET with the exact `promptMessageId`/`assistantMessageIds` of that run
+until it appears, never re-run it, and offer a retry only once the claim could
+have expired. Coverage: `tests/server-contract/comparison-review-route.test.ts`,
+`tests/server-contract/comparison-review-run-claim.test.ts`,
+`tests/comparisonReviewInFlight.test.mjs` and both browser harnesses.
+
 ## Continue a saved analysis in Chat (2026-11-14)
 
 Signed-in owners can preview a completed normal Review's current reviewer or

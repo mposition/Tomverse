@@ -571,6 +571,8 @@ export const zh = {
         guestAiReviewVerifySignIn: "登录后可保存、共享或通过网页搜索核实。",
         guestAiReviewSignInCta: "登录",
         aiReviewDuplicateRequest: "此 AI Review 已在运行中。",
+        aiReviewAlreadyRunningWaiting: "此 AI Review 已在运行中。结果准备好后会显示在这里，不会重新运行。",
+        aiReviewAlreadyRunningTimeout: "已在运行的 AI Review 尚未完成。请几分钟后再试。",
         attachmentUploadError: "文件上传失败，请重试。",
         attachmentUploadingLabel: "上传中",
         attachmentUploadingHint: "正在发送文件，请等待完成。",
