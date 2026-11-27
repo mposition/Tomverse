@@ -9,6 +9,9 @@ import {
   IMAGE_ASSET_KEY_PREFIX,
   IMAGE_GENERATION_FAILURE_PHASES,
   IMAGE_GENERATION_STATUSES,
+  IMAGE_PENDING_REDRIVE_AFTER_MS,
+  IMAGE_PENDING_REDRIVE_MAX_AGE_MS,
+  IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP,
   STALE_IMAGE_GENERATION_AFTER_MS,
   STALE_IMAGE_SETTLING_AFTER_MS,
   canTransitionImageGenerationStatus,
@@ -18,6 +21,8 @@ import {
   imageAssetR2Key,
   imageConversationR2Prefix,
 } from "../lib/imageGenerationStateCore.ts";
+import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "../lib/imageGroupLimits.ts";
+import { RAILWAY_CRON_SERVICES } from "../.railway/scheduled-jobs.ts";
 
 test("status machine: forward path is the only legal path", () => {
   assert.ok(canTransitionImageGenerationStatus("pending", "processing"));
@@ -70,6 +75,25 @@ test("policy constants hold their approved values", () => {
   );
   assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("stale_job_reconciled"));
   assert.ok(IMAGE_ASSET_CLEANUP_REASONS.includes("conversation_deleted"));
+});
+
+test("every abandoned pending row meets at least one sweep that can re-drive it", () => {
+  // The sweep that re-drives is the Credit Reconciliation cron; its schedule
+  // is read rather than restated, so a slower cadence fails here instead of
+  // quietly turning re-drives back into refunds.
+  const sweep = RAILWAY_CRON_SERVICES.find((job) => job.key === "creditReconciliation");
+  const cadence = /^\*\/(\d+) \* \* \* \*$/.exec(sweep?.cronSchedule ?? "");
+  assert.ok(cadence, `unexpected sweep schedule ${sweep?.cronSchedule}`);
+  const cadenceMs = Number(cadence[1]) * 60 * 1_000;
+  assert.ok(
+    IMAGE_PENDING_REDRIVE_MAX_AGE_MS - IMAGE_PENDING_REDRIVE_AFTER_MS > cadenceMs,
+    "the re-drive window must hold a whole sweep interval"
+  );
+  // The re-drive looks well before the refund window: that earlier look is
+  // the latency it buys.
+  assert.ok(IMAGE_PENDING_REDRIVE_AFTER_MS < STALE_IMAGE_GENERATION_AFTER_MS);
+  // A group at the fan-out ceiling fits in one sweep's batch.
+  assert.ok(IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP >= IMAGE_GROUP_MAX_MODELS_BOUNDS.max);
 });
 
 test("group status derives from current attempts only (policy section 11)", () => {

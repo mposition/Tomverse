@@ -155,7 +155,15 @@ export async function POST(request: Request) {
     // image conversation with no generation, a generation whose worker
     // died). It never throws, so it cannot turn a successful reconciliation
     // into a failed one.
-    const imageAssets = await runImageAssetMaintenanceQuietly();
+    //
+    // A generation whose executor died before claiming it is re-driven from
+    // `after()`, so its provider call never holds up this response. It runs on
+    // this route's maxDuration, not the 968s an image route states; the batch
+    // is bounded (IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP) and an attempt the
+    // budget cuts off is refunded by a later sweep, never run twice.
+    const imageAssets = await runImageAssetMaintenanceQuietly(new Date(), {
+      scheduleRedrive: (run) => after(run),
+    });
     // The same two arms for generated files: drain the deletion tombstones
     // against object storage, then reclaim objects whose row write never
     // landed. Never throws, so it cannot turn a successful reconciliation

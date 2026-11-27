@@ -26,7 +26,10 @@ import {
   IMAGE_GENERATION_READ_SELECT,
   serializeImageGeneration,
 } from "@/lib/imageGenerationRead";
-import { imageAssetR2Key } from "@/lib/imageGenerationStateCore";
+import {
+  imageAssetR2Key,
+  IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP,
+} from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { accountAttachmentPrefix, MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
@@ -1771,4 +1774,268 @@ test("a group whose later target cannot be funded is refused whole, reporting th
   });
   assert.equal(await prisma.creditLedgerEntry.count(), 0);
   assert.equal(await prisma.imageCreditReservation.count(), 0);
+});
+
+/* ------------------------------------------------------------------------- */
+/* Stale recovery: a pending generation is re-driven once, not refunded.     */
+/* ------------------------------------------------------------------------- */
+
+const minutesLater = (minutes: number) =>
+  new Date(Date.now() + minutes * 60 * 1_000);
+
+/** A sweep scheduler that keeps the re-drive for the test to run, or not. */
+const capturedRedrives = () => {
+  const runs: Array<() => Promise<void>> = [];
+  return {
+    runs,
+    options: {
+      scheduleRedrive: (run: () => Promise<void>) => {
+        runs.push(run);
+      },
+    },
+  };
+};
+
+/** Provider calls answered while `run` ran; call it inside the stand-ins. */
+const countingProviderCalls = async (run: () => Promise<unknown>) => {
+  const answer = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    calls += 1;
+    return answer(...args);
+  }) as typeof fetch;
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = answer;
+  }
+  return calls;
+};
+
+const imageReservation = (generationId: string) =>
+  prisma.imageCreditReservation.findUniqueOrThrow({ where: { generationId } });
+
+const monthlyPlanCreditsUsed = async (userId: string) =>
+  Number(
+    (
+      await prisma.chatUsageBucket.findFirst({
+        where: { key: getUserChatUsageKey(userId), period: "month" },
+      })
+    )?.count ?? 0
+  );
+
+const openAiBudgetHeld = async () =>
+  Number(
+    (
+      await prisma.chatUsageBucket.findFirst({
+        where: { key: "image-provider:openai", period: "provider-cost-day" },
+      })
+    )?.count ?? 0
+  );
+
+test("a pending generation whose executor died is re-driven once and settles instead of refunding", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  const redrive = capturedRedrives();
+
+  // The 202 went out and the process died before after() claimed the row.
+  const sweep = await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+  assert.equal(sweep.redriven, 1);
+  assert.equal(sweep.refunded, 0);
+  assert.equal(redrive.runs.length, 1);
+  const marked = await imageReservation(result.generationId);
+  assert.ok(marked.reconciledAt, "the one re-drive is recorded on the reservation");
+  assert.equal(marked.status, "reserved");
+
+  // Past the stale window, before the re-drive ran: the next sweep neither
+  // schedules a second re-drive nor refunds the row out from under the first.
+  const again = await reconcileStaleImageGenerations(minutesLater(13), 25, redrive.options);
+  assert.equal(again.redriven, 0);
+  assert.equal(again.refunded, 0);
+  assert.equal(redrive.runs.length, 1);
+
+  const calls = await withImageExecutionStandIns(() =>
+    countingProviderCalls(() => redrive.runs[0]())
+  );
+  assert.equal(calls, 1);
+  const generation = await prisma.imageGeneration.findUniqueOrThrow({
+    where: { id: result.generationId },
+  });
+  assert.equal(generation.status, "succeeded");
+  const settled = await imageReservation(result.generationId);
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.outcome, "completed");
+  assert.equal(settled.settledCredits, 15);
+  assert.equal(settled.refundedAt, null);
+  // The person got the image they paid for, so the plan credits stay spent.
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 15);
+
+  const later = await reconcileStaleImageGenerations(minutesLater(30), 25, redrive.options);
+  assert.equal(later.redriven, 0);
+  assert.equal(later.refunded, 0);
+});
+
+test("a slow executor racing the re-drive leaves one provider call and one settlement", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  const redrive = capturedRedrives();
+  await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+  assert.equal(redrive.runs.length, 1);
+
+  // The original executor was only slow, and wakes as the re-drive starts.
+  const calls = await withImageExecutionStandIns(() =>
+    countingProviderCalls(() =>
+      Promise.all([processImageGeneration(result.generationId), redrive.runs[0]()])
+    )
+  );
+  assert.equal(calls, 1);
+  const settled = await imageReservation(result.generationId);
+  assert.equal(settled.outcome, "completed");
+  assert.equal(settled.settledCredits, 15);
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 15);
+  // The budget was trued up once: it holds exactly what the one attempt cost.
+  assert.equal(await openAiBudgetHeld(), Number(settled.settledCostMicroUsd));
+  assert.equal(
+    await prisma.imageAsset.count({
+      where: { generationId: result.generationId, role: "original" },
+    }),
+    1
+  );
+});
+
+test("a processing generation is refunded on the stale window and never re-driven", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  // The executor had claimed it, so the provider may have been called.
+  await prisma.imageGeneration.update({
+    where: { id: result.generationId },
+    data: { status: "processing", startedAt: new Date() },
+  });
+  const redrive = capturedRedrives();
+
+  const early = await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+  assert.equal(early.redriven, 0);
+  assert.equal(early.refunded, 0);
+  const sweep = await reconcileStaleImageGenerations(minutesLater(13), 25, redrive.options);
+  assert.equal(sweep.redriven, 0);
+  assert.equal(sweep.refunded, 1);
+  assert.equal(redrive.runs.length, 0);
+
+  const generation = await prisma.imageGeneration.findUniqueOrThrow({
+    where: { id: result.generationId },
+  });
+  assert.equal(generation.status, "failed");
+  assert.equal(generation.failurePhase, "stale_job_reconciled");
+  const reservation = await imageReservation(result.generationId);
+  assert.equal(reservation.outcome, "failed");
+  assert.equal(reservation.reconciledAt, null);
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
+  // An unknown outcome keeps its whole hold on the provider budget.
+  assert.equal(await openAiBudgetHeld(), 11_000);
+});
+
+test("a target queued behind a live sibling is left to its own executor", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(
+    comparisonRequestInput(user.id, [COMPARISON_MODELS.openAi, COMPARISON_MODELS.xai])
+  );
+  const [running, queued] = result.targets;
+  await prisma.imageGeneration.update({
+    where: { id: running.generationId },
+    data: { status: "processing", startedAt: new Date() },
+  });
+  const redrive = capturedRedrives();
+
+  const sweep = await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+  assert.equal(sweep.redriven, 0);
+  assert.equal((await imageReservation(queued.generationId)).reconciledAt, null);
+
+  // Once the sibling is itself abandoned, nothing is left to run the queue:
+  // the sibling is refunded and the queued target re-driven.
+  const later = await reconcileStaleImageGenerations(minutesLater(13), 25, redrive.options);
+  assert.equal(later.refunded, 1);
+  assert.equal(later.redriven, 1);
+  assert.equal(
+    (await prisma.imageGeneration.findUniqueOrThrow({ where: { id: running.generationId } }))
+      .status,
+    "failed"
+  );
+  assert.ok((await imageReservation(queued.generationId)).reconciledAt);
+});
+
+test("a re-drive that never claimed its row is refunded a stale window after it was scheduled", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  // Scheduled, then lost: the maintenance process died after answering.
+  const lost = capturedRedrives();
+  assert.equal(
+    (await reconcileStaleImageGenerations(minutesLater(5), 25, lost.options)).redriven,
+    1
+  );
+
+  const waiting = await reconcileStaleImageGenerations(minutesLater(16), 25, lost.options);
+  assert.equal(waiting.redriven, 0);
+  assert.equal(waiting.refunded, 0);
+  const refund = await reconcileStaleImageGenerations(minutesLater(18), 25, lost.options);
+  assert.equal(refund.redriven, 0);
+  assert.equal(refund.refunded, 1);
+  const generation = await prisma.imageGeneration.findUniqueOrThrow({
+    where: { id: result.generationId },
+  });
+  assert.equal(generation.status, "failed");
+  assert.equal(generation.failurePhase, "stale_job_reconciled");
+  const reservation = await imageReservation(result.generationId);
+  assert.equal(reservation.outcome, "failed");
+  assert.ok(reservation.refundedAt);
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
+
+  // The spent re-drive arriving late finds nothing to claim.
+  const calls = await withImageExecutionStandIns(() =>
+    countingProviderCalls(() => lost.runs[0]())
+  );
+  assert.equal(calls, 0);
+  assert.equal((await imageReservation(result.generationId)).outcome, "failed");
+});
+
+test("a pending generation past the re-drive age is refunded, not run", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  const redrive = capturedRedrives();
+
+  const sweep = await reconcileStaleImageGenerations(minutesLater(61), 25, redrive.options);
+  assert.equal(sweep.redriven, 0);
+  assert.equal(sweep.refunded, 1);
+  assert.equal(redrive.runs.length, 0);
+  assert.equal((await imageReservation(result.generationId)).outcome, "failed");
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
+});
+
+test("one sweep re-drives at most its batch and leaves the rest unmarked for the next", async () => {
+  await enableImageGeneration();
+  const generationIds: string[] = [];
+  for (let index = 0; index <= IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP; index += 1) {
+    const user = await createUser();
+    generationIds.push(
+      (await requestImageGeneration(requestInput(user.id))).generationId
+    );
+  }
+  const redrive = capturedRedrives();
+
+  const first = await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+  assert.equal(first.redriven, IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP);
+  assert.equal(
+    await prisma.imageCreditReservation.count({
+      where: { generationId: { in: generationIds }, reconciledAt: null },
+    }),
+    1
+  );
+  const second = await reconcileStaleImageGenerations(minutesLater(6), 25, redrive.options);
+  assert.equal(second.redriven, 1);
+  assert.equal(redrive.runs.length, 2);
 });

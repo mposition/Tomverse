@@ -423,6 +423,8 @@ export type ImageAssetMaintenanceResult = {
     refunded: number;
     /** Refunds that came from a settlement transaction that had failed. */
     settlementStranded: number;
+    /** Pending generations handed to a re-drive instead of refunded. */
+    redriven: number;
   };
 };
 
@@ -430,12 +432,14 @@ export type ImageAssetMaintenanceResult = {
  * The ride-along for the fifteen-minute maintenance cron. Never throws, so
  * it cannot turn a successful credit reconciliation run into a failed one
  * (same contract as drainNotificationDeliveriesQuietly). Alongside the R2
- * tombstone sweep, this is the refund arm for generations whose executor
- * died: the settling claim inside the service makes it race-safe against a
- * worker that is merely slow.
+ * tombstone sweep, this is the recovery for generations whose executor died:
+ * one that never started is re-driven through `scheduleRedrive` (the route
+ * passes `after`), one that had started is refunded. The claims inside the
+ * service make both race-safe against a worker that is merely slow.
  */
 export const runImageAssetMaintenanceQuietly = async (
-  now = new Date()
+  now = new Date(),
+  options: { scheduleRedrive?: (run: () => Promise<void>) => void } = {}
 ): Promise<ImageAssetMaintenanceResult> => {
   try {
     const cleanup = await drainImageAssetCleanupQueue(200, now);
@@ -451,9 +455,9 @@ export const runImageAssetMaintenanceQuietly = async (
     const { reconcileStaleImageGenerations } = await import(
       "@/lib/imageGenerationService"
     );
-    const staleRecovery = await reconcileStaleImageGenerations(now).catch(
-      () => ({ examined: 0, refunded: 0, settlementStranded: 0 })
-    );
+    const staleRecovery = await reconcileStaleImageGenerations(now, undefined, {
+      scheduleRedrive: options.scheduleRedrive,
+    }).catch(() => ({ examined: 0, refunded: 0, settlementStranded: 0, redriven: 0 }));
     const invariants = await auditImageGenerationInvariants(now);
     return { cleanup, thumbnails, invariants, staleRecovery };
   } catch (error) {
@@ -471,7 +475,7 @@ export const runImageAssetMaintenanceQuietly = async (
         orphanedReservations: 0,
         orphanedReservationCostMicroUsd: 0,
       },
-      staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0 },
+      staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0, redriven: 0 },
     };
   }
 };

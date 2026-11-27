@@ -12,8 +12,15 @@
 //  - a stale threshold at or below the worst legitimate attempt has the sweep
 //    refunding work that is still running, and charging the provider for it;
 //  - a route budget below what the executor needs cuts the executor off
-//    mid-group. That is not a delay: nothing re-drives a `pending` generation,
-//    so the request is lost and its owner waits out the stale window.
+//    mid-group. That is not a delay: the attempt it was running stays
+//    `processing`, which the sweep can only refund, so that request is lost
+//    and its owner waits out the stale window. (Targets it had not started
+//    stay `pending` and are re-driven once by the sweep.)
+//
+// The maintenance route re-drives pending generations from its own `after()`
+// on a smaller budget, and is deliberately not listed below: it runs a bounded
+// batch, and what its cut-off does is defined next to
+// IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP rather than avoided.
 //
 // Pure, so the arithmetic is testable without a Next build.
 

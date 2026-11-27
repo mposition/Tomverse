@@ -82,6 +82,9 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   imageAssetR2Key,
+  IMAGE_PENDING_REDRIVE_AFTER_MS,
+  IMAGE_PENDING_REDRIVE_MAX_AGE_MS,
+  IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP,
   STALE_IMAGE_GENERATION_AFTER_MS,
   STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageGenerationFailurePhase,
@@ -2012,24 +2015,190 @@ export const processImageGeneration = async (
   }
 };
 
+export type ImageStaleRecoveryOptions = {
+  /**
+   * Runs the re-driven attempts once the sweep has answered, inside the
+   * caller's own budget -- the maintenance route passes `after`. Absent,
+   * nothing is re-driven and a pending row is refunded on the stale window as
+   * before: a caller that cannot run the work must not leave it waiting.
+   */
+  scheduleRedrive?: (run: () => Promise<void>) => void;
+};
+
 /**
- * The refund arm of the stale recovery promised in PR 2: a generation still
- * in a live status past the stale window has lost its executor. The
- * settling claim inside finalizeFailure makes this race-safe against a
- * worker that is merely slow.
+ * The re-drive arm: run a `pending` generation whose executor died before
+ * claiming it, instead of refunding it.
+ *
+ * Safe because a pending row's provider was never called -- the claim into
+ * `processing` precedes the call -- and because the re-drive goes through the
+ * same conditional claim as every executor, so a merely slow one and the
+ * sweep cannot both call the provider or both settle.
+ *
+ * At most once per row. The mark is the reservation's `reconciledAt`, which
+ * nothing else writes for an image reservation; the conditional update that
+ * sets it is what a second sweep loses. A marked row the re-drive never
+ * claimed is refunded a stale window later by the refund arm.
+ */
+const redrivePendingImageGenerations = async (
+  now: Date,
+  limit: number,
+  staleBefore: Date,
+  redriveOldest: Date,
+  schedule: (run: () => Promise<void>) => void
+): Promise<number> => {
+  const candidates = await prisma.imageGeneration.findMany({
+    where: {
+      status: "pending",
+      updatedAt: {
+        lt: new Date(now.getTime() - IMAGE_PENDING_REDRIVE_AFTER_MS),
+        gte: redriveOldest,
+      },
+      // A target queued behind a live sibling is waiting for its own executor,
+      // which has the budget for it; the maintenance route's does not.
+      target: {
+        group: {
+          targets: {
+            none: {
+              generations: {
+                some: {
+                  status: { in: ["processing", "settling"] },
+                  updatedAt: { gte: staleBefore },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { updatedAt: "asc" },
+    take: limit,
+    select: { id: true, groupId: true },
+  });
+
+  const groups = new Map<string, string[]>();
+  let marked = 0;
+  for (const candidate of candidates) {
+    if (marked >= IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP) break;
+    // Only a reservation still holding the credits is run: a row without one
+    // would be an image nobody pays for, and the refund arm closes it instead.
+    // A mark that fails leaves its row unmarked for the next sweep, and does
+    // not cost the rows already marked their run.
+    const mark = await prisma.imageCreditReservation
+      .updateMany({
+        where: { generationId: candidate.id, status: "reserved", reconciledAt: null },
+        data: { reconciledAt: now },
+      })
+      .catch(() => ({ count: 0 }));
+    if (mark.count === 0) continue;
+    marked += 1;
+    groups.set(candidate.groupId, [...(groups.get(candidate.groupId) ?? []), candidate.id]);
+  }
+  if (marked === 0) return 0;
+
+  try {
+    schedule(async () => {
+      // Each group at its own per-provider job cap, all at once, so a small
+      // batch starts immediately rather than queueing behind itself.
+      await Promise.all(
+        [...groups.values()].map((ids) =>
+          processImageGenerationGroup(ids).catch((error) =>
+            console.error("Image generation re-drive failed:", {
+              errorName: error instanceof Error ? error.name : "UnknownError",
+            })
+          )
+        )
+      );
+    });
+  } catch (error) {
+    // The rows stay marked and pending, so the refund arm returns their
+    // credits a stale window from now rather than anything running twice.
+    console.error("Image generation re-drive could not be scheduled:", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+  return marked;
+};
+
+/**
+ * Which stale pending rows the refund arm may take while a re-drive is
+ * possible: only those no re-drive will run. Its one re-drive was scheduled a
+ * whole stale window ago and never claimed it, it is too old to run, or its
+ * reservation no longer holds credits to run it with. Anything else is left to
+ * the re-drive arm.
+ */
+const pendingRowsNoRedriveWillTake = async (
+  rows: readonly { id: string; updatedAt: Date }[],
+  staleBefore: Date,
+  redriveOldest: Date
+): Promise<Set<string>> => {
+  if (rows.length === 0) return new Set();
+  const reservations = new Map(
+    (
+      await prisma.imageCreditReservation.findMany({
+        where: { generationId: { in: rows.map((row) => row.id) } },
+        select: { generationId: true, status: true, reconciledAt: true },
+      })
+    ).map((reservation) => [reservation.generationId, reservation])
+  );
+  return new Set(
+    rows
+      .filter((row) => {
+        const reservation = reservations.get(row.id);
+        return (
+          !reservation ||
+          reservation.status !== "reserved" ||
+          row.updatedAt < redriveOldest ||
+          (reservation.reconciledAt !== null && reservation.reconciledAt < staleBefore)
+        );
+      })
+      .map((row) => row.id)
+  );
+};
+
+/**
+ * The stale recovery promised in PR 2, in two arms.
+ *
+ * Re-drive (redrivePendingImageGenerations above): a `pending` row is run
+ * once instead of refunded, when the caller can schedule it.
+ *
+ * Refund: a generation still in a live status past its window has lost its
+ * executor. A `processing` or `settling` one may already have reached the
+ * provider, so it is failed and refunded and never run again -- an unknown
+ * outcome is not retried blindly. A `pending` one is refunded only when no
+ * re-drive will take it. The settling claim inside finalizeFailure makes this
+ * race-safe against a worker that is merely slow.
  */
 export const reconcileStaleImageGenerations = async (
   now = new Date(),
-  limit = 25
+  limit = 25,
+  options: ImageStaleRecoveryOptions = {}
 ): Promise<{
   examined: number;
   refunded: number;
   settlementStranded: number;
+  /** Pending generations handed to a re-drive by this sweep. */
+  redriven: number;
 }> => {
   const staleBefore = new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS);
   const settlingStaleBefore = new Date(
     now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS
   );
+  const redriveOldest = new Date(now.getTime() - IMAGE_PENDING_REDRIVE_MAX_AGE_MS);
+  // First, so a row it marks now is one the refund arm below leaves alone.
+  const redriven = options.scheduleRedrive
+    ? await redrivePendingImageGenerations(
+        now,
+        limit,
+        staleBefore,
+        redriveOldest,
+        options.scheduleRedrive
+      ).catch((error) => {
+        console.error("Image generation re-drive sweep failed:", {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        return 0;
+      })
+    : 0;
   const stale = await prisma.imageGeneration.findMany({
     where: {
       OR: [
@@ -2047,11 +2216,28 @@ export const reconcileStaleImageGenerations = async (
     },
     orderBy: { updatedAt: "asc" },
     take: limit,
-    select: { id: true, status: true },
+    select: { id: true, status: true, updatedAt: true },
   });
+  // Unreadable means no pending row is refunded this sweep: waiting one more
+  // sweep costs minutes, while refunding a row a re-drive is about to run
+  // loses the request it was meant to save.
+  const refundablePending = options.scheduleRedrive
+    ? await pendingRowsNoRedriveWillTake(
+        stale.filter((generation) => generation.status === "pending"),
+        staleBefore,
+        redriveOldest
+      ).catch(() => new Set<string>())
+    : null;
   let refunded = 0;
   let settlementStranded = 0;
   for (const generation of stale) {
+    if (
+      generation.status === "pending" &&
+      refundablePending &&
+      !refundablePending.has(generation.id)
+    ) {
+      continue;
+    }
     const stranded = generation.status === "settling";
     const finalized = await finalizeFailure({
       generationId: generation.id,
@@ -2085,7 +2271,7 @@ export const reconcileStaleImageGenerations = async (
       },
     });
   }
-  return { examined: stale.length, refunded, settlementStranded };
+  return { examined: stale.length, refunded, settlementStranded, redriven };
 };
 
 /**
