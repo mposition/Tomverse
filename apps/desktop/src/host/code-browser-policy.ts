@@ -18,9 +18,11 @@ import { linkViewUrl } from "../web-view-contract";
  * browser opened with no project (Chat) has the project part `none`, and one opened with no one signed in the account part of the
  * device. The data stays on this computer.
  */
-export function browserProfile(accountId: string | null, projectPath: string | null) {
+export function browserProfile(accountId: string | null, projectPath: string | null, platform: NodeJS.Platform = process.platform) {
   const digest = (label: string, value: string) => createHash("sha256").update(label + "\0" + value).digest("hex").slice(0, 16);
-  const folder = projectPath?.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() || null;
+  // Windows and macOS compare folder names without case; elsewhere `/work/App` and `/work/app` are two projects.
+  const folded = (text: string) => platform === "win32" || platform === "darwin" ? text.toLowerCase() : text;
+  const folder = projectPath ? folded(projectPath.replace(/\\/g, platform === "win32" ? "/" : "\\").replace(/\/+$/, "")) || null : null;
   const id = digest("account", accountId ?? "device") + "-" + (folder ? digest("project", folder) : "none");
   return { id, partition: "persist:tomverse-code-browser-" + id };
 }
@@ -112,7 +114,10 @@ export function createPermissionMemory(store: { read(): string | null; write(tex
   } catch { entries.clear(); }
   while (entries.size > MAX_REMEMBERED_PERMISSIONS) entries.delete(entries.keys().next().value!);
   const save = () => { try { store.write(JSON.stringify(Object.fromEntries(entries))); } catch { /* The decision still holds for this run. */ } };
+  // Every clear starts a new epoch, so a question that was open when the data was cleared cannot write its answer back afterwards.
+  let epoch = 0;
   return {
+    epoch: () => epoch,
     get: (key: string) => entries.get(key),
     set(key: string, value: StoredDecision) {
       entries.delete(key);
@@ -120,7 +125,7 @@ export function createPermissionMemory(store: { read(): string | null; write(tex
       while (entries.size > MAX_REMEMBERED_PERMISSIONS) entries.delete(entries.keys().next().value!);
       save();
     },
-    clear() { entries.clear(); try { store.remove(); } catch { /* Nothing was stored. */ } },
+    clear() { epoch += 1; entries.clear(); try { store.remove(); } catch { /* Nothing was stored. */ } },
     size: () => entries.size,
   };
 }
@@ -164,7 +169,10 @@ export async function decidePermission(request: PermissionRequest, deps: {
   if (stored.includes("deny")) return false;
   if (stored.every((value) => value === "allow")) return true;
   const mediaTypes = request.permission === "media" ? keys.map((key) => key.slice(key.lastIndexOf(":") + 1)) : [];
+  const epoch = deps.memory.epoch();
   const answer = await deps.ask({ origin: request.origin, permission: request.permission, mediaTypes });
+  // The profile's data was cleared while the person was deciding: that answer is not kept and grants nothing.
+  if (deps.memory.epoch() !== epoch) return false;
   if (answer.remember) for (const key of keys) deps.memory.set(key, answer.allow ? "allow" : "deny");
   return answer.allow;
 }

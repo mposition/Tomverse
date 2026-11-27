@@ -18,19 +18,23 @@ const hostDir = fileURLToPath(new URL("../src/host/", import.meta.url));
 // ---- profile -------------------------------------------------------------------------------------------------------------------
 
 test("the saved browser data is one partition for each account and each project, and no other session can name it", () => {
-  const a = browserProfile("account-1", "H:\\Project\\Shop");
+  const a = browserProfile("account-1", "H:\\Project\\Shop", "win32");
   assert.equal(a.partition.startsWith("persist:tomverse-code-browser-"), true, "persistent, and not the app's own partition");
-  assert.deepEqual(browserProfile("account-1", "H:/Project/Shop/"), a, "the same folder written another way is the same project");
-  assert.deepEqual(browserProfile("account-1", "h:\\project\\shop"), a, "the folder compares without case");
-  assert.notEqual(browserProfile("account-2", "H:\\Project\\Shop").partition, a.partition, "another account has its own data");
-  assert.notEqual(browserProfile("account-1", "H:\\Project\\Blog").partition, a.partition, "another project has its own data");
-  assert.notEqual(browserProfile(null, "H:\\Project\\Shop").partition, a.partition, "a browser with no one signed in has its own data");
-  assert.notEqual(browserProfile("account-1", null).partition, a.partition, "a browser with no project (Chat) has its own data");
-  assert.match(browserProfile("account-1", null).partition, /^persist:tomverse-code-browser-[0-9a-f]{16}-none$/);
+  assert.deepEqual(browserProfile("account-1", "H:/Project/Shop/", "win32"), a, "the same folder written another way is the same project");
+  assert.deepEqual(browserProfile("account-1", "h:\\project\\shop", "win32"), a, "Windows compares the folder without case");
+  assert.deepEqual(browserProfile("account-1", "/Users/dev/Shop", "darwin"), browserProfile("account-1", "/users/dev/shop/", "darwin"), "macOS compares the folder without case");
+  assert.notEqual(browserProfile("account-1", "/work/App", "linux").partition, browserProfile("account-1", "/work/app", "linux").partition,
+    "elsewhere two folders that differ only in case are two projects");
+  assert.deepEqual(browserProfile("account-1", "/work/App/", "linux"), browserProfile("account-1", "/work/App", "linux"));
+  assert.notEqual(browserProfile("account-2", "H:\\Project\\Shop", "win32").partition, a.partition, "another account has its own data");
+  assert.notEqual(browserProfile("account-1", "H:\\Project\\Blog", "win32").partition, a.partition, "another project has its own data");
+  assert.notEqual(browserProfile(null, "H:\\Project\\Shop", "win32").partition, a.partition, "a browser with no one signed in has its own data");
+  assert.notEqual(browserProfile("account-1", null, "win32").partition, a.partition, "a browser with no project (Chat) has its own data");
+  assert.match(browserProfile("account-1", null, "win32").partition, /^persist:tomverse-code-browser-[0-9a-f]{16}-none$/);
   assert.match(a.partition, /^persist:tomverse-code-browser-[0-9a-f]{16}-[0-9a-f]{16}$/);
   assert.equal(a.partition.includes("account-1") || a.partition.toLowerCase().includes("shop"), false, "the name does not carry the account or the folder");
   // An account id and a folder that spell the same text still make different keys.
-  assert.notEqual(browserProfile("x", "x").id.split("-")[0], browserProfile("x", "x").id.split("-")[1]);
+  assert.notEqual(browserProfile("x", "x", "linux").id.split("-")[0], browserProfile("x", "x", "linux").id.split("-")[1]);
   // The link viewers, the checkout window and the sign-in windows use in-memory partitions of their own names: none can equal a profile.
   assert.equal(/^persist:/.test("tomverse-code-browser-abc"), false);
 });
@@ -161,6 +165,20 @@ test("a permission a page asks for is put to the person, once, and remembered fo
   assert.equal(await decidePermission(request({ permission: "clipboard-read" }), deps), false);
   assert.equal(await decidePermission(request({ permission: "clipboard-read" }), { ...deps, ask: async () => { throw new Error("asked again"); } }), false);
   assert.equal(checkPermission(request({ permission: "clipboard-read" }), store.value), false);
+});
+
+test("clearing the profile's data while a question is open keeps its answer out of the profile and grants nothing", async () => {
+  const store = memory();
+  let answer!: (value: { allow: boolean; remember: boolean }) => void;
+  const pending = decidePermission(request(), { memory: store.value, ask: () => new Promise((resolve) => { answer = resolve; }) });
+  store.value.clear();
+  answer({ allow: true, remember: true });
+  assert.equal(await pending, false);
+  assert.equal(store.value.size(), 0);
+  assert.equal(store.content(), null, "nothing was written back after the clear");
+  // A question asked after the clear works as before.
+  assert.equal(await decidePermission(request(), { memory: store.value, ask: async () => ({ allow: true, remember: true }) }), true);
+  assert.equal(store.value.size(), 1);
 });
 
 test("camera and microphone are asked and remembered by kind, and one refusal wins", async () => {

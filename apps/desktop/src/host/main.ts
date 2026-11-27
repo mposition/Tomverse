@@ -2736,14 +2736,19 @@ function codeBrowserProfile() {
 /** Tomverse's own origins: a page there is not signed in to the Tomverse account, and the panel says so. */
 const tomverseOrigins = () => [...new Set([accountOrigin ?? DESKTOP_LIVE_ORIGIN, webOrigin].map((value) => new URL(value).origin))];
 
-function createBrowserTab(browser: CodeBrowser, owner: BrowserWindow, tabId: string, target: { kind: BrowserKind; origin: string }, opener?: string) {
+/**
+ * A tab's profile is the one it was opened in: what a person types into the address box uses the project the panel is in now, and a
+ * page's own new tab uses its opener's, so a page of one project never reaches the cookies of another after the project changes.
+ */
+function createBrowserTab(browser: CodeBrowser, owner: BrowserWindow, tabId: string, target: { kind: BrowserKind; origin: string },
+  profile: ReturnType<typeof codeBrowserProfile>, opener?: string) {
   const view = createCodeBrowserView(owner, target, tabId, (next) => {
     if (browser.grant?.tab === tabId && (next.url !== browser.grant.url || next.loading || next.failed)) browser.grant = undefined;
     if (codeBrowser?.tabs.get(tabId) === view && !owner.isDestroyed() && !owner.webContents.isDestroyed()) {
       owner.webContents.send("desktop:code-browser-state", browserAgent.decorate(next));
     }
   }, {
-    profile: codeBrowserProfile(),
+    profile,
     limitHosts: () => browserAgent.hostsFor(tabId),
     agentHolds: () => browserAgent.holds(tabId),
     isTomverse: (address) => isTomverseUrl(address, tomverseOrigins()),
@@ -2766,7 +2771,7 @@ function openPopupTab(openerTab: string, address: string): boolean {
   const opener = browser?.tabs.get(openerTab);
   const owner = mainWindow;
   if (!browser || !opener || !owner || owner.isDestroyed() || browser.tabs.size >= MAX_CODE_BROWSER_TABS) return false;
-  const view = createBrowserTab(browser, owner, randomUUID(), { kind: opener.kind, origin: opener.origin }, openerTab);
+  const view = createBrowserTab(browser, owner, randomUUID(), { kind: opener.kind, origin: opener.origin }, opener.profile, openerTab);
   void view.load(address);
   return true;
 }
@@ -2836,12 +2841,14 @@ async function runCodeBrowser(value: unknown, by: "person" | "agent" = "person")
   if (command.type === "open") {
     let address = classifyBrowserAddress(command.url);
     if (!address) throw new Error("Enter a public https address, or an address on this computer or your own network.");
+    // The project the panel is in now (the person's own address); a tab still open from another project is replaced, not reused.
+    const profile = codeBrowserProfile();
     if (by === "agent") {
       // The agent opens a local page or (with the person's second switch) a public site; a private-network page is the person's alone.
       if (address.kind === "private") throw new Error("Only a person opens a page on their own network.");
     } else {
       // A name is looked up first: a private name must answer privately, and a name that answers a public address over plain http is refused.
-      address = await admitTypedAddress(address, (host) => (existing?.profile ?? codeBrowserProfile()).resolveHost(host));
+      address = await admitTypedAddress(address, (host) => profile.resolveHost(host));
       if (!address) throw new Error("That address is not on this computer or your own network.");
       if (codeBrowser !== browser || currentBrowserScope() !== scope || owner.isDestroyed()) return;
     }
@@ -2849,10 +2856,10 @@ async function runCodeBrowser(value: unknown, by: "person" | "agent" = "person")
     if (browser.grant?.tab === tabId) browser.grant = undefined;
     const live = browser.tabs.get(tabId);
     // A web tab takes any public https address; a local or private tab stays on its origin. A tab of the other kind (or another origin) is replaced.
-    if (live?.kind === kind && (kind === "web" || live.origin === target.origin)) return live.load(target.href);
+    if (live?.kind === kind && live.profile === profile && (kind === "web" || live.origin === target.origin)) return live.load(target.href);
     if (!live && browser.tabs.size >= MAX_CODE_BROWSER_TABS) throw new Error("Close a browser tab before opening another.");
     live?.close();
-    const view = createBrowserTab(browser, owner, tabId, { kind, origin: kind === "web" ? "" : target.origin });
+    const view = createBrowserTab(browser, owner, tabId, { kind, origin: kind === "web" ? "" : target.origin }, profile);
     return view.load(target.href);
   }
   if (command.type === "layout") {
