@@ -19,10 +19,11 @@
  *   * A Content-Security-Policy `<meta>` is the first thing in the document.
  *     It cuts the channels a sandboxed script would still have: `connect-src
  *     'none'` (no fetch, XHR, WebSocket, beacon), `form-action 'none'`,
- *     `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`. Script and
- *     style may be inline or come from three public CDNs; images and fonts may
- *     be inline or from those CDNs. A page that wants anything else does not
- *     get it.
+ *     `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`. Script,
+ *     style and fonts may be inline or come from three public CDNs (the
+ *     libraries a chart or a map needs); images are inline only (`data:`,
+ *     `blob:`), so a page cannot put text into an image URL and send it to a
+ *     host. A page that wants anything else does not get it.
  *   * Not a guarantee against everything: a script may still navigate its own
  *     frame (CSP has no portable `navigate-to`). The panel counts the frame's
  *     loads and tears it down on the second one, so a page that leaves is shown
@@ -47,21 +48,39 @@ export const HTML_PREVIEW_CDN_HOSTS = [
 
 const cdn = HTML_PREVIEW_CDN_HOSTS.join(" ");
 
-export const HTML_PREVIEW_CSP = [
-    "default-src 'none'",
-    `script-src 'unsafe-inline' ${cdn}`,
-    `style-src 'unsafe-inline' ${cdn}`,
-    `img-src data: blob: ${cdn}`,
-    `font-src data: ${cdn}`,
-    "media-src data: blob:",
-    "connect-src 'none'",
-    "form-action 'none'",
-    "base-uri 'none'",
-    "frame-src 'none'",
-    "object-src 'none'",
-    "worker-src 'none'",
-    "manifest-src 'none'",
-].join("; ");
+/** Where this application serves the files a preview may load from its own origin (public/vendor/artifact-preview). */
+export const HTML_PREVIEW_VENDOR_PATH = "/vendor/artifact-preview/";
+
+/** This application's origin as a CSP source, or null when it is not a plain http(s) origin. */
+export const previewAssetOrigin = (origin: string | null | undefined) =>
+    typeof origin === "string" && /^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(origin) ? origin : null;
+
+/**
+ * The frame policy. With this application's origin it also admits the vendored
+ * preview files under `HTML_PREVIEW_VENDOR_PATH` on that origin, and nothing
+ * else of it (a `srcdoc` frame's own origin is opaque, so `'self'` would not).
+ */
+export const htmlPreviewCsp = (assetOrigin?: string | null) => {
+    const origin = previewAssetOrigin(assetOrigin);
+    const vendor = origin ? ` ${origin}${HTML_PREVIEW_VENDOR_PATH}` : "";
+    return [
+        "default-src 'none'",
+        `script-src 'unsafe-inline' ${cdn}${vendor}`,
+        `style-src 'unsafe-inline' ${cdn}`,
+        "img-src data: blob:",
+        `font-src data: ${cdn}`,
+        "media-src data: blob:",
+        "connect-src 'none'",
+        "form-action 'none'",
+        "base-uri 'none'",
+        "frame-src 'none'",
+        "object-src 'none'",
+        "worker-src 'none'",
+        "manifest-src 'none'",
+    ].join("; ");
+};
+
+export const HTML_PREVIEW_CSP = htmlPreviewCsp(null);
 
 export const isHtmlPreviewable = (artifact: { format: string; byteSize: number; status: string }) =>
     artifact.status === "ready" && HTML_PREVIEW_FORMATS.has(artifact.format.toLowerCase());
@@ -95,9 +114,9 @@ const attributeEscape = (value: string) => value.replace(/&/g, "&amp;").replace(
  * before a request leaves. The initial `srcdoc` load is not a network
  * navigation and is not affected.
  */
-export function buildHtmlPreviewSrcdoc(html: string): string {
+export function buildHtmlPreviewSrcdoc(html: string, assetOrigin?: string | null): string {
     const page = html.replace(LEADING_DOCTYPE, "");
-    const inner = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">${page}`;
+    const inner = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">${page}`;
     return (
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_OUTER_CSP}">` +
         `<body style="margin:0;height:100vh;overflow:hidden">` +

@@ -399,6 +399,7 @@ export async function ReviewWorkspaceShell({
         generatedArtifactRevisionEnabled={generatedArtifactRevisionEnabled() || artifactRevisionFixtureOffered}
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
+        chatArtifactWorkspaceEnabled={process.env.TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED === "true"}
         chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
         chatRouterLocationFusion={chatRouterLocationFusionEnabled()}
         existingChatRouterLocationFusion={existingChatRouterLocationFusionEnabled()}

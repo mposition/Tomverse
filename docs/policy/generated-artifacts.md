@@ -487,7 +487,14 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   - 내용은 `srcdoc`으로만 넣고 URL로 로드하지 않습니다. 문서 맨 앞에 CSP `<meta>`를 둡니다(page 안의
     `<head>`를 패턴으로 찾아 끼우면 주석 안에 들어갈 수 있으므로 앞에 붙입니다): `default-src 'none'`,
     `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`,
-    script·style은 inline과 cdnjs·jsdelivr·unpkg만, 이미지·글꼴은 inline과 같은 CDN만, `'unsafe-eval'` 없음.
+    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음.
+    이미지 URL에 page의 글을 실어 어느 host로도 보낼 수 없습니다. React 미리보기 문서는 자기 `<head>` 맨 앞에
+    더 좁은 정책(`reactPreviewCsp`)을 하나 더 둡니다. 두 정책이 함께 적용되어 고정한 세 파일과 inline script만 실행됩니다.
+    그 세 파일은 **이 앱이 직접 제공합니다**(`public/vendor/artifact-preview/`, 아래). 그래서 React 미리보기에는 제3자 host가
+    하나도 없고, script URL의 경로나 query에 글을 실어도 이 앱 서버에만 닿습니다. 공통 정책은 앱 origin 중
+    `/vendor/artifact-preview/` 경로만 더 허용합니다(`htmlPreviewCsp(origin)`; `srcdoc` frame의 origin은 opaque라 `'self'`로는 안 됩니다).
+    한계: 모델이 쓴 HTML page(React가 아닌 것)는 차트·지도 라이브러리를 쓰려고 세 CDN의 script·style·글꼴을 계속 받을 수
+    있으므로, 그 page가 CDN 주소에 글을 실어 요청하면 CDN 운영자 로그에는 남을 수 있습니다(다른 host로는 못 보냄).
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는
@@ -506,9 +513,34 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     적용됩니다. `DOMParser` 문서는 브라우저 맥락이 없어 자원을 가져오지 않습니다(img·link·script·iframe·video
     poster·object·@import를 담은 page를 파싱해도 서버에 요청이 오지 않는 것을 확인). inline 이벤트 속성(`onclick="..."`)은 nonce 정책에서 막힌 채로 두며 `addEventListener`는 동작합니다.
     frame 안에서 막힌 요청의 CSP 위반 보고가 앱의 보고 endpoint로 갈 수 있습니다.
-  - 코드 블록 미리보기와 SVG 카드 미리보기는 이것과 별개입니다. 이 패널은 생성 파일 카드에서만 열립니다.
+  - SVG 카드 미리보기(`<img>`)는 이것과 별개입니다.
+  - **답변 안 코드 블록과 React도 같은 패널에서 미리 봅니다**(`TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED`, 기본 꺼짐).
+    스위치는 서버에서 읽어 `ReviewWorkspaceShell` → `ChatPageClient` → `ChatArtifactWorkspaceProvider`로 내려가고,
+    provider 밖(공유 페이지 등)에서는 아래 동작이 하나도 나타나지 않습니다. 격리(sandbox·CSP·중첩 frame)는 위와 **같은 것을
+    그대로** 쓰며 `lib/chatArtifactPreview.ts`가 frame에 넣을 문서만 만듭니다. 허용 CDN 목록은 넓히지 않았습니다.
+    - 답변이 **끝난 뒤** ```` ```html ````·```` ```svg ````·```` ```jsx ````·```` ```tsx ```` 블록에 "미리보기" 버튼이 붙습니다
+      (스트리밍 중인 블록에는 붙이지 않습니다). 버튼을 누르기 전에는 아무것도 실행되지 않습니다. 파일이 아니라 답변 본문
+      코드이므로 서버를 거치지 않고, 화면에 보이는 코드 텍스트를 그대로 frame에 넣습니다. 한도는 파일과 같은 1,000,000바이트입니다.
+    - HTML 블록은 그대로 page이고, SVG 블록은 흰 바탕 가운데에 놓입니다(XML 선언·doctype은 버립니다).
+    - **React(`jsx`/`tsx` 블록과 생성된 `.jsx`/`.tsx` 파일)**는 frame 안에서 컴파일합니다. 문서는 React 18.3.1 UMD,
+      ReactDOM 18.3.1, Babel standalone 7.26.2를 **이 앱의 `/vendor/artifact-preview/`에서 정확한 버전과 sha384 integrity**로
+      불러오고(`REACT_PREVIEW_SCRIPTS`; cdnjs 배포본과 바이트가 같고 테스트가 파일 해시를 고정), frame의 origin이 `null`이라 CORS로
+      받으므로 그 경로에만 `Access-Control-Allow-Origin: *`를 둡니다(`next.config.ts`, 공개 라이브러리 파일),
+      안쪽 script가 `Babel.transform`(presets `react`, TSX는 `typescript`; plugin `transform-modules-commonjs`)한 결과를
+      nonce를 단 `<script>` 요소의 텍스트로 넘깁니다. **`eval`·`new Function`을 쓰지 않으므로 CSP에 `'unsafe-eval'`이 없습니다.**
+      채팅 페이지는 아무것도 컴파일하거나 평가하지 않습니다. 기본 export 컴포넌트, 없으면 `App`을 mount하고,
+      `import`는 `react`·`react-dom`만 풀립니다(다른 패키지는 패널 안에 "미리보기에서 쓸 수 없다"는 안내). 코드는 문서 안
+      `<textarea>`에 HTML escape된 텍스트로 담겨 요소를 닫거나 더할 수 없습니다.
+    - **실패는 frame 안의 짧은 안내입니다.** 문법 오류, 실행 오류, 렌더 중 오류(error boundary), 컴포넌트 없음, 라이브러리 로드 실패는
+      frame 안 상단에 안내(첫 오류만, 최대 8줄)로 보이고 채팅 화면은 영향받지 않습니다.
+    - **"이 화면 고치기"**: 패널 아래 입력란에 바꿀 내용을 적으면, 생성 파일은 기존 "수정본 만들기" 경로(원본 복사본 첨부와 표준
+      요청문, 그 아래 입력한 내용)로, 답변 코드 블록은 입력창 맨 위에 "위 코드에서 다음을 고쳐 주세요: …"를 채워 넣고 패널을
+      닫습니다. 보내지는 않으며 **새 서버 API가 없습니다**. 입력란은 그 경로가 실제로 있는 곳에만 나타납니다(생성 파일은 계정과 수정본 만들기가 켜진 대화, 코드 블록은 채팅 입력창이 있는 화면).
+    - 공개 URL 게시, 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
   - 검증: `tests/htmlArtifactPreview.test.mjs`(sandbox·CSP 문자열 고정),
-    `tests/client/htmlArtifactPreviewRender.test.tsx`(frame 속성·버튼 조건).
+    `tests/chatArtifactPreview.test.mjs`(코드 블록 판정, React 문서의 자체 호스팅 경로·파일 해시·escape, bootstrap에 eval 없음, 모든 문서가 같은
+    격리를 거침), `tests/client/htmlArtifactPreviewRender.test.tsx`(frame 속성·버튼 조건),
+    `tests/client/chatArtifactWorkspace.test.tsx`(스위치·스트리밍·언어별 버튼, 8개 언어 문구).
 - 버튼은 최소 44px 터치 영역과 `focus-visible` 링을 갖는다.
 - 스크린 리더는 하나의 accessible name으로 형식·파일명·크기·상태를 받는다.
 - 시각 role은 `accent-generated-artifact-*`(emerald)뿐이다. AI Review의
@@ -633,6 +665,8 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
 - 사용자가 만든 파일을 대화 밖에서 다시 찾는 목록 화면.
 - 수식, 차트, 조건부 서식, 피벗.
 - artifact 공유 링크. 공유 대화 스냅샷은 artifact를 포함하지 않는다.
+- 미리보기 페이지의 공개 URL 게시(외부 게시라 별도 승인·도메인·moderation이 먼저다), 서버 저장, 여러 모델의 결과 나란히 미리보기.
+- React 미리보기에서 React 밖의 패키지(차트·아이콘 라이브러리 등)와 Tailwind. 허용 CDN 목록을 넓히지 않고는 불가능하다.
 
 ## 13. 첨부된 템플릿에서 여러 문서 만들기
 
