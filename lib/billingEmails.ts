@@ -1206,6 +1206,10 @@ const planChangeEmailCopy: Record<EmailLanguage, PlanChangeEmailCopy> = {
   },
 };
 
+const PLAN_CHANGE_EMAIL_COPY = new Map(
+  Object.entries(planChangeEmailCopy) as [EmailLanguage, PlanChangeEmailCopy][]
+);
+
 export function buildPlanChangeEmail(
   phase: PlanChangeEmailPhase,
   input: {
@@ -1222,7 +1226,9 @@ export function buildPlanChangeEmail(
   }
 ) {
   const language = normalizeLanguage(input.language);
-  const copy = planChangeEmailCopy[language];
+  // A Map lookup, not a computed index: the language is already normalised
+  // and every language has copy, so `en` is only the type's fallback.
+  const copy = PLAN_CHANGE_EMAIL_COPY.get(language) ?? planChangeEmailCopy.en;
   // Raw in the text part and inside the sentences (each sentence is escaped
   // once, as a whole, for the HTML part); escaped in the HTML rows.
   const rawFrom = input.fromPlan || "Tomverse";
