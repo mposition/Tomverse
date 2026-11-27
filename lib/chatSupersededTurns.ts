@@ -165,11 +165,19 @@ export function beginReplacement(conversationId: string, ids: readonly string[] 
       const saved = getSupersededIds(conversationId);
       return pending ? new Set([...saved, ...pending]) : saved;
     },
-    /** The new answer is finished: as written, or cut short by the provider. */
-    complete(status: Message["status"]) {
+    /**
+     * The new answer is finished: as written, or cut short by the provider.
+     * `saved: false` is a saved conversation whose server could not confirm
+     * the answer was stored (`not_saved`, `unknown`): the answer may be gone
+     * after a reload, so the turn it replaced stays, in context and on the
+     * server. The server marks the replacement itself in the transaction that
+     * stores the answer, so a stored answer is never left unrecorded.
+     */
+    complete(status: Message["status"], options: { saved?: boolean } = {}) {
       if (!pending || (status !== "normal" && status !== "incomplete")) return;
       const done = pending;
       pending = null;
+      if (save && options.saved === false) return;
       markTurnSuperseded(conversationId, done, save);
     },
   };

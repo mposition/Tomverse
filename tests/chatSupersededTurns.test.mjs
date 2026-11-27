@@ -142,6 +142,38 @@ test("a replacement is recorded only once the new answer is written as finished"
   assert.equal(getSupersededIds("c3").size, 0);
 });
 
+test("a saved conversation's answer the server could not confirm storing replaces nothing", () => {
+  resetSupersededForTests();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (...args) => {
+    calls.push(args);
+    return new Response(JSON.stringify({ marked: 2 }), { status: 200 });
+  };
+  try {
+    // not_saved / unknown: the new answer may be gone after a reload, so the old turn stays.
+    const unconfirmed = beginReplacement("c4", ["u4", "a4"], true);
+    unconfirmed.complete("normal", { saved: false });
+    assert.equal(getSupersededIds("c4").size, 0);
+    assert.equal(calls.length, 0, "no replacement is sent to the server");
+    // Once settled it cannot be recorded later by a second report.
+    unconfirmed.complete("normal");
+    assert.equal(getSupersededIds("c4").size, 0);
+
+    // A stored answer replaces the turn as before.
+    const stored = beginReplacement("c5", ["u5", "a5"], true);
+    stored.complete("normal", { saved: true });
+    assert.deepEqual([...getSupersededIds("c5")].sort(), ["a5", "u5"]);
+
+    // A guest conversation lives in this page only: there is no server save to wait for.
+    const guest = beginReplacement("c6", ["u6", "a6"]);
+    guest.complete("normal", { saved: false });
+    assert.deepEqual([...getSupersededIds("c6")].sort(), ["a6", "u6"]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("the note comes from the server's flags and is never kept in the browser", () => {
   const previousWindow = globalThis.window;
   const touched = [];
@@ -275,7 +307,8 @@ test("the chat panel reports completion at each finished-answer path, never from
   const source = readFileSync(new URL("../components/chat/ChatApp.tsx", import.meta.url), "utf8");
   // Completion is explicit; the status of a write is not a completion signal.
   assert.ok(!source.includes("answerWritten"));
-  assert.ok(source.includes("replacement.complete(completionStatus)"));
+  // The stream's end passes whether the server confirmed storing the answer.
+  assert.ok(source.includes("replacement.complete(completionStatus, { saved: !trailer?.persistence })"));
   assert.ok(source.includes("replacement.complete(completedMessage.status)"));
   assert.ok(source.includes("parkReplacement(assistantMessageId, replacement)"));
   assert.ok(source.includes("settleParkedReplacement(assistantMessageId, completedMessage.status)"));

@@ -2992,7 +2992,8 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
-        replacement.complete(completionStatus);
+        // Only an answer the server stored replaces the turn before it.
+        replacement.complete(completionStatus, { saved: !trailer?.persistence });
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
           nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
