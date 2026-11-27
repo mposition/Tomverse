@@ -607,6 +607,11 @@ export const EXCLUDED_PREFIXES = [
       "The independent AMUX workspace uses local SQLite. Only its SQL is excluded; JS/TS files remain scanned for product database writes.",
   },
   {
+    prefix: "public/vendor/artifact-preview/",
+    reason:
+      "Pinned third-party browser libraries (React, ReactDOM, Babel standalone) served to the isolated preview frame. Minified upstream bundles that open no database connection.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",

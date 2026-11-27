@@ -36,6 +36,9 @@ const walk = (dir, found = []) => {
     for (const entry of entries) {
         if (entry === "node_modules" || entry === ".next") continue;
         const full = join(dir, entry);
+        // Pinned third-party browser bundles (Babel standalone) mention the
+        // Push API names without registering anything; they are not our code.
+        if (full.split("\\").join("/") === "public/vendor/artifact-preview") continue;
         if (statSync(join(root, full)).isDirectory()) walk(full, found);
         else found.push(full);
     }
