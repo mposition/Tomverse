@@ -29,6 +29,7 @@ let conversation: { PATCH: Handler; DELETE: Handler };
 let generateTitle: { POST: Handler };
 let exportOne: { GET: Handler };
 let ratings: { GET: Handler; PUT: Handler };
+let messages: { POST: Handler };
 
 before(async () => {
   ({ prisma } = (await import(mod("lib/prisma.ts"))) as typeof import("@/lib/prisma"));
@@ -39,6 +40,7 @@ before(async () => {
   generateTitle = await import(mod("app/api/conversations/[conversationId]/generate-title/route.ts"));
   exportOne = await import(mod("app/api/conversations/[conversationId]/export/route.ts"));
   ratings = await import(mod("app/api/chat/answer-ratings/route.ts"));
+  messages = await import(mod("app/api/conversations/[conversationId]/messages/route.ts"));
 });
 
 const reset = () =>
@@ -162,6 +164,30 @@ test("a temporary Chat cannot move into a project, turn memory on, get a title o
   const row = await prisma.conversation.findUniqueOrThrow({ where: { id: body.id } });
   assert.equal(row.projectId, null);
   assert.equal(row.memoryMode, "off");
+});
+
+test("an expired temporary Chat refuses a new question before saving it", async () => {
+  await signIn();
+  await enableTemporaryChat();
+  const { body } = await createTemporary();
+  const save = () =>
+    messages.POST(
+      json(`/api/conversations/${body.id}/messages`, "POST", {
+        messages: [{ role: "user", content: "still there?", clientRequestId: randomUUID() }],
+      }),
+      params(body.id)
+    );
+
+  const accepted = await save();
+  assert.equal(accepted.status, 200);
+  await accepted.text();
+  assert.equal(await prisma.message.count({ where: { conversationId: body.id } }), 1);
+
+  await prisma.conversation.update({ where: { id: body.id }, data: { temporaryExpiresAt: new Date(Date.now() - 1000) } });
+  const refused = await save();
+  assert.equal(refused.status, 410);
+  assert.equal((await refused.json()).code, "TEMPORARY_CHAT_EXPIRED");
+  assert.equal(await prisma.message.count({ where: { conversationId: body.id } }), 1);
 });
 
 test("leaving deletes the temporary Chat through the ordinary delete", async () => {
