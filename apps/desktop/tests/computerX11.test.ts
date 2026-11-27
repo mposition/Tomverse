@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WindowRef } from "../src/host/computer-backend";
-import { createX11Backend, parseWinInfo, parseX11WindowId, parseXprop, quotedStrings, x11Missing, xdotoolKey, X11_TOOLS, type X11Run } from "../src/host/computer-backend-x11";
+import { createX11Backend, parseRootChildren, parseWinInfo, parseX11WindowId, parseXprop, quotedStrings, x11Missing, xdotoolKey, X11_TOOLS, type X11Run } from "../src/host/computer-backend-x11";
 import { COMPUTER_UNVERIFIED_LINUX, createBackendFor } from "../src/host/computer-platform";
 import { windowDenial } from "../src/host/computer-deny";
 import { keyInput } from "../src/host/computer-policy";
@@ -13,6 +13,14 @@ import { INPUT_TICK_MS, tickDistance } from "../src/host/computer-host";
 type FakeWindow = {
   xid: number; pid: number; cls: string; instance: string; title: string; type?: string; hidden?: boolean; mapped?: boolean;
   x: number; y: number; w: number; h: number;
+  /** A window no window manager manages (a menu, a tooltip, a popup): a child of the root that the stacking list does not hold. */
+  unmanaged?: boolean;
+  /** An input-only window (it takes no pixels of a picture). */
+  inputOnly?: boolean;
+  /** The enumeration of the root's children does not list it (to show what the pointer check alone catches). */
+  notListed?: boolean;
+  /** A part of another window: under the pointer it is that window. */
+  parent?: number;
 };
 type Call = { file: string; args: string[] };
 
@@ -26,21 +34,43 @@ const PNG = (width: number, height: number) => {
   return head;
 };
 
+const ROOT = { id: 0x1, w: 1920, h: 1080 };
+const OVERLAY = 0x2c00003;
+
 function fakeX(initial: FakeWindow[]) {
   let clock = 1_000_000;
   const windows = new Map<number, FakeWindow>(initial.map((window) => [window.xid, { ...window }]));
-  let stack = initial.map((window) => window.xid);
-  let active = initial.at(-1)?.xid ?? 0;
+  let stack = initial.filter((window) => !window.unmanaged && window.parent === undefined).map((window) => window.xid);
+  let active = initial.filter((window) => !window.unmanaged && window.parent === undefined).at(-1)?.xid ?? 0;
   let pointer = { x: 5, y: 5 };
   /** The X server's own idea of the last input, by anyone: the agent's input counts too. */
   let lastInputAt = clock - 60_000;
+  /** Windows a question about fails for, with an error that is not "no such window". */
+  const broken = new Set<number>();
+  /** The compositor's overlay: a window as big as the screen, a child of the root, on top of everything. */
+  let overlay = true;
+  /** The list of the root's children cannot be read. */
+  let rootListBroken = false;
   const calls: Call[] = [];
   const hooks: Array<(call: Call) => void> = [];
   const inputCalls = () => calls.filter((call) => call.file === "xdotool" && ["mousemove", "click", "key", "type"].includes(call.args[0]!));
 
   const out = (stdout: string, code = 0): { code: number; stdout: Buffer; stderr: string } => ({ code, stdout: Buffer.from(stdout), stderr: "" });
-  const bad = () => ({ code: 1, stdout: Buffer.alloc(0), stderr: "xprop: error: X Error of failed request:  BadWindow" });
+  const gone = (tool: string) => ({ code: 1, stdout: Buffer.alloc(0), stderr: tool === "xprop" ? "xprop: error: X Error of failed request:  BadWindow (invalid Window parameter)" : "xwininfo: error: No such window with id 0x0." });
+  const failed = { code: 1, stdout: Buffer.alloc(0), stderr: "Xlib: connection to \":0\" lost" };
   const idOf = (text: string) => Number.parseInt(text, 16);
+  const viewable = (window: FakeWindow) => window.mapped !== false && !window.hidden;
+  const inside = (window: FakeWindow, point: { x: number; y: number }) => point.x >= window.x && point.y >= window.y && point.x < window.x + window.w && point.y < window.y + window.h;
+  /** The window under the pointer: a part of a window, then a popup, then the top of the stack. */
+  const pointerWindow = () => {
+    const parts = [...windows.values()].filter((window) => window.parent !== undefined && viewable(window) && inside(window, pointer));
+    if (parts.length) return parts[0]!.xid;
+    const loose = [...windows.values()].filter((window) => window.unmanaged && !window.inputOnly && viewable(window) && inside(window, pointer));
+    if (loose.length) return loose[0]!.xid;
+    for (const xid of [...stack].reverse()) { const window = windows.get(xid); if (window && viewable(window) && inside(window, pointer)) return xid; }
+    return ROOT.id;
+  };
+  const info = (window: FakeWindow) => `  Absolute upper-left X:  ${window.x}\n  Absolute upper-left Y:  ${window.y}\n  Width: ${window.w}\n  Height: ${window.h}\n  Map State: ${viewable(window) ? "IsViewable" : "IsUnMapped"}\n  Override Redirect State: ${window.unmanaged ? "yes" : "no"}\n  Class: ${window.inputOnly ? "InputOnly" : "InputOutput"}\n`;
 
   const run: X11Run = async (file, args, options) => {
     options?.signal?.throwIfAborted();
@@ -53,8 +83,10 @@ function fakeX(initial: FakeWindow[]) {
       return out(`_NET_ACTIVE_WINDOW(WINDOW): window id # 0x${active.toString(16)}\n`);
     }
     if (file === "xprop" && args[0] === "-id") {
-      const window = windows.get(idOf(args[1]!));
-      if (!window) return bad();
+      const xid = idOf(args[1]!);
+      if (broken.has(xid)) return failed;
+      const window = windows.get(xid);
+      if (!window) return gone("xprop");
       const lines = [`_NET_WM_PID(CARDINAL) = ${window.pid}`, `WM_CLASS(STRING) = "${window.instance}", "${window.cls}"`,
         `_NET_WM_NAME(UTF8_STRING) = "${window.title}"`, `WM_NAME(STRING) = "${window.title}"`,
         window.hidden ? "_NET_WM_STATE(ATOM) = _NET_WM_STATE_HIDDEN" : "_NET_WM_STATE(ATOM) = ",
@@ -62,14 +94,28 @@ function fakeX(initial: FakeWindow[]) {
       return out(lines.join("\n") + "\n");
     }
     if (file === "xwininfo") {
-      const window = windows.get(idOf(args[1]!));
-      if (!window) return bad();
-      return out(`xwininfo: Window id: ${args[1]}\n  Absolute upper-left X:  ${window.x}\n  Absolute upper-left Y:  ${window.y}\n  Width: ${window.w}\n  Height: ${window.h}\n  Map State: ${window.mapped === false ? "IsUnMapped" : "IsViewable"}\n`);
+      if (args[0] === "-root") {
+        if (args[1] === "-children") {
+          if (rootListBroken) return failed;
+          const listed = [...windows.values()].filter((window) => window.parent === undefined && !window.notListed);
+          const rows = listed.map((window) => `     0x${window.xid.toString(16)} "${window.title}": ("${window.instance}" "${window.cls}")  ${window.w}x${window.h}+${window.x}+${window.y}  +${window.x}+${window.y}`);
+          if (overlay) rows.push(`     0x${OVERLAY.toString(16)} (has no name): ()  ${ROOT.w}x${ROOT.h}+0+0  +0+0`);
+          return out(`\nxwininfo: Window id: 0x1 (the root window) (has no name)\n\n  Root window id: 0x1 (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     ${rows.length} children:\n${rows.join("\n")}\n`);
+        }
+        return out(`xwininfo: Window id: 0x1 (the root window) (has no name)\n  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Width: ${ROOT.w}\n  Height: ${ROOT.h}\n  Map State: IsViewable\n  Override Redirect State: no\n  Class: InputOutput\n`);
+      }
+      const xid = idOf(args[1]!);
+      if (broken.has(xid)) return failed;
+      if (xid === OVERLAY && overlay) return out(`  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Width: ${ROOT.w}\n  Height: ${ROOT.h}\n  Map State: IsViewable\n  Override Redirect State: yes\n  Class: InputOutput\n`);
+      const window = windows.get(xid);
+      if (!window) return gone("xwininfo");
+      if (args[2] === "-children") return out(`  Root window id: 0x1 (the root window)\n  Parent window id: 0x${(window.parent ?? ROOT.id).toString(16)} (${window.parent === undefined ? "the root window" : "has no name"})\n     0 children.\n`);
+      return out(`xwininfo: Window id: ${args[1]}\n${info(window)}`);
     }
     if (file === "xprintidle") return out(`${clock - lastInputAt}\n`);
     if (file === "xdotool") {
       switch (args[0]) {
-        case "getmouselocation": return out(`X=${pointer.x}\nY=${pointer.y}\nSCREEN=0\nWINDOW=0\n`);
+        case "getmouselocation": return out(`X=${pointer.x}\nY=${pointer.y}\nSCREEN=0\nWINDOW=${pointerWindow()}\n`);
         case "mousemove": pointer = { x: Number(args[2]), y: Number(args[3]) }; lastInputAt = clock; return out("");
         case "windowactivate": active = idOf(args[2]!); stack = [...stack.filter((id) => id !== active), active]; return out("");
         case "click": case "key": case "type": lastInputAt = clock; return out("");
@@ -81,7 +127,7 @@ function fakeX(initial: FakeWindow[]) {
   };
 
   return {
-    run, calls, inputCalls, windows,
+    run, calls, inputCalls, windows, broken,
     now: () => clock,
     onCall: (hook: (call: Call) => void) => hooks.push(hook),
     /** The person: moves the mouse or presses a key now. */
@@ -91,6 +137,8 @@ function fakeX(initial: FakeWindow[]) {
     /** The stacking order, bottom to top, without changing which window is active. */
     restack: (ids: number[]) => { stack = ids; },
     advance: (ms: number) => { clock += ms; },
+    overlay: (on: boolean) => { overlay = on; },
+    breakRootList: () => { rootListBroken = true; },
   };
 }
 
@@ -113,7 +161,11 @@ test("the output of xprop and xwininfo is read for the values it names and nothi
   assert.deepEqual(quotedStrings(props.get("WM_CLASS")), ["a", "B c"]);
   assert.equal(props.has("_NET_WM_STATE"), false);
   assert.deepEqual(quotedStrings('"he said \\"hi\\""'), ['he said "hi"']);
-  assert.deepEqual(parseWinInfo("  Absolute upper-left X:  -5\n  Absolute upper-left Y:  10\n  Width: 640\n  Height: 480\n  Map State: IsViewable\n"), { x: -5, y: 10, width: 640, height: 480, viewable: true });
+  assert.deepEqual(parseWinInfo("  Absolute upper-left X:  -5\n  Absolute upper-left Y:  10\n  Width: 640\n  Height: 480\n  Map State: IsViewable\n  Override Redirect State: yes\n  Class: InputOutput\n"),
+    { x: -5, y: 10, width: 640, height: 480, viewable: true, inputOutput: true, overrideRedirect: true });
+  assert.equal(parseWinInfo("  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Width: 1\n  Height: 1\n  Map State: IsUnMapped\n  Class: InputOnly\n")!.inputOutput, false);
+  assert.deepEqual(parseRootChildren('     0x3e0000b "Terminal": ("gnome-terminal" "Gnome-terminal")  720x480+100+100  +100+100\n     0x2c00003 (has no name): ()  10x10+-20+-20  +-20+-20\nnot a window line\n'),
+    [{ xid: 0x3e0000b, width: 720, height: 480, x: 100, y: 100 }, { xid: 0x2c00003, width: 10, height: 10, x: -20, y: -20 }]);
   assert.equal(parseWinInfo("garbage"), null);
   assert.deepEqual(parseX11WindowId("4a00003:4321"), { xid: 0x4a00003, pid: 4321 });
   for (const bad of ["", "zz:1", "4a00003", "4a00003:abc", "123456789:1", "0:1", "4a00003:4321;rm"]) assert.throws(() => parseX11WindowId(bad), /Not a window id/, bad);
@@ -432,4 +484,114 @@ test("the backend starts only where the app was told to, on an X11 session that 
   assert.deepEqual(X11_TOOLS.map(([name]) => name), ["xdotool", "xprop", "xwininfo", "xprintidle", "import"]);
   assert.equal(createBackendFor("darwin", env, present), null, "macOS has none");
   assert.equal(createBackendFor("freebsd", env, present), null);
+});
+
+// ── What the review of the first version found ──────────────────────────────────────────────────────────────────
+
+const POPUP: FakeWindow = { xid: 0x7000001, pid: 999, cls: "Menu", instance: "menu", title: "popup", x: 300, y: 200, w: 120, h: 90, unmanaged: true };
+const covers = async (backend: ReturnType<typeof setup>["backend"]) => ((await backend.info(ref())) as { covered: boolean }).covered;
+
+test("a window no window manager manages (a menu, a tooltip, a popup) over the window covers it, though the stacking list does not hold it", async () => {
+  const { backend, x } = setup([POPUP]);
+  assert.equal(await covers(backend), true);
+  const behind = await backend.capture(ref(), 1568);
+  assert.ok(!("gone" in behind) && behind.image === undefined && behind.status.covered === true, "no picture with a popup over the window");
+  assert.equal(x.calls.some((call) => call.file === "import"), false);
+  assert.equal((await backend.act(ref(), size, { kind: "click", x: 10, y: 10, button: "left", double: false }, OWN_PID)).reason, "covered");
+  assert.deepEqual(x.inputCalls(), []);
+  // A popup somewhere else, an unmapped one, an input-only one and the compositor's overlay (as big as the screen) cover nothing.
+  for (const change of [{ x: 1500 }, { mapped: false }, { inputOnly: true }] as Array<Partial<FakeWindow>>) {
+    const other = setup([{ ...POPUP, ...change }]);
+    assert.equal(await covers(other.backend), false, JSON.stringify(change));
+  }
+  assert.equal(await covers(setup().backend), false, "the overlay of a compositor is not a window of a program");
+  const none = setup();
+  none.x.overlay(false);
+  assert.equal(await covers(none.backend), false);
+});
+
+test("what cannot be read counts as covering; only a window that is gone is left out", async () => {
+  const over: FakeWindow = { ...FRONT_APP, xid: 0x6000001, x: 150, y: 100, w: 100, h: 100 };
+  // A window above that vanished while being looked at covers nothing.
+  const vanished = setup([over]);
+  vanished.x.windows.delete(over.xid);
+  assert.equal(await covers(vanished.backend), false);
+  // One whose properties or geometry cannot be read does: the tool failed, the window is not known to be gone.
+  const broken = setup([over]);
+  broken.x.restack([EDITOR.xid, over.xid]);
+  broken.x.broken.add(over.xid);
+  assert.equal(await covers(broken.backend), true);
+  const result = await broken.backend.act(ref(), size, { kind: "click", x: 10, y: 10, button: "left", double: false }, OWN_PID);
+  assert.deepEqual([result.performed, result.reason], [false, "covered"]);
+  assert.deepEqual(broken.x.inputCalls(), []);
+  // The root's children cannot be listed: the same.
+  const unlisted = setup();
+  unlisted.x.breakRootList();
+  assert.equal(await covers(unlisted.backend), true);
+  // Everything above it is looked at, however many windows there are.
+  const many = Array.from({ length: 100 }, (_, index): FakeWindow => ({ ...FRONT_APP, xid: 0x6100000 + index, x: 2000, y: 0, w: 10, h: 10 }));
+  const crowded = setup(many);
+  crowded.x.restack([EDITOR.xid, ...many.map((window) => window.xid)]);
+  crowded.x.windows.get(many[99]!.xid)!.x = 150;
+  crowded.x.windows.get(many[99]!.xid)!.y = 100;
+  assert.equal(await covers(crowded.backend), true, "the hundredth window above is the one that covers");
+});
+
+test("a click is refused when what is under the pointer is not the window, however the window manager stacks it", async () => {
+  // A popup that the root's list does not show either: only the pointer's own window can tell.
+  const hidden: FakeWindow = { ...POPUP, notListed: true, x: 140, y: 125, w: 30, h: 30 };
+  const { backend, x } = setup([hidden]);
+  // The window as a whole looks uncovered ... (the popup is outside the stacking list and the root's list)
+  assert.equal(await covers(backend), false);
+  const refused = await backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: false }, OWN_PID);
+  assert.deepEqual([refused.performed, refused.reason], [false, "covered-point"]);
+  assert.equal(x.inputCalls().some((call) => call.args[0] === "click"), false, "the pointer was placed, nothing was clicked");
+  // A part of the window itself (a widget inside it) is the window.
+  const part: FakeWindow = { xid: 0x4a00009, pid: 4321, cls: "Gedit", instance: "gedit", title: "editor area", x: 100, y: 80, w: 800, h: 400, parent: EDITOR.xid };
+  const inner = setup([part]);
+  const done = await inner.backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: false }, OWN_PID);
+  assert.equal(done.performed, true, done.reason);
+  // A popup that appears between two wheel steps stops the scroll.
+  const wheel = setup([{ ...hidden, x: 5000 }]);
+  let after = 0;
+  wheel.x.onCall((call) => { if (call.file === "xdotool" && call.args[0] === "click") after += 1; if (after === 1 && call.file === "xdotool" && call.args[0] === "getmouselocation") wheel.x.windows.get(hidden.xid)!.x = 140; });
+  const stopped = await wheel.backend.act(ref(), size, { kind: "scroll", x: 50, y: 60, dx: 0, dy: 10 }, OWN_PID);
+  assert.equal(stopped.performed, false);
+  assert.ok(["covered-point", "covered"].includes(stopped.reason!), stopped.reason);
+  assert.equal(stopped.delivered, 4);
+});
+
+test("the person's input right after the agent's own, before the idle time was read, is not taken for the agent's", async () => {
+  const text = "y".repeat(60);
+  // A key is pressed after the first piece went out and before the idle time was read.
+  const typing = setup();
+  let armed = false;
+  typing.x.onCall((call) => {
+    if (call.file === "xdotool" && call.args[0] === "type") armed = true;
+    else if (armed && call.file === "xprintidle") { armed = false; typing.x.advance(100); typing.x.person("key"); }
+  });
+  const typed = await typing.backend.act(ref(), size, { kind: "type", text }, OWN_PID);
+  assert.deepEqual([typed.performed, typed.reason, typed.typed], [false, "user-input", 24]);
+  assert.equal(typing.x.inputCalls().length, 1, "no second piece");
+  assert.equal(typeof typed.sentTick, "number");
+  // The host's own comparison then sees it too: the last input the backend reports is later than the agent's own by more than a timer tick.
+  const last = await typing.backend.lastInput();
+  assert.ok(tickDistance(last.inputTick, typed.sentTick!) > INPUT_TICK_MS, `${tickDistance(last.inputTick, typed.sentTick!)}`);
+
+  // The same between the two clicks of a double click.
+  const clicking = setup();
+  let clicked = false;
+  clicking.x.onCall((call) => {
+    if (call.file === "xdotool" && call.args[0] === "click") clicked = true;
+    else if (clicked && call.file === "xprintidle") { clicked = false; clicking.x.advance(100); clicking.x.person("key"); }
+  });
+  const double = await clicking.backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: true }, OWN_PID);
+  assert.deepEqual([double.performed, double.reason, double.delivered, double.planned], [false, "user-input", 1, 2]);
+
+  // Nobody pressed anything: the whole text goes out, and the baseline is the agent's own.
+  const quiet = setup();
+  const whole = await quiet.backend.act(ref(), size, { kind: "type", text }, OWN_PID);
+  assert.deepEqual([whole.performed, whole.typed], [true, 60]);
+  quiet.x.advance(300);
+  assert.ok(tickDistance((await quiet.backend.lastInput()).inputTick, whole.sentTick!) <= INPUT_TICK_MS);
 });

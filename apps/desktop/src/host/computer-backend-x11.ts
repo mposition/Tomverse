@@ -10,16 +10,22 @@ import type { ActOutcome, BackendAction, ComputerBackend, LastInput, RawWindow, 
  *
  * What it keeps from the Windows backend, check by check: the window is identified by its X id, its process id and its class and is
  * "gone" if any differ; an action is refused unless the window is not minimized, has the size of the picture, is the active window
- * (or Tomverse's own window is, and then the window is brought to the front first) and nothing above it in the stacking order covers
- * it; a point must be inside the window and not covered; the mouse pointer is put on the target and read back before each click and
- * wheel step, and a pointer that moved is the person's; typing goes in short pieces with the window checked between them; the person's
- * keyboard and mouse are noticed by the idle time of the X server, which the agent's own input also resets, so the agent's own last
- * input is the baseline. A picture is only taken of a window that nothing covers, because a screen grab of a covered window would
- * carry the pixels of whatever is above it.
+ * (or Tomverse's own window is, and then the window is brought to the front first) and nothing covers it: every window the window
+ * manager stacks above it, and every window that no window manager manages (a menu, a tooltip, a popup of another program, found from
+ * the root's own list of children), is looked at, and what cannot be read counts as covering (only a window that is gone is left
+ * out); a point must be inside the window, and the window under the pointer, read back after the pointer is put there and before
+ * each click and wheel step, must be this window or a part of it; a pointer that moved is the person's; typing goes in short pieces
+ * with the window checked between them; the person's keyboard and mouse are noticed by the idle time of the X server, which the
+ * agent's own input also resets, so the agent's own last input is the baseline, and input that came after the end of the agent's
+ * command and before the idle time was read is the person's. A picture is only taken of a window that nothing covers, because a screen
+ * grab of a covered window would carry the pixels of whatever is above it.
  *
  * Not covered, said plainly: Wayland (native windows cannot be listed, captured or driven by these tools, so the backend does not
  * start there), and any desktop whose window manager does not set `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST_STACKING` and
- * `_NET_WM_PID`. It has been run against a model of the tools in tests, never on a real X server.
+ * `_NET_WM_PID`. A window that no window manager manages and that is below the chosen one is counted as covering too (their order is
+ * not known), which only refuses more; a window of that kind as big as the screen is taken for the compositor's overlay and ignored.
+ * The check and the input are separate program runs, so a window that changes between them is caught by the next check, not by
+ * the input. It has been run against a model of the tools in tests, never on a real X server.
  */
 
 export type X11Result = { code: number | null; stdout: Buffer; stderr: string };
@@ -38,7 +44,6 @@ const TYPE_PIECE = 24;
 const WHEEL_PIECE = 4;
 /** The idle time of the X server is read around process starts; a reset smaller than this is jitter, not the person. */
 const IDLE_SLACK_MS = 40;
-const MAX_STACK_LOOKED_AT = 80;
 
 const toolEnvironment = (): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = { LC_ALL: "C.UTF-8" };
@@ -103,7 +108,7 @@ export function quotedStrings(value: string | undefined): string[] {
 
 const windowIds = (value: string | undefined) => [...(value ?? "").matchAll(/0x[0-9a-fA-F]+/g)].map((match) => Number.parseInt(match[0], 16)).filter((id) => Number.isSafeInteger(id) && id > 0);
 
-type Geometry = { x: number; y: number; width: number; height: number; viewable: boolean };
+type Geometry = { x: number; y: number; width: number; height: number; viewable: boolean; inputOutput: boolean; overrideRedirect: boolean };
 
 export function parseWinInfo(text: string): Geometry | null {
   const read = (label: RegExp) => { const found = label.exec(text); return found ? Number(found[1]) : Number.NaN; };
@@ -112,7 +117,20 @@ export function parseWinInfo(text: string): Geometry | null {
   const width = read(/^\s*Width:\s+(\d+)/m);
   const height = read(/^\s*Height:\s+(\d+)/m);
   if (![x, y, width, height].every(Number.isFinite)) return null;
-  return { x, y, width, height, viewable: /Map State:\s+IsViewable/.test(text) };
+  return {
+    x, y, width, height, viewable: /Map State:\s+IsViewable/.test(text),
+    inputOutput: !/Class:\s+InputOnly/.test(text), overrideRedirect: /Override Redirect State:\s+yes/.test(text),
+  };
+}
+
+/** The direct children of the root window as `xwininfo -root -children` lists them, with their absolute rectangles. */
+export function parseRootChildren(text: string): Array<{ xid: number; x: number; y: number; width: number; height: number }> {
+  const out: Array<{ xid: number; x: number; y: number; width: number; height: number }> = [];
+  for (const line of text.split("\n")) {
+    const found = /^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)\s*$/.exec(line);
+    if (found) out.push({ xid: Number.parseInt(found[1]!, 16), width: Number(found[2]), height: Number(found[3]), x: Number(found[6]), y: Number(found[7]) });
+  }
+  return out;
 }
 
 const overlaps = (a: Geometry, b: Geometry) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -172,6 +190,19 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     const done = await text("xwininfo", ["-id", hex(xid)], signal);
     return done.ok ? parseWinInfo(done.out) : null;
   }
+  /** What a question about another window came to: an answer, "the window is gone" (only that), or "could not tell". */
+  type Looked<T> = { kind: "ok"; value: T } | { kind: "vanished" } | { kind: "error" };
+  const vanished = (error: string) => /BadWindow|No such window/i.test(error);
+  async function propsOf(xid: number, signal?: AbortSignal): Promise<Looked<Map<string, string>>> {
+    const done = await text("xprop", ["-id", hex(xid), "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE"], signal);
+    return done.ok ? { kind: "ok", value: parseXprop(done.out) } : vanished(done.err) ? { kind: "vanished" } : { kind: "error" };
+  }
+  async function rectOf(xid: number, signal?: AbortSignal): Promise<Looked<Geometry>> {
+    const done = await text("xwininfo", ["-id", hex(xid)], signal);
+    if (!done.ok) return vanished(done.err) ? { kind: "vanished" } : { kind: "error" };
+    const rect = parseWinInfo(done.out);
+    return rect ? { kind: "ok", value: rect } : { kind: "error" };
+  }
   async function stacking(signal?: AbortSignal): Promise<number[]> {
     const done = await text("xprop", ["-root", "_NET_CLIENT_LIST_STACKING"], signal);
     return done.ok ? windowIds(parseXprop(done.out).get("_NET_CLIENT_LIST_STACKING")) : [];
@@ -193,7 +224,11 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     return type === undefined || /_NET_WM_WINDOW_TYPE_(NORMAL|DIALOG)\b/.test(type) && !/_NET_WM_WINDOW_TYPE_(DOCK|DESKTOP|MENU|DROPDOWN_MENU|POPUP_MENU|TOOLTIP|NOTIFICATION|COMBO|DND|SPLASH)\b/.test(type);
   };
 
-  /** Is something above the window, in the stacking order, over this rectangle (or this point)? */
+  /**
+   * Is something above the window over this rectangle (or this point)? Everything the window manager stacks above it is looked at,
+   * and so is every window that no window manager manages (a menu, a tooltip, a popup of another program), which the stacking list
+   * does not hold. What cannot be read counts as covering: only a window that is gone is left out.
+   */
   async function coveredBy(xid: number, own: Geometry, point?: { x: number; y: number }, signal?: AbortSignal) {
     const order = await stacking(signal);
     const at = order.indexOf(xid);
@@ -201,13 +236,43 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     if (at < 0) return { covered: true, point: true };
     let covered = false;
     let pointCovered = false;
-    for (const above of order.slice(at + 1, at + 1 + MAX_STACK_LOOKED_AT)) {
-      const [found, rect] = await Promise.all([props(above, signal), geometry(above, signal)]);
-      if (!found || !rect || !rect.viewable || hidden(found)) continue;
+    const consider = (rect: Geometry) => {
       if (overlaps(own, rect)) covered = true;
       if (point && contains(rect, point.x, point.y)) pointCovered = true;
+    };
+    for (const above of order.slice(at + 1)) {
+      const [found, rect] = await Promise.all([propsOf(above, signal), rectOf(above, signal)]);
+      if (found.kind === "vanished" || rect.kind === "vanished") continue;
+      if (found.kind === "error" || rect.kind === "error") return { covered: true, point: true };
+      if (!rect.value.viewable || hidden(found.value)) continue;
+      consider(rect.value);
     }
+    const loose = await unmanagedOver(own, signal);
+    if (loose === null) return { covered: true, point: true };
+    for (const rect of loose) consider(rect);
     return { covered, point: pointCovered };
+  }
+
+  /**
+   * The mapped windows of the root that the window manager does not manage (override-redirect) and that overlap the window, or null
+   * when that cannot be found out. A window as big as the screen is the compositor's overlay, not a window of a program. A
+   * window of this kind below the chosen one is counted too (the order among them is not known), which only refuses more.
+   */
+  async function unmanagedOver(own: Geometry, signal?: AbortSignal): Promise<Geometry[] | null> {
+    const [root, tree] = await Promise.all([text("xwininfo", ["-root"], signal), text("xwininfo", ["-root", "-children"], signal)]);
+    const screen = root.ok ? parseWinInfo(root.out) : null;
+    if (!screen || !tree.ok) return null;
+    const found: Geometry[] = [];
+    for (const child of parseRootChildren(tree.out)) {
+      if (!overlaps(own, { ...child, viewable: true, inputOutput: true, overrideRedirect: false })) continue;
+      const rect = await rectOf(child.xid, signal);
+      if (rect.kind === "vanished") continue;
+      if (rect.kind === "error") return null;
+      if (!rect.value.viewable || !rect.value.inputOutput || !rect.value.overrideRedirect) continue;
+      if (rect.value.width >= screen.width && rect.value.height >= screen.height) continue;
+      found.push(rect.value);
+    }
+    return found;
   }
 
   /** The window as it is now, or null when it is not the same window any more. */
@@ -238,13 +303,18 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     const at = (before + after) / 2;
     return { idle, at, tick: Math.round(at - idle) >>> 0 };
   }
-  /** Notes that the agent's own input just went out: it is the baseline the person's input is told from. */
-  async function ownInput(signal?: AbortSignal) {
+  /**
+   * Notes that the agent's own input just went out, and returns the tick the host takes as the end of it. The idle time is read a
+   * moment later, so a key the person pressed in that gap would look like the last input of the agent's own: when the last input
+   * the server saw is later than the end of the agent's command, it was not the agent's, and `person` says so.
+   */
+  async function ownInput(signal?: AbortSignal): Promise<{ tick: number | undefined; person: boolean }> {
+    const ended = now();
     try {
       const sample = await idleSample(signal);
       seen = { tick: sample.tick, sampledAt: sample.at };
-      return sample.tick;
-    } catch { return undefined; }
+      return { tick: ended >>> 0, person: sample.tick - ended > IDLE_SLACK_MS };
+    } catch { return { tick: undefined, person: false }; }
   }
   /** Whether anything moved the pointer or pressed a key since the last time this was looked at. */
   async function inputSince(signal?: AbortSignal) {
@@ -285,6 +355,26 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       return { ok: true, screen };
     }
     return { ok: true, screen: undefined };
+  }
+
+  /**
+   * Whether the window under the pointer is the chosen window or a part of it. The pointer window is the deepest window at the
+   * pointer that takes input, so a popup, a menu or a tooltip over the point is what is found, whether or not a window manager
+   * manages it. The chain of parents is followed up to the root.
+   */
+  async function pointerIsOver(target: number, signal?: AbortSignal): Promise<boolean> {
+    const done = await text("xdotool", ["getmouselocation", "--shell"], signal);
+    const found = /^WINDOW=(\d+)$/m.exec(done.out);
+    if (!done.ok || !found) return false;
+    let current = Number(found[1]);
+    for (let depth = 0; depth < 12 && Number.isSafeInteger(current) && current > 0; depth += 1) {
+      if (current === target) return true;
+      const tree = await text("xwininfo", ["-id", hex(current), "-children"], signal);
+      const parent = tree.ok ? /Parent window id:\s+(0x[0-9a-fA-F]+)/.exec(tree.out) : null;
+      if (!parent) return false;
+      current = Number.parseInt(parent[1]!, 16);
+    }
+    return false;
   }
 
   /** Puts the pointer on the target and reads it back. */
@@ -335,6 +425,7 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     async act(window, size, action: BackendAction, handBackFrom, signal): Promise<ActOutcome> {
       signal?.throwIfAborted();
       const refuse = (reason: string, extra: Partial<ActOutcome> = {}): ActOutcome => ({ performed: false, reason, ...extra });
+      const withTick = (tick: number | undefined): Partial<ActOutcome> => (tick !== undefined ? { sentTick: tick } : {});
 
       if (action.kind === "key") {
         const name = xdotoolKey(action);
@@ -344,28 +435,33 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
         signal?.throwIfAborted();
         if (await inputSince(signal)) return refuse("user-input");
         const sent = await text("xdotool", ["key", "--clearmodifiers", name], signal);
-        const sentTick = await ownInput(signal);
-        return sent.ok ? { performed: true, ...(sentTick !== undefined ? { sentTick } : {}) } : refuse("input-failed", sentTick !== undefined ? { sentTick } : {});
+        const own = await ownInput(signal);
+        return sent.ok ? { performed: true, ...withTick(own.tick) } : refuse("input-failed", withTick(own.tick));
       }
 
       if (action.kind === "type") {
         const pieces = Array.from(action.text);
         let typed = 0;
         let lastTick: number | undefined;
+        // Set when the person's input was seen right after a piece went out: the next piece is not sent.
+        let person = false;
         if (await inputSince(signal)) return refuse("user-input", { typed });
         for (let at = 0; at < pieces.length; at += TYPE_PIECE) {
           signal?.throwIfAborted();
+          if (person) return refuse("user-input", { typed, ...withTick(lastTick) });
           const piece = pieces.slice(at, at + TYPE_PIECE).join("");
           const checked = await gate(window, size, undefined, handBackFrom, signal);
           // Before the first piece a refusal is the same as for any input; between pieces the window changed under the typing.
-          if (!checked.ok) return refuse(typed > 0 && checked.reason === "not-front" ? "focus-lost" : checked.reason, { typed, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
-          if (typed > 0 && await inputSince(signal)) return refuse("user-input", { typed, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
+          if (!checked.ok) return refuse(typed > 0 && checked.reason === "not-front" ? "focus-lost" : checked.reason, { typed, ...withTick(lastTick) });
+          if (typed > 0 && await inputSince(signal)) return refuse("user-input", { typed, ...withTick(lastTick) });
           const sent = await text("xdotool", ["type", "--delay", "12", "--", piece], signal);
-          lastTick = await ownInput(signal) ?? lastTick;
-          if (!sent.ok) return refuse("input-failed", { typed, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
+          const own = await ownInput(signal);
+          lastTick = own.tick ?? lastTick;
+          person = own.person;
+          if (!sent.ok) return refuse("input-failed", { typed, ...withTick(lastTick) });
           typed += Array.from(piece).length;
         }
-        return { performed: true, typed, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) };
+        return { performed: true, typed, ...withTick(lastTick) };
       }
 
       // click and scroll: a point of the window
@@ -373,9 +469,13 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       if (!checked.ok) return refuse(checked.reason);
       if (!checked.screen) return refuse("outside");
       const screen = checked.screen;
+      const target = parseX11WindowId(window.id).xid;
       signal?.throwIfAborted();
       if (await inputSince(signal)) return refuse("user-input");
-      if (!await place(screen, signal)) return refuse("cursor-failed");
+      const placed = await place(screen, signal);
+      if (!placed) return refuse("cursor-failed");
+      // What is under the pointer must be this window (or a part of it): a popup that no window manager manages is found this way.
+      if (!await pointerIsOver(target, signal)) return refuse("covered-point");
 
       /** The window and the pointer, looked at again before the next input goes out. */
       const stillThere = async (): Promise<string | null> => {
@@ -383,6 +483,7 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
         if (!again.ok) return again.reason;
         const at = await pointer(signal);
         if (!at || at.x !== screen.x || at.y !== screen.y) return "cursor-moved";
+        if (!await pointerIsOver(target, signal)) return "covered-point";
         return (await inputSince(signal)) ? "user-input" : null;
       };
 
@@ -390,18 +491,21 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
         const planned = action.double ? 2 : 1;
         let delivered = 0;
         let lastTick: number | undefined;
+        let person = false;
         for (let index = 0; index < planned; index += 1) {
           signal?.throwIfAborted();
           if (index > 0) {
-            const why = await stillThere();
-            if (why) return refuse(why, { delivered, planned, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
+            const why = person ? "user-input" : await stillThere();
+            if (why) return refuse(why, { delivered, planned, ...withTick(lastTick) });
           }
           const sent = await text("xdotool", ["click", buttonOf(action.button)], signal);
-          lastTick = await ownInput(signal) ?? lastTick;
-          if (!sent.ok) return refuse("input-failed", { delivered, planned, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
+          const own = await ownInput(signal);
+          lastTick = own.tick ?? lastTick;
+          person = own.person;
+          if (!sent.ok) return refuse("input-failed", { delivered, planned, ...withTick(lastTick) });
           delivered += 1;
         }
-        return { performed: true, delivered, planned, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) };
+        return { performed: true, delivered, planned, ...withTick(lastTick) };
       }
 
       // scroll: wheel buttons 4 up, 5 down, 6 left, 7 right, a few notches between two looks at the pointer
@@ -411,21 +515,24 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       const planned = steps.reduce((sum, step) => sum + step.notches, 0);
       let delivered = 0;
       let lastTick: number | undefined;
+      let person = false;
       for (const step of steps) {
         for (let left = step.notches; left > 0; left -= WHEEL_PIECE) {
           signal?.throwIfAborted();
           if (delivered > 0) {
-            const why = await stillThere();
-            if (why) return refuse(why, { delivered, planned, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
+            const why = person ? "user-input" : await stillThere();
+            if (why) return refuse(why, { delivered, planned, ...withTick(lastTick) });
           }
           const count = Math.min(WHEEL_PIECE, left);
           const sent = await text("xdotool", ["click", "--repeat", String(count), "--delay", "30", step.button], signal);
-          lastTick = await ownInput(signal) ?? lastTick;
-          if (!sent.ok) return refuse("input-failed", { delivered, planned, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) });
+          const own = await ownInput(signal);
+          lastTick = own.tick ?? lastTick;
+          person = own.person;
+          if (!sent.ok) return refuse("input-failed", { delivered, planned, ...withTick(lastTick) });
           delivered += count;
         }
       }
-      return { performed: true, delivered, planned, ...(lastTick !== undefined ? { sentTick: lastTick } : {}) };
+      return { performed: true, delivered, planned, ...withTick(lastTick) };
     },
 
     async bringToFront(window) {
