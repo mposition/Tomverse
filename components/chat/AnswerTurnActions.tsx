@@ -3,7 +3,8 @@
 import { useEffect, useState, useSyncExternalStore, type MouseEventHandler } from "react";
 import { RotateCcw, Shuffle, Volume2, VolumeX } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
-import { decideArmedRegenerate, REGENERATE_ARM_TTL_MS } from "@/lib/chatRegenerateArm";
+import { CHAT_MODEL_PICKER_CLOSED_EVENT } from "@/lib/chatModelPickerEvents";
+import { decideArmedRegenerate, regenerateArmRecheckInMs } from "@/lib/chatRegenerateArm";
 import {
   getSpeakingId,
   speechSupported,
@@ -50,7 +51,9 @@ export function AnswerTurnActions({
   const canSpeak = useSyncExternalStore(noopSubscribe, speechSupported, () => false);
   const speakingId = useSyncExternalStore(subscribeSpeaking, getSpeakingId, () => null);
   const speaking = speakingId === messageId;
-  const [armed, setArmed] = useState<{ modelId: string; at: number } | null>(null);
+  const [armed, setArmed] = useState<{ modelId: string; at: number; closedAt: number | null } | null>(
+    null
+  );
   const waitingForModel = Boolean(regenerate && armed);
   const onRegenerate = regenerate?.onRegenerate;
   const currentModelId = regenerate?.currentModelId;
@@ -62,13 +65,26 @@ export function AnswerTurnActions({
     [messageId]
   );
 
+  // The wait is for the picker it opened: once that picker is closed, a model
+  // picked later from the ordinary picker must not resend the question.
+  const waiting = armed !== null;
+  useEffect(() => {
+    if (!waiting) return;
+    const onPickerClosed = () =>
+      setArmed((current) => (current && current.closedAt === null ? { ...current, closedAt: Date.now() } : current));
+    window.addEventListener(CHAT_MODEL_PICKER_CLOSED_EVENT, onPickerClosed);
+    return () => window.removeEventListener(CHAT_MODEL_PICKER_CLOSED_EVENT, onPickerClosed);
+  }, [waiting]);
+
   useEffect(() => {
     if (!armed || !onRegenerate) return;
+    const now = Date.now();
     const decision = decideArmedRegenerate({
       armedModelId: armed.modelId,
       currentModelId,
       armedAt: armed.at,
-      now: Date.now(),
+      now,
+      pickerClosedAt: armed.closedAt,
     });
     // Acting from a timer callback, not the effect body: the wait ends (and the
     // question is sent again) as an event, one tick after the model changed.
@@ -77,7 +93,9 @@ export function AnswerTurnActions({
         setArmed(null);
         if (decision === "fire") onRegenerate();
       },
-      decision === "wait" ? Math.max(0, REGENERATE_ARM_TTL_MS - (Date.now() - armed.at)) : 0
+      decision === "wait"
+        ? regenerateArmRecheckInMs({ armedAt: armed.at, now, pickerClosedAt: armed.closedAt })
+        : 0
     );
     return () => window.clearTimeout(timer);
   }, [armed, currentModelId, onRegenerate]);
@@ -122,7 +140,7 @@ export function AnswerTurnActions({
               type="button"
               data-testid="chat-regenerate-another-model"
               onClick={(event) => {
-                setArmed({ modelId: regenerate.currentModelId ?? "", at: Date.now() });
+                setArmed({ modelId: regenerate.currentModelId ?? "", at: Date.now(), closedAt: null });
                 regenerate.onOpenModelPicker?.(event);
               }}
               disabled={regenerate.disabled}

@@ -77,10 +77,9 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import {
   armSupersede,
+  beginReplacement,
   canResendQuestion,
-  getSupersededIds,
   lastReplaceableTurn,
-  markTurnSuperseded,
   takeArmedSupersede,
   withoutSuperseded,
 } from "@/lib/chatSupersededTurns";
@@ -1612,6 +1611,11 @@ function ChatAppComponent({
       with them.
     */
     let sourceReceipt: ContinuationReceipt | undefined;
+    // The turn this send replaces ("Regenerate" / "edit"). It is excluded from
+    // this request's context at once but is recorded as replaced only when the
+    // new answer is written as finished: a refused, failed or stopped send
+    // leaves the earlier answer as it was (lib/chatSupersededTurns.ts).
+    let replacement = beginReplacement(targetChatId, null);
     const writeAssistantMessage = assistantMessageWriter(runKey);
     const setAssistantMessage: typeof writeAssistantMessage = (
       id,
@@ -1620,6 +1624,7 @@ function ChatAppComponent({
       errorMeta,
       extraFields
     ) => {
+      replacement.answerWritten(status);
       if (status === "error") {
         onTurnErrorRef.current?.(
           analyticsPromptId,
@@ -1649,11 +1654,10 @@ function ChatAppComponent({
       send is identical to what it was before the override existed.
     */
     // "Regenerate" / "edit" armed a replacement of the newest turn; the send
-    // that carries that exact question is where it becomes real, so a send
-    // that never starts leaves the earlier answer untouched.
-    const armedReplacement = takeArmedSupersede(targetChatId, text);
-    if (armedReplacement) markTurnSuperseded(targetChatId, armedReplacement);
-    const replacedIds = getSupersededIds(targetChatId);
+    // that carries that exact question takes it up, so a send that never
+    // starts leaves the earlier answer untouched.
+    replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text));
+    const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;

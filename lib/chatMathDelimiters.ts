@@ -14,7 +14,8 @@
  *   - a `$$` that never closes (a formula still streaming in) is escaped, so
  *     a half-written formula shows as text instead of an error
  *
- * Fenced code and inline code are never touched.
+ * Code is never touched: fenced blocks, indented blocks, the same inside a
+ * blockquote or list item, and inline code.
  */
 
 const CODE_OPEN = "\u0001";
@@ -22,38 +23,93 @@ const CODE_CLOSE = "\u0002";
 
 type Piece = { kind: "prose" | "code"; text: string };
 
-/** Splits at fenced code blocks. An unterminated fence runs to the end. */
+/** A line's blockquote markers (`> `, `> > `) and what follows them. */
+const QUOTE_PREFIX = /^((?: {0,3}>[ ]?)+)(.*)$/;
+const INDENTED = /^(?: {4}|\t)/;
+const LIST_MARKER = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]/;
+
+/**
+ * Splits out the code that must never be read for math: fenced blocks
+ * (also inside a blockquote or a list item), indented code blocks and the same
+ * inside a blockquote. An unterminated fence runs to the end.
+ *
+ * An indented block starts only after a blank line (or at the top, or after
+ * another code block) and never inside a list, where a deeper indent is just
+ * a nested paragraph: a formula there stays a formula.
+ */
 function splitFences(source: string): Piece[] {
   const lines = source.split("\n");
   const pieces: Piece[] = [];
   let prose: string[] = [];
-  let fence: { char: string; length: number } | null = null;
+  let fence: { char: string; length: number; quoted: boolean; loose: boolean } | null = null;
+  let indentedCode = false;
   let code: string[] = [];
+  let previousBlank = true;
+  let inList = false;
   const flushProse = () => {
     if (prose.length) pieces.push({ kind: "prose", text: prose.join("\n") });
     prose = [];
   };
+  const flushCode = () => {
+    if (code.length) pieces.push({ kind: "code", text: code.join("\n") });
+    code = [];
+  };
   for (const line of lines) {
+    const quote = QUOTE_PREFIX.exec(line);
+    const body = quote ? quote[2] : line;
+    const blank = body.trim() === "";
+
     if (fence) {
-      code.push(line);
-      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
-      if (close && close[1][0] === fence.char && close[1].length >= fence.length) {
-        pieces.push({ kind: "code", text: code.join("\n") });
-        code = [];
+      // A fence opened inside a blockquote ends where the quote does.
+      if (fence.quoted && !quote) {
+        flushCode();
         fence = null;
+        previousBlank = true;
+      } else {
+        code.push(line);
+        const fenceLine = fence.quoted ? body : line;
+        const closing = /^(`{3,}|~{3,})$/.exec(fenceLine.trim());
+        const indentOk = fence.loose || /^ {0,3}\S/.test(fenceLine);
+        if (closing && indentOk && closing[1][0] === fence.char && closing[1].length >= fence.length) {
+          flushCode();
+          fence = null;
+          previousBlank = true;
+        }
+        continue;
       }
-      continue;
     }
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (open && !(open[1][0] === "`" && line.slice(open[0].length).includes("`"))) {
+
+    if (indentedCode) {
+      if (blank || INDENTED.test(body)) {
+        code.push(line);
+        continue;
+      }
+      flushCode();
+      indentedCode = false;
+    }
+
+    const opening = (inList ? /^[ \t]*(`{3,}|~{3,})/ : /^ {0,3}(`{3,}|~{3,})/).exec(body);
+    if (opening && !(opening[1][0] === "`" && body.slice(opening[0].length).includes("`"))) {
       flushProse();
-      fence = { char: open[1][0], length: open[1].length };
+      fence = { char: opening[1][0], length: opening[1].length, quoted: Boolean(quote), loose: inList };
       code.push(line);
       continue;
     }
+
+    if (!blank && previousBlank && !inList && INDENTED.test(body)) {
+      flushProse();
+      indentedCode = true;
+      code.push(line);
+      previousBlank = false;
+      continue;
+    }
+
+    if (LIST_MARKER.test(body)) inList = true;
+    else if (inList && previousBlank && !blank && !/^[ \t]/.test(body)) inList = false;
+    previousBlank = blank;
     prose.push(line);
   }
-  if (fence) pieces.push({ kind: "code", text: code.join("\n") });
+  flushCode();
   flushProse();
   return pieces;
 }
