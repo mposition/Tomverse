@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { browserCommand, classifyBrowserAddress, pinnedNavigationUrl, pinnedOriginUrl, privateNetworkUrl } from "../src/browser-contract";
+import { browserCommand, classifyBrowserAddress, isLoopbackHost, pinnedNavigationUrl, pinnedOriginUrl, pinnedSubresourceUrl, privateNetworkUrl } from "../src/browser-contract";
 import { isPrivateNetworkAddress } from "../src/internal-address";
 import {
   admitTypedAddress, browserProfile, checkPermission, createPermissionMemory, decidePermission, downloadPlan, permissionKey, permissionVerdict,
@@ -78,7 +78,7 @@ test("an address a person types on their own network opens and is pinned; a publ
   assert.equal((await admitTypedAddress(typed("https://intranet.example.com/"), dns))?.url.origin, "https://intranet.example.com");
 });
 
-test("a private tab and a local tab stay on the origin they were opened with, WebSocket included, and nothing else is reached", () => {
+test("the pinned origin of a local or private tab is exact: its own host and port, over its scheme or the WebSocket twin", () => {
   for (const origin of ["http://192.168.0.5:3000", "http://app.test:5173", "https://nas:8443"]) {
     const base = new URL(origin);
     const twin = base.protocol === "https:" ? "wss:" : "ws:";
@@ -91,6 +91,33 @@ test("a private tab and a local tab stay on the origin they were opened with, We
       assert.equal(pinnedOriginUrl(other, origin), null, origin + " must not reach " + other);
     }
   }
+});
+
+test("a local tab's page reaches any port of this computer, a private tab's page other ports of its own host, and the main frame stays on the origin", () => {
+  for (const host of ["localhost", "LOCALHOST", "127.0.0.1", "127.0.0.2", "127.255.255.254", "[::1]"]) assert.equal(isLoopbackHost(host), true, host);
+  for (const host of ["128.0.0.1", "127.0.0", "127.0.0.1.evil.test", "localhost.evil.test", "10.0.0.1", "192.168.0.5", "[fd00::1]", "example.com", "127.0.0.256"]) assert.equal(isLoopbackHost(host), false, host);
+  const local = "http://127.0.0.1:3000";
+  for (const ok of [local + "/a", "http://127.0.0.1:4000/api", "https://localhost:4443/x", "ws://127.0.0.1:5173/hmr", "wss://[::1]:8443/s", "http://127.0.0.2:9000/", "http://localhost/"]) {
+    assert.ok(pinnedSubresourceUrl(ok, local, "local"), ok);
+  }
+  for (const bad of ["http://192.168.0.5:3000/", "http://10.0.0.1/", "https://example.com/", "http://example.com:3000/", "http://user:pw@127.0.0.1:4000/", "ftp://127.0.0.1:21/", "file:///etc/hosts",
+    "data:text/html,x", "javascript:alert(1)", "http://127.0.0.1.evil.test:4000/", "http://[fd00::1]:3000/"]) {
+    assert.equal(pinnedSubresourceUrl(bad, local, "local"), null, bad);
+  }
+  const lan = "http://192.168.0.5:3000";
+  for (const ok of [lan + "/a", "http://192.168.0.5:4000/api", "https://192.168.0.5:4443/x", "ws://192.168.0.5:5173/hmr", "wss://192.168.0.5:8443/s"]) assert.ok(pinnedSubresourceUrl(ok, lan, "private"), ok);
+  for (const bad of ["http://192.168.0.6:3000/", "http://127.0.0.1:4000/", "http://localhost:4000/", "https://example.com/", "http://user:pw@192.168.0.5:4000/", "ftp://192.168.0.5/"]) {
+    assert.equal(pinnedSubresourceUrl(bad, lan, "private"), null, bad);
+  }
+  const named = "https://app.test";
+  assert.ok(pinnedSubresourceUrl("https://app.test:8443/api", named, "private"));
+  assert.equal(pinnedSubresourceUrl("https://other.test/api", named, "private"), null);
+  // A public tab has no such rule, and the main frame of a pinned tab never moves to another port.
+  assert.equal(pinnedSubresourceUrl("http://127.0.0.1:4000/", "https://example.com", "web"), null);
+  assert.equal(pinnedNavigationUrl("http://127.0.0.1:4000/", local), null);
+  assert.equal(pinnedNavigationUrl("http://127.0.0.2:3000/", local), null);
+  assert.equal(pinnedNavigationUrl("ws://127.0.0.1:3000/", local), null);
+  assert.equal(pinnedNavigationUrl("http://192.168.0.5:4000/", lan), null);
 });
 
 test("a public tab cannot reach the person's network: the name rule, the scheme rule and the resolved address all refuse", async () => {

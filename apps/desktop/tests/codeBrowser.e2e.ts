@@ -21,8 +21,9 @@ test("Code opens a native browser panel for the selected loopback site and dispo
   const profile = join(folder, "profile");
   const descriptor = join(folder, "fixture.json");
   const gateway = await new FakeGateway({ script: () => ({ text: "Done" }) }).start();
-  let blockedRequests = 0;
-  const blockedServer = createServer((_req, reply) => { blockedRequests += 1; reply.end("Other origin"); });
+  // Another port of this computer: what a local page loads from it is allowed, but the page itself never moves there.
+  const otherPaths: string[] = [];
+  const blockedServer = createServer((req, reply) => { otherPaths.push(new URL(req.url!, "http://x").pathname); reply.end("Other port"); });
   const blockedOrigin = await listen(blockedServer);
   const requestPaths: string[] = [];
   const site = createServer((req, reply) => {
@@ -69,6 +70,10 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     const panel = app.context().pages().find((candidate) => candidate.url() === origin + "/");
     assert.ok(panel);
     // A link that opens a new window opens a tab of the panel, on the same origin: nothing else is reachable through it.
+    // The image of the page came from another port of this computer; an address on another machine is cancelled at once.
+    await expect.poll(() => otherPaths.includes("/asset")).toBe(true);
+    assert.equal(await panel.evaluate(() => Promise.race([
+      fetch("http://10.255.255.1:81/lan", { mode: "no-cors" }).then(() => "reached", () => "blocked"), new Promise((resolve) => setTimeout(() => resolve("hung"), 4000))])), "blocked");
     await panel.getByText("Popup", { exact: true }).click();
     await expect(page.getByRole("tab", { name: "Tabs 2" })).toHaveAttribute("aria-selected", "true");
     await expect.poll(() => requestPaths.includes("/popup")).toBe(true);
@@ -106,7 +111,7 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     await address.fill(origin + "/redirect");
     await address.press("Enter");
     await expect.poll(() => requestPaths.includes("/redirect")).toBe(true);
-    assert.equal(blockedRequests, 0);
+    assert.equal(otherPaths.includes("/redirected"), false, "a redirect of the page to another port is not followed");
     await address.fill(origin + "/drop");
     await address.press("Enter");
     await expect(page.getByRole("status").filter({ hasText: "The page could not load." })).toBeVisible();
@@ -120,7 +125,7 @@ test("Code opens a native browser panel for the selected loopback site and dispo
     await expect.poll(() => app!.evaluate(({ webContents }, origin) =>
       webContents.getAllWebContents().some((contents) => contents.getURL().startsWith(origin)), origin)).toBe(false);
     await expect(page.getByRole("complementary", { name: "Browser", exact: true })).toHaveCount(0);
-    assert.equal(blockedRequests, 0);
+    assert.equal(otherPaths.includes("/redirected"), false);
   } finally {
     await app?.close();
     site.close();

@@ -125,6 +125,32 @@ export function pinnedOriginUrl(value: string, origin: string): URL | null {
   }
 }
 
+/** `localhost`, any `127.x.x.x` address or `[::1]`: the person's own computer. */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return host === "localhost" || host === "[::1]" || (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) && isIpAddress(host));
+}
+
+/**
+ * What a page of a pinned tab may load or connect to besides its own origin (fetch, XHR, WebSocket, frames, images, scripts), over
+ * http, https, ws or wss and without credentials. A local tab reaches any port of the person's own computer (a front end and its API
+ * on another port); a private tab reaches other ports of the same host only, never another machine. The main frame is not covered:
+ * it stays on the origin the tab was opened with (pinnedNavigationUrl).
+ */
+export function pinnedSubresourceUrl(value: string, origin: string, kind: BrowserKind): URL | null {
+  const own = pinnedOriginUrl(value, origin);
+  if (own) return own;
+  try {
+    const target = new URL(value);
+    if (!/^(https?|wss?):$/.test(target.protocol) || target.username || target.password) return null;
+    if (kind === "local") return isLoopbackHost(target.hostname) ? target : null;
+    if (kind === "private") return target.hostname.toLowerCase() === new URL(origin).hostname.toLowerCase() ? target : null;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** A main-frame address of a pinned tab (local or private): the origin of the tab, over its own scheme (never the WebSocket twin). */
 export function pinnedNavigationUrl(value: string, origin: string): URL | null {
   const target = pinnedOriginUrl(value, origin);

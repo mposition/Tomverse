@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { WebContentsView, type BrowserWindow, type DownloadItem, type HandlerDetails, type WebContents, type WindowOpenHandlerResponse } from "electron";
 import {
-  loopbackBrowserUrl, onApprovedSite, pinnedNavigationUrl, pinnedOriginUrl,
+  loopbackBrowserUrl, onApprovedSite, pinnedNavigationUrl, pinnedSubresourceUrl,
   type BrowserCommand, type BrowserDownload, type BrowserKind, type BrowserState,
 } from "../browser-contract";
 import { allowsSubresource, linkViewUrl } from "../web-view-contract";
@@ -33,8 +33,9 @@ export type CodeBrowserViewDeps = {
 
 /**
  * One tab of the browser panel, in the saved data of its project (see code-browser-profile.ts). A local or private tab is pinned to
- * the origin it was opened with (its page, its redirects, everything it loads and its WebSocket; a person types another origin to
- * leave it). A web tab (a public https site) takes any such address, but every request waits for the address check of
+ * the origin it was opened with (its page and its redirects; a person types another origin to leave it). What its page loads
+ * (requests, WebSocket, frames, images, scripts) may also come from other ports of this computer (local tab) or of its own host
+ * (private tab), never from another machine (pinnedSubresourceUrl). A web tab (a public https site) takes any such address, but every request waits for the address check of
  * resolved-host-gate.ts, and while the agent holds the tab (`limitHosts`) the page itself may only move within the sites the person
  * approved for it. No preload, no Tomverse session, no client certificates; a page's new tab or window gets the same rules.
  */
@@ -85,7 +86,8 @@ export function createCodeBrowserView(owner: BrowserWindow, target: { kind: Brow
     request(request, callback) {
       if (closed) return callback({ cancel: true });
       if (admitWeb) return admitWeb(request, callback);
-      callback({ cancel: !pinnedOriginUrl(request.url, origin) });
+      // The page stays on its origin; what it loads may also come from other ports of the same computer (local) or host (private).
+      callback({ cancel: !(request.resourceType === "mainFrame" ? pinnedNavigationUrl(request.url, origin) : pinnedSubresourceUrl(request.url, origin, kind)) });
     },
     agentHolds: () => !closed && deps.agentHolds(),
     owner: () => closed || owner.isDestroyed() ? null : owner,
@@ -132,7 +134,7 @@ export function createCodeBrowserView(owner: BrowserWindow, target: { kind: Brow
   const guard = (event: { url: string; isMainFrame: boolean; preventDefault(): void }) => {
     if (web) {
       if (event.isMainFrame ? !mainFrameAllowed(event.url) : !allowsSubresource(event.url)) event.preventDefault();
-    } else if (!pinnedNavigationUrl(event.url, origin)) event.preventDefault();
+    } else if (!(event.isMainFrame ? pinnedNavigationUrl(event.url, origin) : pinnedSubresourceUrl(event.url, origin, kind))) event.preventDefault();
   };
 
   /** The rules of the tab for one of its pages: the tab's own, and every window it opened. */

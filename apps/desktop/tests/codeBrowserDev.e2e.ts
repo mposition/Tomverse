@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { createServer, type RequestListener, type Server, type ServerResponse } from "node:http";
 import { createServer as createTlsServer } from "node:https";
 import { tmpdir } from "node:os";
@@ -25,6 +26,12 @@ async function listen(host: string, handler: RequestListener): Promise<Site> {
   const server = createServer((request, reply) => {
     seen.push({ host: request.headers.host ?? "", path: new URL(request.url!, "http://x").pathname, cookie: request.headers.cookie ?? "" });
     handler(request, reply);
+  });
+  // A WebSocket handshake and nothing more: the page learns that the connection opened.
+  server.on("upgrade", (request, socket) => {
+    seen.push({ host: request.headers.host ?? "", path: new URL(request.url!, "http://x").pathname, cookie: "" });
+    const accept = createHash("sha1").update(String(request.headers["sec-websocket-key"]) + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+    socket.write(["HTTP/1.1 101 Switching Protocols", "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Accept: " + accept, "", ""].join("\r\n"));
   });
   await new Promise<void>((resolve, reject) => server.listen(0, host, resolve).once("error", reject));
   const address = server.address();
@@ -59,6 +66,18 @@ function devSite(host: string, other?: () => string) {
     if (url.pathname === "/oauth-popup") {
       return html(reply, "<title>Popup</title><script>window.opener && window.opener.postMessage('popup-done', location.origin);" +
         "document.title = 'popup ' + typeof window.desktop + ' ' + typeof require + ' ' + typeof process + ' ' + (window.opener !== null);</script>");
+    }
+    if (url.pathname === "/app") {
+      // A front end that talks to an API on another port: a request, a WebSocket and a frame. The title tells what got through.
+      return html(reply, "<title>app pending</title><script>" +
+        "const params = new URLSearchParams(location.search); const api = params.get('api'); const tag = params.get('tag');" +
+        "const state = { fetch: 'wait', ws: 'wait' };" +
+        "const show = () => { document.title = 'app ws:' + state.ws + ' fetch:' + state.fetch; };" +
+        "fetch(api + '/api/data-' + tag, { mode: 'no-cors' }).then(() => { state.fetch = 'ok'; show(); }, () => { state.fetch = 'fail'; show(); });" +
+        "const socket = new WebSocket(api.replace('http', 'ws') + '/socket-' + tag);" +
+        "socket.onopen = () => { state.ws = 'open'; show(); socket.close(); }; socket.onerror = () => { state.ws = 'error'; show(); };" +
+        "const frame = document.createElement('iframe'); frame.src = api + '/frame-' + tag; document.documentElement.append(frame);" +
+        "</script>");
     }
     if (url.pathname === "/opener") {
       return html(reply, "<title>Opener</title><button id='open' onclick=\"window.open('/oauth-popup', 'oauth', 'width=420,height=320')\">Sign in</button>" +
@@ -201,6 +220,46 @@ test("a page on the person's own network opens over http, stays on its origin, a
   }
 });
 
+test("a local page reaches other ports of this computer, a private page other ports of its own host only, and the page itself stays put", { timeout: 120_000 }, async () => {
+  const front = await devSite("127.0.0.1");
+  const api = await devSite("127.0.0.1");
+  const lanFront = await devSite("127.0.0.2");
+  const lanApi = await devSite("127.0.0.2");
+  const gateway = await new FakeGateway({ script: () => ({ text: "Done" }) }).start();
+  let run: Launched | undefined;
+  const hit = (site: Site, path: string) => site.seen.some((entry) => entry.path === path);
+  const app = (origin: string, apiOrigin: string, tag: string) => origin + "/app?api=" + encodeURIComponent(apiOrigin) + "&tag=" + tag;
+  try {
+    run = await launch(gateway);
+    const { page } = run;
+    const { app: electron } = { app: run.app };
+    // A local tab: its front end calls the API, opens a WebSocket and a frame on another port of this computer (and on 127.0.0.2).
+    await visit(page, electron, app(front.origin, api.origin, "a"), "app ws:open fetch:ok");
+    assert.ok(hit(api, "/api/data-a") && hit(api, "/socket-a"), "request and socket reached the other port");
+    await expect.poll(() => hit(api, "/frame-a"), { message: "the frame reached the other port" }).toBe(true);
+    await visit(page, electron, app(front.origin, lanApi.origin, "b"), "app ws:open fetch:ok");
+    assert.ok(hit(lanApi, "/api/data-b"), "any loopback address is the person's own computer");
+    // The page itself does not move there: a link to the other port does nothing, and a redirect would not be followed.
+    const home = await visit(page, electron, front.origin + "/", "Dev 127.0.0.1");
+    await home.evaluate((target) => { (document.getElementById("other") as HTMLAnchorElement).href = target; }, api.origin + "/navigated");
+    await home.locator("#other").click({ noWaitAfter: true });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal(hit(api, "/navigated"), false, "the main frame stays on the origin it was opened with");
+    assert.equal(await home.evaluate(() => Promise.race([fetch("http://10.255.255.1:81/lan", { mode: "no-cors" }).then(() => "reached", () => "blocked"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 4000))])), "blocked", "another machine is out of reach");
+    // A private tab (127.0.0.2 is a private address here, typed as such): other ports of the same host only.
+    const other = await visit(page, electron, app(lanFront.origin, lanApi.origin, "c"), "app ws:open fetch:ok");
+    assert.ok(other);
+    assert.ok(hit(lanApi, "/api/data-c") && hit(lanApi, "/socket-c"), "the same host, another port");
+    await expect.poll(() => hit(lanApi, "/frame-c")).toBe(true);
+    await visit(page, electron, app(lanFront.origin, api.origin, "d"), "app ws:error fetch:fail");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal([...api.seen].some((entry) => entry.path.endsWith("-d")), false, "another host is not reached: no request, no socket, no frame");
+  } finally {
+    await finish([run], [front, api, lanFront, lanApi], gateway);
+  }
+});
+
 test("a sign-in outlasts the tab, the panel and the app, belongs to the project, stays out of the Tomverse session, and is cleared on request", { timeout: 180_000 }, async () => {
   const site = await devSite("127.0.0.1");
   const gateway = await new FakeGateway({ script: () => ({ text: "Done" }) }).start();
@@ -285,11 +344,14 @@ test("a window.open popup that answers through window.opener is a child window u
       return { persistent: contents?.session.isPersistent() ?? false, sameAsApp: contents ? contents.session === session.defaultSession : true };
     }, site.origin + "/oauth-popup");
     assert.deepEqual(kept, { persistent: true, sameAsApp: false });
-    assert.equal(await popup.evaluate((target) => fetch(target, { mode: "no-cors" }).then(() => "reached", () => "blocked"), elsewhere.origin + "/from-popup"), "blocked");
-    assert.equal(elsewhere.seen.length, 0);
+    // It follows the same rules as its tab: another loopback address is reachable for what it loads, another machine is not.
+    assert.equal(await popup.evaluate((target) => fetch(target, { mode: "no-cors" }).then(() => "reached", () => "blocked"), elsewhere.origin + "/from-popup"), "reached");
+    assert.equal(await popup.evaluate(() => Promise.race([fetch("http://10.255.255.1:81/lan", { mode: "no-cors" }).then(() => "reached", () => "blocked"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 4000))])), "blocked");
+    elsewhere.seen.length = 0;
     const nested = await popup.evaluate((target) => { const child = window.open(target, "x", "width=200,height=200"); return child === null ? "none" : "opened"; }, elsewhere.origin + "/nested");
     await new Promise((resolve) => setTimeout(resolve, 500));
-    assert.equal(elsewhere.seen.length, 0, "a popup of the popup cannot leave the origin either (" + nested + ")");
+    assert.equal(elsewhere.seen.length, 0, "a popup of the popup cannot go to another origin either (" + nested + ")");
     // A link with target=_blank is a tab of the panel, and the panel shows it.
     await page.bringToFront();
     await opener.evaluate(() => { history.back(); });
@@ -354,8 +416,10 @@ test("a site's permission request is asked in a dialog with its origin, remember
     assert.equal((await asked(app)).length, 2);
     assert.equal(await ask(), "granted");
     assert.equal((await asked(app)).length, 2, "a remembered answer is not asked again");
+    const loads = site.seen.filter((entry) => entry.path === "/").length;
     await page.getByRole("button", { name: "Reload", exact: true }).click();
-    await expect.poll(() => dev.evaluate(() => Notification.permission)).toBe("granted");
+    await expect.poll(() => site.seen.filter((entry) => entry.path === "/").length).toBeGreaterThan(loads);
+    await expect.poll(() => dev.evaluate(() => Notification.permission).catch(() => "reloading")).toBe("granted");
     // Screen sharing and devices are refused with no dialog at all.
     const refused = await dev.evaluate(`(async () => {
       const outcome = (run) => run().then(() => "granted", (error) => error.name);
