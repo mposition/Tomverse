@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { codeWebSearchOffered } from "@/lib/codeWebSearch";
@@ -107,6 +107,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopVoiceConversation: desktopVoiceEnabled() && voiceConversationConfig(process.env) !== null,
     // The providers Desktop may add as a login method from its settings (empty while the switch is off).
     desktopSocialLink: desktopLinkProviders(),
+    // Remote control's file-change counts and previews: a Desktop reports them only where this server says it takes them.
+    desktopRemotePreview: desktopRemotePreviewEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };

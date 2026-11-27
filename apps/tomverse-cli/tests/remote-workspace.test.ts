@@ -709,3 +709,57 @@ for (const shell of ["sh", "dash"] as const) {
         assert.deepEqual(left(remote.root), []);
     });
 }
+
+const loginShell = async (shell: "sh" | "bash-login" | "zsh") => {
+    const remote = await connected();
+    const workspace = new RemoteWorkspace({ ...remote.target, shell: shell as "sh" }, remote.runner);
+    await workspace.connect();
+    return { remote, workspace };
+};
+const runIn = (workspace: RemoteWorkspace, input: Parameters<typeof planRemoteCommand>[0]) => workspace.exec(planRemoteCommand(input, workspace.root, 30_000), new AbortController().signal);
+
+test("a project set to a login shell starts the agent's commands through bash -lc; the default stays sh -c", { skip }, async () => {
+    const plain = await loginShell("sh");
+    const asSh = await runIn(plain.workspace, { command: "echo $0; shopt -q login_shell 2>/dev/null && echo login || echo plain" });
+    assert.equal(asSh.stdout, "sh\nplain\n");
+    const login = await loginShell("bash-login");
+    const asBash = await runIn(login.workspace, { command: "echo $0; shopt -q login_shell && echo login || echo plain; exit 7" });
+    assert.equal(asBash.stdout, "bash\nlogin\n");
+    assert.equal(asBash.exitCode, 7);
+    assert.equal(login.workspace.state, "connected");
+    // Every call of the login-shell project still reaches the machine as `sh -c '<script>'`: only the command inside is started by bash.
+    for (const call of login.remote.calls()) assert.match(call.command, /^sh -c '/);
+});
+
+test("what a login-shell project is given arrives as written: arguments and command lines with quotes, spaces, dollars and globs", { skip }, async () => {
+    const { workspace } = await loginShell("bash-login");
+    const awkward = ["a b", "$HOME", "it's", "; id", "*", "$(echo pwned)", "`echo pwned`", '"q"', "-n", "--", "ünï cödé", "한국어", "\\", " lead", "trail "];
+    const argv = await runIn(workspace, { argv: ["sh", "-c", 'for a in "$@"; do printf "[%s]" "$a"; done', "sh", ...awkward] });
+    assert.equal(argv.stdout, awkward.map((value) => `[${value}]`).join(""));
+    assert.equal(argv.exitCode, 0);
+    // An argument list is not a shell line: nothing in it is read by bash a second time.
+    const direct = await runIn(workspace, { argv: ["printf", "%s|", ...awkward] });
+    assert.equal(direct.stdout, awkward.map((value) => `${value}|`).join(""));
+    // A shell line is read by bash as written, and `$@` of it is empty.
+    const line = await runIn(workspace, { command: `printf '%s|' 'it'\\''s' "a b" $'x\\ty' \\$HOME; echo "$#"` });
+    assert.equal(line.stdout.endsWith("0\n"), true);
+    assert.match(line.stdout, /^it's\|a b\|x\ty\|\$HOME\|/);
+});
+
+test("a login-shell command is ended on the remote machine when the task stops, as an sh one is", { skip }, async () => {
+    const { workspace, remote } = await loginShell("bash-login");
+    const stop = new AbortController();
+    const pending = workspace.exec(planRemoteCommand({ command: "echo $$ > l.pid; exec sleep 60" }, workspace.root, 30_000), stop.signal);
+    await waitUntil(() => existsSync(join(remote.root, "l.pid")));
+    stop.abort();
+    const done = await pending;
+    assert.equal(done.cancelled, true);
+    const pid = readFileSync(join(remote.root, "l.pid"), "utf8").trim();
+    await waitUntil(() => !alive(remote, pid));
+    assert.equal(alive(remote, pid), false);
+});
+
+test("a shell the script does not know is refused before anything starts, as a machine without it is", { skip }, async () => {
+    const { workspace } = await loginShell("zsh");
+    await assert.rejects(runIn(workspace, { command: "echo hi" }), remoteError("unsupported-remote"));
+});

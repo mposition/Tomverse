@@ -424,6 +424,8 @@ export type Snapshot = {
     reasoningSteps?: boolean; promptRefiner?: boolean;
     /** The providers the server lets this device add as a login method from Settings (Google, Microsoft). */
     socialLink?: ("google" | "azure-ad")[];
+    /** Remote control reports a file change's line counts and, if the person chose, a few redacted changed lines. */
+    remotePreview?: boolean;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */

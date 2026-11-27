@@ -39,6 +39,7 @@ const capabilities = z.object({
   desktopPromptRefiner: z.boolean().optional(),
   // An older server names none, and Settings then offers no Google or Microsoft connection.
   desktopSocialLink: z.array(z.enum(["google", "azure-ad"])).max(2).optional().catch(undefined),
+  desktopRemotePreview: z.boolean().optional(),
   voiceConversation: z.object({ enabled: z.boolean(), maxSeconds: z.number().int().positive(), continuous: z.boolean().optional() }).optional().catch(undefined),
 });
 
@@ -74,6 +75,7 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     reasoningSteps: data.desktopReasoningSteps === true,
     promptRefiner: data.desktopPromptRefiner === true && data.desktopWrite === true,
     socialLink: data.desktopSocialLink ?? [],
+    remotePreview: data.desktopRemotePreview === true,
     // The conversation is offered only where Desktop's own switch and the server's voice switch are both on.
     voiceConversation: data.desktopVoiceConversation === true && data.voiceConversation?.enabled
       ? { continuous: data.voiceConversation.continuous === true, maxSeconds: data.voiceConversation.maxSeconds } : null };

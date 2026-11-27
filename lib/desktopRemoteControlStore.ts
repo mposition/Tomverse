@@ -233,6 +233,33 @@ function auditSummary(input: DesktopRemoteCommandRequest) {
 }
 
 /**
+ * Whether a command would be refused now, read without locking and without writing anything: the PC is the account's own and
+ * reports now, the task and the request are the ones it reported with the same digest and answerable from another device, and
+ * the request is not answered yet. Asked before a passkey ceremony is started and before its challenge is used, so that a
+ * request that changed or was answered meanwhile is said so first; `recordDesktopRemoteCommand` still decides under its lock.
+ */
+export async function precheckDesktopRemoteCommand(userId: string, command: DesktopRemoteCommandRequest): Promise<DesktopRemoteCommandRefusal | null> {
+  const approvalId = command.kind === "approval" ? command.approvalId : null;
+  const rows = await prisma.$queryRaw<Array<{ snapshot: unknown; answered: boolean }>>`
+    SELECT r."snapshot", EXISTS (
+      SELECT 1 FROM "DesktopRemoteCommand" c WHERE c."deviceId" = r."deviceId" AND c."approvalId" = ${approvalId}::text
+    ) AS "answered"
+    FROM "DesktopRemoteDevice" r
+    JOIN "MobileDevice" d ON d."id" = r."deviceId"
+    JOIN "MobileTokenFamily" f ON f."id" = r."familyId"
+    WHERE r."deviceId" = ${command.deviceId} AND r."userId" = ${userId} AND r."expiresAt" > now()
+      AND d."userId" = ${userId} AND d."platform" = 'desktop' AND d."revokedAt" IS NULL
+      AND f."userId" = ${userId} AND f."deviceId" = r."deviceId" AND f."revokedAt" IS NULL
+      AND f."absoluteExpiresAt" > (now() AT TIME ZONE 'UTC')
+  `;
+  const snapshot = rows[0] ? desktopRemoteSnapshot.safeParse(rows[0].snapshot) : null;
+  if (!snapshot?.success) return "DEVICE_NOT_FOUND";
+  const verdict = checkDesktopRemoteCommand(command, snapshot.data);
+  if (!verdict.ok) return verdict.code;
+  return rows[0]!.answered ? "ALREADY_ANSWERED" : null;
+}
+
+/**
  * Records one answer, stop or follow-up from a signed-in web session, with the person's audit entry in the same
  * transaction. Refused unless the PC is the session's own, reports now, and its latest report has the task (and, for an
  * answer, the very request with the same digest, answerable from another device). A second answer for one request is
@@ -242,6 +269,8 @@ export async function recordDesktopRemoteCommand(input: {
   session: Session;
   request: Request;
   command: DesktopRemoteCommandRequest;
+  /** The passkey that confirmed this command (lib/desktopRemotePasskeyStore.ts), when one was needed. */
+  passkeyId?: string;
 }): Promise<{ id: string }> {
   const userId = input.session.user.id;
   const command = input.command;
@@ -287,6 +316,7 @@ export async function recordDesktopRemoteCommand(input: {
       metadata: {
         deviceId: command.deviceId,
         taskKey: command.taskKey,
+        ...(input.passkeyId ? { passkeyId: input.passkeyId } : {}),
         ...(approval ? {
           approvalId: approval.approvalId, decision: approval.decision, digest: approval.digest,
           approvalKind: snapshot.data.approval?.kind ?? null,

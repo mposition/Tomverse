@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import type { Session } from "next-auth";
 import { resetTestFixture } from "./resetTestFixture";
+import { softPasskey } from "./softPasskey";
 
 // Desktop remote control against a real database (docs/ops/desktop-remote-control.md): the PC's report and answer
 // pick-up through its own Desktop bearer, the web screen through the account's signed-in session. What this file
@@ -56,7 +57,7 @@ const switchOn = () => {
 const reset = async () => {
   await resetTestFixture(prisma, `
     TRUNCATE TABLE
-      "DesktopRemoteCommand", "DesktopRemoteDevice",
+      "DesktopRemoteCommand", "DesktopRemoteDevice", "DesktopRemotePasskey", "DesktopRemotePasskeyChallenge",
       "MobileAuthEvent", "MobileRefreshRotation", "MobileTokenFamily", "MobileLoginGrant", "MobileDevice",
       "ChatUsageBucket", "UserSettings", "User"
     RESTART IDENTITY CASCADE
@@ -65,6 +66,7 @@ const reset = async () => {
   resetMobileSessionSnapshotsForTesting();
   currentSession = null;
   switchOn();
+  delete process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED;
 };
 beforeEach(reset);
 after(async () => {
@@ -403,4 +405,244 @@ test("reports expire and are deleted; turning off and signing the PC out remove 
   await syncAs(other.token, { snapshot: snapshot(), acks: [] });
   await prisma.user.delete({ where: { id: user.id } });
   assert.deepEqual(await count(), { devices: 0, commands: 0 });
+});
+
+// ── Passkey confirmation (lib/desktopRemotePasskeyStore.ts) ───────────────────────────────────────────────────────
+
+const SITE = "https://tomverse.test";
+// What a route answers is read by name in these tests.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Json = Record<string, any>;
+
+test("passkeys: nothing is offered while the passkey switch is off, and a deployment's own origin is required", async () => {
+  const user = await createUser("pk-off");
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const call = (session: Session | null, body: object, headers: Record<string, string> = { Origin: SITE }) => {
+    currentSession = session;
+    return passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", ...headers } }));
+  };
+  delete process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED;
+  assert.equal((await call(webSession(user.id), { action: "options-register" })).status, 503);
+  assert.deepEqual((await (await listAs(webSession(user.id))).json()).passkey, { enabled: false, passkeys: [] });
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  assert.deepEqual((await (await listAs(webSession(user.id))).json()).passkey, { enabled: true, passkeys: [] });
+  // Browser session only, signed in recently, and from this deployment's own origin.
+  assert.equal((await call(null, { action: "options-register" })).status, 401);
+  assert.equal((await call(webSession(user.id, 6 * 60), { action: "options-register" })).status, 428);
+  assert.equal((await call(webSession(user.id), { action: "options-register" }, {})).status, 403);
+  assert.equal((await call(webSession(user.id), { action: "options-register" }, { Origin: "https://evil.example" })).status, 403);
+  assert.equal((await call(webSession(user.id), { action: "options-register" })).status, 200);
+});
+
+test("passkeys: a registered passkey confirms allow once and follow-ups, each bound to its own command", async () => {
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const user = await createUser("pk-flow");
+  const pc = await desktopFor(user.id);
+  const session = webSession(user.id);
+  const call = async (body: object, headers: Record<string, string> = { Origin: SITE }) => {
+    currentSession = session;
+    const response = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", ...headers } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  const phone = softPasskey(SITE);
+
+  // Register the first passkey.
+  const asked = await call({ action: "options-register" });
+  assert.equal(asked.status, 200);
+  assert.equal(asked.body.confirm, undefined);
+  assert.equal(asked.body.publicKey.rp.id, "tomverse.test");
+  assert.equal(asked.body.publicKey.authenticatorSelection.userVerification, "required");
+  const made = phone.create(asked.body.publicKey);
+  assert.equal((await call({ action: "register", challengeId: asked.body.challengeId, label: "My phone", ...made })).status, 201);
+  // A challenge is used once.
+  assert.equal((await call({ action: "register", challengeId: asked.body.challengeId, label: "Again", ...made })).status, 409);
+  const registered = await prisma.adminAuditLog.findMany({ where: { action: "desktop_remote.passkey_registered", actorUserId: user.id } });
+  assert.equal(registered.length, 1);
+  assert.equal(JSON.stringify(registered[0]!.metadata).includes(made.credentialId), false);
+  const listed = (await (await listAs(session)).json()).passkey;
+  assert.equal(listed.passkeys.length, 1);
+  assert.equal(listed.passkeys[0].label, "My phone");
+  assert.equal(JSON.stringify(listed).includes("publicKey"), false);
+
+  // "Allow once" now needs the passkey; deny and stop do not.
+  const approvalOf = (id: string) => ({ ...snapshot(), tasks: [{ ...snapshot().tasks[0]!, canFollowUp: true }], approval: { ...snapshot().approval!, id } });
+  const first = randomUUID();
+  await syncAs(pc.token, { snapshot: approvalOf(first), acks: [] });
+  const once = (id: string, extra: Record<string, unknown> = {}) => answer(pc.deviceId, { approvalId: id, ...extra });
+  const send = async (body: object) => {
+    currentSession = session;
+    const response = await commands.POST(new Request(`${SITE}/api/desktop/remote/commands`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Origin: SITE } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  assert.deepEqual((await send(once(first))).body, { ok: false, code: "PASSKEY_REQUIRED" });
+  const confirm = async (command: Record<string, unknown>, over: { flags?: number; origin?: string } = {}) => {
+    const options = await call({ action: "options-command", command });
+    assert.equal(options.status, 200, JSON.stringify(options.body));
+    assert.deepEqual(options.body.publicKey.allowCredentials.map((entry: { id: string }) => entry.id), [phone.credentialId]);
+    return { challengeId: options.body.challengeId, ...phone.get(options.body.publicKey, over) };
+  };
+  // An assertion without user verification, or from another origin, is refused.
+  assert.equal((await send({ ...once(first), passkey: await confirm(once(first), { flags: 0x01 }) })).status, 403);
+  assert.equal((await send({ ...once(first), passkey: await confirm(once(first), { origin: "https://evil.example" }) })).status, 403);
+  // An assertion made for "allow once" does not confirm a follow-up, whatever the PC reports as open.
+  const forFirst = await confirm(once(first));
+  const second = randomUUID();
+  assert.equal((await send({ kind: "follow_up", deviceId: pc.deviceId, taskKey: TASK, text: "Run the linter too.", passkey: forFirst })).status, 403);
+  // A command the PC no longer reports is refused before the challenge is used.
+  assert.deepEqual((await send({ ...once(second), passkey: await confirm(once(first)) })).body, { ok: false, code: "APPROVAL_NOT_OPEN" });
+  // The right one is accepted once, and its challenge cannot be replayed.
+  const proof = await confirm(once(first));
+  const accepted = await send({ ...once(first), passkey: proof });
+  assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
+  const audit = await prisma.adminAuditLog.findFirst({ where: { targetId: accepted.body.id } });
+  assert.equal((audit!.metadata as Record<string, unknown>).passkeyId, listed.passkeys[0].id);
+  // The same assertion again: the request is answered, which is said before the challenge is looked at; and the challenge itself is gone.
+  assert.deepEqual((await send({ ...once(first), passkey: proof })).body, { ok: false, code: "ALREADY_ANSWERED" });
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count({ where: { id: proof.challengeId } }), 0);
+
+  // Deny and stop reduce what happens: no passkey, and the server issues none for them.
+  await syncAs(pc.token, { snapshot: approvalOf(second), acks: [] });
+  assert.equal((await call({ action: "options-command", command: once(second, { decision: "deny" }) })).status, 403);
+  assert.equal((await send(once(second, { decision: "deny" }))).status, 201);
+  assert.equal((await send({ kind: "stop", deviceId: pc.deviceId, taskKey: TASK })).status, 201);
+
+  // A follow-up is bound to its text.
+  await syncAs(pc.token, { snapshot: { ...snapshot({ approval: null }), tasks: [{ ...snapshot().tasks[0]!, canFollowUp: true }] }, acks: [] });
+  const follow = { kind: "follow_up", deviceId: pc.deviceId, taskKey: TASK, text: "Run the linter too." };
+  assert.deepEqual((await send(follow)).body, { ok: false, code: "PASSKEY_REQUIRED" });
+  const forText = await confirm(follow);
+  assert.equal((await send({ ...follow, text: "Delete everything.", passkey: forText })).status, 403);
+  assert.equal((await send({ ...follow, passkey: await confirm(follow) })).status, 201);
+
+  // The passkey switch off again: the account is asked for none.
+  delete process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED;
+  const third = randomUUID();
+  await syncAs(pc.token, { snapshot: approvalOf(third), acks: [] });
+  assert.equal((await send(once(third))).status, 201);
+});
+
+test("passkeys: another is added only with an existing one, removal needs one, and an account holds five", async () => {
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const user = await createUser("pk-more");
+  const stranger = await createUser("pk-stranger");
+  const session = webSession(user.id);
+  const call = async (body: object, as: Session = session) => {
+    currentSession = as;
+    const response = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Origin: SITE } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  const add = async (device: ReturnType<typeof softPasskey>, label: string, withExisting?: ReturnType<typeof softPasskey>) => {
+    const asked = await call({ action: "options-register" });
+    assert.equal(asked.status, 200, JSON.stringify(asked.body));
+    const made = device.create(asked.body.publicKey);
+    const passkey = withExisting && asked.body.confirm ? { challengeId: asked.body.confirm.challengeId, ...withExisting.get(asked.body.confirm.publicKey) } : undefined;
+    return call({ action: "register", challengeId: asked.body.challengeId, label, ...made, ...(passkey ? { passkey } : {}) });
+  };
+  const phone = softPasskey(SITE);
+  const laptop = softPasskey(SITE);
+  assert.equal((await add(phone, "Phone")).status, 201);
+  // A session on its own cannot add a passkey to an account that has one.
+  const alone = await add(laptop, "Attacker key");
+  assert.equal(alone.status, 428);
+  assert.equal(alone.body.code, "PASSKEY_CONFIRMATION_REQUIRED");
+  assert.equal((await add(laptop, "Laptop", phone)).status, 201);
+  // The same authenticator is not registered twice.
+  assert.equal((await add(laptop, "Laptop again", phone)).status, 409);
+  const mine = (await (await listAs(session)).json()).passkey.passkeys as Array<{ id: string; label: string }>;
+  assert.deepEqual(mine.map((entry) => entry.label), ["Phone", "Laptop"]);
+
+  // Another account sees none of them and cannot remove them.
+  assert.deepEqual((await (await listAs(webSession(stranger.id))).json()).passkey.passkeys, []);
+  assert.equal((await call({ action: "options-remove", passkeyId: mine[0]!.id }, webSession(stranger.id))).status, 409);
+
+  // Removal needs an assertion made for that removal.
+  const options = await call({ action: "options-remove", passkeyId: mine[1]!.id });
+  const assertion = { challengeId: options.body.challengeId, ...laptop.get(options.body.publicKey) };
+  const wrong = await call({ action: "remove", passkeyId: mine[0]!.id, passkey: assertion });
+  assert.equal(wrong.status, 409);
+  assert.equal(wrong.body.code, "PASSKEY_CHALLENGE");
+  const again = await call({ action: "options-remove", passkeyId: mine[1]!.id });
+  const removed = await call({ action: "remove", passkeyId: mine[1]!.id, passkey: { challengeId: again.body.challengeId, ...laptop.get(again.body.publicKey) } });
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.equal((await prisma.adminAuditLog.count({ where: { action: "desktop_remote.passkey_removed", actorUserId: user.id } })), 1);
+  assert.deepEqual(((await (await listAs(session)).json()).passkey.passkeys as Array<{ label: string }>).map((entry) => entry.label), ["Phone"]);
+
+  // Five at most. (The route allows a person twenty passkey requests a minute; this test makes more.)
+  await prisma.$executeRaw`DELETE FROM "ChatUsageBucket"`;
+  for (let index = 0; index < 4; index += 1) assert.equal((await add(softPasskey(SITE), `Key ${index}`, phone)).status, 201);
+  const sixth = await call({ action: "options-register" });
+  assert.equal(sixth.status, 409);
+  assert.equal(sixth.body.code, "PASSKEY_LIMIT");
+  // Deleting the account removes the passkeys and their challenges.
+  await prisma.user.delete({ where: { id: user.id } });
+  assert.equal(await prisma.desktopRemotePasskey.count(), 0);
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count(), 0);
+});
+
+test("passkeys: challenges live two minutes and maintenance sweeps the expired", async () => {
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const { purgeDesktopRemotePasskeyChallenges } = (await import(mod("lib/desktopRemotePasskeyStore.ts"))) as typeof import("@/lib/desktopRemotePasskeyStore");
+  const user = await createUser("pk-ttl");
+  currentSession = webSession(user.id);
+  const asked = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify({ action: "options-register" }), headers: { "Content-Type": "application/json", Origin: SITE } }));
+  const { challengeId, publicKey } = await asked.json();
+  await prisma.$executeRaw`UPDATE "DesktopRemotePasskeyChallenge" SET "expiresAt" = now() - interval '1 second'`;
+  const late = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: SITE },
+    body: JSON.stringify({ action: "register", challengeId, label: "Late", ...softPasskey(SITE).create(publicKey) }),
+  }));
+  assert.equal(late.status, 409);
+  await purgeDesktopRemotePasskeyChallenges();
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count(), 0);
+});
+
+test("passkeys: two first registrations that both saw no passkey cannot both go through, and a stale command burns no challenge", async () => {
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const user = await createUser("pk-race");
+  const pc = await desktopFor(user.id);
+  const session = webSession(user.id);
+  const call = async (body: object) => {
+    currentSession = session;
+    const response = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Origin: SITE } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  const mine = softPasskey(SITE);
+  const attacker = softPasskey(SITE);
+  // Both options are issued while the account has no passkey, so neither carries an existing passkey's confirmation.
+  const first = await call({ action: "options-register" });
+  const second = await call({ action: "options-register" });
+  assert.equal(first.body.confirm, undefined);
+  assert.equal(second.body.confirm, undefined);
+  const attempts = await Promise.all([
+    call({ action: "register", challengeId: first.body.challengeId, label: "Mine", ...mine.create(first.body.publicKey) }),
+    call({ action: "register", challengeId: second.body.challengeId, label: "Other", ...attacker.create(second.body.publicKey) }),
+  ]);
+  assert.deepEqual(attempts.map((attempt) => attempt.status).sort(), [201, 428]);
+  assert.equal(await prisma.desktopRemotePasskey.count({ where: { userId: user.id } }), 1);
+
+  // A request that is not open, or changed since it was reported, is refused before a challenge exists.
+  const registered = (await (await listAs(session)).json()).passkey.passkeys as Array<{ id: string }>;
+  assert.equal(registered.length, 1);
+  await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  const before = await prisma.desktopRemotePasskeyChallenge.count({ where: { userId: user.id } });
+  const stale = await call({ action: "options-command", command: answer(pc.deviceId, { digest: "b".repeat(64) }) });
+  assert.deepEqual([stale.status, stale.body.code], [409, "APPROVAL_CHANGED"]);
+  assert.deepEqual((await call({ action: "options-command", command: answer("no-such-device") })).status, 404);
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count({ where: { userId: user.id } }), before);
+  // An answer that was given meanwhile is said so before the person is asked for the passkey.
+  currentSession = session;
+  assert.equal((await commands.POST(new Request(`${SITE}/api/desktop/remote/commands`, {
+    method: "POST", body: JSON.stringify(answer(pc.deviceId, { decision: "deny" })), headers: { "Content-Type": "application/json", Origin: SITE },
+  }))).status, 201);
+  const answered = await call({ action: "options-command", command: answer(pc.deviceId) });
+  assert.deepEqual([answered.status, answered.body.code], [409, "ALREADY_ANSWERED"]);
 });
