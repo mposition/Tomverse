@@ -163,7 +163,7 @@ readAttempt: (
     if (running || failure || (pendingContent === null && !unconfirmed)) return;
     let inFlight: string | null = null;
     running = (async () => {
-      await reconcile();
+      if (unconfirmed) await reconcile();
       while (pendingContent !== null && !failure) {
         const next = pendingContent;
         pendingContent = null;
@@ -295,7 +295,7 @@ readAttempt: (
     try {
       // An unsettled write is settled before the terminal one; a read that
       // fails now is the turn's error -- nothing is written blind.
-      await reconcile();
+      if (unconfirmed) await reconcile();
       // Even when no new characters arrived since the last coalesced write,
       // the terminal path needs a fresh owner/revision/DB-clock CAS --
       // a write, not a read. Otherwise an expired writer whose final prefix

@@ -1937,9 +1937,14 @@ const ask = async (
   }
   if (behaviour === "silent") {
     // A first-token deadline closes the response before asynchronous cleanup.
-    // Wait for its final lease release before inspecting settlement or resetting
-    // the shared fixtures for the next test.
-    await until("the stalled fallback cleanup", () => ledger.releases.length > 0);
+    // Wait for its settlement and its lease release before inspecting either or
+    // resetting the shared fixtures for the next test. Both, because neither is
+    // last: the pull that the cancelled read resolves can release the lease
+    // while the settlement is still awaiting the attempt's final checkpoint.
+    await until(
+      "the stalled fallback cleanup",
+      () => ledger.releases.length > 0 && ledger.settlements.length > 0
+    );
   }
   return { response, ...read };
 };
