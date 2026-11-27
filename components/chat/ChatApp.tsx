@@ -75,6 +75,15 @@ import { researchRunMessage } from "@/lib/researchPreviewRunClient";
 import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
+import {
+  armSupersede,
+  canResendQuestion,
+  getSupersededIds,
+  lastReplaceableTurn,
+  markTurnSuperseded,
+  takeArmedSupersede,
+  withoutSuperseded,
+} from "@/lib/chatSupersededTurns";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
@@ -1639,6 +1648,12 @@ function ChatAppComponent({
       and the conversation's own mode is used everywhere else, so an ordinary
       send is identical to what it was before the override existed.
     */
+    // "Regenerate" / "edit" armed a replacement of the newest turn; the send
+    // that carries that exact question is where it becomes real, so a send
+    // that never starts leaves the earlier answer untouched.
+    const armedReplacement = takeArmedSupersede(targetChatId, text);
+    if (armedReplacement) markTurnSuperseded(targetChatId, armedReplacement);
+    const replacedIds = getSupersededIds(targetChatId);
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
@@ -2059,7 +2074,8 @@ function ChatAppComponent({
           // past them (lib/chatRequestLimits.ts).
           messages: researchMode ? [{ ...toChatRequestMessage(userMessage), id: sourceUserMessageId }] : fitChatRequestTranscript(
             requestTranscriptForScope(
-              messages,
+              // A turn the person replaced is not shown to the model again.
+              withoutSuperseded(messages, replacedIds),
               userMessage,
               transcriptScope
             )
@@ -2941,6 +2957,27 @@ function ChatAppComponent({
   }, [initialConversationId, onRetryPrompt, transcriptScope]);
 
   /**
+   * Asks the newest finished answer's question again ("Regenerate", "Try
+   * another model" once a model is chosen) or sends an edited copy of it.
+   *
+   * Both go through the shell's ordinary retry send, so the turn is validated,
+   * priced and charged like any question typed into the composer. Nothing is
+   * deleted: the replaced question and answer are noted as replaced
+   * (lib/chatSupersededTurns.ts) when the new send actually starts.
+   */
+  const handleReplaceLastTurn = useCallback((editedText?: string) => {
+    if (transcriptScope !== "conversation" || !onRetryPrompt || !initialConversationId ||
+        isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    const turn = lastReplaceableTurn(getChatRuntimeSnapshot(runtimeKeyRef.current).messages);
+    if (!turn || !canResendQuestion(turn)) return;
+    const text = (editedText ?? turn.question.content).trim();
+    if (!text) return;
+    armSupersede(initialConversationId, text, [turn.question.id, turn.answer.id]);
+    onRetryPrompt({ text, attachments: [], targetChatId: initialConversationId });
+  }, [initialConversationId, onRetryPrompt, transcriptScope]);
+  const handleRegenerateAnswer = useCallback(() => handleReplaceLastTurn(), [handleReplaceLastTurn]);
+
+  /**
    * Sends a concurrency-refused question again, in place of the refused turn.
    *
    * The refusal came before any provider call or reservation, so the turn
@@ -3481,6 +3518,9 @@ function ChatAppComponent({
           ? handleRetryQuestion : undefined}
         // In Chat the shell's close-model handler opens the model picker.
         onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
+        onRegenerateAnswer={transcriptScope === "conversation" && onRetryPrompt ? handleRegenerateAnswer : undefined}
+        onEditLastQuestion={transcriptScope === "conversation" && onRetryPrompt ? handleReplaceLastTurn : undefined}
+        enableQuote={transcriptScope === "conversation" && currentProduct === "chat"}
         // Built from this transcript, which is the one on screen.
         onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {

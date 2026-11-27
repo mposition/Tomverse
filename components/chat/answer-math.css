@@ -1,0 +1,12 @@
+@import "katex/dist/katex.min.css";
+
+/* A wide formula scrolls inside its own block instead of the whole list. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+}
+
+.katex {
+  font-size: 1.1em;
+}

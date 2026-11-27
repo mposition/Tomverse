@@ -72,13 +72,17 @@ export function formatConversationHeader(
     ].join("\n");
 }
 
+/** "User", the answering model's name, or "Assistant": the line both formats print. */
+export function formatExportMessageLabel(message: Pick<ExportMessage, "role" | "modelId">) {
+    return message.role === "user"
+        ? "User"
+        : message.modelId
+          ? displayNameFor(message.modelId)
+          : "Assistant";
+}
+
 export function formatExportMessage(message: ExportMessage) {
-    const label =
-        message.role === "user"
-            ? "User"
-            : message.modelId
-              ? displayNameFor(message.modelId)
-              : "Assistant";
+    const label = formatExportMessageLabel(message);
 
     return [
         "==================================================",
@@ -100,7 +104,7 @@ export function formatExportMessage(message: ExportMessage) {
  * become spaces. This is the document's title, not a filename, so nothing else
  * is substituted here.
  */
-function headerLineText(title: string) {
+export function headerLineText(title: string) {
     // Every C0 and C1 control (U+0085 NEL is a line break to some readers)
     // and the Unicode line and paragraph separators.
     return title.replace(CONTROL_CHARACTERS, " ");
@@ -195,15 +199,18 @@ function encodeRfc5987(value: string) {
  * with no name; a fallback with nothing of the title left in it is the generic
  * name instead, the same rule `asciiArtifactFilename()` settled on.
  */
-export function conversationExportContentDisposition(title: string) {
-    const fileName = `${sanitizeFileName(title)}${TEXT_EXTENSION}`;
+export function conversationExportContentDisposition(
+    title: string,
+    extension: ".txt" | ".md" = TEXT_EXTENSION
+) {
+    const fileName = `${sanitizeFileName(title)}${extension}`;
     // Sanitised again after the strip: removing "한" from "CON한" leaves a
     // reserved name, and removing a trailing word can leave a trailing dot.
     const asciiBase = sanitizeFileName(
-        fileName.slice(0, -TEXT_EXTENSION.length).replace(/[^\x20-\x7e]/g, "")
+        fileName.slice(0, -extension.length).replace(/[^\x20-\x7e]/g, "")
     );
     const asciiFileName = /[A-Za-z0-9]/.test(asciiBase)
-        ? `${asciiBase}${TEXT_EXTENSION}`
-        : `${FILE_NAME_FALLBACK}${TEXT_EXTENSION}`;
+        ? `${asciiBase}${extension}`
+        : `${FILE_NAME_FALLBACK}${extension}`;
     return `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeRfc5987(fileName)}`;
 }

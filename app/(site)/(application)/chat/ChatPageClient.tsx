@@ -111,6 +111,7 @@ import {
   useConversationDrafts,
   type PreparedDraftSend,
 } from "@/components/chat/useConversationDrafts";
+import { appendQuoteToDraft, subscribeChatQuote } from "@/lib/chatQuote";
 import {
   parseChatDraftMessageReceipt,
   parseChatMessageSaveResponse,
@@ -3595,6 +3596,17 @@ export function ChatPageClient({
     setDraftAttachments(prompt.attachments, prompt.targetChatId);
     setFocusToken((value) => value + 1);
   }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
+
+  // "Quote" on selected answer text: the quote is appended to the composer's
+  // draft through the same draft state typing uses, so the saved draft, the
+  // mobile composer and the send path see an ordinary edit (lib/chatQuote.ts).
+  useEffect(() => {
+    if (mountedSurface !== "chat") return;
+    return subscribeChatQuote((quote) => {
+      setInputValue((current) => appendQuoteToDraft(current, quote));
+      setFocusToken((value) => value + 1);
+    });
+  }, [mountedSurface, setInputValue]);
 
   useEffect(() => {
     // The /chat URL names its conversation; a continuation route already does.
@@ -9484,7 +9496,7 @@ export function ChatPageClient({
         // The sidebar passes the row title it already has; the file is named by
         // the server from the same row, so it is accepted and ignored here.
         _title?: string,
-        options: { includeSource?: boolean } = {}
+        options: { includeSource?: boolean; format?: "markdown" } = {}
     ) => {
         if (isGuestMode) return;
         // Fetched and saved from here rather than navigated to. Assigning
@@ -9493,7 +9505,7 @@ export function ChatPageClient({
         // navigated to, with the chat gone. See lib/browserDownload.ts.
         try {
             const response = await fetch(
-                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : ""}`,
+                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : ""}${!options.includeSource && options.format === "markdown" ? "?format=md" : ""}`,
                 {
                     cache: "no-store",
                     // The file is named with the date and words the list shows
@@ -9532,7 +9544,7 @@ export function ChatPageClient({
                 }
                 return;
             }
-            await saveResponseAsFile(response, "conversation.txt");
+            await saveResponseAsFile(response, options.format === "markdown" ? "conversation.md" : "conversation.txt");
         } catch {
             showToast(t("sidebar.downloadFailed"), "error");
         }

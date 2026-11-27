@@ -27,6 +27,7 @@ import {
 import { useSession } from "next-auth/react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
+import { chatTurnToolsCopy } from "@/locales/chatTurnTools";
 import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
 import Link from "next/link";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
@@ -114,7 +115,7 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string, options?: { includeSource?: boolean }) => void;
+    onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
@@ -1566,6 +1567,7 @@ export function ChatSidebar({
                 <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                     <input
+                        data-chat-shortcut-target="conversation-search"
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder={t("sidebar.searchPlaceholder")}
@@ -2640,6 +2642,27 @@ export function ChatSidebar({
                                                         ? t("sidebar.downloadContinuationOnlyTxt")
                                                         : t("sidebar.downloadTxt")}
                                                 </span>
+                                            </span>
+                                            {!canDownload && <Crown className={crownClass} />}
+                                        </button>
+                                        {/* Same plan, lock and permission checks as the text download: the route is the same. */}
+                                        <button
+                                            type="button"
+                                            data-testid="conversation-download-markdown"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (canDownload) {
+                                                    onDownload(conv.id, conv.title, { format: "markdown" });
+                                                    setOpenMenuId(null);
+                                                }
+                                            }}
+                                            disabled={!canDownload}
+                                            className={`${menuItemBase} ${!canDownload ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : !canDownload ? t("modelStatusReasons.upgradeRequired") : ""}
+                                        >
+                                            <span className="flex min-w-0 items-start gap-2">
+                                                <Download className={menuIconClass} />
+                                                <span>{chatTurnToolsCopy[lang].exportMarkdown}</span>
                                             </span>
                                             {!canDownload && <Crown className={crownClass} />}
                                         </button>
