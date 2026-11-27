@@ -67,6 +67,18 @@ against loopback responses (no provider/DB). It covers one execution across
 reopens, background completion, tabs and evidence, saved reload, changed input,
 identity scope, guest reuse, dark mode and mobile exclusion.
 
+## Classic and mobile AI Review while answers finish (2026-11-27)
+
+Classic and mobile keep their entry rule: two completed answers can be
+reviewed while another model is still generating (state 2 of
+`docs/ui-contracts/comparison-action-rail.md`). Their dialog is keyed by
+identity and conversation only. A newly finished answer refreshes the setup
+step, but never remounts or reloads a review that is running or being read:
+that run is billed for the answers it started with, and its saved result is
+looked up by that turn. Returning to the setup step catches up with the latest
+turn. Coverage: `node --import tsx scripts/verify-ai-review-dialog.mjs` (real
+dialog, loopback fixtures) and `tests/comparisonReviewDialogMount.test.mjs`.
+
 ## Continue a saved analysis in Chat (2026-11-14)
 
 Signed-in owners can preview a completed normal Review's current reviewer or

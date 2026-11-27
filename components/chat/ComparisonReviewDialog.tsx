@@ -462,6 +462,7 @@ export function ComparisonReviewDialog({
   onClose,
   onCompleted,
   onSignIn,
+  sourceRevision = 0,
 }: {
   conversationId: string | null;
   /**
@@ -476,6 +477,13 @@ export function ComparisonReviewDialog({
   onClose: () => void;
   onCompleted?: () => void;
   onSignIn?: () => void;
+  /**
+   * Bumped by the page whenever another model answer finishes. It refreshes
+   * the setup screen only (see `setupRevision`); it is deliberately not part
+   * of this component's key, because remounting would discard a run in flight
+   * or a result being read.
+   */
+  sourceRevision?: number;
 }) {
   const { t } = useLanguage();
   const { requestToken: requestGuestVerificationToken } = useGuestVerification();
@@ -493,6 +501,22 @@ export function ComparisonReviewDialog({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
+  /**
+   * The answers revision the setup on screen was loaded for.
+   *
+   * A newly finished answer has to refresh a *setup* screen: its scope, its
+   * estimate and its saved-result lookup all describe the latest turn. It
+   * must never reset a run in flight or a result being read. That run is
+   * billed for the answers it started with, and its saved result is looked up
+   * by that turn, so resetting the dialog under it left a paid result
+   * unreachable and put a second, separately billed run one click away. The
+   * revision is therefore followed only while the dialog is idle at its setup
+   * step, and caught up as soon as it returns there.
+   */
+  const [setupRevision, setSetupRevision] = useState(sourceRevision);
+  if (!running && !review && setupRevision !== sourceRevision) {
+    setSetupRevision(sourceRevision);
+  }
 
   /**
    * `reviewer:section:ordinal` -> the server-derived item id.
@@ -564,7 +588,7 @@ export function ComparisonReviewDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [conversationId, guestSource, open, t, mode, includeSynthesis]);
+  }, [conversationId, guestSource, open, t, mode, includeSynthesis, setupRevision]);
 
   useEffect(() => {
     if (open && !idempotencyKeyRef.current) {
