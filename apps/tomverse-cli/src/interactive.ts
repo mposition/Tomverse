@@ -46,6 +46,10 @@ export const renderApproval = (view: ApprovalView) => {
         lines.push("── Approval needed: read a web page ──");
         lines.push(`  site:    ${safeLine(view.web.host)}`, `  address: ${safeLine(view.web.url)}`);
         lines.push("  A plain request for this address goes to that site: no cookies, no login, nothing from your folder. Its text is sent to the model as untrusted reference material.");
+    } else if (view.webSearch) {
+        lines.push("── Approval needed: search the web ──");
+        for (const query of view.webSearch.queries) lines.push(`  query:   ${safeLine(query)}`);
+        lines.push("  These queries go to Tomverse's web search, which is charged to your credits (one price for the call, nothing if no search is served). The results are sent to the model as untrusted reference material.");
     } else if (view.command) {
         const plan = view.command;
         lines.push(plan.background ? "── Approval needed: run a command in the BACKGROUND ──" : "── Approval needed: run a command ──");
@@ -73,6 +77,7 @@ export const renderApproval = (view: ApprovalView) => {
 /** What is done without asking, shown so the person still sees every action. */
 export const renderRemembered = (view: ApprovalView, rule: RememberedRule) => {
     if (rule === "web_host") return safeText(`  · reading without asking (you allowed this site for this run): ${safeLine(view.web!.url)}`);
+    if (rule === "web_search") return safeText(`  · searching without asking (you allowed web searches for this run; each is still charged): ${view.webSearch!.queries.map(safeLine).join(" | ")}`);
     if (rule === "browser_origin") return safeText(`  · acting in the browser without asking (you allowed this site for this run): ${safeLine(view.browser!.selector)} on ${safeLine(view.browser!.origin)}`);
     if (rule === "computer_window") return safeText(`  · acting in a desktop window without asking (you allowed this window for this run): ${safeLine(view.computer!.window.title)}`);
     if (rule === "file_edits") {
@@ -85,6 +90,7 @@ export const renderRemembered = (view: ApprovalView, rule: RememberedRule) => {
 /** The question for one approval, with "always" only where it can be remembered. */
 export const approvalQuestion = (view: ApprovalView, canRemember: boolean) => {
     if (view.web) return "Read this page? [y] yes  [a] yes, and read pages from this site without asking for the rest of this run  [N] no: ";
+    if (view.webSearch) return "Search? [y] yes  [a] yes, and search without asking for the rest of this run (each search is still charged)  [N] no: ";
     if (view.patch) {
         return canRemember
             ? "Apply these changes? [y] yes  [a] yes, and allow file edits without asking for the rest of this run  [N] no: "

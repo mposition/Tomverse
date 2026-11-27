@@ -1339,6 +1339,13 @@ function Approval() {
         </dl>
         <p role="note">{request.tool === "browser_navigate" ? engineCopy.approvalBrowserOpenNote : engineCopy.approvalWebNote}</p>
       </section>}
+      {request.webSearch && <section aria-label={engineCopy.approvalWebSearchHeading} data-testid="approval-web-search">
+        <h2>{engineCopy.approvalWebSearchHeading}</h2>
+        <dl>
+          {request.webSearch.queries.map((query, index) => <Fragment key={index}><dt>{engineCopy.approvalWebSearchQuery}</dt><dd><code>{query}</code></dd></Fragment>)}
+        </dl>
+        <p role="note">{engineCopy.approvalWebSearchNote}</p>
+      </section>}
       {request.browser && <ApprovalBrowser browser={request.browser} copy={engineCopy} />}
       {request.computer && <ApprovalComputer computer={request.computer} language={language} />}
       {request.mcp && <section aria-label={extensionsCopy.approvalHeading}>

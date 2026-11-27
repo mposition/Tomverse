@@ -74,6 +74,9 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/code/v1/responses",
   "/api/code/anthropic/v1/messages",
   "/api/code/anthropic/v1/messages/count_tokens",
+  // The coding API's web search for the agent engine, on the same key and the
+  // same Bearer-only condition (default off: TOMVERSE_DESKTOP_WEB_SEARCH_ENABLED).
+  "/api/code/v1/web-search",
 ];
 
 const parseOrigin = (value: string | null) => {

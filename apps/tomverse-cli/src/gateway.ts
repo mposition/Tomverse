@@ -56,6 +56,72 @@ export type Receipt = {
     usage: { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number } | null;
 };
 
+/** What the web_search tool asks for: the same narrow input as Chat's search tool. */
+export type WebSearchInput = {
+    query: string | string[];
+    country?: string;
+    searchLang?: string;
+    freshness?: "day" | "week" | "month" | "year";
+};
+
+/** The Tomverse API's answer to one web search (POST /web-search). Text in it is third-party and untrusted. */
+export type WebSearchReply = {
+    requestId: string | null;
+    searches: Array<{
+        query: string | null;
+        status: string;
+        results?: Array<{ title: string; url: string; snippet?: string; publishedAt?: string }>;
+        reason?: string;
+        truncated?: boolean;
+    }>;
+    sources: string[];
+    notice: string | null;
+    /** Credits the request was charged; null when the server could not say yet. */
+    chargedCredits: number | null;
+};
+
+const textOf = (value: unknown, limit: number) => (typeof value === "string" && value ? value.slice(0, limit) : undefined);
+const webUrl = (value: unknown) => {
+    const url = textOf(value, 2_000);
+    return url && /^https?:\/\//i.test(url) ? url : undefined;
+};
+
+/** Reads the reply defensively: anything not of the documented shape is dropped, never passed on as it came. */
+const readWebSearchReply = (body: unknown): WebSearchReply => {
+    const record = (body ?? {}) as Record<string, unknown>;
+    if (record.object !== "tomverse.web_search" || !Array.isArray(record.searches)) {
+        throw new GatewayError("protocol", "The web search answer has an unexpected shape.");
+    }
+    const searches = (record.searches as unknown[]).slice(0, 8).map((value) => {
+        const entry = (value ?? {}) as Record<string, unknown>;
+        const results = Array.isArray(entry.results) ? (entry.results as unknown[]).slice(0, 10).flatMap((item) => {
+            const result = (item ?? {}) as Record<string, unknown>;
+            const url = webUrl(result.url);
+            if (!url) return [];
+            const snippet = textOf(result.snippet, 2_000);
+            const publishedAt = textOf(result.published_at, 40);
+            return [{ title: textOf(result.title, 300) ?? url, url, ...(snippet ? { snippet } : {}), ...(publishedAt ? { publishedAt } : {}) }];
+        }) : undefined;
+        const reason = textOf(entry.reason, 80);
+        return {
+            query: textOf(entry.query, 500) ?? null,
+            status: textOf(entry.status, 40) ?? "failed",
+            ...(results ? { results } : {}),
+            ...(reason ? { reason } : {}),
+            ...(entry.truncated === true ? { truncated: true } : {}),
+        };
+    });
+    const sources = Array.isArray(record.sources) ? (record.sources as unknown[]).flatMap((value) => webUrl(value) ?? []).slice(0, 25) : [];
+    const charged = record.charged_credits;
+    return {
+        requestId: textOf(record.request_id, 80) ?? null,
+        searches,
+        sources,
+        notice: textOf(record.notice, 1_000) ?? null,
+        chargedCredits: typeof charged === "number" && Number.isSafeInteger(charged) && charged >= 0 ? charged : null,
+    };
+};
+
 export type GatewayErrorKind = "http" | "network" | "tls" | "timeout" | "redirect" | "protocol" | "aborted" | "limit";
 
 export class GatewayError extends Error {
@@ -245,6 +311,35 @@ export class Gateway {
             throw new GatewayError("limit", "The API key needs available credits and a cap within the approved continuation limit.");
         }
         return { cap, remaining };
+    }
+
+    /**
+     * One web search through the Tomverse API (POST /web-search), charged to this key's account like a request and
+     * listed in its receipts. Never sent twice: the Idempotency-Key is the tool call's own, and a request whose answer
+     * was lost is reported, not repeated (its receipt says whether it was charged).
+     */
+    async webSearch(input: WebSearchInput, idempotencyKey: string, signal: AbortSignal): Promise<WebSearchReply> {
+        const body = {
+            query: input.query,
+            ...(input.country ? { country: input.country } : {}),
+            ...(input.searchLang ? { search_lang: input.searchLang } : {}),
+            ...(input.freshness ? { freshness: input.freshness } : {}),
+        };
+        const response = await this.send(this.url("/web-search"), {
+            method: "POST",
+            headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
+            body: JSON.stringify(body),
+            signal,
+            timeoutMs: 90_000,
+        });
+        if (!response.ok) throw await readError(response);
+        let parsed: unknown;
+        try {
+            parsed = await response.json();
+        } catch {
+            throw new GatewayError("protocol", "The web search answer is not JSON.");
+        }
+        return readWebSearchReply(parsed);
     }
 
     /**

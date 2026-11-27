@@ -345,6 +345,8 @@ export class Subagents {
         const ctx: ToolContext = { ...host.context() };
         delete ctx.background;
         delete ctx.web;
+        // A paid search is the main task's to ask about, never a subagent's.
+        delete ctx.webSearch;
         delete ctx.remember;
         delete ctx.instructionsFor;
         delete ctx.attachImage;

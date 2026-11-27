@@ -53,3 +53,16 @@ test("dictation and the voice conversation are offered only where Desktop's swit
   const unread = await load();
   assert.deepEqual([unread?.voiceInput, unread?.voiceConversation, unread?.chatWrite], [true, null, true]);
 });
+
+test("the Code agent's paid web search is given to runs only where the server that was reached offers it", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false } };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  assert.equal((await load())?.codeWebSearch, false, "an older server does not name it");
+  body = { ...body, desktopCodeWebSearch: false };
+  assert.equal((await load())?.codeWebSearch, false);
+  body = { ...body, desktopCodeWebSearch: true };
+  assert.equal((await load())?.codeWebSearch, true);
+  body = { ...body, desktopCodeWebSearch: "yes" };
+  assert.equal(await load().catch(() => null), null, "a value this build cannot read is not an offer");
+});

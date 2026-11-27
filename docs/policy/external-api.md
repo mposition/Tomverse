@@ -70,6 +70,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
+| `TOMVERSE_DESKTOP_WEB_SEARCH_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/code/v1/web-search`, the agent engine's paid web search (section 11.1), and Desktop's `desktopCodeWebSearch` capability. Off: 503 `feature_unavailable`, nothing searched or held. Needs a ready search backend (`BRAVE_SEARCH_API_KEY` and the `search-provider:brave` budget) as Chat's search does. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > Developer and Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
@@ -1014,6 +1015,48 @@ output contract are in `apps/tomverse-cli/README.md`.
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling
 `TOMVERSE_CLI_GUIDE_ENABLED` are separate approved steps.
+
+### 11.1 Web search for the agent engine (`POST /api/code/v1/web-search`)
+
+Owner direction 2026-11-27. The one route on the coding API that runs no model:
+the agent engine's `web_search` tool (the CLI and Desktop Code) asks Tomverse to
+search the web and gets back titles, addresses and short extracts, which its own
+model reads. Default off: `TOMVERSE_DESKTOP_WEB_SEARCH_ENABLED` must be exactly
+`true`, with `EXTERNAL_API_ENABLED`; otherwise 503 `feature_unavailable` before
+the key is read. Code: `lib/codeWebSearch.ts`, `lib/codeWebSearchCore.ts`.
+
+- **The search is Chat's** application-managed search, unchanged: the same
+  backend (Brave), backend readiness, query checks, result bounds, untrusted
+  notice and five-request session counter (`buildAppManagedWebSearchTool`). No
+  new provider and no new price.
+- **Request.** `{ query: string | string[1..5], country?, search_lang?,
+  freshness? }`, strict. Every query is checked before anything is held: one
+  that cannot be sent refuses the whole request (400 `invalid_query`), at no cost.
+- **Money** is Chat's search rule (`docs/policy/credit-and-cost-limits.md`,
+  "Application-managed web search"), on the shared reservation
+  (`ChatCreditReservation`, `source = external_api`, model id
+  `tomverse-web-search`, provider `brave`) built by `createSearchOnlyChatBudget`:
+  the flat `WEB_SEARCH_SURCHARGE_CREDITS` and the vendor's worst case (5 ×
+  5,000 µUSD) in `search-provider:brave`, no tokens and no model-provider hold.
+  One request is one search session, the unit a Chat turn's search is priced on:
+  the surcharge is charged when at least one backend request was served and
+  refunded in full otherwise; the vendor bucket settles to the requests served.
+  A client that leaves mid-search, and a hold that expires into the
+  reconciliation, are charged nothing and keep the vendor's authorized ceiling.
+- **Key, cap and receipts** as for every request: Bearer key, account list and
+  paid plan, the completions request-rate guard, the key cap inside the
+  reservation transaction, `Idempotency-Key` (a repeat gets the receipt, 409),
+  and a receipt with `protocol = web_search` (no CHECK constraint) that `/usage`
+  and Settings > API keys list. The Origin exemption is the exact path, on the
+  Bearer-only condition (`tests/externalApiBoundary.test.mjs`).
+- **The engine** offers the tool only when its host turns it on: the CLI with
+  `tomverse config set web-search on`, Desktop when the server's
+  `/api/products/chat/capabilities` says `desktopCodeWebSearch` (switch, API,
+  account list and a ready backend). Every call passes the approval and
+  permission mode like a command (a `web_search` rule names the tool), is sent
+  once with its own Idempotency-Key, shows its sources to the person, and is
+  never given to a read-only or plan session or to a subagent. The model
+  evaluation harness (`tools/code-eval`) does not turn it on.
 
 
 ### Coding API reasoning effort

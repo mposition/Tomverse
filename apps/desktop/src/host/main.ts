@@ -2840,7 +2840,9 @@ function loadCodeTerminal() {
 /** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
 function codeRunTools() {
   const { agent, inspection, web } = browserTools();
-  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(web ? { browserWeb: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}) };
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(web ? { browserWeb: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}),
+    // The paid web search only where the server this app reached offers it; the route checks the key, plan and credits again.
+    ...(state.capabilities?.codeWebSearch ? { webSearch: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.

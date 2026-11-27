@@ -5,6 +5,7 @@ import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
+import { codeWebSearchOffered } from "@/lib/codeWebSearch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
@@ -81,6 +82,9 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
     desktopBilling: desktopBillingEnabled(),
     desktopManagedCode: desktopManagedCodeEnabled(),
+    // The Code agent's web_search tool (POST /api/code/v1/web-search, the coding API's key and ledger). A Desktop build gives
+    // its runs the tool only where the server it reached says so; the route checks the key, plan and credits again.
+    desktopCodeWebSearch: codeWebSearchOffered(userId),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
     // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
     // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
