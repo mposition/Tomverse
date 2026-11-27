@@ -2789,10 +2789,13 @@ function ChatAppComponent({
       const artifacts = trailer?.artifacts ?? [];
       // A file the server kept is the answer even with no prose above it
       // (docs/policy/generated-artifacts.md section 8): the card is shown,
-      // with this screen's own sentence, instead of "empty response".
+      // with this screen's own sentence, instead of "empty response". A
+      // failure card alone is kept the same way -- it is what the server
+      // stored, and what a reload will show -- but it is not a reply.
       const fileOnlyAnswer =
         !assistantText.trim() &&
         artifacts.some((artifact) => artifact.status === "ready");
+      const cardOnlyAnswer = !assistantText.trim() && artifacts.length > 0;
 
       // The server stopped waiting for the provider and said so. Checked
       // before the empty-response branch below, and that order is the whole
@@ -2808,7 +2811,7 @@ function ChatAppComponent({
           ERROR_CLASSIFICATION_SOURCE.server,
           assistantText
         );
-      } else if (!assistantText.trim() && !fileOnlyAnswer) {
+      } else if (!assistantText.trim() && !cardOnlyAnswer) {
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: "normal", nonempty: false });
         if (requestTraceId && typeof window !== "undefined") {

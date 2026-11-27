@@ -1769,3 +1769,61 @@ test("an answer with neither text nor a file is still empty: no message, no char
   assert.deepEqual(world.artifactRows, []);
   assert.deepEqual(world.settlements, ["empty"]);
 });
+
+/*
+  The other half of the same decision (G4). A call the output ceiling cut off
+  is a `turn_incomplete` card the server records -- and with no text the
+  message used to be skipped, so the card the user saw while it streamed was
+  gone on reload, against section 9. The card is kept with its message; the
+  turn delivered no file, so it still settles as the empty answer it is.
+*/
+test("a turn_incomplete card with no text is stored with its message and settles empty", async () => {
+  const { trailer } = await ask({
+    begins: [beganTextFile],
+    executes: [],
+    finishReason: "length",
+    rawFinishReason: "max_tokens",
+    text: "",
+  });
+  assert.equal(trailer?.completion?.status, "incomplete");
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]!.failureCode, "turn_incomplete");
+  // The row's own id: the card is what a reload will find.
+  assert.equal(trailer?.artifacts?.[0]!.id, "row_1");
+  assert.deepEqual(
+    world.messages.map((message) => [message.id, message.status, message.content]),
+    [[ASSISTANT_MESSAGE_ID, "incomplete", ""]]
+  );
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.artifactRows[0]!.status, "failed");
+  assert.equal(world.artifactRows[0]!.failureCode, "turn_incomplete");
+  assert.deepEqual(world.settlements, ["empty"]);
+});
+
+test("a generation that failed with no text keeps its failure card and settles empty", async () => {
+  const { trailer } = await ask({
+    begins: [{ toolCallId: "collector_1", toolName: "create_text_file" }],
+    executes: ["collector_1"],
+    executeInput: { format: "txt", filename: "notes.txt", content: "x" },
+    text: "",
+  });
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]!.status, "failed");
+  assert.equal(trailer?.artifacts?.[0]!.id, "row_1");
+  assert.deepEqual(world.messages.map((message) => message.content), [""]);
+  assert.deepEqual(world.settlements, ["empty"]);
+});
+
+test("a delivered file and a failure card alone are settled differently", async () => {
+  await ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId], text: "" });
+  const delivered = [...world.settlements];
+  await ask({
+    begins: [beganTextFile],
+    executes: [],
+    finishReason: "length",
+    rawFinishReason: "max_tokens",
+    text: "",
+  });
+  const cardOnly = [...world.settlements];
+  assert.deepEqual([delivered, cardOnly], [["completed"], ["empty"]]);
+});

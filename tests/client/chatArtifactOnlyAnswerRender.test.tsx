@@ -53,3 +53,16 @@ test("an answer with prose keeps its own words above the card", () => {
   assert.match(html, /Your budget is ready\./);
   assert.doesNotMatch(html, /Here is the file you asked for\./);
 });
+
+test("a failure card alone is shown as the answer, with no sentence and no empty-response error", () => {
+  const html = render([question, { id: "a", role: "assistant", status: "incomplete",
+    content: "", modelId: "claude-haiku-4-5", artifacts: [{
+      ...readyFile, status: "failed" as const, failureCode: "turn_incomplete" as const,
+      format: "txt" as const, filename: "generated.txt", byteSize: 0,
+    }] }]);
+  assert.match(html, /data-testid="generated-artifact-card"[^>]*data-artifact-status="failed"/);
+  assert.match(html, /The answer ended before the file was finished\./);
+  assert.match(html, /data-testid="response-incomplete-notice"/);
+  assert.doesNotMatch(html, /Here is the file you asked for\./);
+  assert.doesNotMatch(html, /Generating a response/);
+});

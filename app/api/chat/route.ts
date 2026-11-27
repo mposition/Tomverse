@@ -6724,6 +6724,14 @@ async function handleChatPost(
         let usageSettlement: Promise<void> | null = null;
         let turnCancellation: Promise<void> | null = null;
         let completionCommitted = false;
+        /**
+         * Set by the completion branch when it is about to write the
+         * assistant Message. The Message transaction then performs the
+         * attempt's terminal CAS itself (and its failure path terminalizes
+         * the attempt as failed), so `settleSafely` must not terminalize the
+         * attempt first for a non-`completed` settlement.
+         */
+        let attemptTerminalWithMessage = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
         /**
          * Set once the client's connection is gone and the turn carries on
@@ -6885,7 +6893,11 @@ async function handleChatPost(
             if (!reservation) return Promise.resolve();
             usageSettlement = (async () => {
                 try {
-                    if (durableAttempt && outcome !== "completed") {
+                    if (
+                        durableAttempt &&
+                        outcome !== "completed" &&
+                        !attemptTerminalWithMessage
+                    ) {
                         try {
                             const checkpoint = durableCheckpointWriter
                                 ? await durableCheckpointWriter.flush(generatedText)
@@ -8665,6 +8677,12 @@ async function handleChatPost(
                           because its file would be unreachable the moment it
                           was written. The body stays empty; the sentence
                           above the card is the screen's own, in its language.
+
+                          A failure card alone (a call cut off by the output
+                          ceiling, `turn_incomplete`, or a generation that
+                          failed) is kept too, because section 9 promises the
+                          card survives a reload -- but nothing was delivered,
+                          so the turn still settles as the empty answer it is.
                         */
                         const answerHasText = Boolean(generatedText.trim());
                         const canPersistAnswer = Boolean(
@@ -8673,9 +8691,20 @@ async function handleChatPost(
                         const deliveredFiles =
                             canPersistAnswer &&
                             (artifactCollector?.stored.length ?? 0) > 0;
+                        const failureCardsOnly =
+                            canPersistAnswer &&
+                            !answerHasText &&
+                            !deliveredFiles &&
+                            (artifactCollector?.failed.length ?? 0) > 0;
                         const persistAnswer =
-                            canPersistAnswer && (answerHasText || deliveredFiles);
+                            canPersistAnswer &&
+                            (answerHasText || deliveredFiles || failureCardsOnly);
                         const answerDelivered = answerHasText || deliveredFiles;
+                        // The Message transaction owns this turn's attempt
+                        // terminal whenever it will write one -- including an
+                        // `empty` settlement that keeps a failure card -- so
+                        // the attempt and the Message agree on reload.
+                        attemptTerminalWithMessage = persistAnswer;
 
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;

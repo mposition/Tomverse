@@ -1086,17 +1086,20 @@ export function ChatMessageList({
             // rendered separately below as a de-emphasized auxiliary layer
             // (see errorAuxiliaryLines) rather than dropped entirely.
             const errorText = msg.recoveryNotice ?? msg.content;
-            // An answer whose only output is a file the server kept
+            // An answer whose only output is its file cards
             // (docs/policy/generated-artifacts.md section 8). The stored body
-            // is empty on purpose; the sentence above the card is this
-            // screen's own, so it is in the reader's language.
-            const fileOnlyAnswer =
+            // is empty on purpose; the sentence above a delivered file is
+            // this screen's own, so it is in the reader's language. A
+            // failure card alone gets no sentence: the card says what
+            // happened.
+            const cardOnlyAnswer =
               !isUser &&
               msg.role === "assistant" &&
               msg.status !== "error" &&
               !msg.content.trim() &&
-              Boolean(msg.artifacts?.some((artifact) => artifact.status === "ready"));
-            const displayContent = fileOnlyAnswer
+              (msg.artifacts?.length ?? 0) > 0;
+            const displayContent = cardOnlyAnswer &&
+              msg.artifacts!.some((artifact) => artifact.status === "ready")
               ? t("chat.artifactOnlyAnswer")
               : !isUser && msg.status === "error" && msg.recoveryNotice === undefined
                 ? msg.content.split("\n")[0]
@@ -1423,7 +1426,7 @@ export function ChatMessageList({
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
                     <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
-                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" && !fileOnlyAnswer ? (
+                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" && !cardOnlyAnswer ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
