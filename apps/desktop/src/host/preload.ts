@@ -210,6 +210,11 @@ if (trustedWindow) {
     previewImage: (id: string) => ipcRenderer.invoke("image:preview", id),
     saveImage: (input: Parameters<DesktopApi["saveImage"]>[0]) => ipcRenderer.invoke("image:save", input),
     saveArtifact: (input: Parameters<DesktopApi["saveArtifact"]>[0]) => ipcRenderer.invoke("artifact:save", input),
+    subscribeAttachmentPhase(listener: Parameters<DesktopApi["subscribeAttachmentPhase"]>[0]) {
+      const onPhase = (_event: Electron.IpcRendererEvent, phase: Parameters<typeof listener>[0]) => listener(phase);
+      ipcRenderer.on("attachment:phase", onPhase);
+      return () => ipcRenderer.removeListener("attachment:phase", onPhase);
+    },
     importDriveAttachments: (input: Parameters<DesktopApi["importDriveAttachments"]>[0]) => ipcRenderer.invoke("attachment:drive", input),
     checkDeepResearch: (id: string) => ipcRenderer.invoke("chat:research-status", id),
     uploadAttachment: (input: Parameters<DesktopApi["uploadAttachment"]>[0]) => ipcRenderer.invoke("attachment:upload", input),
