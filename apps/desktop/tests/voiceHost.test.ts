@@ -189,11 +189,18 @@ test("on sleep, a closing window, a quit or a lost account this process ends the
   // The caller can hold a quit or a sign-out on this: it resolves once the server has answered the stop.
   let answered = false;
   const ending = host.end(async (body) => { sent.push(body); await settle(); answered = true; return Response.json({ ok: true }); });
-  assert.equal(host.active(), false, "the session is over here at once");
-  assert.equal(aborted, true, "and its stream is closed at once");
+  assert.equal(aborted, true, "its stream is closed at once");
+  assert.equal(host.active(), true, "but it counts as open until the server has answered, so a close or a quit keeps waiting");
+  assert.equal(host.arm(), false, "and nothing new starts meanwhile");
+  // A second ending while the first is on its way (a sign-out during a sleep, a second close) waits for the same request.
+  let secondDone = false;
+  const second = host.end(async () => { throw new Error("a second stop request must not be sent"); }).then(() => { secondDone = true; });
+  await Promise.resolve();
+  assert.equal(secondDone, false);
   assert.equal(answered, false);
-  await ending;
+  await Promise.all([ending, second]);
   assert.equal(answered, true);
+  assert.equal(host.active(), false);
   assert.deepEqual(sent.at(-1), { action: "stop", reservationId: "voice-r7" });
   await settle();
   assert.deepEqual(events.at(-1), { id: first.id, end: "error" });

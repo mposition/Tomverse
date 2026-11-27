@@ -25,6 +25,8 @@ export function createVoiceHost(deps: {
   const now = deps.now ?? Date.now;
   let grant: { expiry: number; microphone: boolean } | undefined;
   let session: { id: string; reservation?: string } | undefined;
+  /** The one stop request that is on its way to the server; everything that ends a session waits for it. */
+  let ending: Promise<void> | undefined;
   const live = new Map<string, AbortController>();
   const fresh = () => Boolean(grant && now() < grant.expiry);
 
@@ -59,7 +61,7 @@ export function createVoiceHost(deps: {
   return {
     /** The person pressed Start: the next microphone request from the main window is theirs, for a few seconds. */
     arm() {
-      if (!deps.allowed() || session) return false;
+      if (!deps.allowed() || session || ending) return false;
       grant = { expiry: now() + PRESS_SECONDS * 1_000, microphone: false };
       return true;
     },
@@ -71,8 +73,8 @@ export function createVoiceHost(deps: {
       grant.microphone = true;
       grant.expiry = now() + PRESS_SECONDS * 1_000;
     },
-    /** Whether a session's event stream is open. */
-    active: () => session !== undefined,
+    /** Whether a session is open, or the server has not yet answered that it is over. A close or a quit waits while this holds. */
+    active: () => session !== undefined || ending !== undefined,
 
     async request({ id, body }: VoiceRequestInput): Promise<VoiceReply> {
       // Ending a session and reading what it cost stay possible after the feature is withdrawn, as on the server.
@@ -81,7 +83,7 @@ export function createVoiceHost(deps: {
         // A session starts only behind the microphone the person just opened for it, once, and one at a time.
         const pressed = Boolean(grant?.microphone && fresh());
         grant = undefined;
-        if (!pressed || session) return refused("VOICE_SESSION_REFUSED");
+        if (!pressed || session || ending) return refused("VOICE_SESSION_REFUSED");
         session = { id };
       }
       if (live.has(id) || live.size >= MAX_LIVE_REQUESTS) {
@@ -121,19 +123,23 @@ export function createVoiceHost(deps: {
      * an account that is going, where the window may never get to act. The open requests are closed at once, and the
      * server is asked to stop the session. It resolves when the server has answered, or after three seconds, so the
      * caller can hold a sign-out or a quit until then. `send` is for a sign-out, whose token is about to go.
+     * Every caller waits for the same request: a second ending while one is on its way does not pass it by.
      */
-    async end(send: (body: VoiceBody, signal: AbortSignal) => Promise<Response> = deps.send) {
+    end(send: (body: VoiceBody, signal: AbortSignal) => Promise<Response> = deps.send): Promise<void> {
       const had = grant !== undefined || live.size > 0;
       grant = undefined;
       const reservation = session?.reservation;
       session = undefined;
-      const asked = reservation
-        ? send({ action: "stop", reservationId: reservation }, AbortSignal.timeout(3_000))
-          .then((response) => response.body?.cancel()).catch(() => { /* The closed stream ends it on the server as well. */ })
-        : undefined;
       for (const controller of live.values()) controller.abort();
       if (had) deps.notifyStop();
-      await asked;
+      if (reservation) {
+        const asked: Promise<void> = Promise.resolve()
+          .then(() => send({ action: "stop", reservationId: reservation }, AbortSignal.timeout(3_000)))
+          .then((response) => response.body?.cancel(), () => { /* The closed stream ends it on the server as well. */ })
+          .then(() => { if (ending === asked) ending = undefined; });
+        ending = asked;
+      }
+      return ending ?? Promise.resolve();
     },
   };
 }
