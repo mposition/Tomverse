@@ -256,3 +256,14 @@ test("an old client reading a new trailer still gets its citations", () => {
   assert.deepEqual(parsed.searchMetadata, execution);
   assert.equal(parsed.completion.status, "incomplete");
 });
+
+test("notSaved round-trips only as true, and alone still makes an envelope", () => {
+  const json = (trailer) =>
+    splitSearchMetadataTrailer(buildChatStreamTrailerChunk(trailer)).searchMetadataJson;
+  assert.equal(parseChatStreamTrailer(json({ searchMetadata: null, notSaved: true }))?.notSaved, true);
+  assert.equal(parseChatStreamTrailer(json({ searchMetadata: null }))?.notSaved, undefined);
+  assert.equal(parseChatStreamTrailer(JSON.stringify({ notSaved: "yes" }))?.notSaved, undefined);
+  const alone = parseChatStreamTrailer(JSON.stringify({ notSaved: true }));
+  assert.equal(alone?.notSaved, true);
+  assert.equal(alone?.searchMetadata, null);
+});

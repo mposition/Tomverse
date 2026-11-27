@@ -420,6 +420,7 @@ export const pt = {
         responseComplete: "Resposta concluída.",
         responseIncomplete: "A resposta parou no limite de comprimento de saída.",
         responseIncompleteNotice: "A resposta foi interrompida pelo limite de comprimento de saída. Você pode continuar com uma pergunta de acompanhamento.",
+        responseNotSavedNotice: "Esta resposta não foi salva. Ela não aparecerá depois que você recarregar a página.",
         responseFailed: "A solicitação falhou.",
         traceId: "ID de rastreamento",
         showDiagnostics: "Ver informações de diagnóstico",

@@ -429,6 +429,7 @@ export const zh = {
         responseComplete: "回复已完成。",
         responseIncomplete: "回复因输出长度上限而中断。",
         responseIncompleteNotice: "回复因输出长度上限而中断。你可以通过追问继续。",
+        responseNotSavedNotice: "此回复未能保存，刷新后将不再显示。",
         responseFailed: "请求失败。",
         traceId: "追踪 ID",
         showDiagnostics: "查看诊断信息",

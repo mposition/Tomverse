@@ -204,6 +204,21 @@ Message and complete its attempt rolls back, settlement is not repeated and the
 attempt is immediately terminalised as a public-safe internal failure rather
 than remaining active until lease expiry.
 
+That transaction is re-run, up to twice after short backoffs, when it fails
+with a retryable database error (`isRetryableDatabaseError`). A failed COMMIT
+has an unknown outcome, so before each re-run (and after the last failure) the
+route reads this turn's assistant Message back; finding its own body and model
+means the earlier try committed and nothing is written again. If that read
+fails too, the outcome stays unknown and the write is not retried. A rollback
+leaves the final checkpoint revision unchanged, so the re-run's terminal CAS
+names the same revision. Settlement still runs before the transaction and is
+not reversed when the write finally fails: the answer was shown and the
+provider ran. A turn without an attempt row (Review panels and other
+non-durable callers) whose Message still cannot be written receives
+`notSaved: true` in its stream trailer, and the browser shows a localized
+"this answer was not saved" notice under the answer instead of ending as if it
+were saved.
+
 Finish reasons and failure codes are closed, public-safe classifications shared
 by runtime parsing and database constraints. A failed attempt must use the
 generic `error` finish reason and one of the approved coarse failure codes.

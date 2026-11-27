@@ -7,6 +7,7 @@ import {
   isCheckViolationDatabaseError,
   isRetryableDatabaseError,
   isUniqueConstraintDatabaseError,
+  runRetryableDatabaseWrite,
 } from "../lib/databaseError.ts";
 
 /**
@@ -98,4 +99,127 @@ test("exposes a sanitized driver cause for operational diagnosis", () => {
     driverCode: "ETIMEDOUT",
     message: "connection timed out",
   });
+});
+
+/*
+  runRetryableDatabaseWrite: the assistant Message write's retry
+  (app/api/chat/route.ts). A retryable failure is re-run only after a read
+  says the failed try did not commit -- a dropped COMMIT has an unknown
+  outcome, and a blind re-run would write twice.
+*/
+const writeConflict = () =>
+  Object.assign(new Error("write conflict"), {
+    name: "PrismaClientKnownRequestError",
+    code: "P2034",
+  });
+const noSleep = async () => undefined;
+
+test("a retryable failure that did not commit is run again", async () => {
+  let writes = 0;
+  const retries = [];
+  const outcome = await runRetryableDatabaseWrite({
+    write: async () => {
+      writes += 1;
+      if (writes === 1) throw writeConflict();
+    },
+    committed: async () => false,
+    sleep: noSleep,
+    onRetry: (retry) => retries.push(retry.attempt),
+  });
+  assert.equal(outcome, "written");
+  assert.equal(writes, 2);
+  assert.deepEqual(retries, [1]);
+});
+
+test("a failed try that in fact committed is not written twice", async () => {
+  let writes = 0;
+  const outcome = await runRetryableDatabaseWrite({
+    write: async () => {
+      writes += 1;
+      throw writeConflict();
+    },
+    committed: async () => true,
+    sleep: noSleep,
+  });
+  assert.equal(outcome, "already_committed");
+  assert.equal(writes, 1);
+});
+
+test("a non-retryable failure is thrown at once, with no commit check", async () => {
+  const unique = Object.assign(new Error("duplicate"), { code: "P2002" });
+  let checks = 0;
+  await assert.rejects(
+    runRetryableDatabaseWrite({
+      write: async () => {
+        throw unique;
+      },
+      committed: async () => {
+        checks += 1;
+        return false;
+      },
+      sleep: noSleep,
+    }),
+    (error) => error === unique
+  );
+  assert.equal(checks, 0);
+});
+
+test("an unreadable outcome is never retried", async () => {
+  const conflict = writeConflict();
+  let writes = 0;
+  await assert.rejects(
+    runRetryableDatabaseWrite({
+      write: async () => {
+        writes += 1;
+        throw conflict;
+      },
+      committed: async () => {
+        throw new Error("database still down");
+      },
+      sleep: noSleep,
+    }),
+    (error) => error === conflict
+  );
+  assert.equal(writes, 1);
+});
+
+test("at most two more tries, then the last failure is checked once more and thrown", async () => {
+  let writes = 0;
+  let checks = 0;
+  const delays = [];
+  const conflict = writeConflict();
+  await assert.rejects(
+    runRetryableDatabaseWrite({
+      write: async () => {
+        writes += 1;
+        throw conflict;
+      },
+      committed: async () => {
+        checks += 1;
+        return false;
+      },
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    }),
+    (error) => error === conflict
+  );
+  assert.equal(writes, 3);
+  assert.equal(checks, 3);
+  assert.deepEqual(delays, [150, 500, 150]);
+});
+
+test("a last try that turns out to have committed is reported as committed", async () => {
+  let checks = 0;
+  const outcome = await runRetryableDatabaseWrite({
+    write: async () => {
+      throw writeConflict();
+    },
+    committed: async () => {
+      checks += 1;
+      return checks === 3;
+    },
+    sleep: noSleep,
+  });
+  assert.equal(outcome, "already_committed");
 });

@@ -401,6 +401,7 @@ export const ko = {
         responseComplete: "응답이 완료되었습니다.",
         responseIncomplete: "출력 길이 제한으로 답변이 중단되었습니다.",
         responseIncompleteNotice: "출력 길이 제한으로 답변이 중단되었습니다. 후속 질문으로 이어서 요청할 수 있습니다.",
+        responseNotSavedNotice: "이 답변은 저장되지 않았습니다. 새로고침하면 보이지 않습니다.",
         responseFailed: "요청이 실패했습니다.",
         traceId: "추적 ID",
         showDiagnostics: "진단 정보 보기",

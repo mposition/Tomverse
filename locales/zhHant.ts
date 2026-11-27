@@ -424,6 +424,7 @@ export const zhHant = {
         responseComplete: "回覆已完成。",
         responseIncomplete: "回覆因輸出長度上限而中斷。",
         responseIncompleteNotice: "回覆因輸出長度上限而中斷。你可以透過追問繼續。",
+        responseNotSavedNotice: "此回覆未能儲存，重新整理後將不再顯示。",
         responseFailed: "請求失敗。",
         traceId: "追蹤 ID",
         showDiagnostics: "查看診斷資訊",

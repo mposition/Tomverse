@@ -402,6 +402,7 @@ export const en = {
         responseComplete: "Response complete.",
         responseIncomplete: "The response stopped at the output length limit.",
         responseIncompleteNotice: "The response was cut off by the output length limit. You can ask a follow-up question to continue.",
+        responseNotSavedNotice: "This answer was not saved. It will not appear after you reload.",
         responseFailed: "The request failed.",
         traceId: "Trace ID",
         showDiagnostics: "Show diagnostic info",

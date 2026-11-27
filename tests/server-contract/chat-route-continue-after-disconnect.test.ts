@@ -252,7 +252,11 @@ mock.module(mod("lib/apiSecurity.ts"), {
 /* The database                                                                */
 /* -------------------------------------------------------------------------- */
 
-const world = { messages: [] as Array<{ id: string; content?: unknown }> };
+const world = {
+  messages: [] as Array<{ id: string; content?: unknown }>,
+  /** Errors the next assistant `message.create` calls throw, in order. */
+  createFailures: [] as unknown[],
+};
 
 const DEFAULTS: Record<string, () => unknown> = {
   findUnique: () => null,
@@ -290,6 +294,8 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
   message: {
     findFirst: () => ({ id: SOURCE_MESSAGE_ID }),
     create: (args: { data: { id: string; content?: unknown } }) => {
+      const failure = world.createFailures.shift();
+      if (failure) throw failure;
       world.messages.push({ ...args.data });
       return args.data;
     },
@@ -550,4 +556,46 @@ test("a stop that meets the final checkpoint settles as a stop, never as a free 
   assert.equal(ledger.settlements[0].outcome, "cancelled");
   assert.notEqual(ledger.settlements[0].outcome, "failed");
   assert.deepEqual(world.messages, []);
+});
+
+/*
+  S3 on the durable path. The Message transaction also carries the attempt's
+  terminal CAS, so a re-run after a rollback has to land on the same final
+  checkpoint revision -- and does, because a rollback moves nothing.
+*/
+const retryableWriteError = () =>
+  Object.assign(new Error("connection closed"), {
+    name: "PrismaClientKnownRequestError",
+    code: "P1017",
+  });
+
+test("a durable turn whose Message write fails once is retried and completes once", async () => {
+  world.createFailures = [retryableWriteError()];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    await readToEnd();
+    await until("the saved answer", () => world.messages.length > 0);
+    assert.equal(world.messages.length, 1);
+    assert.equal(world.messages[0].content, "Partial. The end.");
+    assert.deepEqual(terminals.map((t) => t.status), ["completed"]);
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
+  } finally {
+    world.createFailures = [];
+  }
+});
+
+test("a durable turn whose Message write keeps failing ends failed, still settled once", async () => {
+  world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    assert.deepEqual(world.messages, []);
+    assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
+  } finally {
+    world.createFailures = [];
+  }
 });

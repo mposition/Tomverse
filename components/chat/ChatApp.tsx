@@ -2826,7 +2826,9 @@ function ChatAppComponent({
           // "pick another model" is the wrong advice then (2026-11-21).
           `${t(trailer?.failure?.kind === "attachment_rejected"
             ? "chat.responseAttachmentRejected"
-            : "chat.responseEmpty")}${
+            : trailer?.notSaved
+              ? "chat.responseNotSavedNotice"
+              : "chat.responseEmpty")}${
             requestTraceId
               ? `\n${t("chat.traceId")}: ${requestTraceId}`
               : ""
@@ -2863,6 +2865,8 @@ function ChatAppComponent({
             artifacts,
             isGeneratingArtifact: false,
             generatingArtifactFormat: undefined,
+            // The server could not save this answer; say so under it.
+            ...(trailer?.notSaved ? { notSaved: true as const } : {}),
             ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
             // Only when the Router chose it, and only when the answer did not
             // then fall back to something else: `retryingWithModelId` means a

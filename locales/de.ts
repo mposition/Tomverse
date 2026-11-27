@@ -409,6 +409,7 @@ export const de = {
         responseComplete: "Antwort abgeschlossen.",
         responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
         responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",
+        responseNotSavedNotice: "Diese Antwort wurde nicht gespeichert. Nach dem Neuladen ist sie nicht mehr zu sehen.",
         responseFailed: "Die Anfrage ist fehlgeschlagen.",
         traceId: "Trace-ID",
         showDiagnostics: "Diagnoseinformationen anzeigen",

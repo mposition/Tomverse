@@ -1945,6 +1945,19 @@ export function ChatMessageList({
                       {t("chat.responseIncompleteNotice")}
                     </p>
                   )}
+                  {/*
+                    The server streamed this answer and could not save it, so
+                    a reload will not show it. Only ever on the live message:
+                    the flag is runtime-only and never serialized.
+                  */}
+                  {!isUser && msg.notSaved && msg.status !== "error" && (
+                    <p
+                      data-testid="response-not-saved-notice"
+                      className="mt-3 border-t border-zinc-200 pt-2 text-[11px] leading-4 font-semibold text-zinc-500 dark:border-zinc-700/60 dark:text-zinc-400"
+                    >
+                      {t("chat.responseNotSavedNotice")}
+                    </p>
+                  )}
                   {!isUser && msg.status === "cancelled" && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
                       <span className="inline-flex items-center rounded-full bg-zinc-200 px-2.5 py-1 text-[11px] font-bold text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">

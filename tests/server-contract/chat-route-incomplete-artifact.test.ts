@@ -134,6 +134,14 @@ const world = {
   settlements: [] as string[],
   /** How many stored objects the route handed back for reclamation. */
   discarded: 0,
+  /**
+   * Errors the next assistant `message.create` calls throw, in order. With
+   * `landsBeforeThrow`, the row is recorded first -- a COMMIT that went
+   * through on a connection that then dropped.
+   */
+  messageCreateFailures: [] as unknown[],
+  landsBeforeThrow: false,
+  messageCreateCalls: 0,
   providerContexts: [] as Array<{ messageId: string }>,
   uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
     sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
@@ -296,14 +304,23 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     }),
   },
   message: {
-    findFirst: () => ({ id: "user-message-1" }),
+    // The route's commit check reads the assistant row back; every other
+    // lookup is the source prompt.
+    findFirst: ((args: { where?: { id?: string; role?: string } }) =>
+      args?.where?.role === "assistant"
+        ? world.messages.find((message) => message.id === args.where?.id) ?? null
+        : { id: "user-message-1" }) as (args: never) => unknown,
     create: (args: { data: { id: string; status: string; modelId: string; content?: string } }) => {
+      world.messageCreateCalls += 1;
+      const failure = world.messageCreateFailures.shift();
+      if (failure && !world.landsBeforeThrow) throw failure;
       world.messages.push({
         id: args.data.id,
         status: args.data.status,
         modelId: args.data.modelId,
         content: args.data.content,
       });
+      if (failure) throw failure;
       return args.data;
     },
   },
@@ -695,6 +712,7 @@ const ask = async (
   world.providerContexts = [];
   world.settlements = [];
   world.discarded = 0;
+  world.messageCreateCalls = 0;
   lastStreamTextOptions = null;
   networkCalls = 0;
 
@@ -1826,4 +1844,84 @@ test("a delivered file and a failure card alone are settled differently", async 
   });
   const cardOnly = [...world.settlements];
   assert.deepEqual([delivered, cardOnly], [["completed"], ["empty"]]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The Message write that fails                                                 */
+/* -------------------------------------------------------------------------- */
+
+/*
+  S3. Settlement runs before the Message transaction and is not rolled back
+  with it -- the user read the answer and the provider ran. What changed is how
+  often the write is lost: a retryable database error is run again, up to
+  twice, once a read shows the failed try did not land; and a turn with no
+  attempt row that still cannot be saved says so in the trailer.
+*/
+const retryableWriteError = () =>
+  Object.assign(new Error("write conflict"), {
+    name: "PrismaClientKnownRequestError",
+    code: "P2034",
+  });
+type NotSavedTrailer = { notSaved?: true } | null;
+const withMessageCreateFailures = async <T,>(
+  failures: unknown[],
+  landsBeforeThrow: boolean,
+  run: () => Promise<T>
+): Promise<T> => {
+  world.messageCreateFailures = failures;
+  world.landsBeforeThrow = landsBeforeThrow;
+  try {
+    return await run();
+  } finally {
+    world.messageCreateFailures = [];
+    world.landsBeforeThrow = false;
+  }
+};
+
+test("a retryable failure of the Message write is run again and the answer is saved once", async () => {
+  const { trailer } = await withMessageCreateFailures([retryableWriteError()], false, () =>
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
+  );
+  assert.equal(world.messageCreateCalls, 2);
+  assert.deepEqual(world.messages.map((message) => message.content), [ANSWER]);
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.discarded, 0);
+  assert.equal(trailer?.artifacts?.[0]!.status, "ready");
+  assert.equal((trailer as NotSavedTrailer)?.notSaved, undefined);
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+test("a write that landed before its error is found, not written a second time", async () => {
+  const { trailer } = await withMessageCreateFailures([retryableWriteError()], true, () =>
+    ask({})
+  );
+  assert.equal(world.messageCreateCalls, 1, "the landed write was run again");
+  assert.equal(world.messages.length, 1);
+  assert.equal((trailer as NotSavedTrailer)?.notSaved, undefined);
+});
+
+test("a write that keeps failing tells the browser the answer was not saved; billing is unchanged", async () => {
+  const failures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
+  const { body, trailer } = await withMessageCreateFailures(failures, false, () =>
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
+  );
+  assert.equal(world.messageCreateCalls, 3, "two more tries, no more");
+  assert.deepEqual(world.messages, []);
+  assert.ok(body.startsWith(ANSWER), "the answer still streamed");
+  assert.equal((trailer as NotSavedTrailer)?.notSaved, true);
+  // The file's row was never written, so neither is its card.
+  assert.equal(trailer?.artifacts, undefined);
+  assert.equal(world.discarded, 1);
+  // Settled before the write, and not rolled back with it.
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+test("a non-retryable Message write failure is not retried", async () => {
+  const refusal = Object.assign(new Error("duplicate"), {
+    name: "PrismaClientKnownRequestError",
+    code: "P2002",
+  });
+  const { trailer } = await withMessageCreateFailures([refusal], false, () => ask({}));
+  assert.equal(world.messageCreateCalls, 1);
+  assert.equal((trailer as NotSavedTrailer)?.notSaved, true);
 });

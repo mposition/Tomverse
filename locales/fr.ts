@@ -420,6 +420,7 @@ export const fr = {
         responseComplete: "Réponse terminée.",
         responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
         responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
+        responseNotSavedNotice: "Cette réponse n'a pas été enregistrée. Elle n'apparaîtra plus après le rechargement.",
         responseFailed: "La requête a échoué.",
         traceId: "ID de suivi",
         showDiagnostics: "Afficher les informations de diagnostic",

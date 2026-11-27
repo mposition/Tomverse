@@ -90,6 +90,57 @@ export const isRetryableDatabaseError = (error: unknown) => {
   );
 };
 
+/** Backoff before each re-run of a write that failed retryably: two more tries. */
+export const DATABASE_WRITE_RETRY_DELAYS_MS: readonly number[] = [150, 500];
+/** The pause before asking whether the last failed try committed after all. */
+const FINAL_COMMIT_CHECK_DELAY_MS = 150;
+
+/**
+ * Runs a database write again when it failed with a retryable error -- but
+ * only once the failed try is known not to have committed.
+ *
+ * A retryable error does not prove a rollback: a connection that drops during
+ * COMMIT leaves the outcome unknown, and running the write again blindly would
+ * duplicate it. So every failure is followed by `committed()`, after a short
+ * pause, and a write that turns out to have landed is reported as
+ * `already_committed` instead of being run again. If that read fails too, the
+ * outcome stays unknown and the original error is thrown, never retried.
+ *
+ * `write` must be safe to run again after a rollback: one transaction, with
+ * nothing outside it that the first try already changed.
+ */
+export async function runRetryableDatabaseWrite(input: {
+  write: () => Promise<unknown>;
+  committed: () => Promise<boolean>;
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  onRetry?: (retry: { attempt: number; error: unknown }) => void;
+}): Promise<"written" | "already_committed"> {
+  const pending = [...(input.delaysMs ?? DATABASE_WRITE_RETRY_DELAYS_MS)];
+  const sleep =
+    input.sleep ??
+    ((ms: number) => new Promise<void>((settle) => setTimeout(settle, ms)));
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await input.write();
+      return "written";
+    } catch (error) {
+      if (!isRetryableDatabaseError(error)) throw error;
+      const delay = pending.shift();
+      await sleep(delay ?? FINAL_COMMIT_CHECK_DELAY_MS);
+      let committed: boolean;
+      try {
+        committed = await input.committed();
+      } catch {
+        throw error;
+      }
+      if (committed) return "already_committed";
+      if (delay === undefined) throw error;
+      input.onRetry?.({ attempt, error });
+    }
+  }
+}
+
 export const isUniqueConstraintDatabaseError = (error: unknown) => {
   const metadata = databaseErrorMetadata(error);
   return (

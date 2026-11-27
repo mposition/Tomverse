@@ -526,6 +526,10 @@ import {
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import {
+    databaseErrorMetadata,
+    runRetryableDatabaseWrite,
+} from "@/lib/databaseError";
+import {
     createChatResponseAttemptCheckpointWriter,
     type ChatResponseAttemptCheckpointWriter,
 } from "@/lib/chatDurableAttemptStream";
@@ -8755,6 +8759,10 @@ async function handleChatPost(
                         */
                         let artifactsForTrailer: ChatStreamArtifact[] =
                             artifactCollector?.toStreamArtifacts() ?? [];
+                        /** The Message transaction committed (or was found to have). */
+                        let messageCommitted = false;
+                        /** A non-durable answer the browser is showing that was not saved. */
+                        let answerNotSaved = false;
                         if (persistAnswer && conversationId && assistantMessageId) {
                             try {
                                 // A file-only answer is stored with no body,
@@ -8800,7 +8808,17 @@ async function handleChatPost(
                                               responseResult.value.messages
                                           )
                                         : null;
-                                await prisma.$transaction(async (tx) => {
+                                /*
+                                  One transaction, safe to run again: a
+                                  rollback undoes the Message, its receipt,
+                                  provider context and artifact rows (which
+                                  are `skipDuplicates` besides) and the
+                                  attempt's terminal CAS, whose expected
+                                  revision is the final checkpoint's and does
+                                  not move. Nothing outside it changes. See
+                                  `runRetryableDatabaseWrite` below.
+                                */
+                                const writeAssistantMessage = () => prisma.$transaction(async (tx) => {
                                     await assertMessageCapacity(
                                         tx,
                                         session!.user!.id,
@@ -8955,6 +8973,51 @@ async function handleChatPost(
                                         );
                                     }
                                 });
+                                /*
+                                  A transient database failure here used to
+                                  lose an answer the user had already read
+                                  (and paid for). It is run again, up to twice
+                                  -- but a failed COMMIT leaves its outcome
+                                  unknown, so before each re-run the Message is
+                                  looked up: this turn's own row, with this
+                                  turn's own body and model, means the earlier
+                                  try landed and nothing is written twice.
+                                */
+                                await runRetryableDatabaseWrite({
+                                    write: writeAssistantMessage,
+                                    committed: async () => {
+                                        const landed = await prisma.message.findFirst({
+                                            where: {
+                                                id: assistantMessageId,
+                                                conversationId,
+                                                role: "assistant",
+                                            },
+                                            select: { content: true, modelId: true },
+                                        });
+                                        return (
+                                            landed !== null &&
+                                            landed.content === storedContent &&
+                                            landed.modelId === dispatched.modelId
+                                        );
+                                    },
+                                    onRetry: ({ attempt, error }) => {
+                                        const metadata = databaseErrorMetadata(error);
+                                        console.warn(
+                                            JSON.stringify({
+                                                event: "assistant_message_persist_retry",
+                                                traceId,
+                                                modelId: dispatched.modelId,
+                                                attempt,
+                                                errorName: metadata.errorName,
+                                                errorCode: metadata.errorCode ?? null,
+                                                driverKind: metadata.driverKind ?? null,
+                                                driverCode: metadata.driverCode ?? null,
+                                                timestamp: new Date().toISOString(),
+                                            })
+                                        );
+                                    },
+                                });
+                                messageCommitted = true;
                                 durableAttempt = null;
                                 durableCheckpointWriter = null;
                                 if (artifactCollector && !artifactCollector.isEmpty) {
@@ -8991,19 +9054,34 @@ async function handleChatPost(
                                     error,
                                     dispatched.modelId
                                 );
-                                /*
-                                  The message did not land, so nothing can
-                                  ever reach these objects: no row references
-                                  them and no route accepts a key. Reclaimed
-                                  now, and swept later if this fails too.
+                                if (messageCommitted) {
+                                    // Only the read-back after the commit
+                                    // failed. The Message and its rows exist,
+                                    // so their objects stay and the answer is
+                                    // saved; the cards keep the ids they had.
+                                    artifactsPersisted = true;
+                                } else {
+                                    /*
+                                      The message did not land, so nothing can
+                                      ever reach these objects: no row
+                                      references them and no route accepts a
+                                      key. Reclaimed now, and swept later if
+                                      this fails too.
 
-                                  The cards are dropped from the trailer in
-                                  the same breath. Showing a download button
-                                  for a file whose row does not exist would be
-                                  the one failure this feature must not have.
-                                */
-                                await artifactCollector?.discard();
-                                artifactsForTrailer = [];
+                                      The cards are dropped from the trailer in
+                                      the same breath. Showing a download
+                                      button for a file whose row does not
+                                      exist would be the one failure this
+                                      feature must not have.
+                                    */
+                                    await artifactCollector?.discard();
+                                    artifactsForTrailer = [];
+                                    // A turn without an attempt row has no
+                                    // other way to tell the browser: the
+                                    // answer it is showing will be gone on
+                                    // reload.
+                                    answerNotSaved = !durableAttempt;
+                                }
                                 if (durableAttempt && durableFinalCheckpoint) {
                                     // Billing has already settled above and is
                                     // intentionally not rolled back with the
@@ -9208,6 +9286,7 @@ async function handleChatPost(
                                 ...(attachmentRejected
                                     ? { failure: { kind: "attachment_rejected" as const } }
                                     : {}),
+                                ...(answerNotSaved ? { notSaved: true as const } : {}),
                             })
                         );
                         closeSafely(controller);

@@ -420,6 +420,7 @@ export const es = {
         responseComplete: "Respuesta completada.",
         responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
         responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
+        responseNotSavedNotice: "Esta respuesta no se guardó. No aparecerá si recargas la página.",
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
         showDiagnostics: "Ver información de diagnóstico",

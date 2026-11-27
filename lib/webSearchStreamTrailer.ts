@@ -78,6 +78,13 @@ export type ChatStreamTrailer = {
    * `emptyResponseCause`). Absent otherwise; an older client ignores it.
    */
   failure?: { kind: "attachment_rejected" };
+  /**
+   * The answer streamed in full, but its Message could not be written after
+   * the server's retries -- on a turn with no durable attempt row, so nothing
+   * else will tell the browser that a reload will not show it. Billing is
+   * unaffected (the provider ran and the answer was shown). Absent otherwise.
+   */
+  notSaved?: true;
 };
 
 const ERROR_REPORT_TOKEN_MAX_LENGTH = 2_048;
@@ -115,7 +122,8 @@ export function parseChatStreamTrailer(
     !("artifacts" in record) &&
     !("fileGenerationRetry" in record) &&
     !("errorReport" in record) &&
-    !("failure" in record)
+    !("failure" in record) &&
+    !("notSaved" in record)
   ) {
     return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
@@ -174,6 +182,7 @@ export function parseChatStreamTrailer(
     (record.failure as Record<string, unknown>).kind === "attachment_rejected"
       ? { failure: { kind: "attachment_rejected" as const } }
       : {}),
+    ...(record.notSaved === true ? { notSaved: true as const } : {}),
   };
 }
 
