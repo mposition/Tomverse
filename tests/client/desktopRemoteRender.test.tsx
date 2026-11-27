@@ -86,3 +86,58 @@ test("the screen reads in the account's language", () => {
   const pcOnly = renderToStaticMarkup(<DesktopRemoteView {...props({ language: "ko", deviceId: "device-1", taskKey: TASK, state: { kind: "ready", data: data({ remote: false }) } })} />);
   assert.match(pcOnly, /PC에서 확인 필요/);
 });
+
+const withPasskeys = (passkey: DesktopRemoteDevicesResponse["passkey"], over: Parameters<typeof data>[0] = {}): DesktopRemoteDevicesResponse => ({ ...data(over), passkey });
+const KEYS = [{ id: "00000000-0000-4000-8000-0000000000aa", label: "My phone", createdAt: "2026-11-20T01:00:00.000Z", lastUsedAt: null }];
+
+test("a file change shows its line counts and, when the PC sent them, the redacted changed lines", () => {
+  const response = data();
+  const device = response.devices[0]!;
+  device.snapshot.approval = { ...device.snapshot.approval!, kind: "files", target: "", files: [
+    { path: "src/a.ts", action: "update", added: 3, removed: 1, preview: ["- const x = 1;", "+ const x = 2;"] },
+    { path: ".env", action: "update", omitted: "secret" },
+    { path: "src/old.ts", action: "update" },
+  ] };
+  const html = renderToStaticMarkup(<DesktopRemoteView {...props({ deviceId: "device-1", taskKey: TASK, state: { kind: "ready", data: response } })} />);
+  assert.match(html, /data-testid="remote-approval-counts"[^>]*>3 added, 1 removed</);
+  assert.match(html, /data-testid="remote-approval-preview"[^>]*>- const x = 1;\n\+ const x = 2;</);
+  assert.match(html, /Changed lines \(redacted/);
+  assert.match(html, /data-testid="remote-approval-omitted"[^>]*>This file may hold credentials: no preview</);
+  // A file from a PC that sent no counts shows only its path.
+  assert.equal((html.match(/data-testid="remote-approval-counts"/g) ?? []).length, 1);
+});
+
+test("passkeys: the panel lists the account's passkeys and offers adding; nothing appears while the server offers none", () => {
+  const none = renderToStaticMarkup(<DesktopRemoteView {...props({ state: { kind: "ready", data: data() } })} />);
+  assert.doesNotMatch(none, /data-testid="remote-passkeys"/);
+  const off = renderToStaticMarkup(<DesktopRemoteView {...props({ state: { kind: "ready", data: withPasskeys({ enabled: false, passkeys: [] }) } })} />);
+  assert.doesNotMatch(off, /data-testid="remote-passkeys"/);
+  const empty = renderToStaticMarkup(<DesktopRemoteView {...props({ state: { kind: "ready", data: withPasskeys({ enabled: true, passkeys: [] }) } })} />);
+  assert.match(empty, /data-testid="remote-passkey-none"/);
+  assert.match(empty, /data-testid="remote-passkey-add"/);
+  assert.equal(disabled(empty, "remote-passkey-add"), true, "a name is needed first");
+  const some = renderToStaticMarkup(<DesktopRemoteView {...props({ passkeyName: "Laptop", state: { kind: "ready", data: withPasskeys({ enabled: true, passkeys: KEYS }) } })} />);
+  assert.match(some, /My phone/);
+  assert.match(some, /Not used yet/);
+  assert.equal(disabled(some, "remote-passkey-add"), false);
+  const armed = renderToStaticMarkup(<DesktopRemoteView {...props({ removeArmed: KEYS[0]!.id, state: { kind: "ready", data: withPasskeys({ enabled: true, passkeys: KEYS }) } })} />);
+  assert.match(armed, /Tap again to remove/);
+  const viewOnly = renderToStaticMarkup(<DesktopRemoteView {...props({ state: { kind: "ready", data: { ...withPasskeys({ enabled: true, passkeys: KEYS }), canAct: false } } })} />);
+  assert.equal(disabled(viewOnly, "remote-passkey-remove"), true);
+  const five = renderToStaticMarkup(<DesktopRemoteView {...props({ state: { kind: "ready", data: withPasskeys({ enabled: true, passkeys: Array.from({ length: 5 }, (_, index) => ({ ...KEYS[0]!, id: `00000000-0000-4000-8000-0000000001${index}0`, label: `Key ${index}` })) }) } })} />);
+  assert.doesNotMatch(five, /data-testid="remote-passkey-add"/);
+});
+
+test("passkeys: an account that has one is told that allow once and follow-ups are confirmed with it; deny and stop are not", () => {
+  const withKey = props({ deviceId: "device-1", taskKey: TASK, state: { kind: "ready", data: withPasskeys({ enabled: true, passkeys: KEYS }, { canFollowUp: true }) } });
+  const html = renderToStaticMarkup(<DesktopRemoteView {...withKey} />);
+  assert.match(html, /data-testid="remote-passkey-needed"[^>]*>Confirm with your passkey</);
+  assert.match(html, /data-testid="remote-follow-up-send"[^>]*>Send · Confirm with your passkey</);
+  assert.match(html, /data-testid="remote-deny"/);
+  assert.match(html, /data-testid="remote-stop"/);
+  const without = renderToStaticMarkup(<DesktopRemoteView {...props({ deviceId: "device-1", taskKey: TASK, state: { kind: "ready", data: withPasskeys({ enabled: true, passkeys: [] }, { canFollowUp: true }) } })} />);
+  assert.doesNotMatch(without, /data-testid="remote-passkey-needed"/);
+  // Switched off at the server: no passkey is asked for even if one was registered before.
+  const switchedOff = renderToStaticMarkup(<DesktopRemoteView {...props({ deviceId: "device-1", taskKey: TASK, state: { kind: "ready", data: withPasskeys({ enabled: false, passkeys: [] }) } })} />);
+  assert.doesNotMatch(switchedOff, /data-testid="remote-passkey-needed"/);
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { Language } from "../../../../lib/language";
 import { desktopPluginsCopy } from "../../../../locales/desktopPlugins";
-import type { PluginHookLine, PluginPreview, PluginServerLine, PluginsCommand, PluginsNotice, PluginsView } from "../plugins-contract";
+import type { InstalledPluginView, PluginHookLine, PluginPreview, PluginServerLine, PluginsCommand, PluginsNotice, PluginsView } from "../plugins-contract";
 import "./plugins.css";
 
 type Copy = (typeof desktopPluginsCopy)[Language];
@@ -36,6 +36,23 @@ function ServerList({ servers, testId }: { servers: PluginServerLine[]; testId: 
 
 const names = (list: string[]) => list.join(", ");
 
+const fromText = (copy: Copy, from: InstalledPluginView["from"]) => {
+  switch (from.kind) {
+    case "folder": return copy.fromFolder;
+    case "zip": return copy.fromZip;
+    case "zip-url": return copy.fromZipUrl;
+    case "npm": return fill(copy.fromNpm, { package: from.package });
+    case "marketplace": return fill(copy.fromMarketplace, { marketplace: from.marketplace });
+  }
+};
+
+/** `name` or `name@1.2.3`; a scope's own @ is kept. */
+const splitPackage = (text: string): { package: string; version?: string } => {
+  const value = text.trim();
+  const at = value.lastIndexOf("@");
+  return at > 0 ? { package: value.slice(0, at), version: value.slice(at + 1) } : { package: value };
+};
+
 /** What the person confirms: counts, the names, and every command a hook or server would run, in full. */
 function PreviewCard({ copy, preview, busy, onAnswer }: { copy: Copy; preview: PluginPreview; busy: boolean; onAnswer: (confirmed: boolean) => void }) {
   const diff = preview.diff;
@@ -45,6 +62,11 @@ function PreviewCard({ copy, preview, busy, onAnswer }: { copy: Copy; preview: P
     <p className="desktop-connector-help">{fill(copy.previewFrom, { from: preview.from })}{preview.version ? ` · ${preview.version}` : ""}{preview.author ? ` · ${preview.author}` : ""}</p>
     {preview.description && <p>{preview.description}</p>}
     <p className="desktop-connector-help">{fill(copy.previewFiles, { files: preview.files, kb: preview.kilobytes })}</p>
+    {preview.origin && <p className="desktop-connector-help" data-testid="plugin-preview-origin">
+      {fill(preview.origin.kind === "npm" ? copy.previewIntegrity : preview.origin.kind === "git" ? copy.previewCommit : copy.previewSha256, { value: preview.origin.value })}
+      {preview.origin.detail ? ` · ${preview.origin.detail}` : ""}
+    </p>}
+    <p className="desktop-connector-help" data-testid="plugin-preview-approval">{fill(copy.previewApproval, { value: preview.approval })}</p>
     <p data-testid="plugin-preview-counts">{fill(copy.contents, { skills: preview.skills.length, commands: preview.commands.length, agents: preview.agents.length, hooks: preview.hooks.length, servers: preview.servers.length })}</p>
     {preview.skills.length > 0 && <p><strong>{copy.previewSkills}:</strong> {names(preview.skills)}</p>}
     {preview.commands.length > 0 && <p><strong>{copy.previewCommands}:</strong> {names(preview.commands)}</p>}
@@ -90,6 +112,8 @@ export function PluginsPanel({ language }: { language: Language }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [address, setAddress] = useState("");
+  const [zipAddress, setZipAddress] = useState("");
+  const [npmName, setNpmName] = useState("");
   const alive = useRef(true);
 
   const run = useCallback(async (command: PluginsCommand) => {
@@ -100,6 +124,7 @@ export function PluginsPanel({ language }: { language: Language }) {
       setView(next);
       setFailed(false);
       if (command.type === "marketplace-add-git" && !next.error) setAddress("");
+      if ((command.type === "preview-zip-url" || command.type === "preview-npm") && !next.error) { setZipAddress(""); setNpmName(""); }
       if (["confirm", "remove", "set-enabled", "set-enabled-here"].includes(command.type)) window.dispatchEvent(new Event("tomverse-plugins-changed"));
     } catch {
       if (alive.current) setFailed(true);
@@ -112,6 +137,16 @@ export function PluginsPanel({ language }: { language: Language }) {
     window.desktop.plugins({ type: "list" }).then((next) => { if (alive.current) setView(next); }, () => { if (alive.current) setFailed(true); });
     return () => { alive.current = false; };
   }, []);
+
+  const submitZipAddress = (event: FormEvent) => {
+    event.preventDefault();
+    if (zipAddress.trim()) void run({ type: "preview-zip-url", url: zipAddress.trim() });
+  };
+  const submitNpm = (event: FormEvent) => {
+    event.preventDefault();
+    const { package: name, version } = splitPackage(npmName);
+    if (name) void run({ type: "preview-npm", package: name, ...(version ? { version } : {}) });
+  };
 
   const submitAddress = (event: FormEvent) => {
     event.preventDefault();
@@ -131,13 +166,24 @@ export function PluginsPanel({ language }: { language: Language }) {
     <h4>{copy.installedHeading}</h4>
     <div className="plugin-actions">
       <button type="button" className="primary" disabled={busy} data-testid="plugin-install-folder" onClick={() => void run({ type: "preview-folder" })}>{copy.installFolder}</button>
+      {view?.sources && <button type="button" className="primary" disabled={busy} data-testid="plugin-install-zip" onClick={() => void run({ type: "preview-zip" })}>{copy.installZip}</button>}
     </div>
+    {view?.sources && <>
+      <form className="plugin-form" onSubmit={submitZipAddress}>
+        <input type="text" value={zipAddress} maxLength={1000} aria-label={copy.zipUrlLabel} placeholder={copy.zipUrlPlaceholder} data-testid="plugin-zip-url" onChange={(event) => setZipAddress(event.currentTarget.value)} />
+        <button type="submit" className="soft" disabled={busy || !zipAddress.trim()}>{copy.previewButton}</button>
+      </form>
+      <form className="plugin-form" onSubmit={submitNpm}>
+        <input type="text" value={npmName} maxLength={300} aria-label={copy.npmLabel} placeholder={copy.npmPlaceholder} data-testid="plugin-npm" onChange={(event) => setNpmName(event.currentTarget.value)} />
+        <button type="submit" className="soft" disabled={busy || !npmName.trim()}>{copy.previewButton}</button>
+      </form>
+    </>}
     {view && !view.plugins.length && <p className="desktop-connector-help">{copy.noPlugins}</p>}
     <ul aria-label={copy.installedHeading}>
       {view?.plugins.map((plugin) => <li key={plugin.name} data-testid="plugin-row">
         <div className="plugin-summary">
           <strong>{plugin.name}</strong>{plugin.version ? ` ${plugin.version}` : ""} · <span role="status">{!plugin.enabled ? copy.stateOff : plugin.disabledHere ? copy.stateOffHere : copy.stateOn}</span>
-          · <span>{plugin.from.kind === "folder" ? copy.fromFolder : fill(copy.fromMarketplace, { marketplace: plugin.from.marketplace })}</span>
+          · <span>{fromText(copy, plugin.from)}</span>
           {plugin.description && <p>{plugin.description}</p>}
           {plugin.readable
             ? <p className="desktop-connector-help" data-testid="plugin-contents">{fill(copy.contents, { skills: plugin.skills.length, commands: plugin.commands.length, agents: plugin.agents.length, hooks: plugin.hooks, servers: plugin.servers })}</p>
@@ -166,11 +212,15 @@ export function PluginsPanel({ language }: { language: Language }) {
     </ul>
 
     <h4>{copy.marketplacesHeading}</h4>
+    {view?.official && <label className="plugin-official" data-testid="plugin-official">
+      <input type="checkbox" checked={view.official.enabled} disabled={busy} onChange={(event) => void run({ type: "set-official-marketplace", enabled: event.currentTarget.checked })} />
+      {copy.officialLabel}
+    </label>}
     {view && !view.marketplaces.length && <p className="desktop-connector-help">{copy.noMarketplaces}</p>}
     <ul aria-label={copy.marketplacesHeading}>
       {view?.marketplaces.map((market) => <li key={market.name} data-testid="plugin-marketplace">
         <div className="plugin-summary">
-          <strong>{market.name}</strong>{market.commit ? ` @${market.commit}` : ""}
+          <strong>{market.name}</strong>{market.official ? ` · ${copy.officialBadge}` : ""}{market.commit ? ` @${market.commit}` : ""}
           <p className="desktop-connector-help">{market.location}</p>
           {market.problem && <p className="notice">{market.problem}</p>}
           {open[market.name] && <>

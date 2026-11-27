@@ -8,11 +8,34 @@ import {
   clearOAuthLinkStateCookie,
   resolveOAuthLinkProviderFromState,
   OAuthLinkError,
+  resolveDesktopOAuthLinkCallback,
 } from "@/lib/oauthLink";
+import { DESKTOP_LINK_STATE_PREFIX, desktopSocialLoginEnabled } from "@/lib/desktopSocialLoginCore";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 
+// A Desktop link returns here too, in the system browser and without a web session (lib/desktopSocialLoginCore.ts).
+// Its state carries a signed prefix; all this does is pass the provider's answer to the loopback address inside it.
+function desktopLinkReturn(req: Request) {
+  const refused = (status: number) => new NextResponse("Desktop sign-in callback not available.", {
+    status, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" },
+  });
+  if (!desktopSocialLoginEnabled()) return refused(404);
+  let target: string | null = null;
+  try {
+    target = resolveDesktopOAuthLinkCallback(req);
+  } catch (error) {
+    console.error("Desktop OAuth link callback failed:", error);
+  }
+  if (!target) return refused(400);
+  return new NextResponse(null, {
+    status: 302,
+    headers: { Location: target, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
+  });
+}
+
 export async function GET(req: Request) {
+  if (new URL(req.url).searchParams.get("state")?.startsWith(DESKTOP_LINK_STATE_PREFIX)) return desktopLinkReturn(req);
   const origin = getPublicAppOrigin(req);
   const settingsUrl = (query: string) =>
     `${origin}${PRODUCT_SURFACE_PATH.review}?${query}`;

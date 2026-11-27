@@ -20,12 +20,14 @@ export function ElementComments({ language, pins, picture, onChange, onAttach }:
   if (!pins.length) return null;
   return <section className="element-comments" aria-label={copy.pinsHeading}>
     <h3>{copy.pinsHeading} ({pins.length})</h3>
+    <p>{copy.pinsPictureNote}</p>
     <ol>
       {pins.map((pin, index) => <li key={pin.pick.id}>
         {pin.pick.thumbnail && <img src={pin.pick.thumbnail} alt={copy.thumbnailAlt} />}
         <div>
           <code title={pin.pick.url}>{pin.pick.selector}</code>
           {pin.pick.text && <span>{pin.pick.text}</span>}
+          {pin.pick.withheld === "secret" && <span role="note">{copy.pictureWithheld}</span>}
           <textarea rows={2} aria-label={copy.commentLabel + " " + (index + 1)} placeholder={copy.commentPlaceholder} value={pin.comment}
             onChange={(event) => onChange(pins.map((item) => item === pin ? { ...item, comment: event.currentTarget.value } : item))} />
         </div>

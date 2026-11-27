@@ -45,3 +45,20 @@ test("the Windows backend and its script are the only code that sends input, and
   assert.match(backend, /writeFileSync\(script, WINDOWS_COMPUTER_SCRIPT/);
   for (const name of ["computer-host.ts", "computer-wiring.ts", "computer-policy.ts"]) assert.doesNotMatch(read(name), /writeFile|createWriteStream|appendFile/, name);
 });
+
+test("the Linux backend is the only code that starts the X11 tools, writes no file, and is reached only through the platform factory", () => {
+  const files = readdirSync(host).filter((name) => /\.ts$/.test(name));
+  assert.deepEqual(files.filter((name) => /["']xdotool["']/.test(read(name))).sort(), ["computer-backend-x11.ts"]);
+  const backend = read("computer-backend-x11.ts");
+  assert.doesNotMatch(backend, /writeFile|createWriteStream|appendFile|mkdtemp|shell:\s*true|\bexecSync\b|\bexecFile/, "no file, no shell string");
+  assert.equal((backend.match(/\bspawn\(/g) ?? []).length, 1, "one place starts a program for the backend, with an argument array");
+  assert.equal((backend.match(/\bspawnSync\(/g) ?? []).length, 1, "and one asks each tool whether it is installed");
+  assert.match(backend, /spawn\(file, args, \{ env: toolEnvironment\(\)/);
+  // Nothing but the platform factory builds it, and the factory asks for the opt-in, the session and every tool first.
+  for (const name of files.filter((entry) => entry !== "computer-platform.ts" && entry !== "computer-backend-x11.ts")) assert.doesNotMatch(read(name), /createX11Backend/, name);
+  const platform = read("computer-platform.ts");
+  assert.match(platform, /env\[COMPUTER_UNVERIFIED_LINUX\] === "1"/);
+  assert.match(platform, /x11Missing\(env, probe\)\?\.length === 0 \? createX11Backend\(\{ trustCompositorOverlay: env\[COMPUTER_X11_TRUST_OVERLAY\] === "1" \}\) : null/);
+  // Ctrl+V is refused in the backend as well as in the policy.
+  assert.match(backend, /name === "v"\) return null/);
+});

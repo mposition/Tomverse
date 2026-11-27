@@ -63,6 +63,7 @@ test("a catalog is read as documented: relative paths, pluginRoot names, github,
         { name: "mono", source: { source: "git-subdir", url: "acme/mono", path: "tools/mono" } },
         { name: "codex", source: { source: "local", path: "./plugins/codex" } },
         { name: "npmy", source: { source: "npm", package: "x" } },
+        { name: "pipy", source: { source: "pip", package: "x" } },
         { name: "escape", source: "./../outside" },
         { name: "bad name", source: "./x" },
         { name: "inside", source: "./dupe" },
@@ -79,7 +80,8 @@ test("a catalog is read as documented: relative paths, pluginRoot names, github,
     assert.deepEqual(bySource.remote, { kind: "git", url: "https://git.example.test/acme/remote.git" });
     assert.deepEqual(bySource.mono, { kind: "git", url: "https://github.com/acme/mono.git", subdir: "tools/mono" });
     assert.deepEqual(bySource.codex, { kind: "relative", path: "plugins/codex" });
-    assert.deepEqual(bySource.npmy, { kind: "unsupported", type: "npm" });
+    assert.deepEqual(bySource.npmy, { kind: "npm", package: "x" });
+    assert.deepEqual(bySource.pipy, { kind: "unsupported", type: "pip" });
     assert.equal(bySource.escape?.kind, "unsupported");
     assert.equal(bySource.badsha?.kind, "unsupported");
     assert.equal(catalog.entries.some((entry) => entry.name === "bad name"), false);

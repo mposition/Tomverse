@@ -66,6 +66,7 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       arguments: row.state === "pending" && row.expiresAt > new Date() && row.argumentsCiphertext
         ? JSON.parse(decryptOAuthToken(row.argumentsCiphertext) || "null") : null })),
   codeTaskReservation: (userId) => prisma.$queryRaw<unknown[]>`SELECT "id","clientTaskId","status","reservedCredits","settledCredits","releasedCredits","createdAt","updatedAt" FROM "CodeTaskReservation" WHERE "userId"=${userId} ORDER BY "createdAt" LIMIT 5000`,
+  codeCloudJob: (userId) => prisma.$queryRaw<unknown[]>`SELECT "id","clientTaskId","status","instruction","executorModelId","reviewerModelId","approvedCredits","failureCode","summary","logs","patchBytes","createdAt","startedAt","finishedAt","expiresAt" FROM "CodeCloudJob" WHERE "userId"=${userId} ORDER BY "createdAt" LIMIT 5000`,
   userSettings: (userId) =>
     prisma.userSettings.findMany({
       where: { userId },
