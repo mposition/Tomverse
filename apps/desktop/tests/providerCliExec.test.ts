@@ -286,14 +286,15 @@ test("What the CLI left running ends with it, and a question nobody can answer a
   });
 });
 
-test("When the worker goes away, a background command whose parent is already gone goes with it", { timeout: 60_000 }, async () => {
+// Windows: Node starts every child inside a kill-on-close job object. Linux: the supervisor kills the group when its parent dies. macOS has neither.
+test("When the worker crashes, a background command whose parent is already gone goes with it", { timeout: 60_000, skip: process.platform === "darwin" }, async () => {
   const { spawn } = await import("node:child_process");
   await withFake(async (directory) => {
     const pidFile = join(directory, "pids.json");
     const abandon = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "abandon-provider-cli.ts");
     const worker = spawn(process.execPath, ["--import", "tsx", abandon, fake, pidFile], { stdio: "ignore", cwd: join(dirname(abandon), "..", "..") });
-    const closed = await new Promise<number | null>((resolve) => worker.once("close", resolve));
-    assert.equal(closed, 0);
+    // The stand-in worker ends itself with SIGKILL, so no exit handler of the run runs.
+    await new Promise<number | null>((resolve) => worker.once("close", resolve));
     const cli = JSON.parse(await readFile(pidFile, "utf8")) as { cli: number; middle: number };
     const grandchild = Number(await readFile(pidFile + ".grandchild", "utf8"));
     assert.ok(await dead(cli.cli), "the CLI went with the worker");
