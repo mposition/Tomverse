@@ -72,6 +72,9 @@ const CONTROL_PLANE_PATTERNS = [
   "bin/**",
   "scripts/**",
   "config/**",
+  // The cloud Code runner (services/code-runner): it decides how a person's
+  // uploaded repository is isolated while a model's commands run on it.
+  "services/**",
   // Operator tooling that runs reviewer CLIs (the independent review
   // orchestrator): it decides who reviews whom, so no agent may change it.
   "tools/**",
