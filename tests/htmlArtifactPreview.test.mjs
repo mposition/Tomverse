@@ -65,8 +65,8 @@ test("script, style, image and font sources are inline or one of three public CD
   assert.ok(!HTML_PREVIEW_CSP.includes("'unsafe-eval'"), "no eval or Function from a string");
   assert.ok(!/(^|\s)\*(\s|;|$)/.test(HTML_PREVIEW_CSP), "no wildcard source");
   assert.ok(!/(^|\s)https?:(\s|;|$)/.test(HTML_PREVIEW_CSP), "no whole-scheme source");
-  // Pages may draw with inline images, but remote images are limited to the CDNs: a hostile page cannot ping a server of its choosing.
-  assert.ok(!directives["img-src"].some((value) => /^https?:\/\/(?!cdnjs|cdn\.jsdelivr|unpkg)/.test(value)));
+  // Pages may draw with inline images only: no image URL, on a CDN or anywhere else, can carry the page's text out.
+  assert.deepEqual(directives["img-src"], ["data:", "blob:"]);
 });
 
 const unescape = (value) => value.replace(/&quot;/g, '"').replace(/&amp;/g, "&");

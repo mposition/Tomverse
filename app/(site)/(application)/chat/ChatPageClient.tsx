@@ -31,6 +31,7 @@ import { TemporaryChatNotice } from "@/components/chat/TemporaryChatNotice";
 import { useTemporaryChat } from "@/components/chat/useTemporaryChat";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import { GeneratedArtifactRevisionContext, useGeneratedArtifactRevision } from "@/components/chat/GeneratedArtifactRevisionContext";
+import { ChatArtifactWorkspaceProvider } from "@/components/chat/ChatArtifactWorkspaceContext";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -836,6 +837,7 @@ export function ChatPageClient({
   generatedArtifactRevisionEnabled = false,
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
+  chatArtifactWorkspaceEnabled = false,
   chatParallelPreparationEnabled = false,
   chatRouterLocationFusion = false,
   existingChatRouterLocationFusion = false,
@@ -867,6 +869,8 @@ export function ChatPageClient({
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
   generatedArtifactRevisionEnabled?: boolean;
+  /** TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED, resolved server-side: Preview on code blocks, React previews, "change this screen". */
+  chatArtifactWorkspaceEnabled?: boolean;
   /**
    * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
@@ -10838,6 +10842,12 @@ export function ChatPageClient({
     reviewWorkspace.setMode(mode);
   };
 
+  // A request typed under a code preview goes to the top of the composer draft, ahead of whatever is already there.
+  const fillComposerFromPreview = useCallback((text: string) => {
+    setInputValue((current) => (current.trim() ? [text, current].join("\n\n") : text));
+    setFocusToken((value) => value + 1);
+  }, [setInputValue]);
+
   const artifactRevisionAction = useGeneratedArtifactRevision({
     enabled: generatedArtifactRevisionEnabled && mountedSurface === "chat" &&
       !isGuestMode && identityKey?.startsWith("account:") === true &&
@@ -10869,6 +10879,7 @@ export function ChatPageClient({
       notify={text => showToast(text, "info")} />}
     <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
     <GeneratedArtifactRevisionContext.Provider value={artifactRevisionAction}>
+    <ChatArtifactWorkspaceProvider enabled={chatArtifactWorkspaceEnabled} fillComposer={mountedSurface === "chat" ? fillComposerFromPreview : null}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
@@ -12141,6 +12152,7 @@ export function ChatPageClient({
         </form>
       </div>
     )}
+    </ChatArtifactWorkspaceProvider>
     </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
     </ReviewChatHandoffProvider>
