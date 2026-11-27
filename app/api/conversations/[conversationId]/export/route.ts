@@ -21,7 +21,7 @@ import {
 } from "@/lib/exportConversation";
 import {
     formatConversationHeaderMarkdown,
-    formatExportMessageMarkdown,
+    formatExportMessagePageMarkdown,
 } from "@/lib/exportConversationMarkdown";
 import {
     conversationLockedResponse,
@@ -300,9 +300,9 @@ export async function GET(
                 cursor = messages.at(-1)?.id;
                 controller.enqueue(
                     encoder.encode(
-                        messages
-                            .map(asMarkdown ? formatExportMessageMarkdown : formatExportMessage)
-                            .join("\n")
+                        asMarkdown
+                            ? formatExportMessagePageMarkdown(messages)
+                            : messages.map(formatExportMessage).join("\n")
                     )
                 );
 

@@ -82,6 +82,7 @@ import {
   lastReplaceableTurn,
   parkReplacement,
   rememberSupersededMessages,
+  restoreGuestSuperseded,
   settleParkedReplacement,
   takeArmedSupersede,
   withoutSuperseded,
@@ -1084,6 +1085,8 @@ function ChatAppComponent({
         if (!isCurrentChatRuntimeLoad(loadKey, requestId)) return;
 
         if (initialConversationId) {
+          // The replaced-turn note of a guest conversation is kept beside its transcript.
+          restoreGuestSuperseded(initialConversationId);
           const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
           const savedMessages = localStorage.getItem(storageKey);
           const carried = transcriptScope === "model"

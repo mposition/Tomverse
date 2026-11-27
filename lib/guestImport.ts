@@ -1,6 +1,6 @@
 import type { Conversation, Message } from "@/components/chat/types";
 import { discardResponseBody } from "./discardResponseBody";
-import { removeGuestConversationMessages } from "./guestConversationStorage";
+import { readGuestSupersededIds, removeGuestConversationMessages } from "./guestConversationStorage";
 
 export const PENDING_GUEST_IMPORT_KEY = "tomverse_pending_guest_import";
 export const GUEST_IMPORT_SEEN_KEY = "tomverse_guest_import_prompted_v1";
@@ -154,6 +154,9 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
 
   const seenUserIds = new Set<string>();
   const merged: GuestImportPayloadMessage[] = [];
+  // A turn the guest replaced (regenerate, edit) is not carried into the account:
+  // imported, it would come back as an ordinary turn in the model's context.
+  const replaced = new Set(readGuestSupersededIds(guestConversationId));
 
   modelIds.forEach((modelId, panelIndex) => {
     const raw = window.localStorage.getItem(`guest_messages_${guestConversationId}_${modelId}`);
@@ -168,6 +171,7 @@ export function buildGuestImportPayload(guestConversationId: string): GuestImpor
 
     parsedMessages.forEach((message, indexInPanel) => {
       if (message.id === "welcome") return;
+      if (replaced.has(message.id)) return;
       if (message.role === "user") {
         if (seenUserIds.has(message.id)) return;
         seenUserIds.add(message.id);

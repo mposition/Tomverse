@@ -15,6 +15,7 @@
  */
 
 import type { Message } from "@/components/chat/types";
+import { addGuestSupersededIds, readGuestSupersededIds } from "@/lib/guestConversationStorage";
 
 export type ReplaceableTurn = { question: Message; answer: Message };
 
@@ -132,9 +133,18 @@ function saveToServer(conversationId: string, ids: readonly string[]) {
     .catch(() => undefined);
 }
 
+/** `save` false is a guest conversation: its transcript is in this browser, so the note is kept beside it. */
 export function markTurnSuperseded(conversationId: string, ids: readonly string[], save = false) {
   if (addIds(conversationId, ids)) notify();
   if (save) saveToServer(conversationId, ids);
+  else addGuestSupersededIds(conversationId, ids);
+}
+
+/** A guest conversation loaded from this browser: its note comes back with its transcript. */
+export function restoreGuestSuperseded(conversationId: string | null | undefined) {
+  if (!conversationId) return;
+  const ids = readGuestSupersededIds(conversationId);
+  if (ids.length > 0 && addIds(conversationId, ids)) notify();
 }
 
 /**

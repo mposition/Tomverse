@@ -10,6 +10,7 @@ import {
 import {
   formatConversationHeaderMarkdown,
   formatExportMessageMarkdown,
+  formatExportMessagePageMarkdown,
 } from "../lib/exportConversationMarkdown.ts";
 import { chatTurnToolsCopy } from "../locales/chatTurnTools.ts";
 import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
@@ -104,6 +105,23 @@ test("Markdown export keeps the transcript and escapes the title", () => {
   assert.match(user, /^---\n\n## User · 2026-01-02T03:04:05.000Z\n\nHi/);
   assert.ok(user.includes("```js\nx\n```"));
   assert.match(formatExportMessageMarkdown({ role: "assistant", content: "ok" }), /## Assistant\n/);
+});
+
+test("Markdown export pages written back to back keep a blank line before every rule", () => {
+  // The route streams one page per read; a page's last paragraph must not sit on
+  // the line above the next page's `---`, which would make it a setext heading.
+  const firstPage = formatExportMessagePageMarkdown([
+    { role: "user", content: "a question" },
+    { role: "assistant", content: "the last paragraph of a page" },
+  ]);
+  const secondPage = formatExportMessagePageMarkdown([{ role: "user", content: "next" }]);
+  const file = firstPage + secondPage;
+  assert.equal((file.match(/^---$/gm) ?? []).length, 3);
+  for (const match of file.matchAll(/^---$/gm)) {
+    const before = file.slice(0, match.index);
+    assert.ok(before === "" || before.endsWith("\n\n"), `a rule follows a blank line: ${JSON.stringify(before.slice(-40))}`);
+  }
+  assert.ok(file.includes("the last paragraph of a page\n\n---"));
 });
 
 test("Markdown downloads are named .md, text downloads stay .txt", () => {

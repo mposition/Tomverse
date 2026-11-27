@@ -55,3 +55,13 @@ export function formatExportMessageMarkdown(message: MarkdownExportMessage) {
     "",
   ].join("\n");
 }
+
+/**
+ * One page of messages as the export streams it. Pages are written back to
+ * back, so each ends with a newline: without it a page's last paragraph would
+ * sit directly above the next page's `---`, which Markdown reads as a heading
+ * underline (a setext heading) rather than a rule.
+ */
+export function formatExportMessagePageMarkdown(messages: readonly MarkdownExportMessage[]) {
+  return `${messages.map(formatExportMessageMarkdown).join("\n")}\n`;
+}
