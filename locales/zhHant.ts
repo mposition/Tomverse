@@ -568,6 +568,7 @@ export const zhHant = {
         aiReviewDuplicateRequest: "此 AI Review 已在執行中。",
         aiReviewAlreadyRunningWaiting: "此 AI Review 已在執行中。結果準備好後會顯示在這裡，不會重新執行。",
         aiReviewAlreadyRunningTimeout: "已在執行的 AI Review 尚未完成。請幾分鐘後再試。",
+        aiReviewAlreadyRunningTurnGone: "此 AI Review 正在檢查的回答已不存在，因此無法顯示其結果。你可以針對目前的回答重新執行審閱。",
         attachmentUploadError: "檔案上傳失敗，請重試。",
         attachmentUploadingLabel: "上傳中",
         attachmentUploadingHint: "正在傳送檔案，請等待完成。",

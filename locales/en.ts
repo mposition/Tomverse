@@ -547,6 +547,7 @@ export const en = {
         aiReviewDuplicateRequest: "This AI Review is already running.",
         aiReviewAlreadyRunningWaiting: "This AI Review is already running. Its result will appear here when it is ready, without running it again.",
         aiReviewAlreadyRunningTimeout: "The AI Review that was already running has not finished yet. Try again in a few minutes.",
+        aiReviewAlreadyRunningTurnGone: "The answers this AI Review was checking are no longer available, so its result cannot be shown. You can run a new review for the current answers.",
         attachmentUploadError: "The file could not be uploaded. Please try again.",
         attachmentUploadingLabel: "Uploading",
         attachmentUploadingHint: "The file is being sent. Please wait until it finishes.",

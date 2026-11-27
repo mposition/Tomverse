@@ -89,7 +89,19 @@ every outcome and expires after 15 minutes if its process dies
 that 409 as "already running": they say so and read the saved result through
 the GET with the exact `promptMessageId`/`assistantMessageIds` of that run
 until it appears, never re-run it, and offer a retry only once the claim could
-have expired. Coverage: `tests/server-contract/comparison-review-route.test.ts`,
+have expired. That exact-turn GET answers only for its turn: the saved row,
+`storedReview: null` while there is none yet, or `404
+COMPARISON_REVIEW_TURN_NOT_FOUND` once an answer was deleted or regenerated,
+which ends the wait with its own message and is never replaced by the latest
+turn's review. It does not depend on the latest turn being comparable or
+within the size limit, and it still returns a row a later answer marked stale,
+since the recomputed input hash pins the exact texts. It has its own rate
+limit (10 a minute, 120 a day, apart from the setup preview's 20 and 300); one
+wait backs off to a lookup a minute and makes at most 18 lookups, honouring
+`Retry-After`. Studio stops a wait when its session is discarded (identity or
+conversation change, unmount) but not on dismissal. A join is not counted as
+`comparison_review_started`. Coverage:
+`tests/server-contract/comparison-review-route.test.ts`,
 `tests/server-contract/comparison-review-run-claim.test.ts`,
 `tests/comparisonReviewInFlight.test.mjs` and both browser harnesses.
 

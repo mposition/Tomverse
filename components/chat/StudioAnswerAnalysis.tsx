@@ -18,7 +18,7 @@ import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
-import { isComparisonReviewAlreadyRunning, storedComparisonReviewPath, waitForStoredComparisonReview } from "@/lib/comparisonReviewInFlight";
+import { isComparisonReviewAlreadyRunning, lookupStoredComparisonReview, storedComparisonReviewPath, waitForStoredComparisonReview } from "@/lib/comparisonReviewInFlight";
 import type { ComparisonReview, ReviewSetup } from "../../packages/chat-core/src/review";
 import type { AiReviewAccess } from "./ComparisonActionRail";
 import "./studio-answer-analysis.css";
@@ -63,8 +63,25 @@ export function StudioAnswerAnalysis({
   const [tab, setTab] = useState<"summary" | "detail">("summary");
   const [reviewer, setReviewer] = useState<"primary" | "secondary">("primary");
   const keys = useRef(new Map<string, string>());
-  /** The scope whose analysis is waiting on a run that was already in flight. */
-  const [joinedScope, setJoinedScope] = useState<string | null>(null);
+  /**
+   * The scope whose analysis joined a run that was already in flight, and how
+   * that wait ended if it ended without a result.
+   */
+  const [joined, setJoined] = useState<{ scope: string; ended: null | "gone" | "expired" } | null>(null);
+  /**
+   * Bounds a join's polling. A join is session work like a run, so it survives
+   * dismissal and tab switches the way a pending run does; but it is aborted
+   * when the session is discarded (identity change), when the conversation
+   * changes, and on unmount -- nothing would ever show what it finds. Created
+   * in the effect, not the memo, so StrictMode's rehearsal cleanup cannot
+   * leave a live session holding an aborted signal.
+   */
+  const joinLifetime = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const lifetime = new AbortController();
+    joinLifetime.current = lifetime;
+    return () => lifetime.abort();
+  }, [session, conversationId]);
   const dialogRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -129,9 +146,20 @@ export function StudioAnswerAnalysis({
           reviewMode: "balanced", includeSynthesis: false,
         }),
       });
-      trackProductEvent("comparison_review_started", setup.responses?.length ?? 0, { review_mode: "balanced" });
-      setJoinedScope((current) => current === scope ? null : current);
-      let response = await send();
+      // Counted once the server has answered with anything other than "this
+      // analysis is already running": a join starts and bills nothing here. A
+      // request that never got an answer still counts.
+      let startTracked = false;
+      const trackStarted = () => {
+        if (startTracked) return;
+        startTracked = true;
+        trackProductEvent("comparison_review_started", setup.responses?.length ?? 0, { review_mode: "balanced" });
+      };
+      setJoined((current) => current?.scope === scope ? null : current);
+      let response = await send().catch((error: unknown) => {
+        trackStarted();
+        throw error;
+      });
       if (!guest && conversationId && setup.promptMessageId && setup.assistantMessageIds && response.status === 409) {
         const refusal = await response.clone().json().catch(() => ({}));
         if (isComparisonReviewAlreadyRunning(response.status, refusal)) {
@@ -139,33 +167,31 @@ export function StudioAnswerAnalysis({
           // (Classic, another tab, or a stream this session lost). It was
           // billed once; this session waits for its saved row and never runs.
           await discardResponseBody(response);
-          setJoinedScope(scope);
+          setJoined({ scope, ended: null });
+          const signal = joinLifetime.current?.signal;
           const lookupPath = storedComparisonReviewPath(conversationId, {
             reviewMode: "balanced", includeSynthesis: false,
             promptMessageId: setup.promptMessageId, assistantMessageIds: setup.assistantMessageIds,
           });
-          const stored = await waitForStoredComparisonReview<ComparisonReview>({
-            lookup: async () => {
-              const lookup = await fetch(lookupPath, { cache: "no-store" }).catch(() => null);
-              if (!lookup) return undefined;
-              if (!lookup.ok) {
-                await discardResponseBody(lookup);
-                if (lookup.status === 429 || lookup.status >= 500) return undefined;
-                throw new Error("Cannot read the running analysis");
-              }
-              return ((await lookup.json().catch(() => ({}))) as ReviewSetup).storedReview;
-            },
+          const wait = await waitForStoredComparisonReview<ComparisonReview>({
+            signal,
+            lookup: () => lookupStoredComparisonReview<ComparisonReview>(lookupPath, { signal }),
           }).catch((error: unknown) => {
-            setJoinedScope((current) => current === scope ? null : current);
+            setJoined((current) => current?.scope === scope ? null : current);
             throw error;
           });
-          // Still running when the claim would have expired: a retry is safe,
-          // the server either joins it again or runs it once.
-          if (!stored) throw new StudioAnalysisKnownFailure("Analysis still running");
-          setJoinedScope((current) => current === scope ? null : current);
-          return stored;
+          if (wait.outcome === "saved") {
+            setJoined((current) => current?.scope === scope ? null : current);
+            return wait.review;
+          }
+          // Gone, expired or abandoned: a retry is safe -- the server either
+          // joins a run again or runs it once.
+          setJoined((current) => current?.scope !== scope ? current
+            : wait.outcome === "aborted" ? null : { scope, ended: wait.outcome });
+          throw new StudioAnalysisKnownFailure(`Joined analysis ${wait.outcome}`);
         }
       }
+      trackStarted();
       if (guest && !response.ok) {
         const failure = await response.clone().json().catch(() => ({})) as { code?: string };
         if (failure.code === "TURNSTILE_REQUIRED") {
@@ -234,12 +260,13 @@ export function StudioAnswerAnalysis({
             {!review && entry?.phase !== "error" && <div className="studio-analysis-loading" role="status" aria-live="polite">
               <span className="studio-analysis-mark"><Sparkles size={30} /></span>
               <h3>{entry?.phase === "checking" ? copy.checking : copy.running}</h3><p>{copy.progress}</p>
-              {joinedScope === scope && busy && <p data-testid="studio-analysis-already-running">{t("chat.aiReviewAlreadyRunningWaiting")}</p>}
+              {joined?.scope === scope && !joined.ended && busy && <p data-testid="studio-analysis-already-running">{t("chat.aiReviewAlreadyRunningWaiting")}</p>}
               <div className="studio-analysis-progress" role="progressbar" aria-label={copy.running}><span /></div>
               <ol><li aria-current={entry?.phase === "checking" ? "step" : undefined}>{entry?.phase !== "checking" && <Check size={15} />}{t("chat.aiReviewResponse")}</li><li aria-current={entry?.phase === "running" ? "step" : undefined}>{copy.detail}</li><li>{copy.summary}</li></ol>
               <p>{copy.background}</p>
             </div>}
-            {entry?.phase === "error" && <div className="studio-analysis-error" role="alert"><p>{joinedScope === scope ? t("chat.aiReviewAlreadyRunningTimeout") : copy.failed}</p>
+            {entry?.phase === "error" && <div className="studio-analysis-error" role="alert"><p>{joined?.scope === scope && joined.ended === "gone" ? t("chat.aiReviewAlreadyRunningTurnGone")
+              : joined?.scope === scope && joined.ended === "expired" ? t("chat.aiReviewAlreadyRunningTimeout") : copy.failed}</p>
               <button type="button" onClick={show}>{copy.retry}</button>
               {isGuest && <button type="button" onClick={() => { close(); onSignIn?.(); }}>{copy.signIn}</button>}
             </div>}

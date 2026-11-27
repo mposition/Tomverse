@@ -169,8 +169,13 @@ try {
   // The same account analysis already running elsewhere (Classic, another
   // tab): the server answers 409 DUPLICATE_REQUEST and the session waits for
   // the saved row by the exact turn instead of failing or running it again.
+  // The first lookup is rate limited; the wait backs off and carries on.
+  const startedEvents = () => page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("tomverse_analytics_pending_events_v1") || "[]")
+      .filter((event) => event.eventName === "comparison_review_started").length);
   let joinedPosts = 0;
   const joinedLookups = [];
+  let joinedBehaviour = "rate-limited-then-saved";
   await page.route(endpoint, async (route) => {
     const request = route.request();
     if (request.method() === "POST") {
@@ -180,21 +185,55 @@ try {
     }
     const query = new URL(request.url()).searchParams;
     if (!query.has("assistantMessageIds")) return route.fulfill({ json: originalSetup });
-    joinedLookups.push(query);
-    await route.fulfill({ json: { available: true, storedReview: joinedLookups.length >= 2 ? { ...saved, cached: true } : undefined } });
+    joinedLookups.push({ query, at: Date.now() });
+    if (joinedBehaviour === "gone") {
+      await route.fulfill({ status: 404, json: { error: "Gone.", code: "COMPARISON_REVIEW_TURN_NOT_FOUND" } });
+    } else if (joinedBehaviour === "pending") {
+      await route.fulfill({ json: { available: true, storedReview: null } });
+    } else if (joinedLookups.length === 1) {
+      await route.fulfill({ status: 429, headers: { "Retry-After": "1" }, json: { error: "Too many requests.", code: "API_RATE_LIMITED" } });
+    } else {
+      await route.fulfill({ json: { available: true, storedReview: { ...saved, cached: true } } });
+    }
   });
   await page.reload();
+  const startedBeforeJoin = await startedEvents();
   await entry.getByRole("button").click();
   await expect(dialog.getByTestId("studio-analysis-already-running")).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(dialog.getByRole("alert")).toHaveCount(0);
   assert.equal(joinedPosts, 1, "a joined analysis must not be submitted again");
-  assert.equal(joinedLookups.length, 2);
-  assert.equal(joinedLookups[0].get("reviewMode"), "balanced");
-  assert.equal(joinedLookups[0].get("includeSynthesis"), "false");
-  assert.equal(joinedLookups[0].get("promptMessageId"), originalSetup.promptMessageId);
-  assert.equal(joinedLookups[0].get("assistantMessageIds"), originalSetup.assistantMessageIds.join(","));
+  assert.equal(joinedLookups.length, 2, "a rate-limited lookup was retried more than once");
+  assert.ok(joinedLookups[1].at - joinedLookups[0].at >= 4_000, "a rate-limited lookup was retried too soon");
+  assert.equal(joinedLookups[0].query.get("reviewMode"), "balanced");
+  assert.equal(joinedLookups[0].query.get("includeSynthesis"), "false");
+  assert.equal(joinedLookups[0].query.get("promptMessageId"), originalSetup.promptMessageId);
+  assert.equal(joinedLookups[0].query.get("assistantMessageIds"), originalSetup.assistantMessageIds.join(","));
+  assert.equal(await startedEvents(), startedBeforeJoin, "joining a run already in flight was counted as a start");
   await page.keyboard.press("Escape");
+
+  // The turn being waited on is gone: the wait ends with its own message,
+  // never another turn's analysis, and a retry is offered.
+  joinedBehaviour = "gone";
+  await page.reload();
+  await entry.getByRole("button").click();
+  await expect(dialog.getByRole("alert")).toContainText("결과를 표시할 수 없습니다", { timeout: 15_000 });
+  await expect(dialog.getByRole("heading", { name: "우선순위", exact: true })).toHaveCount(0);
+  assert.equal(joinedPosts, 2);
+  assert.equal(joinedLookups.length, 3, "the wait kept polling a turn that is gone");
+  await page.keyboard.press("Escape");
+
+  // Dismissal keeps a join alive like any pending analysis, but discarding
+  // the session (identity change) stops its polling.
+  joinedBehaviour = "pending";
+  await page.reload();
+  await entry.getByRole("button").click();
+  await expect.poll(() => joinedLookups.length, { timeout: 10_000 }).toBe(4);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Switch identity", exact: true }).click();
+  await page.waitForTimeout(8_000);
+  assert.equal(joinedLookups.length, 4, "a discarded session kept polling");
+  assert.equal(joinedPosts, 3);
 
   // Mobile has neither the new entry/modal nor a background analysis lookup.
   await page.setViewportSize({ width: 390, height: 844 });

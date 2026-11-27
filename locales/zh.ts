@@ -573,6 +573,7 @@ export const zh = {
         aiReviewDuplicateRequest: "此 AI Review 已在运行中。",
         aiReviewAlreadyRunningWaiting: "此 AI Review 已在运行中。结果准备好后会显示在这里，不会重新运行。",
         aiReviewAlreadyRunningTimeout: "已在运行的 AI Review 尚未完成。请几分钟后再试。",
+        aiReviewAlreadyRunningTurnGone: "此 AI Review 正在检查的回答已不存在，因此无法显示其结果。你可以针对当前回答重新运行审阅。",
         attachmentUploadError: "文件上传失败，请重试。",
         attachmentUploadingLabel: "上传中",
         attachmentUploadingHint: "正在发送文件，请等待完成。",

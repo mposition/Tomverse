@@ -71,6 +71,13 @@ try {
     if (endpoint.test(request.url()) && request.method() === "GET") gets.push(request.url());
   });
   const answerFinished = () => page.evaluate(() => window.__tomverseAnswerFinished?.());
+  // With no analytics runtime the product events queue in sessionStorage
+  // (lib/productAnalyticsClient.ts), which is where they can be counted.
+  const startedEvents = () =>
+    page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("tomverse_analytics_pending_events_v1") || "[]")
+        .filter((event) => event.eventName === "comparison_review_started").length,
+    );
   // Long enough for a refetch the dialog should not make to have been sent.
   const settle = () => page.waitForTimeout(400);
 
@@ -110,6 +117,7 @@ try {
   await expect(setupScreen).toHaveCount(0);
   assert.equal(gets.length, 2, "a finished answer re-fetched the setup over a displayed result");
   assert.equal(mock.getRunCount(), 1, "the review ran more than once");
+  assert.equal(await startedEvents(), 1, "a run this dialog started is counted as started");
 
   // 4. Leaving the result for the setup step catches up with the answers that
   //    finished meanwhile, exactly once.
@@ -123,10 +131,12 @@ try {
   // 5. The server says this exact review is already running (another tab,
   //    Studio, or a stream this dialog lost): 409 DUPLICATE_REQUEST. The
   //    dialog neither fails nor offers another run; it reads the saved result
-  //    by the exact turn until it appears.
+  //    by the exact turn until it appears. The first lookup is rate limited:
+  //    the wait backs off and carries on rather than retrying at once.
   const saved = mock.getStoredReview();
   let duplicatePosts = 0;
   const exactLookups = [];
+  let exactBehaviour = "rate-limited-then-saved";
   await page.route(endpoint, async (route) => {
     const request = route.request();
     if (request.method() === "POST") {
@@ -140,11 +150,28 @@ try {
     }
     const query = new URL(request.url()).searchParams;
     if (!query.has("assistantMessageIds")) return route.fallback();
-    exactLookups.push(query);
+    exactLookups.push({ query, at: Date.now() });
+    if (exactBehaviour === "gone") {
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "The answers this review was running on are no longer available.", code: "COMPARISON_REVIEW_TURN_NOT_FOUND" }),
+      });
+      return;
+    }
+    if (exactLookups.length === 1) {
+      await route.fulfill({
+        status: 429,
+        headers: { "Retry-After": "1" },
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Too many requests.", code: "API_RATE_LIMITED" }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ available: true, storedReview: exactLookups.length >= 2 ? { ...saved, cached: true, usageCredits: 0 } : undefined }),
+      body: JSON.stringify({ available: true, storedReview: { ...saved, cached: true, usageCredits: 0 } }),
     });
   });
   const setupGets = () => gets.filter((url) => !new URL(url).searchParams.has("assistantMessageIds")).length;
@@ -163,12 +190,29 @@ try {
   await expect(waitingStatus).toHaveCount(0);
   assert.equal(duplicatePosts, 1, "the dialog sent another run instead of waiting");
   assert.equal(setupGets(), setupGetsBefore, "the setup was re-fetched while waiting");
-  assert.equal(exactLookups.length, 2);
-  for (const query of exactLookups) {
+  assert.equal(exactLookups.length, 2, "a rate-limited lookup was retried more than once");
+  assert.ok(exactLookups[1].at - exactLookups[0].at >= 4_000, "the wait retried a rate-limited lookup too soon");
+  for (const { query } of exactLookups) {
     assert.equal(query.get("promptMessageId"), "11111111-1111-4111-8111-111111111111");
     assert.equal(query.get("reviewMode"), "balanced");
   }
   assert.equal(mock.getRunCount(), 1);
+  assert.equal(await startedEvents(), 1, "joining a run already in flight was counted as a start");
+
+  // 6. The turn being waited on is gone (an answer deleted or regenerated):
+  //    the wait ends with its own message, shows nothing in its place, and
+  //    the run button comes back.
+  exactBehaviour = "gone";
+  await page.getByRole("button", { name: "검토 기준 변경" }).click();
+  await expect(setupScreen).toBeVisible();
+  await page.getByRole("button", { name: /교차검토 실행/ }).click();
+  await expect(page.getByTestId("comparison-review-error")).toContainText("결과를 표시할 수 없습니다", { timeout: 15_000 });
+  await expect(waitingStatus).toHaveCount(0);
+  await expect(result).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /교차검토 실행/ })).toBeEnabled();
+  assert.equal(duplicatePosts, 2);
+  assert.equal(exactLookups.length, 3, "the wait kept polling a turn that is gone");
+  assert.equal(await startedEvents(), 1);
 
   assert.deepEqual(errors, []);
   console.log(

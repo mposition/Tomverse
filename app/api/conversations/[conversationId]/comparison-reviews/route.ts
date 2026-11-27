@@ -47,7 +47,12 @@ import {
   releaseInFlightRun,
   type InFlightRunClaim,
 } from "@/lib/guestIdempotency";
-import { COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS } from "@/lib/comparisonReviewInFlight";
+import {
+  COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_RATE_LIMIT,
+  COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_SCOPE,
+  COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS,
+  COMPARISON_REVIEW_TURN_NOT_FOUND,
+} from "@/lib/comparisonReviewInFlight";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
@@ -176,6 +181,95 @@ const reviewItemIds = (result: {
     ordinal: item.ordinal,
   }));
 
+/** The saved-result DTO both read-only lookups return. Nothing is spent. */
+const storedReviewPayload = (
+  stored: { id: string; reviewerModelId: string; usageCredits: number },
+  result: z.infer<typeof dualComparisonReviewResultSchema>,
+  responseMap: NonNullable<ReturnType<typeof responseMapForStoredReview>>
+) => ({
+  id: stored.id,
+  result,
+  reviewItems: reviewItemIds(result),
+  responseMap,
+  reviewerModelId: stored.reviewerModelId,
+  usageCredits: 0,
+  originalUsageCredits: stored.usageCredits,
+  cached: true,
+  disclaimer: "This AI review compares supplied answers and is not external fact verification.",
+});
+
+/**
+ * The saved result of one exact turn, for a client waiting on a run that is
+ * already in flight.
+ *
+ * It answers only for the turn it was asked about. A turn that no longer
+ * resolves (an answer deleted or regenerated) is COMPARISON_REVIEW_TURN_NOT_FOUND,
+ * never the latest turn's review: substituting one would show a waiting
+ * client somebody else's question as the result of its own run. It is also
+ * independent of the latest turn -- a newer question still generating, or one
+ * over the size limit, does not hide an older turn's saved result -- and it
+ * skips the size check, which guards reviewer input and this reads a row.
+ *
+ * `isStale` is not a reason to withhold the row here. Saving any further
+ * answer to the same question marks that question's reviews stale (the chat
+ * route), so a third answer finishing just after a 2-answer run saved would
+ * otherwise hide the result the client is waiting for. The input hash is
+ * recomputed from the messages as they are now, so a row it finds reviews
+ * exactly these question and answer texts.
+ */
+const storedTurnReviewResponse = async (
+  userId: string,
+  conversationId: string,
+  query: URLSearchParams
+) => {
+  const mode = comparisonReviewModeSchema.safeParse(query.get("reviewMode"));
+  const exact = storedTurnLookupSchema.safeParse({
+    promptMessageId: query.get("promptMessageId"),
+    assistantMessageIds: query.get("assistantMessageIds")?.split(","),
+  });
+  if (!mode.success || !exact.success) {
+    return jsonError("Invalid saved-review lookup.", "INVALID_COMPARISON_REVIEW_LOOKUP", 400);
+  }
+  const turn = await requestedComparableConversationTurn(
+    conversationId,
+    exact.data.promptMessageId,
+    exact.data.assistantMessageIds
+  );
+  if (!turn) {
+    return jsonError(
+      "The answers this review was running on are no longer available.",
+      COMPARISON_REVIEW_TURN_NOT_FOUND,
+      404
+    );
+  }
+  const inputHash = createComparisonReviewHash({
+    promptMessageId: turn.prompt.id,
+    question: turn.prompt.content,
+    responses: turn.responses,
+    reviewMode: mode.data,
+    includeSynthesis: query.get("includeSynthesis") === "true",
+  });
+  const stored = await prisma.comparisonReview.findUnique({
+    where: { userId_inputHash: { userId, inputHash } },
+  });
+  const parsed = stored ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
+  const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
+  const source = {
+    question: turn.prompt.content,
+    responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })),
+  };
+  return Response.json(
+    {
+      available: true,
+      source,
+      storedReview: stored && parsed?.success && responseMap
+        ? storedReviewPayload(stored, parsed.data, responseMap)
+        : null,
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
+};
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ conversationId: string }> }
@@ -187,11 +281,18 @@ export async function GET(
     if (!session?.user?.id) {
       return jsonError("Authentication required.", "AUTH_REQUIRED", 401);
     }
+    const query = new URL(request.url).searchParams;
+    // A client waiting on a run already in flight (POST answered 409
+    // DUPLICATE_REQUEST) names that run's exact turn. Those lookups count
+    // against their own bucket, so a long wait cannot exhaust the budget the
+    // setup preview below needs.
+    const exactTurnLookup =
+      query.has("promptMessageId") || query.has("assistantMessageIds");
     await consumeApiRateLimit(
       request,
       session.user.id,
-      "comparison-review-preview",
-      { minute: 20, day: 300 }
+      exactTurnLookup ? COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_SCOPE : "comparison-review-preview",
+      exactTurnLookup ? COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_RATE_LIMIT : { minute: 20, day: 300 }
     );
     const { conversationId } = await context.params;
     const authorization = await authorizeConversation(
@@ -200,6 +301,9 @@ export async function GET(
       conversationId
     );
     if ("response" in authorization) return authorization.response;
+    if (exactTurnLookup) {
+      return storedTurnReviewResponse(session.user.id, conversationId, query);
+    }
 
     const turn = await latestComparableConversationTurn(conversationId);
     if (!turn) {
@@ -218,30 +322,13 @@ export async function GET(
       responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })),
     };
     // Read-only recovery never dispatches a reviewer or reserves credits.
-    const query = new URL(request.url).searchParams;
     const requestedMode = comparisonReviewModeSchema.safeParse(query.get("reviewMode"));
     if (requestedMode.success) {
-      // A client waiting on a run that is already in flight (POST answered
-      // 409 DUPLICATE_REQUEST) names the exact turn that run reviews: another
-      // answer may have finished since it started, and the latest turn would
-      // then never find its row. Unknown or invalid ids fall back to the
-      // latest turn, exactly as before.
-      const exact = storedTurnLookupSchema.safeParse({
-        promptMessageId: query.get("promptMessageId"),
-        assistantMessageIds: query.get("assistantMessageIds")?.split(","),
-      });
-      const lookupTurn = (exact.success
-        ? await requestedComparableConversationTurn(conversationId, exact.data.promptMessageId, exact.data.assistantMessageIds)
-        : null) ?? turn;
-      const inputHash = createComparisonReviewHash({ promptMessageId: lookupTurn.prompt.id, question: lookupTurn.prompt.content, responses: lookupTurn.responses, reviewMode: requestedMode.data, includeSynthesis: query.get("includeSynthesis") === "true" });
+      const inputHash = createComparisonReviewHash({ promptMessageId: turn.prompt.id, question: turn.prompt.content, responses: turn.responses, reviewMode: requestedMode.data, includeSynthesis: query.get("includeSynthesis") === "true" });
       const stored = await prisma.comparisonReview.findUnique({ where: { userId_inputHash: { userId: session.user.id, inputHash } } });
       const parsed = stored && !stored.isStale ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
-      const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, lookupTurn.responses) : null;
-      const storedSource = lookupTurn === turn ? source : {
-        question: lookupTurn.prompt.content,
-        responses: lookupTurn.responses.map(({ messageId, content }) => ({ messageId, content })),
-      };
-      if (stored && parsed?.success && responseMap) return Response.json({ available: true, source: storedSource, storedReview: { id: stored.id, result: parsed.data, reviewItems: reviewItemIds(parsed.data), responseMap, reviewerModelId: stored.reviewerModelId, usageCredits: 0, originalUsageCredits: stored.usageCredits, cached: true, disclaimer: "This AI review compares supplied answers and is not external fact verification." } }, { headers: { "Cache-Control": "no-store" } });
+      const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
+      if (stored && parsed?.success && responseMap) return Response.json({ available: true, source, storedReview: storedReviewPayload(stored, parsed.data, responseMap) }, { headers: { "Cache-Control": "no-store" } });
     }
     const billingPlan = await getUserBillingPlan(session.user.id);
     const access = identifyChatCaller(request, session.user.id, billingPlan.tier, {

@@ -85,7 +85,11 @@ type World = {
   claimCalls: Array<{ subjectKey: string; scope: string; runKey: string; ttlSeconds: number }>;
   releases: number;
   stored: Map<string, { id: string; assistantMessageIds: string[]; reviewerModelId: string; promptVersion: string; result: unknown; usageCredits: number; isStale: boolean; createdAt: Date }>;
-  latestTurn: { prompt: typeof PROMPT; responses: typeof TWO_ANSWERS };
+  latestTurn: { prompt: typeof PROMPT; responses: typeof TWO_ANSWERS } | null;
+  latestTurnReads: number;
+  rateLimits: Array<{ scope: string; limits: { minute: number; day: number } }>;
+  /** A rate-limit scope whose bucket is spent. */
+  refusedScope: string | null;
 };
 
 const freshWorld = (): World => ({
@@ -101,6 +105,9 @@ const freshWorld = (): World => ({
   releases: 0,
   stored: new Map(),
   latestTurn: { prompt: PROMPT, responses: TWO_ANSWERS },
+  latestTurnReads: 0,
+  rateLimits: [],
+  refusedScope: null,
 });
 
 let world = freshWorld();
@@ -122,9 +129,19 @@ async function loadRoute() {
     },
   });
 
-  const realApiSecurity = original("lib/apiSecurity.ts");
+  const realApiSecurity = original("lib/apiSecurity.ts") as Record<string, unknown> & {
+    ApiSecurityError: new (status: number, code: string, message: string, retryAfter?: number) => Error;
+  };
   mock.module(mod("lib/apiSecurity.ts"), {
-    namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => {} },
+    namedExports: {
+      ...realApiSecurity,
+      consumeApiRateLimit: async (_request: unknown, _user: string, scope: string, limits: { minute: number; day: number }) => {
+        world.rateLimits.push({ scope, limits });
+        if (scope === world.refusedScope) {
+          throw new realApiSecurity.ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.", 3600);
+        }
+      },
+    },
   });
 
   const realLock = original("lib/conversationLock.ts");
@@ -141,7 +158,10 @@ async function loadRoute() {
 
   mock.module(mod("lib/comparisonReviewTurn.ts"), {
     namedExports: {
-      latestComparableConversationTurn: async () => world.latestTurn,
+      latestComparableConversationTurn: async () => {
+        world.latestTurnReads += 1;
+        return world.latestTurn;
+      },
       requestedComparableConversationTurn: async (_conversationId: string, promptMessageId: string, ids: string[]) => {
         if (promptMessageId !== PROMPT_ID) return null;
         const byId = new Map(THREE_ANSWERS.map((answer) => [answer.messageId, answer]));
@@ -402,16 +422,119 @@ test("a run waited on is found by its exact turn even after the latest turn move
   assert.equal(world.claimCalls.length, 1, "a lookup never claims anything");
 });
 
-test("an unknown exact turn falls back to the latest-turn setup", async () => {
+const exactQuery = (ids: string[], promptMessageId = PROMPT_ID) => ({
+  reviewMode: "balanced",
+  includeSynthesis: "false",
+  promptMessageId,
+  assistantMessageIds: ids.join(","),
+});
+
+test("an exact turn that no longer exists is its own answer, never the latest turn's review", async () => {
+  const { GET, POST } = await loadRoute();
+  // The latest turn has a saved review a careless fallback would hand out.
+  assert.equal((await POST(post(), context)).status, 200);
+  const latest = await json(await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context));
+  assert.ok(latest.storedReview, "fixture: the latest turn should have a saved review");
+
+  // The run being waited on reviewed answers that were since deleted or
+  // regenerated, or a question that is gone.
+  for (const query of [
+    exactQuery([ANSWER_A, "51111111-1111-4111-8111-111111111111"]),
+    exactQuery([ANSWER_A, ANSWER_B], "99999999-9999-4999-8999-999999999999"),
+  ]) {
+    const gone = await GET(get(query), context);
+    const body = await json(gone);
+    assert.equal(gone.status, 404);
+    assert.equal(body.code, "COMPARISON_REVIEW_TURN_NOT_FOUND");
+    assert.equal(body.storedReview, undefined, "another turn's review was handed to a waiting client");
+  }
+});
+
+test("an exact turn without a saved row yet says so instead of describing the latest turn", async () => {
   const { GET } = await loadRoute();
-  const setup = await json(await GET(get({
-    reviewMode: "balanced",
-    includeSynthesis: "false",
-    promptMessageId: "99999999-9999-4999-8999-999999999999",
-    assistantMessageIds: [ANSWER_A, ANSWER_B].join(","),
-  }), context));
-  assert.equal(setup.available, true);
-  assert.equal(setup.storedReview, undefined);
-  assert.deepEqual(setup.assistantMessageIds, [ANSWER_A, ANSWER_B]);
+  const waiting = await GET(get(exactQuery([ANSWER_A, ANSWER_B])), context);
+  const body = await json(waiting);
+  assert.equal(waiting.status, 200);
+  assert.equal(body.storedReview, null);
+  assert.equal(body.assistantMessageIds, undefined, "a lookup must not return a runnable setup");
   assert.equal(world.runs, 0);
+});
+
+test("an incomplete exact lookup is refused rather than answered for the latest turn", async () => {
+  const { GET } = await loadRoute();
+  const incomplete: Array<Record<string, string>> = [
+    { reviewMode: "balanced", promptMessageId: PROMPT_ID },
+    { reviewMode: "balanced", assistantMessageIds: [ANSWER_A, ANSWER_B].join(",") },
+    { promptMessageId: PROMPT_ID, assistantMessageIds: [ANSWER_A, ANSWER_B].join(",") },
+  ];
+  for (const query of incomplete) {
+    const refused = await GET(get(query), context);
+    assert.equal(refused.status, 400);
+    assert.equal((await json(refused)).code, "INVALID_COMPARISON_REVIEW_LOOKUP");
+  }
+  assert.equal(world.latestTurnReads, 0);
+});
+
+test("an exact lookup does not depend on the latest turn being comparable or small enough", async () => {
+  const { GET, POST } = await loadRoute();
+  assert.equal((await POST(post(), context)).status, 200);
+  const query = exactQuery([ANSWER_A, ANSWER_B]);
+
+  // A newer question whose answers are still generating.
+  world.latestTurn = null;
+  world.latestTurnReads = 0;
+  const pendingLatest = await json(await GET(get(query), context));
+  assert.ok(pendingLatest.storedReview, "a newer, unfinished question hid the waited-on result");
+
+  // A newer question over the review size limit.
+  world.latestTurn = {
+    prompt: { ...PROMPT, id: "61111111-1111-4111-8111-111111111111", content: "x".repeat(200_000) },
+    responses: TWO_ANSWERS,
+  };
+  const oversizedLatest = await GET(get(query), context);
+  assert.equal(oversizedLatest.status, 200);
+  assert.ok((await json(oversizedLatest)).storedReview, "an oversized newer question hid the waited-on result");
+  assert.equal(world.latestTurnReads, 0, "the exact lookup read the latest turn");
+});
+
+test("an exact lookup still finds its row after a later answer marked it stale", async () => {
+  const { GET, POST } = await loadRoute();
+  assert.equal((await POST(post(), context)).status, 200);
+  // The chat route marks every review of a question stale when another answer
+  // to it is saved -- e.g. the third model finishing just after this run.
+  for (const row of world.stored.values()) row.isStale = true;
+
+  const latest = await json(await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context));
+  assert.equal(latest.storedReview, undefined, "the setup lookup keeps refusing stale rows");
+  const exact = await json(await GET(get(exactQuery([ANSWER_A, ANSWER_B])), context));
+  assert.ok(exact.storedReview, "the waited-on result was hidden by the stale flag");
+  assert.equal(world.runs, 1);
+});
+
+test("exact lookups spend their own rate-limit bucket, never the setup preview's", async () => {
+  const { GET } = await loadRoute();
+  const realInFlight = require(resolve(ROOT, "lib/comparisonReviewInFlight.ts")) as {
+    COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_SCOPE: string;
+    COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_RATE_LIMIT: { minute: number; day: number };
+  };
+  await GET(get(exactQuery([ANSWER_A, ANSWER_B])), context);
+  await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context);
+  assert.deepEqual(world.rateLimits, [
+    {
+      scope: realInFlight.COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_SCOPE,
+      limits: { ...realInFlight.COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_RATE_LIMIT },
+    },
+    { scope: "comparison-review-preview", limits: { minute: 20, day: 300 } },
+  ]);
+
+  // A spent lookup bucket answers 429 with Retry-After and leaves the setup
+  // preview working.
+  world.refusedScope = realInFlight.COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_SCOPE;
+  const limited = await GET(get(exactQuery([ANSWER_A, ANSWER_B])), context);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "3600");
+  await limited.text();
+  const setup = await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context);
+  assert.equal(setup.status, 200);
+  await setup.text();
 });

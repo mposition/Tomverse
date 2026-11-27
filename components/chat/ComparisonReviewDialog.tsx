@@ -25,6 +25,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
 import {
   isComparisonReviewAlreadyRunning,
+  lookupStoredComparisonReview,
   storedComparisonReviewPath,
   waitForStoredComparisonReview,
 } from "@/lib/comparisonReviewInFlight";
@@ -683,39 +684,26 @@ export function ComparisonReviewDialog({
     setWaiting(true);
     setError("");
     try {
-      const stored = await waitForStoredComparisonReview<ComparisonReview>({
+      const path = storedComparisonReviewPath(input.conversationId, input);
+      const wait = await waitForStoredComparisonReview<ComparisonReview>({
         signal: controller.signal,
-        lookup: async () => {
-          let lookup: Response;
-          try {
-            lookup = await fetch(storedComparisonReviewPath(input.conversationId, input), {
-              cache: "no-store",
-              signal: controller.signal,
-            });
-          } catch {
-            return undefined;
-          }
-          if (!lookup.ok) {
-            await discardResponseBody(lookup);
-            // A rate limit or a server hiccup is worth another look; a gone or
-            // locked conversation is not.
-            if (lookup.status === 429 || lookup.status >= 500) return undefined;
-            throw new Error(t("chat.aiReviewPrepareFailed"));
-          }
-          const data = (await lookup.json().catch(() => ({}))) as ReviewSetup;
-          return data.storedReview;
-        },
+        lookup: () => lookupStoredComparisonReview<ComparisonReview>(path, { signal: controller.signal }),
       });
-      if (controller.signal.aborted) return;
-      if (!stored) {
+      if (wait.outcome === "aborted" || controller.signal.aborted) return;
+      if (wait.outcome === "gone") {
+        setError(t("chat.aiReviewAlreadyRunningTurnGone"));
+        return;
+      }
+      if (wait.outcome === "expired") {
         setError(t("chat.aiReviewAlreadyRunningTimeout"));
         return;
       }
-      setReview(stored);
+      setReview(wait.review);
       setActiveReviewer("primary");
-    } catch (waitError) {
+    } catch {
+      // A gone or locked conversation: stop waiting; nothing was spent.
       if (controller.signal.aborted) return;
-      setError(waitError instanceof Error ? waitError.message : t("chat.aiReviewFailed"));
+      setError(t("chat.aiReviewPrepareFailed"));
     } finally {
       if (waitControllerRef.current === controller) {
         waitControllerRef.current = null;
@@ -735,11 +723,19 @@ export function ComparisonReviewDialog({
     setRunning(true);
     setError("");
     let receivedPrimary = false;
-    trackProductEvent(
-      "comparison_review_started",
-      setup.responses?.length || 0,
-      { review_mode: mode }
-    );
+    // Counted once the server has answered with anything other than "this
+    // review is already running": joining someone else's run starts and
+    // bills nothing here. A request that never got an answer still counts.
+    let startTracked = false;
+    const trackStarted = () => {
+      if (startTracked) return;
+      startTracked = true;
+      trackProductEvent(
+        "comparison_review_started",
+        setup.responses?.length || 0,
+        { review_mode: mode }
+      );
+    };
     try {
       const sendGuestRun = (turnstileToken?: string) =>
         fetch("/api/chat/comparison-review", {
@@ -782,6 +778,7 @@ export function ComparisonReviewDialog({
           response = await sendGuestRun(token);
         }
       }
+      if (guestSource || response.status !== 409) trackStarted();
       const data = (await readReviewProgress(response, value => {
         const primary = value as ComparisonReview;
         if (!primary?.result?.primary || !Array.isArray(primary.responseMap)) return;
@@ -810,6 +807,7 @@ export function ComparisonReviewDialog({
         });
         return;
       }
+      trackStarted();
       if (!response.ok || !("result" in data)) {
         const code = "code" in data ? data.code : undefined;
         // The two guest-specific refusals have their own sentences: one is
@@ -848,6 +846,7 @@ export function ComparisonReviewDialog({
       );
       onCompleted?.();
     } catch (runError) {
+      trackStarted();
       trackProductEvent(
         "comparison_review_failed",
         setup.responses?.length || 0,

@@ -546,6 +546,7 @@ export const ko = {
         aiReviewDuplicateRequest: "이 AI Review는 이미 실행 중입니다.",
         aiReviewAlreadyRunningWaiting: "이 AI Review는 이미 실행 중입니다. 다시 실행하지 않고, 결과가 준비되면 여기에 표시합니다.",
         aiReviewAlreadyRunningTimeout: "이미 실행 중이던 AI Review가 아직 끝나지 않았습니다. 몇 분 뒤에 다시 시도해 주세요.",
+        aiReviewAlreadyRunningTurnGone: "이 AI Review가 검토하던 답변이 더 이상 없어 결과를 표시할 수 없습니다. 현재 답변으로 새로 검토를 실행할 수 있습니다.",
         attachmentUploadError: "파일을 업로드하지 못했습니다. 다시 시도해 주세요.",
         attachmentUploadingLabel: "업로드 중",
         attachmentUploadingHint: "파일을 전송하고 있습니다. 완료될 때까지 기다려 주세요.",

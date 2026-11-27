@@ -554,6 +554,7 @@ export const de = {
         aiReviewDuplicateRequest: "Diese AI Review läuft bereits.",
         aiReviewAlreadyRunningWaiting: "Diese AI Review läuft bereits. Das Ergebnis erscheint hier, sobald es fertig ist, ohne sie erneut auszuführen.",
         aiReviewAlreadyRunningTimeout: "Die bereits laufende AI Review ist noch nicht abgeschlossen. Versuchen Sie es in einigen Minuten erneut.",
+        aiReviewAlreadyRunningTurnGone: "Die Antworten, die diese AI Review geprüft hat, sind nicht mehr verfügbar, daher kann ihr Ergebnis nicht angezeigt werden. Sie können für die aktuellen Antworten eine neue Prüfung starten.",
         attachmentUploadError: "Die Datei konnte nicht hochgeladen werden. Bitte erneut versuchen.",
         attachmentUploadingLabel: "Wird hochgeladen",
         attachmentUploadingHint: "Die Datei wird gesendet. Bitte warten Sie, bis der Vorgang abgeschlossen ist.",
