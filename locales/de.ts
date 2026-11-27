@@ -386,6 +386,7 @@ export const de = {
         you: "Sie",
         exceedDailyLimit: "Ihr tägliches Gastlimit ist aufgebraucht. Bitte melden Sie sich an.",
         responseError: "Die Antwort konnte nicht erzeugt werden. Bitte versuchen Sie es gleich erneut.",
+        databaseTemporarilyUnavailable: "Der Dienst ist vorübergehend ausgelastet. Bitte versuchen Sie es gleich erneut.",
         tooManyRequestsRetry: "Anfragen werden zu schnell gesendet. Bitte versuchen Sie es in {seconds} Sekunden erneut.",
         responseBodyMissing: "Der Antwortstream konnte nicht geöffnet werden.",
         responseEmpty: "Der KI-Anbieter hat die Anfrage ohne Antwort beendet. Versuchen Sie es gleich erneut oder wählen Sie ein anderes Modell.",

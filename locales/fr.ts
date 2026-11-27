@@ -397,6 +397,7 @@ export const fr = {
         you: "Vous",
         exceedDailyLimit: "Vous avez atteint la limite quotidienne invité. Connectez-vous pour continuer.",
         responseError: "La réponse n'a pas pu être générée. Réessayez dans un instant.",
+        databaseTemporarilyUnavailable: "Le service est temporairement saturé. Réessayez dans un instant.",
         tooManyRequestsRetry: "Les requêtes sont envoyées trop rapidement. Réessayez dans {seconds} secondes.",
         responseBodyMissing: "Le flux de réponse n'a pas pu être ouvert.",
         responseEmpty: "Le fournisseur d'IA a terminé la requête sans réponse. Réessayez bientôt ou sélectionnez un autre modèle.",

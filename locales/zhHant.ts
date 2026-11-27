@@ -397,6 +397,7 @@ export const zhHant = {
         you: "我",
         exceedDailyLimit: "你已用完訪客每日限額。請登入後繼續使用。",
         responseError: "無法產生回覆，請稍後再試。",
+        databaseTemporarilyUnavailable: "服務暫時繁忙，請稍後再試。",
         tooManyRequestsRetry: "請求傳送過快，請在 {seconds} 秒後重試。",
         responseBodyMissing: "無法開啟回應串流。",
         responseEmpty: "AI 服務供應商已結束要求，但未回傳答案。請稍後重試或選擇其他模型。",

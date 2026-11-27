@@ -397,6 +397,7 @@ export const es = {
         you: "Tú",
         exceedDailyLimit: "Has agotado tu límite diario de invitado. Inicia sesión para continuar.",
         responseError: "No se pudo generar la respuesta. Inténtalo de nuevo en breve.",
+        databaseTemporarilyUnavailable: "El servicio está temporalmente saturado. Inténtalo de nuevo en breve.",
         tooManyRequestsRetry: "Las solicitudes se están enviando demasiado rápido. Inténtalo de nuevo en {seconds} segundos.",
         responseBodyMissing: "No se pudo abrir el flujo de respuesta.",
         responseEmpty: "El proveedor de IA finalizó la solicitud sin respuesta. Inténtalo de nuevo en breve o selecciona otro modelo.",

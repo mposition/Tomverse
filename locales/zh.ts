@@ -402,6 +402,7 @@ export const zh = {
         you: "我",
         exceedDailyLimit: "你已用完访客每日限额。请登录后继续使用。",
         responseError: "无法生成回复，请稍后再试。",
+        databaseTemporarilyUnavailable: "服务暂时繁忙，请稍后再试。",
         tooManyRequestsRetry: "请求发送过快，请在 {seconds} 秒后重试。",
         responseBodyMissing: "无法打开响应流。",
         responseEmpty: "AI 提供商结束了请求，但未返回答案。请稍后重试或选择其他模型。",

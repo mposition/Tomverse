@@ -79,6 +79,24 @@ const RETRYABLE_POSTGRES_CODES = new Set([
   "08P01",
 ]);
 
+/**
+ * Prisma's interactive transaction never got a connection inside `maxWait`.
+ *
+ * P2028 ("Transaction API error") names two opposite situations. This is the
+ * one where nothing ran: the callback was not invoked and no statement was sent.
+ * The other P2028 messages ("... on an expired transaction", "Transaction
+ * already closed") are raised in the middle of the work, where the outcome of a
+ * write may be unknown, and are deliberately not matched.
+ */
+export const isTransactionStartFailure = (error: unknown) => {
+  const value = asRecord(error);
+  return (
+    value?.code === "P2028" &&
+    typeof value.message === "string" &&
+    /unable to start a transaction/i.test(value.message)
+  );
+};
+
 export const isRetryableDatabaseError = (error: unknown) => {
   const metadata = databaseErrorMetadata(error);
   return Boolean(
@@ -86,7 +104,8 @@ export const isRetryableDatabaseError = (error: unknown) => {
       (metadata.driverKind &&
         RETRYABLE_DRIVER_KINDS.has(metadata.driverKind)) ||
       (metadata.driverCode &&
-        RETRYABLE_POSTGRES_CODES.has(metadata.driverCode))
+        RETRYABLE_POSTGRES_CODES.has(metadata.driverCode)) ||
+      isTransactionStartFailure(error)
   );
 };
 
@@ -153,3 +172,69 @@ export const isMissingDatabaseSchemaError = (error: unknown) => {
         MISSING_SCHEMA_POSTGRES_CODES.has(metadata.driverCode))
   );
 };
+
+/* -------------------------------------------------------------------------- */
+/* A transient refusal, as the server says it and the browser reads it         */
+/* -------------------------------------------------------------------------- */
+/*
+ * The one code, header and delay a transient database refusal travels with.
+ * Raised by the chat route and by the shared rate limiter, read by the browser,
+ * so everything here is pure: this file is imported into a client bundle.
+ *
+ * What the code promises: nothing a provider could have seen happened, and the
+ * same request may be sent once more. It never describes a failure after a
+ * provider call began -- that is `AI_PROVIDER_ERROR`'s story, and re-sending
+ * there could pay twice.
+ */
+
+export const DATABASE_TEMPORARILY_UNAVAILABLE_CODE =
+  "DATABASE_TEMPORARILY_UNAVAILABLE";
+
+/** `Retry-After` the server sends, in seconds. */
+export const DATABASE_RETRY_AFTER_SECONDS = 2;
+
+/** The browser never waits longer than this before its single resend. */
+export const DATABASE_RETRY_MAX_DELAY_MS = 10_000;
+
+export const isTransientDatabaseCode = (code: unknown): boolean =>
+  code === DATABASE_TEMPORARILY_UNAVAILABLE_CODE;
+
+/**
+ * How long to wait before the one automatic resend.
+ *
+ * `Retry-After` carries delta-seconds here; an HTTP-date, a negative number or
+ * garbage falls back to the server's own default instead of being trusted, and
+ * the result is clamped so a misbehaving proxy cannot park a send for minutes.
+ */
+export const transientDatabaseRetryDelayMs = (
+  retryAfterHeader: string | null | undefined
+): number => {
+  const seconds = Number(retryAfterHeader);
+  const chosen =
+    retryAfterHeader && Number.isFinite(seconds) && seconds >= 0
+      ? seconds
+      : DATABASE_RETRY_AFTER_SECONDS;
+  return Math.min(Math.round(chosen * 1_000), DATABASE_RETRY_MAX_DELAY_MS);
+};
+
+/**
+ * Resolves after `ms`, or at once when `signal` aborts so a Stop pressed during
+ * the wait is honoured immediately. The caller re-checks the signal afterwards.
+ */
+export const waitForTransientRetry = (
+  ms: number,
+  signal: AbortSignal
+): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener("abort", finish, { once: true });
+  });

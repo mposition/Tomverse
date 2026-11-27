@@ -539,6 +539,11 @@ import {
     ATTACHMENT_STORAGE_UNAVAILABLE_CODE,
     ATTACHMENT_UNAVAILABLE_CODE,
 } from "@/lib/chatAttachmentErrorCopy";
+import {
+    DATABASE_RETRY_AFTER_SECONDS,
+    DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
+    isRetryableDatabaseError,
+} from "@/lib/databaseError";
 
 /**
  * Each provider call of a multi-step turn (a tool loop, Research Preview), from
@@ -9587,6 +9592,64 @@ async function handleChatPost(
                 }
             }
             return accessError;
+        }
+
+        /*
+          A transient database refusal before any provider was called.
+
+          This used to fall into the unclassified branch below and answer 500
+          CHAT_APPLICATION_ERROR with `retryable: false`, in Korean, for what
+          was a connection that did not open or a deadlock Postgres broke. The
+          request is safe to send again here, and only here:
+
+            * `providerCall` is null, so nothing left this process for a
+              provider and nothing can be paid for twice;
+            * the usage reservation, lease and durable attempt of this request
+              were unwound above (a settle that itself failed is logged and
+              left to the reservation sweeper, as before).
+
+          After a provider call began, a database error keeps its old shape: the
+          outcome of that turn is not known, so it is never advertised as
+          retryable. The browser sends the request once more with a new answer
+          id, because the attempt unwound above is terminal.
+        */
+        const transientDatabaseError = providerCall
+            ? null
+            : isRetryableDatabaseError(error)
+              ? error
+              : localFailure &&
+                  localFailure.layer !== "storage" &&
+                  isRetryableDatabaseError(localFailure.cause)
+                ? localFailure.cause
+                : null;
+        if (transientDatabaseError) {
+            logRequestError(
+                "chat_database_temporarily_unavailable",
+                traceId,
+                transientDatabaseError,
+                dispatchModelIdForLog,
+                { failureLayer: "application", phase: "request" }
+            );
+            const unavailable = tracedJsonError(
+                "The service is temporarily unavailable. Please try again shortly.",
+                DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
+                503,
+                traceId,
+                { retryAfterSeconds: DATABASE_RETRY_AFTER_SECONDS },
+                {
+                    phase: "request",
+                    failureLayer: "application",
+                    provider: dispatchProviderForLog,
+                    modelId: dispatchModelIdForLog,
+                    error: transientDatabaseError,
+                    retryable: true,
+                }
+            );
+            unavailable.headers.set(
+                "Retry-After",
+                String(DATABASE_RETRY_AFTER_SECONDS)
+            );
+            return withoutRejectionLine(unavailable);
         }
 
         if (localFailure) {

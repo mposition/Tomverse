@@ -365,6 +365,7 @@ export const ko = {
         you: "나",
         exceedDailyLimit: "게스트 일일 한도를 모두 사용했습니다. 계속 이용하려면 로그인해 주세요.",
         responseError: "응답을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        databaseTemporarilyUnavailable: "서비스가 일시적으로 원활하지 않습니다. 잠시 후 다시 시도해 주세요.",
         tooManyRequestsRetry: "요청이 너무 빠르게 전송되었습니다. {seconds}초 후 다시 시도해 주세요.",
         responseBodyMissing: "응답 스트림을 열 수 없습니다.",
         responseEmpty: "AI 제공업체가 답변 없이 요청을 종료했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해 주세요.",

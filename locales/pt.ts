@@ -397,6 +397,7 @@ export const pt = {
         you: "Você",
         exceedDailyLimit: "Você esgotou seu limite diário de convidado. Faça login para continuar.",
         responseError: "A resposta não pôde ser gerada. Tente novamente em instantes.",
+        databaseTemporarilyUnavailable: "O serviço está temporariamente sobrecarregado. Tente novamente em instantes.",
         tooManyRequestsRetry: "As solicitações estão sendo enviadas rápido demais. Tente novamente em {seconds} segundos.",
         responseBodyMissing: "O fluxo de resposta não pôde ser aberto.",
         responseEmpty: "O provedor de IA encerrou a solicitação sem resposta. Tente novamente em instantes ou selecione outro modelo.",

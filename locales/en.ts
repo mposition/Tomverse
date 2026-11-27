@@ -366,6 +366,7 @@ export const en = {
         you: "You",
         exceedDailyLimit: "You have exhausted your daily guest limit. Please log in to continue.",
         responseError: "The response could not be generated. Please try again shortly.",
+        databaseTemporarilyUnavailable: "The service is temporarily busy. Please try again shortly.",
         tooManyRequestsRetry: "Requests are being sent too quickly. Please try again in {seconds} seconds.",
         responseBodyMissing: "The response stream could not be opened.",
         responseEmpty: "The AI provider ended the request without an answer. Try again shortly or select another model.",
