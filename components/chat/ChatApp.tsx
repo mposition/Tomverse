@@ -2855,6 +2855,12 @@ function ChatAppComponent({
             // Reaching here means the one automatic resend was already spent
             // (or never applied), so the person is asked to try again.
             ? t("chat.databaseTemporarilyUnavailable")
+          : errorCode === "CHAT_APPLICATION_ERROR"
+            // The server's sentence for this code is a fixed Korean one. A
+            // database fault after paid work began (a search, a router call, a
+            // scanned page) ends here instead of as a resend, so it reads as
+            // the generic failure in the person's own language.
+            ? t("chat.responseError")
           : CHAT_SEND_LOCALIZED_ATTACHMENT_CODES.has(errorCode) &&
               chatAttachmentErrorCopyKey(errorCode)
             ? t(chatAttachmentErrorCopyKey(errorCode) as string)

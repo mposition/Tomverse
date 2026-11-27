@@ -105,6 +105,8 @@ const presearchCalls: unknown[] = [];
 const presearchSettlements: Record<string, unknown>[] = [];
 let testBudgetNotice: (() => Promise<void>) | undefined;
 let failEvidenceSetup: (() => never) | undefined;
+// Thrown by the reservation seam, to say a database blinked before anything was dispatched.
+let databaseFailureAtAccess: unknown;
 const realPresearch = require(resolve(ROOT, "lib/chatRouterPresearch.ts")) as typeof import("../../lib/chatRouterPresearch");
 mock.module(mod("lib/chatRouterPresearch.ts"), { namedExports: {
   ...realPresearch,
@@ -1444,6 +1446,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
           },
     acquireChatAccess: async (_access: unknown, budget: Parameters<typeof import("../../lib/chatSecurity").acquireChatAccess>[1]) => {
       ledger.admittedBudgets.push(budget);
+      if (databaseFailureAtAccess) throw databaseFailureAtAccess;
       if (refusePresearchAdmission) throw new (realChatSecurity.ChatAccessError as typeof import("../../lib/chatSecurity").ChatAccessError)(402, "CREDIT_BALANCE_INSUFFICIENT", "fixture");
       ledger.accessAcquisitions += 1;
       return {
@@ -4091,6 +4094,66 @@ test("router presearch stays behind admission, preserves search recovery policy 
     if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
     failPresearchBackend = false; turnLocation = undefined; forceNativeSearch = false; forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined; refusePresearchAdmission = false; throwAfterPresearch = false;
   }
+});
+
+/*
+  A transient database error is answered as a resend (503 DATABASE_TEMPORARILY_UNAVAILABLE)
+  only while this request has spent nothing outside the database: the browser's
+  resend runs the whole request again, and a search, a router call or a scanned
+  page would be paid for a second time.
+*/
+const transientDatabaseFault = () =>
+  Object.assign(new Error("connection closed"), { name: "DriverAdapterError", cause: { kind: "ConnectionClosed" } });
+
+test("a database blink after the pre-answer search ran is not a resend, and the search ran once", async () => {
+  const oldFlag = process.env.CHAT_ROUTER_PRESEARCH_ENABLED;
+  const oldBrave = process.env.BRAVE_SEARCH_API_KEY;
+  process.env.CHAT_ROUTER_PRESEARCH_ENABLED = "true";
+  process.env.BRAVE_SEARCH_API_KEY = "synthetic-never-sent";
+  forceAppManagedSearch = true;
+  llmSearchQueries = ["one fact", "another fact"];
+  llmSearchModelId = "gpt-6-luna";
+  llmSearchFileIntent = false;
+  try {
+    presearchCalls.length = 0;
+    presearchSettlements.length = 0;
+    failEvidenceSetup = () => { throw transientDatabaseFault(); };
+    const { response, body } = await ask("answers", "claimed", 500, false, undefined, true, true, undefined, "always");
+    assert.equal(response.headers.get("Retry-After"), null);
+    assert.notEqual((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    // The search is not repeated by the server, and what it cost is still settled.
+    assert.equal(presearchCalls.length, 2);
+    assert.equal(presearchSettlements.length, 1);
+    assert.equal(presearchSettlements[0].searchBackendRequestCount, 2);
+  } finally {
+    failEvidenceSetup = undefined;
+    if (oldFlag === undefined) delete process.env.CHAT_ROUTER_PRESEARCH_ENABLED; else process.env.CHAT_ROUTER_PRESEARCH_ENABLED = oldFlag;
+    if (oldBrave === undefined) delete process.env.BRAVE_SEARCH_API_KEY; else process.env.BRAVE_SEARCH_API_KEY = oldBrave;
+    forceAppManagedSearch = false; llmSearchQueries = undefined; llmSearchModelId = undefined; llmSearchFileIntent = undefined;
+  }
+});
+
+test("a database blink at the reservation of an Auto turn, after the router was asked, is not a resend", async () => {
+  databaseFailureAtAccess = transientDatabaseFault();
+  try {
+    const { response, body } = await ask("answers", "claimed", 500, false, undefined, true, false);
+    assert.equal(response.headers.get("Retry-After"), null);
+    assert.notEqual((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+  } finally { databaseFailureAtAccess = undefined; }
+});
+
+test("a database blink before anything outside the database ran is still a resend", async () => {
+  // A manual turn has no router, no classifier and no search, so the
+  // reservation failing is the first thing that can go wrong and costs nothing.
+  presearchCalls.length = 0;
+  conversationSelectionMode = "manual";
+  databaseFailureAtAccess = transientDatabaseFault();
+  try {
+    const { response, body } = await ask("answers", "claimed", 503, false, undefined, true, false);
+    assert.equal(response.headers.get("Retry-After"), "2");
+    assert.equal((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    assert.equal(presearchCalls.length, 0);
+  } finally { databaseFailureAtAccess = undefined; conversationSelectionMode = "auto"; }
 });
 
 test("grounded answer guidance and Qwen first-step thinking follow independent gates on the same search turn", async t => {

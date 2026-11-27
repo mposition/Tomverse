@@ -1518,6 +1518,15 @@ async function handleChatPost(
      */
     let providerCall: ProviderCallRecord | null = null;
     let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
+    /**
+     * Set the moment this request starts a paid external call that is not the
+     * answer model: Auto's router and image classification, a paid OCR page, a
+     * Deep Research submission. (A pre-answer web search is tracked by
+     * `presearchForSettlement`'s own request count.) A resend would pay for the
+     * same call again, so the catch never answers such a request with the
+     * retryable DATABASE_TEMPORARILY_UNAVAILABLE.
+     */
+    let paidExternalWorkStarted = false as boolean;
     let providerBudgetNotice: Promise<void> | undefined;
     let searchObservation: ChatSearchObservation | undefined;
     /**
@@ -2807,6 +2816,11 @@ async function handleChatPost(
             const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
             fusion = { key, userId, requestDigest, expiresAt, searchUtcDate, resume };
         }
+        // Auto's semantic calls -- the router model and the image-intent
+        // classifier -- are paid provider calls with their own cost hold. They
+        // start from here (the classifier immediately, the router just below),
+        // and a resend would run and pay for them again.
+        if (deterministicAutoSelection.routed || autoImageTurnEligible) paidExternalWorkStarted = true;
         const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
             ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(messages),
                 plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
@@ -4444,6 +4458,9 @@ async function handleChatPost(
                         if (!ocrAllowance) return "no-text";
                         if (fromArchive) archiveOcrUsed += 1;
 
+                        // Paid per page, and a scanned file on the message being
+                        // sent is not cached: a resend would be billed again.
+                        paidExternalWorkStarted = true;
                         try {
                             const ocrResult = await extractPdfTextWithMistralOcr(
                                 buffer,
@@ -5739,6 +5756,9 @@ async function handleChatPost(
 
             // Preserve the provider job id in diagnostics when persistence fails after acceptance.
             let submittedPerplexityJobId: string | null = null;
+            // A submitted job is paid for; this block answers its own failures
+            // and never reaches the retryable 503, the flag is belt and braces.
+            paidExternalWorkStarted = true;
             try {
                 const depthParams =
                     DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
@@ -9724,8 +9744,20 @@ async function handleChatPost(
           outcome of that turn is not known, so it is never advertised as
           retryable. The browser sends the request once more with a new answer
           id, because the attempt unwound above is terminal.
+
+          "Nothing can be paid for twice" has to hold for everything this
+          request spent before the answer model, not only for the answer
+          model. `costlyWorkStarted` is that: the pre-answer web search (its
+          own request count, the same one failure settlement charges), and
+          `paidExternalWorkStarted` for Auto's router and image classifier, a
+          paid OCR page and a Deep Research submission. Prompt Refiner
+          consumption, MCP connector setup, storage reads and the context
+          bundle are database or free calls: a resend repeats no spend.
         */
-        const transientDatabaseError = providerCall
+        const costlyWorkStarted =
+            (paidExternalWorkStarted as boolean) ||
+            (presearchForSettlement?.session.snapshot().backendRequestCount ?? 0) > 0;
+        const transientDatabaseError = providerCall || costlyWorkStarted
             ? null
             : isRetryableDatabaseError(error)
               ? error
