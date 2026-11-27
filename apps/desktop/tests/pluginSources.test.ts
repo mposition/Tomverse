@@ -18,7 +18,7 @@ const pluginItems = (prefix: string, version: string) => [
   { name: `${prefix}hooks/hooks.json`, data: json({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo hi" }] }] } }) },
 ];
 
-type Setup = { sources?: boolean; zip?: string | null; confirm?: boolean };
+type Setup = { sources?: boolean; zip?: string | null; confirm?: boolean; folder?: string | null };
 
 /** A host over a temporary Tomverse folder, with the network replaced by what each test serves. */
 function setup(options: Setup = {}) {
@@ -27,11 +27,12 @@ function setup(options: Setup = {}) {
   const requested: string[] = [];
   const serve = new Map<string, () => Response>();
   let sources = options.sources ?? true;
+  let confirm = options.confirm ?? true;
   const host = createPluginsHost({
     home: () => home,
-    pickFolder: async () => null,
+    pickFolder: async () => options.folder ?? null,
     pickZip: async () => options.zip ?? null,
-    confirmFetch: async (address, kind) => { asked.push({ address, kind }); return options.confirm ?? true; },
+    confirmFetch: async (address, kind) => { asked.push({ address, kind }); return confirm; },
     sources: () => sources,
     fetchImpl: async (url) => {
       requested.push(url);
@@ -40,7 +41,7 @@ function setup(options: Setup = {}) {
     },
   });
   const reply = (command: PluginsCommand) => host.reply(command, null);
-  return { home, host, reply, asked, requested, serve, setSources: (on: boolean) => { sources = on; } };
+  return { home, host, reply, asked, requested, serve, setSources: (on: boolean) => { sources = on; }, setConfirm: (answer: boolean) => { confirm = answer; } };
 }
 
 test("with the server's switch off, the new sources and the official marketplace are refused and nothing is downloaded or added", async () => {
@@ -178,4 +179,36 @@ test("a private repository is read with the GitHub CLI's own sign-in: the comman
   await assert.rejects(() => githubGitAuth({ run: runner(null), program: "/usr/bin/gh" }), /not installed/);
   await assert.rejects(() => githubGitAuth({ run: null, program: null }), /not installed/);
   await assert.rejects(() => githubGitAuth({ run: runner(0), program: "/home/o'brien/bin/gh" }), /cannot use for sign-in/);
+});
+
+test("an update of a marketplace plugin asks about the addresses the refreshed catalog names now, not the ones it named when the plugin was installed", async () => {
+  const folder = temp("market");
+  const catalog = (url: string) => writeFileSync(join(folder, ".claude-plugin", "marketplace.json"), json({ name: "acme", plugins: [{ name: "demo", source: { source: "zip", url } }] }));
+  mkdirSync(join(folder, ".claude-plugin"), { recursive: true });
+  catalog("https://files.example.com/a.zip");
+  const { reply, serve, asked, requested, setConfirm } = setup({ folder });
+  serve.set("https://files.example.com/a.zip", () => new Response(zipOf(pluginItems("", "1.0.0")), { status: 200 }));
+  serve.set("https://files.example.com/b.zip", () => new Response(zipOf(pluginItems("", "2.0.0")), { status: 200 }));
+  serve.set("https://files.example.com/c.zip", () => new Response(zipOf(pluginItems("", "3.0.0")), { status: 200 }));
+  await reply({ type: "marketplace-add-folder" });
+  const first = await reply({ type: "preview-marketplace", marketplace: "acme", plugin: "demo" });
+  assert.equal(first.preview?.version, "1.0.0");
+  await reply({ type: "confirm", id: first.preview!.id });
+  assert.deepEqual(asked.splice(0), [{ address: "https://files.example.com/a.zip", kind: "zip" }]);
+
+  catalog("https://files.example.com/b.zip");
+  const second = await reply({ type: "preview-update", name: "demo" });
+  assert.equal(second.error, undefined);
+  assert.deepEqual(asked.splice(0), [{ address: "https://files.example.com/b.zip", kind: "zip" }]);
+  assert.equal(second.preview?.version, "2.0.0");
+  await reply({ type: "confirm", id: second.preview!.id });
+
+  // A catalog that moved to another address is asked about too, and refusing downloads nothing from it.
+  catalog("https://files.example.com/c.zip");
+  setConfirm(false);
+  requested.length = 0;
+  const third = await reply({ type: "preview-update", name: "demo" });
+  assert.equal(third.notice?.code, "cancelled");
+  assert.deepEqual(asked.splice(0), [{ address: "https://files.example.com/c.zip", kind: "zip" }]);
+  assert.deepEqual(requested, []);
 });

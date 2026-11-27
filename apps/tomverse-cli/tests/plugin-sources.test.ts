@@ -5,13 +5,13 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { gzipSync } from "node:zlib";
 import { ARCHIVE_LIMITS, ArchiveSink, archiveRoot, extractTarGz, extractZip, safeEntryName } from "../src/plugin-archive.js";
-import { checkDownloadUrl, downloadBytes, type DownloadFetch } from "../src/plugin-download.js";
+import { checkDownloadUrl, downloadBytes, isInternalAddress, publicLookup, type DownloadFetch } from "../src/plugin-download.js";
 import { PluginError } from "../src/plugin-fs.js";
 import { fetchGitSnapshot, GitAuthRequired, maskUrl } from "../src/plugin-git.js";
 import { commitStaged, describeStaged, stagePlugin, type SourceOptions } from "../src/plugin-manager.js";
 import { addMarketplace, classifyMarketplaceInput, readCatalog } from "../src/plugin-marketplace.js";
 import { checkNpmSource, matchesIntegrity, strongestIntegrity } from "../src/plugin-npm.js";
-import { readPluginState } from "../src/plugin-store.js";
+import { readPluginState, setOfficialMarketplaceDeclined } from "../src/plugin-store.js";
 import { tarOf, zipOf, type TarItem } from "./archiveBuilders.js";
 import { tempDir } from "./helpers.js";
 
@@ -346,4 +346,41 @@ test("a GitHub sign-in is used for github.com only, is never part of an address,
     assert.equal(maskUrl("https://user:pw@github.com/x"), "https://***@github.com/x");
     assert.ok(new GitAuthRequired("x") instanceof PluginError);
     assert.deepEqual(readdirSync(dirname(destination)), [], "a refused download leaves no folder");
+});
+
+test("an address that means this computer or a private network is recognised however it is written, and a name is judged by what it resolves to", async () => {
+  for (const internal of ["127.0.0.1", "10.1.2.3", "192.168.0.9", "169.254.169.254", "172.16.0.1", "100.64.0.1", "0.0.0.0", "224.0.0.1", "::1", "::", "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:a00:1", "::ffff:c0a8:1",
+    "64:ff9b::7f00:1", "2002:7f00:1::", "2002:a00:1::", "::127.0.0.1", "fe80::1", "fec0::1", "fc00::1", "fd12:3456::1", "ff02::1", "2001:db8::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "not an address", "1.2.3"]) {
+    assert.equal(isInternalAddress(internal), true, internal);
+  }
+  for (const external of ["1.1.1.1", "8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "2001:4860:4860::8888", "::ffff:808:808", "64:ff9b::808:808"]) {
+    assert.equal(isInternalAddress(external), false, external);
+  }
+  for (const bad of ["https://[::ffff:7f00:1]/x.zip", "https://[::ffff:127.0.0.1]/x.zip", "https://[64:ff9b::a00:1]/x.zip", "https://0x7f.1/x.zip", "https://2130706433/x.zip", "https://[fd00::1]/x.zip"]) {
+    assert.throws(() => checkDownloadUrl(bad), PluginError, bad);
+  }
+  type Answer = { error: NodeJS.ErrnoException | null; address?: string; family?: number; list?: Array<{ address: string; family: number }> };
+  const look = (addresses: Array<{ address: string; family: number }>, options: { all?: boolean; family?: number } = {}) => new Promise<Answer>((done) => {
+    publicLookup((_host, callback) => callback(null, addresses))("files.example.com", { ...options }, ((error: NodeJS.ErrnoException | null, address: unknown, family?: number) => {
+      done(Array.isArray(address) ? { error, list: address as Array<{ address: string; family: number }> } : { error, address: address as string, family });
+    }) as never);
+  });
+  const publicOne = { address: "93.184.216.34", family: 4 };
+  assert.deepEqual(await look([publicOne]), { error: null, address: "93.184.216.34", family: 4 });
+  assert.deepEqual((await look([publicOne], { all: true })).list, [publicOne]);
+  assert.equal((await look([{ address: "127.0.0.1", family: 4 }])).error?.code, "EPLUGINADDR", "a public name that answers with a loopback address");
+  assert.equal((await look([publicOne, { address: "10.0.0.5", family: 4 }], { all: true })).error?.code, "EPLUGINADDR", "one private answer among public ones");
+  assert.equal((await look([])).error?.code, "EPLUGINADDR");
+  // The refusal is told in plain words by the download.
+  const refusing: DownloadFetch = async () => { throw Object.assign(new Error("x"), { code: "EPLUGINADDR" }); };
+  await assert.rejects(() => downloadBytes("https://files.example.com/a.zip", { maxBytes: 100, fetchImpl: refusing }), /resolves to one/);
+});
+
+test("a field a newer copy of the program wrote is kept when the state file is rewritten", () => {
+  const home = tempDir("state-keep");
+  mkdirSync(join(home, "plugins"), { recursive: true });
+  writeFileSync(join(home, "plugins", "state.json"), JSON.stringify({ version: 1, plugins: {}, marketplaces: {}, approvals: [], laterField: { kept: true } }));
+  setOfficialMarketplaceDeclined(home, true);
+  const after = JSON.parse(readFileSync(join(home, "plugins", "state.json"), "utf8"));
+  assert.deepEqual([after.laterField, after.officialMarketplaceDeclined], [{ kept: true }, true]);
 });

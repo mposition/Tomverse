@@ -171,10 +171,6 @@ export function createPluginsHost(options: PluginsHostOptions) {
   /** What a request would download, to ask about before it starts. */
   function downloadsFor(request: PluginRequest): Download[] {
     const out: Download[] = [];
-    const marketplaceOf = (name: string) => {
-      const record = readPluginState(home()).marketplaces[name];
-      if (record?.source.kind === "git") out.push({ address: record.source.url, kind: "git" });
-    };
     const entryOf = (marketplace: string, plugin: string) => {
       try {
         const entry = readMarketplace(home(), marketplace).catalog.entries.find((candidate) => candidate.name === plugin);
@@ -188,10 +184,9 @@ export function createPluginsHost(options: PluginsHostOptions) {
     if (request.kind === "npm") out.push({ address: npmAddress(request.package, request.registry), kind: "npm" });
     if (request.kind === "update") {
       const record = readPluginState(home()).plugins[request.name];
-      if (record?.source.kind === "marketplace") {
-        marketplaceOf(record.source.marketplace);
-        entryOf(record.source.marketplace, record.source.plugin);
-      } else if (record?.origin?.kind === "zip-url") out.push({ address: shownUrl(record.origin.url), kind: "zip" });
+      // A marketplace plugin's catalog was refreshed (and its address asked about) before this: these are the addresses it names now.
+      if (record?.source.kind === "marketplace") entryOf(record.source.marketplace, record.source.plugin);
+      else if (record?.origin?.kind === "zip-url") out.push({ address: shownUrl(record.origin.url), kind: "zip" });
       else if (record?.origin?.kind === "npm") out.push({ address: npmAddress(record.origin.package, record.origin.registry), kind: "npm" });
     }
     return out.filter((entry, index) => out.findIndex((other) => other.address === entry.address) === index);
@@ -204,9 +199,22 @@ export function createPluginsHost(options: PluginsHostOptions) {
 
   async function preview(request: PluginRequest, from: string, root: string | null): Promise<PluginsView> {
     if (request.kind === "zip" || request.kind === "zip-url" || request.kind === "npm") needSources();
+    // An update of a plugin from a marketplace reads the marketplace's newest catalog first, and the person is asked about what that
+    // catalog names, not about what the old one named. The catalog is then not refreshed a second time.
+    const record = request.kind === "update" ? readPluginState(home()).plugins[request.name] : undefined;
+    let refreshed = false;
+    if (record?.source.kind === "marketplace") {
+      const market = readPluginState(home()).marketplaces[record.source.marketplace];
+      if (market?.source.kind === "git" && !(await fetchAllowed([{ address: market.source.url, kind: "git" }]))) return view(root, { notice: { code: "cancelled" } });
+      if (market) {
+        if (isOfficial(record.source.marketplace)) await ensureOfficial();
+        else await refreshMarketplace(home(), record.source.marketplace, marketplaceOptions());
+        refreshed = true;
+      }
+    }
     if (!(await fetchAllowed(downloadsFor(request)))) return view(root, { notice: { code: "cancelled" } });
     drop();
-    const result = await stagePlugin(home(), request, stageOptions());
+    const result = await stagePlugin(home(), request, { ...stageOptions(), ...(refreshed ? { refresh: false } : {}) });
     if ("upToDate" in result) return view(root, { notice: { code: "up-to-date", name: result.upToDate.name } });
     waiting = { staged: result.staged, from };
     return view(root);

@@ -39,7 +39,7 @@ const pluginSchema = z.object({
     disabledIn: z.array(z.string().max(1000)).max(500),
     source: sourceSchema,
     origin: originSchema.optional(),
-});
+}).passthrough();
 export type PluginRecord = z.infer<typeof pluginSchema>;
 
 const marketplaceSourceSchema = z.discriminatedUnion("kind", [
@@ -53,7 +53,7 @@ const marketplaceSchema = z.object({
     commit: z.string().max(80).optional(),
     addedAt: z.string(),
     updatedAt: z.string(),
-});
+}).passthrough();
 export type MarketplaceRecord = z.infer<typeof marketplaceSchema>;
 
 const stateSchema = z.object({
@@ -63,7 +63,8 @@ const stateSchema = z.object({
     approvals: z.array(z.object({ kind: z.enum(["hook", "mcp"]), hash: z.string().regex(/^[0-9a-f]{64}$/), plugin: z.string() })).max(2000),
     /** The person turned the marketplace that comes with Desktop off: it is not added again. */
     officialMarketplaceDeclined: z.boolean().optional(),
-});
+    // A field a newer copy of this program wrote is kept when this one rewrites the file.
+}).passthrough();
 export type PluginState = z.infer<typeof stateSchema>;
 
 export const setOfficialMarketplaceDeclined = (home: string, declined: boolean) =>
