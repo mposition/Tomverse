@@ -602,6 +602,8 @@ export const en = {
         locationErrordenied: "Location permission denied. Allow location in your browser or device settings, then try again.",
         locationErrortimeout: "Location timed out. This message will continue without location. Try again from + tools.",
         locationErrorunavailable: "Current location is unavailable. This message will continue without it. You can enter a place instead.",
+        locationWindowsOff: "Windows location is off, so your current location cannot be read. You can enter a place instead.",
+        locationOpenWindowsSettings: "Open Windows location settings",
         toolsWebSearchOffDescription: "Answers are given without searching the web.",
         toolsWebSearchOnDescription: "Searches the web automatically when current information or sources are needed.",
         toolsWebSearchCostNote: "An extra {credits} credits apply per model that runs a search. No search, no extra credits.",

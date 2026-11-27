@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { WINDOWS_LOCATION_SETTINGS_URI } from "../src/host/os-location";
 
 const hostDir = fileURLToPath(new URL("../src/host/", import.meta.url));
 
@@ -41,15 +42,35 @@ function systemBrowserReferences() {
   return found.sort();
 }
 
-test("Desktop reaches the system browser from exactly three places: sign-in, connecting Google or Microsoft as a login method, and the Google Drive picker", () => {
+test("Desktop reaches the system browser from exactly four places: sign-in, connecting Google or Microsoft as a login method, the Google Drive picker, and the fixed Windows location settings page", () => {
   assert.deepEqual(systemBrowserReferences(), [
     // Handed to the account-data API, which opens only the provider's own https page (host allow-list in login-method-link.ts).
     "main.ts function connectedAccountData",
     "main.ts function importDriveAttachments",
+    // Opens the one constant OS settings address (WINDOWS_LOCATION_SETTINGS_URI), never a web address; checked below.
+    "main.ts function openOsLocationSettings",
     "main.ts function signIn",
   ]);
 });
 
 test("No IPC handler opens the system browser directly, so a renderer cannot choose where it goes", () => {
   assert.deepEqual(systemBrowserReferences().filter((entry) => entry.includes(" ipc ")), []);
+});
+
+test("The Windows location settings call opens one fixed ms-settings address, never a value that can be a web address", () => {
+  assert.equal(WINDOWS_LOCATION_SETTINGS_URI, "ms-settings:privacy-location");
+  assert.doesNotMatch(WINDOWS_LOCATION_SETTINGS_URI, /^(https?|ftp|file):/i);
+  const source = ts.createSourceFile("main.ts", readFileSync(join(hostDir, "main.ts"), "utf8"), ts.ScriptTarget.Latest, true);
+  const handler = source.statements.find((statement): statement is ts.FunctionDeclaration =>
+    ts.isFunctionDeclaration(statement) && statement.name?.text === "openOsLocationSettings");
+  assert.ok(handler, "the settings opener is a named function");
+  assert.deepEqual(handler.parameters.map((parameter) => parameter.name.getText(source)), [], "it takes nothing from the renderer");
+  const calls: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === "shell.openExternal") calls.push(node.arguments.map((argument) => argument.getText(source)).join(","));
+    ts.forEachChild(node, visit);
+  };
+  visit(handler);
+  assert.deepEqual(calls, ["WINDOWS_LOCATION_SETTINGS_URI"]);
+  assert.match(handler.getText(source), /process.platform !== "win32"/);
 });

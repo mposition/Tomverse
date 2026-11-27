@@ -59,6 +59,8 @@ if (trustedWindow) {
       return () => ipcRenderer.removeListener("desktop:changed", onState);
     },
     armChatLocation: () => ipcRenderer.invoke("desktop:location-arm"),
+    osLocationStatus: () => ipcRenderer.invoke("desktop:location-os-status"),
+    openOsLocationSettings: () => ipcRenderer.invoke("desktop:location-open-settings"),
     armDictation: () => ipcRenderer.invoke("desktop:dictation-arm"),
     cancelDictation: (id: string) => ipcRenderer.invoke("desktop:dictation-cancel", id),
     transcribeDictation: (input: Parameters<DesktopApi["transcribeDictation"]>[0]) => ipcRenderer.invoke("desktop:dictation-transcribe", input),

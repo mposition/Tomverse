@@ -479,6 +479,10 @@ export type ApprovalRequest = {
 
 export type DesktopApi = {
   armChatLocation: () => Promise<boolean>;
+  /** After a failed position read: whether Windows has location off for this app. Nothing is passed in. */
+  osLocationStatus: () => Promise<"off" | "on" | "unknown">;
+  /** Opens the Windows location settings page (a fixed address, Windows only); false when it was not opened. */
+  openOsLocationSettings: () => Promise<boolean>;
   armDictation: () => Promise<string | null>;
   cancelDictation: (id: string) => Promise<void>;
   transcribeDictation: (input: DictationClip) => Promise<DictationReply>;
