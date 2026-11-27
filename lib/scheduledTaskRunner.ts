@@ -59,8 +59,16 @@ export type ScheduledTaskTickResult = {
   skippedLate: number;
   skippedTooSoon: number;
   deferred: number;
+  /** Due tasks this tick looked at: claimed, skipped, deferred or taken by another tick. */
+  examined: number;
   /** Work was left for the next tick because the deadline was too close. */
   stoppedForTime: boolean;
+  /**
+   * The tick stopped at one of its bounds with due tasks possibly left for the
+   * next tick: `claims` (the most runs one tick claims) or `scan` (the most
+   * due tasks one tick looks at).
+   */
+  stoppedAtLimit: "claims" | "scan" | null;
   executed: Record<string, number>;
 };
 
@@ -250,6 +258,12 @@ export async function reconcileExpiredScheduledRuns(now = new Date()) {
  * Conditional on the lease still being lapsed, so two ticks cannot both take
  * it; and the grace window is judged again at this instant, not at the start
  * of the tick.
+ *
+ * `startedAt` moves to this instant in the same write. A resumable run never
+ * reached Chat, so this is when it really starts, and the minimum interval
+ * between paid runs (`decideDueOccurrence`'s `previousStartedAt`) is measured
+ * from here: a run resumed two hours after its claim keeps the task's next run
+ * a full interval after the resume, not after the claim.
  */
 export async function acquireResumable(
   run: ResumableRun,
@@ -262,7 +276,7 @@ export async function acquireResumable(
   }
   const taken = await prisma.scheduledTaskRun.updateMany({
     where: { id: run.id, status: "running", leaseExpiresAt: { lt: now } },
-    data: { leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs) },
+    data: { leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs), startedAt: now },
   });
   return { run: taken.count ? run : null, closed: false };
 }
@@ -306,7 +320,8 @@ async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
         orderBy: { scheduledFor: "desc" },
         select: { scheduledFor: true },
       });
-      // The latest run by when it really started, whatever occurrence it was.
+      // The latest run by when it really started, whatever occurrence it was
+      // (a resumed run's start is its resume: acquireResumable moves it).
       const lastStarted = await tx.scheduledTaskRun.findFirst({
         where: { taskId },
         orderBy: { startedAt: "desc" },
@@ -642,38 +657,79 @@ export async function runScheduledTasksTick(input: {
   deadline?: number;
   /** Time a new run needs left before the deadline to be started at all. */
   startReserveMs?: number;
+  /** The per-tick bounds; SCHEDULED_TASK_LIMITS.claimBatch and dueScanLimit unless a test names smaller ones. */
+  claimLimit?: number;
+  scanLimit?: number;
 }): Promise<ScheduledTaskTickResult> {
   const result: ScheduledTaskTickResult = {
     enabled: false, reconciled: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0,
-    stoppedForTime: false, executed: {},
+    examined: 0, stoppedForTime: false, stoppedAtLimit: null, executed: {},
   };
   if (!(await (input.enabled ?? isScheduledTasksEnabled)())) return result;
   result.enabled = true;
   const deadline = input.deadline ?? Date.now() + SCHEDULED_TASK_LIMITS.tickBudgetMs;
   const startReserveMs = input.startReserveMs ?? SCHEDULED_TASK_LIMITS.runStartReserveMs;
+  const claimLimit = input.claimLimit ?? SCHEDULED_TASK_LIMITS.claimBatch;
+  const scanLimit = input.scanLimit ?? SCHEDULED_TASK_LIMITS.dueScanLimit;
   // Read at every decision, not once per tick: a tick can spend many minutes
   // on earlier runs, and lateness is judged when a run is about to start.
   const clock = input.now ?? (() => new Date());
   const reconciliation = await reconcileExpiredScheduledRuns(clock());
   result.reconciled = reconciliation.reconciled;
 
-  const due = await prisma.scheduledTask.findMany({
-    where: { status: "active", nextRunAt: { lte: clock() } },
-    orderBy: { nextRunAt: "asc" },
-    take: SCHEDULED_TASK_LIMITS.claimBatch,
-    select: { id: true },
-  });
+  // Due tasks are read oldest first, a page at a time, behind a cursor on
+  // (nextRunAt, id) as read. A claimed, late or too-soon task leaves the due
+  // set (its nextRunAt moves on); a deferred one keeps its time and the cursor
+  // passes it, so tasks that cannot start now never hold the window shut for
+  // the tasks behind them. An account with a scheduled run in flight is not
+  // read at all: its tasks could only be deferred.
+  //
+  // What the bounds guarantee. Reading stops at claimLimit claims, at
+  // scanLimit tasks looked at, or when time runs short, and everything not
+  // reached stays due, untouched, for the next tick (every 15 minutes). So a
+  // due task is looked at in every tick unless that tick first claimed
+  // claimLimit runs, ran short of time, or looked at scanLimit older due tasks
+  // -- which, once claimed, late and too-soon ones have left, were all
+  // deferred in that same tick. Passing a task over for its whole grace window
+  // (twelve ticks) by the scan bound alone therefore takes more than scanLimit
+  // tasks deferred in every one of those ticks: at most maxActiveTasks per
+  // account, so at the defaults 40 accounts with their own Chat busy for three
+  // hours. Such a task is then skipped late like any missed occurrence; it is
+  // never fired as a backlog and never charged.
+  const dueAsOf = clock();
+  let page: Array<{ id: string; nextRunAt: Date | null }> = [];
+  let inPage = 0;
+  let cursor: { nextRunAt: Date; id: string } | null = null;
+  let moreDue = true;
+  const readDuePage = async () => {
+    const take = Math.min(SCHEDULED_TASK_LIMITS.claimBatch, scanLimit - result.examined);
+    page = await prisma.scheduledTask.findMany({
+      where: {
+        status: "active",
+        nextRunAt: { lte: dueAsOf },
+        ...(cursor ? { OR: [{ nextRunAt: { gt: cursor.nextRunAt } }, { nextRunAt: cursor.nextRunAt, id: { gt: cursor.id } }] } : {}),
+        user: { scheduledTaskRuns: { none: { status: "running" } } },
+      },
+      orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
+      take,
+      select: { id: true, nextRunAt: true },
+    });
+    inPage = 0;
+    moreDue = page.length === take;
+    const last = page.at(-1);
+    if (last?.nextRunAt) cursor = { nextRunAt: last.nextRunAt, id: last.id };
+  };
+  await readDuePage();
 
   // Work is claimed (or a resumable run's lease taken) by the worker that is
   // about to run it, never in advance: a lease spent waiting behind other runs
   // would lapse before its run began.
   const resumable = [...reconciliation.resumable];
-  let nextDue = 0;
   const takeWork = async (): Promise<ClaimedRun | null> => {
     // Nothing new starts without the time to finish inside this request; what
     // is left stays due (or resumable) for the next tick.
     if (Date.now() + startReserveMs > deadline) {
-      result.stoppedForTime = resumable.length > 0 || nextDue < due.length;
+      result.stoppedForTime = resumable.length > 0 || inPage < page.length || moreDue;
       return null;
     }
     for (let candidate = resumable.shift(); candidate; candidate = resumable.shift()) {
@@ -684,8 +740,21 @@ export async function runScheduledTasksTick(input: {
         return taken.run;
       }
     }
-    while (nextDue < due.length) {
-      const outcome = await claimTask(due[nextDue++]!.id, clock());
+    while (inPage < page.length || moreDue) {
+      if (result.claimed >= claimLimit) {
+        result.stoppedAtLimit = "claims";
+        return null;
+      }
+      if (inPage === page.length) {
+        if (result.examined >= scanLimit) {
+          result.stoppedAtLimit = "scan";
+          return null;
+        }
+        await readDuePage();
+        continue;
+      }
+      result.examined += 1;
+      const outcome = await claimTask(page[inPage++]!.id, clock());
       if (outcome.kind === "claimed") {
         result.claimed += 1;
         return outcome.run;
@@ -696,8 +765,16 @@ export async function runScheduledTasksTick(input: {
     }
     return null;
   };
+  // One worker takes work at a time: the page and its cursor are shared, and a
+  // claim is one short transaction. Running the claimed runs is what overlaps.
+  let taking: Promise<unknown> = Promise.resolve();
+  const takeWorkInTurn = () => {
+    const next = taking.then(takeWork);
+    taking = next.catch(() => undefined);
+    return next;
+  };
   const worker = async () => {
-    for (let run = await takeWork(); run; run = await takeWork()) {
+    for (let run = await takeWorkInTurn(); run; run = await takeWorkInTurn()) {
       let outcome: string;
       try {
         outcome = await executeRun(run, input.dispatch, deadline);

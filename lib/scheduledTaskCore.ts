@@ -73,8 +73,18 @@ export const SCHEDULED_TASK_LIMITS = Object.freeze({
   lateGraceMs: 3 * 60 * 60 * 1_000,
   /** A claimed run that has not finished by then is reconciled, never re-sent. */
   runLeaseMs: 15 * 60 * 1_000,
-  /** Runs claimed per maintenance tick (every 15 minutes). */
+  /**
+   * Runs claimed per maintenance tick (every 15 minutes), at most; also the
+   * page size the tick reads due tasks in.
+   */
   claimBatch: 20,
+  /**
+   * Due tasks one tick looks at, at most, oldest first. A task the tick cannot
+   * start now keeps its due time and is passed over, so it never holds the
+   * window shut for the tasks behind it; this bounds how far one tick reads.
+   * What reaching it guarantees is written at runScheduledTasksTick.
+   */
+  dueScanLimit: 200,
   /** Runs executed at once within one tick. */
   executionConcurrency: 2,
   /** A tick's time budget when its caller names no deadline. */
@@ -294,9 +304,10 @@ export const decideDueOccurrence = (input: {
   /** The latest earlier run's occurrence, if any. */
   previousScheduledFor: Date | null;
   /**
-   * When the task's latest run actually started, if any. The minimum interval
-   * is a promise about paid runs, so it holds between real start times too: a
-   * late run followed by a schedule moved earlier is still kept apart.
+   * When the task's latest run actually started, if any -- for a run resumed
+   * after a lapsed lease, when it was resumed. The minimum interval is a
+   * promise about paid runs, so it holds between real start times too: a late
+   * run followed by a schedule moved earlier is still kept apart.
    */
   previousStartedAt?: Date | null;
 }): DueDecision => {

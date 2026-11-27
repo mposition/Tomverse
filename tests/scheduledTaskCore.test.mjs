@@ -49,6 +49,16 @@ test("nothing runs more often than daily: there is no faster frequency and the i
   assert.equal(SCHEDULED_TASK_LIMITS.maxConsecutiveFailures, 3);
 });
 
+test("one tick reads past a full page of waiting tasks, and its scan outlasts many busy accounts", () => {
+  // Due tasks are read in pages of claimBatch; a scan bound of one page would
+  // let tasks waiting on busy accounts hold the window shut again.
+  assert.ok(SCHEDULED_TASK_LIMITS.dueScanLimit > SCHEDULED_TASK_LIMITS.claimBatch);
+  // Passing a task over by the scan bound takes more than dueScanLimit tasks
+  // deferred at once, at most maxActiveTasks of them per account (the
+  // guarantee written at runScheduledTasksTick).
+  assert.ok(SCHEDULED_TASK_LIMITS.dueScanLimit / SCHEDULED_TASK_LIMITS.maxActiveTasks >= 40);
+});
+
 test("only Pro and Max run scheduled tasks", () => {
   assert.equal(planRunsScheduledTasks("Pro"), true);
   assert.equal(planRunsScheduledTasks("Max"), true);

@@ -1265,8 +1265,15 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
   판정하고, 판정할 수 없으면 `unknown`으로 기록합니다.
 - **실행 위치와 시간.** 견적은 실행기가 보내는 turn을 Chat route와 같은 입력(질문, `buildChatTurnSystemBlocks`의 capability block)과 같은 예산 옵션으로 계산하고, `tests/integration/scheduled-task-chat-route.db.test.ts`가 실제 route의 예약액이 견적을 넘지 않는지 확인합니다. tick은 유지보수 요청의 `maxDuration` 안에 돌아오고, 남은 시간이 2분보다 적으면 새 회차를 시작하지 않습니다. 이미 시작한 회차는 요청이 끝난 뒤에도 답을 끝까지 읽고 스스로 정산합니다. 이것은 `next start` 서버(운영은 Railway)에서만 보장되므로(Next self-hosting 안내의 `after`), 서버리스 표지(`VERCEL`, `AWS_LAMBDA_FUNCTION_NAME`, `NETLIFY`, `FUNCTIONS_WORKER_RUNTIME`)가 있으면 아무 회차도 시작하지 않습니다(`scheduledTasksHostProblem`). 배포 중 프로세스가 내려가 끊긴 회차는 일반 Chat turn처럼 attempt 행으로 판정합니다.
 - **빈도와 동시 실행.** 가장 잦은 일정은 매일이고, 실행기는 같은 작업의 두 회차를 20시간보다
-  가깝게 두지 않습니다. 계정당 예약 실행은 한 번에 하나이며(`runningUserId` unique), 계정의
+  가깝게 두지 않습니다. 간격은 예정 시각 사이와 실제 시작 시각 사이를 모두 재며, lease가
+  끊긴 뒤 Chat에 닿지 않았음을 확인하고 다시 시작한 회차는 다시 시작한 시각이 시작 시각입니다
+  (`ScheduledTaskRun.startedAt`). 계정당 예약 실행은 한 번에 하나이며(`runningUserId` unique), 계정의
   Chat lease가 한도에서 하나 모자라면 기다립니다. 활성 작업은 계정당 5개, Pro·Max 전용입니다.
+- **한 tick이 보는 범위.** tick은 시작할 때가 된 작업을 오래된 순서로 20개씩 읽고, 지금 시작할
+  수 없어 기다리는 작업은 건너뛰고 그 뒤를 계속 봅니다. 예약 실행이 돌고 있는 계정의 작업은
+  읽지 않습니다. 한 tick은 최대 20회차를 시작하고 최대 200개 작업을 봅니다
+  (`claimBatch`, `dueScanLimit`). 보지 못한 작업은 그대로 다음 tick(15분 뒤)으로 넘어가고, 3시간
+  유예를 넘긴 회차는 늦게 몰아서 실행하지 않고 건너뜁니다.
 
 ## 5. 시간대와 reset
 

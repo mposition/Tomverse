@@ -1814,6 +1814,9 @@ model ScheduledTaskRun {
   /// What the reservation settled at, read back after the run.
   chargedCredits     Int?
   leaseExpiresAt     DateTime  @db.Timestamptz(3)
+  /// When the run really began: its claim, or its resume after a lapsed lease
+  /// that never reached Chat. The minimum interval between runs is measured
+  /// from it.
   startedAt          DateTime  @default(now()) @db.Timestamptz(3)
   finishedAt         DateTime? @db.Timestamptz(3)
 
