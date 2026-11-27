@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -55,7 +56,7 @@ test("Code deletes one confirmed local journal and keeps unsaved task evidence i
   const sessionDirectory = (id: string) => join(home, "sessions", id);
   try {
     let page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const state = () => page.evaluate(() => window.desktop.state());
     const composer = () => page.getByRole("textbox", { name: "Code request" });
     const send = () => page.getByRole("button", { name: "Send Code request" });
@@ -151,7 +152,7 @@ test("Code deletes one confirmed local journal and keeps unsaved task evidence i
       legacy.state.status = "completed";
       legacy.commit();
     } finally { legacy.release(); }
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Legacy saved task", exact: true }).click();
     assert.equal(await page.evaluate((id) => window.desktop.deleteHistory(id), legacy.state.id), "deleted");
     await assert.rejects(readdir(join(legacyHome, "sessions", legacy.state.id)), { code: "ENOENT" });
@@ -188,7 +189,7 @@ test("Code deletes one confirmed local journal and keeps unsaved task evidence i
     app = undefined;
     app = await launch();
     page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect(page.getByRole("button", { name: "Another saved task", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Session-only prompt", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Saved change", exact: true })).toHaveCount(0);

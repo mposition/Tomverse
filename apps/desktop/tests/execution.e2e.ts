@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -69,7 +70,7 @@ test("Code saves its execution preference and only sends requests through the sh
     assert.equal(gateway.completions.length, 0);
 
     await page.getByRole("button", { name: "Show history", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect(page.getByText("No saved tasks in this project yet.")).toBeVisible();
     await settings();
     await expect(preference).toHaveValue("tomverse_api");
@@ -102,7 +103,7 @@ test("Code saves its execution preference and only sends requests through the sh
     await model.selectOption("api-only");
     await modelMenu.click();
     await expect(page.getByRole("status").filter({ hasText: /^Tomverse API$/ })).toBeVisible();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await send.click();
     await expect(page.getByText("Route verified.", { exact: true })).toBeVisible();
     await expect.poll(async () => (await state()).task?.status).toBe("completed");

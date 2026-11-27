@@ -66,9 +66,11 @@ import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
-import { PermissionModeBadge, PermissionSettings } from "./PermissionSettings";
+import { PermissionSettings } from "./PermissionSettings";
+import { CodeProjectPicker, CreateProjectMenu, WorktreeToggle } from "./CodeProjects";
+import { ComposerPermission } from "./ComposerPermission";
 import { CodePluginPicker } from "./CodePluginPicker";
-import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
+import { CodeWorkspaceDetails } from "./CodeWorkspacePicker";
 import { ConnectorWorkspace } from "./ConnectorWorkspace";
 import { desktopLocalExtensionsCopy } from "../../../../locales/desktopLocalExtensions";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
@@ -324,7 +326,6 @@ function Desktop() {
   const [workspaceSelection, setWorkspaceSelection] = useState<{ key: string; choice: CodeWorktreeChoice }>();
   const [saveNativeHistory, setSaveNativeHistory] = useState(false);
   const [codeReferences, setCodeReferences] = useState<CodeReference[]>([]);
-  const [mode, setMode] = useState<StartInput["mode"]>("agent");
   const [effort, setEffort] = useState<StartInput["effort"]>("default");
   const [engine, setEngine] = useState<CodeEnginePreference>(readCodeEnginePreference);
   function changeEngine(value: CodeEnginePreference) {
@@ -502,8 +503,11 @@ function Desktop() {
   const selectedModel = models.find((item) => item.id === modelId) ?? models.find((item) => item.id === "smart-adaptive") ?? models[0];
   const codeRoute = codeRouteFor(snapshot?.codeExecutionPreference ?? "tomverse_api", selectedModel);
   const waitingForAnswer = task?.status === "clarification";
+  // The permission dropdown replaced the Agent / Ask / Plan select: Read only is the read-and-answer work mode, every other mode is the agent.
+  const permissionMode = snapshot?.permissions?.mode ?? "ask";
+  const workMode: StartInput["mode"] = permissionMode === "read_only" ? "ask" : "agent";
   const codeMode = waitingForAnswer ? task.plan?.proposalOnly ? "plan" : "agent"
-    : cliFixtureModel && mode === "agent" && !snapshot?.nativeFixtureEdits ? "ask" : mode;
+    : cliFixtureModel && workMode === "agent" && !snapshot?.nativeFixtureEdits ? "ask" : workMode;
   const pluginNamespace = codeMode === "ask" && codeRoute.executionMode === "tomverse_api" && snapshot?.capabilities?.codeMcp &&
     snapshot?.account.stage === "connected" ? snapshot.draftNamespace : null;
   const pluginConnectionId = pluginNamespace && codePlugin?.namespace === pluginNamespace ? codePlugin.id : undefined;
@@ -612,9 +616,14 @@ function Desktop() {
   const canQueue = !!queueTarget && online && !requesting && !!prompt.trim();
   const codeGit = codeMode === "agent" && codeRoute.executionMode === "tomverse_api" ? snapshot?.codeGitWorkspace : undefined;
   const workspaceKey = JSON.stringify([snapshot?.draftNamespace, codeGit?.kind === "git" ? codeGit.id : codeGit?.kind]);
+  const openProjectEntry = snapshot?.codeProjects?.items.find(({ id }) => id === snapshot.codeProjects?.selectedId);
+  // The name the person gave the project; a folder not in the list (or a remote project) shows the name the window knows it by.
+  const projectLabel = openProjectEntry?.name ?? snapshot?.project ?? null;
+  // A Git project starts with the Worktree box as the person left it in that project (on the first time); a folder that is not a repository runs in place.
   const workspaceChoice: CodeWorktreeChoice | undefined = !codeGit ? undefined
     : workspaceSelection?.key === workspaceKey ? workspaceSelection.choice
-    : codeGit.kind === "git" ? { kind: "worktree", id: codeGit.id, base: codeGit.bases[0]! } : undefined;
+    : codeGit.kind === "git" ? (openProjectEntry?.worktree === false ? { kind: "local" } : { kind: "worktree", id: codeGit.id, base: codeGit.bases[0]! })
+    : { kind: "local" };
   const canStartCode = cliFixtureModel ? (prompt.trim() || codeHandoff) &&
     (codeMode !== "agent" || (snapshot?.nativeFixtureEdits && saveNativeHistory))
     : (prompt.trim() || codeHandoff) && codeRoute.executionMode === "tomverse_api" &&
@@ -739,12 +748,8 @@ function Desktop() {
     if (menu?.isConnected) menu.querySelector("summary")?.focus();
   }
 
-  async function openCodeProject(trigger: HTMLButtonElement) {
-    await act(async () => {
-      if (await window.desktop.chooseRoot()) setCodeReferences([]);
-    });
-    if (trigger.isConnected) trigger.focus();
-  }
+  // Choosing the project that is already open keeps its attached references; another project starts without them.
+  const codeProjectOpened = (changed: boolean) => { if (changed) setCodeReferences([]); };
 
   async function attachCodeReferences(kind: CodeReference["kind"], button: HTMLButtonElement) {
     const menu = button.closest("details");
@@ -944,7 +949,7 @@ ${text}` : text;
           }} />}
         <div className="projects">
           {snapshot?.project && <details open>
-            <summary><Folder size={16} /> <span>{snapshot.project}</span></summary>
+            <summary><Folder size={16} /> <span>{projectLabel}</span></summary>
             {visibleCodeHistory.length === 0 && <p className="notice" role="status">
               {historyFilter ? copy.noHistoryMatches : copy.emptyCodeHistory}
             </p>}
@@ -959,7 +964,7 @@ ${text}` : text;
             {snapshot.moreHistory && <button className="soft" type="button" onClick={() => void act(() => window.desktop.moreHistory())}>{copy.moreTasks}</button>}
           </details>}
         </div>
-        <button type="button" className="soft open-folder" disabled={busy} onClick={(event) => void openCodeProject(event.currentTarget)}>{copy.openLocalFolder}</button>
+        <CreateProjectMenu language={language} variant="sidebar" disabled={Boolean(busy)} onOpened={codeProjectOpened} />
       </>}
       <div className="resize" role="separator" tabIndex={0} aria-label={copy.resizeHistory} aria-orientation="vertical"
         onPointerDown={resizeHistory} onKeyDown={(event) => {
@@ -989,7 +994,7 @@ ${text}` : text;
             onMouseDown={(event) => event.preventDefault()} onClick={() => void handoffSelection()}>
             {handoffSource === "chat" ? filesCopy.useInCode : filesCopy.useInChat}
           </button>}
-          {surface === "code" && snapshot?.project && <span className="project-label" title={snapshot.root ?? undefined}><Folder size={16} />{snapshot.project}</span>}
+          {surface === "code" && snapshot?.project && <span className="project-label" title={snapshot.root ?? undefined}><Folder size={16} />{projectLabel}</span>}
           {surface === "code" && task?.worktree && <CodeWorkspaceDetails language={language} worktree={task.worktree} />}
           {surface === "code" && task?.id && task.savedLocally && snapshot?.history.some((row) => row.id === task.id) &&
             <details className="chat-conversation-actions">
@@ -1052,9 +1057,9 @@ ${text}` : text;
               language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined} insertReview={surface === "code" && !snapshot?.remote ? insertIntoDraft : undefined}
               engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
-              <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
-                onClick={(event) => void openCodeProject(event.currentTarget)}>
-                <Folder size={19} /> {snapshot?.project ?? copy.openFolder} <ChevronDown size={14} /></button>
+              <div className="project-picker">
+                <CreateProjectMenu language={language} variant="welcome" disabled={Boolean(busy)} onOpened={codeProjectOpened} />
+                {snapshot?.project && <span className="project-label" title={snapshot.root ?? undefined}><Folder size={16} />{projectLabel}</span>}
                 {snapshot?.project && !snapshot.remote && <span>{copy.localProject}</span>}
               </div>
               {snapshot?.remoteEnabled && <RemoteProjectPicker language={language} disabled={Boolean(busy)} />}
@@ -1119,6 +1124,14 @@ ${text}` : text;
               <PromptAttachmentChips scope={attachmentScope} language={language} disabled={Boolean(busy)} />
             </div>
             <div className="composer-actions">
+              <CodeProjectPicker language={language} view={snapshot?.codeProjects} label={projectLabel} disabled={Boolean(busy || pausedForInput)}
+                hasTask={Boolean(task)} cloudOffered={snapshot?.capabilities?.cloudExecution === true} remoteOpen={Boolean(snapshot?.remote)}
+                openIsGit={snapshot?.remote || !snapshot?.root ? null : snapshot.codeGitWorkspace ? snapshot.codeGitWorkspace.kind === "git" : null}
+                remoteEnabled={snapshot?.remoteEnabled === true} onOpened={codeProjectOpened} onOpenCloud={() => openSettings("execution")} />
+              {snapshot?.root && !snapshot.remote && <WorktreeToggle language={language} git={snapshot.codeGitWorkspace} choice={workspaceChoice}
+                disabled={Boolean(busy || pausedForInput)} reason={codeMode !== "agent" ? "readOnly" : codeRoute.executionMode !== "tomverse_api" ? "apiOnly" : null}
+                select={(choice) => setWorkspaceSelection({ key: workspaceKey, choice })}
+                onRemember={(on) => { const id = snapshot.codeProjects?.selectedId; if (id) void window.desktop.codeProjects({ action: "set-worktree", id, worktree: on }); }} />}
               {snapshot?.draftNamespace && !snapshot.remote && <details className="model-menu code-attach-menu">
                 <summary className="icon" aria-label={copy.attachReferences}><Plus size={18} /></summary>
                 <div className="model-popover">
@@ -1128,18 +1141,11 @@ ${text}` : text;
                     onClick={(event) => void attachCodeReferences("folder", event.currentTarget)}><Folder size={15} /> {copy.attachFolders}</button>
                 </div>
               </details>}
-              <select aria-label={copy.codeMode} value={codeMode} disabled={busy || pausedForInput}
-                onChange={(event) => setMode(event.currentTarget.value as StartInput["mode"])}>
-                <option value="agent" disabled={!!cliFixtureModel && !snapshot?.nativeFixtureEdits}>{copy.agent}</option>
-                <option value="ask">{copy.ask}</option><option value="plan">{copy.plan}</option>
-              </select>
-              {codeGit && snapshot?.root && !pausedForInput && <CodeWorkspacePicker key={snapshot.root} git={codeGit} root={snapshot.root}
-                choice={workspaceChoice} language={language} disabled={Boolean(busy)}
-                select={(choice) => setWorkspaceSelection({ key: workspaceKey, choice })} />}
-              {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api"
-                ? <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />
-                : <span className="permission"><ShieldCheck size={15} /> {copy.manual}</span>}
-              {codeMode === "agent" && codeRoute.executionMode === "tomverse_api" && <PermissionModeBadge mode={snapshot?.permissions?.mode} language={language} />}
+              {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api" &&
+                <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />}
+              <ComposerPermission view={snapshot?.permissions} language={language} apiRoute={codeRoute.executionMode === "tomverse_api"}
+                readOnlyOnly={Boolean(cliFixtureModel && !snapshot?.nativeFixtureEdits)}
+                running={Boolean(snapshot?.busy)} disabled={Boolean(requesting)} />
               {codeHistoryControl}
               {pluginNamespace && <CodePluginPicker key={pluginNamespace} language={language} value={pluginConnectionId ?? ""}
                 disabled={Boolean(busy || pausedForInput || canFollowUp)} select={(id) => setCodePlugin(id ? { id, namespace: pluginNamespace } : undefined)} />}

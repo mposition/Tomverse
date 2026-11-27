@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,8 +99,8 @@ test("an answer from another device closes the approval on the PC's screen, once
     assert.equal((await remote()).syncs.length, 0, "nothing runs, so nothing is sent");
 
     await rail.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
     await page.getByRole("textbox", { name: "Code request" }).fill("Run the check");
     const [approval] = await Promise.all([app.waitForEvent("window", { timeout: 20_000 }), page.getByRole("button", { name: "Send Code request" }).click()]);
     // Nobody touches the PC's approval window: the answer from the other device closes it.

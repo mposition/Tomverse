@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +40,7 @@ test("The pull request screen lists checks in the app and hands a failed check's
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     // The public read fails quickly: the link is still saved, and the screen reads through gh.
     await app.evaluate(() => {
       globalThis.fetch = async () => new Response(null, { status: 404 });

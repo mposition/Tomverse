@@ -104,6 +104,9 @@ import { localExtensionsCommand } from "../local-extensions-contract";
 import { codeSandboxInput } from "../code-sandbox-contract";
 import { codeSandboxView, readCodeSandboxSettings } from "./code-sandbox";
 import { remoteProjectInput } from "../remote-contract";
+import { createCodeProjectHost, runWslList } from "./code-project-host";
+import { codeProjectFile, foldersFromHistory } from "./code-project-store";
+import { desktopCodeProjectsCopy } from "../../../../locales/desktopCodeProjects";
 import { createRemoteProjectHost } from "./remote-project-host";
 import { isRemoteShadow, setRemoteShadowBase, sshEnvironmentForRuntime, sshRunnerFor } from "./remote-project";
 import type { SandboxFacts } from "../schedule-policy";
@@ -195,6 +198,11 @@ const fixtureSchema = z.object({
   browserInspection: z.boolean().optional(),
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
+  /** Folders a test picks, one per folder dialog of the project picker (the fixture root when none is left), and where a new folder is made. */
+  projectFolders: z.array(z.string().min(1)).max(16).optional(),
+  projectParent: z.string().min(1).optional(),
+  /** Distributions `wsl.exe -l -q` would list. */
+  wslDistributions: z.array(z.string().min(1).max(100)).max(8).optional(),
   /** A test chooses this zip file where the Plugins screen would open a file dialog, and plays the server's plugin-sources switch. */
   pluginZip: z.string().min(1).optional(),
   pluginSources: z.boolean().optional(),
@@ -252,7 +260,8 @@ function readFixture() {
         isAbsolute(child) || !statSync(canonical).isDirectory()) throw new Error("Desktop fixtures require temporary folders.");
     return canonical;
   }
-  return { ...descriptor, root: temporaryDirectory(descriptor.root), profile: temporaryDirectory(descriptor.profile) };
+  return { ...descriptor, root: temporaryDirectory(descriptor.root), profile: temporaryDirectory(descriptor.profile),
+    projectFolders: descriptor.projectFolders?.map(temporaryDirectory), projectParent: descriptor.projectParent ? temporaryDirectory(descriptor.projectParent) : undefined };
 }
 if (fixture) app.setPath("userData", fixture.profile);
 
@@ -547,6 +556,7 @@ function broadcast() {
   state.codeTerminal = { available: terminalProjectOpen(), enabled: codeTerminalEnabled };
   state.remote = remoteHost.snapshot();
   state.remoteEnabled = remoteHost.enabled();
+  state.codeProjects = codeProjectHost.view();
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
   state.dictationAvailable = dictationAllowed();
@@ -899,7 +909,7 @@ async function confirmWorkspaceHandoff(input: WorkspaceHandoffInput): Promise<Wo
 
   confirmingHandoff = true;
   try {
-    if (!projectRoot && input.target === "code") await chooseRoot();
+    if (!projectRoot && input.target === "code") await codeProjectHost.run({ action: "add-existing" });
     const project = projectRoot;
     const scope = currentHistoryScope();
     if (!project || !scope || session.aborted || connection !== codeConnection() || owner !== mainWindow || owner.isDestroyed()) return null;
@@ -1457,6 +1467,11 @@ async function chooseRemote(project: ProjectRoot) {
     if (state.root !== project.path || projectRoot?.identity !== project.identity) {
       codeReferences.clear();
       workspaceHandoff = null;
+      // Allow all never follows the person to another project, a remote one included.
+      if (permissionHost.current === "allow_all" && permissionHost.run({ action: "set-mode", mode: "ask" }).ok) {
+        worker?.postMessage(permissionHost.runtimeMessage());
+        parallel.permissionChanged();
+      }
     }
     projectRoot = project;
     codeGitProject = null;
@@ -1472,6 +1487,53 @@ async function chooseRemote(project: ProjectRoot) {
     choosing = false;
   }
 }
+
+function codeProjectOwner() {
+  const connection = codeConnection();
+  return connection && linkedCode?.connection === connection ? linkedCode.accountId : browserSession?.accountId ?? null;
+}
+
+/** The register of Code projects (Desktop > Code > project picker): per account, on this computer only. */
+const codeProjectHost = createCodeProjectHost({
+  file: () => {
+    const owner = codeProjectOwner();
+    return owner || fixture ? codeProjectFile(app.getPath("userData"), owner) : null;
+  },
+  now: () => Date.now(),
+  newId: () => randomUUID(),
+  canChange: () => !state.busy && !pendingMutation && !choosing && !closing && !signingOut && !suspended,
+  pickFolder: async (kind) => {
+    if (fixture) return kind === "parent" ? fixture.projectParent ?? fixture.root : fixture.projectFolders?.shift() ?? fixture.root;
+    if (!mainWindow) return null;
+    const copy = desktopCodeProjectsCopy[state.language ?? "en"];
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      title: kind === "parent" ? copy.dialogParent : kind === "relocate" ? copy.dialogRelocate : copy.dialogExisting,
+      properties: kind === "parent" ? ["openDirectory", "createDirectory"] : ["openDirectory"],
+    });
+    return picked.filePaths[0] ?? null;
+  },
+  open: (folder) => chooseRoot(folder),
+  current: () => (projectRoot && !projectRoot.remote ? projectRoot.path : null),
+  permission: () => permissionHost.current,
+  setPermission: (mode) => {
+    if (permissionHost.run({ action: "set-mode", mode }).ok) {
+      worker?.postMessage(permissionHost.runtimeMessage());
+      parallel.permissionChanged();
+    }
+  },
+  historyFolders: () => {
+    const connection = codeConnection();
+    if (!connection) return null;
+    const owner = linkedCode?.connection === connection ? linkedCode.accountId : null;
+    return foldersFromHistory(app.getPath("userData"), (folder) => {
+      const scope = codeHistoryScope(app.getPath("userData"), owner, bindProjectRoot(folder), connection);
+      return [scope.home, scope.legacyHome];
+    });
+  },
+  wslList: async () => (fixture?.wslDistributions ? new TextEncoder().encode(fixture.wslDistributions.join("\n")) : runWslList()),
+  platform: process.platform,
+  changed: () => broadcast(),
+});
 
 /** One Code runtime process. The open task and every task that runs next to it each get one of their own. */
 function forkRunner() {
@@ -1693,14 +1755,13 @@ function retryCodeCatalog() {
   broadcast();
 }
 
-async function chooseRoot() {
+/** Opens a folder of the register as the project. The folder dialogs are the register's (code-project-host.ts). */
+async function chooseRoot(target: string) {
   if (state.busy || pendingMutation || choosing) return false;
   choosing = true;
   const owner = browserSession?.accountId;
   try {
-    const chosen = fixture
-      ? fixture.root
-      : (await dialog.showOpenDialog(mainWindow!, { title: nativeCopy().openFolder, properties: ["openDirectory"] })).filePaths[0];
+    const chosen = target;
     if (!chosen || state.busy || pendingMutation || browserSession?.accountId !== owner) return false;
     const project = bindProjectRoot(chosen);
     const root = project.path;
@@ -4206,7 +4267,7 @@ function registerIpc() {
   });
   main("desktop:open-cli-auth-guide", (value) => webViewHost.openGuide(cliAuthGuides[cliProvider.parse(value)]));
   main("desktop:web-view", (value) => webViewHost.run(value));
-  main("desktop:choose-root", chooseRoot);
+  main("desktop:code-projects", (value) => codeProjectHost.run(value));
   main("desktop:retry-code-catalog", retryCodeCatalog);
   main("desktop:confirm-handoff", (value) => confirmWorkspaceHandoff(workspaceHandoffInput.parse(value)));
   main("desktop:remove-handoff", (value) => removeWorkspaceHandoff(z.uuid().parse(value)));
@@ -4362,10 +4423,12 @@ function registerIpc() {
   main("desktop:remote-control", (value) => remoteControl.command(value));
   main("desktop:permissions", (value) => {
     if (signingOut || closing) return { ok: false, error: "The app is closing." };
-    const result = permissionHost.run(permissionCommand.parse(value));
+    const command = permissionCommand.parse(value);
+    const result = permissionHost.run(command);
     if (result.ok) {
       worker?.postMessage(permissionHost.runtimeMessage());
       parallel.permissionChanged();
+      if (command.action === "set-mode") codeProjectHost.rememberPermission(command.mode);
       broadcast();
     }
     return result;

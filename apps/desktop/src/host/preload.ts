@@ -118,7 +118,7 @@ if (trustedWindow) {
       ipcRenderer.on("desktop:web-view-state", onState);
       return () => ipcRenderer.removeListener("desktop:web-view-state", onState);
     },
-    chooseRoot: () => ipcRenderer.invoke("desktop:choose-root"),
+    codeProjects: (input: Parameters<DesktopApi["codeProjects"]>[0]) => ipcRenderer.invoke("desktop:code-projects", input),
     retryCodeCatalog: () => ipcRenderer.invoke("desktop:retry-code-catalog"),
     chooseCodeReferences: (kind: Parameters<DesktopApi["chooseCodeReferences"]>[0]) => ipcRenderer.invoke("desktop:choose-code-references", kind),
     removeCodeReference: (id: string) => ipcRenderer.invoke("desktop:remove-code-reference", id),

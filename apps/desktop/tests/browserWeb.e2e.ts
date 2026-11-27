@@ -5,6 +5,7 @@ import { createServer as createTlsServer, type Server } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { promisify } from "node:util";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
 import { FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
@@ -109,7 +110,7 @@ test("the globe is in Chat, Review and Code with no project; a person opens a pu
     const address = page.getByRole("textbox", { name: "Address" });
 
     // Code, before any folder is open.
-    await expect(page.getByRole("button", { name: "Open local folder" })).toBeVisible();
+    await expect(page.locator(".open-folder")).toBeVisible();
     await expect(globe).toBeVisible();
     await expect(globe).toHaveAttribute("aria-expanded", "false");
     // Directly left of the theme button.
@@ -281,8 +282,8 @@ test("the agent opens a public site only after the person approves its host, can
   try {
     ({ app, folder: directory } = await launch(gateway, sites.port, { browserAgent: true, browserWeb: true }));
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
     assert.equal((await page.evaluate(() => window.desktop.state())).codeBrowserWeb, true);
     await page.getByRole("textbox", { name: "Code request" }).fill("Look at site one, then site two.");
     await page.getByRole("button", { name: "Send Code request" }).click();
@@ -356,8 +357,8 @@ test("without the second switch the agent's browser opens local pages only, and 
   try {
     ({ app, folder: directory } = await launch(gateway, sites.port, { browserAgent: true }));
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
     assert.deepEqual(await page.evaluate(() => window.desktop.state().then((state) => [state.codeBrowserAgent, state.codeBrowserWeb])), [true, false]);
     await page.getByRole("textbox", { name: "Code request" }).fill("Open the site.");
     await page.getByRole("button", { name: "Send Code request" }).click();

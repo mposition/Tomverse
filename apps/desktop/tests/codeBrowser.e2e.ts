@@ -4,6 +4,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
 import { launchNativeFixture } from "./launch-native-fixture";
@@ -48,7 +49,7 @@ test("Code opens a native browser panel for the selected loopback site and dispo
       electronApp.on("session-created", (created) => { created.resolveHost = async () => ({ endpoints: [{ address: "93.184.216.34", family: "ipv4" }] }); });
     });
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const address = page.getByRole("textbox", { name: "Address" });
     await address.fill("http://example.com/");
