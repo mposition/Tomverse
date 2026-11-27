@@ -232,11 +232,16 @@ test("Desktop connector screens are off unless their own switch and the account 
     process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
     delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
     assert.equal(desktopPluginsEnabled(), false);
-    // A display switch: it enrols no bearer route.
+    // A display switch: it enrols no write route and no connector route (those take the settings session). The one bearer read it
+    // opens is the platform catalogue the Plugins screen lists (tests/desktopPluginCatalogRoute.test.ts).
     process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
     for (const path of ["/api/mcp/connections", "/api/mcp/oauth/start", "/api/mcp/invocations/abc"]) {
       assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+      assert.equal(desktopReadApiRoute(path, "GET"), false, path);
     }
+    assert.equal(desktopReadApiRoute("/api/mcp/providers", "GET"), true);
+    delete process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED;
+    assert.equal(desktopReadApiRoute("/api/mcp/providers", "GET"), false);
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];

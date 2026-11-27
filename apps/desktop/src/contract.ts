@@ -21,6 +21,7 @@ import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
+import type { PluginCatalog } from "./plugin-catalog-contract";
 import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
 import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
@@ -410,6 +411,8 @@ export type Snapshot = {
     googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
+    /** The server serves the web's platform catalogue (GET /api/mcp/providers) for the Plugins screen to list. */
+    pluginCatalog?: boolean;
     /** Plugins from a zip file, an npm package or a private GitHub repository, and the marketplace Desktop carries. */
     pluginSources?: boolean;
     billing?: boolean; managedCode?: boolean;
@@ -604,6 +607,8 @@ export type DesktopApi = {
   saveArtifact(input: SaveArtifactInput): Promise<boolean>;
   pluginInventory(): Promise<DesktopPluginInventory>;
   connectorInventory(): Promise<ConnectorInventory>;
+  /** The web's platform list, read from the server (null where the server does not offer it). `refresh` asks again instead of reusing a list that is still fresh. */
+  pluginCatalog(refresh?: boolean): Promise<PluginCatalog | null>;
   connectorAction(input: ConnectorInput): Promise<ConnectorResult>;
   importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
   checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;

@@ -335,6 +335,8 @@ export function desktopRemotePasskeyEnabled() {
 
 export const DESKTOP_CHAT_CAPABILITIES = "/api/products/chat/capabilities";
 export const DESKTOP_CHAT_HISTORY = "/api/conversations";
+/** The Plugins page's platform catalogue (static, no account data). Desktop reads it while the Desktop plugins switch is on. */
+export const DESKTOP_PLUGIN_CATALOG = "/api/mcp/providers";
 export const DESKTOP_CHAT_SEARCH = "/api/conversations/search";
 
 const ownResourceRead = /^\/api\/(?:conversations|artifacts)\/[A-Za-z0-9_-]{1,128}$/;
@@ -342,6 +344,7 @@ const ownResourceRead = /^\/api\/(?:conversations|artifacts)\/[A-Za-z0-9_-]{1,12
 export function desktopReadApiRoute(path: string, method: string): boolean {
   return method === "GET" && (path === DESKTOP_CHAT_CAPABILITIES || path === DESKTOP_CHAT_HISTORY ||
     path === DESKTOP_CHAT_SEARCH || ownResourceRead.test(path) ||
+    (path === DESKTOP_PLUGIN_CATALOG && desktopPluginsEnabled()) ||
     /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path) ||
     (desktopReviewWriteEnabled() && (path === DESKTOP_IMAGE_GENERATIONS ||
       /^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/generations$/.test(path) ||
