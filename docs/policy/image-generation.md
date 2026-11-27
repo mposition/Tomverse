@@ -305,9 +305,10 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   - **이중 실행·이중 과금 없음**: 재구동도 정상 실행자와 같은
     `pending → processing` 조건부 claim을 거친다. 느린 정상 실행자와 sweep
     중 한쪽만 provider를 호출하고 정산한다.
-  - 실행 위치와 예산: maintenance route(`/api/internal/maintenance/
-    credit-reservations`)의 `after()`에서 응답 뒤에 실행한다. 예산은 그
-    route의 maxDuration(300초)이고 이미지 route의 968초가 아니다. 그래서
+  - 실행 위치와 예산: maintenance route
+    (`/api/internal/maintenance/credit-reservations`)의 `after()`에서 응답
+    뒤에 실행한다. 예산은 그 route의 maxDuration(300초)이고 이미지 route의
+    968초가 아니다. 그래서
     sweep당 `IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP`(8건)만 표시하고, 그룹마다
     자기 provider job 상한으로 병렬 실행한다. 남은 행은 표시하지 않고 다음
     sweep으로 넘긴다.
