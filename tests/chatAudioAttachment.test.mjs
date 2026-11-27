@@ -54,6 +54,7 @@ const fixture = (path) =>
 const MP3_CBR_3000MS = fixture("audio/ffmpeg-lame-cbr32k-22050hz-3000ms.mp3");
 const MP3_VBR_2500MS = fixture("audio/ffmpeg-lame-vbr-44100hz-2500ms.mp3");
 const WAV_1500MS = fixture("audio/ffmpeg-pcm-s16le-8000hz-1500ms.wav");
+const WAV_EXTENSIBLE_500MS = fixture("audio/ffmpeg-pcm-s16le-3ch-extensible-8000hz-500ms.wav");
 const WEBM_2500MS = fixture("voice/chromium-webm-opus-2500ms.webm");
 const MP4_3000MS = fixture("voice/chromium-mp4-aac-3000ms.mp4");
 
@@ -183,6 +184,25 @@ test("a WAV's length is its PCM bytes over the rate they are played at", () => {
   assert.equal(wavPcmDurationSeconds(wav({ byteRate: 192_000, payload: 16_000 })), null);
   assert.equal(wavPcmDurationSeconds(wav({ blockAlign: 4, payload: 16_000 })), null);
   assert.equal(wavPcmDurationSeconds(wav({ format: 0x0055, payload: 16_000 })), null);
+});
+
+test("WAVE_FORMAT_EXTENSIBLE counts only when its sub-format is PCM or float", () => {
+  // ffmpeg writes the extensible wrapper for three channels: a real one, with
+  // KSDATAFORMAT_SUBTYPE_PCM in its 40-byte fmt chunk.
+  const real = WAV_EXTENSIBLE_500MS;
+  assert.equal(new DataView(real.buffer, real.byteOffset).getUint16(20, true), 0xfffe);
+  assert.equal(wavPcmDurationSeconds(real), 0.5);
+  // The same file naming a compressed codec in the GUID, keeping the PCM-looking
+  // byteRate and blockAlign that would otherwise understate its length.
+  const compressed = new Uint8Array(real);
+  new DataView(compressed.buffer).setUint32(44, 0x0055, true);
+  assert.equal(wavPcmDurationSeconds(compressed), null);
+  // A GUID outside the KSDATAFORMAT family, and a wrapper with no room for one.
+  const foreign = new Uint8Array(real);
+  foreign[50] ^= 0xff;
+  assert.equal(wavPcmDurationSeconds(foreign), null);
+  assert.equal(wavPcmDurationSeconds(wav({ format: 0xfffe, payload: 16_000 })), null);
+  assert.equal(inspectAudioAttachment({ bytes: compressed, mediaType: "audio/wav" }).code, "ATTACHMENT_UNREADABLE");
 });
 
 test("bytes of another container are refused whatever they are named", () => {

@@ -211,8 +211,29 @@ const u16 = (bytes: Uint8Array, at: number) => bytes[at] | (bytes[at + 1] << 8);
 const u32 = (bytes: Uint8Array, at: number) =>
     (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0;
 
-/** Integer PCM, IEEE float, and the extensible wrapper around either. */
-const WAV_PCM_FORMATS = new Set([0x0001, 0x0003, 0xfffe]);
+/** Integer PCM and IEEE float: the format tags whose bytes are the samples. */
+const WAV_PCM_FORMATS = new Set([0x0001, 0x0003]);
+const WAVE_FORMAT_EXTENSIBLE = 0xfffe;
+/**
+ * KSDATAFORMAT_SUBTYPE_PCM and _IEEE_FLOAT share this GUID after their first
+ * four bytes (the format code, little-endian). The extensible wrapper can name
+ * any codec, so its sub-format is what decides, not its tag.
+ */
+const KSDATAFORMAT_SUBTYPE_SUFFIX = [
+    0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+];
+
+/** The sample format a fmt chunk describes, unwrapping WAVE_FORMAT_EXTENSIBLE. */
+const wavSampleFormat = (bytes: Uint8Array, body: number, size: number): number | null => {
+    const tag = u16(bytes, body);
+    if (tag !== WAVE_FORMAT_EXTENSIBLE) return tag;
+    // cbSize >= 22: valid bits, channel mask and the 16-byte sub-format GUID.
+    if (size < 40 || body + 40 > bytes.length || u16(bytes, body + 16) < 22) return null;
+    for (let index = 0; index < KSDATAFORMAT_SUBTYPE_SUFFIX.length; index += 1) {
+        if (bytes[body + 28 + index] !== KSDATAFORMAT_SUBTYPE_SUFFIX[index]) return null;
+    }
+    return u32(bytes, body + 24);
+};
 
 /**
  * Seconds of audio in a PCM WAV, or `null`.
@@ -235,13 +256,15 @@ export const wavPcmDurationSeconds = (bytes: Uint8Array): number | null => {
         const body = offset + 8;
         if (id === "fmt ") {
             if (size < 16 || body + 16 > bytes.length) return null;
-            const format = u16(bytes, body);
+            const format = wavSampleFormat(bytes, body, size);
             const channels = u16(bytes, body + 2);
             const sampleRate = u32(bytes, body + 4);
             const declaredByteRate = u32(bytes, body + 8);
             const blockAlign = u16(bytes, body + 12);
             const bits = u16(bytes, body + 14);
-            if (!WAV_PCM_FORMATS.has(format) || channels === 0 || sampleRate === 0) return null;
+            if (format === null || !WAV_PCM_FORMATS.has(format) || channels === 0 || sampleRate === 0) {
+                return null;
+            }
             if (bits === 0 || bits % 8 !== 0 || blockAlign !== channels * (bits / 8)) return null;
             if (declaredByteRate !== sampleRate * blockAlign) return null;
             byteRate = declaredByteRate;
