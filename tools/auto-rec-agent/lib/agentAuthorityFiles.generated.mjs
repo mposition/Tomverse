@@ -23,6 +23,7 @@ const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "prisma",
   "public",
   "scripts",
+  "services",
   "tests",
   "tools",
   "types",

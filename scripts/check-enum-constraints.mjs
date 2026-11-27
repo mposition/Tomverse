@@ -724,6 +724,11 @@ const REGISTRY = {
     reason:
       "A Desktop cloud Code task from creation to its end: waiting for its bundle, queued, claimed by a runner while its credits are reserved, running, and the three ends. Written only by lib/codeCloudService.ts; the runner reports an outcome from the same contract's finish list, never a stored status.",
   },
+  DesktopRemotePasskeyChallenge_purpose_check: {
+    owner: "type_only",
+    reason:
+      "ChallengePurpose in lib/desktopRemotePasskeyStore.ts: register, enroll, command or remove. A challenge is single use and taken by its own purpose, so a passkey confirmation made for one action can never authorize another; the sibling binding CHECK ties register to a null binding hash.",
+  },
   DesktopRemoteCommand_kind_check: {
     owner: "list",
     module: "lib/desktopRemoteControlContract.ts",
