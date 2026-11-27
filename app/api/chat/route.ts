@@ -262,6 +262,7 @@ import {
     CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
+    PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
 import {
@@ -539,6 +540,11 @@ import {
     ATTACHMENT_STORAGE_UNAVAILABLE_CODE,
     ATTACHMENT_UNAVAILABLE_CODE,
 } from "@/lib/chatAttachmentErrorCopy";
+import {
+    DATABASE_RETRY_AFTER_SECONDS,
+    DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
+    isRetryableDatabaseError,
+} from "@/lib/databaseError";
 
 /**
  * Each provider call of a multi-step turn (a tool loop, Research Preview), from
@@ -1512,6 +1518,15 @@ async function handleChatPost(
      */
     let providerCall: ProviderCallRecord | null = null;
     let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
+    /**
+     * Set the moment this request starts a paid external call that a resend
+     * must not repeat: a paid OCR page or a Deep Research submission. (A
+     * pre-answer web search is tracked by `presearchForSettlement`'s own request
+     * count; Auto's router and image classification are deliberately not here,
+     * see the catch.) The catch never answers such a request with the
+     * retryable DATABASE_TEMPORARILY_UNAVAILABLE.
+     */
+    let paidExternalWorkStarted = false as boolean;
     let providerBudgetNotice: Promise<void> | undefined;
     let searchObservation: ChatSearchObservation | undefined;
     /**
@@ -4436,6 +4451,9 @@ async function handleChatPost(
                         if (!ocrAllowance) return "no-text";
                         if (fromArchive) archiveOcrUsed += 1;
 
+                        // Paid per page, and a scanned file on the message being
+                        // sent is not cached: a resend would be billed again.
+                        paidExternalWorkStarted = true;
                         try {
                             const ocrResult = await extractPdfTextWithMistralOcr(
                                 buffer,
@@ -4627,6 +4645,98 @@ async function handleChatPost(
                 return "ok";
             };
 
+            /**
+             * Runs the reading of one stored file and decides what its failure
+             * means for the turn.
+             *
+             * An EARLIER message's file that cannot be delivered -- the model
+             * has no image input, the parser failed or timed out, the archive
+             * or OCR step refused it -- is named to the model as "not included"
+             * and the turn goes on. Those files are re-read on every later
+             * turn, so refusing here made one file the person can no longer
+             * act on end the whole conversation: switching an image chat to a
+             * text-only model answered 400 on every send afterwards.
+             *
+             * The message being SENT is still refused. A failure with no code
+             * (a parser timeout, a worker that died) used to leave as a bare
+             * 500; it now leaves as ATTACHMENT_UNREADABLE so the person is told
+             * which file to look at. Anything that is not about this file --
+             * an aborted request, a storage or database fault -- passes through
+             * untouched in both cases: those are not the file's fault and a
+             * marker would hide them.
+             */
+            const deliverAttachment = async (
+                name: string,
+                read: () => Promise<unknown>
+            ): Promise<void> => {
+                const before = {
+                    textEntries: textAttachments.length,
+                    fileParts: fileParts.length,
+                    imageEstimates: imageInputTokenEstimates.length,
+                    totalImageCount,
+                    totalBase64ImagePayloadBytes,
+                    totalExtractedCharacters,
+                    pastAttachmentTokens,
+                    archiveOcrBudget,
+                    archiveOcrUsed,
+                };
+                try {
+                    await read();
+                } catch (error) {
+                    if (
+                        req.signal.aborted ||
+                        isChatLocalFailure(error) ||
+                        isStorageError(error) ||
+                        isRetryableDatabaseError(error)
+                    ) {
+                        throw error;
+                    }
+                    if (isLatestMessage) {
+                        if (isChatAccessError(error)) throw error;
+                        logRequestError(
+                            "attachment_unreadable",
+                            traceId,
+                            error,
+                            requestedModelId,
+                            { phase: "attachment_read", attachmentScope: "current_turn" }
+                        );
+                        throw new ChatAccessError(
+                            400,
+                            "ATTACHMENT_UNREADABLE",
+                            "The attached file could not be processed."
+                        );
+                    }
+                    logRequestError(
+                        "past_attachment_not_delivered",
+                        traceId,
+                        error,
+                        requestedModelId,
+                        {
+                            phase: "attachment_read",
+                            attachmentScope: "past_turn",
+                            ...(isChatAccessError(error) ? { code: error.code } : {}),
+                        }
+                    );
+                    // Whatever the failed read had already contributed leaves
+                    // with it, counters included: a file that was not sent must
+                    // not count against the image, text or OCR allowances.
+                    textAttachments.length = before.textEntries;
+                    fileParts.length = before.fileParts;
+                    imageInputTokenEstimates.length = before.imageEstimates;
+                    totalImageCount = before.totalImageCount;
+                    totalBase64ImagePayloadBytes = before.totalBase64ImagePayloadBytes;
+                    totalExtractedCharacters = before.totalExtractedCharacters;
+                    pastAttachmentTokens = before.pastAttachmentTokens;
+                    archiveOcrBudget = before.archiveOcrBudget;
+                    archiveOcrUsed = before.archiveOcrUsed;
+                    textAttachments.push({
+                        name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
+                    });
+                }
+            };
+
             for (const [attachmentIndex, incoming] of attachments.entries()) {
                 /*
                   What this file actually is, decided by the server.
@@ -4665,6 +4775,9 @@ async function handleChatPost(
                 ) {
                     throw new Error("Unsupported attachment.");
                 }
+                // Read once, here, where the guard above has narrowed it: a
+                // closure below does not inherit that narrowing.
+                const attachmentName: string = attachment.name;
                 // The shared table decides, and the name has to agree with the
                 // declared type: a `.png` sent as `application/pdf` is a
                 // disagreement, not something to resolve in either direction.
@@ -4844,6 +4957,18 @@ async function handleChatPost(
                             error,
                             requestedModelId
                         );
+                        // An earlier message's file is named to the model as
+                        // gone, exactly as an account's acknowledged missing
+                        // file is, and the turn goes on: a guest has no row to
+                        // acknowledge, and the question being sent does not
+                        // need the file the sweep took. Only the file on the
+                        // message being sent is still refused.
+                        if (!isLatestMessage) {
+                            textAttachments.push(
+                                unavailableAttachmentMarker(attachment.name)
+                            );
+                            continue;
+                        }
                         throw new ChatAccessError(
                             410,
                             "GUEST_ATTACHMENT_EXPIRED",
@@ -5021,12 +5146,14 @@ async function handleChatPost(
                     const filePartsBefore = fileParts.length;
                     const parseRoomBefore =
                         CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
-                    await ingestAttachmentFile({
-                        format,
-                        name: attachment.name,
-                        buffer: attachmentBuffer,
-                        fromArchive: false,
-                    });
+                    await deliverAttachment(attachmentName, () =>
+                        ingestAttachmentFile({
+                            format,
+                            name: attachmentName,
+                            buffer: attachmentBuffer,
+                            fromArchive: false,
+                        })
+                    );
                     if (textCacheEligible) {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
@@ -5074,63 +5201,65 @@ async function handleChatPost(
                 // same reader as any other attachment, so nothing inside it
                 // escapes the image count, the payload ceiling, the text
                 // budget or the OCR allowance.
-                const scope = isGuestObject ? "guest" : "account";
-                archiveOcrBudget += chatArchiveLimits(scope).maxOcrPdfs;
-                let expanded;
-                try {
-                    expanded = await expandChatArchive(attachmentBuffer, scope);
-                } catch (error) {
-                    if (error instanceof ChatArchiveError) {
-                        // The code travels; the entry path that produced it
-                        // never does.
+                await deliverAttachment(attachmentName, async () => {
+                    const scope = isGuestObject ? "guest" : "account";
+                    archiveOcrBudget += chatArchiveLimits(scope).maxOcrPdfs;
+                    let expanded;
+                    try {
+                        expanded = await expandChatArchive(attachmentBuffer, scope);
+                    } catch (error) {
+                        if (error instanceof ChatArchiveError) {
+                            // The code travels; the entry path that produced it
+                            // never does.
+                            throw new ChatAccessError(
+                                error.status,
+                                error.code,
+                                "The attached archive could not be read."
+                            );
+                        }
+                        throw error;
+                    }
+                    const archiveName = inertFilename(attachmentName);
+                    const readPaths: string[] = [];
+                    let unreadableCount = 0;
+
+                    for (const file of expanded.files) {
+                        const outcome = await ingestAttachmentFile({
+                            format: file.entry.format,
+                            name: `${archiveName}/${file.entry.path}`,
+                            buffer: file.bytes,
+                            fromArchive: true,
+                        });
+                        if (outcome === "ok") readPaths.push(file.entry.path);
+                        else unreadableCount += 1;
+                    }
+
+                    if (readPaths.length === 0) {
                         throw new ChatAccessError(
-                            error.status,
-                            error.code,
-                            "The attached archive could not be read."
+                            400,
+                            CHAT_ARCHIVE_ERROR_CODES.noSupportedFiles,
+                            "No file inside the archive could be read."
                         );
                     }
-                    throw error;
-                }
-                const archiveName = inertFilename(attachment.name);
-                const readPaths: string[] = [];
-                let unreadableCount = 0;
 
-                for (const file of expanded.files) {
-                    const outcome = await ingestAttachmentFile({
-                        format: file.entry.format,
-                        name: `${archiveName}/${file.entry.path}`,
-                        buffer: file.bytes,
-                        fromArchive: true,
+                    // Stated to the model rather than left implicit: without it,
+                    // an answer about "the files you sent" silently describes a
+                    // subset, and neither side knows which one.
+                    const skipped =
+                        totalArchiveExclusions(expanded.plan.exclusions) + unreadableCount;
+                    textAttachments.push({
+                        name: attachmentName,
+                        kind: "archive listing",
+                        text: [
+                            `Files read from this archive (${readPaths.length}):`,
+                            ...readPaths.map((path) => `- ${path}`),
+                            skipped > 0
+                                ? `${skipped} other entr${skipped === 1 ? "y" : "ies"} in this archive could not be read by this product and are not included below.`
+                                : "",
+                        ]
+                            .filter(Boolean)
+                            .join("\n"),
                     });
-                    if (outcome === "ok") readPaths.push(file.entry.path);
-                    else unreadableCount += 1;
-                }
-
-                if (readPaths.length === 0) {
-                    throw new ChatAccessError(
-                        400,
-                        CHAT_ARCHIVE_ERROR_CODES.noSupportedFiles,
-                        "No file inside the archive could be read."
-                    );
-                }
-
-                // Stated to the model rather than left implicit: without it,
-                // an answer about "the files you sent" silently describes a
-                // subset, and neither side knows which one.
-                const skipped =
-                    totalArchiveExclusions(expanded.plan.exclusions) + unreadableCount;
-                textAttachments.push({
-                    name: attachment.name,
-                    kind: "archive listing",
-                    text: [
-                        `Files read from this archive (${readPaths.length}):`,
-                        ...readPaths.map((path) => `- ${path}`),
-                        skipped > 0
-                            ? `${skipped} other entr${skipped === 1 ? "y" : "ies"} in this archive could not be read by this product and are not included below.`
-                            : "",
-                    ]
-                        .filter(Boolean)
-                        .join("\n"),
                 });
             }
 
@@ -5620,6 +5749,9 @@ async function handleChatPost(
 
             // Preserve the provider job id in diagnostics when persistence fails after acceptance.
             let submittedPerplexityJobId: string | null = null;
+            // A submitted job is paid for; this block answers its own failures
+            // and never reaches the retryable 503, the flag is belt and braces.
+            paidExternalWorkStarted = true;
             try {
                 const depthParams =
                     DEEP_RESEARCH_DEPTH_PARAMS[deepResearchDepth || "standard"];
@@ -9585,6 +9717,84 @@ async function handleChatPost(
                 }
             }
             return accessError;
+        }
+
+        /*
+          A transient database refusal before any provider was called.
+
+          This used to fall into the unclassified branch below and answer 500
+          CHAT_APPLICATION_ERROR with `retryable: false`, in Korean, for what
+          was a connection that did not open or a deadlock Postgres broke. The
+          request is safe to send again here, and only here:
+
+            * `providerCall` is null, so nothing left this process for a
+              provider and nothing can be paid for twice;
+            * the usage reservation, lease and durable attempt of this request
+              were unwound above (a settle that itself failed is logged and
+              left to the reservation sweeper, as before).
+
+          After a provider call began, a database error keeps its old shape: the
+          outcome of that turn is not known, so it is never advertised as
+          retryable. The browser sends the request once more with a new answer
+          id, because the attempt unwound above is terminal.
+
+          What the request spent before the answer model decides whether a
+          resend is allowed. `costlyWorkStarted` excludes it for work that is
+          settled, billed per page or submitted outside: the pre-answer web
+          search (its own request count, the same one failure settlement
+          charges), a paid OCR page and a Deep Research submission
+          (`paidExternalWorkStarted`).
+
+          Auto's router, its image-intent classification and the location
+          decision riding on the router are NOT in that set, on purpose. They
+          are small internal calls that are never billed to the user, and the
+          browser resends once, so the most a resend adds is one more router
+          call. Excluding them would drop nearly every Auto turn (the default)
+          from the fix, since the reservation and durable-attempt steps where
+          the database blinks come after the router. Prompt Refiner
+          consumption, MCP connector setup, storage reads and the context
+          bundle are database or free calls: a resend repeats no spend.
+        */
+        const costlyWorkStarted =
+            (paidExternalWorkStarted as boolean) ||
+            (presearchForSettlement?.session.snapshot().backendRequestCount ?? 0) > 0;
+        const transientDatabaseError = providerCall || costlyWorkStarted
+            ? null
+            : isRetryableDatabaseError(error)
+              ? error
+              : localFailure &&
+                  localFailure.layer !== "storage" &&
+                  isRetryableDatabaseError(localFailure.cause)
+                ? localFailure.cause
+                : null;
+        if (transientDatabaseError) {
+            logRequestError(
+                "chat_database_temporarily_unavailable",
+                traceId,
+                transientDatabaseError,
+                dispatchModelIdForLog,
+                { failureLayer: "application", phase: "request" }
+            );
+            const unavailable = tracedJsonError(
+                "The service is temporarily unavailable. Please try again shortly.",
+                DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
+                503,
+                traceId,
+                { retryAfterSeconds: DATABASE_RETRY_AFTER_SECONDS },
+                {
+                    phase: "request",
+                    failureLayer: "application",
+                    provider: dispatchProviderForLog,
+                    modelId: dispatchModelIdForLog,
+                    error: transientDatabaseError,
+                    retryable: true,
+                }
+            );
+            unavailable.headers.set(
+                "Retry-After",
+                String(DATABASE_RETRY_AFTER_SECONDS)
+            );
+            return withoutRejectionLine(unavailable);
         }
 
         if (localFailure) {

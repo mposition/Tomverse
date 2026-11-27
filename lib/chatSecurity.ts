@@ -2916,6 +2916,11 @@ export const acquireChatAccess = async (
                 textDetail(error?.details, "resetAt") ?? decisionState.resetAt,
         }).catch(() => undefined);
 
+    // The transaction below takes the same bounds as the comparison preflight
+    // (`{ maxWait: 5_000, timeout: 15_000 }`). Without them Prisma's defaults
+    // (2 s to get a connection, 5 s to finish) turned a slow database into a
+    // refusal of a request that only needed a few more seconds. Options only:
+    // nothing about what the transaction reserves changes.
     try {
     await prisma.$transaction(async (tx) => {
         if (guestAutoPrehold) {
@@ -4292,7 +4297,7 @@ export const acquireChatAccess = async (
                 usageCredits: budget.usageCredits,
             });
         }
-    });
+    }, { maxWait: 5_000, timeout: 15_000 });
     } catch (error) {
         if (error instanceof ChatAccessError) {
             await recordDecision(error);
