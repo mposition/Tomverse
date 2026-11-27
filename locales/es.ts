@@ -421,6 +421,7 @@ export const es = {
         responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
         responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
         responseNotSavedNotice: "Esta respuesta no se guardó. No aparecerá si recargas la página.",
+        responseInterruptedNotice: "La respuesta se cortó por un problema del proveedor de IA. Puedes intentarlo de nuevo o continuar con una pregunta de seguimiento.",
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
         showDiagnostics: "Ver información de diagnóstico",

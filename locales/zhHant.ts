@@ -425,6 +425,7 @@ export const zhHant = {
         responseIncomplete: "回覆因輸出長度上限而中斷。",
         responseIncompleteNotice: "回覆因輸出長度上限而中斷。你可以透過追問繼續。",
         responseNotSavedNotice: "此回覆未能儲存，重新整理後將不再顯示。",
+        responseInterruptedNotice: "由於 AI 提供方發生問題，回覆在中途被中斷。你可以重試，或透過追問繼續。",
         responseFailed: "請求失敗。",
         traceId: "追蹤 ID",
         showDiagnostics: "查看診斷資訊",

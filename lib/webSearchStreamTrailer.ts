@@ -1,6 +1,7 @@
 import { parseContinuationReceipt, type ContinuationReceipt } from "./continuationReceipt";
 import {
   isChatCompletionStatus,
+  isChatIncompleteReason,
   type ChatCompletionStatus,
   type ChatIncompleteReason,
 } from "@tomverse/chat-core";
@@ -165,8 +166,8 @@ export function parseChatStreamTrailer(
       ? {
           completion: {
             status: completionRecord.status,
-            ...(completionRecord.incompleteReason === "length"
-              ? { incompleteReason: "length" as const }
+            ...(isChatIncompleteReason(completionRecord.incompleteReason)
+              ? { incompleteReason: completionRecord.incompleteReason }
               : {}),
           },
         }

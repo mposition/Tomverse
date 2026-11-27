@@ -668,7 +668,11 @@ export function ChatMessageList({
     if (lastMessage.researchRunId) return "";
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
-    if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
+    if (lastMessage.status === "incomplete") {
+      return t(lastMessage.incompleteReason === "interrupted"
+        ? "chat.responseInterruptedNotice"
+        : "chat.responseIncomplete");
+    }
     // A file-only answer has an empty body and is finished: its cards arrive
     // with the trailer, after the last streamed chunk.
     if (!lastMessage.content && !lastMessage.artifacts?.length) return t("chat.responseGenerating");
@@ -1942,7 +1946,9 @@ export function ChatMessageList({
                       data-testid="response-incomplete-notice"
                       className="mt-3 border-t border-zinc-200 pt-2 text-[11px] leading-4 font-semibold text-zinc-500 dark:border-zinc-700/60 dark:text-zinc-400"
                     >
-                      {t("chat.responseIncompleteNotice")}
+                      {t(msg.incompleteReason === "interrupted"
+                        ? "chat.responseInterruptedNotice"
+                        : "chat.responseIncompleteNotice")}
                     </p>
                   )}
                   {/*

@@ -93,6 +93,13 @@ export type Message = {
    * and it persists through storage and a re-fetch like any other status.
    */
   status?: "normal" | "incomplete" | "error" | "cancelled" | "pending";
+  /**
+   * Runtime-only: why an `incomplete` answer stopped, from the stream
+   * trailer -- `length` (the output ceiling) or `interrupted` (the provider's
+   * stream broke off). Not stored: a reloaded incomplete answer has no
+   * reason and keeps the ceiling notice. Never serialized.
+   */
+  incompleteReason?: import("@tomverse/chat-core").ChatIncompleteReason;
   attachments?: ChatAttachment[];
   modelId?: string;
   errorCode?: string;

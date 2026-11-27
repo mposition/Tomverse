@@ -102,6 +102,8 @@ type StreamScript = {
   text: string;
   /** The provider stream breaks with this after `text`, instead of closing. */
   failAfterText?: unknown;
+  /** What the SDK's `usage` promise resolves to, when not the default counts. */
+  usage?: unknown;
 };
 
 let script: StreamScript = {
@@ -132,6 +134,8 @@ const world = {
   messages: [] as Array<{ id: string; status: string; modelId: string; content?: string }>,
   /** The outcome each settlement was asked for, in order. */
   settlements: [] as string[],
+  /** The token figures each settlement was handed. */
+  settledUsage: [] as Array<{ inputTokens?: number; outputTokens?: number; usageFromProvider?: boolean }>,
   /** How many stored objects the route handed back for reclamation. */
   discarded: 0,
   /**
@@ -237,7 +241,7 @@ mock.module("ai", {
           headers: {},
           messages: [],
         }),
-        usage: Promise.resolve({
+        usage: Promise.resolve(script.usage ?? {
           inputTokens: 1_000,
           outputTokens: 500,
           cachedInputTokens: 0,
@@ -428,8 +432,16 @@ mock.module(mod("lib/chatSecurity.ts"), {
     }),
     releaseChatAccess: async () => undefined,
     heartbeatChatAccess: async () => undefined,
-    settleChatUsage: async (_reservation: unknown, usage: { outcome: string }) => {
+    settleChatUsage: async (
+      _reservation: unknown,
+      usage: { outcome: string; inputTokens?: number; outputTokens?: number; usageFromProvider?: boolean }
+    ) => {
       world.settlements.push(usage.outcome);
+      world.settledUsage.push({
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        usageFromProvider: usage.usageFromProvider,
+      });
     },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async () => ({ ok: true, entries: [] }),
@@ -711,6 +723,7 @@ const ask = async (
   world.messages = [];
   world.providerContexts = [];
   world.settlements = [];
+  world.settledUsage = [];
   world.discarded = 0;
   world.messageCreateCalls = 0;
   lastStreamTextOptions = null;
@@ -1924,4 +1937,62 @@ test("a non-retryable Message write failure is not retried", async () => {
   const { trailer } = await withMessageCreateFailures([refusal], false, () => ask({}));
   assert.equal(world.messageCreateCalls, 1);
   assert.equal((trailer as NotSavedTrailer)?.notSaved, true);
+});
+
+/* -------------------------------------------------------------------------- */
+/* A provider that broke off mid-answer without throwing                        */
+/* -------------------------------------------------------------------------- */
+
+/*
+  S2. With AI SDK 7, an error part the provider sends mid-stream does not make
+  `textStream` throw: it closes normally and `finishReason` resolves `error`
+  (`interrupted` when the stream ended without its completion signal). The
+  route used to save that answer as `normal` and charge the flat completed
+  rate. It is an incomplete answer, settled prorated like a stop.
+*/
+test("a stream that ended on an error part is saved incomplete and settled prorated, not completed", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({ text: "Half an answer", finishReason: "error", rawFinishReason: "" });
+    assert.deepEqual(trailer?.completion, { status: "incomplete", incompleteReason: "interrupted" });
+    // An incomplete answer, not a failed turn.
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+  assert.deepEqual(
+    world.messages.map((message) => [message.status, message.content]),
+    [["incomplete", "Half an answer"]]
+  );
+  assert.deepEqual(world.settlements, ["cancelled"]);
+  // The provider reported usage, so that is what the proration reads.
+  assert.deepEqual(world.settledUsage, [{ inputTokens: 1_000, outputTokens: 500, usageFromProvider: true }]);
+});
+
+test("an interrupted stream with no reported usage is settled on the cancelled-turn estimate", async () => {
+  await ask({
+    text: "Half an answer",
+    finishReason: "interrupted",
+    rawFinishReason: "",
+    usage: {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      inputTokenDetails: {},
+      outputTokenDetails: {},
+    },
+  });
+  assert.deepEqual(world.settlements, ["cancelled"]);
+  assert.equal(world.settledUsage[0]!.usageFromProvider, false);
+  // Estimated from the streamed text, as a cancelled turn is.
+  assert.equal(world.settledUsage[0]!.outputTokens, Math.ceil(Buffer.byteLength("Half an answer") / 4));
+  assert.deepEqual(world.messages.map((message) => message.status), ["incomplete"]);
+});
+
+test("an error finish with no text is still the empty answer it always was", async () => {
+  await ask({ text: "", finishReason: "error", rawFinishReason: "" });
+  assert.deepEqual(world.settlements, ["empty"]);
+  assert.deepEqual(world.messages, []);
+});
+
+test("an ordinary stop is unchanged: completed, normal", async () => {
+  const { trailer } = await ask({});
+  assert.deepEqual(trailer?.completion, { status: "normal" });
+  assert.deepEqual(world.settlements, ["completed"]);
 });

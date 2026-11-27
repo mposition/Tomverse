@@ -903,6 +903,24 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
   받습니다. 첫 토큰 이후 provider가 아무 part도 내지 않으면(기본 90초, 브라우저의
   무응답 기준과 같음) 서버가 스스로 비례 `cancelled`로 끝냅니다.
 
+### 완료 분기의 정산 (2026-11-27)
+
+provider 스트림이 끝난 뒤 완료 분기가 고르는 정산 outcome입니다. 정산은 Message
+저장보다 먼저 하고, 저장이 실패해도 되돌리지 않습니다(답은 화면에 나갔고 provider
+비용은 발생함).
+
+- 본문이 있으면 `completed`. 본문이 없어도 **저장소에 저장된 생성 파일이 하나라도**
+  있고 메시지를 쓸 대화가 있으면 `completed`입니다(파일이 전달됨).
+- 본문도 저장된 파일도 없으면 `empty`(0 크레딧). 실패 카드만 있는 turn도 카드는
+  저장하되 `empty`입니다(`docs/policy/generated-artifacts.md` §8).
+- **provider가 답변 도중 끊은 turn**: AI SDK는 스트림 중간의 provider 오류를
+  `textStream`에서 throw하지 않고 finish reason을 `error`(완료 신호 없이 끝나면
+  `interrupted`)로 resolve합니다. 본문이 있는 이런 turn은 `incomplete`로 저장하고
+  `cancelled`와 같은 비례 방식으로 정산합니다 — provider가 usage를 보고했으면 그
+  수치로, 없으면 취소 turn과 같은 추정으로. 정액 `completed` 과금을 하지 않습니다.
+  routing attempt 기록은 취소가 아니라 post-token provider 실패이고, provider·모델
+  실패로 기록합니다. Research Preview는 채택된 보고서가 답이므로 제외합니다.
+
 ## 4. 예약 정확도
 
 - 입력 토큰 추정은 `lib/chatTokenEstimate.ts` 하나로 통일했습니다. CJK 문자는

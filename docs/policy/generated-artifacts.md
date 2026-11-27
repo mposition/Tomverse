@@ -479,8 +479,9 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
 
 절대 조건:
 
-- **완료 판정이 `incomplete`(= `length`)일 때만** 기록한다
-  (`resolveChatCompletionOutcome`). 정상 종료나 취소는 대상이 아니다.
+- **완료 판정이 출력 한도(`incompleteReason: "length"`)로 `incomplete`일 때만**
+  기록한다(`resolveChatCompletionOutcome`). 정상 종료, 취소, provider가 도중에 끊은
+  `interrupted`는 대상이 아니다.
 - **artifact tool 호출이 시작되지 않은 길이 초과는 지금과 같다** — 일반
   incomplete 안내만 보이고 카드는 만들지 않는다.
 - **native tool은 절대 세지 않는다.** `web_search`·`google_search`도 같은

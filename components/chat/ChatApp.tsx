@@ -2867,6 +2867,11 @@ function ChatAppComponent({
             generatingArtifactFormat: undefined,
             // The server could not save this answer; say so under it.
             ...(trailer?.notSaved ? { notSaved: true as const } : {}),
+            // Which notice an incomplete answer gets: the output ceiling, or
+            // a provider stream that broke off.
+            ...(completionStatus === "incomplete" && trailer?.completion?.incompleteReason
+              ? { incompleteReason: trailer.completion.incompleteReason }
+              : {}),
             ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
             // Only when the Router chose it, and only when the answer did not
             // then fall back to something else: `retryingWithModelId` means a

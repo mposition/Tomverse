@@ -8597,10 +8597,28 @@ async function handleChatPost(
                         // Recorded so the answer is never presented as
                         // finished; settlement, cancellation and the
                         // empty-response path are untouched by it.
-                        const completionOutcome = resolveChatCompletionOutcome({
+                        /*
+                          And a provider that broke off mid-answer. The AI
+                          SDK does not throw from `textStream` for an error
+                          part the provider sent mid-stream: the text stream
+                          closes normally and the finish reason resolves as
+                          `error` (`interrupted` when the stream ended without
+                          its completion signal), and a later step with no
+                          output rejects the finish metadata instead. Either
+                          way the answer stops short, and is recorded so. A
+                          Research Preview answer is its accepted report,
+                          checked above, not what the stream did after it.
+                        */
+                        const resolvedCompletionOutcome = resolveChatCompletionOutcome({
                             finishReason,
                             rawFinishReason,
+                            streamFailed: Boolean(completionError),
                         });
+                        const completionOutcome =
+                            isResearchPreview &&
+                            resolvedCompletionOutcome.incompleteReason === "interrupted"
+                                ? { status: "normal" as const }
+                                : resolvedCompletionOutcome;
                         if (completionOutcome.status === "incomplete") {
                             console.warn(
                                 JSON.stringify({
@@ -8629,8 +8647,14 @@ async function handleChatPost(
                               card the user sees while it streams and the row
                               they reload into are the same card
                               (docs/policy/generated-artifacts.md section 9).
+                              The output ceiling only, as section 9 states: a
+                              stream that broke off is not that card's case.
                             */
-                            if (artifactCollector && artifactToolCallTracker) {
+                            if (
+                                artifactCollector &&
+                                artifactToolCallTracker &&
+                                completionOutcome.incompleteReason === "length"
+                            ) {
                                 artifactCollector.recordIncompleteToolCalls(
                                     artifactToolCallTracker.abandonedCalls()
                                 );
@@ -8726,11 +8750,55 @@ async function handleChatPost(
                         // the attempt and the Message agree on reload.
                         attemptTerminalWithMessage = persistAnswer;
 
-                        if (usageResult.status === "fulfilled") {
-                            const usage = usageResult.value;
+                        /*
+                          A provider that broke off after visible text did not
+                          complete an answer (see `completionOutcome`). It is
+                          settled the way a stop is -- prorated on what was
+                          used, never the flat completed charge: on the
+                          provider's own usage when it reported any, otherwise
+                          on the estimate a cancelled turn uses. The attempt
+                          record says what it was, a post-token provider
+                          failure, rather than a cancellation.
+                        */
+                        const providerInterrupted =
+                            answerHasText &&
+                            completionOutcome.incompleteReason === "interrupted";
+                        const interruptionCause = observedStreamError ?? completionError;
+                        const interruption = providerInterrupted
+                            ? classifyStreamFailure({
+                                  error: interruptionCause,
+                                  phase: "read",
+                                  visibleTokenEmitted: true,
+                                  downstreamOpen: true,
+                              })
+                            : null;
+                        const settledAs = providerInterrupted
+                            ? "cancelled"
+                            : answerDelivered
+                              ? "completed"
+                              : "empty";
+                        const interruptionInstrumentation = interruption
+                            ? {
+                                  outcome: interruption.observedOutcome,
+                                  failureLayer: interruption.failureLayer,
+                                  errorClass: interruption.errorClass,
+                              }
+                            : undefined;
+                        // A stream that ended on an error part usually
+                        // resolves usage with no counts at all; that is not
+                        // a measurement, and the estimate is used instead.
+                        const reportedUsage =
+                            usageResult.status === "fulfilled" &&
+                            (!providerInterrupted ||
+                                Number.isFinite(usageResult.value.outputTokens))
+                                ? usageResult.value
+                                : null;
+
+                        if (reportedUsage) {
+                            const usage = reportedUsage;
                             const providerCalls = await providerCallUsage(dispatched.stream);
                             await settleSafely(
-                                answerDelivered ? "completed" : "empty",
+                                settledAs,
                                 {
                                     inputTokens: usage.inputTokens,
                                     cachedInputTokens:
@@ -8754,12 +8822,14 @@ async function handleChatPost(
                                     usageFromProvider: true,
                                     providerCalls,
                                     ...searchSettlementFields,
-                                }
+                                },
+                                interruptionInstrumentation
                             );
                         } else {
                             await settleSafely(
-                                answerDelivered ? "completed" : "empty",
-                                searchSettlementFields
+                                settledAs,
+                                searchSettlementFields,
+                                interruptionInstrumentation
                             );
                         }
                         /*
@@ -9257,6 +9327,46 @@ async function handleChatPost(
                             } catch (error) {
                                 logRequestError(
                                     "provider_empty_response_record_failed",
+                                    traceId,
+                                    error,
+                                    dispatched.modelId
+                                );
+                            }
+                        } else if (providerInterrupted) {
+                            // The same record a provider stream that threw
+                            // mid-answer gets in the catch below: it is that
+                            // event, reported through the finish reason.
+                            const interruptionMetadata = safeErrorMetadata(
+                                interruptionCause
+                            );
+                            const interruptionCode = interruptionCause
+                                ? providerDiagnosticCode(
+                                      "AI_STREAM_FAILED",
+                                      interruptionCause
+                                  )
+                                : "AI_STREAM_FAILED.INTERRUPTED";
+                            try {
+                                await recordProviderFailure(
+                                    dispatched.provider,
+                                    interruptionCode,
+                                    {
+                                        modelId: dispatched.modelId,
+                                        phase: "stream",
+                                        traceId,
+                                        errorName: interruptionMetadata.name,
+                                        errorCode: interruptionMetadata.code,
+                                        httpStatus: interruptionMetadata.statusCode,
+                                        retryable: interruptionMetadata.isRetryable,
+                                    }
+                                );
+                                await recordModelFailure(
+                                    dispatched.modelId,
+                                    dispatched.provider,
+                                    interruptionCode
+                                );
+                            } catch (error) {
+                                logRequestError(
+                                    "provider_failure_record_failed",
                                     traceId,
                                     error,
                                     dispatched.modelId

@@ -74,6 +74,8 @@ type Script = {
    */
   then: "finish" | "stall";
   rest?: string;
+  /** The unified finish reason the SDK resolves; `stop` when absent. */
+  finishReason?: string;
 };
 
 let script: Script = { first: "Partial.", then: "finish", rest: " The end." };
@@ -127,7 +129,7 @@ mock.module("ai", {
           inputTokenDetails: { cacheReadTokens: 0 },
           outputTokenDetails: { reasoningTokens: 0 },
         })),
-        finishReason: finished.then(() => "stop"),
+        finishReason: finished.then(() => script.finishReason ?? "stop"),
         rawFinishReason: finished.then(() => "end_turn"),
         content: finished.then(() => [{ type: "text", text }]),
         providerMetadata: finished.then(() => ({})),
@@ -676,4 +678,29 @@ test("a transient checkpoint failure does not fail a turn the user read to the e
   } finally {
     checkpointFailures = [];
   }
+});
+
+/*
+  S2 on the durable path. A provider error part mid-answer resolves the
+  finish reason as `error` without throwing. The answer is saved incomplete,
+  the turn settles prorated (`cancelled`) -- and the Message transaction, not
+  the cancelled settlement, ends the attempt, so attempt and Message agree.
+*/
+test("a durable answer the provider broke off is saved incomplete, settled prorated, and filed as a provider failure", async () => {
+  health.providerFailures = [];
+  health.modelFailures = [];
+  const { readToEnd } = await start(
+    { first: "Partial.", then: "finish", rest: " The en", finishReason: "error" },
+    false
+  );
+  releaseRest();
+  await readToEnd();
+  await until("the saved answer", () => world.messages.length > 0);
+  assert.equal((world.messages[0] as { status?: string }).status, "incomplete");
+  assert.equal(world.messages[0].content, "Partial. The en");
+  assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["cancelled"]);
+  assert.deepEqual(terminals.map((t) => t.status), ["completed"]);
+  assert.equal(row?.status, "completed");
+  assert.deepEqual(health.providerFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
+  assert.deepEqual(health.modelFailures, ["AI_STREAM_FAILED.INTERRUPTED"]);
 });

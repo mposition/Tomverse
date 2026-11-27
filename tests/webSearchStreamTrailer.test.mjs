@@ -267,3 +267,16 @@ test("notSaved round-trips only as true, and alone still makes an envelope", () 
   assert.equal(alone?.notSaved, true);
   assert.equal(alone?.searchMetadata, null);
 });
+
+test("an interrupted answer's reason round-trips; an unknown reason is dropped", () => {
+  const json = (trailer) =>
+    splitSearchMetadataTrailer(buildChatStreamTrailerChunk(trailer)).searchMetadataJson;
+  assert.deepEqual(
+    parseChatStreamTrailer(json({ searchMetadata: null, completion: { status: "incomplete", incompleteReason: "interrupted" } }))?.completion,
+    { status: "incomplete", incompleteReason: "interrupted" }
+  );
+  assert.deepEqual(
+    parseChatStreamTrailer(JSON.stringify({ completion: { status: "incomplete", incompleteReason: "gremlins" } }))?.completion,
+    { status: "incomplete" }
+  );
+});
