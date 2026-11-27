@@ -495,6 +495,8 @@ export const zh = {
         attachmentUnreadable: "无法处理此文件。",
         attachmentTextTooLarge: "此文件的文本超出了单条消息可承载的长度。",
         attachmentModelImageUnsupported: "该模型无法处理此文件中包含的图片。",
+        attachmentModelUnsupported: "该模型无法读取所附图片。请选择支持图片的模型，或移除该附件。",
+        attachmentOcrUnavailable: "目前无法读取此 PDF 的文字。请稍后再试，或选择可直接读取 PDF 的模型。",
         archiveCorrupt: "ZIP 文件已损坏。",
         archiveEncrypted: "不支持加密的 ZIP 文件。",
         archiveZip64: "暂不支持 ZIP64 格式。",

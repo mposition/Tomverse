@@ -475,6 +475,8 @@ export const de = {
         attachmentUnreadable: "Diese Datei konnte nicht verarbeitet werden.",
         attachmentTextTooLarge: "Der Text dieser Datei ist länger, als eine Nachricht tragen kann.",
         attachmentModelImageUnsupported: "Dieses Modell kann die in dieser Datei enthaltenen Bilder nicht verarbeiten.",
+        attachmentModelUnsupported: "Dieses Modell kann das angehängte Bild nicht lesen. Wählen Sie ein Modell mit Bildunterstützung oder entfernen Sie den Anhang.",
+        attachmentOcrUnavailable: "Der Text dieser PDF konnte gerade nicht gelesen werden. Bitte versuchen Sie es gleich erneut oder wählen Sie ein Modell, das PDFs direkt lesen kann.",
         archiveCorrupt: "Die ZIP-Datei ist beschädigt.",
         archiveEncrypted: "Verschlüsselte ZIP-Dateien werden nicht unterstützt.",
         archiveZip64: "ZIP64-Archive werden noch nicht unterstützt.",

@@ -490,6 +490,8 @@ export const zhHant = {
         attachmentUnreadable: "無法處理此檔案。",
         attachmentTextTooLarge: "此檔案的文字超出了單一訊息可承載的長度。",
         attachmentModelImageUnsupported: "此模型無法處理此檔案中包含的圖片。",
+        attachmentModelUnsupported: "此模型無法讀取所附圖片。請選擇支援圖片的模型，或移除該附件。",
+        attachmentOcrUnavailable: "目前無法讀取此 PDF 的文字。請稍後再試，或選擇可直接讀取 PDF 的模型。",
         archiveCorrupt: "ZIP 檔案已損毀。",
         archiveEncrypted: "不支援加密的 ZIP 檔案。",
         archiveZip64: "暫不支援 ZIP64 格式。",

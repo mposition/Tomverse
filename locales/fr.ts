@@ -486,6 +486,8 @@ export const fr = {
         attachmentUnreadable: "Ce fichier n'a pas pu être traité.",
         attachmentTextTooLarge: "Le texte de ce fichier dépasse ce qu'un seul message peut contenir.",
         attachmentModelImageUnsupported: "Ce modèle ne peut pas traiter les images contenues dans ce fichier.",
+        attachmentModelUnsupported: "Ce modèle ne peut pas lire l'image jointe. Choisissez un modèle compatible avec les images ou retirez la pièce jointe.",
+        attachmentOcrUnavailable: "Le texte de ce PDF n'a pas pu être lu pour le moment. Réessayez dans un instant ou choisissez un modèle capable de lire directement les PDF.",
         archiveCorrupt: "Le fichier ZIP est endommagé.",
         archiveEncrypted: "Les fichiers ZIP chiffrés ne sont pas pris en charge.",
         archiveZip64: "Les archives ZIP64 ne sont pas encore prises en charge.",

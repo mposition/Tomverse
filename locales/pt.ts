@@ -486,6 +486,8 @@ export const pt = {
         attachmentUnreadable: "Não foi possível processar este arquivo.",
         attachmentTextTooLarge: "O texto deste arquivo é maior do que uma mensagem consegue levar.",
         attachmentModelImageUnsupported: "Este modelo não consegue processar as imagens contidas neste arquivo.",
+        attachmentModelUnsupported: "Este modelo não consegue ler a imagem anexada. Escolha um modelo com suporte a imagens ou remova o anexo.",
+        attachmentOcrUnavailable: "Não foi possível ler o texto deste PDF agora. Tente novamente em instantes ou escolha um modelo que leia PDFs diretamente.",
         archiveCorrupt: "O arquivo ZIP está danificado.",
         archiveEncrypted: "Arquivos ZIP criptografados não são compatíveis.",
         archiveZip64: "Arquivos ZIP64 ainda não são compatíveis.",

@@ -262,6 +262,7 @@ import {
     CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
+    PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
 import {
@@ -4634,6 +4635,98 @@ async function handleChatPost(
                 return "ok";
             };
 
+            /**
+             * Runs the reading of one stored file and decides what its failure
+             * means for the turn.
+             *
+             * An EARLIER message's file that cannot be delivered -- the model
+             * has no image input, the parser failed or timed out, the archive
+             * or OCR step refused it -- is named to the model as "not included"
+             * and the turn goes on. Those files are re-read on every later
+             * turn, so refusing here made one file the person can no longer
+             * act on end the whole conversation: switching an image chat to a
+             * text-only model answered 400 on every send afterwards.
+             *
+             * The message being SENT is still refused. A failure with no code
+             * (a parser timeout, a worker that died) used to leave as a bare
+             * 500; it now leaves as ATTACHMENT_UNREADABLE so the person is told
+             * which file to look at. Anything that is not about this file --
+             * an aborted request, a storage or database fault -- passes through
+             * untouched in both cases: those are not the file's fault and a
+             * marker would hide them.
+             */
+            const deliverAttachment = async (
+                name: string,
+                read: () => Promise<unknown>
+            ): Promise<void> => {
+                const before = {
+                    textEntries: textAttachments.length,
+                    fileParts: fileParts.length,
+                    imageEstimates: imageInputTokenEstimates.length,
+                    totalImageCount,
+                    totalBase64ImagePayloadBytes,
+                    totalExtractedCharacters,
+                    pastAttachmentTokens,
+                    archiveOcrBudget,
+                    archiveOcrUsed,
+                };
+                try {
+                    await read();
+                } catch (error) {
+                    if (
+                        req.signal.aborted ||
+                        isChatLocalFailure(error) ||
+                        isStorageError(error) ||
+                        isRetryableDatabaseError(error)
+                    ) {
+                        throw error;
+                    }
+                    if (isLatestMessage) {
+                        if (isChatAccessError(error)) throw error;
+                        logRequestError(
+                            "attachment_unreadable",
+                            traceId,
+                            error,
+                            requestedModelId,
+                            { phase: "attachment_read", attachmentScope: "current_turn" }
+                        );
+                        throw new ChatAccessError(
+                            400,
+                            "ATTACHMENT_UNREADABLE",
+                            "The attached file could not be processed."
+                        );
+                    }
+                    logRequestError(
+                        "past_attachment_not_delivered",
+                        traceId,
+                        error,
+                        requestedModelId,
+                        {
+                            phase: "attachment_read",
+                            attachmentScope: "past_turn",
+                            ...(isChatAccessError(error) ? { code: error.code } : {}),
+                        }
+                    );
+                    // Whatever the failed read had already contributed leaves
+                    // with it, counters included: a file that was not sent must
+                    // not count against the image, text or OCR allowances.
+                    textAttachments.length = before.textEntries;
+                    fileParts.length = before.fileParts;
+                    imageInputTokenEstimates.length = before.imageEstimates;
+                    totalImageCount = before.totalImageCount;
+                    totalBase64ImagePayloadBytes = before.totalBase64ImagePayloadBytes;
+                    totalExtractedCharacters = before.totalExtractedCharacters;
+                    pastAttachmentTokens = before.pastAttachmentTokens;
+                    archiveOcrBudget = before.archiveOcrBudget;
+                    archiveOcrUsed = before.archiveOcrUsed;
+                    textAttachments.push({
+                        name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
+                    });
+                }
+            };
+
             for (const [attachmentIndex, incoming] of attachments.entries()) {
                 /*
                   What this file actually is, decided by the server.
@@ -4672,6 +4765,9 @@ async function handleChatPost(
                 ) {
                     throw new Error("Unsupported attachment.");
                 }
+                // Read once, here, where the guard above has narrowed it: a
+                // closure below does not inherit that narrowing.
+                const attachmentName: string = attachment.name;
                 // The shared table decides, and the name has to agree with the
                 // declared type: a `.png` sent as `application/pdf` is a
                 // disagreement, not something to resolve in either direction.
@@ -4851,6 +4947,18 @@ async function handleChatPost(
                             error,
                             requestedModelId
                         );
+                        // An earlier message's file is named to the model as
+                        // gone, exactly as an account's acknowledged missing
+                        // file is, and the turn goes on: a guest has no row to
+                        // acknowledge, and the question being sent does not
+                        // need the file the sweep took. Only the file on the
+                        // message being sent is still refused.
+                        if (!isLatestMessage) {
+                            textAttachments.push(
+                                unavailableAttachmentMarker(attachment.name)
+                            );
+                            continue;
+                        }
                         throw new ChatAccessError(
                             410,
                             "GUEST_ATTACHMENT_EXPIRED",
@@ -5028,12 +5136,14 @@ async function handleChatPost(
                     const filePartsBefore = fileParts.length;
                     const parseRoomBefore =
                         CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
-                    await ingestAttachmentFile({
-                        format,
-                        name: attachment.name,
-                        buffer: attachmentBuffer,
-                        fromArchive: false,
-                    });
+                    await deliverAttachment(attachmentName, () =>
+                        ingestAttachmentFile({
+                            format,
+                            name: attachmentName,
+                            buffer: attachmentBuffer,
+                            fromArchive: false,
+                        })
+                    );
                     if (textCacheEligible) {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
@@ -5081,63 +5191,65 @@ async function handleChatPost(
                 // same reader as any other attachment, so nothing inside it
                 // escapes the image count, the payload ceiling, the text
                 // budget or the OCR allowance.
-                const scope = isGuestObject ? "guest" : "account";
-                archiveOcrBudget += chatArchiveLimits(scope).maxOcrPdfs;
-                let expanded;
-                try {
-                    expanded = await expandChatArchive(attachmentBuffer, scope);
-                } catch (error) {
-                    if (error instanceof ChatArchiveError) {
-                        // The code travels; the entry path that produced it
-                        // never does.
+                await deliverAttachment(attachmentName, async () => {
+                    const scope = isGuestObject ? "guest" : "account";
+                    archiveOcrBudget += chatArchiveLimits(scope).maxOcrPdfs;
+                    let expanded;
+                    try {
+                        expanded = await expandChatArchive(attachmentBuffer, scope);
+                    } catch (error) {
+                        if (error instanceof ChatArchiveError) {
+                            // The code travels; the entry path that produced it
+                            // never does.
+                            throw new ChatAccessError(
+                                error.status,
+                                error.code,
+                                "The attached archive could not be read."
+                            );
+                        }
+                        throw error;
+                    }
+                    const archiveName = inertFilename(attachmentName);
+                    const readPaths: string[] = [];
+                    let unreadableCount = 0;
+
+                    for (const file of expanded.files) {
+                        const outcome = await ingestAttachmentFile({
+                            format: file.entry.format,
+                            name: `${archiveName}/${file.entry.path}`,
+                            buffer: file.bytes,
+                            fromArchive: true,
+                        });
+                        if (outcome === "ok") readPaths.push(file.entry.path);
+                        else unreadableCount += 1;
+                    }
+
+                    if (readPaths.length === 0) {
                         throw new ChatAccessError(
-                            error.status,
-                            error.code,
-                            "The attached archive could not be read."
+                            400,
+                            CHAT_ARCHIVE_ERROR_CODES.noSupportedFiles,
+                            "No file inside the archive could be read."
                         );
                     }
-                    throw error;
-                }
-                const archiveName = inertFilename(attachment.name);
-                const readPaths: string[] = [];
-                let unreadableCount = 0;
 
-                for (const file of expanded.files) {
-                    const outcome = await ingestAttachmentFile({
-                        format: file.entry.format,
-                        name: `${archiveName}/${file.entry.path}`,
-                        buffer: file.bytes,
-                        fromArchive: true,
+                    // Stated to the model rather than left implicit: without it,
+                    // an answer about "the files you sent" silently describes a
+                    // subset, and neither side knows which one.
+                    const skipped =
+                        totalArchiveExclusions(expanded.plan.exclusions) + unreadableCount;
+                    textAttachments.push({
+                        name: attachmentName,
+                        kind: "archive listing",
+                        text: [
+                            `Files read from this archive (${readPaths.length}):`,
+                            ...readPaths.map((path) => `- ${path}`),
+                            skipped > 0
+                                ? `${skipped} other entr${skipped === 1 ? "y" : "ies"} in this archive could not be read by this product and are not included below.`
+                                : "",
+                        ]
+                            .filter(Boolean)
+                            .join("\n"),
                     });
-                    if (outcome === "ok") readPaths.push(file.entry.path);
-                    else unreadableCount += 1;
-                }
-
-                if (readPaths.length === 0) {
-                    throw new ChatAccessError(
-                        400,
-                        CHAT_ARCHIVE_ERROR_CODES.noSupportedFiles,
-                        "No file inside the archive could be read."
-                    );
-                }
-
-                // Stated to the model rather than left implicit: without it,
-                // an answer about "the files you sent" silently describes a
-                // subset, and neither side knows which one.
-                const skipped =
-                    totalArchiveExclusions(expanded.plan.exclusions) + unreadableCount;
-                textAttachments.push({
-                    name: attachment.name,
-                    kind: "archive listing",
-                    text: [
-                        `Files read from this archive (${readPaths.length}):`,
-                        ...readPaths.map((path) => `- ${path}`),
-                        skipped > 0
-                            ? `${skipped} other entr${skipped === 1 ? "y" : "ies"} in this archive could not be read by this product and are not included below.`
-                            : "",
-                    ]
-                        .filter(Boolean)
-                        .join("\n"),
                 });
             }
 

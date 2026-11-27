@@ -152,6 +152,10 @@ import {
   type GuestAutoRetryMetadata,
 } from "@/lib/guestAutoRetry";
 import {
+  CHAT_SEND_LOCALIZED_ATTACHMENT_CODES,
+  chatAttachmentErrorCopyKey,
+} from "@/lib/chatAttachmentErrorCopy";
+import {
   isTransientDatabaseCode,
   transientDatabaseRetryDelayMs,
   waitForTransientRetry,
@@ -2851,6 +2855,9 @@ function ChatAppComponent({
             // Reaching here means the one automatic resend was already spent
             // (or never applied), so the person is asked to try again.
             ? t("chat.databaseTemporarilyUnavailable")
+          : CHAT_SEND_LOCALIZED_ATTACHMENT_CODES.has(errorCode) &&
+              chatAttachmentErrorCopyKey(errorCode)
+            ? t(chatAttachmentErrorCopyKey(errorCode) as string)
           : errorCode === "CHAT_RATE_LIMITED"
             ? t("chat.tooManyRequestsRetry").replace(
                 "{seconds}",

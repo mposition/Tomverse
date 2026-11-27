@@ -10,6 +10,10 @@ import {
   transientDatabaseRetryDelayMs,
   waitForTransientRetry,
 } from "../lib/databaseError.ts";
+import {
+  CHAT_ATTACHMENT_ERROR_COPY_KEYS,
+  CHAT_SEND_LOCALIZED_ATTACHMENT_CODES,
+} from "../lib/chatAttachmentErrorCopy.ts";
 import { de } from "../locales/de.ts";
 import { en } from "../locales/en.ts";
 import { es } from "../locales/es.ts";
@@ -64,14 +68,23 @@ test("the wait lasts for the delay when nothing interrupts it", async () => {
   assert.ok(Date.now() - started >= 50);
 });
 
-test("every locale says it", () => {
+test("every locale says it, and the attachment sentences the panel now shows exist", () => {
   const lookup = (dictionary, key) =>
     key.split(".").reduce((node, part) => (node ? node[part] : undefined), dictionary);
   for (const [language, dictionary] of Object.entries(locales)) {
     const sentence = lookup(dictionary, "chat.databaseTemporarilyUnavailable");
     assert.equal(typeof sentence, "string", language);
     assert.ok(sentence.trim().length > 0, language);
+    for (const code of CHAT_SEND_LOCALIZED_ATTACHMENT_CODES) {
+      const key = CHAT_ATTACHMENT_ERROR_COPY_KEYS[code];
+      assert.ok(key, `${code} has a copy key`);
+      assert.equal(typeof lookup(dictionary, key), "string", `${language} ${key}`);
+    }
   }
+  assert.deepEqual(
+    [...CHAT_SEND_LOCALIZED_ATTACHMENT_CODES].sort(),
+    ["ATTACHMENT_MODEL_UNSUPPORTED", "ATTACHMENT_UNREADABLE", "PDF_OCR_UNAVAILABLE"]
+  );
 });
 
 /**

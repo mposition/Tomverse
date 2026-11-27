@@ -468,6 +468,8 @@ export const en = {
         attachmentUnreadable: "This file could not be processed.",
         attachmentTextTooLarge: "This file's text is longer than one message can carry.",
         attachmentModelImageUnsupported: "This model cannot process the images this file contains.",
+        attachmentModelUnsupported: "This model cannot read the attached image. Choose a model that supports images, or remove the attachment.",
+        attachmentOcrUnavailable: "The text of this PDF could not be read right now. Please try again shortly, or choose a model that can read PDFs directly.",
         archiveCorrupt: "The ZIP file is damaged.",
         archiveEncrypted: "Encrypted ZIP files are not supported.",
         archiveZip64: "ZIP64 archives are not supported yet.",

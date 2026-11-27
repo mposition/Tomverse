@@ -467,6 +467,8 @@ export const ko = {
         attachmentUnreadable: "이 파일을 처리할 수 없습니다.",
         attachmentTextTooLarge: "이 파일의 텍스트가 한 번에 보낼 수 있는 길이를 초과합니다.",
         attachmentModelImageUnsupported: "이 모델은 포함된 이미지를 처리할 수 없습니다.",
+        attachmentModelUnsupported: "이 모델은 첨부한 이미지를 읽을 수 없습니다. 이미지를 지원하는 모델을 선택하거나 첨부를 제거해 주세요.",
+        attachmentOcrUnavailable: "지금은 이 PDF의 텍스트를 읽지 못했습니다. 잠시 후 다시 시도하거나 PDF를 직접 읽을 수 있는 모델을 선택해 주세요.",
         archiveCorrupt: "ZIP 파일이 손상되었습니다.",
         archiveEncrypted: "암호화된 ZIP 파일은 지원하지 않습니다.",
         archiveZip64: "ZIP64 형식은 아직 지원하지 않습니다.",
