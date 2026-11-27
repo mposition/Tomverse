@@ -13,6 +13,7 @@ import {
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
   desktopPluginSourcesEnabled,
+  desktopProviderCliExecEnabled,
   desktopPluginsEnabled,
   desktopPromptRefinerEnabled,
   desktopReadApiRoute,
@@ -648,6 +649,33 @@ test("a Desktop turn may carry a Prompt Refiner decision only while the Desktop 
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];
       else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop provider CLI execution is off unless its own switch and the Desktop session are both on, and enrols no bearer route", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_PROVIDER_CLI_EXEC_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopProviderCliExecEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopProviderCliExecEnabled(), false, "the session alone opens nothing");
+    process.env.TOMVERSE_DESKTOP_PROVIDER_CLI_EXEC_ENABLED = "1";
+    assert.equal(desktopProviderCliExecEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PROVIDER_CLI_EXEC_ENABLED = "true";
+    assert.equal(desktopProviderCliExecEnabled(), true);
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopProviderCliExecEnabled(), false);
+    // The run calls no server route, so nothing is enrolled for it, and the coding API stays closed to the Desktop bearer.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    for (const path of ["/api/code/v1/chat/completions", "/api/code/v1/models", "/api/desktop/provider-cli"]) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+      assert.equal(desktopReadApiRoute(path, "GET"), false, path);
+    }
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
     });
   }
 });

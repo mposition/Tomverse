@@ -29,6 +29,7 @@ import { reviewHandoffCopy } from "../../../../locales/reviewHandoff";
 import type { AccountPreferences, AccountTheme } from "../account-settings-contract";
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
+import { liveCliModelId } from "../provider-cli-exec-contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { ChatDraftPlace } from "./ChatDraftLocation";
@@ -230,7 +231,7 @@ function TaskConversation({ task, models, language, openSettings, engine, onRewo
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
-      {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language].cliFixture.replace("{cli}", task.execution.cli)}</span>}
+      {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language][task.liveCli ? "cliLive" : "cliFixture"].replace("{cli}", task.execution.cli)}</span>}
       {task.savedLocally === false && <span>{copy.sessionOnly}</span>}
       {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", effortLabel(language, task.effort))}</span>}
       {task.actual && <span>{copy.appliedEffort.replace("{effort}", effortLabel(language, task.actual))}</span>}
@@ -499,7 +500,15 @@ function Desktop() {
     snapshot?.claudeFixtureModel ? claudeFixtureExecution : codexFixtureExecution;
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
     ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.zCodeFixtureModel ?? snapshot.deepSeekFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
-  const models: Model[] = cliFixtureModel ? [{ id: cliFixtureModel, name: cliFixtureModel, provider: cliFixture.provider, efforts: [] }] : snapshot?.models ?? [];
+  // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted): each runs with its own default model.
+  const liveCliModels: Model[] = !cliFixtureModel && snapshot?.codeExecutionPreference === "provider_cli"
+    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: providerClis[provider], provider, efforts: [] })) : [];
+  const liveCli = liveCliModels.length > 0;
+  const cliRoute = Boolean(cliFixtureModel) || liveCli;
+  // The route is on but no Codex or Claude Code file is saved and trusted yet: the API models cannot run here, and the status says what to do.
+  const liveCliOffered = !cliFixtureModel && snapshot?.capabilities?.providerCliExec === true && snapshot.codeExecutionPreference === "provider_cli";
+  const models: Model[] = cliFixtureModel ? [{ id: cliFixtureModel, name: cliFixtureModel, provider: cliFixture.provider, efforts: [] }]
+    : liveCli ? liveCliModels : liveCliOffered ? [] : snapshot?.models ?? [];
   const selectedModel = models.find((item) => item.id === modelId) ?? models.find((item) => item.id === "smart-adaptive") ?? models[0];
   const codeRoute = codeRouteFor(snapshot?.codeExecutionPreference ?? "tomverse_api", selectedModel);
   const waitingForAnswer = task?.status === "clarification";
@@ -606,8 +615,10 @@ function Desktop() {
   const taskSelectionLocked = !!task && (snapshot?.busy || pausedForInput);
   const composerModelId = (taskSelectionLocked && task.model) || selectedModel?.id || "";
   const composerModelName = models.find(({ id }) => id === composerModelId)?.name || composerModelId || copy.modelsUnavailable;
-  const composerEffort = taskSelectionLocked ? task.effort ?? "default" : cliFixtureModel ? "default" : effort;
-  const followUpTarget = !pausedByQuota && nativeTask ? { threadId: nativeTask.threadId, turnId: nativeTask.turnId } : task?.id;
+  const composerEffort = taskSelectionLocked ? task.effort ?? "default" : cliRoute ? "default" : effort;
+  // A task run by the person's own CLI takes no instruction while it runs: the CLI reads one prompt.
+  const followUpTarget = !pausedByQuota && nativeTask ? { threadId: nativeTask.threadId, turnId: nativeTask.turnId }
+    : task?.liveCli ? undefined : task?.id;
   const canFollowUp = followUpTarget && (snapshot?.busy ? task?.status === "running" :
     pausedByQuota ? task.canResumeAfterQuota : waitingForAnswer && task.canAnswerClarification) &&
     !task?.pendingFollowUp && !codeHandoff && !codeReferences.length;
@@ -626,6 +637,7 @@ function Desktop() {
     : { kind: "local" };
   const canStartCode = cliFixtureModel ? (prompt.trim() || codeHandoff) &&
     (codeMode !== "agent" || (snapshot?.nativeFixtureEdits && saveNativeHistory))
+    : liveCli ? (prompt.trim() || codeHandoff) && codeRoute.executionMode === "provider_cli"
     : (prompt.trim() || codeHandoff) && codeRoute.executionMode === "tomverse_api" &&
       (codeGit?.kind !== "unavailable" || workspaceChoice?.kind === "local");
   const canSendCode = online && snapshot?.root && !requesting && (snapshot.busy || pausedForInput ? canFollowUp && prompt.trim() : canStartCode);
@@ -645,7 +657,7 @@ function Desktop() {
     .map((entry) => ({ ...entry, title: entry.unreadable ? native.unreadableTask : entry.title || copy.codeTask }))
     .filter(({ title }) => title.toLowerCase().includes(historyFilter)) ?? [] : [];
   const catalogUnavailable = codeCatalog === "failed" || codeCatalog === "planRequired" || (codeCatalog === "ready" && !selectedModel);
-  const canReloadCatalog = !busy && online && !cliFixtureModel && catalogUnavailable &&
+  const canReloadCatalog = !busy && online && !cliRoute && !liveCliOffered && catalogUnavailable &&
     (snapshot?.localFixture || codeKey?.stage === "connected" || codeKey?.stage === "account");
   // A Code key is asked for only on the Tomverse engine route, and only by a server that does not run Code on the
   // signed-in session (an older one): it answered its capabilities without desktopCodeSession.
@@ -661,8 +673,11 @@ function Desktop() {
     if (pausedByQuota && task.execution) {
       codeStatus = task.execution.executionMode === "provider_cli"
         ? executionCopy.cliFixture.replace("{cli}", task.execution.cli) : "Tomverse API";
+    } else if (liveCliOffered && !liveCli) {
+      codeStatus = executionCopy.cliUnavailable.replace("{cli}", `${providerClis.openai} / ${providerClis.anthropic}`);
     } else if (selectedModel) {
-      if (cliFixtureModel) codeStatus = executionCopy.cliFixture.replace("{cli}", cliFixture.cli);
+      if (liveCli) codeStatus = executionCopy.cliLive.replace("{cli}", providerClis[selectedModel.provider as CliProvider] ?? selectedModel.name);
+      else if (cliFixtureModel) codeStatus = executionCopy.cliFixture.replace("{cli}", cliFixture.cli);
       else if (codeRoute.executionMode === "tomverse_api") codeStatus = "Tomverse API";
       else if (codeRoute.executionMode !== "provider_cli") codeStatus = executionCopy.apiRequired;
       else if (!snapshot.supportedCliPaths.includes(codeRoute.provider)) codeStatus = `${codeRoute.cli} · ${cliCopy.unsupportedPlatform}`;
@@ -818,17 +833,17 @@ ${text}` : text;
       return;
     }
     const { executionMode } = codeRoute;
-    if (!selectedModel || (executionMode !== "tomverse_api" && !(cliFixtureModel && executionMode === "provider_cli"))) return;
+    if (!selectedModel || (executionMode !== "tomverse_api" && !(cliRoute && executionMode === "provider_cli"))) return;
     setRequesting(true);
     nearBottom.current = true;
     await act(async () => {
-      await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
+      await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliRoute ? "default" : effort,
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
-        ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
-        ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
-        ...(!cliFixtureModel && engine.orchestrate && executionMode === "tomverse_api" ? { orchestrate: true } : {}),
+        ...(!cliRoute && engine.limits !== "standard" ? { limits: engine.limits } : {}),
+        ...(!cliRoute && engine.goal && codeMode === "agent" ? { goal: true } : {}),
+        ...(!cliRoute && engine.orchestrate && executionMode === "tomverse_api" ? { orchestrate: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       clearPromptAttachments(attachmentScope);
@@ -1143,7 +1158,7 @@ ${text}` : text;
               </details>}
               {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api" &&
                 <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />}
-              <ComposerPermission view={snapshot?.permissions} language={language} apiRoute={codeRoute.executionMode === "tomverse_api"}
+              <ComposerPermission view={snapshot?.permissions} language={language} apiRoute={codeRoute.executionMode === "tomverse_api" || liveCli} cliRoute={liveCli}
                 readOnlyOnly={Boolean(cliFixtureModel && !snapshot?.nativeFixtureEdits)}
                 running={Boolean(snapshot?.busy)} disabled={Boolean(requesting)} />
               {codeHistoryControl}
@@ -1162,11 +1177,11 @@ ${text}` : text;
                     {composerModelId && !models.some(({ id }) => id === composerModelId) && <option value={composerModelId}>{composerModelName}</option>}
                     {models.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
                   </select></label>
-                  <label>{copy.reasoningEffort}<select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
+                  <label>{copy.reasoningEffort}<select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || cliRoute}
                     onChange={(event) => setEffort(event.currentTarget.value as StartInput["effort"])}>
                     {effortOptions(selectedModel?.efforts, composerEffort).map((value) => <option value={value} key={value}>{effortLabel(language, value)}</option>)}
                   </select></label>
-                  {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== "smart-adaptive" && !selectedModel.efforts.includes(effort) &&
+                  {!taskSelectionLocked && !cliRoute && effort !== "default" && selectedModel && selectedModel.id !== "smart-adaptive" && !selectedModel.efforts.includes(effort) &&
                     <small>{copy.effortFallback}</small>}
                 </div>
               </details>}

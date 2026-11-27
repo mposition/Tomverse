@@ -58,7 +58,8 @@ import { z } from "zod";
 import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationStatus } from "./os-location";
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
-import { permissionCommand } from "../permission-contract";
+import { permissionCommand, type PermissionModeId } from "../permission-contract";
+import { liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
@@ -213,6 +214,8 @@ const fixtureSchema = z.object({
   browserWeb: z.boolean().optional(),
   /** A test runs the computer tools against a fake desktop (two windows and a picture). */
   computerUse: z.boolean().optional(),
+  /** A test runs the provider CLI route (a stand-in script through the saved executable). Read only where fixtures are allowed. */
+  providerCliExec: z.object({ argsPrefix: z.array(z.string().min(1).max(4096)).max(4) }).strict().optional(),
   codex: cliFixtureInput.optional(),
   claude: cliFixtureInput.optional(),
   qwen: qwenFixtureInput.optional(),
@@ -234,6 +237,7 @@ if (windowsTaskbarId) app.setAppUserModelId(windowsTaskbarId);
 
 const fixture = DESKTOP_FIXTURE_ALLOWED && (!app.isPackaged || packagedTaskQa) ? readFixture() : null;
 const codexRunFixture = fixture?.codex;
+const providerCliExecFixture = fixture?.providerCliExec;
 const claudeRunFixture = fixture?.claude;
 const qwenRunFixture = fixture?.qwen;
 const kimiRunFixture = fixture?.kimi;
@@ -309,6 +313,10 @@ let pendingNativeHistory: {
   home: string; mode: "ask" | "plan" | "agent"; previousTurn?: string; checkpointedTurn?: string; checkpointedPlan?: string;
   approval?: NonNullable<Snapshot["codeFallback"]>; apiSource?: CodeCliContinuation;
 } | undefined;
+/** The saved record of a task the person's own provider CLI is running, written when it finishes (the first record says "unknown"). */
+let pendingLiveHistory: { home: string; mode: "ask" | "agent"; provider: LiveCliProvider } | undefined;
+/** Saved task ids that belong to a provider CLI run, and the CLI. */
+const liveHistory = new Map<string, LiveCliProvider>();
 let activeContinuation: Task | undefined;
 let pendingCliContinuation: { mode: "ask" | "plan" | "agent"; project: ProjectRoot; approval: NonNullable<Snapshot["codeFallback"]> } | undefined;
 let activeCliContinuation: Task | undefined;
@@ -496,6 +504,15 @@ function currentNativeHistoryHome(scope = currentHistoryScope()) {
 
 const codeProjectLocks = () => join(app.getPath("appData"), "Tomverse Desktop Workspace Locks");
 
+/**
+ * Where tasks run by the person's own provider CLI are saved: one folder for each account (or this device) and CLI, apart from
+ * the Tomverse API history, so it needs no Tomverse connection. The records use the same checkpoint format as the other CLI tasks.
+ */
+function liveHistoryHome(provider: LiveCliProvider) {
+  const owner = createHash("sha256").update(browserSession?.accountId ?? "this-device").digest("hex").slice(0, 32);
+  return join(app.getPath("userData"), "provider-cli-tasks", owner, provider);
+}
+
 function refreshHistory(more = false) {
   if (more && historyCursor === null) return;
   const scope = currentHistoryScope();
@@ -525,6 +542,16 @@ function refreshHistory(more = false) {
     if (historyStorage.has(saved.id)) continue;
     historyStorage.set(saved.id, nativeHome);
     rows.push({ ...saved, title: cleanText(saved.title, key) });
+  }
+  liveHistory.clear();
+  if (state.capabilities?.providerCliExec && projectRoot) for (const provider of liveCliProviders) {
+    const home = liveHistoryHome(provider);
+    for (const saved of listNativeHistory(home, projectRoot.path, provider)) {
+      if (historyStorage.has(saved.id)) continue;
+      historyStorage.set(saved.id, home);
+      liveHistory.set(saved.id, provider);
+      rows.push({ ...saved, title: cleanText(saved.title, key) });
+    }
   }
   const sorted = rows.sort((a, b) => a.id === b.id ? 0 : a.id < b.id ? 1 : -1);
   const page = nextTaskPage(sorted, more ? historyCursor : null);
@@ -568,6 +595,8 @@ function broadcast() {
   else if (state.capabilities && !state.capabilities.voiceConversation) voice.withdraw();
   refreshCodeFallbackSettings();
   state.draftNamespace = workspaceNamespace();
+  state.providerCliExec = state.capabilities?.providerCliExec && !signingOut
+    ? liveCliProviders.filter((provider) => { const status = state.cliPaths[provider]?.status; return status === "pathVerified" || status === "userTrusted"; }) : [];
   state.handoff = currentHandoff();
   state.projectPermissionProfile = readProjectPermissionProfile();
   state.permissions = permissionHost.view();
@@ -729,6 +758,17 @@ async function trustCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
     outcome = await providerCli.trust(provider, path);
   } finally { configuringCli = false; }
   return outcome === "stored" || outcome === "verified" ? saveCliPath({ provider, path }) : outcome;
+}
+
+/** A saved CLI file is checked again after a restart; with the server's route on, that happens now so the first task can use it. */
+async function revalidateLiveCliPaths() {
+  if (!state.capabilities?.providerCliExec) return;
+  for (const provider of liveCliProviders) {
+    const saved = state.cliPaths[provider];
+    if (closing || configuringCli || saved?.status !== "checkRequired") continue;
+    try { await saveCliPath({ provider, path: saved.path }); }
+    catch { /* The CLI settings were busy; the next capability read tries again. */ }
+  }
 }
 
 function removeCliPath(provider: CliProvider) {
@@ -1121,6 +1161,62 @@ function startNativeTask(cliFixture: NonNullable<typeof cliRunFixture>, project:
   }
 }
 
+/**
+ * Starts a task with the person's own Codex or Claude Code. The file is the one they saved and trusted, checked again now.
+ * The permission mode in force picks the CLI's sandbox and approval options (provider-cli-exec-contract.ts); the run is never
+ * wider than the mode. No Tomverse connection, token or credit is part of it.
+ */
+async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<typeof startInput>, "prompt" | "model" | "mode" | "saveHistory">,
+    executionMode: CodeExecutionMode | undefined, references: Task["references"]) {
+  const provider = liveCliProviderForModel(draft.model);
+  const saved = provider ? state.cliPaths[provider] : undefined;
+  if (!provider || !saved || executionMode !== "provider_cli" || !state.capabilities?.providerCliExec || !worker ||
+      !state.providerCliExec?.includes(provider)) {
+    throw new Error("The selected Code execution route is unavailable.");
+  }
+  const key = codeConnection()?.key;
+  if (key && hasCredential(draft.prompt, key)) throw new Error("The Code request contains a Tomverse credential.");
+  assertProjectRoot(project);
+  choosing = true;
+  let resolved: Awaited<ReturnType<typeof providerCli.resolveSaved>>;
+  try { resolved = await providerCli.resolveSaved(provider, saved); }
+  finally { choosing = false; }
+  if (!resolved || state.cliPaths[provider] !== saved || projectRoot !== project || state.busy || pendingMutation || closing || signingOut ||
+      suspended || state.update.stage === "installing" || state.codeExecutionPreference !== "provider_cli") {
+    throw new Error("Check the CLI in Settings > Development CLIs and try again.");
+  }
+  assertProjectRoot(project);
+  // Only an agent task may leave Read only, and it never runs above the mode the person picked.
+  const permission: PermissionModeId = draft.mode === "agent" ? permissionHost.current : "read_only";
+  const mode = permission === "read_only" ? "ask" : "agent";
+  const text = cleanText(draft.prompt, key);
+  const id = draft.saveHistory === false ? null : Journal.newId();
+  const home = id ? liveHistoryHome(provider) : null;
+  const task: Task = { id, root: project.path, title: text.slice(0, 80), status: "starting", entries: [{ role: "user", text }],
+    execution: provider === "openai" ? codexFixtureExecution : claudeFixtureExecution, effort: "default", changes: [], checks: [], transmission: [],
+    readOnly: permission === "read_only", savedLocally: !!home, references, liveCli: true };
+  if (home) saveNativeHistory(home, task, mode, true);
+  pendingLiveHistory = home ? { home, mode, provider } : undefined;
+  discardTransientTask(state.task);
+  state.task = task;
+  runId = randomUUID();
+  state.busy = true;
+  codeReferences.clear();
+  try {
+    send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
+      protectedRoot: app.getPath("userData"), references, ...(home && id ? { history: { id, directory: nativeSessionDirectory(home, id) } } : {}),
+      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}) });
+  } catch {
+    runId = null;
+    state.busy = false;
+    pendingLiveHistory = undefined;
+    task.status = "unknown";
+    task.entries = [...task.entries, desktopCodeNotice("runUnknown")];
+    refreshHistory();
+  }
+  broadcast();
+}
+
 function startCliFixtureTask(task: Task, command: Extract<WorkerCommand, { type: "start-codex-fixture" | "start-claude-fixture" | "start-structured-cli-fixture" }>) {
   discardTransientTask(state.task);
   state.task = task;
@@ -1244,6 +1340,14 @@ function onWorkerMessage(event: WorkerEvent) {
       if (discarded) discardTransientTask(event.task);
       const reverse = pendingCliContinuation;
       pendingCliContinuation = undefined;
+      if (pendingLiveHistory) {
+        const live = pendingLiveHistory;
+        pendingLiveHistory = undefined;
+        if (!discarded && event.task.id) {
+          try { saveNativeHistory(live.home, event.task, live.mode); }
+          catch { event.task.entries.push(desktopCodeNotice("unreadableCheckpoint")); }
+        }
+      }
       if (DESKTOP_FIXTURE_ALLOWED && !discarded && reverse) {
         try { if (startCliContinuation(reverse, event.task)) return; }
         catch { /* An unavailable checkpoint leaves the verified API refusal in place. */ }
@@ -1906,6 +2010,12 @@ function loadHistory(id: string) {
 function readTaskHistory(id: string, apiOnly = false): Task | null {
   if (!projectRoot) return null;
   try { assertProjectRoot(projectRoot); } catch { return null; }
+  const liveProvider = liveHistory.get(id);
+  const liveStorage = historyStorage.get(id);
+  if (liveProvider && liveStorage && !apiOnly) {
+    const saved = readNativeHistory(liveStorage, id, projectRoot.path, liveProvider);
+    return saved ? { ...restoredNativeTask(saved), liveCli: true } : null;
+  }
   if (DESKTOP_FIXTURE_ALLOWED && !apiOnly) {
     const native = nativeHistoryRecord(id);
     if (native) {
@@ -2389,7 +2499,53 @@ async function compactSelectedTask(taskId: string): Promise<CompactHistoryResult
   return result;
 }
 
+/** Deletes a saved task of a provider CLI run (the person confirms in the app's own dialog). */
+async function deleteLiveHistory(taskId: string): Promise<DeleteHistoryResult> {
+  const provider = liveHistory.get(taskId);
+  const storage = historyStorage.get(taskId);
+  const owner = mainWindow;
+  const project = projectRoot;
+  const task = state.task;
+  if (!provider || !storage || !owner || !project || task?.id !== taskId || task.savedLocally === false || state.busy || pendingMutation ||
+      confirmingMutation || choosing || signingOut || closing || owner.isDestroyed()) return "unavailable";
+  confirmingMutation = true;
+  try {
+    const directoryIdentity = pathIdentity(nativeSessionDirectory(storage, taskId), "directory");
+    if (!directoryIdentity) return "unavailable";
+    const copy = nativeCopy();
+    const { response } = await dialog.showMessageBox(owner, {
+      type: "warning", title: copy.deleteHistoryTitle, message: copy.deleteHistoryPrompt,
+      detail: `${task.title}\n${copy.deleteHistoryDetail}`, buttons: [copy.cancel, copy.deleteHistoryAccept], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response !== 1) return "cancelled";
+    if (owner.isDestroyed() || owner !== mainWindow || closing || signingOut || state.busy || pendingMutation || choosing ||
+        state.task !== task || projectRoot !== project || historyStorage.get(taskId) !== storage) return "unavailable";
+    let verified = false;
+    try {
+      deleteSession(storage, taskId, (directory) => {
+        assertProjectRoot(project);
+        verified = directory === nativeSessionDirectory(storage, taskId) && pathIdentity(directory, "directory") === directoryIdentity &&
+          !!readNativeHistory(storage, taskId, project.path, provider);
+        return verified;
+      });
+      state.task = null;
+      refreshHistory();
+      broadcast();
+      return "deleted";
+    } catch {
+      refreshHistory();
+      broadcast();
+      return verified ? "unconfirmed" : "unavailable";
+    }
+  } catch {
+    return "unavailable";
+  } finally {
+    confirmingMutation = false;
+  }
+}
+
 async function deleteSelectedHistory(taskId: string): Promise<DeleteHistoryResult> {
+  if (liveHistory.has(taskId)) return deleteLiveHistory(taskId);
   const native = DESKTOP_FIXTURE_ALLOWED ? nativeHistoryRecord(taskId) : null;
   const record = native ?? historyRecord(taskId);
   const owner = mainWindow;
@@ -2494,6 +2650,7 @@ async function refreshDesktopCapabilities(session: StoredDesktopSession, { keepC
   state.capabilities = capabilities;
   syncCodeConnection(session);
   broadcast();
+  void revalidateLiveCliPaths();
 }
 
 function setBrowserSession(account: BrowserAccount, saved: StoredDesktopSession, storage: StorageMode) {
@@ -4331,6 +4488,15 @@ function registerIpc() {
       if (connection && hasCredential(prompt, connection.key)) throw new Error("The Code request contains a Tomverse credential.");
       assertProjectRoot(sourceProject);
       startNativeTask(cliRunFixture, sourceProject, draft.mode, prompt, home, undefined, references.length ? references : undefined);
+      if (handoffId) removeWorkspaceHandoff(handoffId);
+      return;
+    }
+    // A model the Tomverse catalogue lists keeps the existing routes; only the CLI entries of the composer start a provider CLI task.
+    if (preference === "provider_cli" && !(DESKTOP_FIXTURE_ALLOWED && cliRunFixture) && liveCliProviderForModel(draft.model)) {
+      if (parallelStart || draft.pluginConnectionId || sourceProject.remote || workspace?.kind === "worktree") {
+        throw new Error("This Code execution route requires an existing folder.");
+      }
+      await startProviderCliTask(sourceProject, { ...draft, prompt: withHandoffExcerpt("code", draft.prompt, handoffId) }, executionMode, references);
       if (handoffId) removeWorkspaceHandoff(handoffId);
       return;
     }

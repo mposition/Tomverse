@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopCodeSessionEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopCodeSessionEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopProviderCliExecEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { codeWebSearchOffered } from "@/lib/codeWebSearch";
@@ -118,6 +118,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopSocialLink: desktopLinkProviders(),
     // Remote control's file-change counts and previews: a Desktop reports them only where this server says it takes them.
     desktopRemotePreview: desktopRemotePreviewEnabled(),
+    // Code with the person's own Codex or Claude Code: a Desktop build offers the route only where this says so. The run itself calls no server route.
+    desktopProviderCliExec: desktopProviderCliExecEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };
