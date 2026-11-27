@@ -118,11 +118,31 @@ export const inspectAudioAttachment = (input: {
  * one might be (review r-20261127-073816-5a1bf4: a short frame, junk, then a
  * long recording resynchronised on and transcribed in full).
  */
-const holdsFrameSync = (bytes: Uint8Array, from: number) => {
-    for (let index = Math.max(0, from); index + 1 < bytes.length; index += 1) {
+const holdsFrameSync = (bytes: Uint8Array, from: number, to = bytes.length) => {
+    for (let index = Math.max(0, from); index + 1 < to; index += 1) {
         if (bytes[index] === 0xff && (bytes[index + 1] & 0xe0) === 0xe0) return true;
     }
     return false;
+};
+
+/**
+ * Where an ID3v1 tag at the very end begins, or the file's end when there is
+ * none: the last 128 bytes, opening with "TAG". Its text fields may hold any
+ * byte (Latin-1 0xFF then 0xE0 reads as a sync), so they are not scanned. Its size is
+ * fixed by the format, not stated by the file, so at most 128 bytes go
+ * unscanned -- less than two of the smallest frames a decoder plays.
+ *
+ * An APEv2 tag is not skipped, deliberately: the footer states its own size,
+ * so a file could declare most of itself a "tag" and hide a long recording a
+ * decoder that does not parse APE would play. A sync inside one still refuses
+ * the file (review r-20261127-122037-b72ce5).
+ */
+const ID3V1_SIZE = 128;
+const id3v1Start = (bytes: Uint8Array, from: number) => {
+    const start = bytes.length - ID3V1_SIZE;
+    return start >= from && bytes[start] === 0x54 && bytes[start + 1] === 0x41 && bytes[start + 2] === 0x47
+        ? start
+        : bytes.length;
 };
 
 // Bitrates in kbit/s, indexed by the header's 4-bit field. Index 0 ("free") and
@@ -183,9 +203,10 @@ const readMp3Frame = (bytes: Uint8Array, offset: number): Mp3Frame | null => {
  * each step advances by at least four bytes.
  *
  * And to the end of the file: whatever follows the last whole frame must hold
- * no frame sync (`holdsFrameSync`), so nothing after it can be played. A last
- * frame cut short counts as a whole one when nothing after its header could
- * start another; anything else past the walk refuses the file.
+ * no frame sync (`holdsFrameSync`), so nothing after it can be played -- an
+ * ID3v1 tag at the end excepted (`id3v1Start`). A last frame cut short counts
+ * as a whole one when nothing after its header could start another; anything
+ * else past the walk refuses the file.
  */
 export const mp3DurationSeconds = (bytes: Uint8Array): number | null => {
     let offset = 0;
@@ -218,7 +239,7 @@ export const mp3DurationSeconds = (bytes: Uint8Array): number | null => {
         offset += frame.length;
     }
     if (frames === 0) return null;
-    if (holdsFrameSync(bytes, offset)) return null;
+    if (holdsFrameSync(bytes, offset, id3v1Start(bytes, offset))) return null;
     return seconds;
 };
 

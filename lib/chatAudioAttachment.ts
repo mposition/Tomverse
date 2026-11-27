@@ -6,6 +6,7 @@ import {
     claimAttachmentTextCache,
     readAttachmentTranscriptOutcome,
     releaseAttachmentTextClaim,
+    renewAttachmentTextClaim,
     writeAttachmentNoTextOutcome,
     writeAttachmentTextCache,
     type CachedAttachmentText,
@@ -89,6 +90,23 @@ export type AudioTranscriptionDeps = {
     transcribe: ReturnType<typeof voiceTranscriptionProvider>["transcribe"];
 };
 
+/**
+ * What the caller learns about the one paid call this transcription may make.
+ *
+ * `mayHaveBeenPaid` turns true immediately before the provider is asked and
+ * turns false again only when the port answers with a failure it classifies
+ * as costing nothing -- `not_sent` or `refused`, the voice route's own
+ * classification (`dispositionFor` in lib/voiceTranscriptionPortCore.ts,
+ * docs/policy/voice-input.md section 7.2). Every other way out of the call --
+ * a transcript, no speech, an indeterminate failure, a throw, a settlement that
+ * failed after the answer -- leaves it true.
+ */
+export type PaidCall = {
+    mayHaveBeenPaid: boolean;
+    /** Runs once the seconds are booked, just before the call; a throw stops it. */
+    beforeProviderCall?: () => Promise<void>;
+};
+
 const defaultDeps = (): AudioTranscriptionDeps => ({
     reserve: reserveVoiceBudgets,
     settle: settleVoiceBudgets,
@@ -106,7 +124,8 @@ export const transcribeAudioAttachment = async (
         traceId: string;
     },
     /** Replaced in tests; the ledgers and the provider otherwise. */
-    deps: AudioTranscriptionDeps = defaultDeps()
+    deps: AudioTranscriptionDeps = defaultDeps(),
+    call: PaidCall = { mayHaveBeenPaid: false }
 ): Promise<{ kind: string; text: string }> => {
     const { reserve, settle, release, transcribe } = deps;
     const reservedSeconds = Math.max(1, Math.ceil(input.durationSeconds));
@@ -138,13 +157,23 @@ export const transcribeAudioAttachment = async (
     // and the turn fails with the settle's error.
     let settled = false;
     try {
+        await call.beforeProviderCall?.();
+        call.mayHaveBeenPaid = true;
+        // A throw from the call is an outcome nobody knows: the port reports
+        // what it can classify, and anything else is treated as the
+        // indeterminate failure it is -- seconds kept, nothing claimed back.
         const result = await transcribe({
             audio: input.bytes,
             mediaType: input.mediaType,
             extension: input.extension,
             languageHint: null,
             timeoutMs: CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS,
-        });
+        }).catch(() => ({
+            ok: false as const,
+            code: "provider_unreachable" as const,
+            status: null,
+            disposition: "indeterminate" as const,
+        }));
         if (!result.ok) {
             // The voice route's rule (docs/policy/voice-input.md section 7.2):
             // a call whose outcome is unknown keeps its reservation, one the
@@ -153,6 +182,7 @@ export const transcribeAudioAttachment = async (
                 result.disposition === "indeterminate"
                     ? { kind: "reservation" }
                     : { kind: "not_billed" };
+            if (basis.kind === "not_billed") call.mayHaveBeenPaid = false;
             settled = true;
             await settle({ reservation, basis });
             report({
@@ -203,8 +233,8 @@ export const transcribeAudioAttachment = async (
         }
         return entry;
     } finally {
-        // Reached unsettled only when something threw before the provider
-        // answered, so nothing was billed.
+        // Reached unsettled only when something threw before the provider was
+        // asked (`beforeProviderCall`), so nothing was billed.
         if (!settled) await release(reservation).catch(() => undefined);
     }
 };
@@ -221,7 +251,9 @@ export const transcribeAudioAttachment = async (
  * timer until the response body has been read as well as the headers
  * (`transcribeWithOpenAi`), so a claim cannot go stale while the call that
  * holds it is still waiting on the provider (review r-20261127-110354-67c5f8).
- * A test pins the order of the two numbers.
+ * The window is measured from the renewal just before the call, not from the
+ * claim, so slow bookings ahead of it do not eat into it
+ * (review r-20261127-122037-b72ce5). A test pins the order of the two numbers.
  */
 export const AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS =
     Math.ceil(CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS / 1000) + 30;
@@ -257,6 +289,8 @@ export type AudioTranscriptStore = {
     /** The stored transcript, "no_text" for a recording found to hold no speech, or null. */
     read: (attachmentId: string) => Promise<CachedAttachmentText[] | "no_text" | null>;
     claim: (attachmentId: string, token: string, staleSeconds: number) => Promise<boolean>;
+    /** True only while this token still holds the claim; restarts its clock. */
+    renew: (attachmentId: string, token: string) => Promise<boolean>;
     /** Resolves true when the transcript is stored. */
     write: (attachmentId: string, entries: readonly CachedAttachmentText[]) => Promise<boolean>;
     /** Resolves true when "no speech" is stored. */
@@ -283,6 +317,7 @@ const pause = (ms: number, signal?: AbortSignal) =>
 const defaultStore = (): AudioTranscriptStore => ({
     read: readAttachmentTranscriptOutcome,
     claim: claimAttachmentTextCache,
+    renew: renewAttachmentTextClaim,
     write: writeAttachmentTextCache,
     writeNoText: writeAttachmentNoTextOutcome,
     release: releaseAttachmentTextClaim,
@@ -309,28 +344,40 @@ const noSpeech = () =>
  * The transcript of a bound attachment, paid for by the request that holds
  * its claim and by no other.
  *
- * Reviews r-20261127-082100-427572 and r-20261127-114544-4444fa: several
- * models answering the same message are several requests, and each used to
- * miss the cache, transcribe and book the seconds again. Now the first to
+ * Several models answering one message are several requests; the first to
  * claim the attachment (`claimAttachmentTextCache`, one statement) books,
- * transcribes and stores the result; the others wait for it and read it.
+ * transcribes and stores the result, and the rest wait for it and read it.
+ * A request that cannot take the claim -- the store failed, or the wait ran
+ * out -- never pays: it ends in a retryable refusal (the message being
+ * answered fails with it, an earlier one leaves the file out).
  *
- * - **No claim, no call.** A claim that cannot be taken -- the store failed,
- *   or the wait ran out -- ends in a retryable refusal, never a transcription
- *   without one. The caller answers it like any refusal: the message being
- *   answered fails with it, an earlier one leaves the file out.
- * - **What was paid for is kept.** The transcript, or the finding that the
- *   recording holds no speech, is stored over the claim (one retry). If it
- *   cannot be stored the claim is not given back: it stands until it goes
- *   stale, so no other request pays again before then, and one log line says
- *   so. The residue: once it is stale, the next request for that recording
- *   transcribes it again -- at most once per stale window while storing keeps
- *   failing.
- * - **A failure that paid for nothing** (refused for budget, provider down)
- *   gives the claim back, and the next waiter tries in its turn -- one at a
- *   time, never side by side.
- * - A claim is never extended; one whose request died is taken over once it
- *   is `AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS` old.
+ * One rule decides whether the claim is given back (review
+ * r-20261127-122037-b72ce5): only when nothing can have been paid for.
+ * `PaidCall.mayHaveBeenPaid` is set just before the provider is asked and is
+ * cleared only by a failure the voice route already classifies as costing
+ * nothing; `finally` reads that flag and nothing else. Every way out once the
+ * claim is held:
+ *
+ *   way out                                       paid?          claim
+ *   seconds refused, or the booking failed        no call        given back
+ *   claim no longer ours at the renewal           no call        given back (a no-op)
+ *   provider answered `not_sent` / `refused`      certainly not  given back
+ *   provider indeterminate (timeout, 5xx, body)   may have been  kept until stale
+ *   the call threw                                may have been  kept until stale
+ *   settlement threw after the answer             may have been  kept until stale
+ *   transcript, stored (one retry)                yes            replaced by it
+ *   transcript, not stored                        yes            kept until stale
+ *   no speech, stored / not stored                yes            replaced / kept
+ *
+ * Just before the call the claim is renewed (`renewAttachmentTextClaim`: still
+ * this token's, clock restarted, one statement). A request whose bookings were
+ * slow enough for its claim to be taken over learns so before it pays, and
+ * the call starts with the whole stale window ahead: the provider deadline,
+ * body included, inside it, then 30 seconds for the settlement and the store.
+ * Left over: a settlement or store still running past those 30 seconds lets
+ * the next request take the stale claim and pay again; and a kept claim
+ * makes requests for that recording wait and be refused until it is stale,
+ * when the first of them pays again -- at most once per stale window.
  */
 export const transcribeAudioAttachmentOnce = async (
     input: Parameters<typeof transcribeAudioAttachment>[0] & {
@@ -344,13 +391,12 @@ export const transcribeAudioAttachmentOnce = async (
     const token = randomUUID();
     const giveUpAt =
         store.now() + AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 + 2 * AUDIO_TRANSCRIPT_CLAIM_POLL_MS;
-    /** Stores a paid result, once more on failure; false when it would not stay. */
+    /** Stores a paid result, once more on failure; logs when it would not stay. */
     const keep = async (write: () => Promise<boolean>) => {
         for (let attempt = 0; attempt < 2; attempt += 1) {
-            if (await write().catch(() => false)) return true;
+            if (await write().catch(() => false)) return;
         }
         report({ outcome: "transcript_store_failed", traceId: input.traceId });
-        return false;
     };
     for (;;) {
         signal?.throwIfAborted();
@@ -365,22 +411,29 @@ export const transcribeAudioAttachmentOnce = async (
             throw transcriptionBusy();
         }
         if (claimed) {
-            // Given back only when nothing paid for is left unstored.
-            let release = true;
+            const call: PaidCall = {
+                mayHaveBeenPaid: false,
+                beforeProviderCall: async () => {
+                    if (await store.renew(attachmentId, token).catch(() => false)) return;
+                    report({ outcome: "claim_lost", traceId: input.traceId });
+                    throw transcriptionBusy();
+                },
+            };
             try {
                 let entry: { kind: string; text: string };
                 try {
-                    entry = await transcribeAudioAttachment(transcription, deps.transcription);
+                    entry = await transcribeAudioAttachment(transcription, deps.transcription, call);
                 } catch (error) {
                     if ((error as { code?: unknown } | null)?.code === "ATTACHMENT_NO_TEXT") {
-                        release = await keep(() => store.writeNoText(attachmentId));
+                        await keep(() => store.writeNoText(attachmentId));
                     }
                     throw error;
                 }
-                release = await keep(() => store.write(attachmentId, [entry]));
+                await keep(() => store.write(attachmentId, [entry]));
                 return [entry];
             } finally {
-                if (release) await store.release(attachmentId, token).catch(() => undefined);
+                // The table above: given back only when nothing can have been paid.
+                if (!call.mayHaveBeenPaid) await store.release(attachmentId, token).catch(() => undefined);
             }
         }
         if (store.now() > giveUpAt) {

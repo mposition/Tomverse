@@ -9,6 +9,7 @@ import {
   readAttachmentTextCache,
   readAttachmentTranscriptOutcome,
   releaseAttachmentTextClaim,
+  renewAttachmentTextClaim,
   writeAttachmentNoTextOutcome,
   writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
@@ -115,6 +116,7 @@ const transcription = (calls: { count: number }, text = "Minutes of the meeting.
 const productionStore = (overrides: Partial<AudioTranscriptStore> = {}): AudioTranscriptStore => ({
   read: readAttachmentTranscriptOutcome,
   claim: claimAttachmentTextCache,
+  renew: renewAttachmentTextClaim,
   write: writeAttachmentTextCache,
   writeNoText: writeAttachmentNoTextOutcome,
   release: releaseAttachmentTextClaim,
@@ -348,4 +350,132 @@ test("a recording found to hold no speech is stored as such and never transcribe
   // Every other reader sees a miss, and the claim cannot take it over.
   assert.equal(await readAttachmentTextCache(attachmentId), null);
   assert.equal(await claimAttachmentTextCache(attachmentId, "x", AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS), false);
+});
+
+// -- Review r-20261127-122037-b72ce5: the claim goes back only when nothing
+// can have been paid (the table in transcribeAudioAttachmentOnce's comment) --
+
+/** A later request, cut off after a few looks: the claim is far from stale. */
+const laterRequestPays = async (userId: string, attachmentId: string) => {
+  const calls = { count: 0 };
+  let looks = 0;
+  await quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+    transcription: transcription(calls),
+    store: productionStore({
+      wait: async (ms) => {
+        looks += 1;
+        if (looks > 3) throw new Error("still waiting");
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      },
+    }),
+  })).catch((error) => {
+    if (!/still waiting/.test(String(error?.message))) throw error;
+  });
+  return calls.count;
+};
+
+/** The production ledgers, with a provider that answers `result`. */
+const answering = (calls: { count: number }, result: Awaited<ReturnType<AudioTranscriptionDeps["transcribe"]>>): AudioTranscriptionDeps => ({
+  ...transcription(calls),
+  transcribe: async () => {
+    calls.count += 1;
+    return result;
+  },
+});
+
+test("an indeterminate failure keeps the claim and the seconds; no later request pays before it is stale", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+      // What the port answers for a body cut off at its deadline.
+      transcription: answering(calls, {
+        ok: false, code: "provider_response_unreadable", status: 200, disposition: "indeterminate",
+      }),
+    })),
+    (error: { code?: string }) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE"
+  );
+  const row = await prisma.messageAttachmentTextCache.findUniqueOrThrow({ where: { attachmentId } });
+  assert.equal(row.version, ATTACHMENT_TEXT_CLAIM_VERSION, "the claim stands");
+  assert.equal(await bucketTotal("voice-seconds-day"), 3, "the reservation stands too");
+  assert.equal(await laterRequestPays(userId, attachmentId), 0);
+});
+
+test("a settlement that throws after the answer keeps the claim", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+      transcription: { ...transcription(calls), settle: async () => { throw new Error("ledger down"); } },
+    })),
+    /ledger down/
+  );
+  assert.equal(calls.count, 1);
+  const row = await prisma.messageAttachmentTextCache.findUniqueOrThrow({ where: { attachmentId } });
+  assert.equal(row.version, ATTACHMENT_TEXT_CLAIM_VERSION, "the claim stands");
+  assert.equal(await laterRequestPays(userId, attachmentId), 0);
+});
+
+test("a refusal that cost nothing gives the claim back, and the next request may pay", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+      transcription: answering(calls, {
+        ok: false, code: "provider_rejected_audio", status: 400, disposition: "refused",
+      }),
+    })),
+    (error: { code?: string }) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE"
+  );
+  assert.equal(await prisma.messageAttachmentTextCache.count({ where: { attachmentId } }), 0, "given back");
+  assert.equal(await bucketTotal("voice-seconds-day"), 0, "nothing billed, nothing kept");
+  const next = { count: 0 };
+  await quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), { transcription: transcription(next) }));
+  assert.equal(next.count, 1);
+});
+
+test("a holder whose claim was taken over while it booked never calls, and gives its seconds back", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  const deps = transcription(calls);
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(userId, attachmentId), {
+      transcription: {
+        ...deps,
+        reserve: async (booking) => {
+          const booked = await deps.reserve(booking);
+          // Another request takes the claim over while this one books.
+          await prisma.$executeRaw`
+            UPDATE "MessageAttachmentTextCache"
+            SET "entries" = ${JSON.stringify({ claim: "someone-else" })}::jsonb
+            WHERE "attachmentId" = ${attachmentId}`;
+          return booked;
+        },
+      },
+    })),
+    (error: { code?: string }) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE"
+  );
+  assert.equal(calls.count, 0, "no call");
+  assert.equal(await bucketTotal("voice-seconds-day"), 0, "its seconds given back");
+  const row = await prisma.messageAttachmentTextCache.findUniqueOrThrow({ where: { attachmentId } });
+  assert.deepEqual(row.entries, { claim: "someone-else" }, "the other request's claim is left alone");
+});
+
+test("renewing a claim is the holder's alone and restarts its clock", async () => {
+  const { attachmentId } = await recording();
+  assert.equal(await claimAttachmentTextCache(attachmentId, "mine", AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS), true);
+  await prisma.$executeRaw`
+    UPDATE "MessageAttachmentTextCache"
+    SET "createdAt" = CURRENT_TIMESTAMP - INTERVAL '100 seconds'
+    WHERE "attachmentId" = ${attachmentId}`;
+  assert.equal(await renewAttachmentTextClaim(attachmentId, "theirs"), false);
+  assert.equal(await renewAttachmentTextClaim(attachmentId, "mine"), true);
+  // Measured in the database, in the clock that wrote it.
+  const [{ age }] = await prisma.$queryRaw<Array<{ age: number }>>`
+    SELECT EXTRACT(EPOCH FROM (LOCALTIMESTAMP - "createdAt"))::float AS age
+    FROM "MessageAttachmentTextCache" WHERE "attachmentId" = ${attachmentId}`;
+  assert.ok(age < 10, `restarted, ${age}s old`);
+  // Once text replaces it, there is no claim left to renew.
+  await writeAttachmentTextCache(attachmentId, [{ kind: "audio transcript", text: "Done." }]);
+  assert.equal(await renewAttachmentTextClaim(attachmentId, "mine"), false);
 });

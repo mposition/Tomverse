@@ -148,6 +148,25 @@ export const claimAttachmentTextCache = async (
   return rows.length > 0;
 };
 
+/**
+ * Confirms this request still holds its claim and restarts its clock, in one
+ * statement: true only if the row is still this token's claim. Run just before
+ * the paid call, so the call starts with a whole stale window ahead of it, and
+ * a request whose claim was taken over while it waited on its own bookings
+ * learns so before it pays rather than after (review r-20261127-122037-b72ce5).
+ * Row locks order it against a takeover: one of the two sees the other's write.
+ */
+export const renewAttachmentTextClaim = async (attachmentId: string, token: string) => {
+  const rows = await prisma.$queryRaw<Array<{ attachmentId: string }>>`
+    UPDATE "MessageAttachmentTextCache"
+    SET "createdAt" = CURRENT_TIMESTAMP
+    WHERE "attachmentId" = ${attachmentId}
+      AND "version" = ${ATTACHMENT_TEXT_CLAIM_VERSION}
+      AND "entries"->>'claim' = ${token}
+    RETURNING "attachmentId"`;
+  return rows.length > 0;
+};
+
 /** Gives back this request's claim; text written over it is left alone. */
 export const releaseAttachmentTextClaim = (attachmentId: string, token: string) =>
   prisma.$executeRaw`

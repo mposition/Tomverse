@@ -269,6 +269,24 @@ test("an mp3 is read to its end: nothing after the frames may hold a frame sync"
     mp3DurationSeconds(new Uint8Array([...MP3_CBR_3000MS, ...id3v1])),
     mp3DurationSeconds(MP3_CBR_3000MS)
   );
+  // Review r-20261127-122037-b72ce5: an ID3v1 tag is skipped by its format, so
+  // a Latin-1 title that happens to read as a sync does not refuse the file...
+  const syncInTitle = new Uint8Array(id3v1);
+  syncInTitle.set([0xff, 0xe0], 10);
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, syncInTitle)), ten);
+  // ...but only a real one: exactly 128 bytes at the end, opening with "TAG".
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array([...syncInTitle, 0x00]))), null);
+  const notATag = new Uint8Array(syncInTitle);
+  notATag[0] = 0x58;
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, notATag)), null);
+  // The bytes before the tag are still scanned.
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array([0x00, 0xff, 0xe3, 0x00, ...id3v1]))), null);
+  // An APEv2 tag is not skipped: its footer states its own size, so a sync
+  // inside one still refuses the file.
+  const ape = new Uint8Array(64);
+  ape.set([...new TextEncoder().encode("APETAGEX")], 32);
+  ape.set([0xff, 0xe3], 8);
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, ape)), null);
   // A last frame cut short counts as a whole one, unless what follows its
   // header could start another.
   assert.equal(mp3DurationSeconds(mp3OfFrames(10).subarray(0, 10 * 72 - 30)), ten);
@@ -376,7 +394,7 @@ test("a provider's own seconds win, and an unknown outcome keeps the reservation
   }
 });
 
-test("no speech is a refusal after settling, and a throw before the provider releases", async () => {
+test("no speech is a refusal after settling; a throw before the call releases, a throw from it keeps", async () => {
   const events = [];
   await assert.rejects(
     quietly(() => transcribeAudioAttachment(attachment, fakeDeps(
@@ -385,9 +403,24 @@ test("no speech is a refusal after settling, and a throw before the provider rel
   );
   assert.deepEqual(events.at(-1), ["settle", { kind: "measured_clip", seconds: 184.2 }]);
 
+  // Stopped before the provider is asked: nothing billed, the seconds go back.
+  const stopped = [];
+  const call = { mayHaveBeenPaid: false, beforeProviderCall: async () => { throw new Error("stop"); } };
+  await assert.rejects(quietly(() => transcribeAudioAttachment(attachment, fakeDeps(null, stopped), call)), /stop/);
+  assert.deepEqual(stopped.at(-1), ["release"]);
+  assert.equal(call.mayHaveBeenPaid, false);
+
+  // A throw from the call itself is an outcome nobody knows (review
+  // r-20261127-122037-b72ce5): the seconds stay booked, as for an
+  // indeterminate failure.
   const thrown = [];
-  await assert.rejects(quietly(() => transcribeAudioAttachment(attachment, fakeDeps(new Error("boom"), thrown))));
-  assert.deepEqual(thrown.at(-1), ["release"]);
+  const thrownCall = { mayHaveBeenPaid: false };
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachment(attachment, fakeDeps(new Error("boom"), thrown), thrownCall)),
+    (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE"
+  );
+  assert.deepEqual(thrown.at(-1), ["settle", { kind: "reservation" }]);
+  assert.equal(thrownCall.mayHaveBeenPaid, true);
 
   // A settle that throws after the provider answered has an unknown outcome:
   // the hold is kept, never released over it.
@@ -435,6 +468,12 @@ const memoryStore = (overrides = {}) => {
       const row = rows.get(id);
       if (row && !(row.claim && clock - row.at > staleSeconds * 1000)) return false;
       rows.set(id, { claim: token, at: clock });
+      return true;
+    },
+    renew: async (id, token) => {
+      const row = rows.get(id);
+      if (row?.claim !== token) return false;
+      row.at = clock;
       return true;
     },
     write: async (id, entries) => { rows.set(id, { entries }); return true; },
@@ -591,7 +630,23 @@ test("the provider's deadline covers the body, not only the headers", async () =
   assert.ok(Date.now() - started < 10_000);
 });
 
-test("a stalled body fails the claimed transcription and frees the claim", async () => {
+// -- The claim is given back only when nothing can have been paid -----------
+
+// Review r-20261127-122037-b72ce5: one row of the table in
+// transcribeAudioAttachmentOnce's comment per test below.
+const transcribedIn = (events) => events.filter(([event]) => event === "transcribe").length;
+/** A later request, cut off at the stale point: it must not have paid by then. */
+const laterRequestBeforeStale = async (store, events) => {
+  const wait = store.wait;
+  store.wait = async (ms) => {
+    if (store.now() + ms > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000) throw new Error("stale from here on");
+    await wait(ms);
+  };
+  await assert.rejects(once(store, slowTranscription(events)), /stale from here on/);
+  store.wait = wait;
+};
+
+test("a body cut off at the deadline may have been paid: the claim stands until stale", async () => {
   const store = memoryStore();
   const events = [];
   const deps = fakeDeps(null, events);
@@ -600,5 +655,90 @@ test("a stalled body fails the claimed transcription and frees the claim", async
   await assert.rejects(once(store, deps), (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
   // Indeterminate: the provider may have done the work, so the seconds stay booked.
   assert.deepEqual(events.at(-1), ["settle", { kind: "reservation" }]);
+  assert.ok(store.rows.get("att-1")?.claim, "the claim stands");
+  const later = [];
+  await laterRequestBeforeStale(store, later);
+  assert.equal(transcribedIn(later), 0, "no later request pays before it is stale");
+});
+
+test("a settlement that throws after the provider answered keeps the claim", async () => {
+  const store = memoryStore();
+  const events = [];
+  const deps = slowTranscription(events);
+  deps.settle = async ({ basis }) => { events.push(["settle", basis]); throw new Error("ledger down"); };
+  await assert.rejects(once(store, deps), /ledger down/);
+  assert.equal(transcribedIn(events), 1);
+  assert.equal(events.some(([event]) => event === "release"), false, "the seconds are not handed back either");
+  assert.ok(store.rows.get("att-1")?.claim, "the claim stands");
+  const later = [];
+  await laterRequestBeforeStale(store, later);
+  assert.equal(transcribedIn(later), 0);
+});
+
+test("a call that throws may have been paid too", async () => {
+  const store = memoryStore();
+  const events = [];
+  const deps = slowTranscription(events);
+  deps.transcribe = async () => { events.push(["transcribe"]); throw new Error("socket reset"); };
+  await assert.rejects(once(store, deps), (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+  assert.deepEqual(events.at(-1), ["settle", { kind: "reservation" }]);
+  assert.ok(store.rows.get("att-1")?.claim, "the claim stands");
+});
+
+test("a refusal the port classifies as costing nothing gives the claim back at once", async () => {
+  for (const [code, status, disposition] of [
+    ["provider_not_configured", null, "not_sent"],
+    ["provider_rejected_audio", 400, "refused"],
+  ]) {
+    const store = memoryStore();
+    const events = [];
+    const refused = slowTranscription(events, { ok: false, code, status, disposition });
+    await assert.rejects(once(store, refused), (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+    assert.deepEqual(events.at(-1), ["settle", { kind: "not_billed" }], disposition);
+    assert.equal(store.rows.has("att-1"), false, disposition);
+  }
+});
+
+test("seconds refused before any call give the claim back", async () => {
+  const store = memoryStore();
+  const events = [];
+  const deps = slowTranscription(events);
+  deps.reserve = async () => { throw new VoiceBudgetError(429, "VOICE_OPERATIONAL_LIMIT_REACHED", "limit", 60); };
+  await assert.rejects(once(store, deps), (error) => error.code === "AUDIO_TRANSCRIPTION_LIMIT_REACHED");
+  assert.equal(transcribedIn(events), 0);
   assert.equal(store.rows.has("att-1"), false);
+});
+
+test("a holder whose claim was taken over while it booked never calls", async () => {
+  const store = memoryStore();
+  const events = [];
+  const deps = slowTranscription(events);
+  // Bookings slow enough for another request to take the claim over.
+  const reserve = deps.reserve;
+  deps.reserve = async (input) => {
+    const booked = await reserve(input);
+    store.rows.set("att-1", { claim: "someone-else", at: store.now() });
+    return booked;
+  };
+  await assert.rejects(once(store, deps), (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+  assert.equal(transcribedIn(events), 0, "no call");
+  assert.deepEqual(events.at(-1), ["release"], "its seconds are given back");
+  assert.equal(store.rows.get("att-1")?.claim, "someone-else", "the other request's claim is left alone");
+});
+
+test("the claim is renewed just before the call, so the stale window starts there", async () => {
+  const store = memoryStore();
+  const events = [];
+  const deps = slowTranscription(events);
+  const reserve = deps.reserve;
+  deps.reserve = async (input) => {
+    // Slow bookings: most of the window spent before the call.
+    await store.wait(AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 - 1_000);
+    return reserve(input);
+  };
+  const write = store.write;
+  let renewedAt = null;
+  store.write = async (id, entries) => { renewedAt = renewedAt ?? store.rows.get(id)?.at; return write(id, entries); };
+  await once(store, deps);
+  assert.equal(renewedAt, AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 - 1_000);
 });
