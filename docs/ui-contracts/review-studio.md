@@ -87,14 +87,19 @@ answers a second request for the same input with `409 DUPLICATE_REQUEST`
 without running, charging or reserving anything -- unless a fresh saved row
 of that input already exists (the other request is a cache hit, or a run that
 has saved), which it then returns as the usual 0-credit cache answer. The
-claim is released on every outcome and expires after 15 minutes if its
-process dies (`lib/comparisonReviewInFlight.ts` derives the bound; it uses the
-existing `ChatUsageBucket` table, no migration). Classic, mobile web and Studio
+claim is released on every outcome. A live run renews it every 5 minutes (a
+third of the TTL; the renewal only moves the holder's own row forward), so a
+run of any length keeps it; it expires 15 minutes after its process dies
+(`lib/comparisonReviewInFlight.ts`; it uses the existing `ChatUsageBucket`
+table, no migration). A run whose claim was taken over anyway logs
+`comparison_review_claim_lost` and still finishes. Classic, mobile web and Studio
 answer that 409 with one localized notice (`chat.aiReviewAlreadyRunningRetryLater`:
 the review of these answers is already running; once it finishes, running it
 again returns the saved result at no extra charge, and if answers are added
 meanwhile it runs as a new review) instead of a failure or the server's
-message. They do not poll. In the dialog the notice is not cleared by a setup
+message. They do not poll. In the dialog the notice belongs to the mode and
+synthesis option that were refused: another choice is a different review and
+does not show it. Neither the notice nor a run failure is cleared by a setup
 refresh -- only by the next run or by closing -- and the setup's scope line
 shows how many answers a run would now cover. The run button stays available;
 Studio's entry reads "check for the result" rather than a failure and retry.

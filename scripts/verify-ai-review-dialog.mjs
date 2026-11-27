@@ -171,6 +171,14 @@ try {
       return;
     }
     duplicatePosts += 1;
+    if (duplicateAnswer === "fail") {
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Reviewer unavailable", traceId: "trace-run-failed" }),
+      });
+      return;
+    }
     if (duplicateAnswer === "saved") {
       await route.fulfill({
         status: 200,
@@ -197,6 +205,26 @@ try {
   await expect(page.getByTestId("comparison-review-error")).toHaveCount(0);
   await expect(runButton).toBeEnabled();
 
+  // The notice is about the review that was refused. Another mode or the
+  // synthesis option is a different review (a different input hash), so the
+  // notice is not shown for it; back on the refused criteria, it is again.
+  const modeButton = (label) => page.getByRole("button", { name: new RegExp(`^${label}`) });
+  const synthesis = page.getByRole("checkbox", { name: /신중한 종합안 포함/ });
+  await modeButton("근거 중심").click();
+  await expect(modeButton("근거 중심")).toHaveAttribute("aria-pressed", "true");
+  await expect(notice).toHaveCount(0);
+  await modeButton("균형 검토").click();
+  await expect(modeButton("균형 검토")).toHaveAttribute("aria-pressed", "true");
+  await expect(notice).toHaveText(alreadyRunning);
+  await synthesis.click();
+  await expect(synthesis).toBeChecked();
+  await expect(notice).toHaveCount(0);
+  await synthesis.click();
+  await expect(synthesis).not.toBeChecked();
+  await expect(notice).toHaveText(alreadyRunning);
+  await settle();
+  assert.equal(duplicatePosts, 1, "changing the criteria sent a run");
+
   // The third answer finishes: the setup refreshes onto the 3-answer turn,
   // the notice stays.
   const getsBeforeThird = gets.length;
@@ -218,12 +246,27 @@ try {
   await expect(notice).toHaveText(alreadyRunning);
   await expect(runButton).toBeEnabled();
 
-  // ...and served from the saved row once it has finished; the notice goes.
+  // A run that fails says why, and an answer finishing afterwards refreshes
+  // the setup without wiping that out: only the next run or closing clears it.
+  duplicateAnswer = "fail";
+  await runButton.click();
+  const runFailure = page.getByTestId("comparison-review-error");
+  await expect(runFailure).toContainText("Reviewer unavailable");
+  await expect(notice).toHaveCount(0);
+  const getsBeforeFailureRefresh = gets.length;
+  await answerFinished();
+  await expect.poll(() => gets.length).toBe(getsBeforeFailureRefresh + 1);
+  await settle();
+  await expect(runFailure).toContainText("Reviewer unavailable");
+
+  // ...and served from the saved row once it has finished; the notice and the
+  // earlier failure go.
   duplicateAnswer = "saved";
   await runButton.click();
   await expect(result).toBeVisible();
   await expect(notice).toHaveCount(0);
-  assert.equal(duplicatePosts, 3);
+  await expect(runFailure).toHaveCount(0);
+  assert.equal(duplicatePosts, 4);
   assert.equal(mock.getRunCount(), 1);
 
   // 6. Guest: the setup previews the page's latest local turn, so an answer

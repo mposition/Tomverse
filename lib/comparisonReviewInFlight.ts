@@ -18,21 +18,27 @@
 
 /**
  * How long a claim lives when the process holding it dies before its
- * `finally` can release it.
+ * `finally` can release it. A live run renews its claim every
+ * COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS, so it keeps the claim however
+ * long it runs (a larger COMPARISON_REVIEW_MODEL_IDS panel, sequential
+ * failures and retries); this bound only decides how long a dead holder can
+ * lock one review out. Nothing is charged meanwhile.
  *
- * Derived from the run's worst case in lib/comparisonReviewService.ts: each
- * reviewer request is aborted at 45 s, a non-timeout failure is retried once
- * (2 x 45 s = 90 s per candidate), and the sequential path can try every
- * candidate for the primary review and every other one for the secondary
- * ((2N - 1) x 90 s). With the default three-reviewer panel that is 450 s.
- * Fifteen minutes is twice that, and still covers a five-reviewer panel
- * (810 s). The cost of a crashed holder is that this one review cannot be
- * re-run for at most this long; nothing is charged meanwhile.
- *
- * tests/server-contract/comparison-review-run-claim.test.ts recomputes the
- * bound from the default panel, so growing it past this TTL fails a test.
+ * Sized from the run's worst case in lib/comparisonReviewService.ts all the
+ * same: each reviewer request is aborted at 45 s, a non-timeout failure is
+ * retried once (2 x 45 s = 90 s per candidate), and the sequential path can
+ * try every candidate for the primary review and every other one for the
+ * secondary ((2N - 1) x 90 s) -- 450 s with the default three-reviewer panel.
+ * tests/server-contract/comparison-review-run-claim.test.ts recomputes it.
  */
 export const COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS = 15 * 60;
+
+/**
+ * How often a live run renews its claim: a third of the TTL, so two renewals
+ * can be missed (a slow database, a busy event loop) before the claim could
+ * be taken over.
+ */
+export const COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS = (COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS * 1000) / 3;
 
 /** The route's answer to a second POST while the same input is still running. */
 export const isComparisonReviewAlreadyRunning = (status: number, body: unknown) =>

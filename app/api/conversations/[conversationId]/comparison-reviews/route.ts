@@ -45,9 +45,13 @@ import {
 import {
   claimInFlightRun,
   releaseInFlightRun,
+  renewInFlightRun,
   type InFlightRunClaim,
 } from "@/lib/guestIdempotency";
-import { COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS } from "@/lib/comparisonReviewInFlight";
+import {
+  COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS,
+  COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS,
+} from "@/lib/comparisonReviewInFlight";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
@@ -309,6 +313,7 @@ async function runPost(
   const traceId = randomUUID();
   let freeQuota: ComparisonReviewQuotaReservation | null = null;
   let runClaim: InFlightRunClaim | null = null;
+  let stopHeartbeat: (() => void) | null = null;
   let completed = false;
   try {
     const authentication = await resolveChatRouteSession(request);
@@ -467,6 +472,20 @@ async function runPost(
       if (served) return served;
       throw error;
     }
+    // Renewed for as long as this request runs, so a run longer than the TTL
+    // (a larger configured reviewer panel, sequential failures and retries)
+    // keeps its claim. A claim found lost is only logged: this run is already
+    // on its paid path, and stopping it would not undo the charge.
+    const heldClaim = runClaim;
+    const heartbeat = setInterval(() => {
+      void renewInFlightRun(heldClaim).then(
+        (held) => {
+          if (!held) console.warn(JSON.stringify({ event: "comparison_review_claim_lost", traceId }));
+        },
+        (error) => console.error("Comparison review run claim renewal failed:", { traceId, error })
+      );
+    }, COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS);
+    stopHeartbeat = () => clearInterval(heartbeat);
     const cached = await findSaved();
     const served = cached ? await servedFromSaved(cached) : null;
     if (served) return served;
@@ -611,6 +630,8 @@ async function runPost(
       traceId
     );
   } finally {
+    // Stopped before the release, so no renewal can follow it.
+    stopHeartbeat?.();
     if (freeQuota && !completed) {
       await releaseComparisonReviewQuota(freeQuota).catch((error) =>
         console.error("Comparison review quota refund failed:", {

@@ -509,15 +509,24 @@ export function ComparisonReviewDialog({
   const [includeSynthesis, setIncludeSynthesis] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  /** Why the setup could not be prepared; every setup refresh clears it. */
   const [error, setError] = useState("");
   /**
-   * "This review is already running" (409 DUPLICATE_REQUEST). Kept apart from
-   * `error`, which every setup refresh clears: an answer finishing right
-   * after the refusal refreshes the setup at once, and that must not erase
-   * the explanation. Cleared only by the next run (and by closing, which
-   * unmounts the dialog).
+   * Why the last run failed. Kept apart from `error`: a run that fails after
+   * another answer finished returns to a setup that refreshes at once, and
+   * that refresh must not erase the failure. Cleared by the next run (and by
+   * closing, which unmounts the dialog).
    */
-  const [alreadyRunningNotice, setAlreadyRunningNotice] = useState("");
+  const [runError, setRunError] = useState("");
+  /**
+   * "This review is already running" (409 DUPLICATE_REQUEST), with the
+   * criteria of the refused request. Kept apart from `error` for the same
+   * reason as `runError`, and shown only while the criteria on screen are the
+   * refused ones: other criteria are another input, which a run would review
+   * and bill anew -- the opposite of what the notice says. Added answers keep
+   * it; its text covers that case.
+   */
+  const [alreadyRunning, setAlreadyRunning] = useState<{ mode: ReviewMode; includeSynthesis: boolean } | null>(null);
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
   /**
    * The answers revision the setup on screen was loaded for.
@@ -691,7 +700,8 @@ export function ComparisonReviewDialog({
     }
     setRunning(true);
     setError("");
-    setAlreadyRunningNotice("");
+    setRunError("");
+    setAlreadyRunning(null);
     let receivedPrimary = false;
     // An account request the server answers with "this review is already
     // running" (409 DUPLICATE_REQUEST) started and billed nothing, so it is
@@ -768,7 +778,7 @@ export function ComparisonReviewDialog({
         // once. Say so and leave the button available -- pressed again it is
         // refused while the run is in flight and served from the saved row
         // once it has finished.
-        setAlreadyRunningNotice(t("chat.aiReviewAlreadyRunningRetryLater"));
+        setAlreadyRunning({ mode, includeSynthesis });
         return;
       }
       trackStarted();
@@ -809,16 +819,16 @@ export function ComparisonReviewDialog({
         }
       );
       onCompleted?.();
-    } catch (runError) {
+    } catch (failure) {
       trackStarted();
       trackProductEvent(
         "comparison_review_failed",
         setup.responses?.length || 0,
         { review_mode: mode }
       );
-      setError(
+      setRunError(
         receivedPrimary ? t("chat.aiReviewPartialInterrupted") :
-          runError instanceof Error ? runError.message : t("chat.aiReviewFailed")
+          failure instanceof Error ? failure.message : t("chat.aiReviewFailed")
       );
       // The failed run released its idempotency claim server-side, so a real
       // retry needs a real new key rather than re-presenting one the server
@@ -1325,7 +1335,7 @@ export function ComparisonReviewDialog({
             </div>
           )}
 
-          {error && (
+          {(runError || error) && (
             // UI-004: a review that fails after the user has committed the
             // click is an error they must notice, not a paragraph that
             // silently appears below the fold -- so it announces like every
@@ -1336,10 +1346,10 @@ export function ComparisonReviewDialog({
               className="mt-5 flex gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="min-w-0 break-words text-sm leading-6">{error}</p>
+              <p className="min-w-0 break-words text-sm leading-6">{runError || error}</p>
             </div>
           )}
-          {alreadyRunningNotice && (
+          {alreadyRunning?.mode === mode && alreadyRunning.includeSynthesis === includeSynthesis && (
             // Not a failure, so not the red alert: nothing ran or was charged.
             <div
               role="status"
@@ -1347,7 +1357,7 @@ export function ComparisonReviewDialog({
               className="mt-5 flex gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="min-w-0 break-words text-sm leading-6">{alreadyRunningNotice}</p>
+              <p className="min-w-0 break-words text-sm leading-6">{t("chat.aiReviewAlreadyRunningRetryLater")}</p>
             </div>
           )}
         </div>

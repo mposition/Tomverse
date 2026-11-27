@@ -105,9 +105,11 @@ export const releaseGuestIdempotencyKey = async (
  * What it guards is different, so two things differ. The guest key is
  * single-use for the day; this claim is held only while its run runs:
  *
- *  - It expires. `updatedAt` is the claim time, and a claim older than
+ *  - It expires. `updatedAt` is the last time its holder showed it was alive
+ *    (the claim, then each `renewInFlightRun`), and a claim older than
  *    `ttlSeconds` may be taken over, so a process that dies before its
- *    `finally` cannot lock the run out for good.
+ *    `finally` cannot lock the run out for good, while a live run however
+ *    long keeps it by renewing.
  *  - It is owned. The holder's random token is stored as the row's count, and
  *    release deletes the row only while that token is still there, so a holder
  *    that overran its TTL cannot release the claim of the request that took
@@ -161,6 +163,24 @@ export const claimInFlightRun = async (
     );
   }
   return { key, period, periodStart, token };
+};
+
+/**
+ * Moves the claim's `updatedAt` forward while its run is alive, so a run
+ * longer than the TTL is not taken over. Only the holder's own token is
+ * renewed: false means the claim already expired and was taken over (or
+ * released), and nothing was changed.
+ */
+export const renewInFlightRun = async (claim: InFlightRunClaim) => {
+  const renewed = await prisma.$executeRaw`
+    UPDATE "ChatUsageBucket"
+    SET "updatedAt" = NOW()
+    WHERE "key" = ${claim.key}
+      AND "period" = ${claim.period}
+      AND "periodStart" = ${claim.periodStart}
+      AND "count" = ${claim.token}
+  `;
+  return renewed > 0;
 };
 
 /**

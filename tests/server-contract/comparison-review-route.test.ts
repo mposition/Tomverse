@@ -81,10 +81,16 @@ type World = {
   upsertThrows: boolean;
   tier: "Free" | "Pro";
   quotaHeld: number;
-  /** key -> token, the in-memory stand-in for the claim row. */
-  claims: Map<string, number>;
+  /**
+   * key -> holder token and last renewal, the in-memory stand-in for the
+   * claim row: a claim older than its TTL by `clockMs` may be taken over,
+   * exactly as the SQL's takeover condition.
+   */
+  claims: Map<string, { token: number; renewedAt: number }>;
+  clockMs: number;
   claimCalls: Array<{ subjectKey: string; scope: string; runKey: string; ttlSeconds: number }>;
   releases: number;
+  renewals: number;
   stored: Map<string, { id: string; assistantMessageIds: string[]; reviewerModelId: string; promptVersion: string; result: unknown; usageCredits: number; isStale: boolean; createdAt: Date }>;
   latestTurn: { prompt: typeof PROMPT; responses: typeof TWO_ANSWERS };
   exactTurnReads: number;
@@ -100,8 +106,10 @@ const freshWorld = (): World => ({
   tier: "Free",
   quotaHeld: 0,
   claims: new Map(),
+  clockMs: 0,
   claimCalls: [],
   releases: 0,
+  renewals: 0,
   stored: new Map(),
   latestTurn: { prompt: PROMPT, responses: TWO_ANSWERS },
   exactTurnReads: 0,
@@ -221,19 +229,27 @@ async function loadRoute() {
       claimInFlightRun: async (subjectKey: string, scope: string, runKey: string, ttlSeconds: number) => {
         world.claimCalls.push({ subjectKey, scope, runKey, ttlSeconds });
         const key = `${subjectKey}:${scope}:${runKey}`;
-        if (world.claims.has(key)) {
+        const held = world.claims.get(key);
+        if (held && world.clockMs - held.renewedAt < ttlSeconds * 1000) {
           world.events.push("claim:refused");
           throw new realChatSecurity.ChatAccessError(409, "DUPLICATE_REQUEST", "This request is already being processed.");
         }
         const token = nextToken++;
-        world.claims.set(key, token);
+        world.claims.set(key, { token, renewedAt: world.clockMs });
         world.events.push("claim");
         return { key, period: `${scope}-in-flight`, periodStart: new Date(0), token };
+      },
+      renewInFlightRun: async (claim: { key: string; token: number }) => {
+        world.renewals += 1;
+        const held = world.claims.get(claim.key);
+        if (held?.token !== claim.token) return false;
+        held.renewedAt = world.clockMs;
+        return true;
       },
       releaseInFlightRun: async (claim: { key: string; token: number }) => {
         world.releases += 1;
         world.events.push("claim:release");
-        if (world.claims.get(claim.key) === claim.token) world.claims.delete(claim.key);
+        if (world.claims.get(claim.key)?.token === claim.token) world.claims.delete(claim.key);
       },
     },
   });
@@ -399,11 +415,85 @@ for (const [label, setup, status] of [
   });
 }
 
+// --- a run longer than the TTL ------------------------------------------------
+
+const realInFlightTiming = () =>
+  require(resolve(ROOT, "lib/comparisonReviewInFlight.ts")) as {
+    COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS: number;
+    COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS: number;
+  };
+/** Moves the claim clock and the route's heartbeat timer together. */
+const elapse = async (ms: number) => {
+  world.clockMs += ms;
+  mock.timers.tick(ms);
+  await new Promise((done) => setImmediate(done));
+};
+
+test("a run longer than the TTL keeps its claim, and the heartbeat stops with it", async () => {
+  const { POST } = await loadRoute();
+  const { COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS: ttl, COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS: beat } = realInFlightTiming();
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    world.runGate = gate();
+    const first = POST(post(), context);
+    await until(() => world.runs === 1);
+    // Twice the TTL, as a larger reviewer panel with failing candidates can take.
+    while (world.clockMs < ttl * 2000) await elapse(beat);
+    assert.ok(world.renewals >= 5, `the claim was renewed ${world.renewals} times`);
+
+    const second = await Promise.race([
+      POST(post(), context),
+      new Promise<null>((done) => setTimeout(() => done(null), 2_000)),
+    ]);
+    if (!second) {
+      world.runGate.open();
+      assert.fail("the claim expired under a live run, and a duplicate started a second paid run");
+    }
+    assert.equal(second.status, 409);
+    assert.equal(world.runs, 1);
+
+    world.runGate.open();
+    assert.equal((await first).status, 200);
+    assert.equal(world.claims.size, 0, "the claim was not released");
+    const renewalsAtEnd = world.renewals;
+    await elapse(beat * 3);
+    assert.equal(world.renewals, renewalsAtEnd, "the heartbeat outlived its run");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("a claim lost to another holder is only logged: the run finishes and the other claim stays", async () => {
+  const { POST } = await loadRoute();
+  const { COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS: beat } = realInFlightTiming();
+  const warn = mock.method(console, "warn", () => {});
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    world.runGate = gate();
+    const first = POST(post(), context);
+    await until(() => world.runs === 1);
+    // Another request took the claim over (its own token).
+    holdClaimFor(world.claimCalls[0], 777);
+    await elapse(beat);
+    assert.ok(
+      warn.mock.calls.some((call) => String(call.arguments[0]).includes("comparison_review_claim_lost")),
+      "a lost claim was not logged"
+    );
+    world.runGate.open();
+    assert.equal((await first).status, 200, "a lost claim stopped a run already on its paid path");
+    const [call] = world.claimCalls;
+    assert.equal(world.claims.get(`${call.subjectKey}:${call.scope}:${call.runKey}`)?.token, 777, "the run released another holder's claim");
+  } finally {
+    mock.timers.reset();
+    warn.mock.restore();
+  }
+});
+
 // --- a refused request and the saved row --------------------------------------
 
 /** Another request holds this input's claim (a cache hit or a run in progress). */
-const holdClaimFor = (call: World["claimCalls"][number]) =>
-  world.claims.set(`${call.subjectKey}:${call.scope}:${call.runKey}`, 999);
+const holdClaimFor = (call: World["claimCalls"][number], token = 999) =>
+  world.claims.set(`${call.subjectKey}:${call.scope}:${call.runKey}`, { token, renewedAt: world.clockMs });
 
 for (const [label, prepare, expected] of [
   ["a fresh saved row answers from the cache", () => {}, 200],

@@ -31,6 +31,8 @@ const statements: Statement[] = [];
 const deletes: Array<{ where: Record<string, unknown> }> = [];
 /** Rows the next $queryRaw should return; empty means "the guard declined". */
 let nextRows: Array<Array<{ count: bigint }>> = [];
+/** Rows the next $executeRaw reports as changed. */
+let nextChanged: number[] = [];
 
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
@@ -38,6 +40,10 @@ mock.module(mod("lib/prisma.ts"), {
       $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => {
         statements.push({ sql: strings.join("?"), values });
         return Promise.resolve(nextRows.shift() ?? [{ count: BigInt(1) }]);
+      },
+      $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => {
+        statements.push({ sql: strings.join("?"), values });
+        return Promise.resolve(nextChanged.shift() ?? 1);
       },
       chatUsageBucket: {
         deleteMany: (args: { where: Record<string, unknown> }) => {
@@ -68,6 +74,30 @@ test.beforeEach(() => {
   statements.length = 0;
   deletes.length = 0;
   nextRows = [];
+  nextChanged = [];
+});
+
+test("a live run renews only its own claim, and only its timestamp", async () => {
+  const claim = await claims.claimInFlightRun(SUBJECT, "comparison-review", RUN_KEY, 900);
+  statements.length = 0;
+  nextChanged = [1, 0];
+  assert.equal(await claims.renewInFlightRun(claim), true);
+  // The claim was taken over (or released): nothing is changed, and it says so.
+  assert.equal(await claims.renewInFlightRun(claim), false);
+
+  const [{ sql, values }] = statements;
+  assert.match(sql, /^\s*UPDATE "ChatUsageBucket"\s+SET "updatedAt" = NOW\(\)\s+WHERE/);
+  assert.doesNotMatch(sql, /"count" =\s*[^?]*,|SET[^W]*"count"/, "a renewal must not touch the token");
+  assert.match(sql, /AND "count" = \?/, "a renewal must be conditional on the holder's token");
+  assert.deepEqual(values, [claim.key, claim.period, claim.periodStart, claim.token]);
+});
+
+test("a live run renews well inside the TTL", () => {
+  assert.ok(
+    inFlight.COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS * 3 <= inFlight.COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS * 1000,
+    "the heartbeat must be at most a third of the TTL"
+  );
+  assert.ok(inFlight.COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS >= 1000);
 });
 
 const SUBJECT = "user:subject-hash";
