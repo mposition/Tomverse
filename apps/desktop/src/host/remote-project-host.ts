@@ -2,7 +2,7 @@ import { parseRemoteTarget, RemoteError, targetLabel, type RemoteTarget } from "
 import type { SshRunner } from "../../../tomverse-cli/src/remote-ssh.js";
 import type { RemoteConnectionState, RemoteProjectInput, RemoteProjectReply, RemoteResult, RemoteSnapshot, RemoteView } from "../remote-contract";
 import { bindProjectRoot, type ProjectRoot } from "./project-root";
-import { describeRemoteFailure, ensureRemoteShadow, readRemoteSettings, testRemote, withRecent, writeRemoteSettings } from "./remote-project";
+import { describeRemoteFailure, ensureRemoteShadow, readRemoteSettings, shellOf, testRemote, withRecent, writeRemoteSettings } from "./remote-project";
 
 /**
  * The main process side of the remote-project screen: the switch, the connection test, opening a remote folder as the project and
@@ -35,6 +35,7 @@ export function createRemoteProjectHost(deps: RemoteHostDeps) {
   let enabledNow: boolean | null = null;
   const enabled = () => (enabledNow ??= settings().enabled);
   const keyOf = (target: RemoteTarget) => `${target.destination}|${target.port ?? ""}|${target.folder}`;
+  const targetKeyOf = keyOf;
   const state = (): RemoteConnectionState => {
     const current = deps.current();
     return current && keyOf(current.target) === key ? connection : "unknown";
@@ -50,7 +51,7 @@ export function createRemoteProjectHost(deps: RemoteHostDeps) {
     const current = deps.current();
     return {
       enabled: enabled(), recent: saved.recent,
-      current: current ? { label: targetLabel(current.target), folder: current.target.folder, state: state() } : null,
+      current: current ? { label: targetLabel(current.target), folder: current.target.folder, state: state(), shell: shellOf(saved, current.target) } : null,
       sandboxOutside: deps.sandboxOn(),
     };
   };
@@ -88,6 +89,19 @@ export function createRemoteProjectHost(deps: RemoteHostDeps) {
         return { view: view() };
       }
       if (!enabled()) return { view: view(), result: { ok: false, failure: "disabled", message: "Remote projects are turned off." } };
+      if (input.action === "set-shell") {
+        const current = deps.current();
+        if (!current) return { view: view() };
+        if (!deps.canChange()) return { view: view(), result: { ok: false, failure: "busy", message: "A task is running." } };
+        const saved = settings();
+        const shells = { ...saved.shells };
+        // The default is not written down.
+        if (input.shell === "sh") delete shells[targetKeyOf(current.target)];
+        else shells[targetKeyOf(current.target)] = input.shell;
+        writeRemoteSettings(deps.settingsDirectory(), { ...saved, shells });
+        deps.changed();
+        return { view: view() };
+      }
       if (working) return { view: view(), result: { ok: false, failure: "busy", message: "Another connection is being tested." } };
       working = true;
       try {

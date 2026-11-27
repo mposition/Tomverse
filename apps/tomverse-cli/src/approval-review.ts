@@ -47,6 +47,9 @@ export const reviewRequestText = (view: ApprovalView, userRequest: string) => {
         action.command = { display: clip(view.command.display, REVIEW_LIMITS.commandChars), shell: view.command.mode === "shell", folder: view.command.cwd, background: view.command.background === true };
     } else if (view.web) {
         action.web = { url: view.web.url };
+    } else if (view.webSearch) {
+        // The queries leave the computer for Tomverse and its search provider, and the search is charged to the account.
+        action.webSearch = { queries: view.webSearch.queries.map((query) => clip(query, 400)), sentTo: "Tomverse web search (paid)" };
     } else if (view.browser) {
         action.browser = { action: view.browser.action, site: view.browser.origin, page: view.browser.url, element: view.browser.selector,
             ...(view.browser.text !== undefined ? { text: clip(view.browser.text, REVIEW_LIMITS.inputChars) } : {}), ...(view.browser.submit ? { pressesEnter: true } : {}) };
@@ -76,6 +79,7 @@ export const reviewShowsAll = (view: ApprovalView): boolean => {
     }
     if (view.command) return view.command.display.length <= REVIEW_LIMITS.commandChars;
     if (view.web) return true;
+    if (view.webSearch) return view.webSearch.queries.every((query) => query.length <= 400);
     if (view.browser) return (view.browser.text?.length ?? 0) <= REVIEW_LIMITS.inputChars;
     return (JSON.stringify(view.input ?? null) ?? "null").length <= REVIEW_LIMITS.inputChars;
 };

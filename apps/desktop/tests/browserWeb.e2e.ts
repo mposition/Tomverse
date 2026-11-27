@@ -409,3 +409,39 @@ test("in a connected Review the globe opens the panel beside the columns, and si
     site.close();
   }
 });
+
+test("beside the browser panel the Review header keeps to its width at every window size and shows the view switch only where two columns fit", { timeout: 180_000, skip: !columnsOrigin }, async () => {
+  for (const width of [1100, 1280, 1920, 2400]) {
+    const session = await launchReviewColumns({ width, height: 900 });
+    const { desktop } = session;
+    try {
+      await desktop.getByRole("button", { name: "Browser", exact: true }).click();
+      await expect(desktop.getByRole("complementary", { name: "Browser", exact: true })).toBeVisible();
+      const toolbar = desktop.locator(".review-column-toolbar");
+      const hint = toolbar.locator(":scope > p").first();
+      const switchGroup = desktop.getByRole("group", { name: "Results", exact: true });
+      // Nothing in the header grows past the width the Review has beside the panel, and the hint is shown whole.
+      await expect.poll(() => toolbar.evaluate((node) => [node, ...node.querySelectorAll(":scope > *")].every((part) => part.scrollWidth <= part.clientWidth)), { message: String(width) }).toBe(true);
+      const [toolbarBox, hintBox] = await Promise.all([toolbar.boundingBox(), hint.boundingBox()]);
+      assert.ok(toolbarBox && hintBox && hintBox.x >= toolbarBox.x && hintBox.x + hintBox.width <= toolbarBox.x + toolbarBox.width + 1, `the hint stays inside the header at ${width}`);
+      // Every model chip can be reached: the chip row scrolls instead of cutting a chip off.
+      await expect(desktop.getByTestId("review-focus-model")).toHaveCount(3);
+      const visibleColumns = await desktop.getByTestId("review-column").evaluateAll((nodes) => nodes.filter((node) => (node as HTMLElement).offsetParent).length);
+      if (visibleColumns === 1) {
+        // One column at a time: there is no view to choose, so no switch to cut off.
+        await expect(switchGroup).toBeHidden();
+      } else {
+        await expect(switchGroup).toBeVisible();
+        const [groupBox, rowBox] = await Promise.all([switchGroup.boundingBox(), toolbar.locator(".review-toolbar-row").boundingBox()]);
+        assert.ok(groupBox && rowBox && groupBox.x >= rowBox.x && groupBox.x + groupBox.width <= rowBox.x + rowBox.width + 1, `the view switch stays inside the header at ${width}`);
+        for (const name of ["Focus", "Side by side"]) {
+          const button = switchGroup.getByRole("button", { name, exact: true });
+          await expect(button).toBeVisible();
+          assert.equal(await button.evaluate((node) => node.scrollWidth <= node.clientWidth), true, `${name} is not cut off at ${width}`);
+        }
+      }
+    } finally {
+      await closeReviewColumns(session);
+    }
+  }
+});

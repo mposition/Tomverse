@@ -57,6 +57,11 @@ export const chatComposerDraftPutSchema = z
 export const chatComposerDraftDeleteSchema = z
   .object({
     expectedRevision: z.number().int().min(1).max(2_147_483_647),
+    /**
+     * The creation time the caller read. Another client may delete a draft and start its own, which restarts at revision 1;
+     * with this the delete applies only to the draft that was read, in the same statement as the revision check.
+     */
+    expectedCreatedAt: z.iso.datetime().optional(),
   })
   .strict();
 

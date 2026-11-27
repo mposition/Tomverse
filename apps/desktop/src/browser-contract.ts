@@ -36,8 +36,10 @@ export const elementPickId = /^pick-[0-9a-f]{8}$/;
 export type ElementPick = {
   id: string; tab: string; url: string; selector: string; tag: string; text: string;
   box: { x: number; y: number; width: number; height: number };
-  /** A data URL for the panel only; the agent reads the full picture through browser_screenshot with this id. */
+  /** A data URL for the panel only; the full picture goes with the instruction (attachedPickIds) or is read through browser_screenshot with this id. */
   thumbnail?: string;
+  /** No picture was taken: the element is, or covers, a secret field (a password, a card number, a one-time code), or it has no visible area. */
+  withheld?: "secret" | "empty";
 };
 
 const LOOPBACK_WITH_PORT = /^(localhost|127\.0\.0\.1|\[::1\]):\d+(?:[/?#].*)?$/i;

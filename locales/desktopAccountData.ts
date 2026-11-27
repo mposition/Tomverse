@@ -28,6 +28,7 @@ type Copy = {
   reviewProvidersNone: string;
   removeLoginMethod: string;
   oauthLinkUnavailable: string;
+  oauthLinkWaiting: string;
 };
 
 const copy = {
@@ -55,7 +56,8 @@ const copy = {
     reviewProvidersLimit: "Choose 1–{count} providers available on your plan.",
     reviewProvidersNone: "No providers are available right now.",
     removeLoginMethod: "Remove",
-    oauthLinkUnavailable: "Connecting Google or Microsoft is not available in Desktop yet.",
+    oauthLinkUnavailable: "Connecting Google or Microsoft is not available right now.",
+    oauthLinkWaiting: "Finish connecting in your browser, then return here.",
   },
   ko: {
     unavailable: "지금은 사용할 수 없습니다.",
@@ -81,7 +83,8 @@ const copy = {
     reviewProvidersLimit: "현재 플랜에서 사용할 수 있는 제공사를 1–{count}개 고르세요.",
     reviewProvidersNone: "지금 사용할 수 있는 제공사가 없습니다.",
     removeLoginMethod: "해제",
-    oauthLinkUnavailable: "Google·Microsoft 연결은 아직 Desktop에서 지원하지 않습니다.",
+    oauthLinkUnavailable: "지금은 Google·Microsoft을 연결할 수 없습니다.",
+    oauthLinkWaiting: "브라우저에서 연결을 마친 뒤 이 창으로 돌아오세요.",
   },
   zh: {
     unavailable: "目前无法使用。",
@@ -107,7 +110,8 @@ const copy = {
     reviewProvidersLimit: "请选择 1–{count} 个当前方案可用的提供方。",
     reviewProvidersNone: "目前没有可用的提供方。",
     removeLoginMethod: "移除",
-    oauthLinkUnavailable: "桌面版暂不支持连接 Google 或 Microsoft。",
+    oauthLinkUnavailable: "目前无法连接 Google 或 Microsoft。",
+    oauthLinkWaiting: "请在浏览器中完成连接，然后返回此处。",
   },
   "zh-Hant": {
     unavailable: "目前無法使用。",
@@ -133,7 +137,8 @@ const copy = {
     reviewProvidersLimit: "請選擇 1–{count} 個目前方案可用的提供者。",
     reviewProvidersNone: "目前沒有可用的提供者。",
     removeLoginMethod: "移除",
-    oauthLinkUnavailable: "桌面版暫不支援連結 Google 或 Microsoft。",
+    oauthLinkUnavailable: "目前無法連結 Google 或 Microsoft。",
+    oauthLinkWaiting: "請在瀏覽器中完成連結，然後回到此處。",
   },
   fr: {
     unavailable: "Cette fonction n’est pas disponible pour le moment.",
@@ -159,7 +164,8 @@ const copy = {
     reviewProvidersLimit: "Choisissez 1 à {count} fournisseurs disponibles avec votre abonnement.",
     reviewProvidersNone: "Aucun fournisseur n’est disponible pour le moment.",
     removeLoginMethod: "Retirer",
-    oauthLinkUnavailable: "La connexion de Google ou Microsoft n’est pas encore disponible dans l’application.",
+    oauthLinkUnavailable: "La connexion de Google ou Microsoft n’est pas disponible pour le moment.",
+    oauthLinkWaiting: "Terminez la connexion dans votre navigateur, puis revenez ici.",
   },
   de: {
     unavailable: "Das ist derzeit nicht verfügbar.",
@@ -185,7 +191,8 @@ const copy = {
     reviewProvidersLimit: "Wählen Sie 1–{count} Anbieter, die Ihr Tarif enthält.",
     reviewProvidersNone: "Derzeit sind keine Anbieter verfügbar.",
     removeLoginMethod: "Entfernen",
-    oauthLinkUnavailable: "Google oder Microsoft zu verbinden ist in der Desktop-App noch nicht möglich.",
+    oauthLinkUnavailable: "Google oder Microsoft zu verbinden ist derzeit nicht möglich.",
+    oauthLinkWaiting: "Schließen Sie die Verbindung im Browser ab und kehren Sie dann hierher zurück.",
   },
   es: {
     unavailable: "Esto no está disponible por ahora.",
@@ -211,7 +218,8 @@ const copy = {
     reviewProvidersLimit: "Elige de 1 a {count} proveedores disponibles en tu plan.",
     reviewProvidersNone: "No hay proveedores disponibles por ahora.",
     removeLoginMethod: "Quitar",
-    oauthLinkUnavailable: "Conectar Google o Microsoft aún no está disponible en la app de escritorio.",
+    oauthLinkUnavailable: "Conectar Google o Microsoft no está disponible por ahora.",
+    oauthLinkWaiting: "Termina la conexión en tu navegador y vuelve aquí.",
   },
   pt: {
     unavailable: "Isto não está disponível no momento.",
@@ -237,7 +245,8 @@ const copy = {
     reviewProvidersLimit: "Escolha de 1 a {count} provedores disponíveis no seu plano.",
     reviewProvidersNone: "Nenhum provedor está disponível no momento.",
     removeLoginMethod: "Remover",
-    oauthLinkUnavailable: "Conectar Google ou Microsoft ainda não está disponível no app de desktop.",
+    oauthLinkUnavailable: "Conectar Google ou Microsoft não está disponível no momento.",
+    oauthLinkWaiting: "Conclua a conexão no navegador e volte aqui.",
   },
 } satisfies Record<Language, Copy>;
 

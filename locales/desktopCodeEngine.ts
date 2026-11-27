@@ -57,6 +57,9 @@ type Copy = {
   approvalWebHost: string;
   approvalWebAddress: string;
   approvalWebNote: string;
+  approvalWebSearchHeading: string;
+  approvalWebSearchQuery: string;
+  approvalWebSearchNote: string;
   approvalBrowserClick: string;
   approvalBrowserType: string;
   approvalBrowserSite: string;
@@ -178,6 +181,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "Site",
     approvalWebAddress: "Address",
     approvalWebNote: "Only this address is requested from the site, with no cookies, login or files from your project. The page text is sent to the model as untrusted reference material. \"Allow for this run\" allows this site until the task ends.",
+    approvalWebSearchHeading: "Search the web",
+    approvalWebSearchQuery: "Query",
+    approvalWebSearchNote: "These queries go to Tomverse's web search, and the search is charged to your credits: one price for the call, nothing if no search is served. The results go to the model as untrusted reference material. \"Allow for this run\" allows web searches until the task ends; each one is still charged.",
     approvalBrowserClick: "Click in the browser tab",
     approvalBrowserType: "Type in the browser tab",
     approvalBrowserSite: "Site",
@@ -297,6 +303,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "사이트",
     approvalWebAddress: "주소",
     approvalWebNote: "이 사이트에는 이 주소만 요청하며, 쿠키·로그인·프로젝트 파일은 보내지 않습니다. 페이지 본문은 신뢰할 수 없는 참고 자료로 모델에 전달됩니다. \"이번 실행에서 허용\"을 고르면 작업이 끝날 때까지 이 사이트를 허용합니다.",
+    approvalWebSearchHeading: "웹 검색",
+    approvalWebSearchQuery: "검색어",
+    approvalWebSearchNote: "이 검색어는 Tomverse 웹 검색으로 보내지며, 검색은 크레딧으로 청구됩니다. 호출 한 번에 한 가격이고, 검색이 하나도 처리되지 않으면 청구되지 않습니다. 결과는 신뢰할 수 없는 참고 자료로 모델에 전달됩니다. \"이번 실행에서 허용\"을 고르면 작업이 끝날 때까지 웹 검색을 허용하며, 검색마다 계속 청구됩니다.",
     approvalBrowserClick: "브라우저 탭에서 클릭",
     approvalBrowserType: "브라우저 탭에 입력",
     approvalBrowserSite: "사이트",
@@ -416,6 +425,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "网站",
     approvalWebAddress: "地址",
     approvalWebNote: "只会向该网站请求这个地址，不会发送 Cookie、登录信息或项目文件。网页文本会作为不可信的参考资料发送给模型。选择“允许本次运行”后，在任务结束前都会允许该网站。",
+    approvalWebSearchHeading: "搜索网页",
+    approvalWebSearchQuery: "搜索词",
+    approvalWebSearchNote: "这些搜索词会发送到 Tomverse 网页搜索，搜索会从你的积分中扣费：每次调用一个价格，如果没有完成任何搜索则不扣费。结果会作为不可信的参考资料发送给模型。选择“允许本次运行”后，在任务结束前都会允许网页搜索，每次搜索仍会扣费。",
     approvalBrowserClick: "在浏览器标签页中点击",
     approvalBrowserType: "在浏览器标签页中输入",
     approvalBrowserSite: "网站",
@@ -535,6 +547,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "網站",
     approvalWebAddress: "位址",
     approvalWebNote: "只會向該網站請求這個位址，不會傳送 Cookie、登入資訊或專案檔案。網頁文字會作為不可信的參考資料傳送給模型。選擇「允許本次執行」後，在工作結束前都會允許該網站。",
+    approvalWebSearchHeading: "搜尋網頁",
+    approvalWebSearchQuery: "搜尋字詞",
+    approvalWebSearchNote: "這些搜尋字詞會傳送到 Tomverse 網頁搜尋，搜尋會從你的點數中扣款：每次呼叫一個價格，如果沒有完成任何搜尋則不扣款。結果會作為不可信的參考資料傳送給模型。選擇「允許本次執行」後，在工作結束前都會允許網頁搜尋，每次搜尋仍會扣款。",
     approvalBrowserClick: "在瀏覽器分頁中點擊",
     approvalBrowserType: "在瀏覽器分頁中輸入",
     approvalBrowserSite: "網站",
@@ -654,6 +669,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "Site",
     approvalWebAddress: "Adresse",
     approvalWebNote: "Seule cette adresse est demandée au site, sans cookies, connexion ni fichiers de votre projet. Le texte de la page est envoyé au modèle comme source de référence non fiable. « Autoriser pour cette exécution » autorise ce site jusqu'à la fin de la tâche.",
+    approvalWebSearchHeading: "Rechercher sur le web",
+    approvalWebSearchQuery: "Requête",
+    approvalWebSearchNote: "Ces requêtes sont envoyées à la recherche web de Tomverse, et la recherche est débitée de vos crédits : un prix par appel, rien si aucune recherche n'aboutit. Les résultats sont envoyés au modèle comme source de référence non fiable. « Autoriser pour cette exécution » autorise les recherches web jusqu'à la fin de la tâche ; chacune reste débitée.",
     approvalBrowserClick: "Cliquer dans l’onglet du navigateur",
     approvalBrowserType: "Saisir dans l’onglet du navigateur",
     approvalBrowserSite: "Site",
@@ -773,6 +791,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "Website",
     approvalWebAddress: "Adresse",
     approvalWebNote: "Von der Website wird nur diese Adresse angefragt, ohne Cookies, Anmeldung oder Dateien Ihres Projekts. Der Seitentext geht als nicht vertrauenswürdiges Referenzmaterial an das Modell. „Für diesen Lauf zulassen“ erlaubt diese Website bis zum Ende der Aufgabe.",
+    approvalWebSearchHeading: "Im Web suchen",
+    approvalWebSearchQuery: "Suchanfrage",
+    approvalWebSearchNote: "Diese Suchanfragen gehen an die Websuche von Tomverse, und die Suche wird Ihren Credits belastet: ein Preis pro Aufruf, nichts, wenn keine Suche ausgeführt wird. Die Ergebnisse gehen als nicht vertrauenswürdiges Referenzmaterial an das Modell. „Für diesen Lauf zulassen“ erlaubt Websuchen bis zum Ende der Aufgabe; jede wird weiterhin berechnet.",
     approvalBrowserClick: "Im Browser-Tab klicken",
     approvalBrowserType: "Im Browser-Tab eingeben",
     approvalBrowserSite: "Website",
@@ -892,6 +913,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "Sitio",
     approvalWebAddress: "Dirección",
     approvalWebNote: "Solo se solicita esta dirección al sitio, sin cookies, inicio de sesión ni archivos de tu proyecto. El texto de la página se envía al modelo como material de referencia no fiable. «Permitir durante esta ejecución» permite este sitio hasta que termine la tarea.",
+    approvalWebSearchHeading: "Buscar en la web",
+    approvalWebSearchQuery: "Consulta",
+    approvalWebSearchNote: "Estas consultas se envían a la búsqueda web de Tomverse, y la búsqueda se cobra de tus créditos: un precio por llamada, nada si no se completa ninguna búsqueda. Los resultados se envían al modelo como material de referencia no fiable. «Permitir durante esta ejecución» permite las búsquedas web hasta que termine la tarea; cada una se sigue cobrando.",
     approvalBrowserClick: "Hacer clic en la pestaña del navegador",
     approvalBrowserType: "Escribir en la pestaña del navegador",
     approvalBrowserSite: "Sitio",
@@ -1011,6 +1035,9 @@ export const desktopCodeEngineCopy = {
     approvalWebHost: "Site",
     approvalWebAddress: "Endereço",
     approvalWebNote: "Apenas este endereço é solicitado ao site, sem cookies, login ou arquivos do seu projeto. O texto da página é enviado ao modelo como material de referência não confiável. \"Permitir para esta execução\" permite este site até o fim da tarefa.",
+    approvalWebSearchHeading: "Pesquisar na web",
+    approvalWebSearchQuery: "Consulta",
+    approvalWebSearchNote: "Estas consultas vão para a pesquisa na web do Tomverse, e a pesquisa é cobrada dos seus créditos: um preço por chamada, nada se nenhuma pesquisa for atendida. Os resultados vão para o modelo como material de referência não confiável. \"Permitir para esta execução\" permite pesquisas na web até o fim da tarefa; cada uma continua sendo cobrada.",
     approvalBrowserClick: "Clicar no separador do navegador",
     approvalBrowserType: "Escrever no separador do navegador",
     approvalBrowserSite: "Site",

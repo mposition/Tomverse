@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { estimateTokens } from "../src/agent.js";
+import { estimateTokens, type Runner } from "../src/agent.js";
 import { IMAGE_MAX_BYTES, imageTypeOf, viewImageTool } from "../src/tools.js";
 import { requestTransmission } from "../src/transmission.js";
 import { PathError, Workspace, withWorkspaceReferences } from "../src/workspace.js";
@@ -136,6 +136,75 @@ test("a host that did not opt in never offers view_image, even to a vision model
         const { runner } = await makeRunner(gateway, makeRepo(), { model: "fake-vision" });
         assert.equal(await runner.runTask("Look."), "success");
         assert.ok(!gateway.completions[0]!.body.tools.some((t: any) => t.function.name === "view_image"));
+    } finally {
+        await gateway.stop();
+    }
+});
+
+const picked = (id: string, base64 = PNG.toString("base64")) => ({ path: `picked element ${id} of page "http://localhost:3000/"`, mediaType: "image/png", base64, bytes: PNG.length });
+const imageParts = (body: any) => body.messages.flatMap((m: any) => Array.isArray(m.content) ? m.content.filter((p: any) => p.type === "image_url") : []);
+
+test("pictures the person sent with the instruction follow it as one user message, for a model that takes images", async () => {
+    const gateway = await new FakeGateway({ models: visionModels, script: () => ({ text: "ok" }) }).start();
+    try {
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { model: "fake-vision", readOnly: true, runner: { images: true } });
+        assert.equal(await runner.runTask("Make the button blue.", "default", undefined, [picked("pick-aaaa0001")]), "success");
+        const messages = gateway.completions[0]!.body.messages as any[];
+        const first = messages.findIndex((m) => m.role === "user");
+        assert.equal(messages[first].content, "Make the button blue.", "the instruction itself stays plain text");
+        const attached = messages[first + 1];
+        assert.equal(attached.role, "user");
+        assert.deepEqual(attached.content[0], { type: "text", text: `Image from view_image: picked element pick-aaaa0001 of page "http://localhost:3000/"` });
+        assert.equal(attached.content[1].image_url.url, `data:image/png;base64,${PNG.toString("base64")}`);
+        // The task record shows what the person wrote, not the picture.
+        assert.equal(journal.state.tasks[0]!.prompt, "Make the button blue.");
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("a model that cannot see images gets the instruction as text only, and the task carries on", async () => {
+    const gateway = await new FakeGateway({ models: visionModels, script: () => ({ text: "ok" }) }).start();
+    try {
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { model: "fake-small", runner: { images: true } });
+        assert.equal(await runner.runTask("Make the button blue.", "default", undefined, [picked("pick-aaaa0001")]), "success");
+        assert.equal(imageParts(gateway.completions[0]!.body).length, 0);
+        assert.ok(!journal.state.messages.some((m) => Array.isArray(m.content) && m.content.some((part: any) => part.type === "image")));
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("at most three pictures go with one instruction", async () => {
+    const gateway = await new FakeGateway({ models: visionModels, script: () => ({ text: "ok" }) }).start();
+    try {
+        const { runner } = await makeRunner(gateway, makeRepo(), { model: "fake-vision", runner: { images: true } });
+        const five = ["pick-aaaa0001", "pick-aaaa0002", "pick-aaaa0003", "pick-aaaa0004", "pick-aaaa0005"].map((id) => picked(id));
+        assert.equal(await runner.runTask("Look.", "default", undefined, five), "success");
+        assert.equal(imageParts(gateway.completions[0]!.body).length, 3);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("pictures sent with a follow-up join the history right after it, and only once", async () => {
+    let runner: Runner | undefined;
+    const gateway = await new FakeGateway({ models: visionModels, script: (_body, index) => {
+        if (index === 0) {
+            assert.ok(runner!.queueFollowUp("Now this one.", [picked("pick-bbbb0001")]));
+            return { toolCalls: [{ name: "list_files", args: { path: "." } }] };
+        }
+        return { text: "ok" };
+    } }).start();
+    try {
+        const made = await makeRunner(gateway, makeRepo(), { model: "fake-vision", runner: { images: true } });
+        runner = made.runner;
+        assert.equal(await runner.runTask("Look."), "success");
+        const messages = gateway.completions[1]!.body.messages as any[];
+        const follow = messages.findIndex((m) => m.role === "user" && m.content === "Now this one.");
+        assert.ok(follow > 0);
+        assert.equal(messages[follow + 1].content[1].type, "image_url");
+        assert.equal(imageParts(gateway.completions[1]!.body).length, 1);
     } finally {
         await gateway.stop();
     }

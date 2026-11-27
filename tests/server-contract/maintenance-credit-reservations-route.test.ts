@@ -118,6 +118,10 @@ const loadRoute = () => {
     mock.module(mod("lib/codeManagedService.ts"), { namedExports: {
       reconcileExpiredCodeTasks: async () => {if(codeSweepFailure)throw new Error("synthetic Code sweep failure");return { interrupted: 0 };},
     } });
+    // Desktop cloud jobs ride along; their sweep never throws (lib/codeCloudService.ts).
+    mock.module(mod("lib/codeCloudService.ts"), { namedExports: {
+      sweepCodeCloudJobsQuietly: async () => ({ lost: 0, expired: 0, purged: 0, deferred: 0 }),
+    } });
     // The route reports incidents from `after()`, which needs a request scope
     // this harness does not have. Running the callback inline keeps the
     // assertion about *what* is reported, which is the contract under test.

@@ -34,6 +34,7 @@ import { desktopPluginInventory } from "../plugin-contract";
 import type { McpProgressState } from "../../../../lib/mcpConnectorProgress";
 import { DesktopSessionRefused } from "./browser-login";
 import type { VoiceBody } from "../voice-contract";
+import type { PromptRefinerProductChatDecision } from "../../../../lib/promptRefinerProductApiContract";
 
 const DESKTOP_PLUGIN_INVENTORY = "/api/mcp/connections";
 
@@ -43,6 +44,8 @@ const catalogModel = z.object({
     publiclyListed: z.boolean().optional(), enabled: z.boolean(),
     status: z.enum(["enabled", "limited", "disabled", "coming-soon"]), catalogDeleted: z.boolean().optional(),
     reasoningEfforts: z.array(z.enum(["low", "high"])).optional(),
+    // Additive: only a server whose Desktop steps switch is on names it, and an older app never reads it.
+    reasoningEffortSteps: z.array(z.enum(["low", "medium", "high"])).optional().catch(undefined),
     icon: z.string().optional(), bestFor: z.string().optional(), userVisibleNote: z.string().optional(),
     usageClass: z.enum(MODEL_USAGE_CLASSES).optional(),
     creditWeight: z.number().nonnegative().optional(), reasoning: z.enum(["none", "low", "medium", "high"]).optional(),
@@ -71,6 +74,8 @@ const uploadPreparation = z.object({
 const matchesProduct = (product: DesktopTextProduct) => product === "review" ? isDesktopReview : isDesktopChat;
 type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort" | "deepResearchDepth" | "mcpConnectionId"> & {
   review?: true;
+  /** The held Prompt Refiner decision an Auto Chat turn was prepared with. The server consumes it once, so a turn that carries it is never replayed. */
+  promptRefinerDecision?: PromptRefinerProductChatDecision;
   /** A Review turn for one model has no shared admission; it prepares its own context where the server offers that for a Review. */
   reviewContext?: boolean;
   currentLocation?: ChatTurnInput["currentLocation"];
@@ -293,14 +298,17 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     async importedSource({ id, offset }: ChatSourceInput) {
       return request(pathFor(id) + "/continuation?offset=" + (offset ?? "end") + "&limit=50", chatImportedSourceWire);
     },
-    async models(): Promise<ChatModel[]> {
+    async models(options: { reasoningSteps?: boolean } = {}): Promise<ChatModel[]> {
       const { models } = await request("/api/models/catalog", catalog, "GET", undefined, { publicRead: true });
       return models.flatMap((entry) => {
         const parsed = catalogModel.safeParse(entry);
         if (!parsed.success || !isPubliclySelectableModel(parsed.data)) return [];
-        const model = parsed.data;
+        const { reasoningEffortSteps, ...model } = parsed.data;
         const seed = getModel(model.id);
-        return [{ ...model, provider: model.provider as AiProvider, apiModel: model.id,
+        // A step list is used only where the server named the capability, so an older server's catalog reads as before.
+        const efforts = options.reasoningSteps && model.reasoningEfforts && reasoningEffortSteps?.length
+          ? { reasoningEfforts: reasoningEffortSteps } : {};
+        return [{ ...model, ...efforts, provider: model.provider as AiProvider, apiModel: model.id,
           icon: model.icon ?? seed?.icon ?? "", bestFor: model.bestFor ?? seed?.bestFor ?? "",
           usageClass: model.usageClass ?? seed?.usageClass ?? "standard" }];
       });
@@ -419,6 +427,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
             conversationId: current.id, assistantMessageId: assistantId, sourceUserMessageId: sourceId,
             messages, modelId, webSearchMode: current.webSearchMode,
             ...(input.admission ? { admissionToken: input.admission.admissionToken } : {}),
+            ...(input.promptRefinerDecision ? { promptRefinerDecision: input.promptRefinerDecision } : {}),
             ...(bundle ? { contextBundle: bundle } : {}),
             ...(mcpConnectionId ? { mcpConnectionId } : {}),
             ...(input.deepResearchDepth ? { deepResearchDepth: input.deepResearchDepth }
@@ -426,7 +435,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           }, { signal: AbortSignal.any([turnSignal(turn), timeout.signal]) });
         };
         let response = await stream(contextBundle);
-        if (ownContext && contextBundle && response.status === 409) {
+        if (ownContext && contextBundle && response.status === 409 && !input.promptRefinerDecision) {
           // A signed-context refusal happens before the provider stream and keeps the same saved turn identity.
           const refusal = staleChatContext.safeParse(await response.json().catch(() => null));
           if (refusal.success) {

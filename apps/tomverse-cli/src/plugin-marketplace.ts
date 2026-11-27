@@ -5,14 +5,17 @@ import { z } from "zod";
 import { tomverseHome } from "./config.js";
 import { copyTreeSafely, insideFolder, PluginError } from "./plugin-fs.js";
 import { validPluginName } from "./plugin-format.js";
-import { checkGitUrl, checkRef, fetchGitSnapshot } from "./plugin-git.js";
+import { checkDownloadUrl } from "./plugin-download.js";
+import { checkGitUrl, checkRef, fetchGitSnapshotSigningIn, type GitAuth } from "./plugin-git.js";
+import { checkNpmSource } from "./plugin-npm.js";
 import {
     marketplacesDir, readPluginState, stagingDir, updatePluginState, type MarketplaceRecord, type MarketplaceSource,
 } from "./plugin-store.js";
 
 /**
  * A marketplace is a catalog of plugins: a folder or git repository with `.claude-plugin/marketplace.json` (or Codex's
- * `.agents/plugins/marketplace.json`). The person adds one by naming a folder on this computer or a git address; nothing is built in.
+ * `.agents/plugins/marketplace.json`). The person adds one by naming a folder on this computer or a git address; this module adds none
+ * by itself (Desktop adds its own official one, from a catalog it carries).
  * Adding downloads the catalog into the CLI's own folder (git: one commit, recorded) and runs nothing. A plugin is installed from a
  * catalog entry in a separate step, with its own confirmation.
  */
@@ -24,6 +27,8 @@ const MAX_ENTRIES = 500;
 export type EntrySource =
     | { kind: "relative"; path: string }
     | { kind: "git"; url: string; ref?: string; sha?: string; subdir?: string }
+    | { kind: "npm"; package: string; version?: string; registry?: string; integrity?: string }
+    | { kind: "zip"; url: string; sha256?: string }
     | { kind: "unsupported"; type: string };
 
 export type CatalogEntry = { name: string; description?: string; version?: string; category?: string; source: EntrySource };
@@ -89,6 +94,19 @@ const sourceOf = (value: z.infer<typeof entrySchema>["source"], pluginRoot: stri
             const path = safeSubpath(text("path") ?? "");
             if (!path) throw new PluginError("a path inside the marketplace is needed.");
             return { kind: "relative", path };
+        }
+        if (type === "npm") {
+            const registry = text("registry");
+            const integrity = text("integrity");
+            const npm = checkNpmSource({ package: text("package") ?? "", ...(text("version") ? { version: text("version")! } : {}), ...(registry ? { registry } : {}), ...(integrity ? { integrity } : {}) });
+            return { kind: "npm", ...npm } as EntrySource;
+        }
+        if (type === "zip") {
+            const url = text("url");
+            const sha256 = text("sha256");
+            if (!url) throw new PluginError("a url is needed.");
+            if (sha256 !== undefined && !/^[0-9a-f]{64}$/.test(sha256)) throw new PluginError("sha256 must be 64 hex characters.");
+            return { kind: "zip", url: checkDownloadUrl(url, "zip file").toString(), ...(sha256 ? { sha256 } : {}) };
         }
     } catch (error) {
         issues.push(`${name}: ${(error as Error).message}`);
@@ -211,23 +229,26 @@ export const classifyMarketplaceInput = (text: string, ref?: string): Marketplac
     return { kind: "git", url: checkGitUrl(value).url, ...(ref ? { ref } : {}) };
 };
 
-const fill = async (input: MarketplaceInput, dir: string, signal?: AbortSignal): Promise<{ commit?: string; source: MarketplaceSource }> => {
+/** `signIn`: how a private github.com repository is read (see plugin-git.ts); only Desktop passes one. */
+export type MarketplaceOptions = { signal?: AbortSignal; signIn?: (url: string) => Promise<GitAuth | null> };
+
+const fill = async (input: MarketplaceInput, dir: string, options: MarketplaceOptions): Promise<{ commit?: string; source: MarketplaceSource }> => {
     if (input.kind === "directory") {
         copyTreeSafely(input.path, dir);
         return { source: { kind: "directory", path: input.path } };
     }
-    const { commit } = await fetchGitSnapshot({ url: input.url, ...(input.ref ? { ref: input.ref } : {}) }, dir, { signal });
+    const { commit } = await fetchGitSnapshotSigningIn({ url: input.url, ...(input.ref ? { ref: input.ref } : {}) }, dir, options);
     return { commit, source: { kind: "git", url: input.url, ...(input.ref ? { ref: input.ref } : {}) } };
 };
 
 export type AddedMarketplace = { name: string; catalog: Catalog; commit?: string };
 
 /** Downloads a marketplace's catalog (and the files of its own plugins) and records it. Runs nothing from it. */
-export const addMarketplace = async (home: string, input: MarketplaceInput, options: { signal?: AbortSignal } = {}): Promise<AddedMarketplace> => {
+export const addMarketplace = async (home: string, input: MarketplaceInput, options: MarketplaceOptions = {}): Promise<AddedMarketplace> => {
     const staging = newStaging(home);
     try {
         const tree = join(staging.dir, "tree");
-        const { commit, source } = await fill(input, tree, options.signal);
+        const { commit, source } = await fill(input, tree, options);
         const catalog = readCatalog(tree);
         if (readPluginState(home).marketplaces[catalog.name]) throw new PluginError(`A marketplace named ${catalog.name} is already added. Remove it first, or update it.`);
         const target = marketplacePath(home, catalog.name);
@@ -245,14 +266,14 @@ export const addMarketplace = async (home: string, input: MarketplaceInput, opti
 };
 
 /** Downloads the marketplace again from where it came from (git: the newest commit of the same branch). The person asked for it. */
-export const refreshMarketplace = async (home: string, name: string, options: { signal?: AbortSignal } = {}): Promise<AddedMarketplace> => {
+export const refreshMarketplace = async (home: string, name: string, options: MarketplaceOptions = {}): Promise<AddedMarketplace> => {
     const record = readPluginState(home).marketplaces[name];
     if (!record) throw new PluginError(`No marketplace named ${name}.`);
     const staging = newStaging(home);
     try {
         const tree = join(staging.dir, "tree");
         const input: MarketplaceInput = record.source.kind === "directory" ? record.source : { kind: "git", url: record.source.url, ...(record.source.ref ? { ref: record.source.ref } : {}) };
-        const { commit } = await fill(input, tree, options.signal);
+        const { commit } = await fill(input, tree, options);
         const catalog = readCatalog(tree);
         if (catalog.name !== name) throw new PluginError(`The marketplace now calls itself ${catalog.name}; remove ${name} and add it again.`);
         const target = marketplacePath(home, name);

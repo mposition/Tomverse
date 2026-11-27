@@ -134,7 +134,7 @@ test("Desktop shows the cloud and managed credits section only when the server o
     await assert.rejects(page.evaluate(() => window.desktop.managedCode({ action: "read" })), /unavailable/);
     assert.deepEqual(await requests(), []);
 
-    // On: the section appears with where Code can run, and cloud says plainly that it cannot.
+    // On: the section appears with where Code can run, and cloud says plainly that this server does not offer it (the fake server names no cloud execution).
     await application.evaluate(() => { (globalThis as Host).managedEnabled = true; });
     await page.evaluate(() => window.desktop.signOut());
     await page.evaluate(() => window.desktop.signIn());
@@ -147,7 +147,7 @@ test("Desktop shows the cloud and managed credits section only when the server o
     await expect(state("worktree")).toHaveAttribute("data-available", "true");
     await expect(state("ssh")).toHaveAttribute("data-available", "false");
     await expect(state("cloud")).toHaveAttribute("data-available", "false");
-    await expect(state("cloud")).toContainText("needs server infrastructure that does not exist yet");
+    await expect(state("cloud")).toContainText("This Tomverse server does not offer it.");
     await expect(section.getByTestId("managed-no-runner")).toContainText("No managed runner is connected in this build");
 
     // Only models the managed path can use are offered. Two models from one company are not a valid pair.

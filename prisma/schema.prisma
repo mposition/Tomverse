@@ -15,6 +15,9 @@ model User {
   mcpOAuthFlows McpOAuthFlow[]
   mcpCustomServers McpCustomServer[]
   codeTaskReservations CodeTaskReservation[]
+  desktopRemotePasskeys DesktopRemotePasskey[]
+  desktopRemotePasskeyChallenges DesktopRemotePasskeyChallenge[]
+  codeCloudJobs CodeCloudJob[]
   id                            String        @id @default(cuid())
   name                          String?
   email                         String?       @unique
@@ -7339,6 +7342,48 @@ model DesktopRemoteCommand {
   @@index([createdAt])
 }
 
+/// One WebAuthn credential an account registered to confirm "allow once" and follow-ups sent from another device
+/// (docs/ops/desktop-remote-control.md). The public key only; the private key stays in the person's authenticator.
+model DesktopRemotePasskey {
+  id           String    @id
+  userId       String
+  /// The credential id, base64url. Unique across accounts.
+  credentialId String    @unique
+  /// SubjectPublicKeyInfo (DER), base64url.
+  publicKey    String
+  /// COSE algorithm: -7 (ES256) or -257 (RS256); a CHECK allows nothing else.
+  alg          Int
+  signCount    BigInt    @default(0)
+  /// The relying party (host name) the credential was made for; an assertion for another one is refused.
+  rpId         String
+  label        String
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt   DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// One single-use challenge for registering a passkey, confirming that enrollment, one remote command, or a removal.
+/// Valid for two minutes; every purpose but registering is bound to the digest of the one thing it confirms.
+model DesktopRemotePasskeyChallenge {
+  id          String   @id
+  userId      String
+  /// register, enroll, command or remove; a CHECK allows nothing else.
+  purpose     String
+  challenge   String
+  /// Null for register; otherwise the digest of what is confirmed.
+  bindingHash String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
 // --- Prompt Refiner shadow reservation authority --------------------------
 //
 // These rows authorize no provider call on their own. The stage is deliberately
@@ -13193,6 +13238,52 @@ model CodingProviderTerms {
   updatedByEmail String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+/// Desktop cloud execution (docs/ops/desktop-cloud-execution.md): one coding task a runner runs on a snapshot of the
+/// person's repository. Money is on the managed reservation named by reservationId; billing is its last receipt.
+/// Objects live at code-cloud/<id>/bundle and code-cloud/<id>/result.patch. Deleted seven days after the job ends.
+model CodeCloudJob {
+  id                   String    @id
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientTaskId         String
+  /// uploading | queued | starting | running | completed | failed | cancelled (CODE_CLOUD_JOB_STATUSES)
+  status               String
+  instruction          String
+  catalogVersion       Int
+  contentHash          String
+  executorModelId      String
+  reviewerModelId      String
+  approvedCredits      Int
+  bundleBytes          Int
+  bundleSha256         String
+  baseCommit           String
+  bundleObjectKey      String?
+  reservationId        String?
+  billing              Json?
+  runnerId             String?
+  /// SHA-256 of the per-claim job token; cleared when the job ends.
+  runnerTokenHash      String?
+  runnerLeaseExpiresAt DateTime? @db.Timestamptz(3)
+  cancelRequestedAt    DateTime? @db.Timestamptz(3)
+  logs                 Json      @default("[]")
+  logSeq               Int       @default(0)
+  failureCode          String?
+  summary              String?
+  patchObjectKey       String?
+  patchBytes           Int?
+  patchSha256          String?
+  createdAt            DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime  @default(now()) @db.Timestamptz(3)
+  startedAt            DateTime? @db.Timestamptz(3)
+  finishedAt           DateTime? @db.Timestamptz(3)
+  expiresAt            DateTime  @db.Timestamptz(3)
+
+  @@unique([userId, clientTaskId])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 /// Code financial metadata only. Generated text and prompts are never stored.

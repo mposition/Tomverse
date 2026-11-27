@@ -6,7 +6,7 @@ import { JournalError } from "./session.js";
 
 /**
  * Permission modes and allow / ask / deny rules for the actions that need an
- * approval (apply_patch, run_command, web_fetch and tools named mcp__...).
+ * approval (apply_patch, run_command, web_fetch, web_search and tools named mcp__...).
  *
  * Everything that decides is in `evaluate`, a pure function, in this order:
  *
@@ -51,7 +51,8 @@ export type RuleScope = "user" | "project";
 export type PermissionRule = { effect: RuleEffect; tool: string; pattern?: string; exact?: boolean };
 export type ScopedRule = PermissionRule & { scope: RuleScope };
 
-export const RULE_TOOLS = ["apply_patch", "run_command", "web_fetch"] as const;
+/** `web_search` (a paid search through the Tomverse API) has no pattern: a rule for it names the tool, like an MCP tool's. */
+export const RULE_TOOLS = ["apply_patch", "run_command", "web_fetch", "web_search"] as const;
 const MCP_RULE_TOOL = /^mcp__[A-Za-z0-9_-]+(?:__(?:[A-Za-z0-9_-]+|\*))?$/;
 const MAX_PATTERN = 500;
 
@@ -60,9 +61,10 @@ export const isRuleTool = (tool: unknown): tool is string => typeof tool === "st
 /** Why a rule is not acceptable, or null. An allow rule must say what it allows. */
 export const ruleProblem = (rule: PermissionRule): string | null => {
     if (!["allow", "ask", "deny"].includes(rule.effect)) return "The effect must be allow, ask or deny.";
-    if (!isRuleTool(rule.tool)) return "The tool must be apply_patch, run_command, web_fetch or an MCP tool name (mcp__server__tool).";
+    if (!isRuleTool(rule.tool)) return "The tool must be apply_patch, run_command, web_fetch, web_search or an MCP tool name (mcp__server__tool).";
     const mcp = rule.tool.startsWith("mcp__");
     if (mcp && rule.pattern !== undefined) return "An MCP tool rule names the tool; it has no pattern.";
+    if (rule.tool === "web_search") return rule.pattern !== undefined || rule.exact !== undefined ? "A web_search rule names the tool; it has no pattern." : null;
     if (!mcp && rule.effect === "allow" && !rule.pattern?.trim()) return "An allow rule needs a pattern (a path glob, a command prefix or a host).";
     if (rule.pattern !== undefined) {
         if (typeof rule.pattern !== "string" || !rule.pattern.trim() || rule.pattern.length > MAX_PATTERN || /[\u0000-\u001f\u007f]/.test(rule.pattern)) {
@@ -85,6 +87,8 @@ type Subject =
     | { kind: "patch"; paths: string[]; deletes: boolean }
     | { kind: "command"; strict: string[] | null; broad: string[][]; text: string; shellParts: string[] }
     | { kind: "web"; host: string }
+    /** A web search through the Tomverse API: it sends its queries out and is charged to the account. */
+    | { kind: "search" }
     /** A tool of an MCP server. `server` and `tool` are null when the request carries no server information. */
     | { kind: "mcp"; name: string; server: string | null; tool: string | null }
     /** A click or typing in the local browser tab. */
@@ -130,6 +134,7 @@ const joinedWords = (part: string) => part.replace(/["'`^\\]/g, "").replace(/[()
 const subjectOf = (view: ApprovalView): Subject => {
     if (view.patch) return { kind: "patch", paths: view.patch.map((edit) => edit.path), deletes: view.patch.some((edit) => edit.action === "delete") };
     if (view.web) return { kind: "web", host: view.web.host.toLowerCase() };
+    if (view.webSearch) return { kind: "search" };
     if (view.command) {
         const plan = view.command;
         const argv = (view.input as { argv?: unknown } | null)?.argv;
@@ -243,7 +248,7 @@ const toolMatches = (rule: PermissionRule, toolName: string, subject: Subject) =
 const ruleApplies = (rule: PermissionRule, toolName: string, subject: Subject) => {
     if (!toolMatches(rule, toolName, subject)) return false;
     const strict = rule.effect === "allow";
-    if (subject.kind === "other" || subject.kind === "browser" || subject.kind === "mcp") return rule.pattern === undefined;
+    if (subject.kind === "other" || subject.kind === "browser" || subject.kind === "mcp" || subject.kind === "search") return rule.pattern === undefined;
     // No allow rule reaches a desktop window, whatever a rules file says.
     if (subject.kind === "computer") return !strict && rule.pattern === undefined;
     if (rule.pattern === undefined) return true;
@@ -531,7 +536,8 @@ export const evaluate = (view: ApprovalView, options: EvaluateOptions): Verdict 
     const restrictiveTool = view.toolName === "browser_navigate" ? "web_fetch" : view.toolName;
     const deny = rules.find((rule) => rule.effect === "deny" && ruleApplies(rule, restrictiveTool, subject));
     if (deny) return { kind: "deny", reason: `Denied by your ${deny.scope} permission rule: ${describeRule(deny)}.`, policy: note("deny_rule", describeRule(deny)) };
-    if (mode === "read_only" && subject.kind !== "web") {
+    // Reading a page and searching change nothing: in read-only mode they still go to a rule or a person.
+    if (mode === "read_only" && subject.kind !== "web" && subject.kind !== "search") {
         return { kind: "deny", reason: "Read-only mode: files are not changed and commands are not run.", policy: note("mode", "read_only") };
     }
     if (boundary) return { kind: "human", reason: boundary.reason, policy: note("boundary", boundary.code) };
@@ -650,6 +656,7 @@ export const ruleForApproval = (view: ApprovalView): PermissionRule | null => {
     if (view.error || checkBoundaries(view)) return null;
     // An answer about opening a site in the browser tab is never saved as a rule: it would also allow web_fetch.
     if (view.web) return view.toolName === "browser_navigate" ? null : { effect: "allow", tool: "web_fetch", pattern: view.web.host };
+    if (view.webSearch) return { effect: "allow", tool: "web_search" };
     if (view.patch) return view.patch.some((edit) => edit.action === "delete") ? null : { effect: "allow", tool: "apply_patch", pattern: "**" };
     const subject = subjectOf(view);
     if (view.command && subject.kind === "command" && subject.strict?.length && !view.command.background) {
