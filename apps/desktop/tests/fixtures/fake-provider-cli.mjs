@@ -30,6 +30,18 @@ async function codex() {
     hold();
     return;
   }
+  if (scenario === "codex-middle") {
+    // The CLI starts a middle process that starts a background command and exits at once, so the command's parent is gone.
+    const grandchildFile = options.pidFile + ".grandchild";
+    const script = `const { spawn } = require("node:child_process"); const fs = require("node:fs");
+      const g = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" }); g.unref();
+      fs.writeFileSync(${JSON.stringify(grandchildFile)}, String(g.pid)); setTimeout(() => process.exit(0), 100);`;
+    const middle = spawn(process.execPath, ["-e", script], { stdio: "ignore" });
+    fs.writeFileSync(options.pidFile, JSON.stringify({ cli: process.pid, middle: middle.pid }));
+    out({ type: "thread.started", thread_id: "thread-middle" });
+    hold();
+    return;
+  }
   if (scenario === "codex-orphan") {
     // The CLI finishes and exits, and leaves a background command running.
     const child = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], { stdio: "ignore" });
