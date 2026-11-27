@@ -3,7 +3,7 @@ import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuid
 import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
 import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
+import { desktopChatTurnField, desktopDeepResearchEnabled, desktopDriveEnabled } from "@/lib/nativeBearerGate";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { desktopResearchAnswerId } from "@/lib/desktopResearchAnswerId";
 import { DEEP_RESEARCH_MODEL_ID } from "@/lib/deepResearchModel";
@@ -1556,9 +1556,7 @@ async function handleChatPost(
         const session = routeAuth.session;
         const body = await readChatJsonBody(req);
         const desktop = req.headers.get("origin") === DESKTOP_APP_ORIGIN;
-        if (desktop && (!body || typeof body !== "object" ||
-            Object.keys(body).some((key) => !["messages", "modelId", "conversationId", "assistantMessageId",
-                "sourceUserMessageId", "reasoningEffort", "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth"].includes(key)))) {
+        if (desktop && (!body || typeof body !== "object" || Object.keys(body).some((key) => !desktopChatTurnField(key)))) {
             return tracedJsonError("Invalid Desktop Chat request.", "INVALID_REQUEST", 400, traceId);
         }
         const currentLocation = parseChatLocation(
@@ -1600,7 +1598,7 @@ async function handleChatPost(
                 })
                 : null;
             const desktopProduct = desktopConversationWriteProduct(desktopConversation);
-            if (!desktopProduct || (desktopProduct === "chat" && admissionToken)) {
+            if (!desktopProduct || (desktopProduct === "chat" && admissionToken) || (desktopProduct !== "chat" && mcpConnectionId)) {
                 return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
             }
             if (desktopConversation?.password != null) return conversationLockedResponse();

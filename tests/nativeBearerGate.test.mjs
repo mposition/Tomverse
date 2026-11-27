@@ -6,6 +6,7 @@ import {
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
   desktopBillingEnabled,
+  desktopChatTurnField,
   desktopComposerToolsEnabled,
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
@@ -58,6 +59,30 @@ test("Desktop remote control enrols only the PC's own sync path, and only for th
     delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
     assert.equal(desktopRemoteControlEnabled(), false);
     assert.equal(desktopWriteApiRoute(sync, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop prepares a turn's context with Chat or Review writes on, and with neither it does not", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
+    // A Review turn that one model answers alone carries memory and the assistant through its own context.
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "GET"), false);
+    delete process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED;
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];
@@ -148,6 +173,33 @@ test("Desktop connector screens are off unless their own switch and the account 
     for (const path of ["/api/mcp/connections", "/api/mcp/oauth/start", "/api/mcp/invocations/abc"]) {
       assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
     }
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("a Desktop turn may carry the device position, and a chosen plugin only behind the plugins switch", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED", "TOMVERSE_DESKTOP_PLUGINS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of ["messages", "modelId", "conversationId", "assistantMessageId", "sourceUserMessageId", "reasoningEffort",
+      "webSearchMode", "admissionToken", "contextBundle", "deepResearchDepth", "currentLocation"]) {
+      assert.equal(desktopChatTurnField(key), true, key);
+    }
+    // Fields the web sends that a Desktop turn has no use for stay refused.
+    for (const key of ["mcpConnectionId", "turnstileToken", "promptRefinerDecision", "guestAutoCapability", "researchMode",
+      "routerLocationFusion", "projectReferences", "action", "__proto__", "constructor"]) {
+      assert.equal(desktopChatTurnField(key), false, key);
+    }
+    for (const key of switches) process.env[key] = "true";
+    assert.equal(desktopChatTurnField("mcpConnectionId"), true);
+    assert.equal(desktopChatTurnField("turnstileToken"), false);
+    process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED = "1";
+    assert.equal(desktopChatTurnField("mcpConnectionId"), false);
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];

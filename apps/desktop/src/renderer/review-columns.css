@@ -8,7 +8,7 @@
 .review-columns-area { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .review-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.review-column-toolbar { flex: none; display: grid; gap: 6px; }
+.review-column-toolbar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .review-column-toolbar > p { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .review-toolbar-row { display: flex; align-items: center; gap: 12px; }
 .review-model-chips { display: flex; flex: 1; min-width: 0; gap: 8px; overflow-x: auto; padding: 3px; }
@@ -80,6 +80,8 @@
 /* Too narrow for side-by-side answers: the chips act as tabs and one column shows at a time. */
 @container review-results (max-width: 759px) {
   .review-column[data-focused="false"] { display: none; }
+  /* With one column showing there is no view to choose. */
+  .review-comparison-switch { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .review-column-switch i, .review-column-switch i::after { transition: none; }

@@ -67,7 +67,7 @@ test("the project workspace runs inside Desktop: overview, chats, materials, mem
         if (target.pathname === "/api/auth/desktop/logout") return Response.json({ ok: true });
         if (target.pathname === "/api/auth/desktop/settings-session") return Response.json({ token: "fixture..settings.web.session", expiresAt: Date.now() + 300_000 });
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
-          autoSelection: { offered: false }, desktopWrite: true, desktopImport: true, desktopPlugins: true, desktopReview: { easy: true, plan: "Pro", modelLimit: 3 } });
+          autoSelection: { offered: false }, desktopWrite: true, desktopImport: true, desktopPlugins: true, desktopChatPlugin: true, desktopReview: { easy: true, plan: "Pro", modelLimit: 3 } });
         if (target.pathname === "/api/models/catalog") return Response.json({ models: [
           { id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", minimumPlan: "Guest", enabled: true, status: "enabled" }] });
         if (target.pathname === "/api/products/chat/conversations" && method === "POST") return Response.json({ id: "new-project-chat" });

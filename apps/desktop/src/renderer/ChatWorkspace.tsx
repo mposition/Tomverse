@@ -33,6 +33,7 @@ import { zh } from "../../../../locales/zh";
 import { zhHant } from "../../../../locales/zhHant";
 import { reviewSeedFromChat } from "../../../../lib/chatReviewHandoff";
 import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
+import { useSendGuard } from "./send-guard";
 import { DraftDictation } from "./DraftDictation";
 import { ImportedSourceUnlock } from "./ImportedSourceUnlock";
 import { AnswerModel, ChatMarkdown, CopyAnswer, UserMessageContent } from "./ChatTranscript";
@@ -949,22 +950,12 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
     if (scroll.current && nearBottom.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat.live, chat.conversation]);
 
-  // Uploads and the position read take time. A message is sent only if the account and conversation never
-  // changed meanwhile (leaving and coming back counts as a change) and the draft is still the one it was.
-  const scopeChanges = useRef(0);
-  useLayoutEffect(() => { scopeChanges.current += 1; }, [toolsScope]);
-  const latestDraft = useRef(chat.draft);
-  useLayoutEffect(() => { latestDraft.current = chat.draft; });
-  const [preparing, setPreparing] = useState(false);
+  const { preparing, guarded } = useSendGuard(toolsScope, chat.draft);
   async function send(depth?: DeepResearchDepth) {
     const model = depth ? researchModel : selectedModel;
     if (!chatWrite || !online || !model || (!chat.draft.trim() && !attachments.files.length && !draftExcerpt) || preparing ||
         chat.sending || chat.writing || location.state.pending || (depth && (!chat.draft.trim() || draftExcerpt || !canUseModelWithPlan(plan, model)))) return;
-    const changes = scopeChanges.current;
-    const draft = chat.draft;
-    const stale = () => scopeChanges.current !== changes || latestDraft.current !== draft;
-    setPreparing(true);
-    try {
+    await guarded(async (stale) => {
       const attachmentUploadIds = await attachments.prepare();
       if (!attachmentUploadIds || stale()) return;
       // A fresh fix for this message only; a failed read continues without a location.
@@ -976,9 +967,7 @@ export function ChatWorkspace({ chat, chatWrite, autoOffered, onImport, onCompar
           ...(connectors && connector && !draftExcerpt ? { mcpConnectionId: connector } : {}) }),
         tools: composerTools ? toolChanges : undefined });
       if (saved) { attachments.clear(); setToolDraft(undefined); }
-    } finally {
-      setPreparing(false);
-    }
+    });
   }
 
   const live = chat.live;

@@ -82,6 +82,12 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopBilling: desktopBillingEnabled(),
     desktopManagedCode: desktopManagedCodeEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
+    // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
+    // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
+    desktopTurnLocation: desktopWrite || desktopReview,
+    desktopChatPlugin: desktopWrite && desktopPluginsEnabled() && mcpPreviewEnabled(),
+    desktopReviewContext: desktopReview,
+    desktopReviewTools: desktopReview && desktopComposerToolsEnabled(),
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };

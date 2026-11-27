@@ -11,13 +11,15 @@ import { reviewProviderName } from "../../../../lib/reviewProviderName";
 import { desktopChatCopy } from "../../../../locales/desktopChat";
 import { desktopReviewCopy } from "../../../../locales/desktopReview";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
-import type { ChatConversation, ChatModel, ReviewCapability, ReviewImageOffer, ReviewTurnInput, ReviewTurnResult } from "../chat-contract";
+import type { ChatConversation, ChatModel, ComposerOptions, ReviewCapability, ReviewImageOffer, ReviewTurnInput, ReviewTurnResult } from "../chat-contract";
 import { ImportedSource, type useChatHistory } from "./ChatWorkspace";
 import { DraftDictation } from "./DraftDictation";
 import { AttachmentDraftStatus, AttachmentPicker, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
 import { ComposerTools } from "./ComposerTools";
+import { ChatLocationStatus, ChatLocationTool, useChatLocation } from "./ChatDraftLocation";
+import { useSendGuard } from "./send-guard";
 import { DesktopReviewAnalysis } from "./DesktopReviewAnalysis";
 import { DesktopCompareSummary } from "./DesktopCompareSummary";
 import { BrandMark } from "./ReviewBrand";
@@ -76,7 +78,8 @@ export function useReviewRun(history: History) {
   }), []);
 
   /** Sends the composer draft to the chosen models, or, with `followUp`, one question to one model of the saved Review. */
-  async function send(mode: ReviewMode, choices: string[], effort: Effort, attachmentUploadIds: string[], followUp?: { prompt: string; modelId: string }) {
+  async function send(mode: ReviewMode, choices: string[], effort: Effort, attachmentUploadIds: string[], followUp?: { prompt: string; modelId: string },
+    extra: Pick<ReviewTurnInput, "currentLocation" | "tools"> = {}) {
     const prompt = followUp ? followUp.prompt : history.draft;
     if (request.current || (!prompt.trim() && !attachmentUploadIds.length) || (history.selected && !history.conversation)) return false;
     const requestId = crypto.randomUUID();
@@ -92,7 +95,9 @@ export function useReviewRun(history: History) {
     setOnly(followUp?.modelId);
     try {
       const result = await window.desktop.sendReview({ mode, choices, effort, requestId, prompt, attachmentUploadIds,
-        conversationId: history.conversation?.id, ...(followUp ? { onlyModelId: followUp.modelId } : {}) });
+        conversationId: history.conversation?.id, ...(followUp ? { onlyModelId: followUp.modelId } : {}),
+        ...(extra.currentLocation ? { currentLocation: extra.currentLocation } : {}),
+        ...(!followUp && extra.tools && Object.keys(extra.tools).length ? { tools: extra.tools } : {}) });
       if (request.current !== requestId) return false;
       if (result.savedQuestion && !followUp) history.setDraft("");
       if (result.conversation) history.applyConversation(result.conversation);
@@ -117,7 +122,7 @@ export function useReviewRun(history: History) {
 }
 
 export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages, onImageStarter, attachments, online, dictation, preferredModelIds,
-  analysisEnabled, searchReadiness, imageCapability, onModelImage }: {
+  analysisEnabled, searchReadiness, imageCapability, onModelImage, composerTools, deviceLocation }: {
   history: History; capability: ReviewCapability | null; run: ReturnType<typeof useReviewRun>;
   onFollowUp?: (draft: string) => void;
   onImages: (offer: ReviewImageOffer) => void;
@@ -128,6 +133,8 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   online: boolean;
   dictation: boolean;
   preferredModelIds?: readonly string[];
+  /** The "+" menu's web search, assistant and memory rows, and the "Current location" switch, as in Chat. */
+  composerTools?: boolean; deviceLocation?: boolean;
 }) {
   const { language } = history;
   const copy = desktopReviewCopy[language];
@@ -160,6 +167,11 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const providerIds = [...new Set(eligible.map((model) => model.provider))];
   const id = history.selected?.id;
   const chatKey = id ?? "new";
+  const toolsScope = `${history.account ?? ""}:${chatKey}`;
+  const [toolDraft, setToolDraft] = useState<{ scope: string; changes: ComposerOptions }>();
+  const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
+  const location = useChatLocation(deviceLocation && history.account ? history.account : null);
+  const { preparing, guarded } = useSendGuard(toolsScope, history.draft);
   const [arranged, setArranged] = useState<{ key: string; ids: string[] }>();
   const [closed, setClosed] = useState<{ key: string; ids: string[] }>();
   // The models the Review holds, in the order the columns were arranged.
@@ -330,7 +342,11 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
       canToggle={(modelId) => !run.running && (isOn(modelId) ? choices.length > 1 : choices.length < limit && eligible.some((model) => keyOf(model.id) === keyOf(modelId)))}
       canClose={(modelId) => !run.running && (!isOn(modelId) || choices.length > 1)}
       onMove={moveColumns} onToggle={toggleColumn} onClose={closeColumn}
-      onAsk={(modelId, text) => run.send("professional", [modelId], "default", [], { prompt: text, modelId })}
+      onAsk={(modelId, text) => guarded(async (stale) => {
+        // The position is read for this question only; a Review left meanwhile gets nothing.
+        const currentLocation = await location.read();
+        return !stale() && run.send("professional", [modelId], "default", [], { prompt: text, modelId }, { currentLocation });
+      }, true)}
       onFollowUp={onFollowUp} />}
   </div>}
   {showComposer && <div className="composer-slot chat-composer-slot review-composer-slot">
@@ -343,12 +359,21 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
     </div>}
     <form className="composer chat-composer" aria-label={copy.composer} onSubmit={async (event) => {
       event.preventDefault();
-      if (!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || run.running) return;
-      const attachmentUploadIds = await attachments.prepare();
-      if (!attachmentUploadIds) return;
-      if (await run.send(mode, choices, actualEffort, attachmentUploadIds)) attachments.clear();
+      if (!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || run.running || preparing || location.state.pending) return;
+      await guarded(async (stale) => {
+        const attachmentUploadIds = await attachments.prepare();
+        if (!attachmentUploadIds || stale()) return;
+        // A fresh fix for this message only; a failed read continues without a location.
+        const currentLocation = await location.read();
+        if (stale()) return;
+        if (await run.send(mode, choices, actualEffort, attachmentUploadIds, undefined, { currentLocation, tools: composerTools ? toolChanges : undefined })) {
+          attachments.clear();
+          setToolDraft(undefined);
+        }
+      });
     }}>
       <AttachmentDraftStatus draft={attachments} busy={run.running} />
+      <ChatLocationStatus location={location} language={language} />
       <div className="review-setup">
         {capability.easy && <div className="review-mode-toggle" role="group" aria-label={copy.mode}>
           {(["easy", "professional"] as const).map((value) => <button type="button" key={value} aria-pressed={mode === value}
@@ -382,7 +407,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         </DesktopModelPicker>}
       </div>
       <textarea id="review-draft-input" aria-label={copy.question} placeholder={copy.ask} value={history.draft}
-        disabled={run.running || attachments.uploading} onPaste={attachments.onPaste}
+        disabled={run.running || attachments.uploading || preparing} onPaste={attachments.onPaste}
         onChange={(event) => history.setDraft(event.currentTarget.value)} onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
             event.preventDefault();
@@ -390,17 +415,22 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
           }
         }} />
       <div className="composer-actions">
-        {attachments.enabled && <ComposerTools language={language} disabled={run.running || attachments.uploading}
-          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}>
-          <AttachmentPicker draft={attachments} busy={run.running} tool />
+        {(attachments.enabled || composerTools || deviceLocation) && <ComposerTools language={language} key={toolsScope}
+          disabled={run.running || attachments.uploading || preparing}
+          onDrive={online && attachments.googleDrive ? () => void attachments.importDrive() : undefined} driveFull={attachments.driveFull}
+          options={composerTools ? { webSearchMode: history.conversation?.webSearchMode, memoryMode: history.conversation?.memoryMode,
+            assistantProfileId: history.conversation?.assistantProfile?.profileId, ...toolChanges } : undefined}
+          setOptions={(change) => setToolDraft({ scope: toolsScope, changes: { ...toolChanges, ...change } })}>
+          {deviceLocation && <ChatLocationTool location={location} disabled={run.running || attachments.uploading || preparing} />}
+          {attachments.enabled && <AttachmentPicker draft={attachments} busy={run.running} tool />}
         </ComposerTools>}
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
-          disabled={run.running || attachments.uploading} draft={history.draft} setDraft={history.setDraft} />}
+          disabled={run.running || attachments.uploading || preparing} draft={history.draft} setDraft={history.setDraft} />}
         <span className="spacer"/>
         {run.running
           ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={16} /></button>
           : <button className="send" type="submit" aria-label={copy.send}
-            disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading}><ArrowUp size={18} /></button>}
+            disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading || preparing}><ArrowUp size={18} /></button>}
       </div>
     </form>
   </div>}

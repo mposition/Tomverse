@@ -374,7 +374,7 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
             balances: { dailyRemainingCredits: 3, planRemainingCredits: 63, purchasedRemainingCredits: 0 } });
         }
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
-          autoSelection: { offered: false }, desktopWrite: !host.readOnly, desktopImport: true, desktopPlugins: true,
+          autoSelection: { offered: false }, desktopWrite: !host.readOnly, desktopImport: true, desktopPlugins: true, desktopChatPlugin: true, desktopTurnLocation: true,
           desktopReview: { easy: true, plan: "Pro", modelLimit: 3 },
           desktopStarters: [
             { id: "debug-stack-trace", label: "Debug a stack trace", seed: "Help me debug this stack trace.", outcome: "Understand the error." },
