@@ -5,13 +5,16 @@ import { after, beforeEach, test } from "node:test";
 import {
   ATTACHMENT_TEXT_CACHE_VERSION,
   ATTACHMENT_TEXT_CLAIM_VERSION,
+  AUDIO_TRANSCRIPT_RESULT_VERSION,
   claimAttachmentTextCache,
   readAttachmentTextCache,
   readAttachmentTranscriptOutcome,
+  readInheritedTranscriptOutcome,
   releaseAttachmentTextClaim,
   renewAttachmentTextClaim,
   writeAttachmentNoTextOutcome,
   writeAttachmentTextCache,
+  writeAudioTranscript,
 } from "@/lib/attachmentTextCache";
 import {
   AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS,
@@ -115,9 +118,10 @@ const transcription = (calls: { count: number }, text = "Minutes of the meeting.
 /** The production store, with one part replaced. */
 const productionStore = (overrides: Partial<AudioTranscriptStore> = {}): AudioTranscriptStore => ({
   read: readAttachmentTranscriptOutcome,
+  readInherited: readInheritedTranscriptOutcome,
   claim: claimAttachmentTextCache,
   renew: renewAttachmentTextClaim,
-  write: writeAttachmentTextCache,
+  write: writeAudioTranscript,
   writeNoText: writeAttachmentNoTextOutcome,
   release: releaseAttachmentTextClaim,
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -179,9 +183,9 @@ test("two requests for one recording transcribe it once and book its seconds onc
   assert.equal(calls.count, 1, "one paid transcription");
   assert.deepEqual(first, [{ kind: "audio transcript", text: "Minutes of the meeting." }]);
   assert.deepEqual(second, first);
-  // Stored as text, the claim gone.
+  // Stored as a paid result, at its own version, the claim gone.
   const row = await prisma.messageAttachmentTextCache.findUniqueOrThrow({ where: { attachmentId } });
-  assert.equal(row.version, ATTACHMENT_TEXT_CACHE_VERSION);
+  assert.equal(row.version, AUDIO_TRANSCRIPT_RESULT_VERSION);
   assert.deepEqual(await readAttachmentTextCache(attachmentId), first);
   // The caller's day and the deployment's day each booked once: three seconds,
   // settled on the provider's own figure.
@@ -212,8 +216,8 @@ test("a claim is taken once, refused while fresh or answered, and taken over onc
   assert.equal(claim.version, ATTACHMENT_TEXT_CLAIM_VERSION);
   assert.deepEqual(claim.entries, { claim: "b" });
 
-  // Answered text is never claimed over, however old it is.
-  await writeAttachmentTextCache(attachmentId, [{ kind: "audio transcript", text: "Done." }]);
+  // A paid result is never claimed over, however old it is.
+  await writeAudioTranscript(attachmentId, [{ kind: "audio transcript", text: "Done." }]);
   await prisma.$executeRaw`
     UPDATE "MessageAttachmentTextCache"
     SET "createdAt" = CURRENT_TIMESTAMP - INTERVAL '1 day'
@@ -476,6 +480,107 @@ test("renewing a claim is the holder's alone and restarts its clock", async () =
     FROM "MessageAttachmentTextCache" WHERE "attachmentId" = ${attachmentId}`;
   assert.ok(age < 10, `restarted, ${age}s old`);
   // Once text replaces it, there is no claim left to renew.
-  await writeAttachmentTextCache(attachmentId, [{ kind: "audio transcript", text: "Done." }]);
+  await writeAudioTranscript(attachmentId, [{ kind: "audio transcript", text: "Done." }]);
   assert.equal(await renewAttachmentTextClaim(attachmentId, "mine"), false);
+});
+
+// -- Review r-20261127-124325-a4352d: a paid result has its own version ------
+
+test("bumping the extractor cache version leaves paid transcripts and no-speech results in force", async () => {
+  const { userId, attachmentId } = await recording();
+  const calls = { count: 0 };
+  const paid = await quietly(() => askFor(userId, attachmentId, calls));
+  const silent = await recording();
+  await quietly(() =>
+    transcribeAudioAttachmentOnce(input(silent.userId, silent.attachmentId), {
+      transcription: transcription(calls, "   "),
+    })
+  ).catch(() => undefined);
+  assert.equal(calls.count, 2);
+  const bookedBefore = await bucketTotal("voice-seconds-day");
+
+  // The extractor version a PDF change would bump to: the route's early read
+  // still finds the transcript, and the audio path never consults it at all.
+  const bumped = { extractorVersion: ATTACHMENT_TEXT_CACHE_VERSION + 1 };
+  assert.deepEqual(await readAttachmentTextCache(attachmentId, bumped), paid);
+  assert.equal(await readAttachmentTranscriptOutcome(silent.attachmentId), "no_text");
+  // An extractor's own row at the old version is a miss, as it should be.
+  const pdf = await recording();
+  await writeAttachmentTextCache(pdf.attachmentId, [{ kind: "pdf text", text: "page one" }]);
+  assert.equal(await readAttachmentTextCache(pdf.attachmentId, bumped), null);
+
+  // Asked again, neither recording is transcribed or booked.
+  assert.deepEqual(await quietly(() => askFor(userId, attachmentId, calls)), paid);
+  await assert.rejects(
+    quietly(() => transcribeAudioAttachmentOnce(input(silent.userId, silent.attachmentId), {
+      transcription: transcription(calls),
+    })),
+    (error: { code?: string }) => error.code === "ATTACHMENT_NO_TEXT"
+  );
+  assert.equal(calls.count, 2, "no transcription");
+  assert.equal(await bucketTotal("voice-seconds-day"), bookedBefore, "no booking");
+});
+
+test("a claim takes over only a stale claim or an older audio result, never a paid one", async () => {
+  const { attachmentId } = await recording();
+  const age = async (seconds: number) => prisma.$executeRaw`
+    UPDATE "MessageAttachmentTextCache"
+    SET "createdAt" = CURRENT_TIMESTAMP - ${seconds}::int * INTERVAL '1 second'
+    WHERE "attachmentId" = ${attachmentId}`;
+  for (const write of [
+    () => writeAudioTranscript(attachmentId, [{ kind: "audio transcript", text: "Paid." }]),
+    () => writeAttachmentNoTextOutcome(attachmentId),
+    // An extractor's row on this attachment is no claim's to take either.
+    () => writeAttachmentTextCache(attachmentId, [{ kind: "text", text: "Extracted." }]),
+  ]) {
+    await write();
+    await age(10 * 24 * 3600);
+    assert.equal(await claimAttachmentTextCache(attachmentId, "x", AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS), false);
+  }
+});
+
+test("bumping the audio result version transcribes again, on purpose", async () => {
+  const { userId, attachmentId } = await recording();
+  // A result stored at the version before the current one.
+  await prisma.$executeRaw`
+    INSERT INTO "MessageAttachmentTextCache" ("attachmentId", "version", "entries")
+    VALUES (${attachmentId}, ${AUDIO_TRANSCRIPT_RESULT_VERSION - 1},
+            ${JSON.stringify([{ kind: "audio transcript", text: "Old model." }])}::jsonb)`;
+  assert.equal(await readAttachmentTranscriptOutcome(attachmentId), null);
+  const calls = { count: 0 };
+  const fresh = await quietly(() => askFor(userId, attachmentId, calls));
+  assert.equal(calls.count, 1, "transcribed again");
+  assert.deepEqual(fresh, [{ kind: "audio transcript", text: "Minutes of the meeting." }]);
+  const row = await prisma.messageAttachmentTextCache.findUniqueOrThrow({ where: { attachmentId } });
+  assert.equal(row.version, AUDIO_TRANSCRIPT_RESULT_VERSION);
+});
+
+test("a resent copy of a recording inherits the paid result of the one it was copied from", async () => {
+  const original = await recording();
+  const calls = { count: 0 };
+  const paid = await quietly(() => askFor(original.userId, original.attachmentId, calls));
+  const source = await prisma.messageAttachment.findUniqueOrThrow({ where: { id: original.attachmentId } });
+  // What a resend binds: a new message, a new object, the original named.
+  const copyOf = async (sourceAttachmentId: string, overrides: { size?: number } = {}) => {
+    const message = await prisma.message.create({
+      data: { conversationId: source.conversationId, role: "user", content: "again" },
+    });
+    return prisma.messageAttachment.create({
+      data: {
+        messageId: message.id, conversationId: source.conversationId, userId: source.userId,
+        name: source.name, mediaType: source.mediaType, size: overrides.size ?? source.size, kind: source.kind,
+        objectKey: `users/${source.userId}/attachments/${randomUUID()}.mp3`, sourceAttachmentId,
+      },
+    });
+  };
+  const copy = await copyOf(original.attachmentId);
+  const copyOfCopy = await copyOf(copy.id);
+  assert.deepEqual(await readInheritedTranscriptOutcome(copyOfCopy.id), paid, "two copies back");
+  assert.deepEqual(await quietly(() => askFor(original.userId, copyOfCopy.id, calls)), paid);
+  assert.equal(calls.count, 1, "no new transcription");
+  assert.equal(await bucketTotal("voice-seconds-day"), 3, "no new booking");
+  assert.deepEqual(await readAttachmentTranscriptOutcome(copyOfCopy.id), paid, "kept on the copy's own row");
+  // A row that does not match its original is not taken for a copy of it.
+  const different = await copyOf(original.attachmentId, { size: source.size + 1 });
+  assert.equal(await readInheritedTranscriptOutcome(different.id), null);
 });

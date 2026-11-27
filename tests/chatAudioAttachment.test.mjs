@@ -36,7 +36,14 @@ import {
   ChatAttachmentValidationError,
   validateChatAttachmentUpload,
 } from "../lib/chatAttachmentValidation.ts";
-import { ATTACHMENT_TEXT_CACHE_CATEGORIES } from "../lib/attachmentTextCache.ts";
+import {
+  ATTACHMENT_TEXT_CACHE_CATEGORIES,
+  ATTACHMENT_TEXT_CACHE_VERSION,
+  ATTACHMENT_TEXT_CLAIM_VERSION,
+  AUDIO_TRANSCRIPT_RESULT_VERSION,
+  AUDIO_TRANSCRIPT_VERSION_BAND,
+  isCurrentAttachmentTextVersion,
+} from "../lib/attachmentTextCache.ts";
 import { transcribeWithOpenAi } from "../lib/voiceTranscriptionPortCore.ts";
 import { createRequire } from "node:module";
 
@@ -463,6 +470,7 @@ const memoryStore = (overrides = {}) => {
       const row = rows.get(id);
       return row?.noText ? "no_text" : (row?.entries ?? null);
     },
+    readInherited: async () => null,
     // As the SQL does: a missing row or a stale claim is taken, nothing else.
     claim: async (id, token, staleSeconds) => {
       const row = rows.get(id);
@@ -741,4 +749,38 @@ test("the claim is renewed just before the call, so the stale window starts ther
   store.write = async (id, entries) => { renewedAt = renewedAt ?? store.rows.get(id)?.at; return write(id, entries); };
   await once(store, deps);
   assert.equal(renewedAt, AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 - 1_000);
+});
+
+// -- A paid result is versioned on its own ----------------------------------
+
+// Review r-20261127-124325-a4352d: bumping the extractor cache for a PDF
+// change must not make every paid transcript a miss.
+test("the audio result version sits in its own band, far from the extractor's", () => {
+  assert.ok(ATTACHMENT_TEXT_CACHE_VERSION > ATTACHMENT_TEXT_CLAIM_VERSION);
+  assert.ok(ATTACHMENT_TEXT_CACHE_VERSION < AUDIO_TRANSCRIPT_VERSION_BAND);
+  assert.ok(AUDIO_TRANSCRIPT_RESULT_VERSION > AUDIO_TRANSCRIPT_VERSION_BAND, "an older audio version stays in the band");
+  // A bumped extractor version leaves the audio result readable, and only it.
+  const bumped = ATTACHMENT_TEXT_CACHE_VERSION + 1;
+  assert.equal(isCurrentAttachmentTextVersion(AUDIO_TRANSCRIPT_RESULT_VERSION, bumped), true);
+  assert.equal(isCurrentAttachmentTextVersion(ATTACHMENT_TEXT_CACHE_VERSION, bumped), false);
+  assert.equal(isCurrentAttachmentTextVersion(bumped, bumped), true);
+  assert.equal(isCurrentAttachmentTextVersion(AUDIO_TRANSCRIPT_RESULT_VERSION - 1), false);
+  assert.equal(isCurrentAttachmentTextVersion(ATTACHMENT_TEXT_CLAIM_VERSION), false);
+});
+
+test("a copy of a recording already paid for takes its original's result and pays nothing", async () => {
+  const transcript = [{ kind: AUDIO_TRANSCRIPT_KIND, text: "From the original." }];
+  for (const inherited of [transcript, "no_text"]) {
+    const store = memoryStore({ readInherited: async () => inherited });
+    const events = [];
+    const outcome = once(store, slowTranscription(events));
+    if (inherited === "no_text") {
+      await assert.rejects(outcome, (error) => error.code === "ATTACHMENT_NO_TEXT");
+      assert.deepEqual(store.rows.get("att-1"), { noText: true }, "kept on the copy's own row");
+    } else {
+      assert.deepEqual(await outcome, transcript);
+      assert.deepEqual(store.rows.get("att-1"), { entries: transcript }, "kept on the copy's own row");
+    }
+    assert.deepEqual(events, [], "nothing booked, nothing transcribed");
+  }
 });

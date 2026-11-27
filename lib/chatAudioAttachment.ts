@@ -5,10 +5,12 @@ import { randomUUID } from "node:crypto";
 import {
     claimAttachmentTextCache,
     readAttachmentTranscriptOutcome,
+    readInheritedTranscriptOutcome,
     releaseAttachmentTextClaim,
     renewAttachmentTextClaim,
     writeAttachmentNoTextOutcome,
-    writeAttachmentTextCache,
+    writeAudioTranscript,
+    type AudioTranscriptOutcome,
     type CachedAttachmentText,
 } from "@/lib/attachmentTextCache";
 import { ChatAccessError } from "@/lib/chatSecurity";
@@ -287,7 +289,9 @@ export const AUDIO_TRANSCRIPT_CLAIM_POLL_MS = 500;
 
 export type AudioTranscriptStore = {
     /** The stored transcript, "no_text" for a recording found to hold no speech, or null. */
-    read: (attachmentId: string) => Promise<CachedAttachmentText[] | "no_text" | null>;
+    read: (attachmentId: string) => Promise<AudioTranscriptOutcome | null>;
+    /** The same, from the attachment this one was copied from (a resend, an edit). */
+    readInherited: (attachmentId: string) => Promise<AudioTranscriptOutcome | null>;
     claim: (attachmentId: string, token: string, staleSeconds: number) => Promise<boolean>;
     /** True only while this token still holds the claim; restarts its clock. */
     renew: (attachmentId: string, token: string) => Promise<boolean>;
@@ -316,14 +320,28 @@ const pause = (ms: number, signal?: AbortSignal) =>
 
 const defaultStore = (): AudioTranscriptStore => ({
     read: readAttachmentTranscriptOutcome,
+    readInherited: readInheritedTranscriptOutcome,
     claim: claimAttachmentTextCache,
     renew: renewAttachmentTextClaim,
-    write: writeAttachmentTextCache,
+    write: writeAudioTranscript,
     writeNoText: writeAttachmentNoTextOutcome,
     release: releaseAttachmentTextClaim,
     wait: pause,
     now: Date.now,
 });
+
+/**
+ * A recording's paid result, its own or its original's, without claiming or
+ * paying for anything: what an earlier message reads when a new transcription
+ * is not allowed (the audio switch off). Null when none is stored or the
+ * store cannot answer.
+ */
+export const readStoredAudioTranscript = async (
+    attachmentId: string,
+    store: Pick<AudioTranscriptStore, "read" | "readInherited"> = defaultStore()
+): Promise<AudioTranscriptOutcome | null> =>
+    (await store.read(attachmentId).catch(() => null)) ??
+    (await store.readInherited(attachmentId).catch(() => null));
 
 /** Retryable, and nothing was paid: another request has, or will. */
 const transcriptionBusy = () =>
@@ -398,9 +416,22 @@ export const transcribeAudioAttachmentOnce = async (
         }
         report({ outcome: "transcript_store_failed", traceId: input.traceId });
     };
-    for (;;) {
+    for (let first = true; ; first = false) {
         signal?.throwIfAborted();
-        const stored = await store.read(attachmentId).catch(() => null);
+        let stored = await store.read(attachmentId).catch(() => null);
+        if (!stored && first) {
+            // A copy of a recording already paid for (a resend, an edit) takes
+            // its original's result instead of paying again, and stores it on
+            // this row so the next turn finds it directly.
+            stored = await store.readInherited(attachmentId).catch(() => null);
+            if (stored) {
+                const outcome = stored;
+                await (outcome === "no_text"
+                    ? store.writeNoText(attachmentId)
+                    : store.write(attachmentId, outcome)
+                ).catch(() => false);
+            }
+        }
         if (stored === "no_text") throw noSpeech();
         if (stored) return stored;
         let claimed: boolean;

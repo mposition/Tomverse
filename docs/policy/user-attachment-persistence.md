@@ -214,7 +214,9 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
   같은 메시지의 재시도와 다른 모델의 답은 그것을 읽는다. 동시에 온 요청은 같은 행의 claim으로
   한 요청만 전사한다. 녹음 파일은 그때도 읽는다(`docs/policy/chat-attachment-formats.md` §2.4.1).
 - **무효화:** 추출기 출력이 바뀌면 버전(`ATTACHMENT_TEXT_CACHE_VERSION`)을 올린다. 다른
-  버전의 행은 읽지 않고, 다음 turn이 현재 버전으로 덮어쓴다. `CHAT_ATTACHMENT_TEXT_CACHE=0`이면 캐시를 읽지도 쓰지도 않는다.
+  버전의 행은 읽지 않고, 다음 turn이 현재 버전으로 덮어쓴다. 오디오 전사 결과는 이 버전과 무관한
+  자기 버전(`AUDIO_TRANSCRIPT_RESULT_VERSION`)을 쓰므로 추출기 버전을 올려도 다시 과금되지 않는다
+  (`docs/policy/chat-attachment-formats.md` §2.4.1). `CHAT_ATTACHMENT_TEXT_CACHE=0`이면 캐시를 읽지도 쓰지도 않는다.
   단 오디오 전사문, "말소리 없음" 결과, 그 claim은 이 스위치와 무관하게 쓰고 읽는다 — 추출
   캐시가 아니라 돈을 낸 결과이고, 끄면 같은 녹음을 요청마다 다시 전사하게 된다(독립 검토
   r-20261127-110354-67c5f8, r-20261127-114544-4444fa).

@@ -40,6 +40,7 @@ import {
 } from "@/lib/chatAttachmentFormats";
 import {
     chatAudioAttachmentEnabled,
+    readStoredAudioTranscript,
     resolveRecordingAttachmentId,
     transcribeAudioAttachmentOnce,
 } from "@/lib/chatAudioAttachment";
@@ -4458,6 +4459,16 @@ async function handleChatPost(
                     // once and cached on the attachment row; an earlier file is
                     // named and left out rather than failing today's turn.
                     if (!chatAudioAttachmentEnabled() || !access.subjectKey) {
+                        // A result already paid for -- this row's, or the one it
+                        // was copied from -- is still read; only a new
+                        // transcription is withheld.
+                        if (!isLatestMessage && transcriptAttachmentId) {
+                            const stored = await readStoredAudioTranscript(transcriptAttachmentId);
+                            if (stored && stored !== "no_text") {
+                                for (const entry of stored) addExtractedText(entry.kind, entry.text);
+                                return "ok";
+                            }
+                        }
                         if (!isLatestMessage) return omitPastAttachment();
                         throw new ChatAccessError(400, "UNSUPPORTED_ATTACHMENT_TYPE",
                             "Audio attachments are not available.");
