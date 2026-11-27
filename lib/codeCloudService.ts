@@ -5,7 +5,7 @@ import { ApiSecurityError } from "@/lib/apiSecurity";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { codeTaskLimit, CODE_MAX_OUTPUT_TOKENS, type CodeManagedRequest } from "@/lib/codeManagedCore";
 import { handleCodeManaged } from "@/lib/codeManagedService";
-import { deleteR2Object, readOwnR2ObjectBytes, writeR2Object } from "@/lib/r2";
+import { deleteR2Object, listExpiredR2Objects, readOwnR2ObjectBytes, writeR2Object } from "@/lib/r2";
 import {
   CODE_CLOUD_LIMITS, cleanCloudLogLine, codeCloudBilling, codeCloudBundleKey, codeCloudPatchKey, codeCloudTerminal,
   looksLikeGitBundle,
@@ -49,7 +49,11 @@ export type CodeCloudStorage = {
   put(key: string, bytes: Buffer, contentType: string): Promise<void>;
   get(key: string, maxBytes: number): Promise<Buffer>;
   remove(key: string): Promise<void>;
+  /** Keys under `prefix` last written before `olderThan`, at most `max`. */
+  listOlderThan(prefix: string, olderThan: Date, max: number): Promise<string[]>;
 };
+/** Far longer than any write can take (its transaction allows two minutes), so an object this old is never mid-write. */
+const ORPHAN_AGE_MS = 60 * 60_000;
 type Db = Pick<typeof prisma, "$queryRaw" | "$executeRaw" | "$transaction">;
 type Tx = Pick<typeof prisma, "$queryRaw" | "$executeRaw">;
 export type CodeCloudDeps = {
@@ -65,6 +69,7 @@ const r2Storage: CodeCloudStorage = {
   put: (key, bytes, type) => writeR2Object(key, bytes, type),
   get: (key, maxBytes) => readOwnR2ObjectBytes(key, { maxBytes }),
   remove: (key) => deleteR2Object(key),
+  listOlderThan: (prefix, olderThan, max) => listExpiredR2Objects(prefix, olderThan, max),
 };
 
 /** A managed refusal carries its code and whether a provider call may have gone out (lib/codeManagedService.ts). */
@@ -85,7 +90,9 @@ const tokenHash = (token: string) => digest(token).toString("hex");
  * A bundle or a patch is written to storage only inside a transaction that holds its job's row lock. An account
  * deletion (lib/codeCloudDeletion.ts) queues both object keys of every job and then removes the rows; removing this row
  * waits for the lock, so its tombstones commit after the write and the cleanup drain cannot run before the object
- * exists. A deletion that came first leaves no row, and nothing is written. Long enough for an 8 MiB write.
+ * exists. A deletion that came first leaves no row, and nothing is written. Long enough for an 8 MiB write. If a write
+ * outlives its transaction anyway, the orphan pass of the maintenance sweep (removeOrphans) removes the object once
+ * its row is gone.
  */
 const WRITE_TRANSACTION = { maxWait: 15_000, timeout: 120_000 };
 
@@ -493,7 +500,30 @@ export function createCodeCloudService(overrides: Partial<CodeCloudDeps> = {}) {
         deferred++;
       }
     }
-    return { lost, expired, purged, deferred };
+    const orphans = await removeOrphans(now).catch(() => { deferred++; return 0; });
+    return { lost, expired, purged, deferred, orphans };
+  }
+
+  /**
+   * The backstop behind every other path: an object under code-cloud/ older than ORPHAN_AGE_MS whose job row no longer
+   * exists is removed. It covers whatever left one behind -- a write that outlived its transaction and landed after an
+   * account deletion and its cleanup, a process that died between writing and recording, a purge whose delete failed.
+   * A row is created before any of its objects is written, so a live job's object always has its row.
+   */
+  async function removeOrphans(now: Date) {
+    const keys = await deps.storage.listOlderThan("code-cloud/", new Date(now.getTime() - ORPHAN_AGE_MS), 500);
+    const owner = (key: string) => /^code-cloud\/([0-9a-f-]{36})\//.exec(key)?.[1] ?? null;
+    const ids = [...new Set(keys.map(owner).filter((id): id is string => id !== null))];
+    if (!keys.length) return 0;
+    const live = new Set((await db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "CodeCloudJob" WHERE "id" = ANY(${ids}::text[])`).map((row) => row.id));
+    let removed = 0;
+    for (const key of keys) {
+      const id = owner(key);
+      if (id && live.has(id)) continue;
+      await deps.storage.remove(key);
+      removed++;
+    }
+    return removed;
   }
 
   return { handle, uploadBundle, readPatch, handleRunner, readRunnerBundle, sweep };

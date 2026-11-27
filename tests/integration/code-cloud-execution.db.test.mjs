@@ -45,8 +45,11 @@ test('Desktop cloud jobs reserve, call, settle and release through the managed C
   const {enqueueCodeCloudCleanupForUser}=await import(mod('lib/codeCloudDeletion.ts'));
   const {codeTaskLimit}=await import(mod('lib/codeManagedCore.ts'));
   const objects=new Map();
-  const storage={put:async(key,bytes)=>{objects.set(key,Buffer.from(bytes));},get:async(key,max)=>{const v=objects.get(key);if(!v||v.length>max)throw new Error('missing');return v;},remove:async key=>{objects.delete(key);}};
   let clock=Date.now();
+  const written=new Map();
+  const storage={put:async(key,bytes)=>{objects.set(key,Buffer.from(bytes));written.set(key,clock);},get:async(key,max)=>{const v=objects.get(key);if(!v||v.length>max)throw new Error('missing');return v;},
+    remove:async key=>{objects.delete(key);written.delete(key);},
+    listOlderThan:async(prefix,olderThan,max)=>[...objects.keys()].filter(key=>key.startsWith(prefix)&&(written.get(key)??0)<olderThan.getTime()).slice(0,max)};
   const service=createCodeCloudService({storage,env,now:()=>new Date(clock)});
   const coverageUntil=new Date(Date.now()+30*86400000);
   const snapshot=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:catalogContentHash(rows),payload:{models:rows},coverageUntil}});
@@ -201,6 +204,20 @@ test('Desktop cloud jobs reserve, call, settle and release through the managed C
       clock+=8*86400000;const swept=await service.sweep(500);clock-=8*86400000;
       assert.ok(swept.purged>=1);assert.equal(await db.codeCloudJob.count({where:{id:waiting.jobId}}),0);
       assert.equal(objects.has(`code-cloud/${waiting.jobId}/result.patch`),false);
+    });
+    await t.test('an object whose job row is gone is removed by the orphan pass once it is an hour old',async()=>{
+      const user=await newUser(),live=await queuedJob(user);
+      // A write that outlived its transaction and landed after the account deletion and its cleanup.
+      const stray=`code-cloud/${randomUUID()}/result.patch`,kept=`code-cloud/${live.jobId}/result.patch`;
+      await storage.put(stray,Buffer.from('left behind'));
+      await storage.put(kept,Buffer.from('its row is still there'));
+      clock+=30*60000;await service.sweep(500);clock-=30*60000;
+      assert.equal(objects.has(stray),true,'too young to be judged');
+      clock+=2*3600000;const swept=await service.sweep(500);clock-=2*3600000;
+      assert.ok(swept.orphans>=1);
+      assert.equal(objects.has(stray),false);
+      // The queued job ran out of queue time meanwhile (its bundle went with that), but its row is kept: so is its object.
+      assert.equal(objects.has(kept),true,'an object whose row exists is not an orphan');
     });
     await t.test('account deletion: rows go and every object key gets a tombstone',async()=>{
       const user=await newUser(),job=await queuedJob(user);

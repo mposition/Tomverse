@@ -76,7 +76,9 @@ job ends; the row and its patch are deleted seven days after the job ends by the
 (`sweepCodeCloudJobsQuietly`, which also ends jobs whose runner stopped reporting and fails uploads and queue waits that
 ran out). Account deletion deletes the rows and queues both object keys of every job on the shared object cleanup queue
 (`lib/codeCloudDeletion.ts`). Bundles and patches are written only while their job row is locked, so a deletion
-that starts during a write waits for it and its tombstones always follow the object. The account export includes the job rows without the token digest, runner name, storage
+that starts during a write waits for it and its tombstones always follow the object. As a backstop for any write
+that outlives its transaction or any failed delete, the same sweep removes objects under `code-cloud/` older than one
+hour whose job row no longer exists. The account export includes the job rows without the token digest, runner name, storage
 keys and reservation link.
 
 ## Switches and variables
