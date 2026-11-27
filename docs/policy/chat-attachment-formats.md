@@ -147,8 +147,15 @@ import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실�
   OpenAI·Anthropic은 토큰 밖 과금이라 가산 크레딧이 필요한데 그 값이 정해지지
   않았으므로 `surcharge_unapproved`로 거절한다. 값이 정해지면 가산·예약·정산 연결이
   웹 검색과 같은 모양으로 필요하다.
-- **상한**: 답 하나에 실행 5회. 여섯 번째 호출은 이 프로세스가 stream에서 세어
-  끊고 공급자 요청을 abort한다. 실행 한 번은 Gemini가 30초에서 멈춘다.
+- **상한**: 답 하나에 보이는 실행 5회. Gemini에는 실행 횟수를 묶는 요청 parameter가
+  없어서 강제할 수 있는 유일한 정지는 이 프로세스가 stream을 끊는 것이다. 실행은
+  `tool-call`이 도착할 때 보이고 그때는 공급자가 이미 시작한 뒤이므로, 여섯 번째
+  호출이 attempt를 abort하고 그 여섯 번째는 실행됐을 수 있다 — 답 하나에 최대 6회,
+  한 번에 30초(Gemini 자체 상한). 이것은 답 하나가 계산을 계속할 수 있는 시간의
+  상한이지 청구 상한이 아니다: Gemini는 실행마다 과금하지 않고, 실행이 더하는 token은
+  요청의 출력 상한에 묶이며 정산이 공급자 사용량으로 매긴다(독립 검토 2026-11-27).
+- **오류**: 이 stream은 ai@7의 `textStream`처럼 `text-delta` 외의 부분을 버린다.
+  공급자 오류는 그대로 `streamText`의 `onError`(`observeStreamError`)가 받는다.
 - **보이는 모양**: 실행한 코드와 출력이 답 안의 code fence로 들어가고, 웹 composer는
   info string의 `tomverse-code-run`·`tomverse-code-output`을 보고 접힌 상태로
   그린다(그 밖의 화면에서는 평범한 code block). 모델 자신의 글에서는 이 표시어를
@@ -175,16 +182,21 @@ import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실�
 
 `CHAT_AUDIO_ATTACHMENT_ENABLED="true"`일 때만 받는다. 회의 녹음 요약 같은 용도다.
 
-- **형식은 별도 표다**(`CHAT_AUDIO_ATTACHMENT_FORMATS`): `mp3`, `m4a`, `wav`,
-  `webm`. 위 표에 행으로 넣지 않으므로 스위치가 꺼져 있으면 `accept`, 업로드
+- **형식은 별도 표다**(`CHAT_AUDIO_ATTACHMENT_FORMATS`): `mp3`, `wav`. 위 표에 행으로
+  넣지 않으므로 스위치가 꺼져 있으면 `accept`, 업로드
   허용 목록, 게스트 부분집합, 형식 안내가 바이트 단위로 그대로다. 서버가 스위치를
   풀고 composer에는 boolean 하나로 넘긴다(`ChatAudioAttachmentProvider`).
-- **길이를 먼저 읽는다**(`lib/chatAudioAttachmentCore.ts`). WebM·MP4·WAV는 음성
-  입력의 컨테이너 판독기를, mp3는 프레임을 끝까지 걸어 더한 값을 쓴다(헤더가 말하는
-  bitrate는 파일 스스로의 주장이다). **길이를 읽지 못한 파일은 거절한다** — 음성
-  입력은 모르는 길이를 클립 상한 120초로 예약하지만 첨부에는 그런 상한이 없다.
-  그래서 길이 판독기가 없는 `ogg`는 공급자가 받더라도 아직 제공하지 않는다.
-  fragmented MP4(Safari 녹음 등)도 길이가 없으면 거절된다.
+- **길이는 오디오에서 계산한다**(`lib/chatAudioAttachmentCore.ts`). mp3는 프레임을
+  끝까지 걸어 더하고, WAV는 `data` 뒤 PCM 바이트 전부를 format chunk의 재생 속도로
+  나눈다(`blockAlign`·`byteRate`가 서로 맞지 않거나 압축 형식이면 거절). 헤더가 적은
+  길이·bitrate·data 크기는 파일 스스로의 주장이라 쓰지 않는다 — 짧게 적힌 헤더는 긴
+  녹음을 10분 한도와 초 예산 밑으로 통과시키고, 공급자는 디코딩한 만큼 전부 청구한다
+  (독립 검토 2026-11-27). **길이를 계산하지 못한 파일은 거절한다** — 음성 입력은 모르는
+  길이를 클립 상한 120초로 예약하지만 첨부에는 그런 상한이 없다.
+- **그래서 `m4a`·`webm`·`ogg`는 아직 제공하지 않는다.** 공급자는 받지만 길이를
+  헤더(`mvhd`, `Info > Duration`, granule)로만 말한다. 회의 녹음에 흔한 `m4a`는 MP4
+  sample table(`stsz` 개수 × AAC 프레임 길이 / 샘플 속도)을 세는 판독기가 생기면 연다.
+  음성 입력도 같은 헤더를 읽지만 그쪽은 8 MB 클립 상한이 노출을 묶는다.
 - **한도**: 파일 25 MB(공급자 상한, 2026-11-27 speech-to-text 안내 확인), 길이
   10분. 설정된 전사 모델의 출력 상한이 2,000 token이고(모델 페이지 2026-11-27
   확인) 기록된 유일한 유료 측정이 분당 190.6 token이므로, 보통 발화는 10분 근처에서

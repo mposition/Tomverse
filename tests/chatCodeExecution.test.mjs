@@ -14,6 +14,8 @@ import {
   resolveCodeExecution,
 } from "../lib/chatCodeExecutionCore.ts";
 import { withCodeExecutionTool } from "../lib/chatCodeExecutionTool.ts";
+import { streamText } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 
 /**
  * Code execution: docs/policy/chat-attachment-formats.md section 2.3.1.
@@ -175,6 +177,41 @@ test("the call past the ceiling ends the stream and aborts the request", async (
   assert.equal(text.split(CODE_EXECUTION_CODE_META).length - 1, CODE_EXECUTION_MAX_CALLS_PER_TURN);
   assert.equal(text.includes("never shown"), false);
   assert.ok(text.startsWith("Working."));
+});
+
+test("a provider error mid-stream reads exactly as textStream reads it, and still reaches onError", async () => {
+  // Each attempt in the route reads one stream view; errors are observed by
+  // streamText's onError. The code-execution view must not change either.
+  const modelParts = [
+    { type: "stream-start", warnings: [] },
+    { type: "text-start", id: "t" },
+    { type: "text-delta", id: "t", delta: "Partial answer" },
+    { type: "text-end", id: "t" },
+    { type: "error", error: new Error("provider dropped the stream") },
+    { type: "finish", finishReason: { unified: "error", raw: "error" },
+      usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } } },
+  ];
+  const run = async (view) => {
+    const errors = [];
+    const result = streamText({
+      prompt: "add these",
+      maxRetries: 0,
+      onError: ({ error }) => errors.push(String(error?.message ?? error)),
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: new ReadableStream({ start(controller) { for (const part of modelParts) controller.enqueue(part); controller.close(); } }),
+        }),
+      }),
+    });
+    const text = await read(view(result));
+    await result.finishReason.catch(() => undefined);
+    return { text, errors };
+  };
+  const plain = await run((result) => result.textStream);
+  const withRuns = await run((result) => createCodeExecutionTextStream(result.fullStream, { maxCalls: 5, onCeiling: () => {} }));
+  assert.deepEqual(withRuns, plain);
+  assert.equal(plain.text, "Partial answer");
+  assert.deepEqual(plain.errors, ["provider dropped the stream"]);
 });
 
 test("the composer folds a fence by its info-string words only", () => {

@@ -48,9 +48,17 @@ export const chatCodeExecutionSwitchOn = (
 export const CODE_EXECUTION_TOOL_NAME = "code_execution";
 
 /**
- * Runs one answer may make. Enforced here, on the stream: the sixth call
- * aborts the attempt (`createCodeExecutionTextStream`). Gemini stops each run
- * at 30 seconds itself, so a turn's execution time is at most 150 seconds.
+ * Runs one answer may show before it is stopped.
+ *
+ * What this bounds, precisely: Gemini takes no request parameter that caps its
+ * runs, so the only enforceable stop is this process cutting the stream. A run
+ * is seen when its `tool-call` part arrives, which is after the provider has
+ * started it -- so the call past the ceiling is the one that aborts the
+ * attempt, and that sixth run may already have executed. At most six runs, of
+ * at most 30 seconds each (Gemini's own limit), per answer. It bounds how long
+ * one answer can keep computing, not a bill: Gemini charges nothing per run,
+ * and the tokens the runs add are bounded by the request's output cap and
+ * priced at settlement from the provider's usage.
  */
 export const CODE_EXECUTION_MAX_CALLS_PER_TURN = 5;
 
@@ -166,8 +174,8 @@ export const resolveCodeExecution = (input: {
 // ---------------------------------------------------------------------------
 
 /**
- * The info-string words the web composer folds on
- * (`components/chat/CodeExecutionBlock.tsx`). Everywhere else -- the mobile
+ * The info-string words the web composer folds on (`MarkdownCodeBlock` in
+ * `components/chat/ChatMessageList.tsx`). Everywhere else -- the mobile
  * app, an export, the next turn's history -- the block is an ordinary code
  * fence, which is what it should degrade to.
  */
@@ -266,6 +274,13 @@ type StreamPart = {
  * the same way it does: text deltas become text and every other part is
  * ignored -- except a provider-executed `code_execution` call, which is
  * counted, and its result, which becomes the markdown above.
+ *
+ * "Every other part" includes `error`. That is what the installed ai@7's own
+ * `textStream` does (`toTextStream` enqueues `text-delta` and nothing else),
+ * and it is why the route observes provider errors through `streamText`'s
+ * `onError` (`observeStreamError`) rather than through the stream it reads.
+ * Raising them here instead would give a code-execution turn a failure path
+ * every other turn lacks, and report the same error twice.
  *
  * The model's own text never carries the fold markers: a model that wrote one
  * would have its prose shown as "code that was run". They are removed here,

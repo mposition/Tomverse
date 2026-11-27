@@ -24,6 +24,7 @@ import {
   chatAudioAttachmentSwitchOn,
   inspectAudioAttachment,
   mp3DurationSeconds,
+  wavPcmDurationSeconds,
 } from "../lib/chatAudioAttachmentCore.ts";
 import { transcribeAudioAttachment, chatAudioAttachmentEnabled } from "../lib/chatAudioAttachment.ts";
 import {
@@ -52,8 +53,24 @@ const fixture = (path) =>
 
 const MP3_CBR_3000MS = fixture("audio/ffmpeg-lame-cbr32k-22050hz-3000ms.mp3");
 const MP3_VBR_2500MS = fixture("audio/ffmpeg-lame-vbr-44100hz-2500ms.mp3");
+const WAV_1500MS = fixture("audio/ffmpeg-pcm-s16le-8000hz-1500ms.wav");
 const WEBM_2500MS = fixture("voice/chromium-webm-opus-2500ms.webm");
 const MP4_3000MS = fixture("voice/chromium-mp4-aac-3000ms.mp4");
+
+// A RIFF/WAVE file built field by field: fmt then data.
+const wav = ({ format = 1, channels = 1, sampleRate = 8000, bits = 8, byteRate, blockAlign, dataSize, payload }) => {
+  const align = blockAlign ?? channels * (bits / 8);
+  const rate = byteRate ?? sampleRate * align;
+  const bytes = new Uint8Array(44 + payload);
+  const view = new DataView(bytes.buffer);
+  const tag = (at, text) => [...text].forEach((c, i) => { bytes[at + i] = c.charCodeAt(0); });
+  tag(0, "RIFF"); view.setUint32(4, 36 + payload, true); tag(8, "WAVE");
+  tag(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, format, true);
+  view.setUint16(22, channels, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, rate, true); view.setUint16(32, align, true); view.setUint16(34, bits, true);
+  tag(36, "data"); view.setUint32(40, dataSize ?? payload, true);
+  return bytes;
+};
 
 // MPEG 2.5 Layer III, 8 kbit/s, 8 kHz: 72-byte frames of 576 samples (72 ms).
 const tinyMp3Frame = () => {
@@ -94,28 +111,29 @@ test("switched on, recordings resolve from the names and types browsers report",
     resolveChatAttachmentFormat({ filename, declaredMediaType, audio: true })?.id ?? null;
   assert.equal(resolve("meeting.mp3", "audio/mpeg"), "mp3");
   assert.equal(resolve("meeting.MP3", ""), "mp3");
-  assert.equal(resolve("memo.m4a", "audio/x-m4a"), "m4a");
   assert.equal(resolve("call.wav", "audio/x-wav"), "wav");
-  // Windows reports a WebM as video; the name decides.
-  assert.equal(resolve("clip.webm", "video/webm"), "webm-audio");
+  assert.equal(resolve("call.WAV", ""), "wav");
+  // Containers that only state their length in a header are not offered yet.
+  assert.equal(resolve("memo.m4a", "audio/x-m4a"), null);
+  assert.equal(resolve("clip.webm", "audio/webm"), null);
   // A name and a type naming two different formats is still a refusal.
   assert.equal(resolve("notes.txt", "audio/mpeg"), null);
   assert.equal(resolve("meeting.mp3", "application/pdf"), null);
-  // Ogg has no length reader yet, so it is not offered.
   assert.equal(resolve("voice.ogg", "audio/ogg"), null);
   assert.equal(chatAttachmentMediaTypeAccepted("audio/mpeg", { audio: true }), true);
-  assert.equal(formatByMediaType("audio/x-m4a", { audio: true })?.mediaType, "audio/mp4");
+  assert.equal(formatByMediaType("audio/x-wav", { audio: true })?.mediaType, "audio/wav");
+  assert.equal(formatByMediaType("audio/mp4", { audio: true }), null);
 });
 
 test("recordings are appended for an account and never offered to a guest", () => {
   const accept = chatAttachmentAcceptAttribute({ audio: true });
   assert.ok(accept.startsWith(chatAttachmentAcceptAttribute()));
-  assert.ok(accept.includes(".mp3") && accept.includes("audio/mp4"));
+  assert.ok(accept.includes(".mp3") && accept.includes("audio/wav"));
   assert.equal(
     chatAttachmentAcceptAttribute({ guest: true, audio: true }),
     chatAttachmentAcceptAttribute({ guest: true })
   );
-  assert.deepEqual(chatAttachmentExtensionsByGroup({ audio: true }).audio, ["mp3", "m4a", "wav", "webm"]);
+  assert.deepEqual(chatAttachmentExtensionsByGroup({ audio: true }).audio, ["mp3", "wav"]);
   assert.equal("audio" in chatAttachmentExtensionsByGroup({ guest: true, audio: true }), false);
   for (const format of CHAT_AUDIO_ATTACHMENT_FORMATS) {
     assert.equal(format.guestAllowed, false, format.id);
@@ -154,14 +172,25 @@ test("an mp3's length is what its frames add up to, measured on real encoder out
   });
 });
 
-test("WebM and MP4 recordings are read by voice input's container reader", () => {
-  const webm = inspectAudioAttachment({ bytes: WEBM_2500MS, mediaType: "audio/webm" });
-  assert.equal(webm.ok, true);
-  assert.ok(Math.abs(webm.durationSeconds - 2.5) < 0.2);
-  const m4a = inspectAudioAttachment({ bytes: MP4_3000MS, mediaType: "audio/mp4" });
-  assert.equal(m4a.ok, true);
-  assert.ok(Math.abs(m4a.durationSeconds - 3.0) < 0.2);
-  // Bytes of one container named as another.
+test("a WAV's length is its PCM bytes over the rate they are played at", () => {
+  assert.deepEqual(inspectAudioAttachment({ bytes: WAV_1500MS, mediaType: "audio/wav" }), {
+    ok: true, durationSeconds: 1.5, durationSource: "pcm-bytes",
+  });
+  // A data size smaller than what follows is the file's claim: every byte counts.
+  assert.equal(wavPcmDurationSeconds(wav({ dataSize: 100, payload: 16_000 })), 2);
+  assert.equal(wavPcmDurationSeconds(wav({ dataSize: 0xffffffff, payload: 8_000 })), 1);
+  // A rate that disagrees with its own sample format, or a compressed stream.
+  assert.equal(wavPcmDurationSeconds(wav({ byteRate: 192_000, payload: 16_000 })), null);
+  assert.equal(wavPcmDurationSeconds(wav({ blockAlign: 4, payload: 16_000 })), null);
+  assert.equal(wavPcmDurationSeconds(wav({ format: 0x0055, payload: 16_000 })), null);
+});
+
+test("bytes of another container are refused whatever they are named", () => {
+  for (const [bytes, mediaType] of [[MP3_CBR_3000MS, "audio/wav"], [WAV_1500MS, "audio/mpeg"],
+    [WEBM_2500MS, "audio/webm"], [MP4_3000MS, "audio/mp4"], [WEBM_2500MS, "audio/mpeg"]]) {
+    const result = inspectAudioAttachment({ bytes, mediaType });
+    assert.equal(result.ok, false, mediaType);
+  }
   assert.deepEqual(inspectAudioAttachment({ bytes: MP3_CBR_3000MS, mediaType: "audio/wav" }), {
     ok: false, code: "ATTACHMENT_TYPE_MISMATCH",
   });

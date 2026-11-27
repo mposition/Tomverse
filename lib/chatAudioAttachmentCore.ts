@@ -16,9 +16,15 @@
  * 120-second ceiling, but an attachment has no such ceiling of its own -- a
  * 25 MB file can hold hours. So an attachment whose length is unknown is
  * refused, not reserved at a guess.
+ *
+ * And the length has to be the audio's, not the file's description of itself.
+ * A header field (`mvhd` in MP4, `Info > Duration` in WebM) is written by
+ * whoever made the file; one that understates the length would let a long
+ * recording through the ten-minute limit and book it as a short one, while the
+ * provider transcribes -- and bills -- every second it decodes. So the length
+ * here is computed from what a decoder plays: mp3 frames, WAV PCM bytes.
+ * Voice input reads those headers, and that is bounded there by its 8 MB clip.
  */
-
-import { inspectVoiceClip } from "@/lib/voiceClipDuration";
 
 export const CHAT_AUDIO_ATTACHMENT_ENV = "CHAT_AUDIO_ATTACHMENT_ENABLED";
 
@@ -58,15 +64,18 @@ export const CHAT_AUDIO_TRANSCRIPT_MAX_OUTPUT_TOKENS = 2_000;
 export const CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS = 120_000;
 
 export type AudioAttachmentInspection =
-    | { ok: true; durationSeconds: number; durationSource: "ebml" | "mp4" | "riff" | "mpeg-frames" }
+    | { ok: true; durationSeconds: number; durationSource: "mpeg-frames" | "pcm-bytes" }
     | {
           ok: false;
           /** Codes the attachment error copy already explains, plus the length one. */
           code: "ATTACHMENT_TYPE_MISMATCH" | "ATTACHMENT_UNREADABLE" | "ATTACHMENT_AUDIO_TOO_LONG";
       };
 
+const isRiffWave = (bytes: Uint8Array) =>
+    bytes.length >= 12 && ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WAVE";
+
 /**
- * The container's length, read from the bytes, or why the file is refused.
+ * The recording's length, computed from its audio, or why the file is refused.
  *
  * `mediaType` is the format table's canonical type -- the name has already
  * decided which format this is, and the bytes now have to agree.
@@ -76,21 +85,17 @@ export const inspectAudioAttachment = (input: {
     mediaType: string;
 }): AudioAttachmentInspection => {
     let durationSeconds: number | null;
-    let durationSource: "ebml" | "mp4" | "riff" | "mpeg-frames";
+    let durationSource: "mpeg-frames" | "pcm-bytes";
     if (input.mediaType === "audio/mpeg") {
+        if (isRiffWave(input.bytes)) return { ok: false, code: "ATTACHMENT_TYPE_MISMATCH" };
         durationSeconds = mp3DurationSeconds(input.bytes);
         durationSource = "mpeg-frames";
+    } else if (input.mediaType === "audio/wav") {
+        if (!isRiffWave(input.bytes)) return { ok: false, code: "ATTACHMENT_TYPE_MISMATCH" };
+        durationSeconds = wavPcmDurationSeconds(input.bytes);
+        durationSource = "pcm-bytes";
     } else {
-        const inspection = inspectVoiceClip({
-            bytes: input.bytes,
-            declaredMediaType: input.mediaType,
-        });
-        if (!inspection.ok) return { ok: false, code: "ATTACHMENT_TYPE_MISMATCH" };
-        if (inspection.durationSource === "unknown") {
-            return { ok: false, code: "ATTACHMENT_UNREADABLE" };
-        }
-        durationSeconds = inspection.durationSeconds;
-        durationSource = inspection.durationSource;
+        return { ok: false, code: "ATTACHMENT_TYPE_MISMATCH" };
     }
     if (durationSeconds === null || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
         return { ok: false, code: "ATTACHMENT_UNREADABLE" };
@@ -194,6 +199,60 @@ export const mp3DurationSeconds = (bytes: Uint8Array): number | null => {
     if (frames === 0) return null;
     if (bytes.length - offset > MP3_TRAILING_TAG_ALLOWANCE) return null;
     return seconds;
+};
+
+// ---------------------------------------------------------------------------
+// WAV: the length is the PCM bytes over the rate they are played at
+// ---------------------------------------------------------------------------
+
+const ascii = (bytes: Uint8Array, start: number, end: number) =>
+    String.fromCharCode(...bytes.subarray(start, end));
+const u16 = (bytes: Uint8Array, at: number) => bytes[at] | (bytes[at + 1] << 8);
+const u32 = (bytes: Uint8Array, at: number) =>
+    (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0;
+
+/** Integer PCM, IEEE float, and the extensible wrapper around either. */
+const WAV_PCM_FORMATS = new Set([0x0001, 0x0003, 0xfffe]);
+
+/**
+ * Seconds of audio in a PCM WAV, or `null`.
+ *
+ * Every byte after the `data` chunk header counts, whatever its size field
+ * says: common readers treat 0 and 0xFFFFFFFF as "to the end", and a size
+ * smaller than what follows is the file's claim, not the audio's. Over-counting
+ * a trailing LIST chunk only reserves a little more. The rate is the format
+ * chunk's, and its fields must agree with one another (`blockAlign`, `byteRate`)
+ * -- a decoder plays the bytes at that rate, so that is the length the provider
+ * hears. Anything compressed is refused.
+ */
+export const wavPcmDurationSeconds = (bytes: Uint8Array): number | null => {
+    if (!isRiffWave(bytes)) return null;
+    let offset = 12;
+    let byteRate: number | null = null;
+    for (let chunks = 0; chunks < 64 && offset + 8 <= bytes.length; chunks += 1) {
+        const id = ascii(bytes, offset, offset + 4);
+        const size = u32(bytes, offset + 4);
+        const body = offset + 8;
+        if (id === "fmt ") {
+            if (size < 16 || body + 16 > bytes.length) return null;
+            const format = u16(bytes, body);
+            const channels = u16(bytes, body + 2);
+            const sampleRate = u32(bytes, body + 4);
+            const declaredByteRate = u32(bytes, body + 8);
+            const blockAlign = u16(bytes, body + 12);
+            const bits = u16(bytes, body + 14);
+            if (!WAV_PCM_FORMATS.has(format) || channels === 0 || sampleRate === 0) return null;
+            if (bits === 0 || bits % 8 !== 0 || blockAlign !== channels * (bits / 8)) return null;
+            if (declaredByteRate !== sampleRate * blockAlign) return null;
+            byteRate = declaredByteRate;
+        } else if (id === "data") {
+            if (byteRate === null) return null;
+            const available = bytes.length - body;
+            return available > 0 ? available / byteRate : null;
+        }
+        offset = body + size + (size % 2);
+    }
+    return null;
 };
 
 // ---------------------------------------------------------------------------

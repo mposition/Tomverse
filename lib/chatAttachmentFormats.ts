@@ -656,11 +656,14 @@ for (const format of CHAT_ATTACHMENT_FORMATS) {
  * only when it is true; the server decides it (`lib/chatAudioAttachment.ts`)
  * and the composer is told, never the other way round.
  *
- * Four containers, each one whose length can be read before anything is paid
- * for (`lib/chatAudioAttachmentCore.ts`). Ogg is accepted by the transcription
- * provider but has no length reader here yet, so it is not offered: a file
- * whose length is unknown cannot be reserved against the seconds budget
- * (docs/policy/chat-attachment-formats.md section 2.4).
+ * Two containers, the ones whose length is computed from the audio itself
+ * rather than read from a header the file writes about itself
+ * (`lib/chatAudioAttachmentCore.ts`): mp3 by walking its frames, WAV from its
+ * PCM bytes. M4A, WebM and Ogg are accepted by the transcription provider but
+ * declare their length in a header (`mvhd`, `Info > Duration`, a granule), and
+ * a header that understates it would book a long recording as a short one
+ * against the seconds budget. They wait for a reader that counts samples
+ * (docs/policy/chat-attachment-formats.md section 2.4.1).
  */
 const audio = (
     id: string,
@@ -687,9 +690,7 @@ const audio = (
 
 export const CHAT_AUDIO_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
     audio("mp3", "mp3", "audio/mpeg", ["audio/mp3", "audio/mpeg3", "audio/x-mpeg-3"]),
-    audio("m4a", "m4a", "audio/mp4", ["audio/x-m4a", "audio/m4a"]),
     audio("wav", "wav", "audio/wav", ["audio/x-wav", "audio/wave", "audio/vnd.wave"]),
-    audio("webm-audio", "webm", "audio/webm", []),
 ];
 
 const audioByExtension = new Map<string, ChatAttachmentFormat>();
