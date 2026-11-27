@@ -250,7 +250,12 @@ inside "$cwd" "$root" || exit 42
 printf '@tv-start\n'
 (set -m) 2>/dev/null && set -m
 if [ "$login" = bash-login ]; then
-  if [ "$mode" = shell ]; then bash -lc "$1" </dev/null & else bash -lc 'exec "$@"' bash "$@" </dev/null & fi
+  # The profile runs first and may change the folder: it is set again, and checked again, right before the command, in the same bash.
+  if [ "$mode" = shell ]; then
+    bash -lc 'cd -P -- "$1" 2>/dev/null || { echo "the project folder is gone after the login profile ran" >&2; exit 44; }; [ "$(pwd -P)" = "$1" ] || { echo "the login profile moved the command out of the project folder" >&2; exit 42; }; line=$2; shift 2; eval "$line"' bash "$cwd" "$1" </dev/null &
+  else
+    bash -lc 'cd -P -- "$1" 2>/dev/null || { echo "the project folder is gone after the login profile ran" >&2; exit 44; }; [ "$(pwd -P)" = "$1" ] || { echo "the login profile moved the command out of the project folder" >&2; exit 42; }; shift; exec "$@"' bash "$cwd" "$@" </dev/null &
+  fi
 else
   if [ "$mode" = shell ]; then sh -c "$1" </dev/null & else "$@" </dev/null & fi
 fi

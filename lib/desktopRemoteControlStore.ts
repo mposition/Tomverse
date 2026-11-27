@@ -269,8 +269,11 @@ export async function recordDesktopRemoteCommand(input: {
   session: Session;
   request: Request;
   command: DesktopRemoteCommandRequest;
-  /** The passkey that confirmed this command (lib/desktopRemotePasskeyStore.ts), when one was needed. */
-  passkeyId?: string;
+  /**
+   * The passkey that confirmed this command (lib/desktopRemotePasskeyStore.ts), when one was needed. `apply` moves its counter
+   * in this transaction, after the answer was stored: a command that is refused leaves no use of the passkey behind.
+   */
+  passkeyUse?: { passkeyId: string; apply(tx: Prisma.TransactionClient): Promise<void> };
 }): Promise<{ id: string }> {
   const userId = input.session.user.id;
   const command = input.command;
@@ -303,6 +306,7 @@ export async function recordDesktopRemoteCommand(input: {
       RETURNING "id"
     `;
     if (!inserted.length) throw new DesktopRemoteRefused("ALREADY_ANSWERED");
+    await input.passkeyUse?.apply(tx);
 
     await writeAdminAuditLog({
       tx,
@@ -316,7 +320,7 @@ export async function recordDesktopRemoteCommand(input: {
       metadata: {
         deviceId: command.deviceId,
         taskKey: command.taskKey,
-        ...(input.passkeyId ? { passkeyId: input.passkeyId } : {}),
+        ...(input.passkeyUse ? { passkeyId: input.passkeyUse.passkeyId } : {}),
         ...(approval ? {
           approvalId: approval.approvalId, decision: approval.decision, digest: approval.digest,
           approvalKind: snapshot.data.approval?.kind ?? null,
