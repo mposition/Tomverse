@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { temporaryChatOnLeave, temporaryChatOnView } from "../lib/temporaryChatClientCore.ts";
+import { temporaryChatOnCreated, temporaryChatOnLeave, temporaryChatOnView } from "../lib/temporaryChatClientCore.ts";
 import { chatPersonalizationCopy } from "../locales/chatPersonalization.ts";
 import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
 
@@ -54,9 +54,30 @@ test("while its first message is still being saved it is kept, and opening it ma
     });
 });
 
-test("every language states the 24-hour fallback beside the delete on leaving", () => {
+test("a create that answers after the person left is deleted on arrival", () => {
+    const response = { id: "c-temp", temporary: true };
+    assert.deepEqual(temporaryChatOnCreated({ ownerKey: "u-1", created: response, screenLeft: true }), {
+        track: null, deleteId: "c-temp",
+    });
+    assert.deepEqual(temporaryChatOnCreated({ ownerKey: null, created: response, screenLeft: false }), {
+        track: null, deleteId: "c-temp",
+    });
+    assert.deepEqual(temporaryChatOnCreated({ ownerKey: "u-1", created: response, screenLeft: false }), {
+        track: created, deleteId: null,
+    });
+    // An ordinary conversation, or a response that is not one, is never deleted here.
+    for (const other of [{ id: "c-1", temporary: false }, { id: "c-1" }, null, { temporary: true }]) {
+        assert.deepEqual(temporaryChatOnCreated({ ownerKey: "u-1", created: other, screenLeft: true }), {
+            track: null, deleteId: null,
+        });
+    }
+});
+
+test("every language states the 24-hour fallback beside the delete on leaving, without promising the minute", () => {
     for (const language of SUPPORTED_LANGUAGES) {
         assert.match(chatPersonalizationCopy(language).temporaryDescription, /24/, language);
     }
-    assert.match(chatPersonalizationCopy("en").temporaryDescription, /deleted when you leave them; one that can't be deleted then/);
+    const en = chatPersonalizationCopy("en").temporaryDescription;
+    assert.match(en, /deleted when you leave them/);
+    assert.match(en, /stops taking messages 24 hours after it started and is deleted automatically soon after/);
 });

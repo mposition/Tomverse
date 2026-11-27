@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import {
+  temporaryChatOnCreated,
   temporaryChatOnLeave,
   temporaryChatOnView,
   type TemporaryChatTracker,
@@ -84,14 +85,23 @@ export function useTemporaryChat(input: {
   // The Chat screen going away is leaving too: an in-app navigation unmounts
   // it, and a reload or a closed tab fires `pagehide`. Both delete what is
   // tracked; a second request for the same conversation is a harmless 404.
+  // `screenLeftRef` covers a create still in flight at that moment: its
+  // response is deleted on arrival (`adoptCreated`).
+  const screenLeftRef = useRef(false);
   useEffect(() => {
+    screenLeftRef.current = false;
     const leave = () => {
+      screenLeftRef.current = true;
       const id = temporaryChatOnLeave(activeRef.current);
       if (id) void deleteConversation(id, true);
     };
+    // A page restored from the back/forward cache is on screen again.
+    const returned = () => { screenLeftRef.current = false; };
     window.addEventListener("pagehide", leave);
+    window.addEventListener("pageshow", returned);
     return () => {
       window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pageshow", returned);
       leave();
     };
   }, []);
@@ -106,12 +116,15 @@ export function useTemporaryChat(input: {
   );
   const createFields = useCallback((): { temporary?: true } => (armed ? { temporary: true } : {}), [armed]);
   const adoptCreated = useCallback((created: unknown) => {
-    const record = created as { id?: unknown; temporary?: unknown } | null;
-    if (!ownerKey || record?.temporary !== true || typeof record.id !== "string") return;
-    const tracked = { owner: ownerKey, id: record.id, entered: false };
+    const step = temporaryChatOnCreated({ ownerKey, created, screenLeft: screenLeftRef.current });
+    if (step.deleteId) {
+      void deleteConversation(step.deleteId, true);
+      return;
+    }
+    if (!step.track) return;
     // Read by the unmount and pagehide paths before the next render commits.
-    activeRef.current = tracked;
-    setActive(tracked);
+    activeRef.current = step.track;
+    setActive(step.track);
   }, [ownerKey]);
   const matchesPending = useCallback(
     (conversationId: string) => armed === Boolean(active?.owner === ownerKey && active?.id === conversationId),

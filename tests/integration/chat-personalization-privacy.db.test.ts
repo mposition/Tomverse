@@ -170,6 +170,35 @@ test("an answer still running holds an expired temporary Chat until its lease la
   assert.equal(await exists(running.conversation.id), false);
 });
 
+test("one run works off a backlog larger than a batch, and a deferred row is not retried within it", async () => {
+  const now = new Date();
+  const owner = await seedUser();
+  const expiredAt = new Date(now.getTime() - 60 * 60 * 1000);
+  const held = await seedConversation(owner.id, { temporaryExpiresAt: new Date(expiredAt.getTime() - 1000) });
+  await seedAttempt({
+    userId: owner.id,
+    conversationId: held.conversation.id,
+    sourceUserMessageId: held.question.id,
+    updatedAt: now,
+    leaseExpiresAt: new Date(now.getTime() + 4 * 60 * 1000),
+  });
+  const backlog = [];
+  for (let index = 0; index < 5; index += 1) {
+    backlog.push(await seedConversation(owner.id, { temporaryExpiresAt: expiredAt }));
+  }
+  const ordinary = await seedConversation(owner.id);
+
+  // Batches of two: the held row heads the first batch and is skipped after it.
+  assert.deepEqual(await sweepExpiredTemporaryConversations(now, 2), { examined: 6, deleted: 5, deferred: 1, failed: 0 });
+  for (const row of backlog) assert.equal(await exists(row.conversation.id), false);
+  assert.equal(await exists(held.conversation.id), true);
+  assert.equal(await exists(ordinary.conversation.id), true);
+
+  // The batch cap bounds one run; the next run continues.
+  for (let index = 0; index < 3; index += 1) await seedConversation(owner.id, { temporaryExpiresAt: expiredAt });
+  assert.deepEqual(await sweepExpiredTemporaryConversations(now, 1, 2), { examined: 2, deleted: 1, deferred: 1, failed: 0 });
+});
+
 test("the sweep's deletion scope drops an ordinary or foreign id before anything is touched", async () => {
   const now = new Date();
   const owner = await seedUser();

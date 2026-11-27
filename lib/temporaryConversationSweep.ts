@@ -6,8 +6,14 @@ import { deleteOwnedConversations } from "@/lib/conversationDeletion";
 import { prisma } from "@/lib/prisma";
 import { temporaryConversationSweepWhere, temporarySweepCutoff } from "@/lib/temporaryChatAccess";
 
-/** Conversations one pass may examine; the rest wait fifteen minutes. */
+/**
+ * Conversations one batch examines, and how many batches one run may take.
+ * A run keeps going while batches come back full, so a backlog is worked off
+ * in the same run instead of adding fifteen minutes per hundred; past the
+ * last batch the rest wait for the next run.
+ */
 export const TEMPORARY_CHAT_SWEEP_BATCH = 100;
+export const TEMPORARY_CHAT_SWEEP_MAX_BATCHES = 20;
 
 export type TemporaryConversationSweepResult = {
     examined: number;
@@ -38,52 +44,67 @@ export type TemporaryConversationSweepResult = {
  */
 export async function sweepExpiredTemporaryConversations(
     now = new Date(),
-    limit = TEMPORARY_CHAT_SWEEP_BATCH
+    limit = TEMPORARY_CHAT_SWEEP_BATCH,
+    maxBatches = TEMPORARY_CHAT_SWEEP_MAX_BATCHES
 ): Promise<TemporaryConversationSweepResult> {
     const cutoff = temporarySweepCutoff(now);
-    const candidates = await prisma.conversation.findMany({
-        where: temporaryConversationSweepWhere(cutoff),
-        select: { id: true, userId: true },
-        orderBy: { temporaryExpiresAt: "asc" },
-        take: limit,
-    });
-    const result: TemporaryConversationSweepResult = { examined: candidates.length, deleted: 0, deferred: 0, failed: 0 };
-    for (const candidate of candidates) {
-        try {
-            const outcome = await prisma.$transaction(async (tx) => {
-                await lockChatRecoveryConversation(tx, candidate.userId, candidate.id);
-                const live = await tx.chatResponseAttempt.findFirst({
-                    where: {
-                        userId: candidate.userId,
-                        conversationId: candidate.id,
-                        status: { in: [...CHAT_RESPONSE_ATTEMPT_ACTIVE_STATUSES] },
-                        leaseExpiresAt: { gt: now },
-                    },
-                    select: { assistantMessageId: true },
-                });
-                if (live) return "deferred" as const;
-                const deleted = await deleteOwnedConversations(tx, {
-                    userId: candidate.userId,
-                    conversationIds: [candidate.id],
-                    temporaryExpiredBefore: cutoff,
-                });
-                return deleted.count === 1 ? ("deleted" as const) : ("gone" as const);
-            });
-            if (outcome === "deleted") result.deleted += 1;
-            else if (outcome === "deferred") result.deferred += 1;
-        } catch (error) {
-            result.failed += 1;
-            console.error(JSON.stringify({
-                event: "temporary_chat_sweep_failed",
-                // Content-free: the error class only, never the conversation.
-                error: error instanceof Error ? error.name : "unknown",
-            }));
+    const result: TemporaryConversationSweepResult = { examined: 0, deleted: 0, deferred: 0, failed: 0 };
+    // A conversation deferred or failed in this run is not examined again in it.
+    const seen: string[] = [];
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+        const candidates = await prisma.conversation.findMany({
+            where: { ...temporaryConversationSweepWhere(cutoff), ...(seen.length ? { id: { notIn: seen } } : {}) },
+            select: { id: true, userId: true },
+            orderBy: [{ temporaryExpiresAt: "asc" }, { id: "asc" }],
+            take: limit,
+        });
+        result.examined += candidates.length;
+        for (const candidate of candidates) {
+            seen.push(candidate.id);
+            await sweepOne(candidate, { now, cutoff, result });
         }
+        if (candidates.length < limit) break;
     }
     if (result.examined > 0) {
         console.info(JSON.stringify({ event: "temporary_chat_sweep", ...result }));
     }
     return result;
+}
+
+async function sweepOne(
+    candidate: { id: string; userId: string },
+    { now, cutoff, result }: { now: Date; cutoff: Date; result: TemporaryConversationSweepResult }
+) {
+    try {
+        const outcome = await prisma.$transaction(async (tx) => {
+            await lockChatRecoveryConversation(tx, candidate.userId, candidate.id);
+            const live = await tx.chatResponseAttempt.findFirst({
+                where: {
+                    userId: candidate.userId,
+                    conversationId: candidate.id,
+                    status: { in: [...CHAT_RESPONSE_ATTEMPT_ACTIVE_STATUSES] },
+                    leaseExpiresAt: { gt: now },
+                },
+                select: { assistantMessageId: true },
+            });
+            if (live) return "deferred" as const;
+            const deleted = await deleteOwnedConversations(tx, {
+                userId: candidate.userId,
+                conversationIds: [candidate.id],
+                temporaryExpiredBefore: cutoff,
+            });
+            return deleted.count === 1 ? ("deleted" as const) : ("gone" as const);
+        });
+        if (outcome === "deleted") result.deleted += 1;
+        else if (outcome === "deferred") result.deferred += 1;
+    } catch (error) {
+        result.failed += 1;
+        console.error(JSON.stringify({
+            event: "temporary_chat_sweep_failed",
+            // Content-free: the error class only, never the conversation.
+            error: error instanceof Error ? error.name : "unknown",
+        }));
+    }
 }
 
 /** For the fifteen-minute maintenance run: never throws. */
