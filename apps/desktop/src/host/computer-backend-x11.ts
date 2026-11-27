@@ -23,7 +23,8 @@ import type { ActOutcome, BackendAction, ComputerBackend, LastInput, RawWindow, 
  * Not covered, said plainly: Wayland (native windows cannot be listed, captured or driven by these tools, so the backend does not
  * start there), and any desktop whose window manager does not set `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST_STACKING` and
  * `_NET_WM_PID`. A window that no window manager manages and that is below the chosen one is counted as covering too (their order is
- * not known), which only refuses more; a window of that kind as big as the screen is taken for the compositor's overlay and ignored.
+ * not known), which only refuses more; a window of that kind as big as the screen that carries no class, name or process id is taken
+ * for the compositor's overlay and ignored (one that carries any of them is a window of a program and covers).
  * The check and the input are separate program runs, so a window that changes between them is caught by the next check, not by
  * the input. It has been run against a model of the tools in tests, never on a real X server.
  */
@@ -123,11 +124,15 @@ export function parseWinInfo(text: string): Geometry | null {
   };
 }
 
-/** The direct children of the root window as `xwininfo -root -children` lists them, with their absolute rectangles. */
+/**
+ * The direct children of the root window as `xwininfo -root -children` lists them, with their absolute rectangles. A line reads
+ * `0x... "name": ("instance" "Class")  WxH+X+Y  +AX+AY` and a negative coordinate is printed with its own sign (`-20`, never `+-20`):
+ * the sign is part of the number in both pairs.
+ */
 export function parseRootChildren(text: string): Array<{ xid: number; x: number; y: number; width: number; height: number }> {
   const out: Array<{ xid: number; x: number; y: number; width: number; height: number }> = [];
   for (const line of text.split("\n")) {
-    const found = /^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)\s*$/.exec(line);
+    const found = /^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)([+-]\d+)([+-]\d+)\s+([+-]\d+)([+-]\d+)\s*$/.exec(line);
     if (found) out.push({ xid: Number.parseInt(found[1]!, 16), width: Number(found[2]), height: Number(found[3]), x: Number(found[6]), y: Number(found[7]) });
   }
   return out;
@@ -255,8 +260,9 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
 
   /**
    * The mapped windows of the root that the window manager does not manage (override-redirect) and that overlap the window, or null
-   * when that cannot be found out. A window as big as the screen is the compositor's overlay, not a window of a program. A
-   * window of this kind below the chosen one is counted too (the order among them is not known), which only refuses more.
+   * when that cannot be found out. A window as big as the screen that carries no property of a program is the compositor's overlay,
+   * not a window of a program. A window of this kind below the chosen one is counted too (the order among them is not known),
+   * which only refuses more.
    */
   async function unmanagedOver(own: Geometry, signal?: AbortSignal): Promise<Geometry[] | null> {
     const [root, tree] = await Promise.all([text("xwininfo", ["-root"], signal), text("xwininfo", ["-root", "-children"], signal)]);
@@ -269,7 +275,16 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       if (rect.kind === "vanished") continue;
       if (rect.kind === "error") return null;
       if (!rect.value.viewable || !rect.value.inputOutput || !rect.value.overrideRedirect) continue;
-      if (rect.value.width >= screen.width && rect.value.height >= screen.height) continue;
+      if (rect.value.width >= screen.width && rect.value.height >= screen.height) {
+        // As big as the screen: the compositor's overlay only if it has no property of a program (no class, name or process id).
+        // A full-screen popup, a lock screen or a splash of a program has them and is a window like any other.
+        const named = await text("xprop", ["-id", hex(child.xid), "WM_CLASS", "WM_NAME", "_NET_WM_NAME", "_NET_WM_PID"], signal);
+        if (!named.ok) {
+          if (vanished(named.err)) continue;
+          return null;
+        }
+        if (parseXprop(named.out).size === 0) continue;
+      }
       found.push(rect.value);
     }
     return found;
@@ -301,7 +316,10 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     const idle = Number(done.out.trim());
     if (!done.ok || !Number.isFinite(idle) || idle < 0) throw new Error("The idle time could not be read.");
     const at = (before + after) / 2;
-    return { idle, at, tick: Math.round(at - idle) >>> 0 };
+    // `last`: when the server last saw input, on this process's own millisecond clock. `tick`: the same cut to 32 bits, which is
+    // what the host compares; times are compared on `last`, which is not cut.
+    const last = Math.round(at - idle);
+    return { idle, at, last, tick: last >>> 0 };
   }
   /**
    * Notes that the agent's own input just went out, and returns the tick the host takes as the end of it. The idle time is read a
@@ -313,7 +331,7 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     try {
       const sample = await idleSample(signal);
       seen = { tick: sample.tick, sampledAt: sample.at };
-      return { tick: ended >>> 0, person: sample.tick - ended > IDLE_SLACK_MS };
+      return { tick: ended >>> 0, person: sample.last - ended > IDLE_SLACK_MS };
     } catch { return { tick: undefined, person: false }; }
   }
   /** Whether anything moved the pointer or pressed a key since the last time this was looked at. */

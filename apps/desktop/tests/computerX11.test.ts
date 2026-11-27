@@ -38,7 +38,8 @@ const ROOT = { id: 0x1, w: 1920, h: 1080 };
 const OVERLAY = 0x2c00003;
 
 function fakeX(initial: FakeWindow[]) {
-  let clock = 1_000_000;
+  // A real millisecond clock, far beyond 32 bits: the backend must not mix it with the 32-bit ticks the host compares.
+  let clock = 1_800_000_000_000;
   const windows = new Map<number, FakeWindow>(initial.map((window) => [window.xid, { ...window }]));
   let stack = initial.filter((window) => !window.unmanaged && window.parent === undefined).map((window) => window.xid);
   let active = initial.filter((window) => !window.unmanaged && window.parent === undefined).at(-1)?.xid ?? 0;
@@ -70,6 +71,8 @@ function fakeX(initial: FakeWindow[]) {
     for (const xid of [...stack].reverse()) { const window = windows.get(xid); if (window && viewable(window) && inside(window, pointer)) return xid; }
     return ROOT.id;
   };
+  /** How xwininfo prints a coordinate: with its own sign. */
+  const signed = (value: number) => (value < 0 ? `${value}` : `+${value}`);
   const info = (window: FakeWindow) => `  Absolute upper-left X:  ${window.x}\n  Absolute upper-left Y:  ${window.y}\n  Width: ${window.w}\n  Height: ${window.h}\n  Map State: ${viewable(window) ? "IsViewable" : "IsUnMapped"}\n  Override Redirect State: ${window.unmanaged ? "yes" : "no"}\n  Class: ${window.inputOnly ? "InputOnly" : "InputOutput"}\n`;
 
   const run: X11Run = async (file, args, options) => {
@@ -85,6 +88,8 @@ function fakeX(initial: FakeWindow[]) {
     if (file === "xprop" && args[0] === "-id") {
       const xid = idOf(args[1]!);
       if (broken.has(xid)) return failed;
+      // The compositor's overlay is made by the server: it has no property of a program.
+      if (xid === OVERLAY && overlay) return out("WM_CLASS(STRING):  not found.\nWM_NAME(STRING):  not found.\n_NET_WM_NAME(UTF8_STRING):  not found.\n_NET_WM_PID(CARDINAL):  not found.\n");
       const window = windows.get(xid);
       if (!window) return gone("xprop");
       const lines = [`_NET_WM_PID(CARDINAL) = ${window.pid}`, `WM_CLASS(STRING) = "${window.instance}", "${window.cls}"`,
@@ -98,7 +103,7 @@ function fakeX(initial: FakeWindow[]) {
         if (args[1] === "-children") {
           if (rootListBroken) return failed;
           const listed = [...windows.values()].filter((window) => window.parent === undefined && !window.notListed);
-          const rows = listed.map((window) => `     0x${window.xid.toString(16)} "${window.title}": ("${window.instance}" "${window.cls}")  ${window.w}x${window.h}+${window.x}+${window.y}  +${window.x}+${window.y}`);
+          const rows = listed.map((window) => `     0x${window.xid.toString(16)} "${window.title}": ("${window.instance}" "${window.cls}")  ${window.w}x${window.h}${signed(window.x)}${signed(window.y)}  ${signed(window.x)}${signed(window.y)}`);
           if (overlay) rows.push(`     0x${OVERLAY.toString(16)} (has no name): ()  ${ROOT.w}x${ROOT.h}+0+0  +0+0`);
           return out(`\nxwininfo: Window id: 0x1 (the root window) (has no name)\n\n  Root window id: 0x1 (the root window) (has no name)\n  Parent window id: 0x0 (none)\n     ${rows.length} children:\n${rows.join("\n")}\n`);
         }
@@ -164,8 +169,8 @@ test("the output of xprop and xwininfo is read for the values it names and nothi
   assert.deepEqual(parseWinInfo("  Absolute upper-left X:  -5\n  Absolute upper-left Y:  10\n  Width: 640\n  Height: 480\n  Map State: IsViewable\n  Override Redirect State: yes\n  Class: InputOutput\n"),
     { x: -5, y: 10, width: 640, height: 480, viewable: true, inputOutput: true, overrideRedirect: true });
   assert.equal(parseWinInfo("  Absolute upper-left X:  0\n  Absolute upper-left Y:  0\n  Width: 1\n  Height: 1\n  Map State: IsUnMapped\n  Class: InputOnly\n")!.inputOutput, false);
-  assert.deepEqual(parseRootChildren('     0x3e0000b "Terminal": ("gnome-terminal" "Gnome-terminal")  720x480+100+100  +100+100\n     0x2c00003 (has no name): ()  10x10+-20+-20  +-20+-20\nnot a window line\n'),
-    [{ xid: 0x3e0000b, width: 720, height: 480, x: 100, y: 100 }, { xid: 0x2c00003, width: 10, height: 10, x: -20, y: -20 }]);
+  assert.deepEqual(parseRootChildren('     0x3e0000b "Terminal": ("gnome-terminal" "Gnome-terminal")  720x480+100+100  +100+100\n     0x2c00003 (has no name): ()  10x10-20-20  -20-20\n     0x2c00004 "Menu": ("menu" "Menu")  120x90-10+100  -10+100\nnot a window line\n'),
+    [{ xid: 0x3e0000b, width: 720, height: 480, x: 100, y: 100 }, { xid: 0x2c00003, width: 10, height: 10, x: -20, y: -20 }, { xid: 0x2c00004, width: 120, height: 90, x: -10, y: 100 }]);
   assert.equal(parseWinInfo("garbage"), null);
   assert.deepEqual(parseX11WindowId("4a00003:4321"), { xid: 0x4a00003, pid: 4321 });
   for (const bad of ["", "zz:1", "4a00003", "4a00003:abc", "123456789:1", "0:1", "4a00003:4321;rm"]) assert.throws(() => parseX11WindowId(bad), /Not a window id/, bad);
@@ -594,4 +599,21 @@ test("the person's input right after the agent's own, before the idle time was r
   assert.deepEqual([whole.performed, whole.typed], [true, 60]);
   quiet.x.advance(300);
   assert.ok(tickDistance((await quiet.backend.lastInput()).inputTick, whole.sentTick!) <= INPUT_TICK_MS);
+});
+
+test("a popup partly off the left or top edge of the screen is still found, and a full-screen window of a program is a window, not the compositor's overlay", async () => {
+  // xwininfo prints a negative coordinate with its own sign, so such a popup is read like any other.
+  const edge = setup([{ ...POPUP, x: -10, y: 100, w: 150, h: 90 }]);
+  assert.equal(await covers(edge.backend), true);
+  // A window as big as the screen that carries a class, a name or a process id covers; the overlay, which carries none, does not.
+  const lock: FakeWindow = { ...POPUP, xid: 0x7000002, cls: "Lock", instance: "lock", title: "screen locked", x: 0, y: 0, w: 1920, h: 1080 };
+  const locked = setup([lock]);
+  assert.equal(await covers(locked.backend), true);
+  const shot = await locked.backend.capture(ref(), 1568);
+  assert.ok(!("gone" in shot) && shot.image === undefined);
+  assert.equal(await covers(setup().backend), false);
+  // Its properties cannot be read: it counts as covering.
+  const unreadable = setup([lock]);
+  unreadable.x.broken.add(lock.xid);
+  assert.equal(await covers(unreadable.backend), true);
 });
