@@ -11961,6 +11961,7 @@ export function ChatPageClient({
         sourceRevision={reviewResultRevision}
         conversationId={isGuestMode ? null : currentChatId ?? null}
         guestSource={guestReviewSource}
+        readGuestSource={isGuestMode ? readGuestComparisonTurn : undefined}
         open
         onClose={() => setShowComparisonReview(false)}
         onCompleted={() => {

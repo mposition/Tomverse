@@ -84,7 +84,9 @@ type World = {
   claims: Map<string, number>;
   claimCalls: Array<{ subjectKey: string; scope: string; runKey: string; ttlSeconds: number }>;
   releases: number;
-  stored: Map<string, { id: string; assistantMessageIds: string[]; reviewerModelId: string; promptVersion: string; result: unknown; usageCredits: number; isStale: boolean; createdAt: Date }>;
+  /** Holds a run's claim release open, to land a request between save and release. */
+  releaseGate: Gate | null;
+  stored: Map<string, { id: string; assistantMessageIds: string[]; reviewerModelId: string; promptVersion: string; result: unknown; usageCredits: number; isStale: boolean; createdAt: Date; updatedAt: Date }>;
   latestTurn: { prompt: typeof PROMPT; responses: typeof TWO_ANSWERS } | null;
   latestTurnReads: number;
   rateLimits: Array<{ scope: string; limits: { minute: number; day: number } }>;
@@ -103,6 +105,7 @@ const freshWorld = (): World => ({
   claims: new Map(),
   claimCalls: [],
   releases: 0,
+  releaseGate: null,
   stored: new Map(),
   latestTurn: { prompt: PROMPT, responses: TWO_ANSWERS },
   latestTurnReads: 0,
@@ -111,6 +114,15 @@ const freshWorld = (): World => ({
 });
 
 let world = freshWorld();
+let writes = 0;
+/** What the chat route does when another answer to the question is saved. */
+const markStale = () => {
+  for (const row of world.stored.values()) {
+    if (row.isStale) continue;
+    row.isStale = true;
+    row.updatedAt = new Date(Date.UTC(2026, 10, 27) + ++writes * 1000);
+  }
+};
 let route: {
   GET: (request: Request, context: { params: Promise<{ conversationId: string }> }) => Promise<Response>;
   POST: (request: Request, context: { params: Promise<{ conversationId: string }> }) => Promise<Response>;
@@ -194,7 +206,8 @@ async function loadRoute() {
             modelName: answer.modelName,
           })),
           reviewerModelId: "mistral-medium-3-1",
-          usageCredits: 8,
+          // Distinct per run, so a test can tell which run wrote a row.
+          usageCredits: 7 + world.runs,
         };
       },
     },
@@ -239,9 +252,14 @@ async function loadRoute() {
         return { key, period: `${scope}-in-flight`, periodStart: new Date(0), token };
       },
       releaseInFlightRun: async (claim: { key: string; token: number }) => {
+        if (world.releaseGate) await world.releaseGate.promise;
         world.releases += 1;
         world.events.push("claim:release");
         if (world.claims.get(claim.key) === claim.token) world.claims.delete(claim.key);
+      },
+      isInFlightRunLive: async (subjectKey: string, scope: string, runKey: string) => {
+        world.events.push("live:read");
+        return world.claims.has(`${subjectKey}:${scope}:${runKey}`);
       },
     },
   });
@@ -258,14 +276,23 @@ async function loadRoute() {
         },
         userSettings: { findUnique: async () => ({ language: "en" }) },
         comparisonReview: {
-          findUnique: async ({ where }: { where: { userId_inputHash: { inputHash: string } } }) => {
-            world.events.push("cache:read");
-            return world.stored.get(where.userId_inputHash.inputHash) ?? null;
+          findUnique: async ({ where, select }: { where: { userId_inputHash: { inputHash: string } }; select?: unknown }) => {
+            world.events.push(select ? "fingerprint:read" : "cache:read");
+            const row = world.stored.get(where.userId_inputHash.inputHash);
+            return row ? { ...row } : null;
           },
           upsert: async ({ where, create }: { where: { userId_inputHash: { inputHash: string } }; create: { assistantMessageIds: string[]; reviewerModelId: string; promptVersion: string; result: unknown; usageCredits: number } }) => {
             world.events.push("upsert");
             if (world.upsertThrows) throw new Error("database went away");
-            const row = { id: `review-${world.stored.size + 1}`, ...create, isStale: false, createdAt: new Date(0) };
+            const existing = world.stored.get(where.userId_inputHash.inputHash);
+            // Like @updatedAt: every write moves the timestamp forward.
+            const row = {
+              id: existing?.id ?? `review-${world.stored.size + 1}`,
+              ...create,
+              isStale: false,
+              createdAt: existing?.createdAt ?? new Date(0),
+              updatedAt: new Date(Date.UTC(2026, 10, 27) + ++writes * 1000),
+            };
             world.stored.set(where.userId_inputHash.inputHash, row);
             return row;
           },
@@ -340,7 +367,8 @@ test("the claim is per account and input, taken before the cache, the quota and 
   const done = await POST(post(), context);
   assert.equal(done.status, 200);
 
-  assert.deepEqual(world.events.slice(0, 4), ["claim", "cache:read", "quota", "run"]);
+  // The fingerprint precedes the claim (see "a duplicate between save and release").
+  assert.deepEqual(world.events.slice(0, 5), ["fingerprint:read", "claim", "cache:read", "quota", "run"]);
   assert.equal(world.events.at(-1), "claim:release");
   const [call] = world.claimCalls;
   assert.equal(call.subjectKey, realSecurity.getUserChatUsageKey(USER_ID));
@@ -405,12 +433,7 @@ test("a run waited on is found by its exact turn even after the latest turn move
   const latest = await json(await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context));
   assert.equal(latest.storedReview, undefined, "the latest-turn lookup should not see the 2-answer run");
 
-  const exact = await json(await GET(get({
-    reviewMode: "balanced",
-    includeSynthesis: "false",
-    promptMessageId: PROMPT_ID,
-    assistantMessageIds: [ANSWER_A, ANSWER_B].join(","),
-  }), context));
+  const exact = await json(await GET(get(exactQuery([ANSWER_A, ANSWER_B])), context));
   const stored = exact.storedReview as { cached: boolean; usageCredits: number; responseMap: unknown[] } | undefined;
   assert.ok(stored, "the exact-turn lookup did not find the saved run");
   assert.equal(stored.cached, true);
@@ -422,12 +445,15 @@ test("a run waited on is found by its exact turn even after the latest turn move
   assert.equal(world.claimCalls.length, 1, "a lookup never claims anything");
 });
 
-const exactQuery = (ids: string[], promptMessageId = PROMPT_ID) => ({
-  reviewMode: "balanced",
-  includeSynthesis: "false",
-  promptMessageId,
-  assistantMessageIds: ids.join(","),
-});
+function exactQuery(ids: string[], promptMessageId = PROMPT_ID, savedBefore = "none") {
+  return {
+    reviewMode: "balanced",
+    includeSynthesis: "false",
+    promptMessageId,
+    assistantMessageIds: ids.join(","),
+    savedBefore,
+  };
+}
 
 test("an exact turn that no longer exists is its own answer, never the latest turn's review", async () => {
   const { GET, POST } = await loadRoute();
@@ -465,7 +491,11 @@ test("an incomplete exact lookup is refused rather than answered for the latest 
   const incomplete: Array<Record<string, string>> = [
     { reviewMode: "balanced", promptMessageId: PROMPT_ID },
     { reviewMode: "balanced", assistantMessageIds: [ANSWER_A, ANSWER_B].join(",") },
-    { promptMessageId: PROMPT_ID, assistantMessageIds: [ANSWER_A, ANSWER_B].join(",") },
+    { promptMessageId: PROMPT_ID, assistantMessageIds: [ANSWER_A, ANSWER_B].join(","), savedBefore: "none" },
+    // Without the pre-run fingerprint a lookup could not tell the joined
+    // run's result from an older row of the same input.
+    { reviewMode: "balanced", promptMessageId: PROMPT_ID, assistantMessageIds: [ANSWER_A, ANSWER_B].join(",") },
+    { ...exactQuery([ANSWER_A, ANSWER_B]), savedBefore: "yesterday" },
   ];
   for (const query of incomplete) {
     const refused = await GET(get(query), context);
@@ -502,7 +532,7 @@ test("an exact lookup still finds its row after a later answer marked it stale",
   assert.equal((await POST(post(), context)).status, 200);
   // The chat route marks every review of a question stale when another answer
   // to it is saved -- e.g. the third model finishing just after this run.
-  for (const row of world.stored.values()) row.isStale = true;
+  markStale();
 
   const latest = await json(await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context));
   assert.equal(latest.storedReview, undefined, "the setup lookup keeps refusing stale rows");
@@ -537,4 +567,106 @@ test("exact lookups spend their own rate-limit bucket, never the setup preview's
   const setup = await GET(get({ reviewMode: "balanced", includeSynthesis: "false" }), context);
   assert.equal(setup.status, 200);
   await setup.text();
+});
+
+// --- which row a waiting client may receive ---------------------------------
+
+type StoredDto = { originalUsageCredits: number } | null;
+const joinWhileRunning = async (POST: NonNullable<typeof route>["POST"]) => {
+  world.runGate = gate();
+  const owner = POST(post(), context);
+  await until(() => world.runs >= 1 && world.events.at(-1) === "run");
+  const duplicate = await POST(post(), context);
+  const body = await json(duplicate);
+  assert.equal(duplicate.status, 409);
+  assert.equal(body.code, "DUPLICATE_REQUEST");
+  return { owner, savedBefore: body.savedBefore as string | null };
+};
+const lookUp = async (GET: NonNullable<typeof route>["GET"], savedBefore: string | null) =>
+  json(await GET(get(exactQuery([ANSWER_A, ANSWER_B], PROMPT_ID, savedBefore ?? "none")), context));
+
+test("a wait on a re-run of a stale row gets the new result, never the old one", async () => {
+  const { GET, POST } = await loadRoute();
+  // An earlier run of the same input, since marked stale: it is why the
+  // next POST runs again (and is charged again) instead of being cached.
+  assert.equal((await POST(post(), context)).status, 200);
+  markStale();
+  const previous = [...world.stored.values()][0];
+
+  const { owner, savedBefore } = await joinWhileRunning(POST);
+  assert.equal(savedBefore, previous.updatedAt.toISOString(), "the 409 must name the stale row it supersedes");
+  const during = await lookUp(GET, savedBefore);
+  assert.equal(during.storedReview, null, "the waiting client was handed the previous run's result");
+  assert.equal(during.running, true);
+
+  world.runGate!.open();
+  assert.equal((await owner).status, 200);
+  const after = await lookUp(GET, savedBefore);
+  assert.equal((after.storedReview as StoredDto)?.originalUsageCredits, 9, "the wait must end on the joined run's own row");
+  assert.equal(world.runs, 2);
+});
+
+test("a result marked stale right after it saved is still the waiting client's", async () => {
+  const { GET, POST } = await loadRoute();
+  const { owner, savedBefore } = await joinWhileRunning(POST);
+  assert.equal(savedBefore, null, "no row existed before the joined run");
+  world.runGate!.open();
+  assert.equal((await owner).status, 200);
+  // The third model finishes just after the 2-answer run saved.
+  markStale();
+  const after = await lookUp(GET, savedBefore);
+  assert.equal((after.storedReview as StoredDto)?.originalUsageCredits, 8);
+});
+
+test("a joined run that ends without saving ends the wait instead of returning an older row", async () => {
+  const { GET, POST } = await loadRoute();
+  assert.equal((await POST(post(), context)).status, 200);
+  markStale();
+  world.runBehaviour = "fail";
+  const { owner, savedBefore } = await joinWhileRunning(POST);
+  assert.equal((await lookUp(GET, savedBefore)).running, true);
+
+  world.runGate!.open();
+  assert.equal((await owner).status, 502);
+  const after = await lookUp(GET, savedBefore);
+  assert.equal(after.storedReview, null, "the stale row of an earlier run was handed out as this run's result");
+  assert.equal(after.running, false, "a run that ended without a row must end the wait");
+});
+
+test("a joined run that ends without saving and with no earlier row ends the wait", async () => {
+  const { GET, POST } = await loadRoute();
+  world.runBehaviour = "fail";
+  const { owner, savedBefore } = await joinWhileRunning(POST);
+  world.runGate!.open();
+  assert.equal((await owner).status, 502);
+  const after = await lookUp(GET, savedBefore);
+  assert.equal(after.storedReview, null);
+  assert.equal(after.running, false);
+});
+
+test("a duplicate between the run's save and its release joins a run that is already done", async () => {
+  const { GET, POST } = await loadRoute();
+  world.releaseGate = gate();
+  const owner = POST(post(), context);
+  await until(() => world.events.includes("upsert"));
+  // Saved, claim not yet released: the duplicate is refused, but the row it
+  // fingerprinted is already this run's fresh result.
+  const duplicate = await POST(post(), context);
+  const body = await json(duplicate);
+  assert.equal(duplicate.status, 409);
+  assert.equal(body.savedBefore, null, "a fresh row is the joined run's own result and must be acceptable");
+  world.releaseGate.open();
+  assert.equal((await owner).status, 200);
+  markStale();
+  const after = await lookUp(GET, body.savedBefore as null);
+  assert.equal((after.storedReview as StoredDto)?.originalUsageCredits, 8);
+});
+
+test("liveness is read before the row, so a run that saved and released is never reported ended", async () => {
+  const { GET } = await loadRoute();
+  world.events = [];
+  await lookUp(GET, null);
+  const live = world.events.indexOf("live:read");
+  const row = world.events.indexOf("cache:read");
+  assert.ok(live >= 0 && row > live, `lookup order was ${world.events.join(", ")}`);
 });

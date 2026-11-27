@@ -144,13 +144,21 @@ try {
       await route.fulfill({
         status: 409,
         contentType: "application/json",
-        body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST" }),
+        body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST", savedBefore: null }),
       });
       return;
     }
     const query = new URL(request.url()).searchParams;
     if (!query.has("assistantMessageIds")) return route.fallback();
     exactLookups.push({ query, at: Date.now() });
+    if (exactBehaviour === "ended") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ available: true, storedReview: null, running: false }),
+      });
+      return;
+    }
     if (exactBehaviour === "gone") {
       await route.fulfill({
         status: 404,
@@ -195,6 +203,8 @@ try {
   for (const { query } of exactLookups) {
     assert.equal(query.get("promptMessageId"), "11111111-1111-4111-8111-111111111111");
     assert.equal(query.get("reviewMode"), "balanced");
+    // The 409's pre-run fingerprint travels with every lookup.
+    assert.equal(query.get("savedBefore"), "none");
   }
   assert.equal(mock.getRunCount(), 1);
   assert.equal(await startedEvents(), 1, "joining a run already in flight was counted as a start");
@@ -214,9 +224,90 @@ try {
   assert.equal(exactLookups.length, 3, "the wait kept polling a turn that is gone");
   assert.equal(await startedEvents(), 1);
 
+  // 7. The joined run ended without saving (every reviewer failed, or its
+  //    process died and the claim expired): the wait stops with its own
+  //    message instead of polling to the deadline, and a retry is offered.
+  exactBehaviour = "ended";
+  await page.getByRole("button", { name: /교차검토 실행/ }).click();
+  await expect(page.getByTestId("comparison-review-error")).toContainText("저장된 결과 없이 끝났습니다", { timeout: 15_000 });
+  await expect(result).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /교차검토 실행/ })).toBeEnabled();
+  assert.equal(exactLookups.length, 4, "the wait kept polling a run that ended");
+
+  // 8. A 409 without the pre-run fingerprint cannot be told apart from an
+  //    older row of the same input, so the dialog does not wait on it.
+  await page.route(endpoint, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    duplicatePosts += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "This request is already being processed.", code: "DUPLICATE_REQUEST" }),
+    });
+  });
+  await page.getByRole("button", { name: /교차검토 실행/ }).click();
+  await expect(page.getByTestId("comparison-review-error")).toContainText("이미 실행 중입니다");
+  await page.waitForTimeout(4_000);
+  assert.equal(exactLookups.length, 4, "a 409 without a fingerprint started a wait");
+
+  // 9. Guest: the setup previews the page's latest local turn, so an answer
+  //    finishing on the setup step is included in the preview and in the run;
+  //    once the run starts, more answers change nothing.
+  const guestPreviews = [];
+  const guestRuns = [];
+  const guestGate = { open: () => {} };
+  const guestRunGate = new Promise((done) => { guestGate.open = done; });
+  await page.route("**/api/chat/comparison-review/preview", async (route) => {
+    const body = route.request().postDataJSON();
+    guestPreviews.push(body.responses.length);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        available: true,
+        guest: true,
+        guestTrial: { limit: 1, used: 0, remaining: 1 },
+        responses: body.responses.map(({ messageId, modelId }) => ({ messageId, modelId, modelName: modelId })),
+        estimatedCredits: 8,
+        dualReview: false,
+        reviewerClass: "Advanced",
+        disclaimer: "This compares only supplied answers.",
+      }),
+    });
+  });
+  await page.route("**/api/chat/comparison-review", async (route) => {
+    guestRuns.push(route.request().postDataJSON().responses.length);
+    await guestRunGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ...saved, guest: true, persisted: false, webVerificationAvailable: false }),
+    });
+  });
+  await page.goto(`${base}/?mode=guest`);
+  await expect(setupScreen).toBeVisible();
+  assert.deepEqual(guestPreviews, [2]);
+  await answerFinished();
+  await expect.poll(() => guestPreviews.length).toBe(2);
+  assert.equal(guestPreviews[1], 3, "the guest setup was refreshed with the answers captured when it opened");
+  await expect(setupScreen).toBeVisible();
+  await page.getByRole("button", { name: /교차검토 실행/ }).click();
+  await expect.poll(() => guestRuns.length).toBe(1);
+  assert.equal(guestRuns[0], 3, "the guest run did not send the turn its setup previewed");
+  await answerFinished();
+  await settle();
+  assert.equal(guestPreviews.length, 2, "a finished answer re-previewed the guest setup under a running review");
+  guestGate.open();
+  await expect(result).toBeVisible();
+  await answerFinished();
+  await settle();
+  await expect(result).toBeVisible();
+  assert.equal(guestPreviews.length, 2);
+  assert.equal(guestRuns.length, 1);
+
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Classic AI Review dialog; setup refreshes on new answers, a running review and a displayed result survive them, the setup catches up afterwards, and an already-running review is waited on, not re-run.",
+    "PASS: Classic AI Review dialog; setup refreshes on new answers (guest included), a running review and a displayed result survive them, the setup catches up afterwards, and an already-running review is waited on, not re-run.",
   );
 } finally {
   await browser?.close();

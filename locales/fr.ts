@@ -566,6 +566,7 @@ export const fr = {
         aiReviewAlreadyRunningWaiting: "Cette AI Review est déjà en cours. Le résultat s’affichera ici dès qu’il sera prêt, sans la relancer.",
         aiReviewAlreadyRunningTimeout: "L’AI Review déjà en cours n’est pas encore terminée. Réessayez dans quelques minutes.",
         aiReviewAlreadyRunningTurnGone: "Les réponses qu’analysait cette AI Review ne sont plus disponibles ; son résultat ne peut donc pas être affiché. Vous pouvez lancer une nouvelle analyse des réponses actuelles.",
+        aiReviewAlreadyRunningEnded: "L’AI Review déjà en cours s’est terminée sans résultat enregistré. Vous pouvez la relancer.",
         attachmentUploadError: "Le fichier n'a pas pu être téléversé. Réessayez.",
         attachmentUploadingLabel: "Envoi en cours",
         attachmentUploadingHint: "Le fichier est en cours d'envoi. Veuillez patienter jusqu'à la fin.",

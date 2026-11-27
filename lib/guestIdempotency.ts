@@ -132,6 +132,8 @@ const inFlightPeriod = (scope: string) => `${scope}-in-flight`;
 
 /** A positive int4, so the bound parameter needs no BigInt handling. */
 const inFlightToken = () => randomInt(1, 2 ** 31);
+const inFlightKey = (subjectKey: string, scope: string, runKey: string) =>
+  `${subjectKey}:${scope}:${runKey}`;
 
 export const claimInFlightRun = async (
   subjectKey: string,
@@ -139,7 +141,7 @@ export const claimInFlightRun = async (
   runKey: string,
   ttlSeconds: number
 ): Promise<InFlightRunClaim> => {
-  const key = `${subjectKey}:${scope}:${runKey}`;
+  const key = inFlightKey(subjectKey, scope, runKey);
   const period = inFlightPeriod(scope);
   const periodStart = IN_FLIGHT_PERIOD_START;
   const token = inFlightToken();
@@ -176,4 +178,25 @@ export const releaseInFlightRun = async (claim: InFlightRunClaim) => {
       count: BigInt(claim.token),
     },
   });
+};
+
+/**
+ * Whether some run still holds the claim for this key, by the same expiry
+ * the claim itself uses. Read-only. A client waiting on a run uses it to tell
+ * "still running" from "ended without writing anything".
+ */
+export const isInFlightRunLive = async (
+  subjectKey: string,
+  scope: string,
+  runKey: string,
+  ttlSeconds: number
+) => {
+  const rows = await prisma.$queryRaw<Array<{ live: number }>>`
+    SELECT 1 AS "live" FROM "ChatUsageBucket"
+    WHERE "key" = ${inFlightKey(subjectKey, scope, runKey)}
+      AND "period" = ${inFlightPeriod(scope)}
+      AND "periodStart" = ${IN_FLIGHT_PERIOD_START}
+      AND "updatedAt" >= NOW() - ${ttlSeconds}::int * INTERVAL '1 second'
+  `;
+  return rows.length > 0;
 };

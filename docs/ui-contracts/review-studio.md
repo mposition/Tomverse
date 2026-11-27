@@ -76,8 +76,10 @@ identity and conversation only. A newly finished answer refreshes the setup
 step, but never remounts or reloads a review that is running or being read:
 that run is billed for the answers it started with, and its saved result is
 looked up by that turn. Returning to the setup step catches up with the latest
-turn. Coverage: `node --import tsx scripts/verify-ai-review-dialog.mjs` (real
-dialog, loopback fixtures) and `tests/comparisonReviewDialogMount.test.mjs`.
+turn; for a guest it re-reads the page's latest local turn, so the preview and
+the run include an answer that finished on the setup step. Coverage:
+`node --import tsx scripts/verify-ai-review-dialog.mjs` (real dialog, loopback
+fixtures) and `tests/comparisonReviewDialogMount.test.mjs`.
 
 One account review runs at a time per input. The signed-in POST claims
 `(account, input hash)` before its cache read, Free quota and reviewers, and
@@ -89,17 +91,24 @@ every outcome and expires after 15 minutes if its process dies
 that 409 as "already running": they say so and read the saved result through
 the GET with the exact `promptMessageId`/`assistantMessageIds` of that run
 until it appears, never re-run it, and offer a retry only once the claim could
-have expired. That exact-turn GET answers only for its turn: the saved row,
-`storedReview: null` while there is none yet, or `404
+have expired. The 409 carries `savedBefore`: the `updatedAt` of the stale row
+the joined run supersedes, or null when there was no row or it was already
+fresh. The wait accepts only a row written since then, so an older result of
+the same input is never shown as the new one; the check compares the column
+with its own earlier value, never two clocks. That exact-turn GET answers only
+for its turn: the row written since the join, `storedReview: null` with
+`running: true` while the claim is live, `running: false` once no run holds it
+and none wrote a row (the wait ends with its own message), or `404
 COMPARISON_REVIEW_TURN_NOT_FOUND` once an answer was deleted or regenerated,
-which ends the wait with its own message and is never replaced by the latest
-turn's review. It does not depend on the latest turn being comparable or
-within the size limit, and it still returns a row a later answer marked stale,
-since the recomputed input hash pins the exact texts. It has its own rate
-limit (10 a minute, 120 a day, apart from the setup preview's 20 and 300); one
-wait backs off to a lookup a minute and makes at most 18 lookups, honouring
-`Retry-After`. Studio stops a wait when its session is discarded (identity or
-conversation change, unmount) but not on dismissal. A join is not counted as
+never the latest turn's review. It reads liveness before the row, does not
+depend on the latest turn being comparable or within the size limit, and
+still returns the joined run's row after a later answer marked it stale. It
+has its own rate limit (10 a minute, 120 a day, apart from the setup
+preview's 20 and 300); one wait backs off to a lookup a minute and makes at
+most 18 lookups, honouring `Retry-After`. Studio binds a wait to the session
+and conversation that sent the request, stops it when either is discarded
+(identity or conversation change, unmount) and never starts one for a 409
+that arrives after that; dismissal does not stop it. A join is not counted as
 `comparison_review_started`. Coverage:
 `tests/server-contract/comparison-review-route.test.ts`,
 `tests/server-contract/comparison-review-run-claim.test.ts`,

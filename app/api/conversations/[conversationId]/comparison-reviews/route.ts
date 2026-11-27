@@ -44,6 +44,7 @@ import {
 } from "@/lib/chatSecurity";
 import {
   claimInFlightRun,
+  isInFlightRunLive,
   releaseInFlightRun,
   type InFlightRunClaim,
 } from "@/lib/guestIdempotency";
@@ -51,6 +52,7 @@ import {
   COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_RATE_LIMIT,
   COMPARISON_REVIEW_IN_FLIGHT_LOOKUP_SCOPE,
   COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS,
+  COMPARISON_REVIEW_SAVED_BEFORE_NONE,
   COMPARISON_REVIEW_TURN_NOT_FOUND,
 } from "@/lib/comparisonReviewInFlight";
 import {
@@ -88,6 +90,10 @@ const reviewRequestSchema = z
 const storedTurnLookupSchema = z.object({
   promptMessageId: z.string().uuid(),
   assistantMessageIds: z.array(z.string().uuid()).min(2).max(3),
+  savedBefore: z.union([
+    z.literal(COMPARISON_REVIEW_SAVED_BEFORE_NONE),
+    z.string().datetime(),
+  ]),
 });
 
 const jsonError = (
@@ -210,12 +216,25 @@ const storedReviewPayload = (
  * over the size limit, does not hide an older turn's saved result -- and it
  * skips the size check, which guards reviewer input and this reads a row.
  *
- * `isStale` is not a reason to withhold the row here. Saving any further
- * answer to the same question marks that question's reviews stale (the chat
- * route), so a third answer finishing just after a 2-answer run saved would
- * otherwise hide the result the client is waiting for. The input hash is
- * recomputed from the messages as they are now, so a row it finds reviews
- * exactly these question and answer texts.
+ * It returns only a row written by the run being waited on, or later:
+ * `savedBefore` is the `updatedAt` of the stale row the 409 saw just before
+ * the run was joined ("none" when there was no row or it was already fresh).
+ * That unchanged stale row is the *previous* result of the same input -- the
+ * one that made the run start -- and is never handed out as the new one. The
+ * comparison is the column against its own earlier value: Prisma fills
+ * `updatedAt` from the application's clock, so comparing it with the claim's
+ * database `NOW()` would compare two clocks.
+ *
+ * `isStale` is not a reason to withhold a row written since the join. Saving
+ * any further answer to the same question marks that question's reviews stale
+ * (the chat route), so a third answer finishing just after a 2-answer run
+ * saved would otherwise hide the result the client is waiting for. The input
+ * hash is recomputed from the messages as they are now, so a row it finds
+ * reviews exactly these question and answer texts.
+ *
+ * Liveness is read before the row: the run writes its row before it releases
+ * its claim, so "no live claim, row unchanged" can only mean the run ended
+ * without writing one (`running: false`), and the client stops waiting.
  */
 const storedTurnReviewResponse = async (
   userId: string,
@@ -226,6 +245,7 @@ const storedTurnReviewResponse = async (
   const exact = storedTurnLookupSchema.safeParse({
     promptMessageId: query.get("promptMessageId"),
     assistantMessageIds: query.get("assistantMessageIds")?.split(","),
+    savedBefore: query.get("savedBefore"),
   });
   if (!mode.success || !exact.success) {
     return jsonError("Invalid saved-review lookup.", "INVALID_COMPARISON_REVIEW_LOOKUP", 400);
@@ -249,26 +269,56 @@ const storedTurnReviewResponse = async (
     reviewMode: mode.data,
     includeSynthesis: query.get("includeSynthesis") === "true",
   });
+  const running = await isInFlightRunLive(
+    getUserChatUsageKey(userId),
+    "comparison-review",
+    inputHash,
+    COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
+  );
   const stored = await prisma.comparisonReview.findUnique({
     where: { userId_inputHash: { userId, inputHash } },
   });
-  const parsed = stored ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
-  const responseMap = stored ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
+  const writtenSinceJoin = stored !== null && (
+    exact.data.savedBefore === COMPARISON_REVIEW_SAVED_BEFORE_NONE ||
+    stored.updatedAt.toISOString() !== exact.data.savedBefore
+  );
+  const parsed = stored && writtenSinceJoin ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
+  const responseMap = stored && writtenSinceJoin ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
   const source = {
     question: turn.prompt.content,
     responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })),
   };
+  const storedReview = stored && parsed?.success && responseMap
+    ? storedReviewPayload(stored, parsed.data, responseMap)
+    : null;
   return Response.json(
-    {
-      available: true,
-      source,
-      storedReview: stored && parsed?.success && responseMap
-        ? storedReviewPayload(stored, parsed.data, responseMap)
-        : null,
-    },
+    { available: true, source, storedReview, running: storedReview ? false : running },
     { headers: { "Cache-Control": "no-store" } }
   );
 };
+
+/**
+ * The 409 a duplicate gets, saying which row its wait must not accept (see
+ * GET): a *stale* row is the previous result that made the run start, so its
+ * `updatedAt` is sent. No row, or a fresh one, sends null -- a fresh row at
+ * this point can only be the joined run's own result, saved just before it
+ * released its claim, and any row is then acceptable. Stale rows change only
+ * when a run writes them (marking stale touches fresh rows only), so the
+ * value cannot move under the wait for any other reason.
+ */
+const alreadyRunningResponse = (
+  prior: { updatedAt: Date; isStale: boolean } | null,
+  traceId: string
+) =>
+  Response.json(
+    {
+      error: "This request is already being processed.",
+      code: "DUPLICATE_REQUEST",
+      savedBefore: prior?.isStale ? prior.updatedAt.toISOString() : null,
+      traceId,
+    },
+    { status: 409, headers: { "Cache-Control": "no-store" } }
+  );
 
 export async function GET(
   request: Request,
@@ -475,12 +525,30 @@ async function runPost(
     // DUPLICATE_REQUEST and waits for the saved result through GET. Released
     // in `finally` on every outcome; it expires on its own if this process
     // dies first (lib/comparisonReviewInFlight.ts derives the TTL).
-    runClaim = await claimInFlightRun(
-      getUserChatUsageKey(session.user.id),
-      "comparison-review",
-      inputHash,
-      COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
-    );
+    //
+    // The row is fingerprinted *before* the claim attempt, so a refused
+    // request can say what the row looked like before the run it joins (see
+    // alreadyRunningResponse): a run that saves after this read changes
+    // `updatedAt`, and one that saved before it left a fresh row.
+    const prior = await prisma.comparisonReview.findUnique({
+      where: {
+        userId_inputHash: { userId: session.user.id, inputHash },
+      },
+      select: { updatedAt: true, isStale: true },
+    });
+    try {
+      runClaim = await claimInFlightRun(
+        getUserChatUsageKey(session.user.id),
+        "comparison-review",
+        inputHash,
+        COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
+      );
+    } catch (error) {
+      if (error instanceof ChatAccessError && error.code === "DUPLICATE_REQUEST") {
+        return alreadyRunningResponse(prior, traceId);
+      }
+      throw error;
+    }
     const cached = await prisma.comparisonReview.findUnique({
       where: {
         userId_inputHash: { userId: session.user.id, inputHash },

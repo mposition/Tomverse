@@ -176,11 +176,14 @@ try {
   let joinedPosts = 0;
   const joinedLookups = [];
   let joinedBehaviour = "rate-limited-then-saved";
+  /** When set, the 409 is held until the test releases it. */
+  let duplicateGate = null;
   await page.route(endpoint, async (route) => {
     const request = route.request();
     if (request.method() === "POST") {
       joinedPosts++;
-      await route.fulfill({ status: 409, json: { error: "This request is already being processed.", code: "DUPLICATE_REQUEST" } });
+      if (duplicateGate) await duplicateGate.promise;
+      await route.fulfill({ status: 409, json: { error: "This request is already being processed.", code: "DUPLICATE_REQUEST", savedBefore: null } });
       return;
     }
     const query = new URL(request.url()).searchParams;
@@ -209,6 +212,7 @@ try {
   assert.equal(joinedLookups[0].query.get("includeSynthesis"), "false");
   assert.equal(joinedLookups[0].query.get("promptMessageId"), originalSetup.promptMessageId);
   assert.equal(joinedLookups[0].query.get("assistantMessageIds"), originalSetup.assistantMessageIds.join(","));
+  assert.equal(joinedLookups[0].query.get("savedBefore"), "none", "the 409's pre-run fingerprint must travel with the lookup");
   assert.equal(await startedEvents(), startedBeforeJoin, "joining a run already in flight was counted as a start");
   await page.keyboard.press("Escape");
 
@@ -234,6 +238,20 @@ try {
   await page.waitForTimeout(8_000);
   assert.equal(joinedLookups.length, 4, "a discarded session kept polling");
   assert.equal(joinedPosts, 3);
+
+  // A 409 that arrives only after the session was discarded belongs to the
+  // old session: it must not start polling under the new session's lifetime.
+  await page.reload();
+  let releaseDuplicate = () => {};
+  duplicateGate = { promise: new Promise((done) => { releaseDuplicate = done; }) };
+  await entry.getByRole("button").click();
+  await expect.poll(() => joinedPosts, { timeout: 10_000 }).toBe(4);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Switch identity", exact: true }).click();
+  releaseDuplicate();
+  duplicateGate = null;
+  await page.waitForTimeout(8_000);
+  assert.equal(joinedLookups.length, 4, "a late 409 for a discarded session started polling");
 
   // Mobile has neither the new entry/modal nor a background analysis lookup.
   await page.setViewportSize({ width: 390, height: 844 });

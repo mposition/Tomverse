@@ -566,6 +566,7 @@ export const pt = {
         aiReviewAlreadyRunningWaiting: "Esta AI Review já está em execução. O resultado aparecerá aqui quando estiver pronto, sem executá-la novamente.",
         aiReviewAlreadyRunningTimeout: "A AI Review que já estava em execução ainda não terminou. Tente novamente em alguns minutos.",
         aiReviewAlreadyRunningTurnGone: "As respostas que esta AI Review estava analisando não estão mais disponíveis, então o resultado não pode ser exibido. Você pode iniciar uma nova revisão com as respostas atuais.",
+        aiReviewAlreadyRunningEnded: "A AI Review que já estava em execução terminou sem um resultado salvo. Você pode executá-la novamente.",
         attachmentUploadError: "O arquivo não pôde ser enviado. Tente novamente.",
         attachmentUploadingLabel: "Enviando",
         attachmentUploadingHint: "O arquivo está sendo enviado. Aguarde a conclusão.",

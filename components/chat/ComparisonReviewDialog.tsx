@@ -25,6 +25,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
 import {
   isComparisonReviewAlreadyRunning,
+  joinedRunSavedBefore,
   lookupStoredComparisonReview,
   storedComparisonReviewPath,
   waitForStoredComparisonReview,
@@ -469,6 +470,7 @@ export function ComparisonReviewDialog({
   onCompleted,
   onSignIn,
   sourceRevision = 0,
+  readGuestSource,
 }: {
   conversationId: string | null;
   /**
@@ -490,6 +492,14 @@ export function ComparisonReviewDialog({
    * or a result being read.
    */
   sourceRevision?: number;
+  /**
+   * A guest's latest local turn, read again whenever the setup step refreshes:
+   * `guestSource` is the turn captured when the dialog opened, so without it a
+   * third answer finishing on the setup step would refresh the preview with
+   * the old two answers. Never read while a run is in flight or a result is
+   * shown -- the setup step is frozen then (see `setupRevision`).
+   */
+  readGuestSource?: () => GuestReviewSource | null;
 }) {
   const { t } = useLanguage();
   const { requestToken: requestGuestVerificationToken } = useGuestVerification();
@@ -549,26 +559,36 @@ export function ComparisonReviewDialog({
   }, [review]);
 
   const isGuestReview = Boolean(guestSource);
+  const readGuestSourceRef = useRef(readGuestSource);
+  useEffect(() => {
+    readGuestSourceRef.current = readGuestSource;
+  });
+  /** The guest turn the setup on screen was previewed with; the run sends the same. */
+  const [setupGuestSource, setSetupGuestSource] = useState<GuestReviewSource | null>(guestSource);
 
   useEffect(() => {
     if (!open) return;
     if (!conversationId && !guestSource) return;
     const controller = new AbortController();
     queueMicrotask(() => { if (!controller.signal.aborted) { setSetup(null); setReview(null); setLoading(true); setError(""); } });
+    // A guest's answers live in the page, not in a conversation: the setup
+    // previews the latest local turn, so a refresh after another answer
+    // finished includes it. The open-time capture is the fallback.
+    const previewSource = guestSource ? readGuestSourceRef.current?.() ?? guestSource : null;
     // The guest preview is a POST because the thing being previewed is the
     // payload: there is no saved conversation to name in a URL. It spends
     // nothing and reserves nothing -- it exists so the price, the reviewer
     // class and the remaining trial on this screen all come from the server.
-    const request = guestSource
+    const request = previewSource
       ? fetch("/api/chat/comparison-review/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
           signal: controller.signal,
           body: JSON.stringify({
-            question: guestSource.question,
-            responses: guestSource.responses,
-            language: guestSource.language,
+            question: previewSource.question,
+            responses: previewSource.responses,
+            language: previewSource.language,
           }),
         })
       : fetch(`/api/conversations/${conversationId}/comparison-reviews?${new URLSearchParams({ reviewMode: mode, includeSynthesis: String(includeSynthesis) })}`, {
@@ -584,6 +604,7 @@ export function ComparisonReviewDialog({
         if (!response.ok) throw new Error(data.error || t("chat.aiReviewPrepareFailed"));
         if (controller.signal.aborted) return;
         setSetup(data);
+        if (previewSource) setSetupGuestSource(previewSource);
         if (data.storedReview) setReview(data.storedReview);
         trackProductEvent(
           "comparison_review_viewed",
@@ -677,6 +698,8 @@ export function ComparisonReviewDialog({
     assistantMessageIds: string[];
     reviewMode: ReviewMode;
     includeSynthesis: boolean;
+    /** From the 409: the row this wait must not accept (see the route's GET). */
+    savedBefore: string | null;
   }) => {
     waitControllerRef.current?.abort();
     const controller = new AbortController();
@@ -692,6 +715,10 @@ export function ComparisonReviewDialog({
       if (wait.outcome === "aborted" || controller.signal.aborted) return;
       if (wait.outcome === "gone") {
         setError(t("chat.aiReviewAlreadyRunningTurnGone"));
+        return;
+      }
+      if (wait.outcome === "ended") {
+        setError(t("chat.aiReviewAlreadyRunningEnded"));
         return;
       }
       if (wait.outcome === "expired") {
@@ -736,6 +763,8 @@ export function ComparisonReviewDialog({
         { review_mode: mode }
       );
     };
+    // The guest run sends exactly the turn the setup on screen previewed.
+    const runGuestSource = guestSource ? setupGuestSource ?? guestSource : null;
     try {
       const sendGuestRun = (turnstileToken?: string) =>
         fetch("/api/chat/comparison-review", {
@@ -743,9 +772,9 @@ export function ComparisonReviewDialog({
           headers: { "Content-Type": "application/json", Accept: REVIEW_STREAM_TYPE },
           cache: "no-store",
           body: JSON.stringify({
-            question: guestSource!.question,
-            responses: guestSource!.responses,
-            language: guestSource!.language,
+            question: runGuestSource!.question,
+            responses: runGuestSource!.responses,
+            language: runGuestSource!.language,
             reviewMode: mode,
             includeSynthesis,
             idempotencyKey: idempotencyKeyRef.current,
@@ -789,11 +818,13 @@ export function ComparisonReviewDialog({
         | ComparisonReview
         | { error?: string; traceId?: string; code?: string };
       const { promptMessageId, assistantMessageIds } = setup;
+      const savedBefore = joinedRunSavedBefore(data);
       if (
         !guestSource &&
         conversationId &&
         promptMessageId &&
         assistantMessageIds &&
+        savedBefore !== undefined &&
         isComparisonReviewAlreadyRunning(response.status, data)
       ) {
         // Not a failure: the same review is already running and billed once.
@@ -804,6 +835,7 @@ export function ComparisonReviewDialog({
           assistantMessageIds,
           reviewMode: mode,
           includeSynthesis,
+          savedBefore,
         });
         return;
       }

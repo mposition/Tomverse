@@ -7,9 +7,11 @@ import {
   COMPARISON_REVIEW_IN_FLIGHT_MAX_LOOKUPS,
   COMPARISON_REVIEW_IN_FLIGHT_POLL_DELAYS_MS,
   COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS,
+  COMPARISON_REVIEW_SAVED_BEFORE_NONE,
   COMPARISON_REVIEW_TURN_NOT_FOUND,
   ComparisonReviewLookupError,
   isComparisonReviewAlreadyRunning,
+  joinedRunSavedBefore,
   lookupStoredComparisonReview,
   storedComparisonReviewPath,
   waitForStoredComparisonReview,
@@ -45,19 +47,43 @@ test("the 409 the route sends for a run in flight is recognised, and nothing els
   assert.equal(isComparisonReviewAlreadyRunning(409, "DUPLICATE_REQUEST"), false);
 });
 
-test("the lookup names the exact turn being waited on, not just the latest one", () => {
-  const path = storedComparisonReviewPath("conversation-1", {
+test("the lookup names the exact turn being waited on, and the row it must not accept", () => {
+  const input = {
     reviewMode: "evidence",
     includeSynthesis: true,
     promptMessageId: "prompt-1",
     assistantMessageIds: ["answer-a", "answer-b"],
-  });
-  const url = new URL(path, "http://localhost");
+  };
+  const url = new URL(storedComparisonReviewPath("conversation-1", { ...input, savedBefore: "2026-11-27T01:02:03.456Z" }), "http://localhost");
   assert.equal(url.pathname, "/api/conversations/conversation-1/comparison-reviews");
   assert.equal(url.searchParams.get("reviewMode"), "evidence");
   assert.equal(url.searchParams.get("includeSynthesis"), "true");
   assert.equal(url.searchParams.get("promptMessageId"), "prompt-1");
   assert.equal(url.searchParams.get("assistantMessageIds"), "answer-a,answer-b");
+  assert.equal(url.searchParams.get("savedBefore"), "2026-11-27T01:02:03.456Z");
+  const none = new URL(storedComparisonReviewPath("conversation-1", { ...input, savedBefore: null }), "http://localhost");
+  assert.equal(none.searchParams.get("savedBefore"), COMPARISON_REVIEW_SAVED_BEFORE_NONE);
+});
+
+test("a 409 without the pre-run fingerprint gives nothing safe to wait for", () => {
+  assert.equal(joinedRunSavedBefore({ code: "DUPLICATE_REQUEST", savedBefore: null }), null);
+  assert.equal(joinedRunSavedBefore({ code: "DUPLICATE_REQUEST", savedBefore: "2026-11-27T01:02:03.456Z" }), "2026-11-27T01:02:03.456Z");
+  assert.equal(joinedRunSavedBefore({ code: "DUPLICATE_REQUEST" }), undefined);
+  assert.equal(joinedRunSavedBefore({ code: "DUPLICATE_REQUEST", savedBefore: 5 }), undefined);
+  assert.equal(joinedRunSavedBefore(null), undefined);
+});
+
+test("a run that ended without a new row ends the wait at once", async () => {
+  let lookups = 0;
+  const wait = await waitForStoredComparisonReview({
+    lookup: async () => {
+      lookups += 1;
+      return { status: "ended" };
+    },
+    sleep: async () => {},
+  });
+  assert.deepEqual(wait, { outcome: "ended" });
+  assert.equal(lookups, 1);
 });
 
 test("waiting resolves with the saved review as soon as it appears", async () => {
@@ -228,7 +254,9 @@ const respond = (body, init = {}) => {
 
 test("one lookup classifies every answer the GET can give, reading every body", async () => {
   const cases = [
-    [{ available: true, storedReview: { id: "r1" } }, {}, { status: "saved", review: { id: "r1" } }],
+    [{ available: true, storedReview: { id: "r1" }, running: false }, {}, { status: "saved", review: { id: "r1" } }],
+    [{ available: true, storedReview: null, running: true }, {}, { status: "pending" }],
+    [{ available: true, storedReview: null, running: false }, {}, { status: "ended" }],
     [{ available: true, storedReview: null }, {}, { status: "pending" }],
     [{ code: COMPARISON_REVIEW_TURN_NOT_FOUND }, { status: 404 }, { status: "gone" }],
     [{ code: "API_RATE_LIMITED" }, { status: 429, headers: { "Retry-After": "30" } }, { status: "pending", retryAfterMs: 30_000 }],

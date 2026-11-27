@@ -69,14 +69,30 @@ export const isComparisonReviewAlreadyRunning = (status: number, body: unknown) 
   body !== null &&
   (body as { code?: unknown }).code === "DUPLICATE_REQUEST";
 
+/** `savedBefore` when no row existed before the run being joined. */
+export const COMPARISON_REVIEW_SAVED_BEFORE_NONE = "none";
+
+/**
+ * What the 409 says about the row as it stood before the run being joined:
+ * its `updatedAt`, or null when there was none. A wait accepts only a row
+ * written after that -- an older (stale) row of the same input is not the
+ * result of the run it joined. Undefined when the 409 carries no such fact,
+ * in which case there is nothing safe to wait for.
+ */
+export const joinedRunSavedBefore = (body: unknown): string | null | undefined => {
+  const value = (body as { savedBefore?: unknown } | null)?.savedBefore;
+  return typeof value === "string" || value === null ? value : undefined;
+};
+
 /**
  * The read-only GET that returns the saved result of one exact turn.
  *
  * The exact ids matter: the GET otherwise looks the saved result up by the
  * conversation's *latest* turn, and the run being waited on may have started
  * before another answer finished. With them, the route answers only for that
- * turn -- saved, not yet saved, or COMPARISON_REVIEW_TURN_NOT_FOUND -- and
- * counts against its own rate-limit bucket.
+ * turn -- saved since `savedBefore`, still running, ended without a new row,
+ * or COMPARISON_REVIEW_TURN_NOT_FOUND -- and counts against its own
+ * rate-limit bucket.
  */
 export const storedComparisonReviewPath = (
   conversationId: string,
@@ -85,6 +101,7 @@ export const storedComparisonReviewPath = (
     includeSynthesis: boolean;
     promptMessageId: string;
     assistantMessageIds: readonly string[];
+    savedBefore: string | null;
   }
 ) =>
   `/api/conversations/${conversationId}/comparison-reviews?${new URLSearchParams({
@@ -92,6 +109,7 @@ export const storedComparisonReviewPath = (
     includeSynthesis: String(input.includeSynthesis),
     promptMessageId: input.promptMessageId,
     assistantMessageIds: input.assistantMessageIds.join(","),
+    savedBefore: input.savedBefore ?? COMPARISON_REVIEW_SAVED_BEFORE_NONE,
   })}`;
 
 const pause = (ms: number, signal?: AbortSignal) =>
@@ -114,7 +132,9 @@ export type StoredComparisonReviewLookup<Review> =
   /** No saved row yet, or a transient failure worth another (later) look. */
   | { status: "pending"; retryAfterMs?: number }
   /** The turn being waited on no longer exists: stop, never substitute. */
-  | { status: "gone" };
+  | { status: "gone" }
+  /** No run holds the claim any more and none wrote a row: stop. */
+  | { status: "ended" };
 
 /** A refusal that ends the wait for good (gone conversation, lock, bad request). */
 export class ComparisonReviewLookupError extends Error {
@@ -147,10 +167,11 @@ export async function lookupStoredComparisonReview<Review>(
     return { status: "pending" };
   }
   const body = (await response.json().catch(() => null)) as
-    | { code?: unknown; storedReview?: Review | null }
+    | { code?: unknown; storedReview?: Review | null; running?: unknown }
     | null;
   if (response.ok) {
-    return body?.storedReview ? { status: "saved", review: body.storedReview } : { status: "pending" };
+    if (body?.storedReview) return { status: "saved", review: body.storedReview };
+    return body?.running === false ? { status: "ended" } : { status: "pending" };
   }
   if (response.status === 404 && body?.code === COMPARISON_REVIEW_TURN_NOT_FOUND) return { status: "gone" };
   if (response.status === 429) {
@@ -166,6 +187,8 @@ export async function lookupStoredComparisonReview<Review>(
 export type ComparisonReviewWaitOutcome<Review> =
   | { outcome: "saved"; review: Review }
   | { outcome: "gone" }
+  /** The run joined ended (failed, crashed and expired) without a new row. */
+  | { outcome: "ended" }
   /** The deadline, the lookup budget or a Retry-After beyond either ran out. */
   | { outcome: "expired" }
   | { outcome: "aborted" };
@@ -204,6 +227,7 @@ export async function waitForStoredComparisonReview<Review>({
     if (signal?.aborted) return { outcome: "aborted" };
     if (result.status === "saved") return { outcome: "saved", review: result.review };
     if (result.status === "gone") return { outcome: "gone" };
+    if (result.status === "ended") return { outcome: "ended" };
     notBeforeMs = result.retryAfterMs ?? 0;
   }
   return { outcome: "expired" };
