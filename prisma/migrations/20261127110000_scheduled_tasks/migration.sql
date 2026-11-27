@@ -110,7 +110,8 @@ CREATE TABLE "ScheduledTaskRun" (
     ),
     -- A short machine code, never provider text or an exception message.
     CONSTRAINT "ScheduledTaskRun_outcome_shape_check" CHECK ("outcome" IS NULL OR "outcome" ~ '^[A-Za-z0-9_]{1,64}$'),
-    CONSTRAINT "ScheduledTaskRun_credits_check" CHECK ("reservedCredits" >= 0 AND ("chargedCredits" IS NULL OR "chargedCredits" >= 0) AND "taskRevision" >= 1)
+    CONSTRAINT "ScheduledTaskRun_credits_check" CHECK ("reservedCredits" >= 0 AND ("chargedCredits" IS NULL OR "chargedCredits" >= 0)),
+    CONSTRAINT "ScheduledTaskRun_taskRevision_check" CHECK ("taskRevision" >= 1)
 );
 
 CREATE INDEX "ScheduledTask_status_nextRunAt_idx" ON "ScheduledTask"("status", "nextRunAt");

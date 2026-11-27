@@ -465,10 +465,11 @@ test("a run whose lease lapsed is settled from its attempt and never sent again"
   const settled = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
   assert.equal(settled.consecutiveFailures, 2);
   // Nothing claimed in Chat and still within the grace window: verified unsent,
-  // so the same run (same message identities) is handed back under a new lease.
+  // so the same run (same message identities) is offered back. Its lease is
+  // taken only by the worker that runs it, so it is still lapsed here.
   const resumed = await lapsed(null, null, new Date(Date.now() - 60_000));
   assert.equal(resumed.run.status, "running");
-  assert.ok(resumed.run.leaseExpiresAt.getTime() > Date.now());
+  assert.ok(resumed.run.leaseExpiresAt.getTime() < Date.now());
   assert.deepEqual(resumed.reconciliation.resumable.map((run) => run.id), [resumed.run.id]);
   // A held reservation is never resumed, whatever the window says. (The
   // resumed run above still holds the account's one slot; release it first.)
@@ -476,6 +477,39 @@ test("a run whose lease lapsed is settled from its attempt and never sent again"
     data: { status: "failed", outcome: "test_closed", runningUserId: null, finishedAt: new Date() } });
   const held = await lapsed(null, "held-reservation", new Date(Date.now() - 30_000));
   assert.equal(held.reconciliation.resumable.length, 0);
+});
+
+test("a verified-unsent run of a task paused meanwhile is closed, not resumed, and frees the slot", async () => {
+  await enable();
+  const userId = await seedUser();
+  const task = await seedTask(userId, { nextRunAt: null });
+  const runId = randomUUID();
+  await prisma.scheduledTaskRun.create({
+    data: { id: runId, taskId: task.id, userId, runningUserId: userId, taskRevision: task.revision,
+      scheduledFor: new Date(Date.now() - 60_000), assistantMessageId: scheduledRunAssistantMessageId(runId),
+      leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+  await prisma.scheduledTask.update({ where: { id: task.id }, data: { status: "paused", pauseReason: "user", revision: { increment: 1 } } });
+  const result = await runScheduledTasksTick({ dispatch: async () => neverCalled() });
+  assert.equal(result.resumed, 0);
+  const closed = await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(closed.status, "skipped");
+  assert.equal(closed.outcome, "task_changed");
+  assert.equal(closed.runningUserId, null);
+});
+
+test("lateness is judged when a run is about to start, not when the tick began", async () => {
+  await enable();
+  const userId = await seedUser();
+  await seedTask(userId);
+  let reads = 0;
+  // The tick's first two reads (reconciliation, the due list) see now; by the
+  // time a worker would claim, earlier runs have taken past the grace window.
+  const clock = () => (reads++ < 2 ? new Date() : new Date(Date.now() + SCHEDULED_TASK_LIMITS.lateGraceMs + 120_000));
+  const result = await runScheduledTasksTick({ dispatch: async () => neverCalled(), now: clock });
+  assert.equal(result.claimed, 0);
+  assert.equal(result.skippedLate, 1);
+  assert.equal(await prisma.scheduledTaskRun.count(), 0);
 });
 
 test("a tick resumes a verified-unsent run with its own identities and answers it once", async () => {

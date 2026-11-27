@@ -116,10 +116,11 @@ async function finalizeRun(
       },
     });
     if (!closed.count) return;
-    const task = await tx.scheduledTask.findUnique({
-      where: { id: run.taskId },
-      select: { status: true, frequency: true, consecutiveFailures: true, revision: true },
-    });
+    // Locked, so an edit cannot commit between this read and the write below.
+    const rows = await tx.$queryRaw<Array<{ status: string; frequency: string; consecutiveFailures: number; revision: number }>>`
+      SELECT "status", "frequency", "consecutiveFailures", "revision" FROM "ScheduledTask"
+      WHERE "id" = ${run.taskId} FOR UPDATE`;
+    const task = rows[0];
     if (task && task.status === "active" && task.revision === run.taskRevision) {
       const streak = failureStreakAfter(task.consecutiveFailures, classification);
       await tx.scheduledTask.update({
@@ -165,16 +166,21 @@ const chargedCreditsOf = async (run: { chatReservationId: string | null; reserve
 
 type ClaimedRun = RunRef & { assistantMessageId: string };
 
+type ResumableRun = ClaimedRun & { scheduledFor: Date };
+
 /**
  * Runs whose lease lapsed, settled from the durable Chat attempt.
  *
  * One case is resumed rather than closed: no attempt and no reservation means
  * the run stopped before the Chat route claimed anything, so nothing was sent
- * and nothing was charged -- verified, not assumed. If its occurrence is still
- * within the grace window it is handed back to this tick under a fresh lease,
- * with the same run id, so the same question and answer identities: a second
- * worker that does reach Chat can only reattach. Every other lapsed run is
- * closed from its attempt and never sent again.
+ * and nothing was charged -- verified, not assumed. If its task is unchanged
+ * and its occurrence still inside the grace window it is returned as a
+ * candidate; a worker takes its lease only when it is about to run it
+ * (`acquireResumable`), with the same run id, so the same question and answer
+ * identities: a second worker that does reach Chat can only reattach. A
+ * candidate whose task was paused or edited is closed now, so it does not hold
+ * the account's one slot. Every other lapsed run is closed from its attempt and
+ * never sent again.
  */
 export async function reconcileExpiredScheduledRuns(now = new Date()) {
   const stale = await prisma.scheduledTaskRun.findMany({
@@ -184,25 +190,25 @@ export async function reconcileExpiredScheduledRuns(now = new Date()) {
     select: {
       id: true, taskId: true, userId: true, taskRevision: true, assistantMessageId: true, conversationId: true,
       chatReservationId: true, reservedCredits: true, scheduledFor: true,
+      task: { select: { status: true, revision: true } },
     },
   });
   let reconciled = 0;
-  const resumable: ClaimedRun[] = [];
-  for (const run of stale) {
+  const resumable: ResumableRun[] = [];
+  for (const { task, ...run } of stale) {
     const attempt = await prisma.chatResponseAttempt.findFirst({
       where: { assistantMessageId: run.assistantMessageId, userId: run.userId },
       select: { status: true, failureCode: true, leaseExpiresAt: true },
     });
     if (!attempt && !run.chatReservationId) {
-      if (now.getTime() - run.scheduledFor.getTime() <= SCHEDULED_TASK_LIMITS.lateGraceMs) {
-        const renewed = await prisma.scheduledTaskRun.updateMany({
-          where: { id: run.id, status: "running", leaseExpiresAt: { lt: now } },
-          data: { leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs) },
-        });
-        if (renewed.count) resumable.push(run);
+      if (task.status !== "active" || task.revision !== run.taskRevision) {
+        await finalizeRun(run, { status: "skipped", outcome: "task_changed", pause: null });
+      } else if (now.getTime() - run.scheduledFor.getTime() <= SCHEDULED_TASK_LIMITS.lateGraceMs) {
+        resumable.push(run);
         continue;
+      } else {
+        await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null });
       }
-      await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null });
       reconciled += 1;
       continue;
     }
@@ -215,6 +221,24 @@ export async function reconcileExpiredScheduledRuns(now = new Date()) {
     reconciled += 1;
   }
   return { reconciled, resumable };
+}
+
+/**
+ * Takes a resumable run's lease at the moment a worker is about to run it.
+ * Conditional on the lease still being lapsed, so two ticks cannot both take
+ * it; and the grace window is judged again at this instant, not at the start
+ * of the tick.
+ */
+async function acquireResumable(run: ResumableRun, now: Date): Promise<ClaimedRun | null> {
+  if (now.getTime() - run.scheduledFor.getTime() > SCHEDULED_TASK_LIMITS.lateGraceMs) {
+    await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null });
+    return null;
+  }
+  const taken = await prisma.scheduledTaskRun.updateMany({
+    where: { id: run.id, status: "running", leaseExpiresAt: { lt: now } },
+    data: { leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs) },
+  });
+  return taken.count ? run : null;
 }
 
 /* ---------------------------------------------------------------- claim -- */
@@ -285,7 +309,7 @@ async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
           assistantMessageId: scheduledRunAssistantMessageId(runId),
           // Claimed by the worker that is about to execute it, so the lease
           // covers the run itself and not a wait behind other runs.
-          leaseExpiresAt: new Date(Date.now() + SCHEDULED_TASK_LIMITS.runLeaseMs),
+          leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs),
         },
         select: { id: true, taskId: true, userId: true, taskRevision: true, assistantMessageId: true },
       });
@@ -358,8 +382,14 @@ async function prepareConversation(
   const questionRequestId = scheduledRunQuestionRequestId(run.id);
   try {
     return await prisma.$transaction(async (tx) => {
-      // Serialised with a pause or an edit: one that committed first wins and
-      // nothing is written to Chat for this run.
+      // Run row, then task row -- the order the reservation guard and
+      // finalizeRun take them in. Serialised with a pause or an edit: one that
+      // committed first wins and nothing is written to Chat for this run.
+      const owned = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT "status" FROM "ScheduledTaskRun" WHERE "id" = ${run.id} FOR UPDATE`;
+      if (owned[0]?.status !== "running") {
+        return { kind: "skip", classification: { status: "skipped", outcome: "task_changed", pause: null } } as const;
+      }
       const current = await tx.$queryRaw<Array<{ status: string; revision: number }>>`
         SELECT "status", "revision" FROM "ScheduledTask" WHERE "id" = ${task.id} FOR UPDATE`;
       if (current[0]?.status !== "active" || current[0].revision !== run.taskRevision) {
@@ -548,28 +578,34 @@ export async function runScheduledTasksTick(input: {
   };
   if (!(await (input.enabled ?? isScheduledTasksEnabled)())) return result;
   result.enabled = true;
-  const now = input.now?.() ?? new Date();
-  const reconciliation = await reconcileExpiredScheduledRuns(now);
+  // Read at every decision, not once per tick: a tick can spend many minutes
+  // on earlier runs, and lateness is judged when a run is about to start.
+  const clock = input.now ?? (() => new Date());
+  const reconciliation = await reconcileExpiredScheduledRuns(clock());
   result.reconciled = reconciliation.reconciled;
-  result.resumed = reconciliation.resumable.length;
 
   const due = await prisma.scheduledTask.findMany({
-    where: { status: "active", nextRunAt: { lte: now } },
+    where: { status: "active", nextRunAt: { lte: clock() } },
     orderBy: { nextRunAt: "asc" },
     take: SCHEDULED_TASK_LIMITS.claimBatch,
     select: { id: true },
   });
 
-  // Work is claimed by the worker that is about to run it, never in advance:
-  // a claim starts a lease, and a lease spent waiting behind other runs would
-  // lapse before its run began.
+  // Work is claimed (or a resumable run's lease taken) by the worker that is
+  // about to run it, never in advance: a lease spent waiting behind other runs
+  // would lapse before its run began.
   const resumable = [...reconciliation.resumable];
   let nextDue = 0;
   const takeWork = async (): Promise<ClaimedRun | null> => {
-    const resumed = resumable.shift();
-    if (resumed) return resumed;
+    for (let candidate = resumable.shift(); candidate; candidate = resumable.shift()) {
+      const taken = await acquireResumable(candidate, clock());
+      if (taken) {
+        result.resumed += 1;
+        return taken;
+      }
+    }
     while (nextDue < due.length) {
-      const outcome = await claimTask(due[nextDue++]!.id, now);
+      const outcome = await claimTask(due[nextDue++]!.id, clock());
       if (outcome.kind === "claimed") {
         result.claimed += 1;
         return outcome.run;
