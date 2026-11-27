@@ -116,6 +116,7 @@ import {
 } from "./browser-login";
 import { createCodeKeyVault, createSessionVault, type StorageMode, type StoredDesktopSession } from "./session-vault";
 import { readDesktopCapabilities } from "./desktop-capabilities";
+import { prepareRefinedTurn, refinerEligible, type RefinerAttempt } from "./prompt-refiner";
 import { CodeKeyRefused, readCopiedCodeKey, verifyCodeKey } from "./code-key";
 import { DESKTOP_LIVE_ORIGIN, type DesktopIdentityProvider } from "../../../../lib/desktopAuthContract";
 import { DESKTOP_APP_ORIGIN } from "../../../../lib/desktopReadApiContract";
@@ -3004,6 +3005,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   }
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
   if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
+  if (draft.effort === "medium" && !state.capabilities?.reasoningSteps) throw new Error("This reasoning effort is unavailable.");
   if (draft.mcpConnectionId && (!state.capabilities?.chatPlugin || draft.deepResearchDepth || handoffId)) {
     throw new Error("Plugins are unavailable for this draft.");
   }
@@ -3027,6 +3029,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let contextChanged = false;
     let researchSubmitted = false;
     let imageOffer: ChatTurnResult["imageOffer"];
+    let refinerAttempt: RefinerAttempt | undefined;
     let lastProgressAt = 0;
     let lastMcpProgress: ChatTurnProgress["mcpProgress"];
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
@@ -3044,14 +3047,23 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           }
         }
         publish({});
-        sourceId = await api.saveQuestion(id, input, signal);
+        // An Auto turn in plain text may be prepared by the Prompt Refiner, as on the web. The question is saved under the
+        // request id the server minted for the held draft, and the held decision rides on the stream request.
+        const settings = (() => { try { return connectedSettingsApi(); } catch { return null; } })();
+        if (settings && refinerEligible({ enabled: state.capabilities?.promptRefiner === true, conversationId: id, prompt: input.prompt,
+          selectionMode: input.selectionMode, attachmentCount: attachments.length, deepResearch: Boolean(input.deepResearchDepth),
+          plugin: Boolean(input.mcpConnectionId), handoff: Boolean(handoffId) })) {
+          refinerAttempt = await prepareRefinedTurn(settings, { conversationId: id, prompt: input.prompt }, signal);
+        }
+        const refined = refinerAttempt?.refined ?? null;
+        sourceId = await api.saveQuestion(id, refined ? { ...input, requestId: refined.clientRequestId } : input, signal);
         if (input.deepResearchDepth) assistantId = desktopResearchAnswerId(id, sourceId);
         if (handoffId) removeWorkspaceHandoff(handoffId);
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);
         publish({ savedPrompt: input.prompt });
         const saved = await api.conversation({ id }, true, signal);
         streamStarted = true;
-        const result = await api.stream(saved, input, sourceId, assistantId, signal, (text, mcpState) => {
+        const result = await api.stream(saved, refined ? { ...input, promptRefinerDecision: refined.decision } : input, sourceId, assistantId, signal, (text, mcpState) => {
           if (mcpState && mcpState !== lastMcpProgress) {
             lastMcpProgress = mcpState;
             publish({ mcpProgress: mcpState });
@@ -3079,6 +3091,8 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
       } catch (error) {
         failed = !signal.aborted;
         contextChanged = failed && error instanceof DesktopChatContextChanged;
+      } finally {
+        await refinerAttempt?.finish();
       }
       const savedId = id;
       const conversation = savedId && !accountSignal.aborted
@@ -3150,7 +3164,8 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
         }
         if (input.effort !== "default") {
           const effort = input.effort;
-          const models = await api.models();
+          if (effort === "medium" && !state.capabilities?.reasoningSteps) throw new Error("This reasoning effort is unavailable.");
+          const models = await api.models({ reasoningSteps: state.capabilities?.reasoningSteps === true });
           if (input.mode !== "professional" || modelIds.some((modelId) =>
             !models.find((model) => model.id === modelId)?.reasoningEfforts?.includes(effort))) {
             throw new Error("The selected models do not share this reasoning effort.");
@@ -4145,7 +4160,7 @@ function registerIpc() {
     return withChatAccount((api) => api.rename(input), "chat");
   });
   main("chat:remove", (value) => removeChat(chatId.parse(value)));
-  main("chat:models", () => withChatAccount((api) => api.models()));
+  main("chat:models", () => withChatAccount((api) => api.models({ reasoningSteps: state.capabilities?.reasoningSteps === true })));
   main("chat:copy-text", (value) => clipboard.writeText(z.string().min(1).max(1_000_000).parse(value)));
   main("chat:export", (value) => {
     const input = z.object({ id: chatId, title: z.string().max(500), includeSource: z.boolean() }).strict().parse(value);

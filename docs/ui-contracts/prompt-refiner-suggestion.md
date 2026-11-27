@@ -65,6 +65,19 @@ auto를 허용할 때 사용자의 통상 Send 준비 과정에서만 서버가 
 규칙(§1의 두 버튼과 패널 상태)은 fixture와 패널 컴포넌트에 계속 적용된다. 서버의
 explicit proposal 경로는 남아 있지만 제품 화면에는 진입점이 없다.
 
+### Desktop
+
+Desktop Chat도 같은 서버 경로를 쓰며 화면에 새 패널은 없다(Refiner는 자동 기능이다).
+`TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED`(기본 꺼짐)가 켜지고 서버의 Auto release가
+열려 있을 때만 capability `desktopPromptRefiner`가 나가며, Desktop은 그 신호가 있을 때만
+Auto·텍스트 전용·저장된 대화의 턴에서 `host/prompt-refiner.ts`를 호출한다. 순서는 웹의
+Send 준비와 같다: 입력 원문을 대화의 durable composer draft로 **새로 만들고**(`expectedRevision: 0`이므로
+웹이 이미 가진 draft는 덮어쓰지 않고, 충돌하면 Refiner 없이 원문으로 보낸다), scope를 받고,
+`prepare`를 한 번 부르고, 서버가 돌려준 `clientRequestId`로 질문을 저장한 뒤 stream 요청에
+`promptRefinerDecision`(식별자만)을 싣는다. 제안문은 Desktop에 오지 않으며, 결정을 실은 턴은
+1회 소비되므로 서명 context 재시도도 하지 않는다. 턴이 끝나면 이 시도가 만든 draft를 지운다.
+Review와 첨부·플러그인·Deep Research 턴에는 적용하지 않는다(웹과 같은 범위).
+
 ## 2. 원문과 실행 입력은 서로 다른 자료다
 
 채택 시에도 사용자가 작성한 Message는 원문을 보존해야 한다. Refiner 제안은

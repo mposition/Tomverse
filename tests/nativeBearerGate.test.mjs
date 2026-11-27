@@ -11,6 +11,7 @@ import {
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
   desktopPluginsEnabled,
+  desktopPromptRefinerEnabled,
   desktopReadApiRoute,
   desktopRemoteControlEnabled,
   desktopVoiceEnabled,
@@ -507,5 +508,36 @@ test("the folder-era history calls stay open to parity while the project workspa
   for (const [path, method] of [["/api/projects/p1", "GET"], ["/api/projects/p1/materials", "GET"], ["/api/projects/p1/memories", "POST"], ["/api/chat/context", "POST"]]) {
     assert.equal(nativeProjectWorkspaceBearerRoute(path, method), true, `${method} ${path}`);
     assert.equal(nativeHistoryFolderBearerRoute(path, method), false, `${method} ${path}`);
+  }
+});
+
+test("a Desktop turn may carry a Prompt Refiner decision only while the Desktop Refiner switch and what it needs are all on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED",
+    "TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopPromptRefinerEnabled(), false);
+    assert.equal(desktopChatTurnField("promptRefinerDecision"), false);
+    // Each switch alone, and every set missing one, leaves the field refused: the Refiner rides on Chat writes and the settings session.
+    for (const missing of switches) {
+      for (const key of switches) process.env[key] = key === missing ? "false" : "true";
+      assert.equal(desktopPromptRefinerEnabled(), false, missing);
+      assert.equal(desktopChatTurnField("promptRefinerDecision"), false, missing);
+    }
+    for (const key of switches) process.env[key] = "true";
+    assert.equal(desktopPromptRefinerEnabled(), true);
+    assert.equal(desktopChatTurnField("promptRefinerDecision"), true);
+    // Only that one field opens: the two Refiner inputs a browser could forge stay refused.
+    for (const key of ["promptRefinerPrompt", "promptRefinerSuggestion", "refinedPrompt", "promptRefinerMode"]) {
+      assert.equal(desktopChatTurnField(key), false, key);
+    }
+    process.env.TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED = "1";
+    assert.equal(desktopChatTurnField("promptRefinerDecision"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
   }
 });

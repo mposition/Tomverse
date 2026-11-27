@@ -2583,7 +2583,8 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
-            appliedReasoningEffort: trailer?.appliedReasoningEffort,
+            // `medium` is a Desktop-only step; the web composer has no label for it.
+            appliedReasoningEffort: trailer?.appliedReasoningEffort === "medium" ? undefined : trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
             // cards the previous attempt left behind.
             artifacts,

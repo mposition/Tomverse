@@ -14,6 +14,7 @@ import { webLocales } from "./answer-locales";
 import { SavedAttachments } from "./AttachmentDraft";
 import { ChatMarkdown, CopyAnswer, UserMessageContent } from "./ChatTranscript";
 import { GeneratedFiles } from "./GeneratedFiles";
+import { effortLabel } from "./CodeEngine";
 import { BrandMark } from "./ReviewBrand";
 import "./review-columns.css";
 
@@ -181,7 +182,7 @@ function ReviewColumn({ language, messages, column, columnIds, position, count, 
   const common = desktopChatCopy[language];
   const shell = desktopShellCopy[language];
   const handoff = reviewHandoffCopy[language === "zh-Hant" ? "zhHant" : language];
-  const effortNames = { low: shell.lowEffort, default: shell.defaultEffort, high: shell.highEffort };
+  const effortNames = { low: shell.lowEffort, medium: effortLabel(language, "medium"), default: shell.defaultEffort, high: shell.highEffort };
   const { id: modelId, name, provider, on } = column;
   const arrangement = columnIds.join("\n");
   // eslint-disable-next-line react-hooks/exhaustive-deps

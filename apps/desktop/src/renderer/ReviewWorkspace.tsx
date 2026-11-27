@@ -25,6 +25,7 @@ import { DesktopCompareSummary } from "./DesktopCompareSummary";
 import { BrandMark } from "./ReviewBrand";
 import { ReviewColumns, UserBubble, type ReviewLive } from "./ReviewColumns";
 import { ChatMarkdown } from "./ChatTranscript";
+import { effortLabel } from "./CodeEngine";
 import { arrangeColumns } from "../review-columns";
 import type { ImageCapability } from "../images-contract";
 
@@ -142,7 +143,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const starters = workspaceWelcomeCopy[language].starter.cards;
   const common = desktopChatCopy[language];
   const shell = desktopShellCopy[language];
-  const effortNames = { low: shell.lowEffort, default: shell.defaultEffort, high: shell.highEffort };
+  const effortNames = { low: shell.lowEffort, medium: effortLabel(language, "medium"), default: shell.defaultEffort, high: shell.highEffort };
   const [models, setModels] = useState<ChatModel[]>([]);
   const [modeChoice, setModeChoice] = useState<ReviewMode | null>(null);
   const [picked, setPicked] = useState<{ conversationId?: string; mode: ReviewMode; choices: string[] }>();
@@ -186,7 +187,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   let nextChosen = 0;
   const shownProviders = providerIds.map((provider) => choices.includes(provider) ? choices[nextChosen++]! : provider);
   const levels = mode === "professional" && choices.length
-    ? (["low", "high"] as const).filter((level) =>
+    ? (["low", "medium", "high"] as const).filter((level) =>
       choices.every((modelId) => eligible.find((model) => model.id === modelId)?.reasoningEfforts?.includes(level)))
     : [];
   const actualEffort = effort === "default" || levels.includes(effort) ? effort : "default";

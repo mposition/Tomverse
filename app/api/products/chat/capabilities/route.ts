@@ -3,7 +3,8 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
@@ -88,6 +89,10 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopChatPlugin: desktopWrite && desktopPluginsEnabled() && mcpPreviewEnabled(),
     desktopReviewContext: desktopReview,
     desktopReviewTools: desktopReview && desktopComposerToolsEnabled(),
+    // The reasoning steps a Desktop turn may ask for (the catalogue lists them per model), and the Prompt Refiner
+    // decision a Chat turn may carry, which exists only while the server's own release lets Auto prepare one.
+    desktopReasoningSteps: (desktopWrite || desktopReview) && reasoningEffortStepsEnabled(),
+    desktopPromptRefiner: desktopWrite && desktopPromptRefinerEnabled() && (await promptRefinerChatExecutionRelease()).autoEnabled,
     // Dictation and the Chat voice conversation, each only where its own switch is on as well as Desktop's.
     desktopVoiceInput: desktopVoiceEnabled() && await isVoiceInputEnabled().catch(() => false),
     desktopVoiceConversation: desktopVoiceEnabled() && voiceConversationConfig(process.env) !== null,
