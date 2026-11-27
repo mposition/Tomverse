@@ -525,6 +525,10 @@ export const zh = {
         attachFormatGroupMarkup: "标记语言",
         attachFormatGroupCode: "代码",
         attachFormatGroupArchive: "压缩包",
+        attachFormatGroupAudio: "音频",
+        attachmentAudioTooLong: "录音最长可为 10 分钟。请剪短文件或拆分为更短的部分。",
+        audioTranscriptionUnavailable: "暂时无法转写该录音，请稍后再试。",
+        audioTranscriptionLimitReached: "今天的音频转写额度已用完。请明天再试，或附加更短的录音。",
         attachFormatsOverflow: "另有 {count} 个",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "访客可添加 1 个本地文件",

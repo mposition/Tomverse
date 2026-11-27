@@ -39,6 +39,8 @@ export function helpAttachmentFormats(): HelpAttachmentFormats {
   const byGroup = new Map<ChatAttachmentUiGroup, string[]>(GROUP_ORDER.map((group) => [group, []]));
   const guest = new Set<string>();
   for (const format of CHAT_ATTACHMENT_FORMATS) {
+    // Recordings live in their own switch-gated table, never in this one.
+    if (format.uiGroup === "audio") continue;
     const entries = entriesOf(format);
     byGroup.get(format.uiGroup)!.push(...entries);
     if (format.guestAllowed) for (const entry of entries) guest.add(entry);
