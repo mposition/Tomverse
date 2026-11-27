@@ -1,3 +1,4 @@
+import { ClientErrorReporter } from "@/components/ClientErrorReporter";
 import { ThemeBootstrap } from "@/components/ThemeBootstrap";
 import { ThemeController } from "@/components/ThemeController";
 import { fontVariables } from "@/lib/fonts";
@@ -72,6 +73,7 @@ export function DocumentShell({
         */}
         <ThemeBootstrap nonce={nonce} />
         <ThemeController />
+        <ClientErrorReporter />
         <SkipToContentLink lang={lang} />
         {/*
           UX-016. The skip link's target. `display: contents` means this adds a
