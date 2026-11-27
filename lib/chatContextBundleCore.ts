@@ -74,6 +74,13 @@ export type ContextBundleFingerprintInput = {
      * is left out of the fingerprint so every pre-project bundle keeps verifying.
      */
     projectHash?: string;
+    /**
+     * The account owner's personal instructions block
+     * (lib/chatPersonalization.ts personalizationHash). `"none"` (or absent)
+     * when the owner saved nothing; left out of the fingerprint then, so every
+     * older bundle keeps verifying.
+     */
+    preferencesHash?: string;
 };
 
 /**
@@ -160,6 +167,8 @@ export type ContextBundlePayload = ContextBundleFingerprintInput & {
      * the profile's so each booked figure says what it paid for.
      */
     projectTokens?: number;
+    /** Input tokens of the owner's personal instructions block, priced apart. */
+    preferenceTokens?: number;
     expiresAtMs: number;
     /** See `SemanticStepsUsed`. Signed, never compared as content. */
     semanticSteps: SemanticStepsUsed;
@@ -231,6 +240,7 @@ export function contextFingerprint(
                 // Appended only when present, so a turn without project context
                 // fingerprints exactly as it did before projects existed.
                 ...(input.projectHash && input.projectHash !== "none" ? [`project:${input.projectHash}`] : []),
+                ...(input.preferencesHash && input.preferencesHash !== "none" ? [`preferences:${input.preferencesHash}`] : []),
             ].join("\n"),
             "utf8"
         )
@@ -257,6 +267,8 @@ const encode = (payload: ContextBundlePayload) =>
             pt: payload.profileTokens,
             ...(payload.projectHash && payload.projectHash !== "none" ? { ph: payload.projectHash } : {}),
             ...(payload.projectTokens ? { pj: payload.projectTokens } : {}),
+            ...(payload.preferencesHash && payload.preferencesHash !== "none" ? { uh: payload.preferencesHash } : {}),
+            ...(payload.preferenceTokens ? { uf: payload.preferenceTokens } : {}),
             e: payload.expiresAtMs,
             ss: encodeSemanticSteps(payload.semanticSteps),
             mq: payload.memoryQueryPolicy,
@@ -344,6 +356,16 @@ const decode = (body: string): ContextBundlePayload | null => {
     ) {
         return null;
     }
+    // Personal instructions: read tolerantly for the same reason as the two
+    // Release C fields above. Absent is "no block", the same context a turn
+    // without saved instructions has.
+    if (record.uh !== undefined && typeof record.uh !== "string") return null;
+    if (
+        record.uf !== undefined &&
+        (typeof record.uf !== "number" || !Number.isSafeInteger(record.uf) || record.uf < 0)
+    ) {
+        return null;
+    }
     if (record.mq !== undefined && record.mq !== "full" && record.mq !== "legacy") return null;
     if (record.mh !== undefined && (!isMemoryHistoryAnchor(record.mh) || record.mq !== "full")) return null;
     const semanticSteps = decodeSemanticSteps(record.ss);
@@ -367,6 +389,8 @@ const decode = (body: string): ContextBundlePayload | null => {
         profileTokens: typeof record.pt === "number" ? record.pt : 0,
         projectHash: typeof record.ph === "string" ? record.ph : "none",
         projectTokens: typeof record.pj === "number" ? record.pj : 0,
+        preferencesHash: typeof record.uh === "string" ? record.uh : "none",
+        preferenceTokens: typeof record.uf === "number" ? record.uf : 0,
         expiresAtMs: record.e,
         semanticSteps,
         ...(record.mq !== undefined ? { memoryQueryPolicy: record.mq as "full" | "legacy" } : {}),

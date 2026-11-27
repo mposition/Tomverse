@@ -13,6 +13,7 @@ import { codingNotesRouterText, type CodingNotes } from "@/lib/modelCatalogCore"
 import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
 import { DEFAULT_MODEL_ID, getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
+import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
@@ -84,7 +85,7 @@ export const externalApiRunnableModels = async (
                 maxInputTokens: chatUserMaxInputTokens(),
                 maxOutputTokens: resolveModelRequestPricing(model, { estimatedPromptTokens: 1 }).maxOutputTokens,
                 creditWeight: getModelUsageProfile(model).credits,
-            }),
+            }, { effortSteps: reasoningEffortStepsEnabled() }),
             ...(pricing ? { catalogPricing: pricing } : {}),
             ...(codingNotes ? { codingNotes } : {}),
         }));

@@ -135,3 +135,57 @@ test("a payload with a nested object is bounded by its own matching brace", () =
   assert.equal(split.text, "Answer.");
   assert.equal(split.signal.state, "awaiting_first_token");
 });
+
+/*
+  After the first visible token the server writes `provider_active` -- only
+  when the provider delivered a non-visible part since the previous tick. It
+  is stripped like any keepalive and carries the server's interval, which the
+  client's silence watchdog sizes itself against.
+*/
+test("a post-first-token keepalive is stripped mid-answer and carries the interval", () => {
+  const raw =
+    "First paragraph. " +
+    buildStreamKeepaliveChunk({
+      state: "provider_active",
+      elapsedMs: 75_000,
+      intervalMs: 20_000,
+    }) +
+    "Second paragraph.";
+
+  const split = splitStreamKeepaliveSignal(raw);
+  assert.equal(split.text, "First paragraph. Second paragraph.");
+  assert.deepEqual(split.signal, {
+    state: "provider_active",
+    elapsedMs: 75_000,
+    intervalMs: 20_000,
+  });
+  assert.equal(split.count, 1);
+});
+
+test("the count includes every complete marker, readable or not, and no torn one", () => {
+  const two =
+    buildStreamKeepaliveChunk({ state: "awaiting_first_token", elapsedMs: 20_000 }) +
+    `${STREAM_KEEPALIVE_MARKER}{"state":"something-new"}`;
+  assert.equal(splitStreamKeepaliveSignal(two).count, 2);
+  assert.equal(splitStreamKeepaliveSignal("plain answer").count, 0);
+  // A marker whose payload has not finished arriving is not counted yet: the
+  // next pass, over the longer accumulation, counts it once.
+  const torn = buildStreamKeepaliveChunk({ state: "provider_active", elapsedMs: 1 });
+  assert.equal(splitStreamKeepaliveSignal(torn.slice(0, -2)).count, 0);
+  assert.equal(splitStreamKeepaliveSignal(torn).count, 1);
+});
+
+test("a nonsensical interval is dropped rather than trusted", () => {
+  for (const intervalMs of [0, -5, 1.5, "20000", null]) {
+    const raw = `${STREAM_KEEPALIVE_MARKER}${JSON.stringify({
+      state: "provider_active",
+      elapsedMs: 1,
+      intervalMs,
+    })}`;
+    assert.equal(
+      "intervalMs" in splitStreamKeepaliveSignal(raw).signal,
+      false,
+      String(intervalMs)
+    );
+  }
+});

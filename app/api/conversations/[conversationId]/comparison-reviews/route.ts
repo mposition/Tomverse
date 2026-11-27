@@ -39,8 +39,19 @@ import {
 import {
   chatErrorResponse,
   ChatAccessError,
+  getUserChatUsageKey,
   identifyChatCaller,
 } from "@/lib/chatSecurity";
+import {
+  claimInFlightRun,
+  releaseInFlightRun,
+  renewInFlightRun,
+  type InFlightRunClaim,
+} from "@/lib/guestIdempotency";
+import {
+  COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS,
+  COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS,
+} from "@/lib/comparisonReviewInFlight";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
@@ -301,6 +312,8 @@ async function runPost(
 ): Promise<Response> {
   const traceId = randomUUID();
   let freeQuota: ComparisonReviewQuotaReservation | null = null;
+  let runClaim: InFlightRunClaim | null = null;
+  let stopHeartbeat: (() => void) | null = null;
   let completed = false;
   try {
     const authentication = await resolveChatRouteSession(request);
@@ -348,12 +361,28 @@ async function runPost(
       reviewMode: payload.reviewMode,
       includeSynthesis: payload.includeSynthesis,
     });
-    const cached = await prisma.comparisonReview.findUnique({
-      where: {
-        userId_inputHash: { userId: session.user.id, inputHash },
-      },
-    });
-    if (cached && !cached.isStale) {
+    // One run per (account, input) at a time. The row below is written only
+    // when the reviewers finish, so until then the cache cannot see a run in
+    // flight: a second tab, a retry after a dropped stream, or Studio and the
+    // Classic dialog both asking used to run and bill the whole review again
+    // and reserve a second Free slot. Claimed before the cache read so a run
+    // that finishes between the two is still served from its row, and before
+    // the quota so a duplicate spends nothing. The loser gets 409
+    // DUPLICATE_REQUEST; once the run has saved, the same request is a cache
+    // hit. Released in `finally` on every outcome; it expires on its own if
+    // this process dies first (lib/comparisonReviewInFlight.ts derives the TTL).
+    const findSaved = () =>
+      prisma.comparisonReview.findUnique({
+        where: {
+          userId_inputHash: { userId: session.user.id, inputHash },
+        },
+      });
+    // The cache answer for a fresh, valid saved row: 0 credits, nothing run,
+    // nothing reserved. Null when the row cannot be served.
+    const servedFromSaved = async (
+      cached: NonNullable<Awaited<ReturnType<typeof findSaved>>>
+    ): Promise<Response | null> => {
+      if (cached.isStale) return null;
       const result = dualComparisonReviewResultSchema.safeParse(cached.result);
       const responseMap = responseMapForStoredReview(
         cached.assistantMessageIds,
@@ -422,7 +451,44 @@ async function runPost(
           { headers: { "Cache-Control": "no-store" } }
         );
       }
+      return null;
+    };
+    try {
+      runClaim = await claimInFlightRun(
+        getUserChatUsageKey(session.user.id),
+        "comparison-review",
+        inputHash,
+        COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
+      );
+    } catch (error) {
+      if (!(error instanceof ChatAccessError && error.code === "DUPLICATE_REQUEST")) throw error;
+      // Refused: another request holds this input's claim. When that one is
+      // a cache hit, or a run that has already saved, the fresh row answers
+      // this request too; otherwise it is 409. Read only after the refusal,
+      // and only a fresh row is served, so nothing is run or reserved either
+      // way.
+      const saved = await findSaved();
+      const served = saved ? await servedFromSaved(saved) : null;
+      if (served) return served;
+      throw error;
     }
+    // Renewed for as long as this request runs, so a run longer than the TTL
+    // (a larger configured reviewer panel, sequential failures and retries)
+    // keeps its claim. A claim found lost is only logged: this run is already
+    // on its paid path, and stopping it would not undo the charge.
+    const heldClaim = runClaim;
+    const heartbeat = setInterval(() => {
+      void renewInFlightRun(heldClaim).then(
+        (held) => {
+          if (!held) console.warn(JSON.stringify({ event: "comparison_review_claim_lost", traceId }));
+        },
+        (error) => console.error("Comparison review run claim renewal failed:", { traceId, error })
+      );
+    }, COMPARISON_REVIEW_IN_FLIGHT_HEARTBEAT_MS);
+    stopHeartbeat = () => clearInterval(heartbeat);
+    const cached = await findSaved();
+    const served = cached ? await servedFromSaved(cached) : null;
+    if (served) return served;
 
     const billingPlan = await getUserBillingPlan(session.user.id);
     const access = identifyChatCaller(request, session.user.id, billingPlan.tier, {
@@ -564,9 +630,22 @@ async function runPost(
       traceId
     );
   } finally {
+    // Stopped before the release, so no renewal can follow it.
+    stopHeartbeat?.();
     if (freeQuota && !completed) {
       await releaseComparisonReviewQuota(freeQuota).catch((error) =>
         console.error("Comparison review quota refund failed:", {
+          traceId,
+          error,
+        })
+      );
+    }
+    if (runClaim) {
+      // After a success the saved row answers the next request; after a
+      // failure the user may genuinely retry. A release that fails leaves the
+      // claim to expire on its own.
+      await releaseInFlightRun(runClaim).catch((error) =>
+        console.error("Comparison review run claim release failed:", {
           traceId,
           error,
         })

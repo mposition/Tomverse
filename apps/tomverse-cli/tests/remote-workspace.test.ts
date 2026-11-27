@@ -8,7 +8,7 @@ import { SEARCH_SCRIPT } from "../src/remote-scripts.js";
 import { RemoteError, remoteShellCommand } from "../src/remote-target.js";
 import { planRemoteCommand, RemoteWorkspace } from "../src/remote-workspace.js";
 import { PathError } from "../src/workspace.js";
-import { dashShim, HAS_SH, makeFakeRemote, realTool, remotePath, shimFolder } from "./remote-fixture.js";
+import { dashShim, FAKE_SSH, HAS_SH, makeFakeRemote, realTool, remotePath, shimFolder, tempFolder } from "./remote-fixture.js";
 
 const skip = !HAS_SH && "needs a POSIX sh (Git for Windows has one)";
 
@@ -709,3 +709,84 @@ for (const shell of ["sh", "dash"] as const) {
         assert.deepEqual(left(remote.root), []);
     });
 }
+
+const loginShell = async (shell: "sh" | "bash-login" | "zsh") => {
+    const remote = await connected();
+    const workspace = new RemoteWorkspace({ ...remote.target, shell: shell as "sh" }, remote.runner);
+    await workspace.connect();
+    return { remote, workspace };
+};
+const runIn = (workspace: RemoteWorkspace, input: Parameters<typeof planRemoteCommand>[0]) => workspace.exec(planRemoteCommand(input, workspace.root, 30_000), new AbortController().signal);
+
+test("a project set to a login shell starts the agent's commands through bash -lc; the default stays sh -c", { skip }, async () => {
+    const plain = await loginShell("sh");
+    const asSh = await runIn(plain.workspace, { command: "echo $0; shopt -q login_shell 2>/dev/null && echo login || echo plain" });
+    assert.equal(asSh.stdout, "sh\nplain\n");
+    const login = await loginShell("bash-login");
+    const asBash = await runIn(login.workspace, { command: "echo $0; shopt -q login_shell && echo login || echo plain; exit 7" });
+    assert.equal(asBash.stdout, "bash\nlogin\n");
+    assert.equal(asBash.exitCode, 7);
+    assert.equal(login.workspace.state, "connected");
+    // Every call of the login-shell project still reaches the machine as `sh -c '<script>'`: only the command inside is started by bash.
+    for (const call of login.remote.calls()) assert.match(call.command, /^sh -c '/);
+});
+
+test("what a login-shell project is given arrives as written: arguments and command lines with quotes, spaces, dollars and globs", { skip }, async () => {
+    const { workspace } = await loginShell("bash-login");
+    const awkward = ["a b", "$HOME", "it's", "; id", "*", "$(echo pwned)", "`echo pwned`", '"q"', "-n", "--", "ünï cödé", "한국어", "\\", " lead", "trail "];
+    const argv = await runIn(workspace, { argv: ["sh", "-c", 'for a in "$@"; do printf "[%s]" "$a"; done', "sh", ...awkward] });
+    assert.equal(argv.stdout, awkward.map((value) => `[${value}]`).join(""));
+    assert.equal(argv.exitCode, 0);
+    // An argument list is not a shell line: nothing in it is read by bash a second time.
+    const direct = await runIn(workspace, { argv: ["printf", "%s|", ...awkward] });
+    assert.equal(direct.stdout, awkward.map((value) => `${value}|`).join(""));
+    // A shell line is read by bash as written, and `$@` of it is empty.
+    const line = await runIn(workspace, { command: `printf '%s|' 'it'\\''s' "a b" $'x\\ty' \\$HOME; echo "$#"` });
+    assert.equal(line.stdout.endsWith("0\n"), true);
+    assert.match(line.stdout, /^it's\|a b\|x\ty\|\$HOME\|/);
+});
+
+test("a login-shell command is ended on the remote machine when the task stops, as an sh one is", { skip }, async () => {
+    const { workspace, remote } = await loginShell("bash-login");
+    const stop = new AbortController();
+    const pending = workspace.exec(planRemoteCommand({ command: "echo $$ > l.pid; exec sleep 60" }, workspace.root, 30_000), stop.signal);
+    await waitUntil(() => existsSync(join(remote.root, "l.pid")));
+    stop.abort();
+    const done = await pending;
+    assert.equal(done.cancelled, true);
+    const pid = readFileSync(join(remote.root, "l.pid"), "utf8").trim();
+    await waitUntil(() => !alive(remote, pid));
+    assert.equal(alive(remote, pid), false);
+});
+
+test("a shell the script does not know is refused before anything starts, as a machine without it is", { skip }, async () => {
+    const { workspace } = await loginShell("zsh");
+    await assert.rejects(runIn(workspace, { command: "echo hi" }), remoteError("unsupported-remote"));
+});
+
+test("a login profile that changes folder cannot move an approved command out of the project folder", { skip }, async () => {
+  const remote = await connected();
+  // A home folder with a profile that goes somewhere else, where a file of the same name waits.
+  const home = tempFolder("home");
+  const elsewhere = tempFolder("elsewhere");
+  writeFileSync(join(elsewhere, "victim.txt"), "must stay\n");
+  writeFileSync(join(home, ".bash_profile"), `cd "${remotePath(elsewhere)}"\nexport TV_PROFILE_READ=yes\n`);
+  writeFileSync(join(remote.root, "victim.txt"), "project copy\n");
+  const runner = createSshRunner({ file: process.execPath, prefixArgs: [FAKE_SSH], env: { HOME: remotePath(home) } });
+  const workspace = new RemoteWorkspace({ ...remote.target, shell: "bash-login" }, runner);
+  await workspace.connect();
+  // Without the fix the profile's cd decides where this runs: it would delete the other folder's file.
+  const shell = await runIn(workspace, { command: "pwd; echo $TV_PROFILE_READ; rm victim.txt" });
+  assert.equal(shell.stdout.trim(), `${workspace.root}\nyes`, "the profile ran (it set the variable) and the command still ran in the project folder");
+  assert.equal(existsSync(join(elsewhere, "victim.txt")), true, "the file outside the project was not touched");
+  assert.equal(existsSync(join(remote.root, "victim.txt")), false, "the project's own file was the one removed");
+  writeFileSync(join(remote.root, "victim.txt"), "project copy\n");
+  const argv = await runIn(workspace, { argv: ["sh", "-c", "pwd; rm victim.txt"] });
+  assert.equal(argv.stdout.trim(), workspace.root);
+  assert.equal(existsSync(join(elsewhere, "victim.txt")), true);
+  assert.equal(existsSync(join(remote.root, "victim.txt")), false);
+  // A profile that removes the project folder's way back (it cannot be entered again) runs nothing.
+  writeFileSync(join(home, ".bash_profile"), `cd "${remotePath(elsewhere)}"\nexport PATH=/nonexistent\n`);
+  const kept = await runIn(workspace, { command: "echo ran" });
+  assert.equal(kept.stdout.includes("ran"), true, "a profile that only changes PATH and folder still runs the command, in the project folder");
+});

@@ -1,9 +1,9 @@
 import { consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { desktopAuthNoStore, desktopAuthResponse, desktopAuthUnavailable, requireDesktopBearer } from "@/lib/desktopAuthServer";
-import { DESKTOP_REMOTE_LIMITS, desktopRemoteSyncRequest, desktopRemoteWithdrawRequest } from "@/lib/desktopRemoteControlContract";
+import { DESKTOP_REMOTE_LIMITS, desktopRemoteSyncRequest, desktopRemoteWithdrawRequest, withoutDesktopRemotePreview } from "@/lib/desktopRemoteControlContract";
 import { syncDesktopRemote, withdrawDesktopRemote } from "@/lib/desktopRemoteControlStore";
 import { mobileApiSecurityResponse } from "@/lib/mobileAuthRoute";
-import { DESKTOP_APP_ORIGIN, desktopRemoteControlEnabled } from "@/lib/nativeBearerGate";
+import { DESKTOP_APP_ORIGIN, desktopRemoteControlEnabled, desktopRemotePreviewEnabled } from "@/lib/nativeBearerGate";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,9 @@ export async function POST(request: Request) {
   try {
     // About one sync every two seconds while an approval is on the PC's screen, every eight otherwise.
     await consumeApiRateLimit(request, userId, "desktop-remote-sync", { minute: 90, day: 40_000 });
-    const body = await readLimitedJson(request, DESKTOP_REMOTE_LIMITS.uploadBytes, desktopRemoteSyncRequest);
+    const received = await readLimitedJson(request, DESKTOP_REMOTE_LIMITS.uploadBytes, desktopRemoteSyncRequest);
+    // With previews switched off here, a PC that sends them anyway keeps only the paths.
+    const body = desktopRemotePreviewEnabled() ? received : { ...received, snapshot: withoutDesktopRemotePreview(received.snapshot) };
     const synced = await syncDesktopRemote({ userId, deviceId, familyId }, body);
     if (!synced) return desktopAuthResponse({ ok: false, code: "UNAUTHORIZED" }, 401);
     if (synced.stale) return desktopAuthResponse({ ok: false, code: "STALE_SYNC", seq: synced.seq }, 409);

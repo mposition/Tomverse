@@ -23,6 +23,10 @@ export const DESKTOP_REMOTE_LIMITS = {
   /** File paths an approval for a file change shows; a change of more files is answered at the PC. */
   files: 10,
   path: 240,
+  /** A preview of a file change: lines per file, in all, and characters per line (the person turned it on at the PC). */
+  previewLines: 8,
+  previewTotal: 40,
+  previewLine: 120,
   tool: 64,
   followUp: 2_000,
   /** The JSON body of one sync, in bytes. */
@@ -58,6 +62,8 @@ export const DESKTOP_REMOTE_REFUSALS = ["not_open", "changed", "pc_only", "dupli
  */
 export const DESKTOP_REMOTE_APPROVAL_KINDS = ["files", "command", "web", "browser", "mcp", "git", "other"] as const;
 export const DESKTOP_REMOTE_ANSWERABLE_KINDS: readonly DesktopRemoteApprovalKind[] = ["files", "command"];
+/** Why a file change shows no preview lines. */
+export const DESKTOP_REMOTE_PREVIEW_OMITTED = ["binary", "large", "secret", "unreadable"] as const;
 export const DESKTOP_REMOTE_TASK_STATUSES = [
   "queued", "starting", "running", "approval", "stopping", "completed", "clarification", "blocked", "stopped", "unknown", "failed",
 ] as const;
@@ -100,6 +106,12 @@ export const desktopRemoteApproval = z.object({
   files: z.array(z.object({
     path: line(DESKTOP_REMOTE_LIMITS.path),
     action: z.string().regex(/^[a-z_]{1,16}$/),
+    /** Lines added and removed in this file. Sent only to a server that names `desktopRemotePreview`. */
+    added: z.int().min(0).max(10_000_000).optional(),
+    removed: z.int().min(0).max(10_000_000).optional(),
+    /** The changed lines (`+ ` or `- ` first), redacted on the PC. Only when the person turned previews on there. */
+    preview: z.array(line(DESKTOP_REMOTE_LIMITS.previewLine + 2)).max(DESKTOP_REMOTE_LIMITS.previewLines).optional(),
+    omitted: z.enum(DESKTOP_REMOTE_PREVIEW_OMITTED).optional(),
   }).strict()).max(DESKTOP_REMOTE_LIMITS.files),
   moreFiles: z.int().min(0).max(100_000),
   /** Whether the PC accepts an answer from another device for this request. */
@@ -115,6 +127,9 @@ export const desktopRemoteSnapshot = z.object({
   if (keys.size !== snapshot.tasks.length) context.addIssue({ code: "custom", message: "Task keys repeat.", path: ["tasks"] });
   const approval = snapshot.approval;
   if (approval && !keys.has(approval.taskKey)) context.addIssue({ code: "custom", message: "The approval names no task.", path: ["approval"] });
+  if (approval && approval.files.reduce((sum, file) => sum + (file.preview?.length ?? 0), 0) > DESKTOP_REMOTE_LIMITS.previewTotal) {
+    context.addIssue({ code: "custom", message: "The preview is too long.", path: ["approval", "files"] });
+  }
   if (approval?.remote && !DESKTOP_REMOTE_ANSWERABLE_KINDS.includes(approval.kind)) {
     context.addIssue({ code: "custom", message: "This kind of request is answered at the PC.", path: ["approval", "remote"] });
   }
@@ -137,6 +152,12 @@ export const desktopRemoteSeq = z.int().min(1).max(Number.MAX_SAFE_INTEGER);
 /** `DELETE /api/desktop/remote/sync`: the PC turned remote control off, or is signing out. */
 export const desktopRemoteWithdrawRequest = z.object({ seq: desktopRemoteSeq }).strict();
 
+/** A report without the preview fields: what a server with previews switched off keeps of a newer PC's report. */
+export function withoutDesktopRemotePreview(snapshot: z.infer<typeof desktopRemoteSnapshot>): z.infer<typeof desktopRemoteSnapshot> {
+  if (!snapshot.approval) return snapshot;
+  return { ...snapshot, approval: { ...snapshot.approval, files: snapshot.approval.files.map(({ path, action }) => ({ path, action })) } };
+}
+
 export const desktopRemoteSyncRequest = z.object({
   seq: desktopRemoteSeq,
   snapshot: desktopRemoteSnapshot,
@@ -157,14 +178,71 @@ export const desktopRemoteSyncResponse = z.object({
   commands: z.array(desktopRemoteCommand).max(DESKTOP_REMOTE_LIMITS.commandsPerSync),
 }).strict();
 
-/** `POST /api/desktop/remote/commands`, from the signed-in web screen. */
-export const desktopRemoteCommandRequest = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("approval"), deviceId: desktopRemoteDeviceId, taskKey: z.uuid(), approvalId: z.uuid(), digest,
-    decision: z.enum(DESKTOP_REMOTE_DECISIONS) }).strict(),
-  z.object({ kind: z.literal("stop"), deviceId: desktopRemoteDeviceId, taskKey: z.uuid() }).strict(),
-  z.object({ kind: z.literal("follow_up"), deviceId: desktopRemoteDeviceId, taskKey: z.uuid(),
-    text: z.string().trim().min(1).max(DESKTOP_REMOTE_LIMITS.followUp) }).strict(),
+/**
+ * The passkey that confirms a remote command (docs/ops/desktop-remote-control.md): a WebAuthn assertion over a
+ * single-use challenge the server bound to this one command. Shapes only; the checks are in lib/webauthnCore.ts.
+ */
+export const DESKTOP_REMOTE_PASSKEY_LIMITS = {
+  /** Passkeys one account may register. */
+  perAccount: 5,
+  label: 80,
+  /** A challenge is valid this long, once. */
+  challengeTtlMs: 2 * 60_000,
+} as const;
+
+const base64urlText = (max: number) => z.string().min(1).max(max).regex(/^[A-Za-z0-9_-]+$/);
+
+export const desktopRemotePasskeyAssertion = z.object({
+  challengeId: z.uuid(),
+  credentialId: base64urlText(1400),
+  clientDataJSON: base64urlText(6000),
+  authenticatorData: base64urlText(6000),
+  signature: base64urlText(1400),
+}).strict();
+
+const approvalRequest = z.object({ kind: z.literal("approval"), deviceId: desktopRemoteDeviceId, taskKey: z.uuid(), approvalId: z.uuid(), digest,
+  decision: z.enum(DESKTOP_REMOTE_DECISIONS) }).strict();
+const stopRequest = z.object({ kind: z.literal("stop"), deviceId: desktopRemoteDeviceId, taskKey: z.uuid() }).strict();
+const followUpRequest = z.object({ kind: z.literal("follow_up"), deviceId: desktopRemoteDeviceId, taskKey: z.uuid(),
+  text: z.string().trim().min(1).max(DESKTOP_REMOTE_LIMITS.followUp) }).strict();
+
+/** One command as the server records it. */
+export const desktopRemoteCommandRequest = z.discriminatedUnion("kind", [approvalRequest, stopRequest, followUpRequest]);
+
+/** `POST /api/desktop/remote/commands`, from the signed-in web screen: the command, and its passkey where one is needed. */
+export const desktopRemoteCommandSubmission = z.discriminatedUnion("kind", [
+  approvalRequest.extend({ passkey: desktopRemotePasskeyAssertion.optional() }).strict(),
+  stopRequest,
+  followUpRequest.extend({ passkey: desktopRemotePasskeyAssertion.optional() }).strict(),
 ]);
+
+/**
+ * Whether a command is confirmed with a passkey once the account has one: "allow once" and a follow-up widen what
+ * the task does. Deny and stop only reduce what happens, so they stay one tap.
+ */
+export const desktopRemoteNeedsPasskey = (command: DesktopRemoteCommandRequest) =>
+  (command.kind === "approval" && command.decision === "once") || command.kind === "follow_up";
+
+/** `POST /api/desktop/remote/passkey`. */
+export const desktopRemotePasskeyRequest = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("options-register") }).strict(),
+  z.object({ action: z.literal("options-command"), command: desktopRemoteCommandRequest }).strict(),
+  z.object({ action: z.literal("options-remove"), passkeyId: z.uuid() }).strict(),
+  z.object({
+    action: z.literal("register"), challengeId: z.uuid(), label: z.string().trim().min(1).max(DESKTOP_REMOTE_PASSKEY_LIMITS.label),
+    credentialId: base64urlText(1400), clientDataJSON: base64urlText(6000), attestationObject: base64urlText(20_000),
+    /** An account that has a passkey already adds the next one only with it. */
+    passkey: desktopRemotePasskeyAssertion.optional(),
+  }).strict(),
+  z.object({ action: z.literal("remove"), passkeyId: z.uuid(), passkey: desktopRemotePasskeyAssertion }).strict(),
+]);
+export type DesktopRemotePasskeyRequest = z.infer<typeof desktopRemotePasskeyRequest>;
+export type DesktopRemotePasskeyAssertion = z.infer<typeof desktopRemotePasskeyAssertion>;
+
+export type DesktopRemotePasskeyView = { id: string; label: string; createdAt: string; lastUsedAt: string | null };
+
+/** What the screen knows of passkeys: whether the server offers them, and the account's own. */
+export type DesktopRemotePasskeyState = { enabled: boolean; passkeys: DesktopRemotePasskeyView[] };
 
 export type DesktopRemoteTask = z.infer<typeof desktopRemoteTask>;
 export type DesktopRemoteApproval = z.infer<typeof desktopRemoteApproval>;
@@ -201,12 +279,14 @@ export type DesktopRemoteDeviceView = {
 export type DesktopRemoteDevicesResponse = {
   ok: true;
   canAct: boolean;
+  /** Absent from a server that predates passkeys; the screen then asks for none. */
+  passkey?: DesktopRemotePasskeyState;
   devices: DesktopRemoteDeviceView[];
 };
 
 export type DesktopRemoteCommandRefusal =
   | "DEVICE_NOT_FOUND" | "TASK_NOT_RUNNING" | "APPROVAL_NOT_OPEN" | "APPROVAL_CHANGED" | "APPROVAL_PC_ONLY"
-  | "STOP_UNAVAILABLE" | "FOLLOW_UP_UNAVAILABLE" | "ALREADY_ANSWERED";
+  | "STOP_UNAVAILABLE" | "FOLLOW_UP_UNAVAILABLE" | "ALREADY_ANSWERED" | "PASSKEY_REQUIRED" | "PASSKEY_INVALID";
 
 /**
  * Whether a web request may be recorded against the PC's latest report. The PC checks again before it acts; this is

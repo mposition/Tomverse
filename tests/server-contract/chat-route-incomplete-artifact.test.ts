@@ -102,6 +102,8 @@ type StreamScript = {
   text: string;
   /** The provider stream breaks with this after `text`, instead of closing. */
   failAfterText?: unknown;
+  /** What the SDK's `usage` promise resolves to, when not the default counts. */
+  usage?: unknown;
 };
 
 let script: StreamScript = {
@@ -129,7 +131,23 @@ type ArtifactRow = {
 
 const world = {
   artifactRows: [] as ArtifactRow[],
-  messages: [] as Array<{ id: string; status: string; modelId: string }>,
+  messages: [] as Array<{ id: string; status: string; modelId: string; content?: string }>,
+  /** The outcome each settlement was asked for, in order. */
+  settlements: [] as string[],
+  /** The token figures each settlement was handed. */
+  settledUsage: [] as Array<{ inputTokens?: number; outputTokens?: number; usageFromProvider?: boolean }>,
+  /** How many stored objects the route handed back for reclamation. */
+  discarded: 0,
+  /**
+   * Errors the next assistant `message.create` calls throw, in order. With
+   * `landsBeforeThrow`, the row is recorded first -- a COMMIT that went
+   * through on a connection that then dropped.
+   */
+  messageCreateFailures: [] as unknown[],
+  landsBeforeThrow: false,
+  messageCreateCalls: 0,
+  /** The route's read-back of its own assistant row fails (the database is still down). */
+  commitCheckFails: false,
   providerContexts: [] as Array<{ messageId: string }>,
   uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
     sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
@@ -225,7 +243,7 @@ mock.module("ai", {
           headers: {},
           messages: [],
         }),
-        usage: Promise.resolve({
+        usage: Promise.resolve(script.usage ?? {
           inputTokens: 1_000,
           outputTokens: 500,
           cachedInputTokens: 0,
@@ -292,13 +310,29 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     }),
   },
   message: {
-    findFirst: () => ({ id: "user-message-1" }),
-    create: (args: { data: { id: string; status: string; modelId: string } }) => {
+    // The route's commit check reads the assistant row back; every other
+    // lookup is the source prompt.
+    findFirst: ((args: { where?: { id?: string; role?: string } }) => {
+      if (args?.where?.role !== "assistant") return { id: "user-message-1" };
+      if (world.commitCheckFails) {
+        throw Object.assign(new Error("connection closed"), {
+          name: "PrismaClientKnownRequestError",
+          code: "P1017",
+        });
+      }
+      return world.messages.find((message) => message.id === args.where?.id) ?? null;
+    }) as (args: never) => unknown,
+    create: (args: { data: { id: string; status: string; modelId: string; content?: string } }) => {
+      world.messageCreateCalls += 1;
+      const failure = world.messageCreateFailures.shift();
+      if (failure && !world.landsBeforeThrow) throw failure;
       world.messages.push({
         id: args.data.id,
         status: args.data.status,
         modelId: args.data.modelId,
+        content: args.data.content,
       });
+      if (failure) throw failure;
       return args.data;
     },
   },
@@ -406,7 +440,17 @@ mock.module(mod("lib/chatSecurity.ts"), {
     }),
     releaseChatAccess: async () => undefined,
     heartbeatChatAccess: async () => undefined,
-    settleChatUsage: async () => undefined,
+    settleChatUsage: async (
+      _reservation: unknown,
+      usage: { outcome: string; inputTokens?: number; outputTokens?: number; usageFromProvider?: boolean }
+    ) => {
+      world.settlements.push(usage.outcome);
+      world.settledUsage.push({
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        usageFromProvider: usage.usageFromProvider,
+      });
+    },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async () => ({ ok: true, entries: [] }),
     releaseAttemptProviderBudget: async () => undefined,
@@ -583,7 +627,9 @@ mock.module(mod("lib/generatedArtifactStorage.ts"), {
       objectKey: `message-artifacts/${USER_ID}/${CONVERSATION_ID}/art_${input.ordinal}.${input.format}`,
       modelId: input.modelId,
     }),
-    discardStoredArtifacts: async () => undefined,
+    discardStoredArtifacts: async (artifacts: unknown[]) => {
+      world.discarded += artifacts.length;
+    },
   },
 });
 
@@ -684,6 +730,10 @@ const ask = async (
   world.artifactRows = [];
   world.messages = [];
   world.providerContexts = [];
+  world.settlements = [];
+  world.settledUsage = [];
+  world.discarded = 0;
+  world.messageCreateCalls = 0;
   lastStreamTextOptions = null;
   networkCalls = 0;
 
@@ -1702,4 +1752,285 @@ test("a broken stream with signing off raises the same error and sends no traile
   } finally {
     if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* A file with no prose above it                                                */
+/* -------------------------------------------------------------------------- */
+
+/*
+  docs/policy/generated-artifacts.md section 8 (2026-11-27). A tool that stored
+  a file and a model that then wrote nothing -- or ran out of steps -- used to
+  end as "empty response": the stored file was deleted and the turn settled as
+  empty. The file is the answer, so it is kept with its message and charged as
+  one.
+*/
+test("a file stored with no prose keeps its message and its row, and settles completed", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({
+      begins: [beganTextFile],
+      executes: [beganTextFile.toolCallId],
+      text: "",
+    });
+    assert.equal(trailer?.completion?.status, "normal");
+    assert.equal(trailer?.artifacts?.length, 1);
+    assert.equal(trailer?.artifacts?.[0]!.status, "ready");
+    // The persisted row's id, so the card survives a reload.
+    assert.equal(trailer?.artifacts?.[0]!.id, "row_1");
+    // A delivered file is not a failed turn.
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+  // An empty body: the sentence above the card is the screen's own.
+  assert.deepEqual(
+    world.messages.map((message) => [message.id, message.status, message.content]),
+    [[ASSISTANT_MESSAGE_ID, "normal", ""]]
+  );
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.artifactRows[0]!.status, "ready");
+  assert.equal(world.artifactRows[0]!.messageId, ASSISTANT_MESSAGE_ID);
+  assert.deepEqual(world.settlements, ["completed"]);
+  assert.equal(world.discarded, 0, "the delivered file was reclaimed");
+});
+
+test("whitespace a model emitted around a file is not stored as its body", async () => {
+  await ask({
+    begins: [beganTextFile],
+    executes: [beganTextFile.toolCallId],
+    text: "\n  \n",
+  });
+  assert.deepEqual(world.messages.map((message) => message.content), [""]);
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+test("an answer with neither text nor a file is still empty: no message, no charge", async () => {
+  await ask({ text: "" });
+  assert.deepEqual(world.messages, []);
+  assert.deepEqual(world.artifactRows, []);
+  assert.deepEqual(world.settlements, ["empty"]);
+});
+
+/*
+  The other half of the same decision (G4). A call the output ceiling cut off
+  is a `turn_incomplete` card the server records -- and with no text the
+  message used to be skipped, so the card the user saw while it streamed was
+  gone on reload, against section 9. The card is kept with its message; the
+  turn delivered no file, so it still settles as the empty answer it is.
+*/
+test("a turn_incomplete card with no text is stored with its message and settles empty", async () => {
+  const { trailer } = await ask({
+    begins: [beganTextFile],
+    executes: [],
+    finishReason: "length",
+    rawFinishReason: "max_tokens",
+    text: "",
+  });
+  assert.equal(trailer?.completion?.status, "incomplete");
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]!.failureCode, "turn_incomplete");
+  // The row's own id: the card is what a reload will find.
+  assert.equal(trailer?.artifacts?.[0]!.id, "row_1");
+  assert.deepEqual(
+    world.messages.map((message) => [message.id, message.status, message.content]),
+    [[ASSISTANT_MESSAGE_ID, "incomplete", ""]]
+  );
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.artifactRows[0]!.status, "failed");
+  assert.equal(world.artifactRows[0]!.failureCode, "turn_incomplete");
+  assert.deepEqual(world.settlements, ["empty"]);
+});
+
+test("a generation that failed with no text keeps its failure card and settles empty", async () => {
+  const { trailer } = await ask({
+    begins: [{ toolCallId: "collector_1", toolName: "create_text_file" }],
+    executes: ["collector_1"],
+    executeInput: { format: "txt", filename: "notes.txt", content: "x" },
+    text: "",
+  });
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]!.status, "failed");
+  assert.equal(trailer?.artifacts?.[0]!.id, "row_1");
+  assert.deepEqual(world.messages.map((message) => message.content), [""]);
+  assert.deepEqual(world.settlements, ["empty"]);
+});
+
+test("a delivered file and a failure card alone are settled differently", async () => {
+  await ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId], text: "" });
+  const delivered = [...world.settlements];
+  await ask({
+    begins: [beganTextFile],
+    executes: [],
+    finishReason: "length",
+    rawFinishReason: "max_tokens",
+    text: "",
+  });
+  const cardOnly = [...world.settlements];
+  assert.deepEqual([delivered, cardOnly], [["completed"], ["empty"]]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The Message write that fails                                                 */
+/* -------------------------------------------------------------------------- */
+
+/*
+  S3. Settlement runs before the Message transaction and is not rolled back
+  with it -- the user read the answer and the provider ran. What changed is how
+  often the write is lost: a retryable database error is run again, up to
+  twice, once a read shows the failed try did not land; and a turn with no
+  attempt row that still cannot be saved says so in the trailer.
+*/
+const retryableWriteError = () =>
+  Object.assign(new Error("write conflict"), {
+    name: "PrismaClientKnownRequestError",
+    code: "P2034",
+  });
+type PersistenceTrailer = { persistence?: "not_saved" | "unknown" } | null;
+const withMessageCreateFailures = async <T,>(
+  failures: unknown[],
+  landsBeforeThrow: boolean,
+  run: () => Promise<T>,
+  commitCheckFails = false
+): Promise<T> => {
+  world.messageCreateFailures = failures;
+  world.landsBeforeThrow = landsBeforeThrow;
+  world.commitCheckFails = commitCheckFails;
+  try {
+    return await run();
+  } finally {
+    world.messageCreateFailures = [];
+    world.landsBeforeThrow = false;
+    world.commitCheckFails = false;
+  }
+};
+
+test("a retryable failure of the Message write is run again and the answer is saved once", async () => {
+  const { trailer } = await withMessageCreateFailures([retryableWriteError()], false, () =>
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
+  );
+  assert.equal(world.messageCreateCalls, 2);
+  assert.deepEqual(world.messages.map((message) => message.content), [ANSWER]);
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.discarded, 0);
+  assert.equal(trailer?.artifacts?.[0]!.status, "ready");
+  assert.equal((trailer as PersistenceTrailer)?.persistence, undefined);
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+test("a write that landed before its error is found, not written a second time, and keeps its file", async () => {
+  const { trailer } = await withMessageCreateFailures([retryableWriteError()], true, () =>
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
+  );
+  assert.equal(world.messageCreateCalls, 1, "the landed write was run again");
+  assert.equal(world.messages.length, 1);
+  // Commit confirmed: the object its row points at stays.
+  assert.equal(world.discarded, 0);
+  assert.equal((trailer as PersistenceTrailer)?.persistence, undefined);
+});
+
+test("a write that keeps failing tells the browser the answer was not saved; billing is unchanged", async () => {
+  const failures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
+  const { body, trailer } = await withMessageCreateFailures(failures, false, () =>
+    ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] })
+  );
+  assert.equal(world.messageCreateCalls, 3, "two more tries, no more");
+  assert.deepEqual(world.messages, []);
+  assert.ok(body.startsWith(ANSWER), "the answer still streamed");
+  assert.equal((trailer as PersistenceTrailer)?.persistence, "not_saved");
+  // The file's row was never written, so neither is its card -- and the
+  // check found no row, so the object is reclaimed.
+  assert.equal(trailer?.artifacts, undefined);
+  assert.equal(world.discarded, 1);
+  // Settled before the write, and not rolled back with it.
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+test("a non-retryable Message write failure is not retried", async () => {
+  const refusal = Object.assign(new Error("duplicate"), {
+    name: "PrismaClientKnownRequestError",
+    code: "P2002",
+  });
+  const { trailer } = await withMessageCreateFailures([refusal], false, () => ask({}));
+  assert.equal(world.messageCreateCalls, 1);
+  assert.equal((trailer as PersistenceTrailer)?.persistence, "not_saved");
+});
+
+/*
+  The review's major 2. A COMMIT whose outcome is unknown, and a commit check
+  that fails too, used to fall into the rollback branch and delete the stored
+  file -- although the transaction may have committed, leaving a row and a
+  download card pointing at a deleted object. Nothing is deleted on a guess:
+  the object is left for the orphan sweep, which removes only objects no row
+  references.
+*/
+test("a write whose commit cannot be checked deletes nothing and says the save is unknown", async () => {
+  const { trailer } = await withMessageCreateFailures(
+    [retryableWriteError()],
+    // The dangerous case: it did land before the connection dropped.
+    true,
+    () => ask({ begins: [beganTextFile], executes: [beganTextFile.toolCallId] }),
+    true
+  );
+  assert.equal(world.messageCreateCalls, 1, "an unknown outcome is never retried");
+  assert.equal(world.discarded, 0, "a file a committed row may point at was deleted");
+  assert.equal((trailer as PersistenceTrailer)?.persistence, "unknown");
+  // No download button for a row that may not exist; a reload shows it if it does.
+  assert.equal(trailer?.artifacts, undefined);
+  assert.deepEqual(world.settlements, ["completed"]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* A provider that broke off mid-answer without throwing                        */
+/* -------------------------------------------------------------------------- */
+
+/*
+  S2. With AI SDK 7, an error part the provider sends mid-stream does not make
+  `textStream` throw: it closes normally and `finishReason` resolves `error`
+  (`interrupted` when the stream ended without its completion signal). The
+  route used to save that answer as `normal` and charge the flat completed
+  rate. It is an incomplete answer, settled prorated like a stop.
+*/
+test("a stream that ended on an error part is saved incomplete and settled prorated, not completed", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({ text: "Half an answer", finishReason: "error", rawFinishReason: "" });
+    assert.deepEqual(trailer?.completion, { status: "incomplete", incompleteReason: "interrupted" });
+    // An incomplete answer, not a failed turn.
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+  assert.deepEqual(
+    world.messages.map((message) => [message.status, message.content]),
+    [["incomplete", "Half an answer"]]
+  );
+  assert.deepEqual(world.settlements, ["cancelled"]);
+  // The provider reported usage, so that is what the proration reads.
+  assert.deepEqual(world.settledUsage, [{ inputTokens: 1_000, outputTokens: 500, usageFromProvider: true }]);
+});
+
+test("an interrupted stream with no reported usage is settled on the cancelled-turn estimate", async () => {
+  await ask({
+    text: "Half an answer",
+    finishReason: "interrupted",
+    rawFinishReason: "",
+    usage: {
+      inputTokens: undefined,
+      outputTokens: undefined,
+      inputTokenDetails: {},
+      outputTokenDetails: {},
+    },
+  });
+  assert.deepEqual(world.settlements, ["cancelled"]);
+  assert.equal(world.settledUsage[0]!.usageFromProvider, false);
+  // Estimated from the streamed text, as a cancelled turn is.
+  assert.equal(world.settledUsage[0]!.outputTokens, Math.ceil(Buffer.byteLength("Half an answer") / 4));
+  assert.deepEqual(world.messages.map((message) => message.status), ["incomplete"]);
+});
+
+test("an error finish with no text is still the empty answer it always was", async () => {
+  await ask({ text: "", finishReason: "error", rawFinishReason: "" });
+  assert.deepEqual(world.settlements, ["empty"]);
+  assert.deepEqual(world.messages, []);
+});
+
+test("an ordinary stop is unchanged: completed, normal", async () => {
+  const { trailer } = await ask({});
+  assert.deepEqual(trailer?.completion, { status: "normal" });
+  assert.deepEqual(world.settlements, ["completed"]);
 });

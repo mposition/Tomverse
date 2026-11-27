@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Braces,
   Download,
+  Eye,
   FileArchive,
   FileCode,
   FileImage,
@@ -38,6 +39,9 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { isGeneratedArtifactRevisionSupported } from "@/lib/generatedArtifactRevisionCore";
 import { useArtifactRevisionAction } from "@/components/chat/GeneratedArtifactRevisionContext";
 import { GeneratedArtifactVersions } from "@/components/chat/GeneratedArtifactVersions";
+import { useChatArtifactWorkspace } from "@/components/chat/ChatArtifactWorkspaceContext";
+import { HtmlArtifactPreviewPanel } from "@/components/chat/HtmlArtifactPreviewPanel";
+import { artifactPreviewKind } from "@/lib/chatArtifactPreview";
 import {
   localizedProductHref,
   type ChatWorkspaceProduct,
@@ -143,11 +147,20 @@ export function GeneratedArtifactCard({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // The isolated preview panel (lib/htmlArtifactPreview.ts); HTML files, and React source when the workspace switch is on.
+  const [htmlPreviewOpen, setHtmlPreviewOpen] = useState(false);
+  const closeHtmlPreview = useCallback(() => setHtmlPreviewOpen(false), []);
+  const workspace = useChatArtifactWorkspace();
+  const previewKind = artifactPreviewKind(artifact, { react: workspace.enabled });
   const revise = useArtifactRevisionAction();
   const [isPreparingRevision, setIsPreparingRevision] = useState(false);
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const canRevise = Boolean(revise && !isGuestMode && currentProduct === "chat" &&
     artifact.status === "ready" && isGeneratedArtifactRevisionSupported(artifact));
+  // "Change this screen" under the preview reuses the revision path above, so it exists exactly where that does.
+  const reviseFromPreview = workspace.enabled && canRevise && revise
+    ? (request: string) => revise(artifact, request)
+    : undefined;
 
   const attributedModelId = artifact.modelId ?? fallbackModelId ?? null;
   const modelName = attributedModelId
@@ -402,6 +415,17 @@ export function GeneratedArtifactCard({
             {t(isPreparingRevision ? "chat.artifactRevisionPreparing" : "chat.artifactRevise")}
           </button>
         )}
+        {previewKind && (
+          <button
+            type="button"
+            data-testid="generated-artifact-html-preview"
+            onClick={() => setHtmlPreviewOpen(true)}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-accent-generated-artifact-300 px-3 text-sm font-bold text-accent-generated-artifact-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 dark:border-accent-generated-artifact-700 dark:text-accent-generated-artifact-200"
+          >
+            <Eye className="h-4 w-4" />
+            {t("chat.artifactPreviewOpen")}
+          </button>
+        )}
         {isReady && (
           <button
             type="button"
@@ -468,6 +492,9 @@ export function GeneratedArtifactCard({
       */}
       {isReady && revise && !isGuestMode && currentProduct === "chat" && (
         <GeneratedArtifactVersions artifact={artifact} />
+      )}
+      {htmlPreviewOpen && previewKind && (
+        <HtmlArtifactPreviewPanel artifact={artifact} onClose={closeHtmlPreview} onRevise={reviseFromPreview} />
       )}
       {previewUrl && (
         <div className="w-full @md/artifacts:basis-full">

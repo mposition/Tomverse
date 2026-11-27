@@ -45,6 +45,8 @@ import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { CodeBlockPreview } from "@/components/chat/CodeBlockPreview";
+import { CodeBlockStreamingScope } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
@@ -54,6 +56,7 @@ import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { AnswerRatingButtons } from "@/components/chat/AnswerRatingButtons";
 import { ProjectAnswerSources } from "@/components/projects/ProjectAnswerSources";
 import { ProjectSaveToProject } from "@/components/projects/ProjectSaveToProject";
 import {
@@ -446,6 +449,7 @@ function MarkdownCodeBlock({ children }: MarkdownPreProps) {
       >
         {children}
       </pre>
+      <CodeBlockPreview preRef={preRef}>{children}</CodeBlockPreview>
       {/*
         The icon stays small, but the touch target does not: `before:-inset-2`
         grows the hit area of the 28px button to 44x44. Offset by the same 8px
@@ -668,8 +672,16 @@ export function ChatMessageList({
     if (lastMessage.researchRunId) return "";
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
-    if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
-    if (!lastMessage.content) return t("chat.responseGenerating");
+    if (lastMessage.status === "incomplete") {
+      return t(lastMessage.incompleteReason === "interrupted"
+        ? "chat.responseInterruptedNotice"
+        : lastMessage.incompleteReason === "length"
+          ? "chat.responseIncomplete"
+          : "chat.responseUnfinished");
+    }
+    // A file-only answer has an empty body and is finished: its cards arrive
+    // with the trailer, after the last streamed chunk.
+    if (!lastMessage.content && !lastMessage.artifacts?.length) return t("chat.responseGenerating");
     return t("chat.responseComplete");
   })();
 
@@ -1084,8 +1096,22 @@ export function ChatMessageList({
             // rendered separately below as a de-emphasized auxiliary layer
             // (see errorAuxiliaryLines) rather than dropped entirely.
             const errorText = msg.recoveryNotice ?? msg.content;
-            const displayContent =
-              !isUser && msg.status === "error" && msg.recoveryNotice === undefined
+            // An answer whose only output is its file cards
+            // (docs/policy/generated-artifacts.md section 8). The stored body
+            // is empty on purpose; the sentence above a delivered file is
+            // this screen's own, so it is in the reader's language. A
+            // failure card alone gets no sentence: the card says what
+            // happened.
+            const cardOnlyAnswer =
+              !isUser &&
+              msg.role === "assistant" &&
+              msg.status !== "error" &&
+              !msg.content.trim() &&
+              (msg.artifacts?.length ?? 0) > 0;
+            const displayContent = cardOnlyAnswer &&
+              msg.artifacts!.some((artifact) => artifact.status === "ready")
+              ? t("chat.artifactOnlyAnswer")
+              : !isUser && msg.status === "error" && msg.recoveryNotice === undefined
                 ? msg.content.split("\n")[0]
                 : msg.content;
             const errorAuxiliaryLines =
@@ -1410,7 +1436,7 @@ export function ChatMessageList({
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
                     <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
-                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
+                  ) : msg.role === "assistant" && !msg.content && msg.status !== "error" && !cardOnlyAnswer ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
@@ -1422,7 +1448,7 @@ export function ChatMessageList({
                       <TypingIndicator label={t("chat.responseGenerating")} />
                     )
                   ) : msg.role === "assistant" ? (
-                    <>
+                    <CodeBlockStreamingScope streaming={isActivelyGenerating}>
                     <AnswerMarkdown
                       rehypePlugins={[rehypeHighlight]}
                       components={{
@@ -1553,6 +1579,7 @@ export function ChatMessageList({
                                 triggerClassName="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
                                 triggerIconClassName="h-3 w-3 text-blue-500" />
                             )}
+                            {canReport && !isGuestMode && <AnswerRatingButtons conversationId={currentChatId ?? null} messageId={msg.id} />}
                             {/*
                               Which model answered, on a turn Auto routed
                               (docs/ui-contracts/auto-model-selection.md).
@@ -1652,7 +1679,7 @@ export function ChatMessageList({
                       // nothing outside a project conversation with context on.
                       <ProjectAnswerSources messageId={msg.id} />
                     )}
-                    </>
+                    </CodeBlockStreamingScope>
                   ) : (
                     <UserMessageContent content={msg.content} />
                   )}
@@ -1915,18 +1942,43 @@ export function ChatMessageList({
                     );
                   })()}
                   {/*
-                    The provider stopped at its output-token ceiling. The
-                    answer above is kept exactly as it arrived -- this only
-                    says it is unfinished and how to continue. No follow-up
-                    is sent from here: another turn costs credits, so asking
-                    for one stays the user's action.
+                    The answer stopped short: at the output-token ceiling, or
+                    because the provider broke off. The answer above is kept
+                    exactly as it arrived -- this only says it is unfinished
+                    and how to continue. No follow-up is sent from here:
+                    another turn costs credits, so asking for one stays the
+                    user's action. The reason is known only on the live
+                    stream; a reloaded message carries none (neither the
+                    Message nor the attempt row stores it), so it says only
+                    that the answer did not finish rather than guess.
                   */}
                   {!isUser && msg.status === "incomplete" && (
                     <p
                       data-testid="response-incomplete-notice"
                       className="mt-3 border-t border-zinc-200 pt-2 text-[11px] leading-4 font-semibold text-zinc-500 dark:border-zinc-700/60 dark:text-zinc-400"
                     >
-                      {t("chat.responseIncompleteNotice")}
+                      {t(msg.incompleteReason === "interrupted"
+                        ? "chat.responseInterruptedNotice"
+                        : msg.incompleteReason === "length"
+                          ? "chat.responseIncompleteNotice"
+                          : "chat.responseUnfinishedNotice")}
+                    </p>
+                  )}
+                  {/*
+                    The server streamed this answer and did not save it (a
+                    reload will not show it), or could not confirm that it did
+                    (a reload will tell). Only ever on the live message: the
+                    flag is runtime-only and never serialized.
+                  */}
+                  {!isUser && msg.persistence && msg.status !== "error" && (
+                    <p
+                      data-testid="response-not-saved-notice"
+                      data-persistence={msg.persistence}
+                      className="mt-3 border-t border-zinc-200 pt-2 text-[11px] leading-4 font-semibold text-zinc-500 dark:border-zinc-700/60 dark:text-zinc-400"
+                    >
+                      {t(msg.persistence === "unknown"
+                        ? "chat.responseSaveUnknownNotice"
+                        : "chat.responseNotSavedNotice")}
                     </p>
                   )}
                   {!isUser && msg.status === "cancelled" && (

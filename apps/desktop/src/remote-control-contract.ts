@@ -8,6 +8,8 @@ import { z } from "zod";
 export const remoteControlCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("read") }).strict(),
   z.object({ action: z.literal("set"), enabled: z.boolean() }).strict(),
+  /** Whether the report of a file change carries a short, redacted preview of the changed lines (off by default). */
+  z.object({ action: z.literal("setPreview"), enabled: z.boolean() }).strict(),
 ]);
 export type RemoteControlCommand = z.infer<typeof remoteControlCommand>;
 
@@ -23,4 +25,6 @@ export type RemoteControlView = {
   status: RemoteControlStatus;
   /** The page to open on the other device, shown as text (the app opens no browser for it). */
   page: string | null;
+  /** `available`: the server named previews, so the choice is offered. `enabled`: the person turned previews on for this account. */
+  preview: { available: boolean; enabled: boolean };
 };

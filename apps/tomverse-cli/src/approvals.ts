@@ -2,7 +2,7 @@ import type { ApprovalView } from "./agent.js";
 import { checkBoundaries, ruleForApproval, type PermissionRule } from "./permissions.js";
 
 /** Why an approval was given without asking: an earlier "always" answer at the terminal. */
-export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window";
+export type RememberedRule = "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window" | "web_search";
 
 /**
  * "Yes, and don't ask again" answers the person gave at the terminal, for the
@@ -20,6 +20,8 @@ export type RememberedRule = "file_edits" | "same_command" | "web_host" | "brows
  *   element are shown on every call that is asked, and passwords are refused by the host whatever was allowed.
  * - computer_window: clicking, typing, keys and scrolling in the one desktop window the user chose, for that window only. The host
  *   checks the window and its position again on every action.
+ * - web_search: searching the web through the Tomverse API, each search still
+ *   charged to the account; the queries are shown on every call.
  * - same_command: exactly the same program, arguments, working folder and
  *   environment names, and the same kind of run (background or not); any other
  *   command is asked. The timeout may differ.
@@ -46,6 +48,8 @@ export class ApprovalMemory {
     private readonly computerWindows = new Set<string>();
     /** MCP tools answered "always": one tool of one server, for that exact server definition. */
     private readonly mcpTools = new Set<string>();
+    /** Web searches answered "always" for this run. */
+    private webSearches = false;
 
     private static mcpKey(view: ApprovalView) {
         return view.mcp ? JSON.stringify([view.mcp.server, view.mcp.tool, view.mcp.definition]) : null;
@@ -68,6 +72,7 @@ export class ApprovalMemory {
         if (view.error || checkBoundaries(view)) return false;
         if (view.mcp) return true;
         if (view.web) return true;
+        if (view.webSearch) return true;
         // A click or typing on a local page may be remembered for the site; on a public site every one is asked.
         if (view.browser) return LOOPBACK_ORIGIN.test(view.browser.origin);
         if (view.computer) return Boolean(view.computer.window.id);
@@ -79,6 +84,7 @@ export class ApprovalMemory {
         if (view.error || checkBoundaries(view)) return null;
         if (view.mcp) return this.mcpTools.has(ApprovalMemory.mcpKey(view)!) ? "mcp_tool" : null;
         if (view.web) return (view.toolName === "browser_navigate" ? this.browserHosts : this.webHosts).has(view.web.host) ? "web_host" : null;
+        if (view.webSearch) return this.webSearches ? "web_search" : null;
         if (view.browser) return this.browserOrigins.has(view.browser.origin) ? "browser_origin" : null;
         if (view.computer) return this.computerWindows.has(view.computer.window.id) ? "computer_window" : null;
         if (view.patch) return view.root && this.fileEdits.has(view.root) && !ApprovalMemory.deletes(view) ? "file_edits" : null;
@@ -105,6 +111,10 @@ export class ApprovalMemory {
             (view.toolName === "browser_navigate" ? this.browserHosts : this.webHosts).add(view.web.host);
             return "web_host";
         }
+        if (view.webSearch) {
+            this.webSearches = true;
+            return "web_search";
+        }
         if (view.browser) {
             this.browserOrigins.add(view.browser.origin);
             return "browser_origin";
@@ -126,6 +136,7 @@ export class ApprovalMemory {
             ...[...this.fileEdits].map((root) => `file edits in ${root} (creating and changing files; deleting is still asked)`),
             ...[...this.commands.values()].map((c) => `command: ${c}`),
             ...[...this.webHosts].map((host) => `reading web pages from ${host}`),
+            ...(this.webSearches ? ["searching the web through Tomverse (each search is still charged)"] : []),
             ...[...this.browserHosts].map((host) => `opening pages of ${host} in the browser tab`),
             ...[...this.browserOrigins].map((origin) => `clicking and typing in the browser tab on ${origin}`),
             ...[...this.computerWindows].map((id) => `operating the desktop window ${id}`),
@@ -141,5 +152,6 @@ export class ApprovalMemory {
         this.browserOrigins.clear();
         this.browserHosts.clear();
         this.computerWindows.clear();
+        this.webSearches = false;
     }
 }

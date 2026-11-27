@@ -76,6 +76,8 @@ export type IssuedContextBundle = {
     profileTokens: number;
     /** Project workspace: the project's own blocks. */
     projectTokens: number;
+    /** The account owner's personal instructions block. */
+    preferenceTokens: number;
 };
 
 /**
@@ -106,6 +108,7 @@ export function issueChatContextBundle(input: {
             memoryTokens: input.context.memoryTokens,
             profileTokens: input.context.profileTokens,
             projectTokens: input.context.projectTokens ?? 0,
+            preferenceTokens: input.context.preferenceTokens ?? 0,
             expiresAtMs,
             semanticSteps: input.context.semanticSteps,
             memoryQueryPolicy: input.context.memory.memoryQueryPolicy,
@@ -126,6 +129,7 @@ export function issueChatContextBundle(input: {
         memoryTokens: input.context.memoryTokens,
         profileTokens: input.context.profileTokens,
         projectTokens: input.context.projectTokens ?? 0,
+        preferenceTokens: input.context.preferenceTokens ?? 0,
     };
 }
 

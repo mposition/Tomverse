@@ -131,6 +131,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: "/chat-sw.js", headers: [{ key: "Cache-Control", value: "no-store" }, { key: "Service-Worker-Allowed", value: "/" }] },
+      // The pinned React/Babel files a chat preview frame loads (lib/chatArtifactPreview.ts). The frame's origin is
+      // opaque ("null") and the scripts carry integrity, so the browser fetches them in CORS mode; these are public
+      // library files with versions in their names, so any origin may read them and they never change.
+      {
+        source: "/vendor/artifact-preview/:file*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
       {
         source: "/:path*",
         headers: securityHeaders,

@@ -15,6 +15,9 @@ model User {
   mcpOAuthFlows McpOAuthFlow[]
   mcpCustomServers McpCustomServer[]
   codeTaskReservations CodeTaskReservation[]
+  desktopRemotePasskeys DesktopRemotePasskey[]
+  desktopRemotePasskeyChallenges DesktopRemotePasskeyChallenge[]
+  codeCloudJobs CodeCloudJob[]
   id                            String        @id @default(cuid())
   name                          String?
   email                         String?       @unique
@@ -73,6 +76,7 @@ model User {
   emailLoginEnabled             Boolean       @default(true)
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
+  personalization               UserPersonalization?
   ga4UserId                     Ga4UserId?
 
   accounts                             Account[]
@@ -108,6 +112,7 @@ model User {
   conversations                        Conversation[]
   comparisonReviews                    ComparisonReview[]
   comparisonReviewItemFeedback         ComparisonReviewItemFeedback[]
+  chatAnswerRatings                    ChatAnswerRating[]
   productAnalyticsEvents               ProductAnalyticsEvent[]
   privacyRequests                      PrivacyRequest[]
   planChangeRequests                   PlanChangeRequest[]
@@ -296,6 +301,29 @@ model UserSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// What the account owner asked every Chat and Review answer to know and to
+/// follow (lib/chatPersonalizationCore.ts). Typed by the owner, so it is sent
+/// as the owner's preferences inside the turn's context block, below an
+/// assistant profile's and a project's instructions and never above
+/// Tomverse's own rules. Not sent on the external APIs.
+///
+/// A table of its own rather than UserSettings columns: that row is written
+/// by the settings panel's every-dirty-field save, and it cannot be created
+/// without naming a default model.
+model UserPersonalization {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "What should Tomverse know about you". At most 1,500 characters (CHECK).
+  aboutMe             String   @default("")
+  /// "How should Tomverse answer". At most 1,500 characters (CHECK).
+  responsePreferences String   @default("")
+  /// One of RESPONSE_STYLES (CHECK UserPersonalization_responseStyle_check).
+  responseStyle       String   @default("default")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Account {
@@ -558,9 +586,20 @@ model Conversation {
   passwordVersion  Int     @default(0)
   importedGuestKey String?
 
+  /// Set only when the conversation was started as a temporary Chat
+  /// (lib/temporaryChatAccess.ts), never written afterwards, and NULL for
+  /// every other conversation. The value is when the server deletes it; it is
+  /// the only column the deletion sweep may select on, so a conversation
+  /// without it can never be chosen (lib/temporaryConversationSweep.ts).
+  /// `Conversation_temporary_scope_check` keeps a temporary row out of every
+  /// project and its memory off.
+  temporaryExpiresAt DateTime?
+  answerRatings      ChatAnswerRating[]
+
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
   @@index([userId, kind])
+  @@index([temporaryExpiresAt])
 }
 
 model ConversationProject {
@@ -659,6 +698,9 @@ model Message {
   /// The assistant id is deliberately not a Message relation: the attempt is
   /// claimed before an assistant Message exists.
   responseAttempts ChatResponseAttempt[] @relation("ChatResponseAttemptSource")
+
+  /// The signed-in owner's thumbs up or down on this answer.
+  answerRatings ChatAnswerRating[]
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1020,6 +1062,38 @@ model ComparisonReviewItemFeedback {
   @@unique([comparisonReviewId, userId, reviewItemId])
   @@index([userId, createdAt])
   @@index([verdict, createdAt])
+}
+
+/// A signed-in owner's thumbs up or down on one assistant answer in Chat or
+/// Review (lib/chatAnswerRatingCore.ts). One row per person per answer:
+/// changed by updating, withdrawn by deleting.
+///
+/// `modelId` is copied from the answer's own Message row by the server, never
+/// taken from the request, so it names the model that actually answered
+/// (after any fallback). It is kept for a later Auto routing quality signal;
+/// nothing reads it for routing yet.
+///
+/// No free text: the optional reason is a closed list, and anything a person
+/// wants to say in prose belongs in the existing Feedback report.
+model ChatAnswerRating {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId      String
+  message        Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  modelId        String?
+  /// "up" | "down" (CHECK ChatAnswerRating_rating_check).
+  rating         String
+  /// One of CHAT_ANSWER_RATING_REASONS, only on "down" (two CHECKs).
+  reason         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([messageId, userId])
+  @@index([userId, conversationId])
+  @@index([modelId, createdAt])
 }
 
 /// Content-free operational record of one AI Review run, written by the server
@@ -7262,6 +7336,48 @@ model DesktopRemoteCommand {
   @@index([createdAt])
 }
 
+/// One WebAuthn credential an account registered to confirm "allow once" and follow-ups sent from another device
+/// (docs/ops/desktop-remote-control.md). The public key only; the private key stays in the person's authenticator.
+model DesktopRemotePasskey {
+  id           String    @id
+  userId       String
+  /// The credential id, base64url. Unique across accounts.
+  credentialId String    @unique
+  /// SubjectPublicKeyInfo (DER), base64url.
+  publicKey    String
+  /// COSE algorithm: -7 (ES256) or -257 (RS256); a CHECK allows nothing else.
+  alg          Int
+  signCount    BigInt    @default(0)
+  /// The relying party (host name) the credential was made for; an assertion for another one is refused.
+  rpId         String
+  label        String
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt   DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// One single-use challenge for registering a passkey, confirming that enrollment, one remote command, or a removal.
+/// Valid for two minutes; every purpose but registering is bound to the digest of the one thing it confirms.
+model DesktopRemotePasskeyChallenge {
+  id          String   @id
+  userId      String
+  /// register, enroll, command or remove; a CHECK allows nothing else.
+  purpose     String
+  challenge   String
+  /// Null for register; otherwise the digest of what is confirmed.
+  bindingHash String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
 // --- Prompt Refiner shadow reservation authority --------------------------
 //
 // These rows authorize no provider call on their own. The stage is deliberately
@@ -13116,6 +13232,52 @@ model CodingProviderTerms {
   updatedByEmail String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+/// Desktop cloud execution (docs/ops/desktop-cloud-execution.md): one coding task a runner runs on a snapshot of the
+/// person's repository. Money is on the managed reservation named by reservationId; billing is its last receipt.
+/// Objects live at code-cloud/<id>/bundle and code-cloud/<id>/result.patch. Deleted seven days after the job ends.
+model CodeCloudJob {
+  id                   String    @id
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientTaskId         String
+  /// uploading | queued | starting | running | completed | failed | cancelled (CODE_CLOUD_JOB_STATUSES)
+  status               String
+  instruction          String
+  catalogVersion       Int
+  contentHash          String
+  executorModelId      String
+  reviewerModelId      String
+  approvedCredits      Int
+  bundleBytes          Int
+  bundleSha256         String
+  baseCommit           String
+  bundleObjectKey      String?
+  reservationId        String?
+  billing              Json?
+  runnerId             String?
+  /// SHA-256 of the per-claim job token; cleared when the job ends.
+  runnerTokenHash      String?
+  runnerLeaseExpiresAt DateTime? @db.Timestamptz(3)
+  cancelRequestedAt    DateTime? @db.Timestamptz(3)
+  logs                 Json      @default("[]")
+  logSeq               Int       @default(0)
+  failureCode          String?
+  summary              String?
+  patchObjectKey       String?
+  patchBytes           Int?
+  patchSha256          String?
+  createdAt            DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime  @default(now()) @db.Timestamptz(3)
+  startedAt            DateTime? @db.Timestamptz(3)
+  finishedAt           DateTime? @db.Timestamptz(3)
+  expiresAt            DateTime  @db.Timestamptz(3)
+
+  @@unique([userId, clientTaskId])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 /// Code financial metadata only. Generated text and prompts are never stored.

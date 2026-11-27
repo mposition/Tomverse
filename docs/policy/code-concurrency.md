@@ -92,3 +92,11 @@ Fleet은 사용자 행동 하나(N개 구성원 시작)지만 태스크 N개입�
 - Fleet admission을 도착 순서 방식으로 되돌리지 않습니다(§3).
 - 태스크 lease를 고정 TTL로 바꾸지 않습니다(§4).
 - 이 문서의 **[제안]·[미결정]** 값은 구현 PR에서 정하고, 그 PR이 이 문서를 함께 고칩니다.
+
+## 8. Desktop 클라우드 작업 (기본 꺼짐, 2026-11-28)
+
+- Desktop 클라우드 작업(`docs/ops/desktop-cloud-execution.md`)은 만들 때부터 이 문서의 태스크 슬롯
+  (`CODE_USER_CONCURRENT_TASKS`, 기본 8)을 셉니다: 업로드·대기·시작·실행 중인 작업 수가 한도 이상이면
+  `CODE_CLOUD_CONCURRENCY_EXCEEDED`로 거절합니다. 실행 중에는 그 작업의 관리형 예약도 같은 슬롯을 셉니다.
+- 태스크 lease는 Desktop 대신 실행기의 heartbeat(15초)가 유지합니다. 실행기가 보고를 멈추면 서버의 15분
+  maintenance가 작업을 실패로 끝내고 예약을 `interrupted`로 해제하며, 자동으로 다시 시작하지 않습니다(§4).

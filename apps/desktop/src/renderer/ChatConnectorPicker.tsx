@@ -88,6 +88,8 @@ export function ChatConnectorStatus({ language, progress, waiting, sending, onMa
   const labels: Record<McpProgressState, string> = {
     searching: c.searchState, reading: c.readState, approval_required: c.approvalState, no_results: c.noResults,
     reauth_required: c.expired, server_error: c.serverError, done: c.done,
+    // Chat read tools (page reading, past chats) share this channel; Desktop shows its neutral wording.
+    page_reading: c.readState, page_unavailable: c.noResults, history_searching: c.searchState,
   };
   const notice = progress && progress !== "done" ? labels[progress] : undefined;
   if (!notice && !pending.length && !message) return null;

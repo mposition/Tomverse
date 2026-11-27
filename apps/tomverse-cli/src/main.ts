@@ -423,6 +423,9 @@ const configCommand = async (ctx: Context, args: string[]) => {
         } else if (key === "agent-models") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("agent-models must be on or off.");
             config.agentModels = value === "true" || value === "on";
+        } else if (key === "web-search") {
+            if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("web-search must be on or off.");
+            config.webSearch = value === "true" || value === "on";
         } else if (key === "orchestrate") {
             if (!["true", "false", "on", "off"].includes(value)) throw new UsageError("orchestrate must be on or off.");
             config.orchestrate = value === "true" || value === "on";
@@ -449,7 +452,7 @@ const configCommand = async (ctx: Context, args: string[]) => {
         return EXIT_CODES.success;
     }
     if (sub === "unset") {
-        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", orchestrate: "orchestrate", "orchestrate-max-subagents": "orchestrateMaxSubagents", "orchestrate-max-requests": "orchestrateMaxRequests", mcp: "mcp", hooks: "hooks", sandbox: "sandbox", "sandbox-domains": "sandboxDomains", "sandbox-localhost": "sandboxLocalhost" }[key ?? ""] as keyof CliConfig | undefined;
+        const field = { endpoint: "endpoint", model: "model", "allow-insecure-localhost": "allowInsecureLocalhost", "command-env": "commandEnv", memory: "memory", "agent-models": "agentModels", "web-search": "webSearch", orchestrate: "orchestrate", "orchestrate-max-subagents": "orchestrateMaxSubagents", "orchestrate-max-requests": "orchestrateMaxRequests", mcp: "mcp", hooks: "hooks", sandbox: "sandbox", "sandbox-domains": "sandboxDomains", "sandbox-localhost": "sandboxLocalhost" }[key ?? ""] as keyof CliConfig | undefined;
         if (!field) throw new UsageError(`Unknown config key '${key}'.`);
         delete config[field];
         writeConfig(config);
@@ -527,6 +530,8 @@ const engineExtras = (ctx: Context, root: string) => ({
     extensions: discoverExtensions(root),
     agentModels: ctx.config.agentModels === true,
     web: {},
+    // Off unless the person turned it on (tomverse config set web-search on): each search is charged to the account.
+    webSearch: ctx.config.webSearch === true,
     backgroundCommands: true,
     images: true,
     subagents: true,

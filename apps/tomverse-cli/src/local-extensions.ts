@@ -28,7 +28,7 @@ export type ExtensionDeps = {
 
 const MAX_RESPONSE_CHARS = 20_000;
 /** Tools the person is asked about before they run; a PreToolUse hook for these is answered before that question. */
-const ASKED_TOOLS = ["apply_patch", "run_command", "web_fetch", ...BROWSER_ACT_TOOLS, ...COMPUTER_ACT_TOOLS];
+const ASKED_TOOLS = ["apply_patch", "run_command", "web_fetch", "web_search", ...BROWSER_ACT_TOOLS, ...COMPUTER_ACT_TOOLS];
 
 const fence = (lines: string[]) => lines.join("\n").replaceAll("</hook-context", "<\\/hook-context");
 

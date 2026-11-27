@@ -11,6 +11,7 @@ import type { CliFixtureInput } from "./cli-fixture-input";
 import type { TerminalReadReply } from "../../../tomverse-cli/src/terminal-read";
 import type { ReviewDiff, ReviewFile, ReviewHunk, ReviewModelResult, ReviewScope } from "../review-contract";
 import type { AgentGitAction, AgentGitResult } from "../git-actions-contract";
+import type { PickedPicture } from "./browser-pick-store";
 
 export type Connection = { endpoint: string; key: string };
 export type RecordedSession = { requestId: string; storage: string | null; sessionId: string; project: ProjectRoot;
@@ -26,14 +27,16 @@ export type WorkerCommand =
   | { type: "permissions"; mode: "read_only" | "ask" | "auto_review" | "allow_all"; home: string }
   | { type: "catalog"; requestId: string; connection: Connection }
   | { type: "start"; runId: string; project: ProjectRoot; sourceProject?: ProjectRoot; scope: HistoryScope; protectedRoot: string; connection: Connection; input: StartInput;
-    references: WorkspaceReference[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean;
+    references: WorkspaceReference[]; pictures?: PickedPicture[]; preference: CodeExecutionMode; browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean;
+    /** The server offers the Code agent's paid web search (its desktopCodeWebSearch capability). */
+    webSearch?: boolean;
     continuation?: CodeContinuation & { taskId: string; sourceHome: string; sourceProvider: "openai" | "anthropic" } }
   | (NativeFixtureTask & { type: "start-codex-fixture"; clientVersion: string;
     apiSource?: CodeCliContinuation & { scope: HistoryScope; connection: Connection } })
   | (NativeFixtureTask & { type: "start-claude-fixture" })
   | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
-    browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean;
+    browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean; webSearch?: boolean;
     afterClarification?: { requestId: string; text: string };
     afterQuota?: { requestId: string; refusedRequestId: string; text: string;
       continuation?: { segmentId: string; maximumKeyCreditCap: number } } })
@@ -44,7 +47,7 @@ export type WorkerCommand =
   | { type: "terminal-read-result"; runId: string; requestId: string; reply: TerminalReadReply | null }
   | { type: "git-action-result"; runId: string; requestId: string; result: AgentGitResult }
   | { type: "answer"; runId: string; decision: Decision }
-  | { type: "follow-up"; runId: string; requestId: string; text: string }
+  | { type: "follow-up"; runId: string; requestId: string; text: string; pictures?: PickedPicture[] }
   | { type: "queue"; runId: string; requestId: string; operation: QueueOperation }
   | { type: "stop-background"; runId: string; handle: string }
   | { type: "stop-subagent"; runId: string; subtask?: string }

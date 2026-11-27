@@ -97,9 +97,9 @@ export type ApprovalRecord = {
     by?: "remembered_answer" | "permission_policy";
     /** What the permission policy decided on (a boundary, a rule, the mode, or an auto review), for either answer. */
     policy?: import("./permissions.js").PolicyNote;
-    rule?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window";
+    rule?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window" | "web_search";
     /** This answer was "always" for the rest of that process. */
-    remember?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window";
+    remember?: "file_edits" | "same_command" | "web_host" | "browser_origin" | "mcp_tool" | "computer_window" | "web_search";
     decidedAt: string;
 };
 

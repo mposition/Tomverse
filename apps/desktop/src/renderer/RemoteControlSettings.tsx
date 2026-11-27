@@ -38,6 +38,10 @@ export function RemoteControlSettings({ language }: { language: Language }) {
       <small data-testid="remote-control-sent">{copy.sentToServer}</small>
       <small data-testid="remote-control-pc-only">{copy.pcOnlyNote}</small>
       {view?.enabled && view.page && <small data-testid="remote-control-page">{copy.openOn.replace("{page}", () => view.page!)}</small>}
+      {view?.enabled && view.preview.available && <>
+        <label htmlFor="remote-control-preview">{copy.previewLabel}</label>
+        <small id="remote-control-preview-info" data-testid="remote-control-preview-detail">{copy.previewDetail}</small>
+      </>}
       {status && <small role="status" data-testid="remote-control-status" data-status={view?.status}>{status}</small>}
     </div>
     <div className="execution-setting-control">
@@ -47,6 +51,12 @@ export function RemoteControlSettings({ language }: { language: Language }) {
         }}>
         <option value="off">{copy.settingOff}</option><option value="on">{copy.settingOn}</option>
       </select>
+      {view?.enabled && view.preview.available && <select id="remote-control-preview" aria-describedby="remote-control-preview-info" data-testid="remote-control-preview"
+        value={view.preview.enabled ? "on" : "off"} disabled={busy} onChange={(event) => {
+          void run({ action: "setPreview", enabled: event.currentTarget.value === "on" });
+        }}>
+        <option value="off">{copy.settingOff}</option><option value="on">{copy.settingOn}</option>
+      </select>}
     </div>
   </div>;
 }
