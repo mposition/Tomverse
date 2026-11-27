@@ -116,87 +116,8 @@ Windows는 `File.type`을 registry의 `HKCR\<확장자>\Content Type`에서 냅�
 
 그래서 `.sh`·`.ps1`·`.py`는 **지원**하고 `.exe`·`.msi`·`.bat`은 거절한다. 셸
 스크립트는 이 앱에서 텍스트로만 읽히지만 배치 파일은 읽는 사람의 기계에서
-더블클릭 한 번 거리에 있다. **이 앱의 서버는 어떤 소스코드도 실행·컴파일·동적
-import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실행은 §2.3.1의 공급자
-호스팅 도구 하나뿐이며, 그 코드는 모델이 쓰고 공급자의 sandbox가 돌린다.
-
-#### 2.3.1 코드 실행 (운영자 지시 2026-11-27)
-
-`CHAT_CODE_EXECUTION_ENABLED="true"`일 때, 답하는 모델이 지원하면 그 공급자의
-코드 실행 도구를 붙인다(`lib/chatCodeExecutionCore.ts`). 표 데이터 합계·통계처럼
-모델이 추측하던 숫자를 계산으로 답하게 하는 것이 목적이다. 자체 sandbox는 없다.
-
-- **지금 붙는 것은 Gemini 3.x 이상의 Flash·Pro**(`gemini-3.7-flash`, `gemini-3.6-flash`,
-  `gemini-3.1-pro-preview` 등)뿐이다. Flash-Lite는 지원을 확인한 문서가 없어 뺐다
-  (2.0 Flash-Lite는 미지원이었다). 설치된
-  `@ai-sdk/google`에서 provider 도구와 함수 도구(앱 검색·파일·프로젝트 도구)를 함께
-  보낼 수 있는 것이 Gemini 3 계열이고, 그 이전 모델에서는 함수 도구가 조용히 빠진다.
-  `*-latest` 별칭은 세대를 알 수 없어 받지 않는다. 게스트, Research Preview,
-  deep research turn에는 붙이지 않는다. Auto의 모델 선택 규칙은 바꾸지 않는다.
-- **앱 도구 반복이 있는 turn에는 붙이지 않는다**(`tool_loop`): 플러그인(MCP), 프로젝트
-  도구, 생성 파일 도구, 이 앱의 웹 검색. 반복의 호출과 실행이 최대 4 pass인 예약 하나를
-  나눠 써야 하는데 어느 쪽 계수기도 둘을 함께 세지 않는다. Gemini의 웹 검색은 이 앱의
-  검색 반복이므로 **웹 검색을 켠 turn에는 코드 실행이 붙지 않는다**(새 대화는 웹 검색
-  ON으로 시작한다). 둘을 함께 쓰려면 반복 단계와 실행이 한 pass 예산을 나눠 세야 한다.
-- **비용 규칙은 웹 검색과 같다.** 토큰 밖에서 따로 과금하는 도구는 크레딧 정액
-  가산과 provider 예산의 최악값 예약을 가진다. 토큰 안에서 끝나는 도구는 가산이
-  없고(Perplexity 검색과 같은 범주), 그 도구가 더하는 token은 다른 입력처럼 요청 전에
-  예약한다. 2026-11-27 공식 가격 문서 확인:
-  - Google: "추가 요금 없음". 생성 코드·실행 결과는 output token이고, 실행을 쓰면
-    "원래 프롬프트, 생성 코드, 실행 결과"가 중간 token으로 input 과금된다. 가산은 없고,
-    실행마다 프롬프트를 한 번 더 읽는 것으로 보고 provider pass로 예약한다(독립 검토
-    r-20261127-073816-5a1bf4). route가 예산 전에 도구를 정하고 `toolInputPasses`와
-    `longContextToolInputPasses`에 4 pass(`CODE_EXECUTION_RESERVED_PASSES`)를 넣어, 예약
-    입력은 프롬프트 × 4 + 출력 상한 × 3이 된다(`providerCallPasses` 4가 예약에 저장된다).
-    128k 이하 turn은 크레딧이 고정 가중치 그대로이고 provider 예산 예약만 커진다(Gemini
-    3.6 Flash, 입력 2,000 token: 64,440 → 368,352 µUSD). 128k를 넘는 turn은 크레딧 예약도
-    커진다(입력 200,000 token: 317 → 795 크레딧). 정산은 공급자가 보고한 사용량이다(SDK가
-    `toolUsePromptTokenCount`를 input token에 더한다). 이 예약은 최악값이 아니다(다음 항목).
-  - OpenAI code interpreter: 1 GB 컨테이너 20분 세션당 US$0.03(분 단위, 최소 5분).
-  - Anthropic: 컨테이너 시간당 US$0.05(최소 5분). web_search_20260209 이후 도구와
-    함께면 무료지만 이 앱은 web_search_20250305를 보낸다.
-  OpenAI·Anthropic은 토큰 밖 과금이라 가산 크레딧이 필요한데 그 값이 정해지지
-  않았으므로 `surcharge_unapproved`로 거절한다. 값이 정해지면 가산·예약·정산 연결이
-  웹 검색과 같은 모양으로 필요하다.
-- **코드 실행 turn은 예약보다 높게 정산될 수 있다 — 운영자 결정 대기**(독립 검토
-  r-20261127-082100-427572). 공식 문서(https://ai.google.dev/gemini-api/docs/code-execution,
-  지금은 https://aistudio.google.com/docs/code-execution 으로 옮겨짐, API reference
-  https://aistudio.google.com/api-reference/caching, 2026-11-27 확인)는 한 요청의 청구를
-  묶는 상한을 주지 않는다.
-  - 횟수: 문서가 적는 수는 오류 뒤 재생성 "최대 5회"뿐이고 전체 실행 횟수 상한은 없다.
-    `codeExecution` 도구에는 field가 없어 요청으로 실행 횟수를 묶을 수 없다.
-  - 크기: 실행 결과(`CodeExecutionResult.output`)의 크기 상한이 없고, `maxOutputTokens`가
-    코드·결과·중간 token을 묶는지 말하지 않는다. 실행마다 원래 프롬프트가 다시 과금되는지도
-    명시하지 않는다(위 예약은 그렇다고 가정한다).
-  - 세는 위치: 아래 상한은 stream을 읽는 쪽이 `tool-call`을 볼 때 센다. 공급자는 읽는 쪽을
-    기다리지 않으므로 SDK가 미리 읽거나 읽기가 느리면 세 번째를 보기 전에 더 많은 실행을
-    시작했을 수 있다(`tests/chatCodeExecution.test.mjs`가 이 사실을 고정한다).
-
-  128k 이하 turn은 크레딧이 고정이라 사용자 청구는 그대로이고, 초과분은 정산이 실제
-  사용량으로 provider 예산에 기록한다. 128k를 넘는 turn은 크레딧 정산이 예약에서 멈추므로
-  초과 원가를 회사가 부담한다. **스위치는 기본 꺼짐을 유지하고, 운영자가 다음 중 하나를
-  정하기 전에는 켜지 않는다:** (1) 이 기능에서 코드 실행을 뺀다. (2) 상한 없는 초과를
-  받아들이고 사후 정산과 별도 상한(예: 코드 실행 turn 전용 provider 예산)으로 막는다.
-- **상한**: 답 하나에 보이는 실행 2회. Gemini에는 실행 횟수를 묶는 요청 parameter가
-  없어서 이 프로세스가 할 수 있는 정지는 stream을 끊는 것뿐이다. 읽는 쪽이 세 번째
-  `tool-call`을 보면 attempt를 abort한다. 한 번에 30초(Gemini 자체 상한). 이것은 답에
-  보이는 실행 수와 계속 실행하는 turn을 끊는 시점의 상한이고, 청구 상한이 아니다(위 항목).
-  공급자가 읽는 쪽에서 멈춘다면 4 pass 안에 드는 수라서 5회를 2회로 줄였다. abort는 요청
-  연결을 닫는 것까지이고, 닫힌 뒤 공급자가 생성을 이어 가 청구하는지도 문서가 말하지 않는다.
-- **오류**: 이 stream은 ai@7의 `textStream`처럼 `text-delta` 외의 부분을 버린다.
-  공급자 오류는 그대로 `streamText`의 `onError`(`observeStreamError`)가 받는다.
-- **보이는 모양**: 실행한 코드와 출력이 답 안의 code fence로 들어가고, 웹 composer는
-  info string의 `tomverse-code-run`·`tomverse-code-output`을 보고 접힌 상태로
-  그린다(그 밖의 화면에서는 평범한 code block). 모델 자신의 글에서는 이 표시어를
-  지운다. 그래도 스위치가 꺼진 turn의 글은 바꾸지 않으므로 모델이 표시어를 쓰면
-  접힌 블록으로 보일 수 있다 — 서술로 "실행했다"고 쓰는 것과 같은 정도의 위조다.
-- **아직 하지 않은 것**: 차트 이미지는 Gemini가 inline file로 돌려주지만 답에
-  표시하지 않는다. 답 markdown의 이미지는 막혀 있고(모델이 정하는 URL), base64를
-  본문에 넣으면 다음 turn의 입력 token이 되므로, 생성 파일(artifact) 경로로 저장해야
-  한다. 첨부한 xlsx·csv를 sandbox에 파일로 올리지 않는다 — 모델은 이미 추출된 텍스트를
-  코드에 넣어 계산한다.
-- 스위치가 꺼져 있으면 도구 구성 객체가 그대로이고 텍스트 stream도 `textStream`
-  그대로다.
+더블클릭 한 번 거리에 있다. **어떤 소스코드도 실행·컴파일·동적 import 하지
+않는다.**
 
 ### 2.4 이 범위에서 뺀 것과 근거
 
@@ -206,6 +127,12 @@ import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실�
   파일의 확장자이기도 해서 거절 목록(§2.3)에 있다. 허용하면 PEM 키가 업로드되어
   저장된 뒤에야 package 검사가 거절하게 되므로, 바꾸는 일은 자격증명 보호에 대한
   결정이다.
+- **코드 실행(공급자가 호스팅하는 sandbox 도구)은 넣지 않았다**(운영자 결정 2026-11-27).
+  Gemini는 한 요청 안의 실행 횟수 상한을 주지 않고(오류 뒤 재생성 "최대 5회"만 적으며
+  `codeExecution` 도구에는 횟수를 묶을 field가 없다) 실행 결과의 크기 상한도 적지 않아서,
+  요청 전에 최악 비용을 예약한다는 계약(`docs/policy/credit-and-cost-limits.md`)을 지킬 수
+  없다. 2026-11-27에 https://ai.google.dev/gemini-api/docs/code-execution (지금은
+  https://aistudio.google.com/docs/code-execution) 에서 확인했다.
 
 #### 2.4.1 오디오 첨부 (운영자 지시 2026-11-27)
 

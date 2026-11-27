@@ -814,9 +814,7 @@ test("a long-context turn reserves every call of its tool loop, and only then", 
     assert.equal(ordinary.providerCallPasses, undefined);
     assert.equal(ordinary.usageCredits, createChatBudget("user", luna, 1_000).usageCredits);
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-    // Code execution's runs are passes of the same reservation
-    // (docs/policy/chat-attachment-formats.md 2.3.1).
-    assert.match(route, /longContextToolInputPasses: Math\.max\(\s*artifactToolPlan\?\.registerTool \? GENERATED_ARTIFACT_MAX_STEPS : 1,\s*appManagedSearchEnabled && webSearchCapability\.searchBackend\s*\? APP_MANAGED_SEARCH_MAX_STEPS\s*: 1,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1,\s*codeExecutionReservedPasses\(codeExecution\)\s*\)/);
+    assert.match(route, /longContextToolInputPasses: Math\.max\(\s*artifactToolPlan\?\.registerTool \? GENERATED_ARTIFACT_MAX_STEPS : 1,\s*appManagedSearchEnabled && webSearchCapability\.searchBackend\s*\? APP_MANAGED_SEARCH_MAX_STEPS\s*: 1,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1\s*\)/);
     assert.match(route, /budget\.longContextSettlement && !isResearchPreview\s*\? \(budget\.providerCallPasses \?\? 1\)\s*: Number\.POSITIVE_INFINITY/);
     assert.match(route, /stepCountIs\(\s*Math\.min\(\s*Math\.max\(\s*appManagedSearchTool \? APP_MANAGED_SEARCH_MAX_STEPS : 1,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1\s*\),\s*toolLoopStepCap\s*\)\s*\)/);
     assert.match(route, /: Math\.max\(\s*GENERATED_ARTIFACT_MAX_STEPS,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1\s*\),\s*toolLoopStepCap\s*\)\s*\)/);

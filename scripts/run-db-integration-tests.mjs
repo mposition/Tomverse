@@ -246,8 +246,6 @@ run(
     "tests/integration/chat-token-quota.db.test.ts",
     "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/chat-attempt-usage.db.test.ts",
-    // Code execution holds a provider pass per run the reader can see.
-    "tests/integration/chat-code-execution-reservation.db.test.ts",
     // Two requests for one recording pay for one transcription.
     "tests/integration/chat-audio-transcript-claim.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",

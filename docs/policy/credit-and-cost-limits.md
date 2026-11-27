@@ -897,17 +897,6 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
   provider-native 검색과 application-managed 검색 모두 같은 overhead를 씁니다.
   경로는 달라도 입력 쪽에서 하는 일은 같기 때문이고, 한쪽만 예약하면 모든
   Gemini 검색 turn이 예약보다 수천 토큰 위에서 정산됩니다.
-- **Gemini 코드 실행은 실행마다 프롬프트를 다시 input으로 과금합니다.** 그래서 청구될 수
-  있는 실행 하나를 provider pass 하나로 보고, 요청 전에 `toolInputPasses`와
-  `longContextToolInputPasses`에 4 pass를 넣습니다(요청 1 + 실행 3, 보이는 실행은 2회).
-  128k 이하 turn은 크레딧이 그대로이고 provider 예산 예약만 커지며, 장문 turn은 실제 비용
-  크레딧이라 크레딧 예약도 커집니다. 앱 도구 반복이 있는 turn에는 붙이지 않습니다.
-  **이 예약은 최악값이 아닙니다.** Google 문서에 한 요청의 실행 횟수·결과 크기 상한이 없고
-  요청으로 묶을 parameter도 없으며, 실행 수는 stream을 읽는 쪽에서 셉니다. 그래서 코드 실행
-  turn은 예약보다 높게 정산될 수 있고, 이것은 "요청 전에 최악 비용을 예약한다"는 이 문서의
-  계약 밖입니다. `CHAT_CODE_EXECUTION_ENABLED`는 기본 꺼짐이며 운영자 결정(기능 제외, 또는
-  초과를 받아들이고 별도 상한) 전에는 켜지 않습니다(`docs/policy/chat-attachment-formats.md`
-  §2.3.1).
 - **native web search의 질의당 비용은 요청이 상한을 강제할 때만 예약할 수
   있습니다.** 상한을 보내는 방법은 provider마다 다릅니다 — Anthropic은 tool의
   `maxUses`, OpenAI는 Responses 요청의 `max_tool_calls`

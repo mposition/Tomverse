@@ -43,12 +43,6 @@ import {
     transcribeAudioAttachment,
     transcribeAudioAttachmentOnce,
 } from "@/lib/chatAudioAttachment";
-import {
-    codeExecutionReservedPasses,
-    createCodeExecutionTextStream,
-    resolveCodeExecution,
-} from "@/lib/chatCodeExecutionCore";
-import { withCodeExecutionTool } from "@/lib/chatCodeExecutionTool";
 import { CHAT_AUDIO_ATTACHMENT_MAX_BYTES, inspectAudioAttachment } from "@/lib/chatAudioAttachmentCore";
 import { decodeAttachmentText } from "@/lib/chatAttachmentText";
 import { ChatArchiveError, expandChatArchive } from "@/lib/chatArchive";
@@ -5514,25 +5508,6 @@ async function handleChatPost(
         if (!nativeSearchReservation.ok) {
             throw webSearchCostRefusalError(nativeSearchReservation.reason);
         }
-        // Code execution, on the answering model's own provider when it has a
-        // tool this product attaches (docs/policy/chat-attachment-formats.md
-        // 2.3.1). Decided here, before the budget, because every run can bill
-        // the prompt again and the reservation holds those passes. Refused on
-        // a turn with an application tool loop: the same conditions that
-        // register those loops below.
-        const codeExecution = resolveCodeExecution({
-            env: process.env,
-            model: modelConfig,
-            accessKind: access.kind,
-            // A deep-research model has already answered by this point.
-            researchTurn: isResearchPreview,
-            applicationToolLoop: Boolean(
-                mcpConnector ||
-                    projectTools ||
-                    artifactToolPlan?.registerTool ||
-                    (appManagedSearchEnabled && webSearchCapability.searchBackend)
-            ),
-        });
         const budget = isResearchPreview
             ? createResearchPreviewBudget({
                   accessKind: access.kind,
@@ -5589,11 +5564,7 @@ async function handleChatPost(
                               artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
                               appManagedSearchEnabled && webSearchCapability.searchBackend ? APP_MANAGED_SEARCH_MAX_STEPS : 1
                           )
-                        : 1,
-                    // Every code run that can be billed re-reads the prompt,
-                    // on an ordinary turn and a long-context one alike; the
-                    // stream stops the runs at what this holds.
-                    codeExecutionReservedPasses(codeExecution)
+                        : 1
                 ),
                 // Reserved only above the flat limit; the loop is then stopped
                 // at what was reserved (`toolLoopStepCap` below).
@@ -5602,8 +5573,7 @@ async function handleChatPost(
                     appManagedSearchEnabled && webSearchCapability.searchBackend
                         ? APP_MANAGED_SEARCH_MAX_STEPS
                         : 1,
-                    projectTools ? PROJECT_TOOL_MAX_STEPS : 1,
-                    codeExecutionReservedPasses(codeExecution)
+                    projectTools ? PROJECT_TOOL_MAX_STEPS : 1
                 ),
                   }
               );
@@ -6363,9 +6333,6 @@ async function handleChatPost(
         // authorized are the same number by construction. Merged into
         // `providerOptions.openai` beside `reasoningEffort` rather than over
         // it -- see `getModelGenerationSettings`.
-        // Code execution, decided before the budget (see there). Refused turns
-        // keep the exact tool configuration above.
-        combinedToolConfig = withCodeExecutionTool(combinedToolConfig, codeExecution) as typeof combinedToolConfig;
         const generationSettings = getModelGenerationSettings(modelConfig, {
             openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
                 capability: webSearchCapability,
@@ -6797,12 +6764,7 @@ async function handleChatPost(
                           result.usage,
                           result.steps
                       )
-                    : codeExecution.enabled
-                      ? createCodeExecutionTextStream(result.fullStream, {
-                            maxCalls: codeExecution.maxCalls,
-                            onCeiling: () => initialAttemptAbortController.abort(),
-                        })
-                      : result.textStream
+                    : result.textStream
                 ).getReader(),
                 injectedFault,
                 0

@@ -504,8 +504,6 @@ export const de = {
         attachmentAudioTooLong: "Aufnahmen dürfen höchstens 10 Minuten lang sein. Kürzen Sie die Datei oder teilen Sie sie in kürzere Teile auf.",
         audioTranscriptionUnavailable: "Die Aufnahme konnte gerade nicht transkribiert werden. Bitte versuchen Sie es gleich noch einmal.",
         audioTranscriptionLimitReached: "Das heutige Kontingent für Audio-Transkription ist aufgebraucht. Versuchen Sie es morgen erneut oder hängen Sie eine kürzere Aufnahme an.",
-        codeExecutionCodeSummary: "Ausgeführter Code",
-        codeExecutionOutputSummary: "Ausgabe",
         attachFormatsOverflow: "+{count} weitere",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "Gäste können eine lokale Datei anhängen",

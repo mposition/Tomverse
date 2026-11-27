@@ -496,8 +496,6 @@ export const ko = {
         attachmentAudioTooLong: "녹음 파일은 10분까지 첨부할 수 있습니다. 파일을 잘라 더 짧게 나눠 주세요.",
         audioTranscriptionUnavailable: "지금은 녹음을 텍스트로 옮길 수 없습니다. 잠시 후 다시 시도해 주세요.",
         audioTranscriptionLimitReached: "오늘 사용할 수 있는 녹음 변환 시간을 모두 사용했습니다. 내일 다시 시도하거나 더 짧은 녹음을 첨부해 주세요.",
-        codeExecutionCodeSummary: "실행한 코드",
-        codeExecutionOutputSummary: "실행 결과",
         attachFormatsOverflow: "외 {count}개",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "게스트는 로컬 파일 1개를 첨부할 수 있습니다",

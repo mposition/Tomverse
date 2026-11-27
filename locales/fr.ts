@@ -515,8 +515,6 @@ export const fr = {
         attachmentAudioTooLong: "Les enregistrements peuvent durer jusqu'à 10 minutes. Raccourcissez le fichier ou divisez-le en parties plus courtes.",
         audioTranscriptionUnavailable: "L'enregistrement n'a pas pu être transcrit pour le moment. Réessayez dans quelques instants.",
         audioTranscriptionLimitReached: "Vous avez utilisé le temps de transcription audio disponible aujourd'hui. Réessayez demain ou joignez un enregistrement plus court.",
-        codeExecutionCodeSummary: "Code exécuté",
-        codeExecutionOutputSummary: "Résultat de l'exécution",
         attachFormatsOverflow: "+{count} autres",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "Les invités peuvent joindre un fichier local",
