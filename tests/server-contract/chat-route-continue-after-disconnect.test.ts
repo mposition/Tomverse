@@ -169,6 +169,8 @@ type Row = {
   updatedAt: Date;
 };
 let row: Row | null = null;
+/** Errors the next checkpoint writes throw, in order. */
+let checkpointFailures: unknown[] = [];
 const terminals: Array<{ status: string; writer: "owner" }> = [];
 const isTerminal = (status: string) => ["completed", "failed", "cancelled"].includes(status);
 /** What POST .../attempts/[id] {action: "stop"} writes. */
@@ -215,6 +217,8 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     },
     checkpointChatResponseAttempt: async (input: { partialContent: string; expectedRevision: number }) => {
       assert.ok(row);
+      const failure = checkpointFailures.shift();
+      if (failure) throw failure;
       if (isTerminal(row.status)) throw new CasError("terminal");
       if (row.checkpointRevision !== input.expectedRevision) throw new CasError("revision_conflict");
       row = { ...row, status: "streaming", partialContent: input.partialContent, checkpointRevision: row.checkpointRevision + 1 };
@@ -375,6 +379,22 @@ mock.module(mod("lib/chatSecurity.ts"), {
 });
 mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: { getActiveAiModel: () => ({ modelId: MODEL_ID }) },
+});
+/** Provider and model health, as the route reports it. */
+const health = { providerFailures: [] as string[], modelFailures: [] as string[] };
+const realProviderMonitoring = require(resolve(ROOT, "lib/providerMonitoring.ts")) as Record<string, unknown>;
+mock.module(mod("lib/providerMonitoring.ts"), {
+  namedExports: {
+    ...realProviderMonitoring,
+    recordProviderFailure: async (_provider: string, diagnosticCode: string) => {
+      health.providerFailures.push(diagnosticCode);
+    },
+    recordModelFailure: async (_modelId: string, _provider: string, diagnosticCode: string) => {
+      health.modelFailures.push(diagnosticCode);
+    },
+    recordProviderSuccess: async () => undefined,
+    recordModelSuccess: async () => undefined,
+  },
 });
 globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch;
 
@@ -597,5 +617,63 @@ test("a durable turn whose Message write keeps failing ends failed, still settle
     assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
   } finally {
     world.createFailures = [];
+  }
+});
+
+/*
+  S4 (b). What fails after the provider's stream reported done -- the final
+  checkpoint's CAS, a database error in the Message write -- is this
+  application's own completion handling. It was filed as a provider and a
+  model failure because the route always classified with `phase: "read"`.
+*/
+test("a Message write that keeps failing is not filed as a provider or model failure", async () => {
+  health.providerFailures = [];
+  health.modelFailures = [];
+  world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
+    assert.deepEqual(health.providerFailures, []);
+    assert.deepEqual(health.modelFailures, []);
+  } finally {
+    world.createFailures = [];
+  }
+});
+
+test("a refused final checkpoint that is not the user's stop is not a provider failure", async () => {
+  health.providerFailures = [];
+  health.modelFailures = [];
+  const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+  // Another writer moved the row on: the lease is no longer this request's.
+  assert.ok(row);
+  row = { ...row, checkpointRevision: row.checkpointRevision + 5 };
+  releaseRest();
+  await readToEnd();
+  await until("the settlement", () => ledger.settlements.length > 0);
+  assert.equal(ledger.settlements[0].outcome, "failed");
+  assert.deepEqual(world.messages, []);
+  assert.deepEqual(health.providerFailures, []);
+  assert.deepEqual(health.modelFailures, []);
+});
+
+test("a transient checkpoint failure does not fail a turn the user read to the end", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  health.providerFailures = [];
+  checkpointFailures = [retryableWriteError()];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    await readToEnd();
+    await until("the saved answer", () => world.messages.length > 0);
+    assert.equal(world.messages[0].content, "Partial. The end.");
+    assert.deepEqual(terminals.map((t) => t.status), ["completed"]);
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
+    assert.equal(row?.partialContent, "Partial. The end.");
+    assert.deepEqual(health.providerFailures, []);
+  } finally {
+    checkpointFailures = [];
   }
 });

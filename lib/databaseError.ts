@@ -90,6 +90,15 @@ export const isRetryableDatabaseError = (error: unknown) => {
   );
 };
 
+/**
+ * Whether an error was raised by Prisma or its driver adapter, whatever its
+ * code: a fact about this application's database, never about a provider.
+ */
+export const isDatabaseError = (error: unknown) => {
+  const name = databaseErrorMetadata(error).errorName;
+  return name.startsWith("PrismaClient") || name === "DriverAdapterError";
+};
+
 /** Backoff before each re-run of a write that failed retryably: two more tries. */
 export const DATABASE_WRITE_RETRY_DELAYS_MS: readonly number[] = [150, 500];
 /** The pause before asking whether the last failed try committed after all. */

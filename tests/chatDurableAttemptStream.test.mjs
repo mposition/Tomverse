@@ -217,3 +217,100 @@ test("the chat route renews the attempt lease from the keepalive tick, before an
   assert.match(tick, /state: "provider_active"/);
   assert.match(tick, /!partsArrived \|\|/);
 });
+
+// S4: one failed checkpoint write used to be latched as the writer's failure,
+// so the stream ran to the end and the final flush threw -- AI_STREAM_FAILED
+// after the user had read the whole answer, and nothing saved.
+const { ChatAttemptCasError } = await import("../lib/chatResponseAttemptPersistence.ts");
+const transient = () =>
+  Object.assign(new Error("connection closed"), { name: "PrismaClientKnownRequestError", code: "P1017" });
+const big = (character) => character.repeat(3_000);
+
+test("a transient checkpoint failure is not latched: the final flush persists the answer", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const calls = [];
+  let failures = 1;
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (failures-- > 0) throw transient();
+    return attemptRow(input, calls.length);
+  });
+  writer.observe(big("a"));
+  await settle();
+  assert.equal(calls.length, 1, "the first write was attempted and failed");
+  const final = await writer.flush(big("a") + "end");
+  assert.equal(final.partialContent, big("a") + "end");
+  assert.equal(calls.at(-1).partialContent, big("a") + "end");
+});
+
+test("flush writes the final content itself when the cycle it started fails transiently", async (t) => {
+  const warnings = [];
+  t.mock.method(console, "warn", (line) => warnings.push(JSON.parse(line)));
+  const calls = [];
+  let failures = 2;
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (failures-- > 0) throw transient();
+    return attemptRow(input, calls.length);
+  });
+  writer.observe(big("b"));
+  await settle();
+  const final = await writer.flush(big("b") + "!");
+  assert.equal(final.partialContent, big("b") + "!");
+  assert.equal(calls.length, 3);
+  assert.deepEqual(warnings.map((warning) => [warning.event, warning.code]), [
+    ["chat_attempt_checkpoint_retry", "P1017"],
+    ["chat_attempt_checkpoint_retry", "P1017"],
+  ]);
+  assert.doesNotMatch(JSON.stringify(warnings), /connection closed/);
+});
+
+test("a persistent outage still fails the turn at the terminal flush", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const calls = [];
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    throw transient();
+  });
+  writer.observe(big("c"));
+  await settle();
+  await assert.rejects(writer.flush(big("c")), (error) => error.code === "P1017");
+});
+
+test("a CAS refusal (lost lease, the user's stop) is still latched and thrown by flush", async () => {
+  const calls = [];
+  const refusal = new ChatAttemptCasError("revision_conflict");
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    throw refusal;
+  });
+  writer.observe(big("d"));
+  await settle();
+  writer.observe(big("d") + "more");
+  await settle();
+  assert.equal(calls.length, 1, "a refused writer never writes again");
+  await assert.rejects(writer.flush(big("d") + "more"), (error) => error === refusal);
+});
+
+test("after a transient failure, chunks wait out the interval instead of a write each", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 4_000_000 });
+  const calls = [];
+  let failures = 1;
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (failures-- > 0) throw transient();
+    return attemptRow(input, calls.length);
+  });
+  writer.observe(big("e"));
+  await settle();
+  assert.equal(calls.length, 1);
+  writer.observe(big("e") + big("f"));
+  writer.observe(big("e") + big("f") + big("g"));
+  await settle();
+  assert.equal(calls.length, 1, "no write per chunk while backing off");
+  t.mock.timers.tick(1_000);
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].partialContent, big("e") + big("f") + big("g"));
+});

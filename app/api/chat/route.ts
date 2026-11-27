@@ -527,6 +527,7 @@ import {
 } from "@/lib/chatResponseAttemptPersistence";
 import {
     databaseErrorMetadata,
+    isDatabaseError,
     runRetryableDatabaseWrite,
 } from "@/lib/databaseError";
 import {
@@ -6736,6 +6737,12 @@ async function handleChatPost(
          * attempt first for a non-`completed` settlement.
          */
         let attemptTerminalWithMessage = false;
+        /**
+         * The provider's text stream reported done. From here every failure
+         * is the completion handling's -- checkpoint, settlement, Message
+         * write -- and the catch below classifies it as such.
+         */
+        let providerStreamFinished = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
         /**
          * Set once the client's connection is gone and the turn carries on
@@ -7638,12 +7645,13 @@ async function handleChatPost(
         const attemptFallbackWithinTransition = async (
             controller: ReadableStreamDefaultController<string>,
             error: unknown,
-            nextAttemptAbortController: AbortController
+            nextAttemptAbortController: AbortController,
+            phase: "read" | "completion"
         ): Promise<boolean> => {
             if (isResearchPreview) return false;
             const classified = classifyStreamFailure({
                 error,
-                phase: "read",
+                phase,
                 visibleTokenEmitted: generatedText.length > 0,
                 downstreamOpen: streamState === "open",
             });
@@ -8153,7 +8161,13 @@ async function handleChatPost(
         };
         const attemptFallback = async (
             controller: ReadableStreamDefaultController<string>,
-            error: unknown
+            error: unknown,
+            /**
+             * `completion` once the provider's stream has finished: whatever
+             * failed after that is Tomverse's own handling, never a reason to
+             * try another model (lib/routingStreamFailure.ts).
+             */
+            phase: "read" | "completion"
         ): Promise<boolean> => {
             const nextAttemptAbortController = new AbortController();
             let finishTransition!: () => void;
@@ -8166,7 +8180,8 @@ async function handleChatPost(
                 return await attemptFallbackWithinTransition(
                     controller,
                     error,
-                    nextAttemptAbortController
+                    nextAttemptAbortController,
+                    phase
                 );
             } finally {
                 if (
@@ -8427,6 +8442,7 @@ async function handleChatPost(
                     if (done) {
                         // The provider finished. Whatever it produced, it is
                         // no longer being waited for.
+                        providerStreamFinished = true;
                         stopFirstTokenWatch();
                         const completionResults = await Promise.allSettled([
                             dispatched.stream.response,
@@ -9397,10 +9413,22 @@ async function handleChatPost(
                       as `AI_STREAM_FAILED` it would count against the provider
                       -- the same misattribution the outer catch was fixed for,
                       one layer down. The typed error is what tells them apart.
+
+                      The same goes for the completion handling that runs
+                      after the provider's stream reported done: a refused
+                      attempt CAS or a database error in the final
+                      checkpoint, the settlement or the Message write is this
+                      application's, and was being filed as a provider and a
+                      model failure (always `phase: "read"`).
                     */
+                    const completionFailureIsLocal =
+                        providerStreamFinished &&
+                        (error instanceof ChatAttemptCasError ||
+                            isDatabaseError(error));
                     const streamFailureIsLocal =
                         isStorageError(error) ||
                         isChatLocalFailure(error) ||
+                        completionFailureIsLocal ||
                         error instanceof ResearchPreviewBudgetExhaustedError ||
                         error instanceof ResearchPreviewUsageUnknownError ||
                         error instanceof ResearchPreviewMissingReportError ||
@@ -9436,7 +9464,9 @@ async function handleChatPost(
                                 failureLayer: isStorageError(error)
                                     ? "storage"
                                     : "application",
-                                phase: "stream",
+                                phase: completionFailureIsLocal
+                                    ? "persistence"
+                                    : "stream",
                                 storageStatus: storageErrorStatus(error),
                             }
                         );
@@ -9476,7 +9506,13 @@ async function handleChatPost(
                     // whether or not another model rescued the answer -- the
                     // fallback is a recovery for the user, not an amnesty for
                     // the provider. Off by default; see lib/autoFallbackGate.
-                    if (await attemptFallback(controller, error)) {
+                    if (
+                        await attemptFallback(
+                            controller,
+                            error,
+                            providerStreamFinished ? "completion" : "read"
+                        )
+                    ) {
                         // The response is now being served by another model.
                         // The next pull() reads from its stream.
                         return;

@@ -195,6 +195,18 @@ first. A small final chunk therefore receives a scheduled checkpoint even when
 no later chunk arrives; terminal flush remains the final owner/revision/database
 clock barrier.
 
+A CAS refusal of a checkpoint (lost lease, another owner, a moved revision, the
+user's stop) ends the writer at once and is thrown by the terminal flush, as
+before. A transient write failure (a dropped connection, a pool timeout) is no
+longer latched: it is logged as `chat_attempt_checkpoint_retry`, the content
+stays pending and is written again one interval later, and the terminal flush
+writes the final prefix itself if no earlier cycle did. Only a failure of that
+final write fails the turn. Errors raised after the provider's stream reported
+done -- a refused attempt CAS or a database error in the final checkpoint, the
+settlement or the Message write -- are this application's: they are classified
+with the stream-failure `completion` phase (never a fallback) and are not
+recorded as provider or model failures.
+
 Credit settlement follows the provider outcome and is separate from Message
 and attempt-state persistence. A checkpoint or terminal CAS failure is logged
 and later reconciled through lease expiry, but it cannot suppress the provider

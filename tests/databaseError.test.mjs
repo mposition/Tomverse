@@ -5,6 +5,7 @@ import {
   databaseErrorMetadata,
   hasDatabaseSqlstate,
   isCheckViolationDatabaseError,
+  isDatabaseError,
   isRetryableDatabaseError,
   isUniqueConstraintDatabaseError,
   runRetryableDatabaseWrite,
@@ -222,4 +223,13 @@ test("a last try that turns out to have committed is reported as committed", asy
     sleep: noSleep,
   });
   assert.equal(outcome, "already_committed");
+});
+
+test("isDatabaseError names Prisma and driver-adapter errors, never a provider error", () => {
+  assert.equal(isDatabaseError(writeConflict()), true);
+  assert.equal(isDatabaseError(unmapped("23514")), true);
+  assert.equal(isDatabaseError({ name: "DriverAdapterError", cause: { kind: "SocketTimeout" } }), true);
+  assert.equal(isDatabaseError(Object.assign(new Error("overloaded"), { name: "AI_APICallError", statusCode: 529 })), false);
+  assert.equal(isDatabaseError(new Error("plain")), false);
+  assert.equal(isDatabaseError(null), false);
 });
