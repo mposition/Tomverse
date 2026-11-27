@@ -298,6 +298,8 @@ export const DESKTOP_APP_ORIGIN = "tomverse://desktop";
 export const DESKTOP_CHAT_CREATE = "/api/products/chat/conversations";
 export const DESKTOP_CHAT_TURN = "/api/chat";
 export const DESKTOP_DEEP_RESEARCH_STATUS = "/api/chat/deep-research/status";
+export const DESKTOP_VOICE_CONVERSATION = "/api/chat/voice";
+export const DESKTOP_VOICE_TRANSCRIPTION = "/api/chat/voice-transcription";
 export const DESKTOP_CHAT_CONTEXT = "/api/chat/context";
 export const DESKTOP_REVIEW_CREATE = "/api/products/review/conversations";
 export const DESKTOP_REVIEW_ROUTING = "/api/review/route";
@@ -342,6 +344,15 @@ export function desktopChatWriteEnabled() {
 
 export function desktopReviewWriteEnabled() {
   return process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED === "true";
+}
+
+/**
+ * Desktop's use of the two voice routes: dictation, and the Chat voice conversation. Enrollment only. Each route
+ * keeps its own switch, budget and credit code (feature.voiceInputEnabled; VOICE_CONVERSATION_ENABLED and its key),
+ * and the conversation route still refuses a Review or a locked conversation.
+ */
+export function desktopVoiceEnabled() {
+  return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_VOICE_ENABLED === "true";
 }
 
 export function desktopReviewAnalysisEnabled() {
@@ -402,6 +413,7 @@ export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
   if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && (desktopChatWriteEnabled() || desktopReviewWriteEnabled());
+  if (path === DESKTOP_VOICE_CONVERSATION || path === DESKTOP_VOICE_TRANSCRIPTION) return method === "POST" && desktopVoiceEnabled();
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
   if (desktopChatWriteEnabled() && desktopChatWriteRoute(path, method)) return true;
   if (!desktopReviewWriteEnabled()) return false;

@@ -9,7 +9,6 @@ import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
 import { launchNativeFixture } from "./launch-native-fixture";
 
 const authOrigin = process.env.DESKTOP_E2E_AUTH_ORIGIN;
-const deviceFixture = process.env.TOMVERSE_DESKTOP_DEVICE_FIXTURE === "true";
 test("Code scopes MCP to the selected task and aborts a dispatched read on Stop", { timeout: 60_000, skip: !authOrigin }, async () => {
   const folder = await mkdtemp(join(tmpdir(), "tomverse-code-mcp-"));
   const root = join(folder, "project");
@@ -29,7 +28,7 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
     await Promise.all([mkdir(root), mkdir(profile)]);
     await writeFile(join(profile, "language.txt"), "en");
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
-    app = await launchNativeFixture(descriptor, 20_000, deviceFixture ? ["--use-fake-device-for-media-stream"] : []);
+    app = await launchNativeFixture(descriptor, 20_000, ["--use-fake-device-for-media-stream"]);
     await app.evaluate(({ shell }, origin) => {
       const host = globalThis as typeof globalThis & { scopedCalls?: string[]; clips?: number; reviewSends?: number };
       const realFetch = globalThis.fetch;
@@ -51,7 +50,7 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
           ok: true, account: { id: "mcp-fixture", name: "MCP fixture", email: null },
         });
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
-          autoSelection: { offered: false }, desktopPlugins: true, desktopChatPlugin: true, desktopCodeMcp: true,
+          autoSelection: { offered: false }, desktopPlugins: true, desktopChatPlugin: true, desktopCodeMcp: true, desktopVoiceInput: true,
           desktopReview: { easy: true, modelLimit: 3, plan: "Max" },
         });
         if (target.pathname === "/api/chat/voice-transcription") {
@@ -155,7 +154,8 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
       const continued = await window.desktop.followUp(task.id, "Reuse previous plugin output.");
       return { resumed, continued, resumable: Boolean(task.canResume), clarification: Boolean(task.canAnswerClarification) };
     }), { resumed: false, continued: false, resumable: false, clarification: false });
-    if (deviceFixture) {
+    // Dictation is offered by the server's capability (the device fixture is no longer needed for it).
+    {
       const requests = gateway.completions.length;
       const record = page.getByRole("button", { name: "Record voice input", exact: true });
       const useRecording = page.getByRole("button", { name: "Use recording as text", exact: true });
@@ -169,6 +169,17 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
       await expect(codeDraft).toHaveValue("Edit before sending Fixture dictation.");
       await codeDraft.fill("Editable Code draft");
       assert.equal(gateway.completions.length, requests);
+      // A spoken instruction: with an empty draft it takes the Send button's place, and what was said is sent as typed words are.
+      await codeDraft.fill("");
+      await expect(page.getByRole("button", { name: "Send Code request", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Speak an instruction", exact: true }).click();
+      await expect(page.getByRole("status").filter({ hasText: /^Recording [1-9][0-9]*s$/ })).toBeVisible();
+      await page.getByRole("button", { name: "Send what I said", exact: true }).click();
+      await expect.poll(() => gateway.completions.length).toBeGreaterThan(requests);
+      assert.match(JSON.stringify(gateway.completions.at(-1)), /Fixture dictation\./);
+      await expect(codeDraft).toHaveValue("");
+      await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).busy).toBe(false);
+      await codeDraft.fill("Editable Code draft");
       await rail.getByRole("button", { name: "Review", exact: true }).click();
       const reviewDraft = page.getByRole("textbox", { name: "Review question" });
       await reviewDraft.fill("Compare the replies");
@@ -181,7 +192,7 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
       assert.deepEqual(await app.evaluate(() => {
         const host = globalThis as typeof globalThis & { clips?: number; reviewSends?: number };
         return [host.clips ?? 0, host.reviewSends ?? 0];
-      }), [2, 0]);
+      }), [3, 0]);
     }
   } finally {
     await app?.close();

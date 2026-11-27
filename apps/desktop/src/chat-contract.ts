@@ -190,6 +190,8 @@ export type ChatTurnResult = {
   contextChanged?: boolean;
   /** The server judged this saved question an image request; Desktop asks before anything is charged. */
   imageOffer?: ChatImageOffer;
+  /** The saved question's id: the voice conversation names it when it asks the server to read the answer aloud. */
+  sourceUserMessageId?: string;
 };
 export type ReviewCapability = z.infer<typeof reviewCapability>;
 export type ReviewTurnInput = z.infer<typeof reviewTurnInput>;

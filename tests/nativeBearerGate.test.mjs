@@ -13,6 +13,7 @@ import {
   desktopPluginsEnabled,
   desktopReadApiRoute,
   desktopRemoteControlEnabled,
+  desktopVoiceEnabled,
   desktopWriteApiRoute,
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
@@ -83,6 +84,40 @@ test("Desktop prepares a turn's context with Chat or Review writes on, and with 
     assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), true);
     delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
     assert.equal(desktopWriteApiRoute("/api/chat/context", "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop reaches the two voice routes only behind its own switch, on top of Desktop sign-in and Chat writes", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED", "TOMVERSE_DESKTOP_REVIEW_ENABLED", "TOMVERSE_DESKTOP_VOICE_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const routes = ["/api/chat/voice", "/api/chat/voice-transcription"];
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const key of switches.slice(0, 3)) process.env[key] = "true";
+    assert.equal(desktopVoiceEnabled(), false);
+    for (const path of routes) assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    process.env.TOMVERSE_DESKTOP_VOICE_ENABLED = "1";
+    assert.equal(desktopVoiceEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_VOICE_ENABLED = "true";
+    assert.equal(desktopVoiceEnabled(), true);
+    for (const path of routes) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), true, path);
+      for (const method of ["GET", "PUT", "PATCH", "DELETE"]) assert.equal(desktopWriteApiRoute(path, method), false, method + " " + path);
+      assert.equal(desktopReadApiRoute(path, "GET"), false, path);
+      assert.equal(desktopWriteApiRoute(path + "/extra", "POST"), false);
+    }
+    // Neither route is opened by Review writes alone, and neither without Desktop sign-in.
+    delete process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED;
+    assert.equal(desktopVoiceEnabled(), false);
+    for (const path of routes) assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+    process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "true";
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    for (const path of routes) assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];

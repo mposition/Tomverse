@@ -6,6 +6,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { readGithubPull } from "./github-pr-read";
 import { githubPullUrl, pullEvidence, taskPullCommand } from "../github-pr-contract";
 import { dictationClip } from "../dictation-contract";
+import { voiceRequestInput } from "../voice-contract";
+import { createVoiceHost } from "./voice-host";
 import { createCodeBrowserView } from "./code-browser-view";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
 import { createDesktopComputer } from "./computer-wiring";
@@ -508,9 +510,13 @@ function broadcast() {
   state.remoteEnabled = remoteHost.enabled();
   // A task that was deleted or left behind (another project or account, or a session-only task) takes its terminals with it.
   void terminalHost.retainTasks(new Set([...historyStorage.keys(), ...(state.task?.id ? [state.task.id] : [])]));
-  state.deviceFixtureAvailable = accountPermissionsFixture();
+  state.dictationAvailable = dictationAllowed();
   state.chatLocationAvailable = chatLocationAllowed();
-  if (!state.deviceFixtureAvailable) stopDictation(true);
+  if (!state.dictationAvailable) stopDictation(true);
+  // The account is gone, or the server answered and no longer offers the voice conversation: the window closes its
+  // session. A capability read that failed is not an answer and ends nothing.
+  if (state.account.stage !== "connected") voice.stop(true);
+  else if (state.capabilities && !state.capabilities.voiceConversation) voice.stop(false);
   refreshCodeFallbackSettings();
   state.draftNamespace = workspaceNamespace();
   state.handoff = currentHandoff();
@@ -2244,6 +2250,7 @@ function clearAccountWorkspace() {
   attachmentTransfer?.controller.abort();
   attachmentReceipts.clear();
   codeReferences.clear();
+  voice.stop(true);
   chatSession.abort();
   workspaceHandoff = null;
   chatSession = new AbortController();
@@ -3086,6 +3093,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           : answer || partial ? "partial" : contextChanged ? "failed"
             : streamStarted ? "unconfirmed" : failed ? "failed" : "unconfirmed";
       return { conversation, status, partial: answer ? "" : partial, modelId, applied, savedQuestion: Boolean(sourceId),
+        ...(sourceId ? { sourceUserMessageId: sourceId } : {}),
         ...(imageOffer && !answer ? { imageOffer } : {}),
         ...(contextChanged && status === "failed" ? { contextChanged: true } : {}) };
     } finally {
@@ -3603,6 +3611,29 @@ function accountPermissionsFixture() {
     Boolean(browserSession) && !suspended && !signingOut && !closing;
 }
 
+/** Dictation is offered where the server offers it to this account; the device fixture keeps it for tests. */
+function dictationAllowed() {
+  return accountPermissionsFixture() || (Boolean(browserSession) && state.account.stage === "connected" &&
+    state.capabilities?.voiceInput === true && !suspended && !signingOut && !closing);
+}
+
+const voice = createVoiceHost({
+  allowed: () => Boolean(browserSession) && state.account.stage === "connected" && Boolean(state.capabilities?.voiceConversation) &&
+    !suspended && !signingOut && !closing,
+  send: (body, signal) => withChatAccount((api) => api.voice(body, signal)),
+  emit: (event) => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:voice-stream", event);
+  },
+  notifyStop: () => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("desktop:voice-stop");
+  },
+});
+
+function mayOpenVoiceMicrophone(contents: Electron.WebContents | null) {
+  return Boolean(voice.mayOpenMicrophone() && mainWindow && !mainWindow.isDestroyed() &&
+    contents === mainWindow.webContents && contents.getURL() === shellUrl);
+}
+
 let geolocationGrant: { session: AbortSignal; expiry: number } | undefined;
 
 /** Chat may read the device position for a signed-in account. It is not a fixture-only device permission like dictation. */
@@ -3627,7 +3658,7 @@ function stopDictation(notify = false) {
 }
 
 function mayRequestDictation(contents: Electron.WebContents | null) {
-  return Boolean(accountPermissionsFixture() && dictation && !dictation.session.aborted && !dictation.sent &&
+  return Boolean(dictationAllowed() && dictation && !dictation.session.aborted && !dictation.sent &&
     !dictation.mediaGranted && Date.now() < dictation.expiry && mainWindow && !mainWindow.isDestroyed() &&
     contents === mainWindow.webContents && contents.getURL() === shellUrl);
 }
@@ -3672,8 +3703,11 @@ function registerIpc() {
     geolocationGrant = { session: chatSession.signal, expiry: Date.now() + 12_000 };
     return true;
   });
+  main("desktop:voice-arm", () => voice.arm());
+  main("desktop:voice-request", (value) => voice.request(voiceRequestInput.parse(value)));
+  main("desktop:voice-abort", (value) => voice.abort(z.uuid().parse(value)));
   main("desktop:dictation-arm", () => {
-    if (!accountPermissionsFixture()) return null;
+    if (!dictationAllowed()) return null;
     stopDictation();
     const id = randomUUID();
     dictation = { id, session: chatSession.signal, expiry: Date.now() + 15_000, mediaGranted: false, sent: false,
@@ -3684,7 +3718,7 @@ function registerIpc() {
   main("desktop:dictation-transcribe", async (value) => {
     const input = dictationClip.parse(value);
     const active = dictation;
-    if (!accountPermissionsFixture() || !active || active.id !== input.id || active.session.aborted || active.sent || !active.mediaGranted) {
+    if (!dictationAllowed() || !active || active.id !== input.id || active.session.aborted || active.sent || !active.mediaGranted) {
       return { status: 403, code: "VOICE_INPUT_DISABLED" };
     }
     active.sent = true;
@@ -4262,6 +4296,8 @@ function createMainWindow() {
     catch { /* A preference write must not prevent closing the app. */ }
   });
   window.once("closed", () => {
+    // The window that held the microphone is gone: a session must not stay open (and billed) behind it.
+    voice.stop(true);
     screen.off("display-removed", keepWindowOnDisplay);
     screen.off("display-metrics-changed", keepWindowOnDisplay);
     if (mainWindow === window) {
@@ -4393,7 +4429,14 @@ else {
         return;
       }
       const audioOnly = "mediaTypes" in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === "audio";
-      const allow = permission === "media" && details.isMainFrame && audioOnly && mayRequestDictation(contents);
+      const microphone = permission === "media" && details.isMainFrame && audioOnly;
+      // One request is one grant: the voice conversation's Start, or one dictation.
+      if (microphone && mayOpenVoiceMicrophone(contents)) {
+        voice.microphoneOpened();
+        callback(true);
+        return;
+      }
+      const allow = microphone && mayRequestDictation(contents);
       if (allow && dictation) dictation.mediaGranted = true;
       callback(allow);
     });
@@ -4409,6 +4452,7 @@ else {
       suspended = true;
       geolocationGrant = undefined;
       stopDictation(true);
+      voice.stop(false);
       stop();
       parallel.lanes.stopAll();
     });
