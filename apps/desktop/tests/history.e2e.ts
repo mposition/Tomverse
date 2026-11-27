@@ -157,12 +157,14 @@ test("Code deletes one confirmed local journal and keeps unsaved task evidence i
     assert.deepEqual(await readFile(join(otherDir, "session.json")), otherCheckpoint);
 
     const sessionNames = (await readdir(join(home, "sessions"))).sort();
-    await composer().fill("Draft before opting out");
-    assert.ok(await page.evaluate(() => Object.values(localStorage).includes("Draft before opting out")));
-    await page.getByRole("checkbox", { name: "Save to local history" }).uncheck();
-    await composer().fill("Session-only prompt");
-    assert.equal(await page.evaluate(() => Object.values(localStorage).some((value) => /Draft before opting out|Session-only prompt/.test(value))), false);
-    const [privateApproval] = await Promise.all([app.waitForEvent("window", { timeout: 10_000 }), send().click()]);
+    // The composer always saves: a draft is kept, and there is no switch to turn history off.
+    await composer().fill("Draft kept on this computer");
+    assert.ok(await page.evaluate(() => Object.values(localStorage).includes("Draft kept on this computer")));
+    await expect(page.getByRole("checkbox", { name: "Save to local history" })).toHaveCount(0);
+    await composer().fill("");
+    // The contract still carries an unsaved run (a plugin run is one). Nothing in the composer starts it, so this one is started directly.
+    const [privateApproval] = await Promise.all([app.waitForEvent("window", { timeout: 10_000 }), page.evaluate(() => window.desktop.start({
+      prompt: "Session-only prompt", model: "fake-coder", mode: "agent", effort: "default", executionMode: "tomverse_api", saveHistory: false }))]);
     const [privateCommand] = await Promise.all([app.waitForEvent("window", { timeout: 10_000 }), approve(privateApproval)]);
     await approve(privateCommand);
     await expect(page.getByText("Session only", { exact: true })).toBeVisible();
@@ -192,7 +194,7 @@ test("Code deletes one confirmed local journal and keeps unsaved task evidence i
     await expect(page.getByRole("button", { name: "Session-only prompt", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Saved change", exact: true })).toHaveCount(0);
     await expect(composer()).toHaveValue("");
-    await expect(page.getByRole("checkbox", { name: "Save to local history" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Save to local history" })).toHaveCount(0);
   } finally {
     if (app) await app.close();
   }

@@ -322,7 +322,6 @@ function Desktop() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [saveHistory, setSaveHistory] = useState(true);
   const [codePlugin, setCodePlugin] = useState<{ id: string; namespace: string }>();
   const [workspaceSelection, setWorkspaceSelection] = useState<{ key: string; choice: CodeWorktreeChoice }>();
   const [saveNativeHistory, setSaveNativeHistory] = useState(false);
@@ -462,7 +461,6 @@ function Desktop() {
     if (namespace !== previousNamespace.current) {
       previousNamespace.current = namespace;
       setPrompt(namespace ? readCodeDraft(codeDraft, namespace) : "");
-      setSaveHistory(true);
       setCodeReferences([]);
       setHistoryDraft(false);
     }
@@ -705,7 +703,7 @@ function Desktop() {
 
   function changeDraft(value: string) {
     setPrompt(value);
-    if (saveHistory && !cliFixtureModel && snapshot?.draftNamespace && !(snapshot.busy && task?.savedLocally === false)) {
+    if (!cliFixtureModel && snapshot?.draftNamespace && !(snapshot.busy && task?.savedLocally === false)) {
       writeDesktopDraft(codeDraft, `code:${snapshot.draftNamespace}`, value);
     }
   }
@@ -715,11 +713,6 @@ function Desktop() {
     name: "review", kind: "builtin", argumentHint: "[turn|branch]", description: desktopCodeExtensionsCopy[language].slashReviewDescription,
   }] : [], [task, language, snapshot?.remote]);
   const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus(), builtins: slashBuiltins });
-
-  function changeSaveHistory(value: boolean) {
-    setSaveHistory(value);
-    if (snapshot?.draftNamespace) writeDesktopDraft(codeDraft, `code:${snapshot.draftNamespace}`, value ? prompt : "");
-  }
 
   async function deleteLocalTask(id: string, menu: HTMLDetailsElement | null) {
     setRequesting(true);
@@ -813,7 +806,8 @@ ${text}` : text;
     nearBottom.current = true;
     await act(async () => {
       await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
-        saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
+        // A Code task is always saved. The two that are not: a plugin run, which the host refuses to save, and the CLI fixture's own opt-in.
+        saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : true,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
         ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
@@ -822,7 +816,6 @@ ${text}` : text;
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       clearPromptAttachments(attachmentScope);
-      setSaveHistory(true);
       setCodePlugin(undefined);
       setWorkspaceSelection(undefined);
       setCodeReferences([]);
@@ -845,12 +838,14 @@ ${text}` : text;
     target.addEventListener("lostpointercapture", clear);
   }
 
-  const codeHistoryControl = <label className="code-retention">
-    <input type="checkbox" checked={!pluginConnectionId && (cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory)}
-      disabled={!!pluginConnectionId || busy || pausedForInput || (!!cliFixtureModel && !snapshot?.cliFixtureHistory)}
-      onChange={(event) => (cliFixtureModel ? setSaveNativeHistory : changeSaveHistory)(event.currentTarget.checked)} />
+  // The CLI fixture (development builds only) keeps its own opt-in to saved history; no other run has a choice to make.
+  const fixtureHistoryControl = cliFixtureModel && <label className="code-retention">
+    <input type="checkbox" checked={!pluginConnectionId && !!snapshot?.cliFixtureHistory && saveNativeHistory}
+      disabled={!!pluginConnectionId || busy || pausedForInput || !snapshot?.cliFixtureHistory}
+      onChange={(event) => setSaveNativeHistory(event.currentTarget.checked)} />
     {copy.saveHistory}
   </label>;
+  const codeHistoryControl = pluginConnectionId ? <span className="code-retention">{copy.pluginRunNotSaved}</span> : fixtureHistoryControl;
   const openCodeHistory = () => { select("code"); setHistoryOpen(true); };
   const alertText = notice ? copy[notice].replace("{limit}", MAX_CODE_REFERENCES.toLocaleString(language)) : "";
   return <div className="desktop" style={{ "--history-width": `${historyWidth}px` } as React.CSSProperties}
@@ -1217,7 +1212,7 @@ ${text}` : text;
             <PermissionSettings view={snapshot?.permissions} language={language} act={act} />
           </div>}
           {settingsView === "local-history" && <div className="execution-setting-row">
-            <div>{codeHistoryControl}<small>{privacyCopy.historyDetail}</small></div>
+            <div>{fixtureHistoryControl}<small>{privacyCopy.historyDetail}</small></div>
             <button className="soft" type="button" onClick={openCodeHistory}>{privacyCopy.manageHistory}</button>
           </div>}
           {settingsView === "account" && <section className="desktop-setting-section">
