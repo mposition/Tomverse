@@ -9,6 +9,7 @@ import { SCHEDULED_TASK_LIMITS } from "@/lib/scheduledTaskCore";
 import { scheduledTaskReservationGuard } from "@/lib/scheduledTaskReservationGuard";
 import { runAsScheduledTask, scheduledTaskRunSession } from "@/lib/scheduledTaskRunContext";
 import {
+  acquireResumable,
   reconcileExpiredScheduledRuns,
   runScheduledTasksTick,
   scheduledRunAssistantMessageId,
@@ -479,6 +480,34 @@ test("a run whose lease lapsed is settled from its attempt and never sent again"
   assert.equal(held.reconciliation.resumable.length, 0);
 });
 
+test("a run another tick has just taken is never closed under it", async () => {
+  const userId = await seedUser();
+  const task = await seedTask(userId, { nextRunAt: null });
+  const runId = randomUUID();
+  // Thirty seconds inside the grace window now; past it a minute from now.
+  const scheduledFor = new Date(Date.now() - SCHEDULED_TASK_LIMITS.lateGraceMs + 30_000);
+  await prisma.scheduledTaskRun.create({
+    data: { id: runId, taskId: task.id, userId, runningUserId: userId, taskRevision: task.revision, scheduledFor,
+      assistantMessageId: scheduledRunAssistantMessageId(runId), leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+  const candidate = { id: runId, taskId: task.id, userId, taskRevision: task.revision,
+    assistantMessageId: scheduledRunAssistantMessageId(runId), scheduledFor };
+  // Another tick takes the lease and starts the run ...
+  const other = await acquireResumable(candidate, new Date());
+  assert.equal(other.run?.id, runId);
+  // ... while this one, holding the same stale read, reaches it a minute later
+  // -- past the grace window, but well inside the other tick's fresh lease.
+  const beyondGrace = new Date(Date.now() + 60_000);
+  assert.ok(beyondGrace.getTime() - scheduledFor.getTime() > SCHEDULED_TASK_LIMITS.lateGraceMs);
+  const mine = await acquireResumable(candidate, beyondGrace);
+  assert.deepEqual(mine, { run: null, closed: false });
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } })).status, "running");
+  // A lease that really is still lapsed is closed.
+  await prisma.scheduledTaskRun.update({ where: { id: runId }, data: { leaseExpiresAt: new Date(Date.now() - 1_000) } });
+  assert.deepEqual(await acquireResumable(candidate, beyondGrace), { run: null, closed: true });
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: runId } })).outcome, "interrupted");
+});
+
 test("a verified-unsent run of a task paused meanwhile is closed, not resumed, and frees the slot", async () => {
   await enable();
   const userId = await seedUser();
@@ -505,6 +534,8 @@ test("lateness is judged when a run is about to start, not when the tick began",
   let reads = 0;
   // The tick's first two reads (reconciliation, the due list) see now; by the
   // time a worker would claim, earlier runs have taken past the grace window.
+  // This counts on that read order: a new clock read before the claim moves
+  // the switch point and this test must move with it.
   const clock = () => (reads++ < 2 ? new Date() : new Date(Date.now() + SCHEDULED_TASK_LIMITS.lateGraceMs + 120_000));
   const result = await runScheduledTasksTick({ dispatch: async () => neverCalled(), now: clock });
   assert.equal(result.claimed, 0);

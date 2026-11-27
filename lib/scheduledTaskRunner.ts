@@ -87,7 +87,7 @@ const scheduleOf = (task: {
 
 /* ----------------------------------------------------------- finalising -- */
 
-type RunRef = { id: string; taskId: string; userId: string; taskRevision: number };
+export type RunRef = { id: string; taskId: string; userId: string; taskRevision: number };
 
 /**
  * Closes a run and applies its consequence to the task, in one transaction.
@@ -102,11 +102,25 @@ type RunRef = { id: string; taskId: string; userId: string; taskRevision: number
 async function finalizeRun(
   run: RunRef,
   classification: RunClassification,
-  extra: { chargedCredits?: number | null; conversationId?: string | null } = {}
+  extra: {
+    chargedCredits?: number | null;
+    conversationId?: string | null;
+    /**
+     * Set by reconciliation, which acts on a run nobody owns: the close only
+     * happens while the lease is still lapsed at that instant, so a run
+     * another tick has just taken (and may be dispatching) is never closed
+     * under it.
+     */
+    onlyIfLapsedAt?: Date;
+  } = {}
 ) {
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const closed = await tx.scheduledTaskRun.updateMany({
-      where: { id: run.id, status: "running" },
+      where: {
+        id: run.id,
+        status: "running",
+        ...(extra.onlyIfLapsedAt ? { leaseExpiresAt: { lt: extra.onlyIfLapsedAt } } : {}),
+      },
       data: {
         status: classification.status,
         outcome: classification.outcome,
@@ -115,7 +129,7 @@ async function finalizeRun(
         ...(extra.chargedCredits !== undefined ? { chargedCredits: extra.chargedCredits } : {}),
       },
     });
-    if (!closed.count) return;
+    if (!closed.count) return false;
     // Locked, so an edit cannot commit between this read and the write below.
     const rows = await tx.$queryRaw<Array<{ status: string; frequency: string; consecutiveFailures: number; revision: number }>>`
       SELECT "status", "frequency", "consecutiveFailures", "revision" FROM "ScheduledTask"
@@ -143,6 +157,7 @@ async function finalizeRun(
         data: { updatedAt: new Date() },
       });
     }
+    return true;
   });
 }
 
@@ -164,9 +179,9 @@ const chargedCreditsOf = async (run: { chatReservationId: string | null; reserve
 
 /* -------------------------------------------------------- reconciliation -- */
 
-type ClaimedRun = RunRef & { assistantMessageId: string };
+export type ClaimedRun = RunRef & { assistantMessageId: string };
 
-type ResumableRun = ClaimedRun & { scheduledFor: Date };
+export type ResumableRun = ClaimedRun & { scheduledFor: Date };
 
 /**
  * Runs whose lease lapsed, settled from the durable Chat attempt.
@@ -200,25 +215,29 @@ export async function reconcileExpiredScheduledRuns(now = new Date()) {
       where: { assistantMessageId: run.assistantMessageId, userId: run.userId },
       select: { status: true, failureCode: true, leaseExpiresAt: true },
     });
+    // Every close here is conditional on the lease still being lapsed: another
+    // tick may have taken this run since it was read.
+    const lapsed = { onlyIfLapsedAt: now };
+    let closed = false;
     if (!attempt && !run.chatReservationId) {
       if (task.status !== "active" || task.revision !== run.taskRevision) {
-        await finalizeRun(run, { status: "skipped", outcome: "task_changed", pause: null });
+        closed = await finalizeRun(run, { status: "skipped", outcome: "task_changed", pause: null }, lapsed);
       } else if (now.getTime() - run.scheduledFor.getTime() <= SCHEDULED_TASK_LIMITS.lateGraceMs) {
         resumable.push(run);
         continue;
       } else {
-        await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null });
+        closed = await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null }, lapsed);
       }
-      reconciled += 1;
-      continue;
+    } else {
+      const classification = classifyAttempt(attempt, now);
+      if (!classification) continue;
+      closed = await finalizeRun(run, classification, {
+        chargedCredits: await chargedCreditsOf(run),
+        conversationId: run.conversationId,
+        ...lapsed,
+      });
     }
-    const classification = classifyAttempt(attempt, now);
-    if (!classification) continue;
-    await finalizeRun(run, classification, {
-      chargedCredits: await chargedCreditsOf(run),
-      conversationId: run.conversationId,
-    });
-    reconciled += 1;
+    if (closed) reconciled += 1;
   }
   return { reconciled, resumable };
 }
@@ -229,16 +248,20 @@ export async function reconcileExpiredScheduledRuns(now = new Date()) {
  * it; and the grace window is judged again at this instant, not at the start
  * of the tick.
  */
-async function acquireResumable(run: ResumableRun, now: Date): Promise<ClaimedRun | null> {
+export async function acquireResumable(
+  run: ResumableRun,
+  now: Date
+): Promise<{ run: ClaimedRun | null; closed: boolean }> {
   if (now.getTime() - run.scheduledFor.getTime() > SCHEDULED_TASK_LIMITS.lateGraceMs) {
-    await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null });
-    return null;
+    // Too late to start -- and only if nobody took it meanwhile.
+    const closed = await finalizeRun(run, { status: "failed", outcome: "interrupted", pause: null }, { onlyIfLapsedAt: now });
+    return { run: null, closed };
   }
   const taken = await prisma.scheduledTaskRun.updateMany({
     where: { id: run.id, status: "running", leaseExpiresAt: { lt: now } },
     data: { leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs) },
   });
-  return taken.count ? run : null;
+  return { run: taken.count ? run : null, closed: false };
 }
 
 /* ---------------------------------------------------------------- claim -- */
@@ -599,9 +622,10 @@ export async function runScheduledTasksTick(input: {
   const takeWork = async (): Promise<ClaimedRun | null> => {
     for (let candidate = resumable.shift(); candidate; candidate = resumable.shift()) {
       const taken = await acquireResumable(candidate, clock());
-      if (taken) {
+      if (taken.closed) result.reconciled += 1;
+      if (taken.run) {
         result.resumed += 1;
-        return taken;
+        return taken.run;
       }
     }
     while (nextDue < due.length) {
