@@ -247,12 +247,15 @@ settings·metadata)에는 **현재 identity namespace에 속한 서버 Conversat
   `Retry-After`로 답합니다. 예전에는 `CHAT_APPLICATION_ERROR` 500이었습니다.
   provider 호출이 시작된 뒤의 오류는 이 응답이 되지 않습니다. 결과를 모르는 요청을
   다시 보내면 두 번 과금될 수 있습니다.
-- **이 요청이 DB 밖의 비용 드는 작업을 하나라도 시작했다면 이 응답이 되지 않습니다.**
-  사전 웹 검색(요청이 나갔으면 성공·실패 무관), Auto의 router·이미지 의도 분류 LLM 호출,
-  유료 OCR 페이지, Deep Research 제출이 그것입니다. 다시 보내면 같은 비용이 두 번 듭니다.
-  이 경우는 예전처럼 재시도 불가 `CHAT_APPLICATION_ERROR`(브라우저는 일반 실패 문구)이며,
-  이미 든 검색 비용의 정산은 그대로입니다. 따라서 자동 재전송은 수동 모델 턴과 Auto 턴의
-  router 호출 이전 실패에만 적용됩니다.
+- **이 요청이 정산·페이지 과금·외부 제출이 걸린 작업을 시작했다면 이 응답이 되지 않습니다.**
+  사전 웹 검색(요청이 나갔으면 성공·실패 무관), 유료 OCR 페이지, Deep Research 제출이
+  그것입니다. 다시 보내면 같은 비용이 두 번 듭니다. 이 경우는 예전처럼 재시도 불가
+  `CHAT_APPLICATION_ERROR`(브라우저는 일반 실패 문구)이며, 이미 든 검색 비용의 정산은
+  그대로입니다.
+- **Auto의 router·이미지 의도 분류·위치 판정 호출은 제외 조건이 아닙니다.** 사용자에게
+  과금되지 않는 소액 내부 호출이고 자동 재전송은 한 번이라, 추가 비용은 요청당 router
+  호출 한 번이 최대입니다. 제외하면 router 뒤에 오는 예약·durable attempt 단계의 DB 순간
+  오류(실제 production 패턴)가 Auto 턴에서 전부 재전송 대상에서 빠집니다.
 - 예약 transaction(`acquireChatAccess`)은 비교 preflight와 같은 `maxWait 5 s /
   timeout 15 s`를 명시합니다. Prisma 기본값(2 s / 5 s)이 느린 DB를 거절로 바꿨습니다.
   예약하는 내용은 바뀌지 않습니다.

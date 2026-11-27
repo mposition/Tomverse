@@ -4098,9 +4098,9 @@ test("router presearch stays behind admission, preserves search recovery policy 
 
 /*
   A transient database error is answered as a resend (503 DATABASE_TEMPORARILY_UNAVAILABLE)
-  only while this request has spent nothing outside the database: the browser's
-  resend runs the whole request again, and a search, a router call or a scanned
-  page would be paid for a second time.
+  unless this request already ran work a resend would pay for again: a
+  pre-answer search (settled), a scanned OCR page or a Deep Research submission.
+  Auto's router is a small unbilled internal call and does not count.
 */
 const transientDatabaseFault = () =>
   Object.assign(new Error("connection closed"), { name: "DriverAdapterError", cause: { kind: "ConnectionClosed" } });
@@ -4133,18 +4133,22 @@ test("a database blink after the pre-answer search ran is not a resend, and the 
   }
 });
 
-test("a database blink at the reservation of an Auto turn, after the router was asked, is not a resend", async () => {
+test("a database blink at the reservation of an Auto turn, after the router was asked, is still a resend", async () => {
+  // The router is a small internal call that is never billed to the user and
+  // the browser resends once, so it does not take an Auto turn out of the fix.
   databaseFailureAtAccess = transientDatabaseFault();
+  presearchCalls.length = 0;
   try {
-    const { response, body } = await ask("answers", "claimed", 500, false, undefined, true, false);
-    assert.equal(response.headers.get("Retry-After"), null);
-    assert.notEqual((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    const { response, body } = await ask("answers", "claimed", 503, false, undefined, true, false);
+    assert.equal(response.headers.get("Retry-After"), "2");
+    assert.equal((JSON.parse(body) as { code?: string }).code, "DATABASE_TEMPORARILY_UNAVAILABLE");
+    assert.equal(presearchCalls.length, 0, "no search ran, so nothing settled is repeated");
   } finally { databaseFailureAtAccess = undefined; }
 });
 
 test("a database blink before anything outside the database ran is still a resend", async () => {
-  // A manual turn has no router, no classifier and no search, so the
-  // reservation failing is the first thing that can go wrong and costs nothing.
+  // A manual turn has no router, no classifier and no search: the reservation
+  // failing is the first thing that can go wrong and nothing has been spent.
   presearchCalls.length = 0;
   conversationSelectionMode = "manual";
   databaseFailureAtAccess = transientDatabaseFault();
