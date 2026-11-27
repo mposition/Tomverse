@@ -10,6 +10,9 @@
    resolve `next/font` variables this app injects. */
 @import "@tomverse/ui-tokens/tokens.css";
 @import "@tomverse/ui-tokens/wordmark.css";
+/* The shared dropdown design for every <select>; it sits in the base layer,
+   so a utility class on the element still wins. */
+@import "@tomverse/ui-tokens/select.css";
 @import "@tomverse/chat-ui/voice.css";
 @import "../components/chat/researchPreviewRun.css";
 

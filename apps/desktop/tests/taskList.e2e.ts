@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { expect, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { Journal } from "../../tomverse-cli/src/session.js";
 import { DEFAULT_MODELS, FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { launchNativeFixture } from "./launch-native-fixture";
@@ -109,9 +110,7 @@ if (first) setInterval(() => {}, 1000);
       try { await approval.getByRole("button", { name, exact: true }).click(); }
       catch (error) { if (!approval.isClosed()) throw error; }
     };
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Model", { exact: true }).selectOption("smart-adaptive");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { model: "smart-adaptive" });
     const approvalWindow = application.waitForEvent("window", { predicate: (candidate) => candidate !== page, timeout: approvalWait });
     void approvalWindow.catch(() => undefined);
     await send("Verify the search task list");
@@ -203,9 +202,7 @@ if (first) setInterval(() => {}, 1000);
 
     await page.getByRole("button", { name: "New task", exact: true }).click();
     await page.getByLabel("Code mode").selectOption("agent");
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Task reasoning effort").selectOption("high");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { effort: "high" });
     const [beforeStop] = await Promise.all([application.waitForEvent("window", { timeout: approvalWait }), send("Resume the recorded work")]);
     await answer(beforeStop, "Allow for this run");
     const starts = join(root, "resume-starts.txt");

@@ -83,6 +83,8 @@ type ModelCatalogueProps = {
   isMobileShell: boolean;
   /** See ModelPickerPanel: the panel owns the single scroller in this mode. */
   isKeyboardCompact?: boolean;
+  /** The list has no Chat use cases to filter by (the coding catalogue). */
+  hideTaskFilter?: boolean;
   modelStatuses: Record<string, ModelCatalogueStatusRecord>;
   hasImageAttachments: boolean;
   favoriteModelIds: string[];
@@ -116,6 +118,7 @@ export function ModelCatalogue({
   isGuestMode,
   isMobileShell,
   isKeyboardCompact = false,
+  hideTaskFilter = false,
   modelStatuses,
   hasImageAttachments,
   favoriteModelIds,
@@ -305,7 +308,7 @@ export function ModelCatalogue({
     <div className={`flex min-h-0 flex-col ${isKeyboardCompact ? "" : "flex-1"}`}>
       <div className="shrink-0 space-y-2 px-1 pb-2">
         <div className="flex items-center gap-2">
-          <label className="sr-only" htmlFor="model-catalogue-task-filter">
+          {!hideTaskFilter && <><label className="sr-only" htmlFor="model-catalogue-task-filter">
             {stepCopy.taskAll}
           </label>
           <select
@@ -322,7 +325,7 @@ export function ModelCatalogue({
                 {option === "all" ? stepCopy.taskAll : useCaseLabels[option]}
               </option>
             ))}
-          </select>
+          </select></>}
           <button
             ref={filterTriggerRef}
             type="button"

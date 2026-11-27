@@ -1,0 +1,197 @@
+/*
+ * The one dropdown design every Tomverse client shares.
+ *
+ * It styles the platform `<select>` itself (CSS "customizable select",
+ * `appearance: base-select`) instead of replacing it with a scripted listbox.
+ * The element keeps what the platform already gets right -- arrow keys, Enter,
+ * Escape, type-ahead, the listbox/option roles a screen reader announces, form
+ * participation, and a list drawn in the top layer so no dialog or scroll
+ * container clips it -- and every existing `<select>` gets the design without
+ * its markup changing.
+ *
+ * Where it applies:
+ *   - a browser that implements `appearance: base-select` (Chromium, which is
+ *     also the desktop shell). Any other browser keeps its native control,
+ *     exactly as before;
+ *   - a fine pointer. On a touch device the operating system's own picker is
+ *     the better list, so it is left alone;
+ *   - single-choice dropdowns. `multiple` and `size` list boxes are untouched.
+ *
+ * Everything sits in the `base` cascade layer. In the Next.js app that is
+ * Tailwind's own base layer, so a utility class on a `<select>` (border,
+ * radius, padding, colour) still wins; in the Vite clients every unlayered
+ * rule wins. This file therefore only supplies what a call site left unsaid,
+ * plus the open list, which no call site styles.
+ *
+ * A client re-points the `--tv-select-*` properties to its own palette (the
+ * desktop shell does); the literals below are the web app's zinc and blue.
+ * Follows docs/policy/shared-packages.md: no Tailwind at-rule, no outside
+ * import, and no `var()` this file does not define.
+ */
+
+@layer base {
+    :root {
+        --tv-select-surface: light-dark(#ffffff, #18181b);
+        --tv-select-border: light-dark(#d4d4d8, #3f3f46);
+        --tv-select-text: light-dark(#18181b, #f4f4f5);
+        --tv-select-muted: light-dark(#71717a, #a1a1aa);
+        --tv-select-hover: light-dark(#f4f4f5, #27272a);
+        --tv-select-selected: light-dark(#eff6ff, #172554);
+        --tv-select-accent: light-dark(#2563eb, #60a5fa);
+        --tv-select-shadow: light-dark(rgb(24 24 27 / 0.16), rgb(0 0 0 / 0.5));
+    }
+
+    @supports (appearance: base-select) {
+        @media (pointer: fine) {
+            select:not([multiple], [size]),
+            select:not([multiple], [size])::picker(select) {
+                appearance: base-select;
+            }
+
+            /* The closed control. */
+            select:not([multiple], [size]) {
+                align-items: center;
+                gap: 0.5em;
+                min-block-size: 2em;
+                padding-block: 0.25em;
+                padding-inline: 0.625em;
+                border: 1px solid var(--tv-select-border);
+                border-radius: 0.5rem;
+                background-color: var(--tv-select-surface);
+                cursor: pointer;
+                transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+            }
+            select:not([multiple], [size]):disabled {
+                cursor: not-allowed;
+                opacity: 0.55;
+            }
+            /* The chosen value takes the room; the chevron keeps its own. */
+            select:not([multiple], [size]) > selectedcontent,
+            select:not([multiple], [size])::picker-icon {
+                flex: none;
+            }
+            select:not([multiple], [size])::picker-icon {
+                content: "";
+                inline-size: 0.42em;
+                block-size: 0.42em;
+                margin-inline: auto 0.15em;
+                border: solid currentColor;
+                border-width: 0 1.5px 1.5px 0;
+                opacity: 0.7;
+                translate: 0 -25%;
+                rotate: 45deg;
+                transition: rotate 140ms ease, translate 140ms ease;
+            }
+            select:not([multiple], [size]):open::picker-icon {
+                translate: 0 15%;
+                rotate: 225deg;
+            }
+
+            /* The open list. */
+            select:not([multiple], [size])::picker(select) {
+                box-sizing: border-box;
+                margin-block: 0.375rem;
+                padding: 0.25rem;
+                max-block-size: min(24rem, 70vh);
+                overflow-y: auto;
+                overscroll-behavior: contain;
+                scrollbar-width: thin;
+                border: 1px solid var(--tv-select-border);
+                border-radius: 0.75rem;
+                background-color: var(--tv-select-surface);
+                color: var(--tv-select-text);
+                box-shadow: 0 12px 32px -8px var(--tv-select-shadow), 0 2px 6px -2px var(--tv-select-shadow);
+                font-size: max(1em, 0.8125rem);
+                font-weight: 400;
+                line-height: 1.35;
+                opacity: 0;
+                translate: 0 -0.25rem;
+                transition: opacity 120ms ease, translate 120ms ease, overlay 120ms allow-discrete, display 120ms allow-discrete;
+            }
+            select:not([multiple], [size]):open::picker(select) {
+                opacity: 1;
+                translate: 0 0;
+            }
+            @starting-style {
+                select:not([multiple], [size]):open::picker(select) {
+                    opacity: 0;
+                    translate: 0 -0.25rem;
+                }
+            }
+
+            select:not([multiple], [size]) option {
+                display: flex;
+                align-items: center;
+                gap: 0.625rem;
+                min-block-size: 2rem;
+                padding: 0.3125rem 0.625rem;
+                border-radius: 0.5rem;
+                /* `!important` because call sites colour their options for the
+                   native list (a class or a module rule); in this list that
+                   would hide the hover and chosen states. */
+                background-color: transparent !important;
+                color: var(--tv-select-text) !important;
+                cursor: pointer;
+                outline-offset: -2px;
+                transition: background-color 80ms ease;
+            }
+            select:not([multiple], [size]) option + option,
+            select:not([multiple], [size]) optgroup + option,
+            select:not([multiple], [size]) option + optgroup {
+                margin-block-start: 1px;
+            }
+            select:not([multiple], [size]) option:hover,
+            select:not([multiple], [size]) option:focus-visible {
+                background-color: var(--tv-select-hover) !important;
+            }
+            select:not([multiple], [size]) option:focus-visible {
+                outline: 2px solid var(--tv-select-accent);
+            }
+            select:not([multiple], [size]) option:checked {
+                background-color: var(--tv-select-selected) !important;
+                font-weight: 600;
+            }
+            select:not([multiple], [size]) option:disabled {
+                color: var(--tv-select-muted) !important;
+                cursor: not-allowed;
+                opacity: 0.6;
+            }
+            /* The tick sits after the label, so labels line up whether or not one is chosen. */
+            select:not([multiple], [size]) option::checkmark {
+                content: "";
+                order: 1;
+                flex: none;
+                inline-size: 0.3em;
+                block-size: 0.6em;
+                margin-inline: auto 0.25em;
+                border: solid var(--tv-select-accent);
+                border-width: 0 2px 2px 0;
+                translate: 0 -12%;
+                rotate: 45deg;
+            }
+            select:not([multiple], [size]) option:not(:checked)::checkmark {
+                visibility: hidden;
+            }
+            select:not([multiple], [size]) optgroup {
+                padding-block-start: 0.25rem;
+                color: var(--tv-select-muted);
+                font-size: 0.6875rem;
+                font-weight: 600;
+                letter-spacing: 0.04em;
+            }
+            select:not([multiple], [size]) optgroup option {
+                font-size: max(1rem, 0.8125rem);
+                letter-spacing: 0;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                select:not([multiple], [size]),
+                select:not([multiple], [size])::picker-icon,
+                select:not([multiple], [size])::picker(select),
+                select:not([multiple], [size]) option {
+                    transition: none;
+                }
+            }
+        }
+    }
+}

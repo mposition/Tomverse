@@ -13,6 +13,14 @@
   --review-surface: var(--studio-surface);
   --review-selected: #263757;
   --review-selected-text: #eee9ff;
+  /* The shared dropdown design (@tomverse/ui-tokens/select.css) in Studio's palette. */
+  --tv-select-surface: var(--studio-surface);
+  --tv-select-border: var(--studio-line);
+  --tv-select-text: var(--studio-text);
+  --tv-select-muted: var(--studio-muted);
+  --tv-select-hover: var(--studio-field);
+  --tv-select-selected: var(--studio-selection);
+  --tv-select-accent: var(--studio-accent);
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
   gap: clamp(24px, 3.7vw, 56px);

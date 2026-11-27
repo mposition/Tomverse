@@ -67,8 +67,9 @@ port, each client supplies the implementation.
 
 ### CSS assets
 
-A package can ship no TypeScript at all — `ui-tokens` is a single stylesheet —
-and then neither the ESLint rule nor the tsconfig says anything about it. The
+A package can ship no TypeScript at all — `ui-tokens` is stylesheets only (the
+tokens, the wordmark, and `select.css`, the dropdown design every `<select>` in
+the web app and the desktop shell shares) — and then neither the ESLint rule nor the tsconfig says anything about it. The
 same boundary is enforced by rules that fit CSS:
 
 | Forbidden in `packages/*/src/**.css` | Why |

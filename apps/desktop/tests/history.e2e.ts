@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { Journal } from "../../tomverse-cli/src/session.js";
 import { FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { codeHistoryScope } from "../src/host/history-scope";
@@ -77,9 +78,7 @@ test("Code deletes one confirmed local journal and keeps unsaved task evidence i
     const otherId = (await state()).task!.id!;
     const otherCheckpoint = await readFile(join(sessionDirectory(otherId), "session.json"));
 
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Model", { exact: true }).selectOption("fake-coder");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { model: "fake-coder" });
     await composer().fill("Active task");
     await send().click();
     await expect(page.getByRole("button", { name: "Stop Code task" })).toBeVisible();

@@ -1763,8 +1763,8 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     if (transient?.journal.state.id === data.sessionId) transient = undefined;
   } else if (data.type === "catalog") {
     void gatewayFor(data.connection).models().then((catalog) => {
-      send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts }) => ({
-        id, name, provider, efforts: reasoningEfforts ?? [],
+      send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts, creditsPerRequest, vision, reasoning, contextWindowTokens }) => ({
+        id, name, provider, efforts: reasoningEfforts ?? [], credits: creditsPerRequest, vision, reasoning, contextWindowTokens,
       })) });
     }).catch(() => send({ type: "catalog-failed", requestId: data.requestId }));
   } else if (data.type === "start" || data.type === "resume") {

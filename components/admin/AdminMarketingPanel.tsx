@@ -422,7 +422,7 @@ export function AdminMarketingPanel({
                       data-testid="marketing-channel-filter"
                       value={channel}
                       onChange={(event) => setChannel(event.target.value)}
-                      className="min-h-11 cursor-pointer appearance-none rounded-lg border border-zinc-800 bg-zinc-900 py-2 pl-3 pr-8 text-xs text-zinc-300 hover:border-zinc-700 focus:border-blue-500 focus:outline-none"
+                      className="min-h-11 cursor-pointer rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 hover:border-zinc-700 focus:border-blue-500 focus:outline-none"
                     >
                       <option value="">{m.filterAllChannels}</option>
                       {channels.map((value) => (
@@ -431,7 +431,6 @@ export function AdminMarketingPanel({
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-zinc-500" />
                   </label>
                 ) : null}
                 {view.truncated ? (

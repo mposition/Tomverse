@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./tokens.css": "./src/tokens.css",
+    "./select.css": "./src/select.css",
     "./wordmark.css": "./src/wordmark.css"
   },
   "files": [
