@@ -118,6 +118,13 @@ export const transcribeAudioAttachment = async (
         throw error;
     }
 
+    // Set before each `settle` is awaited, on purpose. Once the provider has
+    // answered, the seconds may have been billed, and a settle that throws has
+    // an unknown outcome -- it may have committed. Releasing then would be a
+    // second write on the same booking that could hand back seconds the
+    // provider charged, so the hold is neither released nor retried: it stays
+    // counted in the seconds buckets it was booked in, the conservative side,
+    // and the turn fails with the settle's error.
     let settled = false;
     try {
         const result = await transcribe({

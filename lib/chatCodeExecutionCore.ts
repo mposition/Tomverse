@@ -15,16 +15,21 @@
  * the user is told about, plus a reservation of its worst case against the
  * provider budget (`lib/webSearchCredits.ts`,
  * `lib/webSearchNativeCostReservation.ts`). A tool whose cost is inside the
- * token usage the provider reports carries neither -- Perplexity's search is
- * the precedent (`hasAdditionalCost: false`).
+ * token usage the provider reports carries no surcharge -- Perplexity's search
+ * is the precedent (`hasAdditionalCost: false`) -- but the tokens it adds are
+ * still reserved before the request, like any other input.
  *
  * Read against the providers' own pricing pages on 2026-11-27:
  *
- * - Google Gemini: "There's no additional charge for enabling code execution";
- *   generated code and results are billed as output tokens and intermediate
- *   tokens as input tokens. So no surcharge and no separate reservation: the
- *   settlement already prices the usage the provider reports, and the AI SDK
- *   counts `toolUsePromptTokenCount` into input tokens.
+ * - Google Gemini: "There's no additional charge for enabling code execution".
+ *   Generated code and its results are output tokens, and when the model uses
+ *   the tool "the original prompt, the generated code, and the result of the
+ *   executed code are labeled intermediate tokens and are billed as input
+ *   tokens". So no surcharge, but a reservation: every run can bill the prompt
+ *   again, which is one more provider pass the budget holds before the request
+ *   is sent (`CODE_EXECUTION_RESERVED_PASSES`). Settlement prices the usage the
+ *   provider reports; the AI SDK counts `toolUsePromptTokenCount` into input
+ *   tokens.
  * - OpenAI code interpreter: US$0.03 per 20-minute session of a 1 GB container,
  *   billed by the minute with a 5-minute minimum.
  * - Anthropic code execution: US$0.05 per container-hour, 5-minute minimum,
@@ -50,17 +55,32 @@ export const CODE_EXECUTION_TOOL_NAME = "code_execution";
 /**
  * Runs one answer may show before it is stopped.
  *
- * What this bounds, precisely: Gemini takes no request parameter that caps its
- * runs, so the only enforceable stop is this process cutting the stream. A run
- * is seen when its `tool-call` part arrives, which is after the provider has
- * started it -- so the call past the ceiling is the one that aborts the
- * attempt, and that sixth run may already have executed. At most six runs, of
- * at most 30 seconds each (Gemini's own limit), per answer. It bounds how long
- * one answer can keep computing, not a bill: Gemini charges nothing per run,
- * and the tokens the runs add are bounded by the request's output cap and
- * priced at settlement from the provider's usage.
+ * Gemini takes no request parameter that caps its runs, so the only
+ * enforceable stop is this process cutting the stream. A run is seen when its
+ * `tool-call` part arrives, which is after the provider has started it -- so
+ * the call past the ceiling is the one that aborts the attempt, and that run
+ * may already have executed and been billed. Billable runs are this number
+ * plus one, each of at most 30 seconds (Gemini's own limit).
+ *
+ * Sized by the reservation rather than chosen on its own: each billable run is
+ * a provider pass (the prompt billed again), the budget holds at most four
+ * passes (`createChatBudget` clamps `toolInputPasses` to 4 and the stored
+ * `providerCallPasses` is validated to that range), and the first pass is the
+ * request itself. Three billable runs, so two shown.
  */
-export const CODE_EXECUTION_MAX_CALLS_PER_TURN = 5;
+export const CODE_EXECUTION_MAX_CALLS_PER_TURN = 2;
+
+/**
+ * Provider passes a code-execution turn reserves: the request itself, then one
+ * per run that can be billed -- the runs shown and the one that aborts.
+ *
+ * Each pass is bounded the way the budget's multi-pass reservation already
+ * bounds an application tool loop's call: the prompt, plus everything the turn
+ * has output so far -- which Gemini counts as output tokens, code and results
+ * included, and which the request's output cap bounds. A test pins that
+ * `createChatBudget` reserves this many passes instead of clamping it down.
+ */
+export const CODE_EXECUTION_RESERVED_PASSES = CODE_EXECUTION_MAX_CALLS_PER_TURN + 2;
 
 export type CodeExecutionPriceEntry = {
     provider: "google" | "openai" | "anthropic";
@@ -110,11 +130,25 @@ export type CodeExecutionRefusal =
     /** A provider this product knows, but not a model verified to take the tool. */
     | "model_unverified"
     /** The tool is billed on top of tokens and its credit surcharge is undecided. */
-    | "surcharge_unapproved";
+    | "surcharge_unapproved"
+    /**
+     * The turn already runs an application tool loop (plugins, project tools,
+     * generated files, this application's own search). Its calls and the runs
+     * would share one reservation of at most four passes that neither counter
+     * sees whole, so it could not hold both.
+     */
+    | "tool_loop";
 
 export type CodeExecutionDecision =
-    | { enabled: true; provider: "google"; maxCalls: number }
+    | { enabled: true; provider: "google"; maxCalls: number; reservedPasses: number }
     | { enabled: false; reason: CodeExecutionRefusal };
+
+/**
+ * The provider passes this decision asks the turn's reservation to hold: one,
+ * the request alone, when the tool is not attached.
+ */
+export const codeExecutionReservedPasses = (decision: CodeExecutionDecision) =>
+    decision.enabled ? decision.reservedPasses : 1;
 
 /**
  * Gemini models on the 3.x line or later, by their API name.
@@ -145,17 +179,21 @@ export const modelSupportsCodeExecution = (model: {
  *
  * Asked about the model that answers, never used to choose one: Auto's
  * selection rules are unchanged, and a model without the tool simply answers
- * without it.
+ * without it. Asked before the budget is built, because the answer decides how
+ * many provider passes the reservation holds.
  */
 export const resolveCodeExecution = (input: {
     env: Readonly<Record<string, string | undefined>>;
     model: { provider: string; apiModel: string };
     accessKind: string;
     researchTurn: boolean;
+    /** Whether the turn registers an application tool loop of its own. */
+    applicationToolLoop: boolean;
 }): CodeExecutionDecision => {
     if (!chatCodeExecutionSwitchOn(input.env)) return { enabled: false, reason: "switch_off" };
     if (input.accessKind !== "user") return { enabled: false, reason: "guest" };
     if (input.researchTurn) return { enabled: false, reason: "research_turn" };
+    if (input.applicationToolLoop) return { enabled: false, reason: "tool_loop" };
     const entry = CODE_EXECUTION_PRICE_REGISTER.find(
         (candidate) => candidate.provider === input.model.provider
     );
@@ -166,7 +204,12 @@ export const resolveCodeExecution = (input: {
     if (entry.provider !== "google" || !modelSupportsCodeExecution(input.model)) {
         return { enabled: false, reason: "model_unverified" };
     }
-    return { enabled: true, provider: "google", maxCalls: CODE_EXECUTION_MAX_CALLS_PER_TURN };
+    return {
+        enabled: true,
+        provider: "google",
+        maxCalls: CODE_EXECUTION_MAX_CALLS_PER_TURN,
+        reservedPasses: CODE_EXECUTION_RESERVED_PASSES,
+    };
 };
 
 // ---------------------------------------------------------------------------

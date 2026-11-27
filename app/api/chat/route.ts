@@ -39,7 +39,11 @@ import {
     type ChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
 import { chatAudioAttachmentEnabled, transcribeAudioAttachment } from "@/lib/chatAudioAttachment";
-import { createCodeExecutionTextStream, resolveCodeExecution } from "@/lib/chatCodeExecutionCore";
+import {
+    codeExecutionReservedPasses,
+    createCodeExecutionTextStream,
+    resolveCodeExecution,
+} from "@/lib/chatCodeExecutionCore";
 import { withCodeExecutionTool } from "@/lib/chatCodeExecutionTool";
 import { CHAT_AUDIO_ATTACHMENT_MAX_BYTES, inspectAudioAttachment } from "@/lib/chatAudioAttachmentCore";
 import { decodeAttachmentText } from "@/lib/chatAttachmentText";
@@ -4812,23 +4816,31 @@ async function handleChatPost(
                   freshly read one, and does not count towards the request's
                   byte total, because no bytes are read.
                 */
+                // A transcript is paid for, so the message being answered reads
+                // and writes it too: the first send stores it, and a retry or
+                // another model's answer to the same message reuses it instead
+                // of transcribing the recording again. Only while recordings
+                // are accepted at all -- a switched-off one is refused below.
+                const latestAudioTranscript =
+                    isLatestMessage &&
+                    format.category === "audio" &&
+                    chatAudioAttachmentEnabled() &&
+                    Boolean(access.subjectKey);
                 const textCacheEligible =
-                    !isLatestMessage &&
+                    (!isLatestMessage || latestAudioTranscript) &&
                     !isGuestObject &&
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
                     attachmentTextCacheEnabled();
-                // A transcript is paid for, so it is stored on the turn that
-                // first sends the recording too, not only when an earlier
-                // message is re-read; the read rule above is unchanged.
-                const audioTranscriptCacheWrite =
-                    isLatestMessage &&
-                    format.category === "audio" &&
-                    !isGuestObject &&
-                    Boolean(resolved?.attachmentId) &&
-                    attachmentTextCacheEnabled();
-                if (textCacheEligible) {
+                // On the message being answered the cache stands in for the
+                // transcription only. The recording is still read below, so the
+                // handle, the byte total and a 410 for a file gone are what a
+                // miss gets, and it needs no probe of its own.
+                let latestCachedTranscript: Awaited<ReturnType<typeof readAttachmentTextCache>> = null;
+                if (textCacheEligible && isLatestMessage) {
+                    latestCachedTranscript = await readAttachmentTextCache(resolved!.attachmentId!);
+                } else if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
                     // knowing it exists: storage is still asked, and a file it
@@ -5076,6 +5088,19 @@ async function handleChatPost(
                             text: structured });
                         continue;
                     }
+                    if (latestCachedTranscript) {
+                        // The stored transcript of this very recording, under
+                        // the parse budget a fresh one would have met.
+                        for (const entry of latestCachedTranscript) {
+                            totalExtractedCharacters += entry.text.length;
+                            if (totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS) {
+                                throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
+                                    "Extracted attachment text exceeds the request limit.");
+                            }
+                            textAttachments.push({ name: attachment.name, kind: entry.kind, text: entry.text });
+                        }
+                        continue;
+                    }
                     const textEntriesBefore = textAttachments.length;
                     const filePartsBefore = fileParts.length;
                     const parseRoomBefore =
@@ -5086,7 +5111,7 @@ async function handleChatPost(
                         buffer: attachmentBuffer,
                         fromArchive: false,
                     });
-                    if (textCacheEligible || audioTranscriptCacheWrite) {
+                    if (textCacheEligible) {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).
@@ -5345,6 +5370,25 @@ async function handleChatPost(
         if (!nativeSearchReservation.ok) {
             throw webSearchCostRefusalError(nativeSearchReservation.reason);
         }
+        // Code execution, on the answering model's own provider when it has a
+        // tool this product attaches (docs/policy/chat-attachment-formats.md
+        // 2.3.1). Decided here, before the budget, because every run can bill
+        // the prompt again and the reservation holds those passes. Refused on
+        // a turn with an application tool loop: the same conditions that
+        // register those loops below.
+        const codeExecution = resolveCodeExecution({
+            env: process.env,
+            model: modelConfig,
+            accessKind: access.kind,
+            // A deep-research model has already answered by this point.
+            researchTurn: isResearchPreview,
+            applicationToolLoop: Boolean(
+                mcpConnector ||
+                    projectTools ||
+                    artifactToolPlan?.registerTool ||
+                    (appManagedSearchEnabled && webSearchCapability.searchBackend)
+            ),
+        });
         const budget = isResearchPreview
             ? createResearchPreviewBudget({
                   accessKind: access.kind,
@@ -5401,7 +5445,11 @@ async function handleChatPost(
                               artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
                               appManagedSearchEnabled && webSearchCapability.searchBackend ? APP_MANAGED_SEARCH_MAX_STEPS : 1
                           )
-                        : 1
+                        : 1,
+                    // Every code run that can be billed re-reads the prompt,
+                    // on an ordinary turn and a long-context one alike; the
+                    // stream stops the runs at what this holds.
+                    codeExecutionReservedPasses(codeExecution)
                 ),
                 // Reserved only above the flat limit; the loop is then stopped
                 // at what was reserved (`toolLoopStepCap` below).
@@ -5410,7 +5458,8 @@ async function handleChatPost(
                     appManagedSearchEnabled && webSearchCapability.searchBackend
                         ? APP_MANAGED_SEARCH_MAX_STEPS
                         : 1,
-                    projectTools ? PROJECT_TOOL_MAX_STEPS : 1
+                    projectTools ? PROJECT_TOOL_MAX_STEPS : 1,
+                    codeExecutionReservedPasses(codeExecution)
                 ),
                   }
               );
@@ -6167,16 +6216,8 @@ async function handleChatPost(
         // authorized are the same number by construction. Merged into
         // `providerOptions.openai` beside `reasoningEffort` rather than over
         // it -- see `getModelGenerationSettings`.
-        // Code execution, on the answering model's own provider when it has a
-        // tool this product attaches (docs/policy/chat-attachment-formats.md
-        // 2.3.1). Refused turns keep the exact tool configuration above.
-        const codeExecution = resolveCodeExecution({
-            env: process.env,
-            model: modelConfig,
-            accessKind: access.kind,
-            // A deep-research model has already answered by this point.
-            researchTurn: isResearchPreview,
-        });
+        // Code execution, decided before the budget (see there). Refused turns
+        // keep the exact tool configuration above.
         combinedToolConfig = withCodeExecutionTool(combinedToolConfig, codeExecution) as typeof combinedToolConfig;
         const generationSettings = getModelGenerationSettings(modelConfig, {
             openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({

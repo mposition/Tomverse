@@ -223,16 +223,52 @@ test("a recording past the ceiling, or of no readable length, is refused", () =>
   });
   const justUnder = Math.floor((CHAT_AUDIO_ATTACHMENT_MAX_SECONDS - 1) / 0.072);
   assert.equal(inspectAudioAttachment({ bytes: mp3OfFrames(justUnder), mediaType: "audio/mpeg" }).ok, true);
-  // No frames at all, and frames followed by more than a tag's worth of
-  // something a decoder could resynchronise on.
+  // No frames at all.
   assert.equal(mp3DurationSeconds(new Uint8Array(4096)), null);
-  assert.equal(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array(300 * 1024))), null);
-  assert.ok(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array(128))) > 0.7);
   // Free-format and reserved fields are not a length.
   assert.equal(mp3DurationSeconds(new Uint8Array([0xff, 0xe3, 0x08, 0x00, ...new Uint8Array(68)])), null);
   assert.deepEqual(inspectAudioAttachment({ bytes: new Uint8Array(4096), mediaType: "audio/mpeg" }), {
     ok: false, code: "ATTACHMENT_UNREADABLE",
   });
+});
+
+// Review r-20261127-073816-5a1bf4: whatever follows the last frame the walk
+// reached must be something no decoder can play, or the walk has not measured
+// what the provider will transcribe.
+test("an mp3 is read to its end: nothing after the frames may hold a frame sync", () => {
+  const ten = mp3DurationSeconds(mp3OfFrames(10));
+  assert.ok(Math.abs(ten - 0.72) < 1e-9, String(ten));
+  // A short frame, bytes the walk cannot read, then 216 seconds a
+  // resynchronising decoder would play in full -- inside the 256 KiB of tail
+  // that used to be waved through as "tags", and booked as 72 ms.
+  const hidden = mp3OfFrames(3_000);
+  const junk = new Uint8Array(100).fill(0x01);
+  const attack = mp3OfFrames(1, new Uint8Array([...junk, ...hidden]));
+  assert.equal(mp3DurationSeconds(attack), null);
+  assert.deepEqual(inspectAudioAttachment({ bytes: attack, mediaType: "audio/mpeg" }), {
+    ok: false, code: "ATTACHMENT_UNREADABLE",
+  });
+  // One sync anywhere in the tail is enough to refuse, the real encoder's
+  // output included.
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array([0x00, 0xff, 0xfb, 0x90]))), null);
+  assert.equal(mp3DurationSeconds(new Uint8Array([...MP3_CBR_3000MS, 0x01, 0xff, 0xe3])), null);
+  // A tag or padding no decoder can play is not audio and adds no length.
+  const id3v1 = new Uint8Array(128);
+  id3v1.set([0x54, 0x41, 0x47]);
+  id3v1.fill(0x20, 3, 127);
+  id3v1[127] = 0xff; // "no genre", with no byte after it to complete a sync
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, id3v1)), ten);
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10, new Uint8Array(300 * 1024))), ten);
+  assert.equal(
+    mp3DurationSeconds(new Uint8Array([...MP3_CBR_3000MS, ...id3v1])),
+    mp3DurationSeconds(MP3_CBR_3000MS)
+  );
+  // A last frame cut short counts as a whole one, unless what follows its
+  // header could start another.
+  assert.equal(mp3DurationSeconds(mp3OfFrames(10).subarray(0, 10 * 72 - 30)), ten);
+  const cut = mp3OfFrames(10).subarray(0, 10 * 72 - 30);
+  cut.set([0xff, 0xe3], 9 * 72 + 20);
+  assert.equal(mp3DurationSeconds(cut), null);
 });
 
 test("finalize checks the container and length, and the provider's size ceiling", async () => {
@@ -346,6 +382,18 @@ test("no speech is a refusal after settling, and a throw before the provider rel
   const thrown = [];
   await assert.rejects(quietly(() => transcribeAudioAttachment(attachment, fakeDeps(new Error("boom"), thrown))));
   assert.deepEqual(thrown.at(-1), ["release"]);
+
+  // A settle that throws after the provider answered has an unknown outcome:
+  // the hold is kept, never released over it.
+  const unsettled = [];
+  const deps = fakeDeps({ ok: true, text: "Hi.", usage: { kind: "duration", seconds: 3 } }, unsettled);
+  deps.settle = async ({ basis }) => {
+    unsettled.push(["settle", basis]);
+    throw new Error("settle connection lost");
+  };
+  await assert.rejects(quietly(() => transcribeAudioAttachment(attachment, deps)), /settle connection lost/);
+  assert.deepEqual(unsettled.at(-1), ["settle", { kind: "provider_seconds", seconds: 3 }]);
+  assert.equal(unsettled.some(([event]) => event === "release"), false);
 });
 
 test("an exhausted seconds budget is its own refusal and never reaches the provider", async () => {

@@ -246,6 +246,8 @@ run(
     "tests/integration/chat-token-quota.db.test.ts",
     "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/chat-attempt-usage.db.test.ts",
+    // Code execution reserves every run Gemini can bill as a provider pass.
+    "tests/integration/chat-code-execution-reservation.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",
     // AMUX scheduling ownership is a database CAS: two claimants must leave
     // exactly one owner and one append-only route decision, and a failed

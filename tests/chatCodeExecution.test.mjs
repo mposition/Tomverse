@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -6,14 +7,18 @@ import {
   CODE_EXECUTION_MAX_CALLS_PER_TURN,
   CODE_EXECUTION_OUTPUT_META,
   CODE_EXECUTION_PRICE_REGISTER,
+  CODE_EXECUTION_RESERVED_PASSES,
   CODE_EXECUTION_TOOL_NAME,
   codeExecutionFenceKind,
   codeExecutionMarkdown,
+  codeExecutionReservedPasses,
   createCodeExecutionTextStream,
   modelSupportsCodeExecution,
   resolveCodeExecution,
 } from "../lib/chatCodeExecutionCore.ts";
 import { withCodeExecutionTool } from "../lib/chatCodeExecutionTool.ts";
+import { createChatBudget } from "../lib/chatSecurity.ts";
+import { getModel } from "../lib/models.ts";
 import { streamText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
@@ -30,7 +35,9 @@ import { MockLanguageModelV4 } from "ai/test";
 const ON = { CHAT_CODE_EXECUTION_ENABLED: "true" };
 const gemini = { provider: "google", apiModel: "gemini-3.7-flash" };
 const decide = (overrides = {}) =>
-  resolveCodeExecution({ env: ON, model: gemini, accessKind: "user", researchTurn: false, ...overrides });
+  resolveCodeExecution({
+    env: ON, model: gemini, accessKind: "user", researchTurn: false, applicationToolLoop: false, ...overrides,
+  });
 
 test("off unless the switch reads true, for every model", () => {
   for (const value of [undefined, "", "1", "TRUE", "false"]) {
@@ -38,12 +45,51 @@ test("off unless the switch reads true, for every model", () => {
       enabled: false, reason: "switch_off",
     });
   }
-  assert.deepEqual(decide(), { enabled: true, provider: "google", maxCalls: CODE_EXECUTION_MAX_CALLS_PER_TURN });
+  assert.deepEqual(decide(), {
+    enabled: true, provider: "google",
+    maxCalls: CODE_EXECUTION_MAX_CALLS_PER_TURN, reservedPasses: CODE_EXECUTION_RESERVED_PASSES,
+  });
 });
 
 test("guests and research turns never get the tool", () => {
   assert.deepEqual(decide({ accessKind: "guest" }), { enabled: false, reason: "guest" });
   assert.deepEqual(decide({ researchTurn: true }), { enabled: false, reason: "research_turn" });
+});
+
+// Review r-20261127-073816-5a1bf4: a run bills the prompt again, so its pass is
+// reserved before the request, and a turn whose tool loop would share those
+// passes does not get the tool.
+test("a turn with an application tool loop does not get the tool", () => {
+  assert.deepEqual(decide({ applicationToolLoop: true }), { enabled: false, reason: "tool_loop" });
+  assert.equal(codeExecutionReservedPasses(decide({ applicationToolLoop: true })), 1);
+});
+
+test("every run that can be billed is a reserved provider pass", () => {
+  // The request, the runs shown, and the one past the ceiling that aborts.
+  assert.equal(CODE_EXECUTION_RESERVED_PASSES, 1 + CODE_EXECUTION_MAX_CALLS_PER_TURN + 1);
+  assert.equal(codeExecutionReservedPasses(decide()), CODE_EXECUTION_RESERVED_PASSES);
+  assert.equal(codeExecutionReservedPasses({ enabled: false, reason: "switch_off" }), 1);
+  // The budget holds that many passes rather than clamping them down, on an
+  // ordinary turn and on a long-context one.
+  const model = getModel("gemini-3-6-flash");
+  assert.ok(model && modelSupportsCodeExecution(model));
+  const passes = codeExecutionReservedPasses(decide());
+  for (const input of [2_000, 200_000]) {
+    const withRuns = createChatBudget("user", model, input, {
+      toolInputPasses: passes, longContextToolInputPasses: passes,
+    });
+    assert.equal(withRuns.providerCallPasses, CODE_EXECUTION_RESERVED_PASSES, String(input));
+    assert.equal(createChatBudget("user", model, input).providerCallPasses, undefined, String(input));
+    assert.equal(
+      withRuns.inputTokens,
+      withRuns.contextInputTokens * CODE_EXECUTION_RESERVED_PASSES +
+        withRuns.maxOutputTokens * (CODE_EXECUTION_RESERVED_PASSES - 1),
+      String(input)
+    );
+  }
+  // Both pass counts the route builds carry the runs.
+  const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  assert.equal(route.split("codeExecutionReservedPasses(codeExecution)").length - 1, 2);
 });
 
 test("a provider that bills the tool on top of tokens waits for its surcharge", () => {

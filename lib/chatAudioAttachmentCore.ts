@@ -111,11 +111,19 @@ export const inspectAudioAttachment = (input: {
 // ---------------------------------------------------------------------------
 
 /**
- * Bytes after the last frame that may be ignored: ID3v1, APE and Lyrics tags.
- * More than this is something a decoder could resynchronise on and play, so
- * the length the frames add up to would no longer bound what is transcribed.
+ * Whether `bytes[from..]` holds anything a decoder could start a frame on: an
+ * MPEG sync word, eleven set bits (0xFF, then a byte whose top three bits are
+ * set). A decoder that loses sync scans for exactly this, so bytes without one
+ * -- an ID3v1 or text APE tag, zero padding -- cannot be played, and bytes with
+ * one might be (review r-20261127-073816-5a1bf4: a short frame, junk, then a
+ * long recording resynchronised on and transcribed in full).
  */
-const MP3_TRAILING_TAG_ALLOWANCE = 256 * 1024;
+const holdsFrameSync = (bytes: Uint8Array, from: number) => {
+    for (let index = Math.max(0, from); index + 1 < bytes.length; index += 1) {
+        if (bytes[index] === 0xff && (bytes[index + 1] & 0xe0) === 0xe0) return true;
+    }
+    return false;
+};
 
 // Bitrates in kbit/s, indexed by the header's 4-bit field. Index 0 ("free") and
 // 15 ("bad") are refused: a free-format stream has no length this can compute.
@@ -173,6 +181,11 @@ const readMp3Frame = (bytes: Uint8Array, offset: number): Mp3Frame | null => {
  * kbit/s over frames encoded at 8 would make the reserved length forty times
  * shorter than what the provider decodes. The walk is bounded by the file:
  * each step advances by at least four bytes.
+ *
+ * And to the end of the file: whatever follows the last whole frame must hold
+ * no frame sync (`holdsFrameSync`), so nothing after it can be played. A last
+ * frame cut short counts as a whole one when nothing after its header could
+ * start another; anything else past the walk refuses the file.
  */
 export const mp3DurationSeconds = (bytes: Uint8Array): number | null => {
     let offset = 0;
@@ -191,13 +204,21 @@ export const mp3DurationSeconds = (bytes: Uint8Array): number | null => {
     for (;;) {
         const frame = readMp3Frame(bytes, offset);
         if (!frame) break;
-        if (offset + frame.length > bytes.length) break;
+        if (offset + frame.length > bytes.length) {
+            // Cut short: it plays at most one frame, and only if no sync after
+            // its header could start a further one.
+            if (holdsFrameSync(bytes, offset + 4)) return null;
+            seconds += frame.samples / frame.sampleRate;
+            frames += 1;
+            offset = bytes.length;
+            break;
+        }
         seconds += frame.samples / frame.sampleRate;
         frames += 1;
         offset += frame.length;
     }
     if (frames === 0) return null;
-    if (bytes.length - offset > MP3_TRAILING_TAG_ALLOWANCE) return null;
+    if (holdsFrameSync(bytes, offset)) return null;
     return seconds;
 };
 
