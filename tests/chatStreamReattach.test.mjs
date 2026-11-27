@@ -236,3 +236,28 @@ test("a settled hand-off carries the completion callback it was given", () => {
   assert.equal(settleInterruptedChatAttempt("k", "a"), null);
   stop();
 });
+
+// Review r-20261127-045409-cf6503: an interrupted reattached turn keeps the
+// partial answer it recovered. Only account Chat takes a hand-off, and its
+// error write keeps `assistantText` as the body with the error beside it.
+test("an interrupted reattached turn keeps its recovered partial as the body", () => {
+  const handOff = source.slice(
+    source.indexOf("const handOffInterruptedStream"),
+    source.indexOf("// The bundle actually presented")
+  );
+  assert.match(
+    handOff,
+    /finish: \(checkpointed\) => \{\s*assistantText = recoveredPartialText\(assistantText, checkpointed\);\s*endAsInterrupted\(interruption\);/
+  );
+  const writer = source.slice(
+    source.indexOf("const setAssistantMessage: typeof writeAssistantMessage"),
+    source.indexOf("const latency = createClientLatency")
+  );
+  assert.match(
+    writer,
+    /status === "error" && transcriptScope === "conversation" \? assistantText : content/
+  );
+  assert.match(writer, /recoveryNotice: content/);
+  const watch = source.slice(source.indexOf("Streams that broke on this key"), source.indexOf("const isMobileShell"));
+  assert.match(watch, /if \(isGuestMode \|\| transcriptScope !== "conversation"\) return;/);
+});

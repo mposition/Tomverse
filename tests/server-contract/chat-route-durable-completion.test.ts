@@ -622,6 +622,62 @@ test("a durable turn whose Message write keeps failing ends failed, still settle
 });
 
 /*
+  Review r-20261127-045409-cf6503. A file-only answer delivers nothing until
+  its Message and file rows exist, so it is charged only once the save outcome
+  is known: a known rollback discards the file and settles empty; a commit
+  whose acknowledgement was lost keeps the file and its charge.
+*/
+const fileOnlyScript = (toolCallId: string): Script => ({
+  first: "",
+  then: "finish",
+  rest: "",
+  tool: {
+    toolName: "create_text_file",
+    toolCallId,
+    execute: true,
+    input: { filename: "page.html", format: "html", content: "<!doctype html><title>ok</title><p>ok</p>" },
+  },
+});
+
+test("a file-only durable answer whose Message write keeps failing is not charged", async () => {
+  world.createFailures = [retryableWriteError(), retryableWriteError(), retryableWriteError()];
+  try {
+    const { readToEnd } = await start(fileOnlyScript("call_file_rollback"));
+    releaseRest();
+    await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    await until("the settlement", () => ledger.settlements.length > 0);
+    assert.deepEqual(world.messages, []);
+    assert.deepEqual(world.artifactRows, []);
+    assert.ok(world.discarded > 0, "the unreachable file was kept");
+    assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["empty"]);
+  } finally {
+    world.createFailures = [];
+  }
+});
+
+test("a file-only durable answer whose commit acknowledgement was lost keeps its file and charge", async () => {
+  world.commitAckLost = [retryableWriteError()];
+  world.commitCheckFails = true;
+  try {
+    const { readToEnd } = await start(fileOnlyScript("call_file_unknown"));
+    releaseRest();
+    await readToEnd();
+    await until("the lease release", () => ledger.releases.length > 0);
+    await until("the settlement", () => ledger.settlements.length > 0);
+    assert.equal(world.messages.length, 1, "the transaction committed");
+    assert.deepEqual(world.artifactRows.map((r) => r.status), ["ready"]);
+    assert.equal(world.discarded, 0);
+    assert.equal(row?.status, "completed");
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
+  } finally {
+    world.commitAckLost = [];
+    world.commitCheckFails = false;
+  }
+});
+
+/*
   S4 (b). What fails after the provider's stream reported done -- the final
   checkpoint's CAS, a database error in the Message write -- is this
   application's own completion handling. It was filed as a provider and a

@@ -8571,44 +8571,65 @@ async function handleChatPost(
                                 ? usageResult.value
                                 : null;
 
-                        if (reportedUsage) {
-                            const usage = reportedUsage;
-                            const providerCalls = await providerCallUsage(dispatched.stream);
-                            await settleSafely(
-                                settledAs,
-                                {
-                                    inputTokens: usage.inputTokens,
-                                    cachedInputTokens:
-                                        usage.inputTokenDetails.cacheReadTokens,
-                                    // `usage.inputTokens` is the *total* --
-                                    // the SDK builds it as noCache + cacheRead
-                                    // + cacheWrite, unlike the Anthropic API's
-                                    // own `input_tokens`, which is the
-                                    // uncached remainder. So the write count
-                                    // is carved out of that total rather than
-                                    // added to it; settlement prices it at
-                                    // 1.25x instead of the 1.0x it was
-                                    // silently getting as part of the
-                                    // "uncached" remainder.
-                                    cacheWriteInputTokens:
-                                        usage.inputTokenDetails.cacheWriteTokens,
-                                    outputTokens: usage.outputTokens,
-                                    reasoningTokens:
-                                        usage.outputTokenDetails
-                                            .reasoningTokens,
-                                    usageFromProvider: true,
-                                    providerCalls,
-                                    ...searchSettlementFields,
-                                },
-                                interruptionInstrumentation
-                            );
-                        } else {
-                            await settleSafely(
-                                settledAs,
-                                searchSettlementFields,
-                                interruptionInstrumentation
-                            );
-                        }
+                        /*
+                          When this turn is charged.
+
+                          Text the user has already read is delivered whether
+                          or not its Message is saved, so it settles now, as it
+                          always has. A file-only answer delivers nothing until
+                          its Message and file rows exist: a known rollback
+                          discards the file, and the user then received
+                          neither text nor file. It settles once the save
+                          outcome is known -- as `settledAs` when the rows
+                          committed (or may have: an unknown outcome keeps the
+                          file for a reload to show), as `empty` when they are
+                          known not to have. `settleSafely` settles once; the
+                          first call wins.
+                        */
+                        const fileOnlyAnswer = deliveredFiles && !answerHasText;
+                        const settleAnswer = async (
+                            outcome: typeof settledAs
+                        ) => {
+                            if (reportedUsage) {
+                                const usage = reportedUsage;
+                                const providerCalls = await providerCallUsage(dispatched.stream);
+                                await settleSafely(
+                                    outcome,
+                                    {
+                                        inputTokens: usage.inputTokens,
+                                        cachedInputTokens:
+                                            usage.inputTokenDetails.cacheReadTokens,
+                                        // `usage.inputTokens` is the *total* --
+                                        // the SDK builds it as noCache + cacheRead
+                                        // + cacheWrite, unlike the Anthropic API's
+                                        // own `input_tokens`, which is the
+                                        // uncached remainder. So the write count
+                                        // is carved out of that total rather than
+                                        // added to it; settlement prices it at
+                                        // 1.25x instead of the 1.0x it was
+                                        // silently getting as part of the
+                                        // "uncached" remainder.
+                                        cacheWriteInputTokens:
+                                            usage.inputTokenDetails.cacheWriteTokens,
+                                        outputTokens: usage.outputTokens,
+                                        reasoningTokens:
+                                            usage.outputTokenDetails
+                                                .reasoningTokens,
+                                        usageFromProvider: true,
+                                        providerCalls,
+                                        ...searchSettlementFields,
+                                    },
+                                    interruptionInstrumentation
+                                );
+                            } else {
+                                await settleSafely(
+                                    outcome,
+                                    searchSettlementFields,
+                                    interruptionInstrumentation
+                                );
+                            }
+                        };
+                        if (!fileOnlyAnswer) await settleAnswer(settledAs);
                         /*
                           The files this turn produced, as the client will be
                           told about them.
@@ -8994,6 +9015,13 @@ async function handleChatPost(
                                     // reload.
                                     if (!durableAttempt) answerPersistence = "not_saved";
                                 }
+                                // A file-only answer whose save outcome is
+                                // known: committed keeps its charge, a
+                                // rollback delivered nothing. An unknown
+                                // outcome is decided below.
+                                if (fileOnlyAnswer && !outcomeUnknown) {
+                                    await settleAnswer(messageCommitted ? settledAs : "empty");
+                                }
                                 if (durableAttempt && durableFinalCheckpoint) {
                                     // Billing has already settled above and is
                                     // intentionally not rolled back with the
@@ -9012,27 +9040,40 @@ async function handleChatPost(
                                     // which the browser reads when the stream
                                     // breaks without a signed failure -- tells
                                     // the truth either way.
-                                    await terminalChatResponseAttempt({
-                                        userId: durableAttempt.userId,
-                                        assistantMessageId:
-                                            durableAttempt.assistantMessageId,
-                                        ownerId: durableAttempt.ownerId,
-                                        expectedRevision:
-                                            durableFinalCheckpoint.revision,
-                                        status: "failed",
-                                        finalContent:
-                                            durableFinalCheckpoint.partialContent,
-                                        actualModelId: dispatched.modelId,
-                                        provider: dispatched.provider,
-                                        finishReason: "error",
-                                        failureCode: "internal_error",
-                                    });
+                                    try {
+                                        await terminalChatResponseAttempt({
+                                            userId: durableAttempt.userId,
+                                            assistantMessageId:
+                                                durableAttempt.assistantMessageId,
+                                            ownerId: durableAttempt.ownerId,
+                                            expectedRevision:
+                                                durableFinalCheckpoint.revision,
+                                            status: "failed",
+                                            finalContent:
+                                                durableFinalCheckpoint.partialContent,
+                                            actualModelId: dispatched.modelId,
+                                            provider: dispatched.provider,
+                                            finishReason: "error",
+                                            failureCode: "internal_error",
+                                        });
+                                    } catch (casError) {
+                                        // Refused: the Message transaction
+                                        // committed and closed the attempt, so
+                                        // the file was delivered (or the CAS
+                                        // itself failed, and the outcome stays
+                                        // unknown with the file kept).
+                                        if (fileOnlyAnswer) await settleAnswer(settledAs);
+                                        throw casError;
+                                    }
                                     if (outcomeUnknown) {
                                         // Not committed after all: known now.
                                         messagePersistOutcomeUnknown = false;
                                         artifactsPersisted = false;
                                         await artifactCollector?.discard();
                                     }
+                                    // The attempt is failed: a file-only
+                                    // answer delivered nothing.
+                                    if (fileOnlyAnswer) await settleAnswer("empty");
                                     durableAttempt = null;
                                     durableCheckpointWriter = null;
                                     throw error;
@@ -9066,6 +9107,10 @@ async function handleChatPost(
                             await artifactCollector.discard();
                             artifactsForTrailer = [];
                         }
+                        // A file-only answer that reached here was saved, or
+                        // its outcome is unknown and its file is kept for a
+                        // reload to show; a rollback settled above as empty.
+                        if (fileOnlyAnswer) await settleAnswer(settledAs);
                         // A delivered file is not an empty answer: no
                         // provider failure, no error report, no failed
                         // attempt.

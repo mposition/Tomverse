@@ -1961,6 +1961,13 @@ function ChatAppComponent({
      * catch block below would have ended it before reattaching existed: a
      * client timeout through `endAsTimeout`, and a body read that rejected
      * with no server code as the request-failure branch's generic error.
+     *
+     * The partial answer is not lost by either: only an account Chat panel
+     * (transcriptScope "conversation") takes a hand-off, and there
+     * `setAssistantMessage` writes an error turn's body from `assistantText`
+     * -- which the hand-off's `finish` has just set to the longer of what was
+     * shown and what the server checkpointed -- and the error sentence into
+     * `recoveryNotice` beside it.
      */
     const endAsInterrupted = (interruption: ChatStreamInterruption) => {
       if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
