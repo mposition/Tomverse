@@ -10,6 +10,7 @@ import {
     type CachedAttachmentText,
 } from "@/lib/attachmentTextCache";
 import { ChatAccessError } from "@/lib/chatSecurity";
+import { prisma } from "@/lib/prisma";
 import {
     audioTranscriptEntry,
     CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS,
@@ -213,10 +214,41 @@ export const transcribeAudioAttachment = async (
 
 /**
  * How long a claim stands before another request may take it over: the
- * transcription's own timeout, plus room to settle and store its result.
+ * transcription's own deadline, plus room to settle and store its result.
+ *
+ * Only safe because that deadline is hard. The provider port holds its abort
+ * timer until the response body has been read as well as the headers
+ * (`transcribeWithOpenAi`), so a claim cannot go stale while the call that
+ * holds it is still waiting on the provider (review r-20261127-110354-67c5f8).
+ * A test pins the order of the two numbers.
  */
 export const AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS =
     Math.ceil(CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS / 1000) + 30;
+
+/**
+ * The bound attachment row a recording is claimed and stored on, or null.
+ *
+ * Keyed on the recording, not on how the request named it: a reference by
+ * attachment id is that row; a reference by upload id is the row the upload
+ * was bound to, when it has been -- same account, same stored object. An
+ * upload nothing has bound has no row, and is not transcribed
+ * (review r-20261127-110354-67c5f8: two requests naming one unbound upload
+ * used to transcribe it twice).
+ */
+export const resolveRecordingAttachmentId = async (input: {
+    userId: string;
+    attachmentId: string | null;
+    uploadId: string | null;
+    objectKey: string;
+}): Promise<string | null> => {
+    if (input.attachmentId) return input.attachmentId;
+    if (!input.uploadId) return null;
+    const row = await prisma.messageAttachment.findFirst({
+        where: { uploadId: input.uploadId, userId: input.userId, objectKey: input.objectKey },
+        select: { id: true },
+    });
+    return row?.id ?? null;
+};
 /** How often a waiting request looks again. */
 export const AUDIO_TRANSCRIPT_CLAIM_POLL_MS = 500;
 

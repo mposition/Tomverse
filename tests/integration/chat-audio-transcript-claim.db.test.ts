@@ -11,6 +11,7 @@ import {
 } from "@/lib/attachmentTextCache";
 import {
   AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS,
+  resolveRecordingAttachmentId,
   transcribeAudioAttachmentOnce,
   type AudioTranscriptionDeps,
 } from "@/lib/chatAudioAttachment";
@@ -42,6 +43,7 @@ const reset = () =>
     TRUNCATE TABLE
       "MessageAttachmentTextCache",
       "MessageAttachment",
+      "MessageAttachmentUpload",
       "Message",
       "Conversation",
       "ChatUsageBucket",
@@ -55,6 +57,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+/** A recording saved with its message, through the upload step the composer takes. */
 const recording = async () => {
   const user = await prisma.user.create({
     data: { email: `transcript-claim-${randomUUID()}@example.test`, plan: "Pro" },
@@ -65,20 +68,27 @@ const recording = async () => {
   const message = await prisma.message.create({
     data: { conversationId: conversation.id, role: "user", content: "summarise" },
   });
+  const file = {
+    name: "meeting.mp3",
+    mediaType: "audio/mpeg",
+    size: 12_452,
+    // attachmentKindForFormat: every non-text format is a "file".
+    kind: "file",
+    objectKey: `users/${user.id}/attachments/${randomUUID()}.mp3`,
+  };
+  const upload = await prisma.messageAttachmentUpload.create({
+    data: { userId: user.id, ...file, boundAt: new Date() },
+  });
   const attachment = await prisma.messageAttachment.create({
     data: {
       messageId: message.id,
       conversationId: conversation.id,
       userId: user.id,
-      name: "meeting.mp3",
-      mediaType: "audio/mpeg",
-      size: 12_452,
-      // attachmentKindForFormat: every non-text format is a "file".
-      kind: "file",
-      objectKey: `users/${user.id}/attachments/${randomUUID()}.mp3`,
+      uploadId: upload.id,
+      ...file,
     },
   });
-  return { userId: user.id, attachmentId: attachment.id };
+  return { userId: user.id, attachmentId: attachment.id, uploadId: upload.id, objectKey: file.objectKey };
 };
 
 /** The production ledgers, with a provider that answers after a short delay. */
@@ -96,6 +106,24 @@ const transcription = (calls: { count: number }): AudioTranscriptionDeps => ({
     };
   },
 });
+
+const askFor = (
+  userId: string,
+  attachmentId: string,
+  calls: { count: number }
+) =>
+  transcribeAudioAttachmentOnce(
+    {
+      bytes: new Uint8Array(16),
+      mediaType: "audio/mpeg",
+      extension: "mp3",
+      durationSeconds: 3,
+      subjectKey: `integration:user:${userId}`,
+      traceId: `trace-${randomUUID()}`,
+      attachmentId,
+    },
+    { transcription: transcription(calls) }
+  );
 
 const bucketTotal = async (period: string) => {
   const rows = await prisma.chatUsageBucket.findMany({ where: { period } });
@@ -117,19 +145,7 @@ const quietly = async <T>(run: () => Promise<T>) => {
 test("two requests for one recording transcribe it once and book its seconds once", async () => {
   const { userId, attachmentId } = await recording();
   const calls = { count: 0 };
-  const ask = () =>
-    transcribeAudioAttachmentOnce(
-      {
-        bytes: new Uint8Array(16),
-        mediaType: "audio/mpeg",
-        extension: "mp3",
-        durationSeconds: 3,
-        subjectKey: `integration:user:${userId}`,
-        traceId: `trace-${randomUUID()}`,
-        attachmentId,
-      },
-      { transcription: transcription(calls) }
-    );
+  const ask = () => askFor(userId, attachmentId, calls);
   const [first, second] = await quietly(() => Promise.all([ask(), ask()]));
 
   assert.equal(calls.count, 1, "one paid transcription");
@@ -176,4 +192,68 @@ test("a claim is taken once, refused while fresh or answered, and taken over onc
     WHERE "attachmentId" = ${attachmentId}`;
   assert.equal(await claimAttachmentTextCache(attachmentId, "c", AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS), false);
   assert.deepEqual(await readAttachmentTextCache(attachmentId), [{ kind: "audio transcript", text: "Done." }]);
+});
+
+// Review r-20261127-110354-67c5f8 (a): a request may name the recording by the
+// upload id rather than the attachment id. It is the same recording, so it is
+// the same claim and the same transcript; an upload nothing has bound has no
+// row to claim on, and the route does not transcribe it.
+test("naming a recording by its upload id claims the same row", async () => {
+  const { userId, attachmentId, uploadId, objectKey } = await recording();
+  const resolve = () =>
+    resolveRecordingAttachmentId({ userId, attachmentId: null, uploadId, objectKey });
+  assert.equal(await resolve(), attachmentId);
+  const calls = { count: 0 };
+  const [byUpload, byAttachment] = await quietly(() =>
+    Promise.all([
+      resolve().then((id) => askFor(userId, id!, calls)),
+      askFor(userId, attachmentId, calls),
+    ])
+  );
+  assert.equal(calls.count, 1, "one paid transcription");
+  assert.deepEqual(byUpload, byAttachment);
+  assert.equal(await bucketTotal("voice-seconds-day"), 3);
+  assert.equal(await bucketTotal(VOICE_PROVIDER_BUDGET_PERIODS.day), 3);
+
+  // Another account's upload id, or a different object, names nothing here.
+  assert.equal(
+    await resolveRecordingAttachmentId({ userId: randomUUID(), attachmentId: null, uploadId, objectKey }),
+    null
+  );
+  assert.equal(
+    await resolveRecordingAttachmentId({ userId, attachmentId: null, uploadId, objectKey: `${objectKey}.other` }),
+    null
+  );
+  // An upload nothing has bound has no row.
+  const unbound = await prisma.messageAttachmentUpload.create({
+    data: {
+      userId, name: "draft.mp3", mediaType: "audio/mpeg", size: 1, kind: "file",
+      objectKey: `users/${userId}/attachments/${randomUUID()}.mp3`,
+    },
+  });
+  assert.equal(
+    await resolveRecordingAttachmentId({ userId, attachmentId: null, uploadId: unbound.id, objectKey: unbound.objectKey }),
+    null
+  );
+});
+
+// Review r-20261127-110354-67c5f8 (b): the transcript is a paid result, not an
+// extractor cache, so turning the text cache off does not turn the claim off.
+test("with the text cache switched off, the recording is still transcribed once", async () => {
+  const previous = process.env.CHAT_ATTACHMENT_TEXT_CACHE;
+  process.env.CHAT_ATTACHMENT_TEXT_CACHE = "0";
+  try {
+    const { userId, attachmentId } = await recording();
+    const calls = { count: 0 };
+    const [first, second] = await quietly(() =>
+      Promise.all([askFor(userId, attachmentId, calls), askFor(userId, attachmentId, calls)])
+    );
+    assert.equal(calls.count, 1, "one paid transcription");
+    assert.deepEqual(second, first);
+    assert.equal(await bucketTotal("voice-seconds-day"), 3);
+    assert.equal(await bucketTotal(VOICE_PROVIDER_BUDGET_PERIODS.day), 3);
+  } finally {
+    if (previous === undefined) delete process.env.CHAT_ATTACHMENT_TEXT_CACHE;
+    else process.env.CHAT_ATTACHMENT_TEXT_CACHE = previous;
+  }
 });

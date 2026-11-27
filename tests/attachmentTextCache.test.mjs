@@ -107,13 +107,13 @@ test("on by default, off with CHAT_ATTACHMENT_TEXT_CACHE=0", () => {
     assert.equal(attachmentTextCacheEnabled({ CHAT_ATTACHMENT_TEXT_CACHE: "0" }), false);
 });
 
-test("the route caches only an account's earlier, bound file, and the turn's own only for a transcript", () => {
+test("the route caches only an account's earlier, bound file, and never the turn's own", () => {
     const route = source("app/api/chat/route.ts");
     const start = route.indexOf("const textCacheEligible =");
     assert.ok(start > 0);
     const eligibility = route.slice(start, route.indexOf(";", start));
     for (const condition of [
-        "(!isLatestMessage || latestAudioTranscript)",
+        "!isLatestMessage",
         "!isGuestObject",
         "Boolean(resolved?.attachmentId)",
         "ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category)",
@@ -121,17 +121,17 @@ test("the route caches only an account's earlier, bound file, and the turn's own
     ]) {
         assert.ok(eligibility.includes(condition), condition);
     }
-    // Review r-20261127-073816-5a1bf4: a retry or another model's answer reuses
-    // the turn's own transcript rather than paying for it again -- while
-    // recordings are accepted, and with the recording still read.
-    const latestStart = route.indexOf("const latestAudioTranscript =");
-    const latest = route.slice(latestStart, route.indexOf(";", latestStart));
-    for (const condition of ["isLatestMessage", 'format.category === "audio"', "chatAudioAttachmentEnabled()"]) {
-        assert.ok(latest.includes(condition), condition);
-    }
-    const reuse = route.slice(route.indexOf("if (latestCachedTranscript) {"));
-    assert.ok(route.indexOf("let attachmentBuffer: Buffer;") < route.indexOf("if (latestCachedTranscript) {"));
-    assert.ok(reuse.indexOf("CHAT_ATTACHMENT_PARSE_CHARACTERS") < reuse.indexOf("await ingestAttachmentFile("));
+    // Reviews r-20261127-082100-427572 and r-20261127-110354-67c5f8: a
+    // recording's transcript is claimed and stored on its own bound row by
+    // transcribeAudioAttachmentOnce -- the turn's own recording included, and
+    // whatever CHAT_ATTACHMENT_TEXT_CACHE says -- so the route neither gates it
+    // on the text cache nor writes it a second time.
+    const recording = route.slice(route.indexOf("const recordingAttachmentId ="));
+    const recordingRule = recording.slice(0, recording.indexOf(";"));
+    assert.ok(recordingRule.includes('format.category === "audio"'));
+    assert.ok(!recordingRule.includes("textCacheEligible") && !recordingRule.includes("attachmentTextCacheEnabled"));
+    assert.ok(route.includes("transcriptAttachmentId: recordingAttachmentId,"));
+    assert.ok(route.includes('if (textCacheEligible && format.category !== "audio") {'));
     // A cache hit answers to the same past-file share and parse budget.
     const hit = route.slice(start, route.indexOf("let attachmentBuffer: Buffer;", start));
     assert.match(hit, /pastAttachmentTokens \+ tokens > pastAttachmentTokenBudget/);

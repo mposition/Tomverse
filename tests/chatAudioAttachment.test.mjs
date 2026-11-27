@@ -37,6 +37,7 @@ import {
   validateChatAttachmentUpload,
 } from "../lib/chatAttachmentValidation.ts";
 import { ATTACHMENT_TEXT_CACHE_CATEGORIES } from "../lib/attachmentTextCache.ts";
+import { transcribeWithOpenAi } from "../lib/voiceTranscriptionPortCore.ts";
 import { createRequire } from "node:module";
 
 // The class the library itself throws and catches. A .ts module reached by
@@ -484,4 +485,57 @@ test("a claim that never resolves is waited out, not waited on forever", async (
   // A store that cannot claim at all is no reason to fail the turn.
   const broken = memoryStore({ claim: async () => { throw new Error("database down"); } });
   assert.equal((await once(broken, slowTranscription([]))).length, 1);
+});
+
+// -- The claim lasts longer than the call that holds it ----------------------
+
+// Review r-20261127-110354-67c5f8: a claim goes stale on a fixed clock, so the
+// transcription it covers must end -- body and all -- before that clock does.
+test("a claim outlives the hardest deadline its transcription can run to", () => {
+  assert.ok(AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 > CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS);
+  // Room after the deadline to settle the seconds and store the transcript.
+  assert.ok(AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 - CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS >= 10_000);
+});
+
+/** Headers now, a body never: a provider whose answer stalls after its status line. */
+const stalledBody = (status) => async () =>
+  new Response(new ReadableStream({ start() {} }), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+const portRequest = {
+  audio: new Uint8Array([1]),
+  mediaType: "audio/mpeg",
+  extension: "mp3",
+  languageHint: null,
+  timeoutMs: 50,
+};
+
+test("the provider's deadline covers the body, not only the headers", async () => {
+  const started = Date.now();
+  const result = await transcribeWithOpenAi(portRequest, {
+    apiKey: "k", model: "m", fetchImpl: stalledBody(200),
+  });
+  assert.deepEqual(result, {
+    ok: false, code: "provider_response_unreadable", status: 200, disposition: "indeterminate",
+  });
+  assert.ok(Date.now() - started < 5_000, "cut off at the deadline, not waited on");
+  // A refusal whose body stalls is still classified, and still on time.
+  const refused = await transcribeWithOpenAi(portRequest, {
+    apiKey: "k", model: "m", fetchImpl: stalledBody(429),
+  });
+  assert.equal(refused.code, "provider_rate_limited");
+  assert.ok(Date.now() - started < 10_000);
+});
+
+test("a stalled body fails the claimed transcription and frees the claim", async () => {
+  const store = memoryStore();
+  const events = [];
+  const deps = fakeDeps(null, events);
+  deps.transcribe = (request) =>
+    transcribeWithOpenAi({ ...request, timeoutMs: 50 }, { apiKey: "k", model: "m", fetchImpl: stalledBody(200) });
+  await assert.rejects(once(store, deps), (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+  // Indeterminate: the provider may have done the work, so the seconds stay booked.
+  assert.deepEqual(events.at(-1), ["settle", { kind: "reservation" }]);
+  assert.equal(store.rows.has("att-1"), false);
 });

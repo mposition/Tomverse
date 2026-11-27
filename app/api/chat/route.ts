@@ -40,7 +40,7 @@ import {
 } from "@/lib/chatAttachmentFormats";
 import {
     chatAudioAttachmentEnabled,
-    transcribeAudioAttachment,
+    resolveRecordingAttachmentId,
     transcribeAudioAttachmentOnce,
 } from "@/lib/chatAudioAttachment";
 import { CHAT_AUDIO_ATTACHMENT_MAX_BYTES, inspectAudioAttachment } from "@/lib/chatAudioAttachmentCore";
@@ -4471,26 +4471,36 @@ async function handleChatPost(
                         throw new ChatAccessError(inspection.code === "ATTACHMENT_AUDIO_TOO_LONG" ? 413 : 400,
                             inspection.code, "The attached recording cannot be transcribed.");
                     }
+                    // Only a recording saved with its message is transcribed:
+                    // its row is what the one paid transcription is claimed and
+                    // stored on, so every request for it -- another model, a
+                    // retry -- reads that one. An upload nothing has bound has
+                    // no such row; the composer always saves the message first.
+                    if (!transcriptAttachmentId) {
+                        if (!isLatestMessage) return omitPastAttachment();
+                        throw new ChatAccessError(409, "AUDIO_TRANSCRIPTION_UNAVAILABLE",
+                            "A recording is transcribed once it is saved with its message.");
+                    }
                     try {
-                        const transcription = {
+                        const entries = await transcribeAudioAttachmentOnce({
                             bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
                             mediaType: format.mediaType,
                             extension: format.extensions[0],
                             durationSeconds: inspection.durationSeconds,
                             subjectKey: access.subjectKey,
                             traceId,
-                        };
-                        // A bound recording is transcribed by one request only;
-                        // another model answering the same message waits for it.
-                        const entries = transcriptAttachmentId
-                            ? await transcribeAudioAttachmentOnce({
-                                  ...transcription,
-                                  attachmentId: transcriptAttachmentId,
-                                  signal: req.signal,
-                              })
-                            : [await transcribeAudioAttachment(transcription)];
+                            attachmentId: transcriptAttachmentId,
+                            signal: req.signal,
+                        });
                         for (const entry of entries) addExtractedText(entry.kind, entry.text);
                     } catch (error) {
+                        // An earlier message's refusal (no budget, provider
+                        // down, no speech) leaves the file out. Anything else
+                        // goes to `deliverAttachment`, which leaves it out too
+                        // -- except a storage or retryable database fault and a
+                        // cancelled request, which stop the turn as they do for
+                        // every other file: a seconds-ledger write that failed
+                        // that way has an outcome nobody knows yet.
                         if (!isLatestMessage && error instanceof ChatAccessError) return omitPastAttachment();
                         throw error;
                     }
@@ -4985,31 +4995,14 @@ async function handleChatPost(
                   freshly read one, and does not count towards the request's
                   byte total, because no bytes are read.
                 */
-                // A transcript is paid for, so the message being answered reads
-                // and writes it too: the first send stores it, and a retry or
-                // another model's answer to the same message reuses it instead
-                // of transcribing the recording again. Only while recordings
-                // are accepted at all -- a switched-off one is refused below.
-                const latestAudioTranscript =
-                    isLatestMessage &&
-                    format.category === "audio" &&
-                    chatAudioAttachmentEnabled() &&
-                    Boolean(access.subjectKey);
                 const textCacheEligible =
-                    (!isLatestMessage || latestAudioTranscript) &&
+                    !isLatestMessage &&
                     !isGuestObject &&
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
                     attachmentTextCacheEnabled();
-                // On the message being answered the cache stands in for the
-                // transcription only. The recording is still read below, so the
-                // handle, the byte total and a 410 for a file gone are what a
-                // miss gets, and it needs no probe of its own.
-                let latestCachedTranscript: Awaited<ReturnType<typeof readAttachmentTextCache>> = null;
-                if (textCacheEligible && isLatestMessage) {
-                    latestCachedTranscript = await readAttachmentTextCache(resolved!.attachmentId!);
-                } else if (textCacheEligible) {
+                if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
                     // knowing it exists: storage is still asked, and a file it
@@ -5269,33 +5262,33 @@ async function handleChatPost(
                             text: structured });
                         continue;
                     }
-                    if (latestCachedTranscript) {
-                        // The stored transcript of this very recording, under
-                        // the parse budget a fresh one would have met.
-                        for (const entry of latestCachedTranscript) {
-                            totalExtractedCharacters += entry.text.length;
-                            if (totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS) {
-                                throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
-                                    "Extracted attachment text exceeds the request limit.");
-                            }
-                            textAttachments.push({ name: attachment.name, kind: entry.kind, text: entry.text });
-                        }
-                        continue;
-                    }
                     const textEntriesBefore = textAttachments.length;
                     const filePartsBefore = fileParts.length;
                     const parseRoomBefore =
                         CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
+                    // A recording is claimed, transcribed and stored on its own
+                    // bound row, whatever the text cache switch says and however
+                    // the request named it (docs/policy/chat-attachment-formats.md
+                    // 2.4.1); `transcribeAudioAttachmentOnce` writes it.
+                    const recordingAttachmentId =
+                        format.category === "audio" && !isGuestObject && access.userId
+                            ? await resolveRecordingAttachmentId({
+                                  userId: access.userId,
+                                  attachmentId: resolved?.attachmentId ?? null,
+                                  uploadId: resolved?.uploadId ?? null,
+                                  objectKey: attachment.objectKey,
+                              })
+                            : null;
                     await deliverAttachment(attachmentName, () =>
                         ingestAttachmentFile({
                             format,
                             name: attachmentName,
                             buffer: attachmentBuffer,
                             fromArchive: false,
-                            transcriptAttachmentId: textCacheEligible ? resolved!.attachmentId! : null,
+                            transcriptAttachmentId: recordingAttachmentId,
                         })
                     );
-                    if (textCacheEligible) {
+                    if (textCacheEligible && format.category !== "audio") {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).
