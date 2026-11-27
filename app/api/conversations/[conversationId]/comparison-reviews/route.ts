@@ -88,6 +88,8 @@ const reviewRequestSchema = z
 
 /** The exact turn a saved-result lookup may name (see GET). */
 const storedTurnLookupSchema = z.object({
+  reviewMode: comparisonReviewModeSchema,
+  includeSynthesis: z.boolean(),
   promptMessageId: z.string().uuid(),
   assistantMessageIds: z.array(z.string().uuid()).min(2).max(3),
   savedBefore: z.union([
@@ -95,6 +97,18 @@ const storedTurnLookupSchema = z.object({
     z.string().datetime(),
   ]),
 });
+type StoredTurnLookup = z.infer<typeof storedTurnLookupSchema>;
+
+const parseStoredTurnLookup = (query: URLSearchParams): StoredTurnLookup | null => {
+  const parsed = storedTurnLookupSchema.safeParse({
+    reviewMode: query.get("reviewMode"),
+    includeSynthesis: query.get("includeSynthesis") === "true",
+    promptMessageId: query.get("promptMessageId"),
+    assistantMessageIds: query.get("assistantMessageIds")?.split(","),
+    savedBefore: query.get("savedBefore"),
+  });
+  return parsed.success ? parsed.data : null;
+};
 
 const jsonError = (
   error: string,
@@ -216,44 +230,47 @@ const storedReviewPayload = (
  * over the size limit, does not hide an older turn's saved result -- and it
  * skips the size check, which guards reviewer input and this reads a row.
  *
- * It returns only a row written by the run being waited on, or later:
- * `savedBefore` is the `updatedAt` of the stale row the 409 saw just before
- * the run was joined ("none" when there was no row or it was already fresh).
- * That unchanged stale row is the *previous* result of the same input -- the
- * one that made the run start -- and is never handed out as the new one. The
- * comparison is the column against its own earlier value: Prisma fills
- * `updatedAt` from the application's clock, so comparing it with the claim's
- * database `NOW()` would compare two clocks.
+ * `savedBefore` is the row's `updatedAt` as the refused POST read it *after*
+ * its claim was refused ("none" when there was no row). The comparison is the
+ * column against its own earlier value: Prisma fills `updatedAt` from the
+ * application's clock, so comparing it with the claim's database `NOW()`
+ * would compare two clocks. Liveness is read before the row -- a run writes
+ * its row before it releases its claim -- and then:
  *
- * `isStale` is not a reason to withhold a row written since the join. Saving
- * any further answer to the same question marks that question's reviews stale
- * (the chat route), so a third answer finishing just after a 2-answer run
- * saved would otherwise hide the result the client is waiting for. The input
- * hash is recomputed from the messages as they are now, so a row it finds
+ *   no row                        live: pending  | not live: ended
+ *   row, savedBefore none         saved
+ *   row, updatedAt differs        saved          (written since the join)
+ *   row, updatedAt equal          live: pending  (the run has not written)
+ *                                 not live, fresh: saved (this input's valid
+ *                                   result was already saved at the join: the
+ *                                   runner saved but had not released, or it
+ *                                   was a cache hit; a POST returns it too)
+ *                                 not live, stale: ended (the previous result
+ *                                   the run was replacing; never handed out)
+ *
+ * A row that fails to parse or map is never saved; it falls to pending or
+ * ended by liveness. `isStale` alone is no reason to withhold a row written
+ * since the join: saving any further answer to the same question marks that
+ * question's reviews stale (the chat route), so a third answer finishing just
+ * after a 2-answer run saved would otherwise hide the result. The input hash
+ * is recomputed from the messages as they are now, so any row it finds
  * reviews exactly these question and answer texts.
  *
- * Liveness is read before the row: the run writes its row before it releases
- * its claim, so "no live claim, row unchanged" can only mean the run ended
- * without writing one (`running: false`), and the client stops waiting.
+ * One narrow case reads "ended" although a result exists: the runner saved,
+ * the row was marked stale, and the duplicate arrived before the release. The
+ * duplicate then fingerprints a stale row that will not change again, so the
+ * wait ends without showing it. That is a missed result, never a wrong one;
+ * the user can open or run the review again.
  */
 const storedTurnReviewResponse = async (
   userId: string,
   conversationId: string,
-  query: URLSearchParams
+  lookup: StoredTurnLookup
 ) => {
-  const mode = comparisonReviewModeSchema.safeParse(query.get("reviewMode"));
-  const exact = storedTurnLookupSchema.safeParse({
-    promptMessageId: query.get("promptMessageId"),
-    assistantMessageIds: query.get("assistantMessageIds")?.split(","),
-    savedBefore: query.get("savedBefore"),
-  });
-  if (!mode.success || !exact.success) {
-    return jsonError("Invalid saved-review lookup.", "INVALID_COMPARISON_REVIEW_LOOKUP", 400);
-  }
   const turn = await requestedComparableConversationTurn(
     conversationId,
-    exact.data.promptMessageId,
-    exact.data.assistantMessageIds
+    lookup.promptMessageId,
+    lookup.assistantMessageIds
   );
   if (!turn) {
     return jsonError(
@@ -266,8 +283,8 @@ const storedTurnReviewResponse = async (
     promptMessageId: turn.prompt.id,
     question: turn.prompt.content,
     responses: turn.responses,
-    reviewMode: mode.data,
-    includeSynthesis: query.get("includeSynthesis") === "true",
+    reviewMode: lookup.reviewMode,
+    includeSynthesis: lookup.includeSynthesis,
   });
   const running = await isInFlightRunLive(
     getUserChatUsageKey(userId),
@@ -278,12 +295,14 @@ const storedTurnReviewResponse = async (
   const stored = await prisma.comparisonReview.findUnique({
     where: { userId_inputHash: { userId, inputHash } },
   });
-  const writtenSinceJoin = stored !== null && (
-    exact.data.savedBefore === COMPARISON_REVIEW_SAVED_BEFORE_NONE ||
-    stored.updatedAt.toISOString() !== exact.data.savedBefore
+  const unchangedSinceJoin = stored !== null &&
+    lookup.savedBefore !== COMPARISON_REVIEW_SAVED_BEFORE_NONE &&
+    stored.updatedAt.toISOString() === lookup.savedBefore;
+  const acceptable = stored !== null && (
+    !unchangedSinceJoin || (!running && !stored.isStale)
   );
-  const parsed = stored && writtenSinceJoin ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
-  const responseMap = stored && writtenSinceJoin ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
+  const parsed = stored && acceptable ? dualComparisonReviewResultSchema.safeParse(stored.result) : null;
+  const responseMap = stored && acceptable ? responseMapForStoredReview(stored.assistantMessageIds, turn.responses) : null;
   const source = {
     question: turn.prompt.content,
     responses: turn.responses.map(({ messageId, content }) => ({ messageId, content })),
@@ -298,23 +317,22 @@ const storedTurnReviewResponse = async (
 };
 
 /**
- * The 409 a duplicate gets, saying which row its wait must not accept (see
- * GET): a *stale* row is the previous result that made the run start, so its
- * `updatedAt` is sent. No row, or a fresh one, sends null -- a fresh row at
- * this point can only be the joined run's own result, saved just before it
- * released its claim, and any row is then acceptable. Stale rows change only
- * when a run writes them (marking stale touches fresh rows only), so the
- * value cannot move under the wait for any other reason.
+ * The 409 a duplicate gets. `savedBefore` is the row as read *after* the
+ * claim was refused -- its `updatedAt` whether it is fresh or stale, or null
+ * when there is none -- so it describes the row at a moment the joined run
+ * was already holding the claim. A read before the claim attempt could see a
+ * row that turned stale and was superseded by a run that claimed in between.
+ * GET then decides what that row means (see storedTurnReviewResponse).
  */
 const alreadyRunningResponse = (
-  prior: { updatedAt: Date; isStale: boolean } | null,
+  current: { updatedAt: Date } | null,
   traceId: string
 ) =>
   Response.json(
     {
       error: "This request is already being processed.",
       code: "DUPLICATE_REQUEST",
-      savedBefore: prior?.isStale ? prior.updatedAt.toISOString() : null,
+      savedBefore: current ? current.updatedAt.toISOString() : null,
       traceId,
     },
     { status: 409, headers: { "Cache-Control": "no-store" } }
@@ -338,6 +356,12 @@ export async function GET(
     // setup preview below needs.
     const exactTurnLookup =
       query.has("promptMessageId") || query.has("assistantMessageIds");
+    const exactLookup = exactTurnLookup ? parseStoredTurnLookup(query) : null;
+    // A malformed lookup is refused before it spends anything, the rate limit
+    // included.
+    if (exactTurnLookup && !exactLookup) {
+      return jsonError("Invalid saved-review lookup.", "INVALID_COMPARISON_REVIEW_LOOKUP", 400);
+    }
     await consumeApiRateLimit(
       request,
       session.user.id,
@@ -351,8 +375,8 @@ export async function GET(
       conversationId
     );
     if ("response" in authorization) return authorization.response;
-    if (exactTurnLookup) {
-      return storedTurnReviewResponse(session.user.id, conversationId, query);
+    if (exactLookup) {
+      return storedTurnReviewResponse(session.user.id, conversationId, exactLookup);
     }
 
     const turn = await latestComparableConversationTurn(conversationId);
@@ -525,17 +549,6 @@ async function runPost(
     // DUPLICATE_REQUEST and waits for the saved result through GET. Released
     // in `finally` on every outcome; it expires on its own if this process
     // dies first (lib/comparisonReviewInFlight.ts derives the TTL).
-    //
-    // The row is fingerprinted *before* the claim attempt, so a refused
-    // request can say what the row looked like before the run it joins (see
-    // alreadyRunningResponse): a run that saves after this read changes
-    // `updatedAt`, and one that saved before it left a fresh row.
-    const prior = await prisma.comparisonReview.findUnique({
-      where: {
-        userId_inputHash: { userId: session.user.id, inputHash },
-      },
-      select: { updatedAt: true, isStale: true },
-    });
     try {
       runClaim = await claimInFlightRun(
         getUserChatUsageKey(session.user.id),
@@ -544,10 +557,16 @@ async function runPost(
         COMPARISON_REVIEW_IN_FLIGHT_TTL_SECONDS
       );
     } catch (error) {
-      if (error instanceof ChatAccessError && error.code === "DUPLICATE_REQUEST") {
-        return alreadyRunningResponse(prior, traceId);
-      }
-      throw error;
+      if (!(error instanceof ChatAccessError && error.code === "DUPLICATE_REQUEST")) throw error;
+      // Read only now, after the refusal, while the joined run holds the
+      // claim (see alreadyRunningResponse).
+      const current = await prisma.comparisonReview.findUnique({
+        where: {
+          userId_inputHash: { userId: session.user.id, inputHash },
+        },
+        select: { updatedAt: true },
+      });
+      return alreadyRunningResponse(current, traceId);
     }
     const cached = await prisma.comparisonReview.findUnique({
       where: {

@@ -115,12 +115,17 @@ const freshWorld = (): World => ({
 
 let world = freshWorld();
 let writes = 0;
-/** What the chat route does when another answer to the question is saved. */
-const markStale = () => {
+/**
+ * What the chat route does when another answer to the question is saved: it
+ * marks the question's *fresh* reviews stale (`isStale: false` in its where).
+ * Whether that `updateMany` also moves `@updatedAt` is exercised both ways,
+ * since the waiting rules must hold either way.
+ */
+const markStale = ({ bumpUpdatedAt = true } = {}) => {
   for (const row of world.stored.values()) {
     if (row.isStale) continue;
     row.isStale = true;
-    row.updatedAt = new Date(Date.UTC(2026, 10, 27) + ++writes * 1000);
+    if (bumpUpdatedAt) row.updatedAt = new Date(Date.UTC(2026, 10, 27) + ++writes * 1000);
   }
 };
 let route: {
@@ -244,6 +249,7 @@ async function loadRoute() {
         world.claimCalls.push({ subjectKey, scope, runKey, ttlSeconds });
         const key = `${subjectKey}:${scope}:${runKey}`;
         if (world.claims.has(key)) {
+          world.events.push("claim:refused");
           throw new realChatSecurity.ChatAccessError(409, "DUPLICATE_REQUEST", "This request is already being processed.");
         }
         const token = nextToken++;
@@ -367,8 +373,9 @@ test("the claim is per account and input, taken before the cache, the quota and 
   const done = await POST(post(), context);
   assert.equal(done.status, 200);
 
-  // The fingerprint precedes the claim (see "a duplicate between save and release").
-  assert.deepEqual(world.events.slice(0, 5), ["fingerprint:read", "claim", "cache:read", "quota", "run"]);
+  // Nothing is read before the claim: the fingerprint is taken only after a
+  // refusal (see "the reviewer's race").
+  assert.deepEqual(world.events.slice(0, 4), ["claim", "cache:read", "quota", "run"]);
   assert.equal(world.events.at(-1), "claim:release");
   const [call] = world.claimCalls;
   assert.equal(call.subjectKey, realSecurity.getUserChatUsageKey(USER_ID));
@@ -503,6 +510,7 @@ test("an incomplete exact lookup is refused rather than answered for the latest 
     assert.equal((await json(refused)).code, "INVALID_COMPARISON_REVIEW_LOOKUP");
   }
   assert.equal(world.latestTurnReads, 0);
+  assert.deepEqual(world.rateLimits, [], "a malformed lookup spent rate limit before it was refused");
 });
 
 test("an exact lookup does not depend on the latest turn being comparable or small enough", async () => {
@@ -644,22 +652,114 @@ test("a joined run that ends without saving and with no earlier row ends the wai
   assert.equal(after.running, false);
 });
 
-test("a duplicate between the run's save and its release joins a run that is already done", async () => {
+for (const bumpUpdatedAt of [true, false]) {
+  const marking = bumpUpdatedAt ? "stale-marking moves updatedAt" : "stale-marking keeps updatedAt";
+
+  test(`the reviewer's race: the fingerprint is read after the refusal, never before (${marking})`, async () => {
+    const { GET, POST } = await loadRoute();
+    // A valid row, which then turns stale; another request claims and runs.
+    assert.equal((await POST(post(), context)).status, 200);
+    markStale({ bumpUpdatedAt });
+    const staleRow = [...world.stored.values()][0];
+    world.runGate = gate();
+    const runner = POST(post(), context);
+    await until(() => world.runs === 2);
+
+    world.events = [];
+    const duplicate = await POST(post(), context);
+    const body = await json(duplicate);
+    assert.equal(duplicate.status, 409);
+    // No read before the claim attempt: the row is read only once the claim
+    // was refused, so it cannot be a fresh row that went stale in between.
+    assert.deepEqual(world.events, ["claim:refused", "fingerprint:read"]);
+    assert.equal(body.savedBefore, staleRow.updatedAt.toISOString());
+
+    // A third answer finishing mid-run touches fresh rows only.
+    markStale({ bumpUpdatedAt });
+    const during = await lookUp(GET, body.savedBefore as string);
+    assert.equal(during.storedReview, null, "the stale row from before the join was handed out as the new result");
+    assert.equal(during.running, true);
+
+    world.runGate.open();
+    assert.equal((await runner).status, 200);
+    const after = await lookUp(GET, body.savedBefore as string);
+    assert.equal((after.storedReview as StoredDto)?.originalUsageCredits, 9, "the wait must end on the new run's row");
+  });
+
+  test(`saved but not yet released: pending while live, then the fresh row (${marking})`, async () => {
+    const { GET, POST } = await loadRoute();
+    world.releaseGate = gate();
+    const runner = POST(post(), context);
+    await until(() => world.events.includes("upsert"));
+    const duplicate = await POST(post(), context);
+    const body = await json(duplicate);
+    assert.equal(duplicate.status, 409);
+    const row = [...world.stored.values()][0];
+    // The row as it is after the refusal, fresh or not.
+    assert.equal(body.savedBefore, row.updatedAt.toISOString());
+    const during = await lookUp(GET, body.savedBefore as string);
+    assert.equal(during.storedReview, null);
+    assert.equal(during.running, true);
+
+    world.releaseGate.open();
+    assert.equal((await runner).status, 200);
+    const after = await lookUp(GET, body.savedBefore as string);
+    assert.equal((after.storedReview as StoredDto)?.originalUsageCredits, 8, "an unchanged fresh row with no live claim is this input's result");
+  });
+
+  test(`saved, marked stale, then a duplicate before the release: ends, never a wrong row (${marking})`, async () => {
+    const { GET, POST } = await loadRoute();
+    world.releaseGate = gate();
+    const runner = POST(post(), context);
+    await until(() => world.events.includes("upsert"));
+    markStale({ bumpUpdatedAt });
+    const duplicate = await POST(post(), context);
+    const body = await json(duplicate);
+    assert.equal(duplicate.status, 409);
+    assert.equal((await lookUp(GET, body.savedBefore as string)).running, true);
+
+    world.releaseGate.open();
+    assert.equal((await runner).status, 200);
+    const after = await lookUp(GET, body.savedBefore as string);
+    // The accepted narrow case: the result exists but reads as "ended"
+    // (missed, never wrong).
+    assert.equal(after.storedReview, null);
+    assert.equal(after.running, false);
+  });
+}
+
+test("decision table: an unchanged fresh row with no live claim is saved (cache-hit join)", async () => {
   const { GET, POST } = await loadRoute();
-  world.releaseGate = gate();
-  const owner = POST(post(), context);
-  await until(() => world.events.includes("upsert"));
-  // Saved, claim not yet released: the duplicate is refused, but the row it
-  // fingerprinted is already this run's fresh result.
-  const duplicate = await POST(post(), context);
-  const body = await json(duplicate);
-  assert.equal(duplicate.status, 409);
-  assert.equal(body.savedBefore, null, "a fresh row is the joined run's own result and must be acceptable");
-  world.releaseGate.open();
-  assert.equal((await owner).status, 200);
-  markStale();
-  const after = await lookUp(GET, body.savedBefore as null);
+  assert.equal((await POST(post(), context)).status, 200);
+  const row = [...world.stored.values()][0];
+  const after = await lookUp(GET, row.updatedAt.toISOString());
   assert.equal((after.storedReview as StoredDto)?.originalUsageCredits, 8);
+});
+
+test("decision table: an unchanged stale row with no live claim is ended", async () => {
+  const { GET, POST } = await loadRoute();
+  assert.equal((await POST(post(), context)).status, 200);
+  markStale();
+  const row = [...world.stored.values()][0];
+  const after = await lookUp(GET, row.updatedAt.toISOString());
+  assert.equal(after.storedReview, null);
+  assert.equal(after.running, false);
+});
+
+test("decision table: no row is pending while live and ended once not", async () => {
+  const { GET, POST } = await loadRoute();
+  world.runGate = gate();
+  const runner = POST(post(), context);
+  await until(() => world.runs === 1);
+  assert.deepEqual(
+    [(await lookUp(GET, null)).storedReview, (await lookUp(GET, null)).running],
+    [null, true]
+  );
+  world.runBehaviour = "fail";
+  world.runGate.open();
+  assert.equal((await runner).status, 502);
+  const after = await lookUp(GET, null);
+  assert.deepEqual([after.storedReview, after.running], [null, false]);
 });
 
 test("liveness is read before the row, so a run that saved and released is never reported ended", async () => {

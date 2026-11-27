@@ -524,6 +524,13 @@ export function ComparisonReviewDialog({
   const waitControllerRef = useRef<AbortController | null>(null);
   useEffect(() => () => waitControllerRef.current?.abort(), []);
   const [error, setError] = useState("");
+  /**
+   * Why a wait on an already-running review ended without a result. Kept
+   * apart from `error`, which the setup refresh clears: a wait that ends after
+   * answers finished meanwhile returns to a setup step that catches up at
+   * once, and that refresh must not erase the explanation.
+   */
+  const [waitNotice, setWaitNotice] = useState("");
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
   /**
    * The answers revision the setup on screen was loaded for.
@@ -706,6 +713,7 @@ export function ComparisonReviewDialog({
     waitControllerRef.current = controller;
     setWaiting(true);
     setError("");
+    setWaitNotice("");
     try {
       const path = storedComparisonReviewPath(input.conversationId, input);
       const wait = await waitForStoredComparisonReview<ComparisonReview>({
@@ -714,15 +722,15 @@ export function ComparisonReviewDialog({
       });
       if (wait.outcome === "aborted" || controller.signal.aborted) return;
       if (wait.outcome === "gone") {
-        setError(t("chat.aiReviewAlreadyRunningTurnGone"));
+        setWaitNotice(t("chat.aiReviewAlreadyRunningTurnGone"));
         return;
       }
       if (wait.outcome === "ended") {
-        setError(t("chat.aiReviewAlreadyRunningEnded"));
+        setWaitNotice(t("chat.aiReviewAlreadyRunningEnded"));
         return;
       }
       if (wait.outcome === "expired") {
-        setError(t("chat.aiReviewAlreadyRunningTimeout"));
+        setWaitNotice(t("chat.aiReviewAlreadyRunningTimeout"));
         return;
       }
       setReview(wait.review);
@@ -730,7 +738,7 @@ export function ComparisonReviewDialog({
     } catch {
       // A gone or locked conversation: stop waiting; nothing was spent.
       if (controller.signal.aborted) return;
-      setError(t("chat.aiReviewPrepareFailed"));
+      setWaitNotice(t("chat.aiReviewPrepareFailed"));
     } finally {
       if (waitControllerRef.current === controller) {
         waitControllerRef.current = null;
@@ -749,6 +757,7 @@ export function ComparisonReviewDialog({
     }
     setRunning(true);
     setError("");
+    setWaitNotice("");
     let receivedPrimary = false;
     // Counted once the server has answered with anything other than "this
     // review is already running": joining someone else's run starts and
@@ -1396,7 +1405,7 @@ export function ComparisonReviewDialog({
             </div>
           )}
 
-          {error && (
+          {(error || waitNotice) && (
             // UI-004: a review that fails after the user has committed the
             // click is an error they must notice, not a paragraph that
             // silently appears below the fold -- so it announces like every
@@ -1407,7 +1416,7 @@ export function ComparisonReviewDialog({
               className="mt-5 flex gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="min-w-0 break-words text-sm leading-6">{error}</p>
+              <p className="min-w-0 break-words text-sm leading-6">{error || waitNotice}</p>
             </div>
           )}
         </div>

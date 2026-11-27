@@ -227,9 +227,18 @@ try {
   // 7. The joined run ended without saving (every reviewer failed, or its
   //    process died and the claim expired): the wait stops with its own
   //    message instead of polling to the deadline, and a retry is offered.
+  //    An answer finishes during the wait, so ending it returns to a setup
+  //    step that refreshes at once -- and that refresh must not erase the
+  //    explanation.
   exactBehaviour = "ended";
   await page.getByRole("button", { name: /교차검토 실행/ }).click();
+  await expect(waitingStatus).toBeVisible();
+  const setupGetsBeforeEnd = setupGets();
+  await answerFinished();
   await expect(page.getByTestId("comparison-review-error")).toContainText("저장된 결과 없이 끝났습니다", { timeout: 15_000 });
+  await expect.poll(setupGets).toBe(setupGetsBeforeEnd + 1);
+  await settle();
+  await expect(page.getByTestId("comparison-review-error")).toContainText("저장된 결과 없이 끝났습니다");
   await expect(result).toHaveCount(0);
   await expect(page.getByRole("button", { name: /교차검토 실행/ })).toBeEnabled();
   assert.equal(exactLookups.length, 4, "the wait kept polling a run that ended");

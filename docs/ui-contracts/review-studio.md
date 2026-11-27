@@ -91,21 +91,24 @@ every outcome and expires after 15 minutes if its process dies
 that 409 as "already running": they say so and read the saved result through
 the GET with the exact `promptMessageId`/`assistantMessageIds` of that run
 until it appears, never re-run it, and offer a retry only once the claim could
-have expired. The 409 carries `savedBefore`: the `updatedAt` of the stale row
-the joined run supersedes, or null when there was no row or it was already
-fresh. The wait accepts only a row written since then, so an older result of
-the same input is never shown as the new one; the check compares the column
-with its own earlier value, never two clocks. That exact-turn GET answers only
-for its turn: the row written since the join, `storedReview: null` with
-`running: true` while the claim is live, `running: false` once no run holds it
-and none wrote a row (the wait ends with its own message), or `404
+have expired. The 409 carries `savedBefore`: the row's `updatedAt` read after
+the claim was refused (fresh or stale), or null when there is no row. That
+exact-turn GET answers only for its turn and reads claim liveness before the
+row: a row whose `updatedAt` differs from `savedBefore` (or any row when it is
+null) is the result; an unchanged row is pending while the claim is live,
+the result once no claim is live if the row is fresh, and ended if it is
+stale; no row is pending while live and ended otherwise; `404
 COMPARISON_REVIEW_TURN_NOT_FOUND` once an answer was deleted or regenerated,
-never the latest turn's review. It reads liveness before the row, does not
-depend on the latest turn being comparable or within the size limit, and
-still returns the joined run's row after a later answer marked it stale. It
-has its own rate limit (10 a minute, 120 a day, apart from the setup
-preview's 20 and 300); one wait backs off to a lookup a minute and makes at
-most 18 lookups, honouring `Retry-After`. Studio binds a wait to the session
+never the latest turn's review. So an older stale result of the same input is
+never shown as the new one; the check compares the column with its own
+earlier value, never two clocks. One narrow case reads ended although a
+result exists (saved, marked stale, duplicate arrives before the release):
+missed, never wrong. The GET does not depend on the latest turn being
+comparable or within the size limit, refuses a malformed lookup before
+spending rate limit, and has its own rate limit (10 a minute, 120 a day, apart
+from the setup preview's 20 and 300); one wait backs off to a lookup a minute
+and makes at most 18 lookups, honouring `Retry-After`. A wait's ending message
+survives the setup refresh that follows it. Studio binds a wait to the session
 and conversation that sent the request, stops it when either is discarded
 (identity or conversation change, unmount) and never starts one for a 409
 that arrives after that; dismissal does not stop it. A join is not counted as
