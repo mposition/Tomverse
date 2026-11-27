@@ -446,7 +446,9 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   - 내용은 `srcdoc`으로만 넣고 URL로 로드하지 않습니다. 문서 맨 앞에 CSP `<meta>`를 둡니다(page 안의
     `<head>`를 패턴으로 찾아 끼우면 주석 안에 들어갈 수 있으므로 앞에 붙입니다): `default-src 'none'`,
     `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`,
-    script·style은 inline과 cdnjs·jsdelivr·unpkg만, 이미지·글꼴은 inline과 같은 CDN만, `'unsafe-eval'` 없음.
+    script·style·글꼴은 inline과 cdnjs·jsdelivr·unpkg만, 이미지는 inline(`data:`·`blob:`)만, `'unsafe-eval'` 없음.
+    이미지 URL에 page의 글을 실어 어느 host로도 보낼 수 없습니다. React 미리보기 문서는 자기 `<head>` 맨 앞에
+    더 좁은 정책(`REACT_PREVIEW_CSP`)을 하나 더 둡니다. 두 정책이 함께 적용되어 고정한 세 파일과 inline script만 실행됩니다.
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는

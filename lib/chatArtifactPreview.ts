@@ -91,6 +91,23 @@ export const REACT_PREVIEW_SCRIPTS = [
     },
 ] as const;
 
+/**
+ * A second policy, ours, as the first element of the React page's `<head>`.
+ * Every policy in force applies, so on top of the shared frame policy the page
+ * may load exactly the three files above and run inline script (the bootstrap
+ * and the compiled code), and fetch nothing else -- not another file from the
+ * same CDN, not an image. The person's code is inside a `<textarea>` after
+ * this element and cannot come before it.
+ */
+export const REACT_PREVIEW_CSP = [
+    "default-src 'none'",
+    `script-src 'unsafe-inline' ${REACT_PREVIEW_SCRIPTS.map((script) => script.src).join(" ")}`,
+    "style-src 'unsafe-inline'",
+    "img-src data: blob:",
+    "font-src data:",
+    "connect-src 'none'",
+].join("; ");
+
 const escapeText = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const escapeAttribute = (value: string) => escapeText(value).replace(/"/g, "&quot;");
 
@@ -179,7 +196,8 @@ export function buildReactPreviewDocument(code: string, options: { typescript: b
         ` data-no-component="${escapeAttribute(labels.noComponent)}" data-missing-package="${escapeAttribute(labels.missingPackage)}">` +
         `\n${escapeText(code)}</textarea>`;
     return (
-        `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${REACT_PREVIEW_CSP}">` +
+        `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
         `<style>${PAGE_STYLE}</style></head><body><div id="root"></div><div id="tomverse-error" role="alert" hidden></div>` +
         `${source}${scripts}<script>${REACT_PREVIEW_BOOTSTRAP}</script></body></html>`
     );

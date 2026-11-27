@@ -19,10 +19,11 @@
  *   * A Content-Security-Policy `<meta>` is the first thing in the document.
  *     It cuts the channels a sandboxed script would still have: `connect-src
  *     'none'` (no fetch, XHR, WebSocket, beacon), `form-action 'none'`,
- *     `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`. Script and
- *     style may be inline or come from three public CDNs; images and fonts may
- *     be inline or from those CDNs. A page that wants anything else does not
- *     get it.
+ *     `base-uri 'none'`, `frame-src 'none'`, `object-src 'none'`. Script,
+ *     style and fonts may be inline or come from three public CDNs (the
+ *     libraries a chart or a map needs); images are inline only (`data:`,
+ *     `blob:`), so a page cannot put text into an image URL and send it to a
+ *     host. A page that wants anything else does not get it.
  *   * Not a guarantee against everything: a script may still navigate its own
  *     frame (CSP has no portable `navigate-to`). The panel counts the frame's
  *     loads and tears it down on the second one, so a page that leaves is shown
@@ -51,7 +52,7 @@ export const HTML_PREVIEW_CSP = [
     "default-src 'none'",
     `script-src 'unsafe-inline' ${cdn}`,
     `style-src 'unsafe-inline' ${cdn}`,
-    `img-src data: blob: ${cdn}`,
+    "img-src data: blob:",
     `font-src data: ${cdn}`,
     "media-src data: blob:",
     "connect-src 'none'",

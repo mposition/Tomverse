@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   REACT_PREVIEW_BOOTSTRAP,
+  REACT_PREVIEW_CSP,
   REACT_PREVIEW_SCRIPTS,
   artifactPreviewKind,
   buildCodePreviewDocument,
@@ -84,7 +85,8 @@ test("the React document names every script it loads, and nothing else loads fro
   const sources = [...html.matchAll(/<script src="([^"]+)" integrity="([^"]+)" crossorigin="anonymous">/g)].map((m) => [m[1], m[2]]);
   assert.deepEqual(sources, REACT_PREVIEW_SCRIPTS.map((s) => [s.src, s.integrity]));
   // No other external reference: every URL in the document is one of the three pinned files.
-  const urls = html.match(/https?:\/\/[^"'\s<>)]+/g) ?? [];
+  // (The page's own policy names the same three; it is checked on its own below.)
+  const urls = html.replace(`content="${REACT_PREVIEW_CSP}"`, "").match(/https?:\/\/[^"'\s<>)]+/g) ?? [];
   assert.deepEqual(urls.sort(), REACT_PREVIEW_SCRIPTS.map((s) => s.src).sort());
   assert.doesNotMatch(html, /<(iframe|object|embed|form|base|link)\b/i);
 });
@@ -147,6 +149,17 @@ test("every preview document goes through the same isolation: our policy first, 
     assert.ok(HTML_PREVIEW_CSP.includes("connect-src 'none'"));
   }
   assert.equal(documents.html.html, "<h1>x</h1>", "an HTML block is the page, as written");
+  // The React page adds its own, narrower policy before anything else in it: exactly the three pinned files, no image host.
+  const reactHead = documents.react.html.split("<head>")[1];
+  assert.ok(reactHead.startsWith(`<meta http-equiv="Content-Security-Policy" content="${REACT_PREVIEW_CSP}">`));
+  const reactDirectives = Object.fromEntries(
+    REACT_PREVIEW_CSP.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name, values])
+  );
+  assert.deepEqual(reactDirectives["script-src"], ["'unsafe-inline'", ...REACT_PREVIEW_SCRIPTS.map((script) => script.src)]);
+  assert.deepEqual(reactDirectives["img-src"], ["data:", "blob:"]);
+  assert.deepEqual(reactDirectives["connect-src"], ["'none'"]);
+  assert.deepEqual(reactDirectives["default-src"], ["'none'"]);
+  assert.ok(!REACT_PREVIEW_CSP.includes("'unsafe-eval'"));
 });
 
 test("an SVG block is centred on a page and its XML prologue is dropped, the drawing itself untouched", () => {
