@@ -415,22 +415,24 @@ test("a draft delete may name the creation time it read, so only that draft is r
   const remove = (body: unknown) => draftRoute.DELETE(request("/api/products/chat/drafts/conversation_1", "DELETE", body), {
     params: Promise.resolve({ scopeKey: "conversation_1" }),
   });
+  // Read through a function: the closure assigns it, which control-flow narrowing cannot see.
+  const sent = () => deleteInput;
   const createdAt = "2026-11-27T00:00:00.123Z";
   assert.equal((await remove({ expectedRevision: 1, expectedCreatedAt: createdAt })).status, 204);
-  assert.equal(deleteInput?.expectedRevision, 1);
-  assert.deepEqual(deleteInput?.expectedCreatedAt, new Date(createdAt));
+  assert.equal(sent()?.expectedRevision, 1);
+  assert.deepEqual(sent()?.expectedCreatedAt, new Date(createdAt));
   // Without it the delete is by revision alone, as before.
   deleteInput = null;
   assert.equal((await remove({ expectedRevision: 2 })).status, 204);
-  assert.equal(deleteInput?.expectedRevision, 2);
-  assert.equal("expectedCreatedAt" in (deleteInput ?? {}), false);
+  assert.equal(sent()?.expectedRevision, 2);
+  assert.equal("expectedCreatedAt" in (sent() ?? {}), false);
   // A malformed time, or any other field, is refused before anything is removed.
   deleteInput = null;
   for (const body of [{ expectedRevision: 1, expectedCreatedAt: "yesterday" }, { expectedRevision: 1, expectedCreatedAt: 5 },
     { expectedRevision: 1, expectedUpdatedAt: createdAt }]) {
     assert.equal((await remove(body)).status, 400, JSON.stringify(body));
   }
-  assert.equal(deleteInput, null);
+  assert.equal(sent(), null);
 });
 
 test("an access refusal remains no-store", async () => {

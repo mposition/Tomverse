@@ -2015,7 +2015,7 @@ test("the middle reasoning step is refused to a web request even while both effo
   });
   await assert.rejects(
     ask("answers", "claimed", 200, false, undefined, true, true, undefined, "off", "none", REQUESTED_MODEL_ID, "medium"),
-    /status 409.*REASONING_EFFORT_UNAVAILABLE/s
+    /status 409[\s\S]*REASONING_EFFORT_UNAVAILABLE/
   );
   assert.equal(attempts.length, 0, "a refused step reaches no provider");
 });
