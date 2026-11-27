@@ -2803,7 +2803,8 @@ export const acquireChatAccess = async (
          * Subject slots this request must leave free, enforced where the
          * lease is claimed (inside the reservation transaction, under the
          * concurrency locks). A scheduled run passes 1 so an unattended turn
-         * never takes the account's last Chat slot; never below one slot.
+         * never takes the account's last Chat slot. With a limit of one
+         * there is none to keep free and the request is refused.
          */
         subjectSlotsKeptFree?: number;
         /** Tool names enabled for this turn, recorded on the limit decision. */
@@ -2900,7 +2901,10 @@ export const acquireChatAccess = async (
               ...resolvedConcurrencyPlan,
               subject: {
                   ...resolvedConcurrencyPlan.subject,
-                  limit: Math.max(1, resolvedConcurrencyPlan.subject.limit - subjectSlotsKeptFree),
+                  // Down to zero: with a limit of one there is no slot to
+                  // keep free, so the caller is refused rather than given
+                  // the account's only slot.
+                  limit: Math.max(0, resolvedConcurrencyPlan.subject.limit - subjectSlotsKeptFree),
               },
           }
         : resolvedConcurrencyPlan;

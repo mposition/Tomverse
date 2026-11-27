@@ -260,5 +260,19 @@ test("inside a scheduled run the route leaves the account's last Chat slot free"
   const roomy = await attempt(limit - 2);
   assert.notEqual(roomy.code, "CHAT_CONCURRENCY_EXCEEDED");
   assert.ok(roomy.reservedCredits > 0, `the run never reached its reservation (code ${roomy.code})`);
+
+  // A deployment that allows one Chat request per account has no slot to keep
+  // free: a scheduled run is refused even with nothing else running, so the
+  // only slot is always the person's.
+  const previousLimit = process.env.CHAT_USER_CONCURRENT;
+  process.env.CHAT_USER_CONCURRENT = "1";
+  try {
+    const single = await attempt(0);
+    assert.equal(single.code, "CHAT_CONCURRENCY_EXCEEDED");
+    assert.equal(single.reservedCredits, 0);
+  } finally {
+    if (previousLimit === undefined) delete process.env.CHAT_USER_CONCURRENT;
+    else process.env.CHAT_USER_CONCURRENT = previousLimit;
+  }
   await prisma.chatRequestLease.deleteMany({ where: { subjectKey: access.subjectKey } });
 });

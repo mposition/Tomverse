@@ -196,6 +196,17 @@ test("unattended runs start only on a long-lived server, never on a serverless h
   assert.equal(scheduledTasksHostProblem({ VERCEL: "  " }), null);
 });
 
+test("nothing unattended starts where an account has a single Chat slot: there is none to keep free", () => {
+  // A scheduled run always leaves one slot for the person, so it needs two.
+  assert.equal(scheduledTasksHostProblem({ CHAT_USER_CONCURRENT: "1" }), "chat_concurrency_too_low");
+  assert.equal(scheduledTasksHostProblem({ CHAT_USER_CONCURRENT: "2" }), null);
+  assert.equal(scheduledTasksHostProblem({ CHAT_USER_CONCURRENT: "8" }), null);
+  // The guest limit is not the account's limit.
+  assert.equal(scheduledTasksHostProblem({ CHAT_GUEST_CONCURRENT: "1" }), null);
+  // The serverless refusal is reported first.
+  assert.equal(scheduledTasksHostProblem({ VERCEL: "1", CHAT_USER_CONCURRENT: "1" }), "serverless_host");
+});
+
 test("the minimum interval holds between real start times, not only between occurrences", () => {
   // Yesterday's 08:00 run started late at 10:59; the schedule was then moved to 04:00.
   const early = schedule({ timeZone: "UTC", timeOfDay: "04:00" });

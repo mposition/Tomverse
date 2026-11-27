@@ -25,6 +25,9 @@
  *     dispatched again; MAX_CONSECUTIVE_FAILURES failures pause the task.
  */
 
+// Pure as well (reads only the env record it is handed).
+import { resolveChatConcurrencyPlan } from "./chatConcurrencyCore";
+
 export const SCHEDULED_TASK_FREQUENCIES = ["once", "daily", "weekly", "monthly"] as const;
 export type ScheduledTaskFrequency = (typeof SCHEDULED_TASK_FREQUENCIES)[number];
 
@@ -434,5 +437,20 @@ const SERVERLESS_HOST_MARKERS = Object.freeze([
   "FUNCTIONS_WORKER_RUNTIME",
 ]);
 
-export const scheduledTasksHostProblem = (env: Record<string, string | undefined>): "serverless_host" | null =>
-  SERVERLESS_HOST_MARKERS.some((name) => Boolean(env[name]?.trim())) ? "serverless_host" : null;
+/**
+ * A scheduled run always leaves one of the account's Chat slots free for the
+ * person (lib/scheduledTaskReservationGuard.ts). A deployment that allows a
+ * single Chat request per account (`CHAT_USER_CONCURRENT=1`) has no second
+ * slot, so the Chat route refuses every scheduled run there. The tick starts
+ * nothing on such a deployment instead of claiming runs that can only be
+ * refused.
+ */
+export const SCHEDULED_TASK_MIN_USER_CONCURRENCY = 2;
+
+export const scheduledTasksHostProblem = (
+  env: Record<string, string | undefined>
+): "serverless_host" | "chat_concurrency_too_low" | null => {
+  if (SERVERLESS_HOST_MARKERS.some((name) => Boolean(env[name]?.trim()))) return "serverless_host";
+  const userLimit = resolveChatConcurrencyPlan({ kind: "user", subjectKey: "user:probe", ipKey: "ip:probe" }, env).subject.limit;
+  return userLimit < SCHEDULED_TASK_MIN_USER_CONCURRENCY ? "chat_concurrency_too_low" : null;
+};
