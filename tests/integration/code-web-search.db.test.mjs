@@ -254,8 +254,14 @@ test("the coding API's web search over the real shared credit ledger", { skip: !
         await startedPromise;
         const [held] = await reservationsOf(userId);
         assert.equal(held.status, "reserved");
-        const swept = await reconcileExpiredChatCreditReservations(new Date(Date.now() + 3 * 3_600_000));
-        assert.ok(swept.refunded + swept.alreadyFinalized + swept.settledFromHandoff >= 1);
+        // The sweep takes the oldest expired holds first and at most a batch at a time, and other suites in the same
+        // database may have left many of their own: repeat until this user's hold has been reached.
+        let swept = 0;
+        for (let round = 0; round < 20 && (await reservationsOf(userId))[0]?.status === "reserved"; round += 1) {
+            const result = await reconcileExpiredChatCreditReservations(new Date(Date.now() + 3 * 3_600_000));
+            swept += result.refunded + result.alreadyFinalized + result.settledFromHandoff;
+        }
+        assert.ok(swept >= 1);
         const [expired] = await reservationsOf(userId);
         assert.notEqual(expired.status, "reserved");
         assert.equal(expired.settledCredits, 0, "the user is refunded, as for any external request that lost its process");
