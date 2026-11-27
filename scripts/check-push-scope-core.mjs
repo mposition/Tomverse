@@ -88,6 +88,23 @@ export const PUSH_IDENTIFIERS = [
  * `registration.pushManager.getSubscription()`, so nothing is lost.
  */
 export const PUSH_PHRASES = ["Notification.requestPermission"];
+
+/**
+ * Files that may ask for notification permission (owner decision in chat,
+ * 2026-11-27, recorded on PUSH-01 in the gate file): a notice the open page
+ * shows by itself through the Notification API -- "your answer is ready" when
+ * the tab is in the background -- is a local notification, not push. It has no
+ * push subscription, no service-worker push handler, no device token and no
+ * server credential, so it adds none of the native or backend lifecycle the
+ * gate is about.
+ *
+ * Exact paths, and only the permission request is excused: a file listed here
+ * that names anything in PUSH_IDENTIFIERS (PushManager, showNotification, ...)
+ * or listens for a push event is still reported.
+ */
+export const APPROVED_LOCAL_NOTIFICATION_PATHS = ["components/settings/AnswerNotificationSetting.tsx"];
+const isApprovedLocalNotificationPath = (path) =>
+    APPROVED_LOCAL_NOTIFICATION_PATHS.includes(path.split("\\").join("/"));
 const PUSH_EVENT_LISTENER = /\baddEventListener\s*\(\s*["'](?:push|pushsubscriptionchange|notificationclick|notificationclose)["']/;
 
 /** Server credentials. Infrastructure whether or not code reads them yet. */
@@ -146,7 +163,7 @@ export const findPushInfrastructure = ({
             }
         }
         for (const phrase of PUSH_PHRASES) {
-            if (text.includes(phrase)) {
+            if (text.includes(phrase) && !isApprovedLocalNotificationPath(path)) {
                 findings.push({ kind: "browser-api", detail: phrase, where: path });
             }
         }

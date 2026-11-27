@@ -135,6 +135,7 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   CHAT_MODEL_PICKER_OPEN_EVENT,
+  notifyChatModelPickerClosed,
   type ChatModelPickerOpenDetail,
 } from "@/lib/chatModelPickerEvents";
 import {
@@ -1877,6 +1878,15 @@ export function ChatInput({
     return () =>
       window.removeEventListener(CHAT_MODEL_PICKER_OPEN_EVENT, openModelPicker);
   }, []);
+
+  // A control that opened the picker for one purpose ("Try another model")
+  // ends its wait when the picker closes, however it was closed.
+  const modelPickerOpen = isMenuOpen && menuView === "models";
+  const modelPickerWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (modelPickerWasOpenRef.current && !modelPickerOpen) notifyChatModelPickerClosed();
+    modelPickerWasOpenRef.current = modelPickerOpen;
+  }, [modelPickerOpen]);
 
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
   const effortCopy = reasoningEffortCopy[lang];

@@ -705,6 +705,12 @@ model Message {
   /// The signed-in owner's thumbs up or down on this answer.
   answerRatings ChatAnswerRating[]
 
+  /// When "Regenerate" or "edit your last message" replaced this question or
+  /// answer (lib/chatSupersededMessages.ts). The row stays; a replaced message
+  /// is drawn dimmed and left out of later model context on every device.
+  /// NULL means the message stands.
+  supersededAt DateTime?
+
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())

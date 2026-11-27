@@ -75,6 +75,18 @@ import { researchRunMessage } from "@/lib/researchPreviewRunClient";
 import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
+import {
+  armSupersede,
+  beginReplacement,
+  canResendQuestion,
+  lastReplaceableTurn,
+  parkReplacement,
+  rememberSupersededMessages,
+  restoreGuestSuperseded,
+  settleParkedReplacement,
+  takeArmedSupersede,
+  withoutSuperseded,
+} from "@/lib/chatSupersededTurns";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
@@ -1073,6 +1085,8 @@ function ChatAppComponent({
         if (!isCurrentChatRuntimeLoad(loadKey, requestId)) return;
 
         if (initialConversationId) {
+          // The replaced-turn note of a guest conversation is kept beside its transcript.
+          restoreGuestSuperseded(initialConversationId);
           const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
           const savedMessages = localStorage.getItem(storageKey);
           const carried = transcriptScope === "model"
@@ -1190,6 +1204,8 @@ function ChatAppComponent({
             if (getChatRuntimeRevision(loadKey) !== revisionAtStart) return;
             if (isChatRuntimeStreaming(loadKey)) return;
 
+          // The server's note of replaced turns (lib/chatSupersededTurns.ts).
+          rememberSupersededMessages(initialConversationId, data.messages);
           if (data.messages && data.messages.length > 0) {
             const filteredMessages = reviewProvider
               ? reviewProviderTranscript<Message>(data.messages, reviewProvider, id => getModel(id)?.provider)
@@ -1212,6 +1228,7 @@ function ChatAppComponent({
               if (attempt.conversationId !== initialConversationId || !hasJourneySource(panelIdentityKey, initialConversationId, attempt.sourceUserMessageId) ||
                 !data.messages.some((message: Message) => message.role === "user" && message.id === attempt.sourceUserMessageId)) continue;
               const completed = parseCompletedChatResponseMessage(data.messages.find((message: Message) => message.id === attempt.assistantMessageId), attempt);
+              if (completed) settleParkedReplacement(attempt.assistantMessageId, completed.status);
               if (completed) observeJourneyReply({ owner: panelIdentityKey, epoch: hydrationJourneyEpoch,
                 conversationId: initialConversationId, sourceUserMessageId: attempt.sourceUserMessageId,
                 status: completed.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completed.content.trim()) });
@@ -1506,6 +1523,9 @@ function ChatAppComponent({
             );
           });
         }
+        // A regenerated answer that finished while polled is the replacement.
+        if (completedMessage) settleParkedReplacement(assistantMessageId, completedMessage.status);
+        else if (!isActiveChatResponseAttempt(attempt)) settleParkedReplacement(assistantMessageId, null);
         if (completedMessage) {
           settleInterruptedChatAttempt(key, assistantMessageId)?.completed?.();
           writeChatRuntimeMessages(key, (current) => {
@@ -1722,6 +1742,12 @@ function ChatAppComponent({
       with them.
     */
     let sourceReceipt: ContinuationReceipt | undefined;
+    // The turn this send replaces ("Regenerate" / "edit"). It is excluded from
+    // this request's context at once but is recorded as replaced only when the
+    // new answer is reported finished (`replacement.complete`, at each place a
+    // finished answer is known): a refused, failed or stopped send leaves the
+    // earlier answer as it was (lib/chatSupersededTurns.ts).
+    let replacement = beginReplacement(targetChatId, null);
     const writeAssistantMessage = assistantMessageWriter(runKey);
     const setAssistantMessage: typeof writeAssistantMessage = (
       id,
@@ -1758,6 +1784,11 @@ function ChatAppComponent({
       and the conversation's own mode is used everywhere else, so an ordinary
       send is identical to what it was before the override existed.
     */
+    // "Regenerate" / "edit" armed a replacement of the newest turn; the send
+    // that carries that exact question takes it up, so a send that never
+    // starts leaves the earlier answer untouched.
+    replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text), !isGuestMode);
+    const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
@@ -2282,7 +2313,8 @@ function ChatAppComponent({
           // past them (lib/chatRequestLimits.ts).
           messages: researchMode ? [{ ...toChatRequestMessage(userMessage), id: sourceUserMessageId }] : fitChatRequestTranscript(
             requestTranscriptForScope(
-              messages,
+              // A turn the person replaced is not shown to the model again.
+              withoutSuperseded(messages, replacedIds),
               userMessage,
               transcriptScope
             )
@@ -2305,6 +2337,9 @@ function ChatAppComponent({
                 // The server fingerprints the attempt with it, so a reused
                 // assistant id cannot be attached to a different question.
                 sourceUserMessageId,
+                // The turn this send replaces: recorded by the server with the
+                // finished answer, even if this page is gone by then.
+                ...(replacement.replacing() && !researchMode ? { supersedesMessageIds: replacement.replacing() } : {}),
               }
             : {}),
           ...(researchMode ? { researchMode } : {}),
@@ -2726,6 +2761,8 @@ function ChatAppComponent({
               : message
           )
         );
+        if (completedMessage) replacement.complete(completedMessage.status);
+        else if (isActiveChatResponseAttempt(attempt)) parkReplacement(assistantMessageId, replacement);
         if (isActiveChatResponseAttempt(attempt)) {
           durableAttemptPollStartedRef.current.set(
             assistantMessageId,
@@ -2963,6 +3000,8 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
+        // Only an answer the server stored replaces the turn before it.
+        replacement.complete(completionStatus, { saved: !trailer?.persistence });
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
           nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
@@ -3333,6 +3372,27 @@ function ChatAppComponent({
     );
     if (prompt && prompt.attachments.length === 0) onRetryPrompt(prompt);
   }, [initialConversationId, onRetryPrompt, transcriptScope]);
+
+  /**
+   * Asks the newest finished answer's question again ("Regenerate", "Try
+   * another model" once a model is chosen) or sends an edited copy of it.
+   *
+   * Both go through the shell's ordinary retry send, so the turn is validated,
+   * priced and charged like any question typed into the composer. Nothing is
+   * deleted: the replaced question and answer are noted as replaced
+   * (lib/chatSupersededTurns.ts) when the new send actually starts.
+   */
+  const handleReplaceLastTurn = useCallback((editedText?: string) => {
+    if (transcriptScope !== "conversation" || !onRetryPrompt || !initialConversationId ||
+        isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    const turn = lastReplaceableTurn(getChatRuntimeSnapshot(runtimeKeyRef.current).messages);
+    if (!turn || !canResendQuestion(turn)) return;
+    const text = (editedText ?? turn.question.content).trim();
+    if (!text) return;
+    armSupersede(initialConversationId, text, [turn.question.id, turn.answer.id]);
+    onRetryPrompt({ text, attachments: [], targetChatId: initialConversationId });
+  }, [initialConversationId, onRetryPrompt, transcriptScope]);
+  const handleRegenerateAnswer = useCallback(() => handleReplaceLastTurn(), [handleReplaceLastTurn]);
 
   /**
    * Sends a concurrency-refused question again, in place of the refused turn.
@@ -3876,6 +3936,9 @@ function ChatAppComponent({
           ? handleRetryQuestion : undefined}
         // In Chat the shell's close-model handler opens the model picker.
         onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
+        onRegenerateAnswer={transcriptScope === "conversation" && onRetryPrompt ? handleRegenerateAnswer : undefined}
+        onEditLastQuestion={transcriptScope === "conversation" && onRetryPrompt ? handleReplaceLastTurn : undefined}
+        enableQuote={transcriptScope === "conversation" && currentProduct === "chat"}
         // Built from this transcript, which is the one on screen.
         onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
