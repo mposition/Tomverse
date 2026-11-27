@@ -4550,7 +4550,7 @@ else {
       if (logoId) {
         const logo = state.capabilities?.pluginCatalog && pluginCatalogHost?.signal === chatSession.signal ? await pluginCatalogHost.host.logo(logoId) : null;
         return logo ? new Response(logo.bytes, { headers: {
-          "Content-Type": logo.type, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "private, max-age=3600",
+          "Content-Type": logo.type, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache",
           "Content-Security-Policy": "default-src 'none'; sandbox",
         } }) : new Response(null, { status: 404 });
       }

@@ -10,6 +10,32 @@ const LOGO_KEPT = 256;
 
 export type PluginLogo = { bytes: Uint8Array<ArrayBuffer>; type: string };
 
+/** The body, read chunk by chunk: the read stops the moment it passes `limit`, whatever length the response declared (or none). */
+async function readLimited(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
+}
+
 /**
  * The Plugins screen's platform list. It is read from the server when the screen opens and when the person asks for a refresh,
  * and held in memory for the lifetime the server's Cache-Control names; after that it is revalidated with its ETag, so an
@@ -24,7 +50,8 @@ export function createPluginCatalog(deps: {
   const now = deps.now ?? Date.now;
   let held: { catalog: PluginCatalog; etag: string | null; fetchedAt: number; maxAge: number } | undefined;
   let inflight: Promise<PluginCatalog> | undefined;
-  const logos = new Map<string, PluginLogo>();
+  // A logo is kept with the path it was read from, and every new list from the server drops them all: a picture that changed under the same path is read again.
+  const logos = new Map<string, PluginLogo & { path: string }>();
 
   /** `refresh` revalidates a list that is still fresh; a failed read keeps the last list for the caller to show beside the error. */
   function read(refresh = false): Promise<PluginCatalog> {
@@ -35,7 +62,7 @@ export function createPluginCatalog(deps: {
         if (!held) throw new Error("Tomverse answered with an unchanged list that was never sent.");
         held = { ...held, fetchedAt: now(), maxAge: result.maxAge };
       } else {
-        if (held && held.catalog.observedAt !== result.catalog.observedAt) logos.clear();
+        logos.clear();
         held = { catalog: result.catalog, etag: result.etag, fetchedAt: now(), maxAge: result.maxAge };
       }
       return held.catalog;
@@ -47,15 +74,15 @@ export function createPluginCatalog(deps: {
     const path = held?.catalog.providers.find((provider) => provider.id === id)?.logo;
     if (!path || !PLUGIN_LOGO_PATH.test(path)) return null;
     const kept = logos.get(id);
-    if (kept) return kept;
+    if (kept?.path === path) return kept;
     let result: PluginLogo | null = null;
     try {
       const response = await deps.fetchLogo(path);
       const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
       const length = Number(response.headers.get("content-length") ?? 0);
       if (response.ok && LOGO_TYPES.has(type) && length <= LOGO_LIMIT_BYTES) {
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (bytes.byteLength > 0 && bytes.byteLength <= LOGO_LIMIT_BYTES) result = { bytes, type };
+        const bytes = await readLimited(response, LOGO_LIMIT_BYTES);
+        if (bytes && bytes.byteLength > 0) result = { bytes, type };
       } else {
         await response.body?.cancel().catch(() => {});
       }
@@ -63,7 +90,7 @@ export function createPluginCatalog(deps: {
     // Only a logo that was read is kept: a failed one is tried again the next time it is asked for.
     if (result) {
       if (logos.size >= LOGO_KEPT) logos.delete(logos.keys().next().value!);
-      logos.set(id, result);
+      logos.set(id, { ...result, path });
     }
     return result;
   }

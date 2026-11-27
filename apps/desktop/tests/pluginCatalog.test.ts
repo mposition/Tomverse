@@ -180,3 +180,44 @@ test("the server read uses the Desktop bearer, revalidates with the ETag, and te
   reply = () => new Response(JSON.stringify({ providers: "nope" }), { headers: { "content-type": "application/json" } });
   await assert.rejects(api.pluginCatalog());
 });
+
+test("a logo body is read only up to the limit, however the response is declared, and the stream is dropped when it goes past", async () => {
+  let pulled = 0;
+  let cancelled = false;
+  const endless = () => new ReadableStream<Uint8Array>({
+    pull(controller) { pulled += 1; controller.enqueue(new Uint8Array(100 * 1024)); },
+    cancel() { cancelled = true; },
+  });
+  const host = createPluginCatalog({
+    // No length is declared, or a false small one: neither lets the body through unread.
+    fetchLogo: async () => new Response(endless(), { headers: { "content-type": "image/png", "content-length": "10" } }),
+    read: async () => ({ status: "ok", etag: null, maxAge: 600, catalog: catalog("d", ["a"]) }),
+  });
+  await host.read();
+  assert.equal(await host.logo("a"), null);
+  assert.ok(cancelled, "the stream was cancelled");
+  assert.ok(pulled <= 8, `read ${pulled} chunks of an endless stream`);
+});
+
+test("a logo is read again when the server sends a new list, or names another file for the platform", async () => {
+  let path = "/plugins/providers/a.png";
+  let etag = "\"v1\"";
+  const served: string[] = [];
+  const host = createPluginCatalog({
+    fetchLogo: async (requested) => { served.push(requested); return new Response(png, { headers: { "content-type": "image/png" } }); },
+    read: async () => ({ status: "ok", etag, maxAge: 0, catalog: pluginCatalogBody.parse({ observedAt: "same-day", providers: [provider("a", { logo: path })] }) }),
+  });
+  await host.read();
+  await host.logo("a");
+  await host.logo("a");
+  assert.equal(served.length, 1);
+  // The same date and the same path, but a different ETag: the server has a new list, so its pictures may be new too.
+  etag = "\"v2\"";
+  await host.read();
+  await host.logo("a");
+  assert.equal(served.length, 2);
+  path = "/plugins/providers/a-new.png";
+  await host.read();
+  await host.logo("a");
+  assert.deepEqual(served, ["/plugins/providers/a.png", "/plugins/providers/a.png", "/plugins/providers/a-new.png"]);
+});
