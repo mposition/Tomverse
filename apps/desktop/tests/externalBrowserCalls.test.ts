@@ -41,8 +41,10 @@ function systemBrowserReferences() {
   return found.sort();
 }
 
-test("Desktop reaches the system browser from exactly two places: sign-in and the Google Drive picker", () => {
+test("Desktop reaches the system browser from exactly three places: sign-in, connecting Google or Microsoft as a login method, and the Google Drive picker", () => {
   assert.deepEqual(systemBrowserReferences(), [
+    // Handed to the account-data API, which opens only the provider's own https page (host allow-list in login-method-link.ts).
+    "main.ts function connectedAccountData",
     "main.ts function importDriveAttachments",
     "main.ts function signIn",
   ]);

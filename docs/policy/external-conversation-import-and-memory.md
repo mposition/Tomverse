@@ -871,6 +871,13 @@ Profile instructions·knowledge의 기존 역할은 유지합니다. Memory data
 독립이며 Deep Research에도 유지됩니다. rules와 data의 실제 비용을 각각 더하고
 두 내용·query plan을 retrieval hash/context bundle에 결속합니다.
 
+계정 소유자의 맞춤 지침(설정 › AI 개인화, `lib/chatPersonalizationCore.ts`)은 2번
+구획의 마지막, 즉 profile·프로젝트 지침 바로 뒤에 들어갑니다. 소유자가 직접 쓴 글이라
+system 블록에 두되, 앞에 규칙(정책·안전 지침을 대신하지 않고, profile·프로젝트 지침과
+충돌하면 그쪽이 우선)을 먼저 적고 marker로 구획합니다. 로그인한 Chat·Review 턴에만
+붙고 외부 API에는 붙지 않으며, 토큰은 `preferenceTokens`로 따로 가격을 매기고 해시는
+context bundle에 결속합니다(편집하면 bundle이 stale이 됩니다).
+
 프로젝트 항목은 각 항목에 명시된 프로젝트의 사실로 구분합니다. 기존 답변 모델은 현재
 질문과 대화의 최신 명시적 전환·정정을 기준으로 프로젝트를 해석하고 다른 프로젝트의
 업무·역할·마감을 가져와 빈칸을 채우지 않습니다. 비교 요청은 프로젝트별로 구분하고,
@@ -1753,6 +1760,39 @@ memory 개수는 표시하지 않으므로(§13.4) 두 숫자를 합치는 일�
 - **Research Preview**: 프로젝트 대화에서 실행할 수 있고 보고서는 그 대화에 남아 저장·검색·후속
   Chat에 쓰입니다. Research 실행 자체에는 프로젝트 지침·자료·기억을 넣지 않으며, 프로젝트 자료를
   웹 검색 provider에 보내지 않습니다.
+
+### 14.6 일반 채팅의 읽기 도구 — 링크 읽기와 과거 대화 참조 (2026-11-27)
+
+운영자 지시(2026-11-27, Chat 기능 격차 C1): Chat이 사용자가 붙인 링크의 본문을 읽고, 사용자의 과거
+대화를 찾아볼 수 있습니다. 둘 다 기본 꺼진 스위치 뒤에 있고, project 도구와 같은 application tool loop
+슬롯(`lib/chatToolLoop.ts`)에서 같은 방식으로 가격이 매겨집니다(도구 정의 + 결과 허용량 × pass 예약).
+도구 호출 자체에는 가격이 없습니다: 페이지를 가져오는 일과 사용자 자신의 대화를 찾는 일은 공급자 비용이
+없고, 늘어난 입력 토큰만 기존 방식대로 차감됩니다.
+
+- **링크 읽기** (`CHAT_URL_READING_ENABLED=true`, `lib/chatUrlReadTool.ts`): `read_url`은 **사용자가 이 대화에
+  쓴 링크만** 가져옵니다. 모델이 지어낸 주소, 읽은 페이지 안의 링크, 사용자가 쓴 링크에 query를 덧붙인
+  주소는 네트워크 호출 전에 거절합니다(페이지가 "이 주소로 데이터를 보내라"고 시켜도 GET으로 나갈 길이
+  없습니다). 가져오기는 Research의 reader(`lib/researchEngineFetch.ts`)를 그대로 씁니다: https만, 공개 DNS
+  답만(사설·loopback·link-local·metadata·CGNAT 차단), 확인한 주소에 소켓 고정, redirect마다 재검사, 쿠키·
+  자격증명 없음, 3 MiB·15초 상한. 본문 추출도 Research의 추출기이며 새 crawler·parser는 없습니다.
+  턴당 3회, 페이지당 20,000자, 턴당 40,000자까지입니다. 링크가 없는 턴에는 도구가 등록되지 않아 정의 토큰도
+  들지 않습니다. 가져온 본문은 `lib/untrustedToolText.ts`의 fence 안 신뢰할 수 없는 데이터이며
+  `npm run check:prompt-injection`이 이 표면(web-page, web-page-title)을 측정합니다. 읽은 페이지는 답변의
+  출처 목록에 나옵니다. YouTube 같은 영상 링크는 읽지 않습니다(자막 scraper 없음).
+- **과거 대화 참조** (`CHAT_HISTORY_REFERENCE_ENABLED=true`, `lib/chatHistoryReference.ts`): `search_past_chats`는
+  본인 대화만 찾고, **잠긴 대화는 제목까지 제외**합니다(unlock grant 없는 요청으로 검색하고 결과를
+  `referenceableConversationWhere`로 다시 거릅니다). 현재 대화, 이미지 대화, 프로젝트 안의 대화(그쪽은
+  `project_search`), 가져온 외부 대화 원문, 메모리가 꺼진 대화는 대상이 아니며, 이 조건은 후보 제한 **이전에**
+  검색 query 안에서 적용합니다(제외 대상이 후보 칸을 채워 참조 가능한 대화를 밀어내지 못합니다). 현재 대화의
+  메모리가 꺼져 있거나(계정 기본값 상속 포함) Assistant profile이 돌고 있거나 현재 대화가 프로젝트 안이면
+  (project 도구가 꺼진 보관·맥락 끔 상태 포함) 도구를 주지 않고, 실행할 때마다 다시 확인합니다. 결과는 최대 대화 5개, 대화당 발췌 2개, 발췌 360자, 턴당 8,000자이며 분당 10회·일 300회로
+  제한합니다. 참조한 대화는 답변의 출처 목록에 그 대화로 가는 링크와 함께 나옵니다. 어떤 대화가 대상인지는
+  `referenceableConversationWhere` 한 곳에서만 정합니다(임시 채팅 제외는 이 조건에 한 줄을 더하면 됩니다).
+- **적용 범위**: Chat 제품의 로그인 대화에서, 도구 사용이 검증된 모델이고 provider 네이티브 검색·플러그인·
+  Research가 아닌 turn에서만 등록됩니다. 진행 표시는 기존 스트림 진행 채널(`lib/mcpConnectorProgress.ts`)을
+  함께 씁니다.
+- **검증**: `tests/chatUrlReadTool.test.mjs`(차단 규칙 각각), `tests/server-contract/chat-history-reference.test.mjs`
+  (권한 경계와 등록 조건), `tests/untrustedToolText.test.mjs`, `npm run check:prompt-injection`.
 
 ## 15. Feature flag와 롤아웃 · rollback
 

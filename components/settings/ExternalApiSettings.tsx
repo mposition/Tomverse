@@ -153,6 +153,7 @@ const PROTOCOL_LABEL: Record<string, string> = {
     chat_completions: "Chat Completions",
     anthropic_messages: "Anthropic Messages",
     responses: "Responses",
+    web_search: "Web search",
 };
 
 function ToolModelSelect({

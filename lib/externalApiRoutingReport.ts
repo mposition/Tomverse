@@ -15,7 +15,8 @@ export async function readCodingRoutingReport(days: number, now = new Date()): P
     // Smart Adaptive requests only: a busy day of requests naming a model
     // cannot push them out of the read. Those are counted on their own.
     const window = { createdAt: { gte: since, lte: now } };
-    const namedRequests = await prisma.externalApiRequest.count({ where: { ...window, routedBy: null } });
+    // A web search names no model (lib/codeWebSearch.ts): it is not a request that bypassed routing.
+    const namedRequests = await prisma.externalApiRequest.count({ where: { ...window, routedBy: null, protocol: { not: "web_search" } } });
     const rows = await prisma.externalApiRequest.findMany({
         where: { ...window, routedBy: { not: null } },
         orderBy: { createdAt: "desc" },

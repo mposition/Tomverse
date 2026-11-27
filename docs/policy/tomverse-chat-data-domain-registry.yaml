@@ -168,6 +168,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: userPersonalization
+    prismaModel: UserPersonalization
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
   - domain: analyticsUserId
     prismaModel: Ga4UserId
     userLinkageRole: subject
@@ -1011,6 +1021,16 @@ domains:
 
   - domain: comparisonReviewItemFeedback
     prismaModel: ComparisonReviewItemFeedback
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: chatAnswerRating
+    prismaModel: ChatAnswerRating
     userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
@@ -4331,6 +4351,45 @@ domains:
       Not part of the account export (owner decision 2026-11-26): the lasting
       record of these tasks is on the person's own PC.
 
+  - domain: desktopRemotePasskey
+    prismaModel: DesktopRemotePasskey
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      A passkey the person registered to confirm remote approvals
+      (docs/ops/desktop-remote-control.md): the public key, the credential id,
+      the host name it was made for, a counter, the name the person gave it and
+      when it was made and last used. The private key never leaves the
+      person's own authenticator. The person lists and removes their passkeys
+      on the same screen; an account deletion removes the rows through the
+      user cascade. Not part of the account export: a public key and a
+      credential id are security material that identifies nothing the person
+      can use elsewhere. The registration, each confirmation and each removal
+      are written to the admin audit chain, which has its own row in this
+      registry.
+
+  - domain: desktopRemotePasskeyChallenge
+    prismaModel: DesktopRemotePasskeyChallenge
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      One single-use random challenge for registering a passkey, confirming one
+      remote command or removing a passkey. Valid for two minutes, used once,
+      and swept by maintenance once expired. It holds a random value and the
+      digest of the one command it is bound to, never the command itself. An
+      account deletion removes the rows through the user cascade. Not part of
+      the account export: it is a short-lived security token.
+
   - domain: desktopRemoteCommand
     prismaModel: DesktopRemoteCommand
     userLinkageRole: subject
@@ -4349,6 +4408,28 @@ domains:
       chain, which has its own row in this registry. Not part of the account
       export (owner decision 2026-11-26): a follow-up's text lives on in the
       task on the person's own PC.
+
+  - domain: codeCloudJob
+    prismaModel: CodeCloudJob
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One Desktop cloud Code task (docs/ops/desktop-cloud-execution.md): the
+      person's instruction, the models and credit cap they chose, the progress
+      lines the runner reported, a short summary and where the uploaded
+      repository bundle and the resulting patch sit in object storage
+      (code-cloud/<id>/...). The bundle is removed when the task ends; the
+      row, its lines and its patch are removed by the maintenance sweep seven
+      days later. Account deletion removes the rows in its own transaction and
+      gives both object keys of every task a tombstone on the shared object
+      cleanup queue (lib/codeCloudDeletion.ts), so the objects go with them;
+      the User cascade is the backstop for the rows. Credits are not here: the
+      task's managed reservation is CodeTaskReservation, which has its own row.
 
   - domain: externalApiKey
     prismaModel: ExternalApiKey

@@ -171,6 +171,24 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `ChatCreditReservation`처럼 대화 삭제에 cascade되지 않고 금융 감사
   snapshot(pricingVersion, provider request ID, lot별 예약 내역
   `reservationPayload`)을 보존한다. 대화 삭제 시 prompt·자산 연결만 끊는다.
+- **삭제된 대화의 미종결 예약도 환급한다.** 생성 중에 대화를 지우면
+  generation 행은 cascade로 사라지고 예약은 `reserved`로 남는다. generation
+  행에서 출발하는 정산 경로(`finalizeFailure`, stale sweep, 성공 정산)는 이
+  예약에 닿지 못하므로, 15분 sweep의 고아 예약 arm
+  (`refundOrphanedImageCreditReservations`)이 generation이 없는 `reserved`
+  예약의 **사용자 크레딧**(플랜 사용량 bucket, 구매 크레딧 lot)을 돌려주고
+  `settled`/`failed`로 닫는다(`lastError: "generation_missing"`). 단건·전체
+  삭제를 포함한 모든 삭제 경로와 이미 고아가 된 행을 같은 arm이 처리한다.
+  - exactly-once는 정산 경로와 같은 예약의 `reserved → settling` claim이
+    보장한다. 먼저 커밋된 정산이 있으면 예약은 이미 `settled`다.
+  - **provider budget은 되돌리지 않는다.** 삭제 전에 provider가 호출됐을 수
+    있으므로(살아 있는 실행자는 계속 돈다) 예약의 hold를 지출로 기록한다.
+  - 계정이 삭제돼 `userId`가 없는 예약은 돌려줄 크레딧이 없으므로 건드리지
+    않고, invariant audit의 `orphanedReservations`에 남는다.
+  - 삭제 transaction 안에서 환급하는 방식은 택하지 않았다. 대화 삭제
+    transaction에 credit 계정 lock을 더하지 않고, 모든 삭제 경로와 기존
+    고아 행을 한 곳에서 닫기 위해서다. 대가로 환급은 다음 sweep(최대 15분)에
+    도착한다.
 - ledger idempotency key: `image-credit-reservation:{generationId}:v1` + DB
   unique constraint. 사용자 요청 idempotency는 `(userId, idempotencyKey)`
   unique — race의 패자는 오류가 아니라 승자의 현재 상태를 멱등 반환한다.
@@ -198,7 +216,8 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
     회수된 stranded 정산은 `IMAGE_SETTLEMENT_STRANDED`로 보고하고 Admin
     Console의 invariant 줄에 별도 수치로 노출한다.
 - 전액 환급 조건: provider 거절, moderation 차단, provider 오류, 원본 저장
-  실패, 처리 시간 초과, stale 작업 reconciliation. 크레딧과 funded cost를
+  실패, 처리 시간 초과, stale 작업 reconciliation(시작된 `processing`·
+  `settling` 행과 재구동이 맡지 않는 `pending` 행, §7). 크레딧과 funded cost를
   ledger 규칙(`settleAddOnCredits`)대로 함께 복원하고 플랜 사용량도
   되돌린다.
 - 원본 저장이 성공했으면 응답 전달 실패만으로는 환급하지 않는다 — 저장된
@@ -254,19 +273,63 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   claim이 조건부라서 15분 reconciliation sweep이나 미래의 전용 worker
   서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
   Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
-  실행은 정확히 stale 케이스이며 sweep이 `failed` 처리 후 전액 환급한다.
+  실행은 정확히 stale 케이스다. 아직 claim되지 않은 `pending` 행은 재구동
+  스위치가 켜져 있으면 sweep이 한 번 재구동하고 꺼져 있으면(기본) 환급한다.
+  이미 시작된 `processing` 행은 `failed` 처리 후 전액 환급한다(아래
+  "`pending` 재구동").
 - **`after()`의 실행 시간은 그 route의 max duration이다**(Next `after`
   레퍼런스). proxy timeout이 아니라 이쪽이 실제 제약이므로 실행자를
   구동하는 route는 예산을 명시한다. 값은
   `IMAGE_EXECUTOR_MAX_DURATION_SECONDS`이고, provider timeout·재시도
   backoff·그룹 상한·provider job 하한에서 유도한다
   (`lib/imageGenerationStateCore.ts`). 잘린 실행자는 지연이 아니다 —
-  `pending` 생성을 다시 구동하는 것은 없고 sweep은 환급만 하므로 요청
-  자체가 사라진다. stale 임계값이 한 시도의 최악 소요보다 크다는 조건과
-  함께 `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
-- 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
-  `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
-  (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
+  실행 중이던 시도는 `processing`에 남고 sweep은 그것을 환급만 하므로 그
+  요청은 사라진다(시작하지 못한 target은 `pending`으로 남아, 재구동
+  스위치가 켜져 있으면 재구동되고 꺼져 있으면 환급된다).
+  stale 임계값이 한 시도의 최악 소요보다 크다는 조건과 함께
+  `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
+- 배포·프로세스 종료로 실행 도중 멈춘(`processing`) stale 작업은
+  reconciliation이 `failed` 처리하고 전액 환급한다. provider가 이미
+  호출됐을 수 있어 결과를 모르므로 다시 실행하지 않는다. Railway graceful
+  shutdown 유예(`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
+- **`pending` 재구동**: claim되지 않은 `pending` 행은 provider가 호출되지
+  않은 것이 확실하므로(claim이 호출보다 먼저다) 15분 sweep이 환급 대신
+  한 번 실행한다. 사용자는 요청을 잃지 않는다.
+  - **스위치: `IMAGE_PENDING_REDRIVE_ENABLED`, 기본 꺼짐.** 값이 정확히
+    `on`일 때만 돈다(`imagePendingRedriveEnabled`). 재구동은 sweep이 스스로
+    유료 provider 호출을 시작하는 동작이므로 배포만으로 켜지지 않고, 켜는
+    시점은 운영자가 정한다. 꺼져 있으면 sweep은 이 기능 이전과 같다 —
+    `reconciledAt`을 표시하지 않고, stale 창(12분)이 지난 `pending` 행을
+    모두 환급한다. 켰다가 끄면 표시만 되고 claim되지 않은 행도 같은 12분
+    규칙으로 환급되므로, 환급도 재구동도 되지 않고 남는 행은 없다.
+  - 대상: `IMAGE_PENDING_REDRIVE_AFTER_MS`(2분) 넘게 claim되지 않았고
+    `IMAGE_PENDING_REDRIVE_MAX_AGE_MS`(1시간)보다 젊으며, 같은 그룹에
+    살아 있는(stale 창 안의) `processing`·`settling` 시도가 없고, 예약이
+    아직 `reserved`인 행. 정상 실행자는 202 뒤 수 초 안에 claim한다. 더
+    오래 기다리는 정상 경우는 provider job 상한 뒤에 줄 선 같은 그룹의
+    target뿐이고, 형제 조건이 그것을 건너뛴다.
+  - **한 번**: 재구동은 예약의 `ImageCreditReservation.reconciledAt`을
+    `null → now`로 조건부 update한 sweep만 한다. 이미지 예약에서 이 필드를
+    쓰는 다른 경로는 없다. 새 컬럼은 없다.
+  - **이중 실행·이중 과금 없음**: 재구동도 정상 실행자와 같은
+    `pending → processing` 조건부 claim을 거친다. 느린 정상 실행자와 sweep
+    중 한쪽만 provider를 호출하고 정산한다.
+  - 실행 위치와 예산: maintenance route
+    (`/api/internal/maintenance/credit-reservations`)의 `after()`에서 응답
+    뒤에 실행한다. 예산은 그 route의 maxDuration(300초)이고 이미지 route의
+    968초가 아니다. 그래서
+    sweep당 `IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP`(8건)만 표시하고, 그룹마다
+    자기 provider job 상한으로 병렬 실행한다. 남은 행은 표시하지 않고 다음
+    sweep으로 넘긴다.
+  - 잘린 경우: 실행 중이던 시도는 `processing`에 남아 stale 창 뒤 환급된다.
+    시작하지 못한 행은 재구동이 이미 소진됐으므로 표시 시각부터 stale
+    창(12분)이 지나면 환급된다. 어느 쪽도 다시 실행되지 않는다.
+  - 환급으로 넘어가는 `pending` 행: 표시 후 stale 창 동안 claim되지 않은
+    행, 1시간보다 오래된 행, `reserved` 예약이 없는 행, 그리고 스위치가
+    꺼졌거나 재구동을 실행할 수 없는 호출자(scheduler 없음)의 sweep에서는
+    stale 창이 지난 모든 `pending` 행. 1시간 상한은 예약 때의
+    일·월 provider budget 창에 잡힌 지출이 나중에 실제로 나가는 양을
+    제한하고, 너무 늦은 결과로 사용자를 놀라게 하지 않기 위해서다.
 - 동시 실행은 entitlement·guardrail과 별개인 concurrency 층이며 v2에서
   **두 층으로 분리한다**. 그룹 하나 = lease 하나로 끝내면 모델 fan-out이
   작업량 증폭 통로가 되기 때문이다.
@@ -367,6 +430,12 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   → 성공 후 행 삭제/완료 처리. 실패는 같은 tombstone으로 재시도하고 15분
   reconciliation이 회수한다. R2를 먼저 지우고 DB 삭제가 실패하는 순서는
   금지한다.
+- 실행자가 원본을 R2에 쓴 뒤 원본 asset 행을 만들지 못하면(실행 중 대화가
+  삭제돼 generation이 사라졌거나 쓰기가 실패한 경우) 그 key를 가리키는 행이
+  없음을 확인하고 방금 쓴 원본 key를 `storage_rollback` tombstone으로 넣는다.
+  삭제 transaction의 tombstone은 그때 존재한 행에서만 나오므로, 이 경로가
+  없으면 원본이 R2에 영원히 남는다. 행이 있는지 확인하지 못하면 넣지 않는다
+  — 커밋됐을 수 있는 원본을 지우지 않기 위해서다.
 - v1 retention: 대화가 존재하는 동안 무기한 보존. 숨은 TTL·사용자별 용량
   상한 금지. 저장량·전송량 지표를 상시 관측하고, 비용 임계 초과 시 고지된
   retention 등 대안을 이 문서 개정으로 결정한다.

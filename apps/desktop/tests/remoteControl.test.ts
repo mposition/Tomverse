@@ -46,6 +46,8 @@ function setup(options: { enabled?: boolean } = {}) {
   const stops: string[] = [];
   const followUps: Array<{ key: string; text: string }> = [];
   let confirm = true;
+  let previewSupported = false;
+  let confirmPreview = true;
   const calls: Call[] = [];
   const replies: Reply[] = [];
   const transport = (async (url: URL | string, init?: RequestInit) => {
@@ -71,6 +73,8 @@ function setup(options: { enabled?: boolean } = {}) {
     stop: (key) => { stops.push(key); return true; },
     followUp: async (key, text) => { followUps.push({ key, text }); return true; },
     confirmEnable: async () => confirm,
+    previewSupported: () => previewSupported,
+    confirmPreview: async () => confirmPreview,
     protectedDirs: () => [APP_DATA],
     transport,
     now: () => now,
@@ -92,6 +96,8 @@ function setup(options: { enabled?: boolean } = {}) {
     setCard: (value: RemoteCard | null) => { card = value; },
     setAccount: (value: typeof account) => { account = value; },
     setConfirm: (value: boolean) => { confirm = value; },
+    setPreviewSupported: (value: boolean) => { previewSupported = value; },
+    setConfirmPreview: (value: boolean) => { confirmPreview = value; },
     async enable() { const view = await control.command({ action: "set", enabled: options.enabled ?? true }); return view; },
     done: () => rmSync(userData, { recursive: true, force: true }),
   };
@@ -421,4 +427,103 @@ test("every request to the server carries a number higher than the last, and a r
   const off = s.calls.at(-1)!;
   assert.equal(off.method, "DELETE");
   assert.ok((off.body as { seq: number }).seq > later);
+});
+
+// ── Previews of a file change (docs/ops/desktop-remote-control.md) ────────────────────────────────────────────────
+
+const TASK_KEY = "00000000-0000-4000-8000-000000009997";
+const changeCard = (files: Array<{ path: string; before: string | null; after: string | null; action?: string }>): ApprovalRequest => ({
+  id: uuid(), root: "/work/app", tool: "apply_patch", canRemember: true,
+  files: files.map((file) => ({ path: file.path, action: file.action ?? "update", eol: "lf", bom: false, preimage: "aa11", postimage: "bb22", before: file.before, after: file.after })),
+});
+const summarize = (card: ApprovalRequest, mode: "none" | "counts" | "excerpt") => remoteSnapshot([{
+  key: TASK_KEY, kind: "foreground", title: "t", status: "approval", task: null, canStop: true, canFollowUp: false,
+}], { request: card, taskKey: TASK_KEY }, KEY, [APP_DATA], mode).approval!;
+
+test("a report says nothing of the content of a file change unless the server named previews", () => {
+  const card = changeCard([{ path: "src/a.ts", before: "one\ntwo\n", after: "one\nTWO\nthree\n" }]);
+  assert.deepEqual(summarize(card, "none").files, [{ path: "src/a.ts", action: "update" }]);
+  // Counts only: how many lines, never which.
+  const counts = summarize(card, "counts");
+  assert.deepEqual(counts.files, [{ path: "src/a.ts", action: "update", added: 2, removed: 1 }]);
+  assert.equal(JSON.stringify(counts).includes("TWO"), false);
+  assert.equal(counts.remote, true);
+});
+
+test("an excerpt holds only changed lines, redacted, with indentation kept, and never the whole change", () => {
+  const body = Array.from({ length: 30 }, (_, index) => `    line ${index}`).join("\n");
+  const card = changeCard([
+    { path: "src/a.ts", before: "const apiKey = 'old-file-content';\n  keep();\n", after: `const apiKey = 'new-file-content';\n  keep();\n${body}\n` },
+    { path: "src/b.ts", before: null, after: `Authorization: Bearer abcdefghijklmnop\nok = 1 ${KEY}\n`, action: "create" },
+    { path: ".env", before: "A=1\n", after: "A=2\nSECRET=hunter2\n" },
+    { path: "src/c.ts", before: "x\n", after: "y\u0000z\u001b[31m\n" },
+  ]);
+  const files = summarize(card, "excerpt").files;
+  const [a, b, env, c] = files;
+  assert.deepEqual(a!.preview!.slice(0, 2), ["- const apiKey = [removed];", "+ const apiKey = [removed];"]);
+  assert.equal(a!.preview!.length, 8, "eight lines of a file at most");
+  assert.ok(a!.preview!.includes("+     line 0"), "indentation is kept");
+  assert.equal(a!.added, 31);
+  assert.equal(a!.removed, 1);
+  assert.equal(b!.preview!.some((line) => line.includes("abcdefghijklmnop")), false);
+  assert.equal(b!.preview!.some((line) => line.includes(KEY)), false);
+  // A file that can hold credentials has no preview at all, not even counts.
+  assert.deepEqual(env, { path: ".env", action: "update", omitted: "secret" });
+  // Control characters are made visible, not sent.
+  assert.equal(c!.preview!.some((line) => /[\u0000-\u0008\u000b-\u001f]/.test(line)), false);
+  const json = JSON.stringify(files);
+  for (const leaked of ["old-file-content", "new-file-content", "hunter2", "SECRET", KEY]) assert.equal(json.includes(leaked), false, leaked);
+  // 40 lines in all, whatever the number of files.
+  const many = changeCard(Array.from({ length: 10 }, (_, index) => ({ path: `f${index}.ts`, before: "a\n", after: Array.from({ length: 20 }, (_, n) => `v${n}`).join("\n") + "\n" })));
+  const total = summarize(many, "excerpt").files.reduce((sum, file) => sum + (file.preview?.length ?? 0), 0);
+  assert.equal(total, 40);
+  // The spaces inside a line are the code's: they are kept, and a tab is two spaces.
+  const spaced = summarize(changeCard([{ path: "s.ts", before: "x\n", after: "if (a)\n\treturn  \"a   b\";\n" }]), "excerpt").files[0]!;
+  assert.deepEqual(spaced.preview, ["- x", "+ if (a)", "+   return  \"a   b\";"]);
+  // A line is cut to its limit.
+  const wide = summarize(changeCard([{ path: "w.ts", before: null, after: "x".repeat(500) + "\n", action: "create" }]), "excerpt").files[0]!;
+  assert.ok(wide.preview![0]!.length <= 122);
+});
+
+test("previews are sent only after the server names them and the person agrees, and the choice belongs to the account", async (t) => {
+  const s = setup();
+  t.after(s.done);
+  await s.enable();
+  const card = changeCard([{ path: "src/a.ts", before: "one\n", after: "two\n" }]);
+  const open = () => { s.setTasks([s.running({ status: "approval" })]); s.setCard({ request: card, taskKey: s.foreground }); };
+  const reported = () => (s.syncs().at(-1)!.body as { snapshot: { approval: { files: Array<Record<string, unknown>> } } }).snapshot.approval.files[0]!;
+
+  // A server that does not name previews gets none of their fields, and cannot be asked to.
+  open();
+  await s.step();
+  assert.deepEqual(reported(), { path: "src/a.ts", action: "update" });
+  assert.deepEqual((await s.control.command({ action: "read" })).preview, { available: false, enabled: false });
+  assert.equal((await s.control.command({ action: "setPreview", enabled: true })).preview.enabled, false);
+
+  // Named by the server: counts go out, lines do not until the person says so.
+  s.setPreviewSupported(true);
+  await s.step(REMOTE_SLOW_POLL_MS);
+  assert.deepEqual(reported(), { path: "src/a.ts", action: "update", added: 1, removed: 1 });
+  s.setConfirmPreview(false);
+  assert.equal((await s.control.command({ action: "setPreview", enabled: true })).preview.enabled, false, "the dialog was declined");
+  s.setConfirmPreview(true);
+  assert.deepEqual((await s.control.command({ action: "setPreview", enabled: true })).preview, { available: true, enabled: true });
+  await s.step(REMOTE_SLOW_POLL_MS);
+  assert.deepEqual(reported().preview, ["- one", "+ two"]);
+  // It survives a restart of the app, for the same account.
+  assert.match(readFileSync(join(s.userData, "remote-control.json"), "utf8"), /"preview":true/);
+
+  // Turning it off again stops the lines at the next report.
+  assert.equal((await s.control.command({ action: "setPreview", enabled: false })).preview.enabled, false);
+  await s.step(REMOTE_SLOW_POLL_MS);
+  assert.equal("preview" in reported(), false);
+
+  // Turning remote control itself off forgets the choice: the next time it is on, previews are off.
+  await s.control.command({ action: "setPreview", enabled: true });
+  await s.control.command({ action: "set", enabled: false });
+  await s.control.command({ action: "set", enabled: true });
+  assert.equal((await s.control.command({ action: "read" })).preview.enabled, false);
+  // A choice cannot be made while remote control is off.
+  await s.control.command({ action: "set", enabled: false });
+  assert.equal((await s.control.command({ action: "setPreview", enabled: true })).preview.enabled, false);
 });

@@ -23,6 +23,7 @@ import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { ComparisonReviewWorkspace } from "@/components/chat/ComparisonReviewWorkspace";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
+import { isComparisonReviewAlreadyRunning } from "@/lib/comparisonReviewInFlight";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import {
   toSourceGrounding,
@@ -462,6 +463,8 @@ export function ComparisonReviewDialog({
   onClose,
   onCompleted,
   onSignIn,
+  sourceRevision = 0,
+  readGuestSource,
 }: {
   conversationId: string | null;
   /**
@@ -476,6 +479,21 @@ export function ComparisonReviewDialog({
   onClose: () => void;
   onCompleted?: () => void;
   onSignIn?: () => void;
+  /**
+   * Bumped by the page whenever another model answer finishes. It refreshes
+   * the setup screen only (see `setupRevision`); it is deliberately not part
+   * of this component's key, because remounting would discard a run in flight
+   * or a result being read.
+   */
+  sourceRevision?: number;
+  /**
+   * A guest's latest local turn, read again whenever the setup step refreshes:
+   * `guestSource` is the turn captured when the dialog opened, so without it a
+   * third answer finishing on the setup step would refresh the preview with
+   * the old two answers. Never read while a run is in flight or a result is
+   * shown -- the setup step is frozen then (see `setupRevision`).
+   */
+  readGuestSource?: () => GuestReviewSource | null;
 }) {
   const { t } = useLanguage();
   const { requestToken: requestGuestVerificationToken } = useGuestVerification();
@@ -491,8 +509,41 @@ export function ComparisonReviewDialog({
   const [includeSynthesis, setIncludeSynthesis] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  /** Why the setup could not be prepared; every setup refresh clears it. */
   const [error, setError] = useState("");
+  /**
+   * Why the last run failed. Kept apart from `error`: a run that fails after
+   * another answer finished returns to a setup that refreshes at once, and
+   * that refresh must not erase the failure. Cleared by the next run (and by
+   * closing, which unmounts the dialog).
+   */
+  const [runError, setRunError] = useState("");
+  /**
+   * "This review is already running" (409 DUPLICATE_REQUEST), with the
+   * criteria of the refused request. Kept apart from `error` for the same
+   * reason as `runError`, and shown only while the criteria on screen are the
+   * refused ones: other criteria are another input, which a run would review
+   * and bill anew -- the opposite of what the notice says. Added answers keep
+   * it; its text covers that case.
+   */
+  const [alreadyRunning, setAlreadyRunning] = useState<{ mode: ReviewMode; includeSynthesis: boolean } | null>(null);
   const [activeReviewer, setActiveReviewer] = useState<"primary" | "secondary">("primary");
+  /**
+   * The answers revision the setup on screen was loaded for.
+   *
+   * A newly finished answer has to refresh a *setup* screen: its scope, its
+   * estimate and its saved-result lookup all describe the latest turn. It
+   * must never reset a run in flight or a result being read. That run is
+   * billed for the answers it started with, and its saved result is looked up
+   * by that turn, so resetting the dialog under it left a paid result
+   * unreachable and put a second, separately billed run one click away. The
+   * revision is therefore followed only while the dialog is idle at its setup
+   * step, and caught up as soon as it returns there.
+   */
+  const [setupRevision, setSetupRevision] = useState(sourceRevision);
+  if (!running && !review && setupRevision !== sourceRevision) {
+    setSetupRevision(sourceRevision);
+  }
 
   /**
    * `reviewer:section:ordinal` -> the server-derived item id.
@@ -511,26 +562,36 @@ export function ComparisonReviewDialog({
   }, [review]);
 
   const isGuestReview = Boolean(guestSource);
+  const readGuestSourceRef = useRef(readGuestSource);
+  useEffect(() => {
+    readGuestSourceRef.current = readGuestSource;
+  });
+  /** The guest turn the setup on screen was previewed with; the run sends the same. */
+  const [setupGuestSource, setSetupGuestSource] = useState<GuestReviewSource | null>(guestSource);
 
   useEffect(() => {
     if (!open) return;
     if (!conversationId && !guestSource) return;
     const controller = new AbortController();
     queueMicrotask(() => { if (!controller.signal.aborted) { setSetup(null); setReview(null); setLoading(true); setError(""); } });
+    // A guest's answers live in the page, not in a conversation: the setup
+    // previews the latest local turn, so a refresh after another answer
+    // finished includes it. The open-time capture is the fallback.
+    const previewSource = guestSource ? readGuestSourceRef.current?.() ?? guestSource : null;
     // The guest preview is a POST because the thing being previewed is the
     // payload: there is no saved conversation to name in a URL. It spends
     // nothing and reserves nothing -- it exists so the price, the reviewer
     // class and the remaining trial on this screen all come from the server.
-    const request = guestSource
+    const request = previewSource
       ? fetch("/api/chat/comparison-review/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
           signal: controller.signal,
           body: JSON.stringify({
-            question: guestSource.question,
-            responses: guestSource.responses,
-            language: guestSource.language,
+            question: previewSource.question,
+            responses: previewSource.responses,
+            language: previewSource.language,
           }),
         })
       : fetch(`/api/conversations/${conversationId}/comparison-reviews?${new URLSearchParams({ reviewMode: mode, includeSynthesis: String(includeSynthesis) })}`, {
@@ -546,6 +607,7 @@ export function ComparisonReviewDialog({
         if (!response.ok) throw new Error(data.error || t("chat.aiReviewPrepareFailed"));
         if (controller.signal.aborted) return;
         setSetup(data);
+        if (previewSource) setSetupGuestSource(previewSource);
         if (data.storedReview) setReview(data.storedReview);
         trackProductEvent(
           "comparison_review_viewed",
@@ -564,7 +626,7 @@ export function ComparisonReviewDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [conversationId, guestSource, open, t, mode, includeSynthesis]);
+  }, [conversationId, guestSource, open, t, mode, includeSynthesis, setupRevision]);
 
   useEffect(() => {
     if (open && !idempotencyKeyRef.current) {
@@ -638,12 +700,27 @@ export function ComparisonReviewDialog({
     }
     setRunning(true);
     setError("");
+    setRunError("");
+    setAlreadyRunning(null);
     let receivedPrimary = false;
-    trackProductEvent(
-      "comparison_review_started",
-      setup.responses?.length || 0,
-      { review_mode: mode }
-    );
+    // An account request the server answers with "this review is already
+    // running" (409 DUPLICATE_REQUEST) started and billed nothing, so it is
+    // not counted as started. That can only be known from the answer, so an
+    // account start is counted when the server answers (or never does); a
+    // guest start is counted on the click, as before.
+    let startTracked = false;
+    const trackStarted = () => {
+      if (startTracked) return;
+      startTracked = true;
+      trackProductEvent(
+        "comparison_review_started",
+        setup.responses?.length || 0,
+        { review_mode: mode }
+      );
+    };
+    if (guestSource) trackStarted();
+    // The guest run sends exactly the turn the setup on screen previewed.
+    const runGuestSource = guestSource ? setupGuestSource ?? guestSource : null;
     try {
       const sendGuestRun = (turnstileToken?: string) =>
         fetch("/api/chat/comparison-review", {
@@ -651,9 +728,9 @@ export function ComparisonReviewDialog({
           headers: { "Content-Type": "application/json", Accept: REVIEW_STREAM_TYPE },
           cache: "no-store",
           body: JSON.stringify({
-            question: guestSource!.question,
-            responses: guestSource!.responses,
-            language: guestSource!.language,
+            question: runGuestSource!.question,
+            responses: runGuestSource!.responses,
+            language: runGuestSource!.language,
             reviewMode: mode,
             includeSynthesis,
             idempotencyKey: idempotencyKeyRef.current,
@@ -686,6 +763,7 @@ export function ComparisonReviewDialog({
           response = await sendGuestRun(token);
         }
       }
+      if (response.status !== 409) trackStarted();
       const data = (await readReviewProgress(response, value => {
         const primary = value as ComparisonReview;
         if (!primary?.result?.primary || !Array.isArray(primary.responseMap)) return;
@@ -695,6 +773,15 @@ export function ComparisonReviewDialog({
       })) as
         | ComparisonReview
         | { error?: string; traceId?: string; code?: string };
+      if (!guestSource && isComparisonReviewAlreadyRunning(response.status, data)) {
+        // Not a failure: the same review is already running and was billed
+        // once. Say so and leave the button available -- pressed again it is
+        // refused while the run is in flight and served from the saved row
+        // once it has finished.
+        setAlreadyRunning({ mode, includeSynthesis });
+        return;
+      }
+      trackStarted();
       if (!response.ok || !("result" in data)) {
         const code = "code" in data ? data.code : undefined;
         // The two guest-specific refusals have their own sentences: one is
@@ -732,15 +819,16 @@ export function ComparisonReviewDialog({
         }
       );
       onCompleted?.();
-    } catch (runError) {
+    } catch (failure) {
+      trackStarted();
       trackProductEvent(
         "comparison_review_failed",
         setup.responses?.length || 0,
         { review_mode: mode }
       );
-      setError(
+      setRunError(
         receivedPrimary ? t("chat.aiReviewPartialInterrupted") :
-          runError instanceof Error ? runError.message : t("chat.aiReviewFailed")
+          failure instanceof Error ? failure.message : t("chat.aiReviewFailed")
       );
       // The failed run released its idempotency claim server-side, so a real
       // retry needs a real new key rather than re-presenting one the server
@@ -1247,7 +1335,7 @@ export function ComparisonReviewDialog({
             </div>
           )}
 
-          {error && (
+          {(runError || error) && (
             // UI-004: a review that fails after the user has committed the
             // click is an error they must notice, not a paragraph that
             // silently appears below the fold -- so it announces like every
@@ -1258,7 +1346,18 @@ export function ComparisonReviewDialog({
               className="mt-5 flex gap-3 rounded-2xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
             >
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="min-w-0 break-words text-sm leading-6">{error}</p>
+              <p className="min-w-0 break-words text-sm leading-6">{runError || error}</p>
+            </div>
+          )}
+          {alreadyRunning?.mode === mode && alreadyRunning.includeSynthesis === includeSynthesis && (
+            // Not a failure, so not the red alert: nothing ran or was charged.
+            <div
+              role="status"
+              data-testid="comparison-review-already-running"
+              className="mt-5 flex gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <p className="min-w-0 break-words text-sm leading-6">{t("chat.aiReviewAlreadyRunningRetryLater")}</p>
             </div>
           )}
         </div>

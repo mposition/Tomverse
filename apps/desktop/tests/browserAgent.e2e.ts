@@ -19,18 +19,18 @@ async function listen(server: Server) {
   return "http://127.0.0.1:" + address.port;
 }
 
-async function launch(gateway: FakeGateway) {
+async function launch(gateway: FakeGateway, options: { browserAgent?: boolean; agentMode?: boolean } = {}) {
   const folder = await mkdtemp(join(tmpdir(), "tomverse-browser-agent-"));
   const root = join(folder, "project");
   const profile = join(folder, "profile");
   const descriptor = join(folder, "fixture.json");
   await Promise.all([mkdir(root), mkdir(profile)]);
   await writeFile(join(profile, "language.txt"), "en");
-  await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY, browserAgent: true }));
+  await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY, ...(options.browserAgent === false ? {} : { browserAgent: true }) }));
   const app = await launchNativeFixture(descriptor);
   const page = await app.firstWindow();
   await page.getByRole("button", { name: "Open local folder" }).click();
-  await page.getByLabel("Code mode").selectOption("agent");
+  if (options.agentMode !== false) await page.getByLabel("Code mode").selectOption("agent");
   return { folder, app, page };
 }
 
@@ -139,7 +139,7 @@ test("the agent opens a local page, reads it, clicks after approval and reads th
     await expect(composer).toHaveValue(/selector "#add"/);
     const draft = await composer.inputValue();
     assert.match(draft, /text "Add item"/);
-    assert.match(draft, /picture pick-[0-9a-f]{8} \(browser_screenshot with pick/);
+    assert.match(draft, /picture pick-[0-9a-f]{8} \(attached as an image when the model can see images; browser_screenshot with pick/);
     assert.match(draft, /comment: Make this button blue\./);
     await expect(comments).toBeHidden();
   } finally {
@@ -183,6 +183,129 @@ test("the person takes the tab back from the agent: its next request is refused,
     assert.match(outputs, /Only an http address on localhost, 127\.0\.0\.1 or \[::1\] with a port can be opened/, "an outside address is refused");
     assert.match(outputs, /The user took control of the browser/);
     assert.doesNotMatch(outputs, /Count: 0/, "nothing was read after the person took the tab");
+  } finally {
+    release();
+    await app?.close();
+    site.close();
+    await gateway.stop();
+    if (folder) await removeNativeFixtureDirectory(folder);
+  }
+});
+
+/** The person opens a page in the panel and picks two elements: a button, and a password field that must not be photographed. */
+async function pickElements(app: ElectronApplication, page: Page, href: string) {
+  await page.getByRole("button", { name: "Browser", exact: true }).click();
+  const address = page.getByRole("textbox", { name: "Address" });
+  await address.fill(href);
+  await address.press("Enter");
+  let panel: Page | undefined;
+  await expect.poll(() => { panel = app.context().pages().find((candidate) => candidate.url() === href); return Boolean(panel); }).toBe(true);
+  const comments = page.getByRole("region", { name: "Element comments" });
+  await expect(page.getByRole("button", { name: "Select element", exact: true })).toBeEnabled({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Select element", exact: true }).click();
+  await expect(page.getByText("Click an element in the page to comment on it.")).toBeVisible();
+  await panel!.locator("#add").click();
+  await expect(comments.getByText("#add", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(comments.getByRole("img", { name: "The selected element" })).toHaveCount(1);
+  await comments.getByRole("textbox").first().fill("Make this button blue.");
+  return { panel: panel!, comments };
+}
+
+const imageParts = (gateway: FakeGateway) => (gateway.completions[0]!.body.messages as Array<{ role: string; content: unknown }>)
+  .flatMap(({ content }) => Array.isArray(content) ? content.filter((part: { type?: string }) => part.type === "image_url") : []);
+
+test("the picture of a picked element goes to a model that sees images with the instruction; a secret field is never photographed", { timeout: 120_000 }, async () => {
+  const site = createServer((_request, reply) => { reply.setHeader("Content-Type", "text/html; charset=utf-8"); reply.end(PAGE); });
+  const href = (await listen(site)) + "/";
+  const gateway = await new FakeGateway({ script: () => ({ text: "I can see the button." }), models: seeingModels }).start();
+  let app: ElectronApplication | undefined;
+  let folder = "";
+  try {
+    ({ app, folder } = await launch(gateway, { browserAgent: false, agentMode: false }));
+    const page = await app.firstWindow();
+    const { panel, comments } = await pickElements(app, page, href);
+    await page.getByRole("button", { name: "Select element", exact: true }).click();
+    await panel.locator("#secret").click();
+    await expect(comments.getByText("No picture is sent: this element holds a secret field.")).toBeVisible({ timeout: 10_000 });
+    await expect(comments.getByRole("img", { name: "The selected element" }), "only the button has a picture").toHaveCount(1);
+    await comments.getByRole("button", { name: "Add to message (2)" }).click();
+    const composer = page.getByRole("textbox", { name: "Code request" });
+    const draft = await composer.inputValue();
+    assert.match(draft, /picture pick-[0-9a-f]{8} \(attached as an image when the model can see images\)/);
+    assert.doesNotMatch(draft, /browser_screenshot/, "the agent has no browser tools here");
+    assert.match(draft, /picture withheld \(the element holds a secret field\)/);
+    assert.equal((draft.match(/attached as an image/g) ?? []).length, 1, "only the button's picture is carried");
+    await page.getByRole("button", { name: "Send Code request" }).click();
+    await expect(page.getByText("I can see the button.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    const messages = gateway.completions[0]!.body.messages as Array<{ role: string; content: unknown }>;
+    const instruction = messages.findIndex(({ role, content }) => role === "user" && typeof content === "string" && content.includes("Make this button blue."));
+    assert.ok(instruction > 0, "the instruction reached the model as text");
+    const pictures = imageParts(gateway) as Array<{ image_url: { url: string } }>;
+    assert.equal(pictures.length, 1, "one picture: the button");
+    assert.match(pictures[0]!.image_url.url, /^data:image\/(png|jpeg);base64,/);
+    assert.ok(pictures[0]!.image_url.url.length > 100, "a real picture, not an empty one");
+    assert.ok(Array.isArray(messages[instruction + 1]!.content), "the picture follows the instruction");
+  } finally {
+    await app?.close();
+    site.close();
+    await gateway.stop();
+    if (folder) await removeNativeFixtureDirectory(folder);
+  }
+});
+
+test("a model that cannot see images gets the picked element's text only", { timeout: 120_000 }, async () => {
+  const site = createServer((_request, reply) => { reply.setHeader("Content-Type", "text/html; charset=utf-8"); reply.end(PAGE); });
+  const href = (await listen(site)) + "/";
+  const gateway = await new FakeGateway({ script: () => ({ text: "Only the words arrived." }) }).start();
+  let app: ElectronApplication | undefined;
+  let folder = "";
+  try {
+    ({ app, folder } = await launch(gateway, { browserAgent: false, agentMode: false }));
+    const page = await app.firstWindow();
+    const { comments } = await pickElements(app, page, href);
+    await comments.getByRole("button", { name: "Add to message (1)" }).click();
+    await page.getByRole("button", { name: "Send Code request" }).click();
+    await expect(page.getByText("Only the words arrived.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    assert.equal(imageParts(gateway).length, 0, "no image for a model without vision");
+    assert.match(JSON.stringify(gateway.completions[0]!.body.messages), /Make this button blue\./);
+  } finally {
+    await app?.close();
+    site.close();
+    await gateway.stop();
+    if (folder) await removeNativeFixtureDirectory(folder);
+  }
+});
+
+test("a picked element's picture also goes with a follow-up sent while the task runs", { timeout: 120_000 }, async () => {
+  const site = createServer((_request, reply) => { reply.setHeader("Content-Type", "text/html; charset=utf-8"); reply.end(PAGE); });
+  const href = (await listen(site)) + "/";
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const gateway = await new FakeGateway({
+    async script(_body, index) {
+      if (index === 0) { await held; return { toolCalls: [{ name: "list_files", args: { path: "." } }] }; }
+      return { text: "The follow-up arrived with its picture." };
+    },
+    models: seeingModels,
+  }).start();
+  let app: ElectronApplication | undefined;
+  let folder = "";
+  try {
+    ({ app, folder } = await launch(gateway, { browserAgent: false, agentMode: false }));
+    const page = await app.firstWindow();
+    await page.getByRole("textbox", { name: "Code request" }).fill("List the folder.");
+    await page.getByRole("button", { name: "Send Code request" }).click();
+    await expect.poll(() => gateway.completions.length).toBe(1);
+    const { comments } = await pickElements(app, page, href);
+    await comments.getByRole("button", { name: "Add to message (1)" }).click();
+    await page.getByRole("button", { name: "Send follow-up instruction" }).click();
+    await expect(page.getByText("Make this button blue.", { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+    release();
+    await expect(page.getByText("The follow-up arrived with its picture.", { exact: true })).toBeVisible({ timeout: 30_000 });
+    const second = gateway.completions[1]!.body.messages as Array<{ role: string; content: unknown }>;
+    assert.ok(second.some(({ role, content }) => role === "user" && typeof content === "string" && content.includes("Make this button blue.")), "the follow-up text reached the model");
+    const pictures = second.flatMap(({ content }) => Array.isArray(content) ? content.filter((part: { type?: string }) => part.type === "image_url") : []);
+    assert.equal(pictures.length, 1, "its picture arrived once");
   } finally {
     release();
     await app?.close();

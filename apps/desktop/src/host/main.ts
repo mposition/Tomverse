@@ -10,6 +10,7 @@ import { voiceRequestInput } from "../voice-contract";
 import { createVoiceHost } from "./voice-host";
 import { createCodeBrowserView } from "./code-browser-view";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
+import { pictureFor } from "./browser-pick-store";
 import { createDesktopComputer } from "./computer-wiring";
 import { createFixtureBackend } from "./computer-fixture-backend";
 import type { ComputerBackend } from "./computer-backend";
@@ -36,6 +37,9 @@ import { createBillingApi, type BillingApi } from "./billing-api";
 import { createManagedCodeClient } from "./managed-code-client";
 import { createManagedCodeSession, type ManagedCodeSession } from "./managed-code-session";
 import { desktopManagedCodeInput } from "../managed-code-contract";
+import { desktopCloudExecutionInput } from "../cloud-execution-contract";
+import { createCloudExecutionClient } from "./cloud-execution-client";
+import { createCloudExecutionHost, type CloudExecutionHost, type CloudProject } from "./cloud-execution-host";
 import { createBillingWindowHost } from "./billing-window";
 import { desktopBillingInput, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
@@ -108,6 +112,9 @@ import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBra
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
 import { createGitIntegration } from "./git-integration";
+import { createFixtureGhRunner, createGhRunner, ghFixtureFile } from "./github-cli";
+import { githubGitAuth } from "./plugin-github-auth";
+import { resolveProgram } from "./tool-process";
 import type { AgentGitResult } from "../git-actions-contract";
 import { appendTaskPage, nextTaskPage } from "./taskPaging";
 import {
@@ -116,6 +123,7 @@ import {
 } from "./browser-login";
 import { createCodeKeyVault, createSessionVault, type StorageMode, type StoredDesktopSession } from "./session-vault";
 import { readDesktopCapabilities } from "./desktop-capabilities";
+import { prepareRefinedTurn, refinerEligible, type RefinerAttempt } from "./prompt-refiner";
 import { CodeKeyRefused, readCopiedCodeKey, verifyCodeKey } from "./code-key";
 import { DESKTOP_LIVE_ORIGIN, type DesktopIdentityProvider } from "../../../../lib/desktopAuthContract";
 import { DESKTOP_APP_ORIGIN } from "../../../../lib/desktopReadApiContract";
@@ -174,6 +182,9 @@ const fixtureSchema = z.object({
   browserInspection: z.boolean().optional(),
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
+  /** A test chooses this zip file where the Plugins screen would open a file dialog, and plays the server's plugin-sources switch. */
+  pluginZip: z.string().min(1).optional(),
+  pluginSources: z.boolean().optional(),
   browserAgent: z.boolean().optional(),
   /** A test lets the agent open public https sites (the person's second browser switch). */
   browserWeb: z.boolean().optional(),
@@ -2840,7 +2851,9 @@ function loadCodeTerminal() {
 /** The host tools a Code run gets, as the person's settings are now: the same for a new task and for one that resumes or continues. */
 function codeRunTools() {
   const { agent, inspection, web } = browserTools();
-  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(web ? { browserWeb: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}) };
+  return { ...(inspection ? { browserSnapshot: true } : {}), ...(agent ? { browserAgent: true } : {}), ...(web ? { browserWeb: true } : {}), ...(computer.host.toolsAvailable() ? { computerUse: true } : {}), ...(codeTerminalEnabled && !projectRoot?.remote ? { terminalRead: true } : {}),
+    // The paid web search only where the server this app reached offers it; the route checks the key, plan and credits again.
+    ...(state.capabilities?.codeWebSearch ? { webSearch: true } : {}) };
 }
 
 // The agent reads the shared terminals of the task it is running, only while that run is live, and never types into them.
@@ -2943,6 +2956,9 @@ function connectedAccountData() {
         language: () => state.language ?? "en",
         origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN,
         pickFile: pickLocalFile,
+        openExternal: (url) => shell.openExternal(url),
+        linkProviders: () => state.capabilities?.socialLink ?? [],
+        signal,
       }),
     };
   }
@@ -2994,6 +3010,30 @@ async function managedCode(value: unknown) {
   return managedCodeSession.session.run(input);
 }
 
+// Cloud Code tasks share the account session too; the host keeps the jobs of the signed-in window. The project is the
+// one open now: its tracked files are the snapshot, and the patch is applied back only to that same folder.
+let cloudExecutionHost: { signal: AbortSignal; host: CloudExecutionHost } | undefined;
+async function cloudProject(): Promise<CloudProject> {
+  const project = projectRoot;
+  if (!project || !state.root) return { unavailable: "noProject" };
+  if (project.remote) return { unavailable: "remoteProject" };
+  const repository = await readGitProject(project);
+  if (!repository || repository === "unavailable") return { unavailable: "notGit" };
+  return { name: basename(repository.root), git: { root: repository.root, executable: repository.executable } };
+}
+async function cloudExecution(value: unknown) {
+  const input = desktopCloudExecutionInput.parse(value);
+  if (!state.capabilities?.cloudExecution) throw new Error("Cloud execution is unavailable.");
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (cloudExecutionHost?.signal !== signal) {
+    const managed = createManagedCodeClient({ send: settings.send, signal });
+    cloudExecutionHost = { signal, host: createCloudExecutionHost({ client: createCloudExecutionClient({ send: settings.send, signal }),
+      catalog: () => managed.catalog(), project: cloudProject, signal }) };
+  }
+  return cloudExecutionHost.host.run(input);
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -3004,6 +3044,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   }
   if (handoffId && draft.conversationId) throw new Error("Use the excerpt in a new Chat draft.");
   if (draft.tools && !state.capabilities?.composerTools) throw new Error("Chat composer options are unavailable.");
+  if (draft.effort === "medium" && !state.capabilities?.reasoningSteps) throw new Error("This reasoning effort is unavailable.");
   if (draft.mcpConnectionId && (!state.capabilities?.chatPlugin || draft.deepResearchDepth || handoffId)) {
     throw new Error("Plugins are unavailable for this draft.");
   }
@@ -3027,6 +3068,7 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
     let contextChanged = false;
     let researchSubmitted = false;
     let imageOffer: ChatTurnResult["imageOffer"];
+    let refinerAttempt: RefinerAttempt | undefined;
     let lastProgressAt = 0;
     let lastMcpProgress: ChatTurnProgress["mcpProgress"];
     const publish = (update: Omit<ChatTurnProgress, "requestId" | "conversationId">) => {
@@ -3044,14 +3086,25 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
           }
         }
         publish({});
-        sourceId = await api.saveQuestion(id, input, signal);
+        // An Auto turn in plain text may be prepared by the Prompt Refiner, as on the web. The question is saved under the
+        // request id the server minted for the held draft, and the held decision rides on the stream request.
+        const settings = (() => { try { return connectedSettingsApi(); } catch { return null; } })();
+        if (settings && refinerEligible({ enabled: state.capabilities?.promptRefiner === true, conversationId: id, prompt: input.prompt,
+          selectionMode: input.selectionMode, attachmentCount: attachments.length, deepResearch: Boolean(input.deepResearchDepth),
+          plugin: Boolean(input.mcpConnectionId), handoff: Boolean(handoffId) })) {
+          refinerAttempt = await prepareRefinedTurn(settings, { conversationId: id, prompt: input.prompt }, signal);
+        }
+        const refined = refinerAttempt?.refined ?? null;
+        sourceId = await api.saveQuestion(id, refined ? { ...input, requestId: refined.clientRequestId } : input, signal);
+        // The saved question is the draft's exact text, so the held decision survives the draft's removal (a database check at commit).
+        await refinerAttempt?.finish();
         if (input.deepResearchDepth) assistantId = desktopResearchAnswerId(id, sourceId);
         if (handoffId) removeWorkspaceHandoff(handoffId);
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);
         publish({ savedPrompt: input.prompt });
         const saved = await api.conversation({ id }, true, signal);
         streamStarted = true;
-        const result = await api.stream(saved, input, sourceId, assistantId, signal, (text, mcpState) => {
+        const result = await api.stream(saved, refined ? { ...input, promptRefinerDecision: refined.decision } : input, sourceId, assistantId, signal, (text, mcpState) => {
           if (mcpState && mcpState !== lastMcpProgress) {
             lastMcpProgress = mcpState;
             publish({ mcpProgress: mcpState });
@@ -3079,6 +3132,8 @@ async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
       } catch (error) {
         failed = !signal.aborted;
         contextChanged = failed && error instanceof DesktopChatContextChanged;
+      } finally {
+        await refinerAttempt?.finish();
       }
       const savedId = id;
       const conversation = savedId && !accountSignal.aborted
@@ -3106,7 +3161,8 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
   const attachments = resolveStagedAttachments(input.attachmentUploadIds);
   const capability = state.capabilities?.review;
   if (!capability || input.choices.length > capability.modelLimit || (input.mode === "easy" && !capability.easy) ||
-      (input.tools && !state.capabilities?.reviewTools)) {
+      (input.tools && !state.capabilities?.reviewTools) || (input.deepResearchDepth && !state.capabilities?.reviewDeepResearch) ||
+      (input.onlyModelId === DEEP_RESEARCH_MODEL_ID && !input.deepResearchDepth)) {
     throw new Error("The selected Review options are unavailable.");
   }
   const currentLocation = chatLocationAllowed() ? input.currentLocation : undefined;
@@ -3120,6 +3176,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
     let id = input.conversationId;
     let savedQuestion = false;
     let dispatching = false;
+    let researchSubmitted = false;
     const responses = new Map<string, { id: string; text: string }>();
     const publish = (update: Omit<ReviewTurnProgress, "requestId" | "conversationId">) => {
       if (!id || !window || window !== mainWindow || window.isDestroyed() || window.webContents.isDestroyed() ||
@@ -3130,10 +3187,20 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
       try {
         let current = id ? await api.conversation({ id, product: "review" }, true, signal) : null;
         let modelIds = input.choices;
+        // Deep Research is one more column of the Review, put to that model alone.
+        const limit = Math.min(3, capability.modelLimit);
+        let researchHeld: string[] | undefined;
         const only = input.onlyModelId;
+        if (input.deepResearchDepth) {
+          if (!(await api.models()).some((model) => model.id === DEEP_RESEARCH_MODEL_ID)) throw new Error("Deep Research is unavailable.");
+          // Like any send, the Review then holds the models the composer shows; a new Review gives up the last ones that do not fit.
+          researchHeld = [...(current ? input.choices : input.choices.slice(0, Math.max(0, limit - 1))), DEEP_RESEARCH_MODEL_ID];
+          if (researchHeld.length > limit) throw new Error("There is no room for Deep Research in this Review.");
+          modelIds = [DEEP_RESEARCH_MODEL_ID];
+        }
         // A follow-up for one model goes to a saved Review that already holds that model; nothing else about the Review changes.
         if (only && !current?.selectedModels.includes(only)) throw new Error("The model is not part of this Review.");
-        if (!only && input.mode === "easy") {
+        if (!only && !input.deepResearchDepth && input.mode === "easy") {
           const context = current?.messages.filter((message) => message.role === "user").slice(-2)
             .map((message) => message.content).join("\n") ?? "";
           const decision = await api.routeReview(input, context, signal, attachments);
@@ -3150,36 +3217,43 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
         }
         if (input.effort !== "default") {
           const effort = input.effort;
-          const models = await api.models();
+          if (effort === "medium" && !state.capabilities?.reasoningSteps) throw new Error("This reasoning effort is unavailable.");
+          const models = await api.models({ reasoningSteps: state.capabilities?.reasoningSteps === true });
           if (input.mode !== "professional" || modelIds.some((modelId) =>
             !models.find((model) => model.id === modelId)?.reasoningEfforts?.includes(effort))) {
             throw new Error("The selected models do not share this reasoning effort.");
           }
         }
+        // What the Review holds once this send is made. Easy mode has routed its providers to models by now; the research column
+        // of a Review stays while a place is free beside the models that answer.
+        const held = researchHeld ?? (!only && current?.selectedModels.includes(DEEP_RESEARCH_MODEL_ID) && modelIds.length < limit
+          ? [...modelIds, DEEP_RESEARCH_MODEL_ID] : modelIds);
         if (!id) {
-          id = await api.createReview(modelIds, input.prompt, signal);
+          id = await api.createReview(held, input.prompt, signal);
           if (input.tools && Object.keys(input.tools).length) {
-            await api.configureReview(await api.conversation({ id, product: "review" }, true, signal), modelIds, signal, input.tools);
+            await api.configureReview(await api.conversation({ id, product: "review" }, true, signal), held, signal, input.tools);
           }
         } else if (current && !only) {
-          await api.configureReview(current, modelIds, signal, input.tools);
+          await api.configureReview(current, held, signal, input.tools);
         }
         current = await api.conversation({ id, product: "review" }, true, signal);
-        if (!only && current.selectedModels.length !== modelIds.length || !modelIds.every((modelId) => current!.selectedModels.includes(modelId))) {
+        if (!only && current.selectedModels.length !== held.length || !held.every((modelId) => current!.selectedModels.includes(modelId))) {
           throw new Error("Tomverse did not confirm the selected Review models.");
         }
         const admission = modelIds.length > 1 ? await api.admitReview(current, input, modelIds, signal, attachments) : undefined;
-        const sourceId = await api.saveQuestion(id, input, signal);
+        const reviewId = id;
+        const sourceId = await api.saveQuestion(id, input.deepResearchDepth ? { ...input, onlyModelId: DEEP_RESEARCH_MODEL_ID } : input, signal);
         savedQuestion = true;
         for (const attachment of attachments) attachmentReceipts.delete(attachment.uploadId);
         publish({ savedPrompt: input.prompt });
         const saved = await api.conversation({ id, product: "review" }, true, signal);
         dispatching = true;
         await Promise.allSettled(modelIds.map(async (modelId) => {
-          const assistant = { id: randomUUID(), text: "" };
+          const assistant = { id: input.deepResearchDepth ? desktopResearchAnswerId(reviewId, sourceId) : randomUUID(), text: "" };
           responses.set(modelId, assistant);
           let lastProgressAt = 0;
-          await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext, currentLocation },
+          const result = await api.stream(saved, { modelId, selectionMode: "manual", effort: input.effort, review: true, admission, reviewContext,
+            currentLocation: input.deepResearchDepth ? undefined : currentLocation, deepResearchDepth: input.deepResearchDepth },
             sourceId, assistant.id, signal, (text) => {
               assistant.text = text;
               const now = Date.now();
@@ -3188,6 +3262,7 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
                 publish({ modelId, text });
               }
             });
+          if (result && "deepResearch" in result) researchSubmitted = true;
         }));
       } catch {
         // Keep any saved question available for a readback after a refusal or transport failure.
@@ -3199,7 +3274,9 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
       const stored = new Map(conversation?.messages.map((message) => [message.id, message]));
       const partial = [...responses].flatMap(([modelId, response]) =>
         response.text && !stored.has(response.id) ? [{ modelId, text: response.text }] : []);
-      const completed = [...responses.values()].filter(({ id }) => stored.get(id)?.status === "normal").length;
+      // A research run that the server accepted is under way, not unfinished: its answer arrives by polling.
+      const completed = [...responses.values()].filter(({ id }) => stored.get(id)?.status === "normal" ||
+        (researchSubmitted && input.deepResearchDepth && (!stored.has(id) || stored.get(id)?.status === "pending"))).length;
       const status = completed && completed === responses.size ? "saved" : signal.aborted ? "stopped"
         : completed || partial.length ? "partial" : dispatching ? "unconfirmed" : "failed";
       return { conversation, status, savedQuestion, partial };
@@ -3603,6 +3680,12 @@ const remoteControl = createRemoteControl({
     const copy = desktopRemoteCopy[state.language ?? "en"];
     return confirmNative({ title: copy.confirmTitle, message: copy.confirmMessage, detail: copy.sentToServer, accept: copy.confirmAccept, cancel: copy.confirmCancel });
   },
+  // Previews of file changes: named by the server, and only after the person agrees to what they hold.
+  previewSupported: () => state.capabilities?.remotePreview === true,
+  confirmPreview: () => {
+    const copy = desktopRemoteCopy[state.language ?? "en"];
+    return confirmNative({ title: copy.previewConfirmTitle, message: copy.previewConfirmMessage, detail: copy.previewDetail, accept: copy.confirmAccept, cancel: copy.confirmCancel });
+  },
 });
 
 let dictation: { id: string; session: AbortSignal; expiry: number; mediaGranted: boolean; sent: boolean; controller: AbortController } | undefined;
@@ -3667,12 +3750,28 @@ function mayRequestDictation(contents: Electron.WebContents | null) {
 
 const pluginsHost = createPluginsHost({
   pickFolder: async () => fixture?.pluginFolder ?? (!mainWindow ? null : (await dialog.showOpenDialog(mainWindow, { title: nativeCopy().openFolder, properties: ["openDirectory"] })).filePaths[0] ?? null),
-  confirmFetch: async (address) => {
+  pickZip: async () => fixture?.pluginZip ?? (!mainWindow ? null : (await dialog.showOpenDialog(mainWindow, {
+    title: desktopPluginsCopy[state.language ?? "en"].zipDialogTitle, properties: ["openFile"], filters: [{ name: "Zip", extensions: ["zip"] }],
+  })).filePaths[0] ?? null),
+  confirmFetch: async (address, kind) => {
     if (fixture) return true;
     const copy = desktopPluginsCopy[state.language ?? "en"];
-    const question = { type: "question" as const, title: copy.fetchTitle, message: copy.fetchMessage, detail: address, buttons: [copy.fetchCancel, copy.fetchAllow], cancelId: 0, defaultId: 0, noLink: true };
+    const [title, message] = kind === "zip" ? [copy.fetchTitleZip, copy.fetchMessageZip] : kind === "npm" ? [copy.fetchTitleNpm, copy.fetchMessageNpm] : [copy.fetchTitle, copy.fetchMessage];
+    const question = { type: "question" as const, title, message, detail: address, buttons: [copy.fetchCancel, copy.fetchAllow], cancelId: 0, defaultId: 0, noLink: true };
     const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, question) : await dialog.showMessageBox(question);
     return response === 1;
+  },
+  // The extra sources follow the server's switch (the capability). A test build can stand in for it.
+  sources: () => (DESKTOP_FIXTURE_ALLOWED && fixture?.pluginSources === true) || state.capabilities?.pluginSources === true,
+  githubSignIn: async (address) => {
+    if (!fixture) {
+      const copy = desktopPluginsCopy[state.language ?? "en"];
+      const question = { type: "question" as const, title: copy.signInTitle, message: copy.signInMessage, detail: address, buttons: [copy.fetchCancel, copy.signInAllow], cancelId: 0, defaultId: 0, noLink: true };
+      const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, question) : await dialog.showMessageBox(question);
+      if (response !== 1) return null;
+    }
+    // The GitHub sign-in the person already has in the GitHub CLI (the same one the Git and pull request features use).
+    return githubGitAuth({ run: fixture ? createFixtureGhRunner(ghFixtureFile(fixture.profile)) : createGhRunner(), program: resolveProgram("gh", process.env) });
   },
 });
 
@@ -3770,6 +3869,8 @@ function registerIpc() {
     }
     broadcast();
   });
+  /** The pictures of the elements the instruction names (the person picked them in the browser panel); the worker attaches them for a model that can see images. */
+  const picturesOf = (text: string) => { const pictures = pictureFor(text); return pictures.length ? { pictures } : {}; };
   const startTask = async (value: unknown, parallelStart = false) => {
     const { handoffId, executionMode, workspace, ...draft } = startInput.parse(value);
     if (recoveryCheckPending()) throw new Error("Wait for the recovery check to finish.");
@@ -3865,7 +3966,7 @@ function registerIpc() {
     if (parallelStart) {
       parallel.submit({ kind: "parallel", title: cleanText(input.prompt, connection.key).slice(0, 80), folder: project.path, isolated: !!worktree,
         ...(worktree ? { worktree: worktree.info } : {}),
-        start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference } });
+        start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference, ...picturesOf(input.prompt) } });
       if (handoffId) removeWorkspaceHandoff(handoffId);
       codeReferences.clear();
       codeWorktreeDraft = undefined;
@@ -3890,7 +3991,7 @@ function registerIpc() {
       approval?.settings.automaticFrom === "tomverse_api"
       ? { mode: input.mode, project, approval } : undefined;
     send({ type: "start", runId: id, project, ...(worktree ? { sourceProject } : {}), scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
-      ...codeRunTools() });
+      ...picturesOf(input.prompt), ...codeRunTools() });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     codeWorktreeDraft = undefined;
@@ -3945,7 +4046,7 @@ function registerIpc() {
     return new Promise<boolean>((resolve) => {
       const requestId = randomUUID();
       pendingFollowUp = { requestId, resolve };
-      try { send({ type: "follow-up", runId: activeRunId, requestId, text }); }
+      try { send({ type: "follow-up", runId: activeRunId, requestId, text, ...picturesOf(text) }); }
       catch {
         pendingFollowUp = null;
         resolve(false);
@@ -4102,6 +4203,7 @@ function registerIpc() {
   main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));
   main("desktop:billing", billing);
   main("desktop:managed-code", managedCode);
+  main("desktop:cloud-execution", cloudExecution);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
   main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
   main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,
@@ -4145,7 +4247,7 @@ function registerIpc() {
     return withChatAccount((api) => api.rename(input), "chat");
   });
   main("chat:remove", (value) => removeChat(chatId.parse(value)));
-  main("chat:models", () => withChatAccount((api) => api.models()));
+  main("chat:models", () => withChatAccount((api) => api.models({ reasoningSteps: state.capabilities?.reasoningSteps === true })));
   main("chat:copy-text", (value) => clipboard.writeText(z.string().min(1).max(1_000_000).parse(value)));
   main("chat:export", (value) => {
     const input = z.object({ id: chatId, title: z.string().max(500), includeSource: z.boolean() }).strict().parse(value);
@@ -4159,7 +4261,7 @@ function registerIpc() {
   main("chat:send", (value) => sendChat(chatTurnInput.parse(value)));
   main("chat:stop", () => chatTurn?.abort());
   main("chat:research-status", (value) => {
-    if (!state.capabilities?.deepResearch) throw new Error("Deep Research is unavailable.");
+    if (!state.capabilities?.deepResearch && !state.capabilities?.reviewDeepResearch) throw new Error("Deep Research is unavailable.");
     return withChatAccount((api) => api.checkDeepResearch(chatId.parse(value)));
   });
   main("review:send", (value) => sendReview(reviewTurnInput.parse(value)));

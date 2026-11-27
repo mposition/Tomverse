@@ -21,6 +21,7 @@ import {
   writeChatComposerDraft,
 } from "@/lib/chatComposerDraftPersistence";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
+import { isCheckViolationDatabaseError } from "@/lib/databaseError";
 import { MessageAttachmentResolveError } from "@/lib/messageAttachmentStorage";
 
 type Params = { params: Promise<{ scopeKey: string }> };
@@ -201,6 +202,18 @@ export async function PUT(request: Request, { params }: Params) {
     }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return noStore(securityResponse);
+    // The request passed validation but the table refused the row: its CHECK
+    // bounds are behind an app limit again (2026-11-24 the draft table still
+    // held 50,000 characters and 5 files). Answer with a code that says so,
+    // not a bare 500, and keep the database's message in the log.
+    if (isCheckViolationDatabaseError(error)) {
+      console.error("Chat draft write refused by a database CHECK constraint:", error);
+      return jsonError(
+        "The Chat draft is larger than can be stored.",
+        "CHAT_DRAFT_STORAGE_LIMIT",
+        422
+      );
+    }
     console.error("Chat draft write failed:", error);
     return jsonError("Failed to save the Chat draft.", "CHAT_DRAFT_WRITE_FAILED", 500);
   }
@@ -220,6 +233,7 @@ export async function DELETE(request: Request, { params }: Params) {
         userId: scope.userId,
         scopeKey: scope.scopeKey,
         expectedRevision: body.expectedRevision,
+        ...(body.expectedCreatedAt ? { expectedCreatedAt: new Date(body.expectedCreatedAt) } : {}),
       });
     } catch (error) {
       if (error instanceof ChatDraftRevisionConflictError) {

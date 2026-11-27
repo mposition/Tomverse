@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { arrangeColumns, columnTurns, moveColumn, shiftColumn, type ReviewMessage } from "../src/review-columns";
 import { reviewTurnInput } from "../src/chat-contract";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../lib/deepResearchModel";
 
 const user = (id: string, content: string, modelId?: string): ReviewMessage =>
   ({ id, role: "user", content, status: "normal", ...(modelId ? { modelId } : {}), artifacts: [] });
@@ -53,6 +54,18 @@ test("a follow-up for one model names a saved conversation and exactly that mode
   assert.equal(reviewTurnInput.safeParse({ ...base, choices: ["gpt"], onlyModelId: "gpt" }).success, false);
   assert.equal(reviewTurnInput.safeParse({ ...base, conversationId: "review-1", choices: ["gpt", "gemini"], onlyModelId: "gpt" }).success, false);
   assert.equal(reviewTurnInput.safeParse({ ...base, conversationId: "review-1", choices: ["gemini"], onlyModelId: "gpt" }).success, false);
+});
+
+test("a Deep Research run of a Review is Professional, has a question, names no effort and no model of its own", () => {
+  const base = { requestId: crypto.randomUUID(), prompt: "Compare the evidence", mode: "professional", effort: "default", choices: ["gpt", "gemini"], deepResearchDepth: "deep" } as const;
+  assert.equal(reviewTurnInput.safeParse(base).success, true);
+  assert.equal(reviewTurnInput.safeParse({ ...base, conversationId: "review-1", tools: { webSearchMode: "always" } }).success, true);
+  assert.equal(reviewTurnInput.safeParse({ ...base, mode: "easy" }).success, false);
+  assert.equal(reviewTurnInput.safeParse({ ...base, effort: "high" }).success, false);
+  assert.equal(reviewTurnInput.safeParse({ ...base, prompt: "" , attachmentUploadIds: [crypto.randomUUID()] }).success, false);
+  assert.equal(reviewTurnInput.safeParse({ ...base, deepResearchDepth: "everything" }).success, false);
+  assert.equal(reviewTurnInput.safeParse({ ...base, conversationId: "review-1", choices: ["gpt"], onlyModelId: "gpt" }).success, false);
+  assert.equal(reviewTurnInput.safeParse({ ...base, choices: [DEEP_RESEARCH_MODEL_ID] }).success, false);
 });
 
 test("a Review turn carries the \"+\" menu's choices and the position; a follow-up for one model changes no choice", () => {

@@ -39,6 +39,7 @@ if (fake.log) appendFileSync(fake.log, `${JSON.stringify({ destination, options,
 const say = (text, code = 255) => { process.stderr.write(`${text}\n`); process.exitCode = code; };
 if (!destination || destination.startsWith("-")) { say("usage: ssh [options] destination [command]", 255); }
 else if (!optionValues.includes("BatchMode=yes")) { say("fake-ssh: BatchMode=yes was not given", 99); }
+else if (!optionValues.includes("StrictHostKeyChecking=yes")) { say("fake-ssh: StrictHostKeyChecking=yes was not given", 97); }
 else if (!command) { say("fake-ssh: no command", 98); }
 else run();
 

@@ -244,6 +244,40 @@ settings·metadata)에는 **현재 identity namespace에 속한 서버 Conversat
 - `chat_conversation_id_namespace_violation` /
   `chat_stale_conversation_released` — client가 막은 잘못된 요청과 복구.
 
+### 6.1 DB 일시 오류는 한 번 다시 보냅니다
+
+- `POST /api/chat`은 **provider를 부르기 전**에 난 재시도 가능한 DB 오류(연결 실패,
+  deadlock, transaction을 시작하지 못함)를 `503 DATABASE_TEMPORARILY_UNAVAILABLE` +
+  `Retry-After`로 답합니다. 예전에는 `CHAT_APPLICATION_ERROR` 500이었습니다.
+  provider 호출이 시작된 뒤의 오류는 이 응답이 되지 않습니다. 결과를 모르는 요청을
+  다시 보내면 두 번 과금될 수 있습니다.
+- **이 요청이 정산·페이지 과금·외부 제출이 걸린 작업을 시작했다면 이 응답이 되지 않습니다.**
+  사전 웹 검색(요청이 나갔으면 성공·실패 무관), 유료 OCR 페이지, Deep Research 제출이
+  그것입니다. 다시 보내면 같은 비용이 두 번 듭니다. 이 경우는 예전처럼 재시도 불가
+  `CHAT_APPLICATION_ERROR`(브라우저는 일반 실패 문구)이며, 이미 든 검색 비용의 정산은
+  그대로입니다.
+- **Auto의 router·이미지 의도 분류·위치 판정 호출은 제외 조건이 아닙니다.** 사용자에게
+  과금되지 않는 소액 내부 호출이고 자동 재전송은 한 번이라, 추가 비용은 요청당 router
+  호출 한 번이 최대입니다. 제외하면 router 뒤에 오는 예약·durable attempt 단계의 DB 순간
+  오류(실제 production 패턴)가 Auto 턴에서 전부 재전송 대상에서 빠집니다.
+- 예약 transaction(`acquireChatAccess`)은 비교 preflight와 같은 `maxWait 5 s /
+  timeout 15 s`를 명시합니다. Prisma 기본값(2 s / 5 s)이 느린 DB를 거절로 바꿨습니다.
+  예약하는 내용은 바뀌지 않습니다.
+- `consumeApiRateLimit`은 같은 오류를 한 번 재시도하고, 그래도 실패하면
+  `ApiSecurityError(503, DATABASE_TEMPORARILY_UNAVAILABLE)`를 던져 각 route의
+  `apiSecurityResponse`가 503 + `Retry-After`로 답하게 합니다. 한 번의 시도는 한
+  transaction이라 실패한 시도의 증가분은 rollback되며, commit 응답만 잃은 경우에만
+  분당 bucket이 1 더 올라갈 수 있습니다(크레딧·예약과 무관).
+- 브라우저(`ChatApp`)는 이 코드를 받으면 `Retry-After` 뒤 **한 번** 같은 질문을
+  다시 보냅니다. 저장된 질문 id는 그대로(질문이 두 번 저장·표시되지 않음), 답변 id는
+  새로 만듭니다(서버가 첫 시도를 failed로 끝냈으므로 같은 id는 그 시도에 다시
+  붙습니다). 단일 사용 context bundle이 있으면 다시 준비합니다. Guest Auto, Refiner
+  결정이 실린 요청, Research 경로는 다시 보내지 않습니다. 두 번째도 실패하면
+  `chat.databaseTemporarilyUnavailable` 문장을 보입니다.
+- 자동 재시도 대상은 "시작 전 실패가 확실한" 오류뿐입니다(`isTransactionStartFailure`는
+  P2028 중 "Unable to start a transaction"만 인정). 실행 중 만료된 transaction처럼
+  결과를 모르는 쓰기는 포함하지 않습니다.
+
 ## 7. 바꾸기 전에
 
 - `CHAT_GUEST_CONCURRENT`를 올려서 문제를 덮지 않습니다.

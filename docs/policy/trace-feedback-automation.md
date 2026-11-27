@@ -205,8 +205,14 @@ user agent, cookie/header 원문, provider 원시 payload, 원시 token, secret,
 ## 7. Sentry 연계
 
 - `issueChatErrorReportGrant`가 Error 객체를 받은 경우에만
-  `captureException`을 호출하고 Trace ID·errorCode·routeClass·occurrenceId를
-  tag로 남긴다. 반환된 event ID는 evidence row에 저장한다.
+  `captureException`을 호출하고 Trace ID·errorCode·routeClass·occurrenceId와,
+  호출부가 아는 경우 provider·modelId를 tag로 남긴다. 반환된 event ID는
+  evidence row에 저장한다.
+- 브라우저에서 난 오류는 이 grant와 별개 경로다. 같은 origin의
+  `/api/diagnostics/client-error`가 받아 `lib/clientErrorReport.ts`가 Sentry로
+  올린다(`errorCode: BROWSER_ERROR`, `routeClass: browser`). 오류 이름·메시지·stack·
+  query 없는 경로·빌드·언어·UA만 받고 사용자 입력·대화·계정 식별자는 받지 않는다.
+  `CLIENT_ERROR_REPORTING_ENABLED=false`로 끈다(기본 켜짐).
 - 기존 `sentry.server.config.ts`의 sanitizer(beforeSend)가 메시지·stack의
   민감 정보를 계속 제거한다. token·secret·사용자 본문은 Sentry로 보내지
   않는다. Sentry 실패는 사용자 응답을 바꾸지 않는다.

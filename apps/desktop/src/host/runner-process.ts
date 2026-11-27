@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import {
   ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
-  startLocalExtensions, type ApprovalView, type CatalogModel, type LocalExtensionSetup, type Output, type WorkspaceReference,
+  startLocalExtensions, IMAGE_MAX_BYTES, MAX_PERSON_PICTURES, type ApprovalView, type CatalogModel, type ImageAttachment, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
 import { claimLock, SessionLockedError } from "../../../tomverse-cli/src/session.js";
 import { tomverseHome } from "../../../tomverse-cli/src/config.js";
@@ -17,6 +17,7 @@ import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecut
 import { canAnswerClarification, canContinueApiQuota, canRewindJournal, markTurns, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
   journalChecks, journalCommand, journalApiUsage, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
 import type { Connection, RecordedSession, WorkerCommand, WorkerEvent } from "./messages";
+import type { PickedPicture } from "./browser-pick-store";
 import { assertProjectRoot, claimCodeProject, type ProjectRoot } from "./project-root";
 import { desktopCodeNotice } from "./desktop-notice";
 import { apiCliDirectory, canResumeNativeQuota, matchesNativeContinuation, nativeSessionDirectory, readNativeCheckpoint, readNativeHistory, recordNativeRun, restoredNativeTask, retiredHistoryDirectory,
@@ -56,7 +57,7 @@ type ActiveRun = {
   terminalRead?: { requestId: string; settle: (reply: TerminalReadReply | null) => void };
   pluginRequest?: { requestId: string; settle: (result: PluginResponse["result"]) => void };
   gitRequest?: { requestId: string; settle: (result: AgentGitResult | null) => void };
-  queueFollowUp?: (text: string, requestId: string) => boolean | Promise<boolean>;
+  queueFollowUp?: (text: string, requestId: string, pictures?: PickedPicture[]) => boolean | Promise<boolean>;
   queueOperation?: (operation: QueueOperation) => boolean;
   /** Sends the task to the window again (a background command printed something or ended). */
   refresh?: () => void;
@@ -75,6 +76,15 @@ function lockProject(project: ProjectRoot, attachedProject = project) {
   return claimCodeProject(project, projectLocks, attachedProject);
 }
 const protectedRoots = (root: string) => projectLocks ? [root, projectLocks] : [root];
+
+/** The pictures of elements the person picked, as the runner takes them; one over the size the model request allows is left out. */
+function imagesFrom(pictures: readonly PickedPicture[] | undefined): ImageAttachment[] {
+  return (pictures ?? []).slice(0, MAX_PERSON_PICTURES).flatMap((picture) => {
+    const bytes = Buffer.from(picture.base64, "base64").length;
+    if (!bytes || bytes > IMAGE_MAX_BYTES) return [];
+    return [{ path: `picked element ${picture.id} of page ${JSON.stringify(picture.url.slice(0, 300))}`, mediaType: picture.mediaType, base64: picture.base64, bytes }];
+  });
+}
 
 function validateReferences(workspace: Workspace, references: readonly WorkspaceReference[], key: string) {
   return references.map((reference) => {
@@ -297,7 +307,7 @@ async function executeCodexFixture(command: Extract<WorkerCommand, { type: "star
     const result = await runCodexFixture(command.fixture, { project: command.project, prompt: inputPrompt,
       mode: command.mode, clientVersion: command.clientVersion, signal: control.abort.signal, patchTool: patches?.tool,
       protectedRoots: protectedRoots(command.protectedRoot), connectionKey: command.connectionKey,
-      effort: task.effort === "low" || task.effort === "high" ? task.effort : undefined,
+      effort: task.effort === "low" || task.effort === "medium" || task.effort === "high" ? task.effort : undefined,
       verifyDestination: command.apiSource && true, verifySource: beforeTurn,
       history: command.history && { home: join(command.history.directory, "profile"), previous: previousTurn },
     }, (observation) => {
@@ -387,7 +397,7 @@ async function followUp(data: Extract<WorkerCommand, { type: "follow-up" }>) {
   const run = active;
   let queued = false;
   try {
-    if (run?.runId === data.runId) queued = await run.queueFollowUp?.(data.text, data.requestId) === true;
+    if (run?.runId === data.runId) queued = await run.queueFollowUp?.(data.text, data.requestId, data.pictures) === true;
   } catch { /* A changed root or unwritable checkpoint cannot accept the instruction. */ }
   send({ type: "follow-up-queued", runId: data.runId, requestId: data.requestId, queued });
 }
@@ -581,6 +591,7 @@ function describeApproval(view: ApprovalView, memory: ApprovalMemory): ApprovalR
     explanation: view.explanation && clean(view.explanation),
     canRemember: memory.canRemember(view),
     ...(view.web ? { web: { url: clean(view.web.url), host: clean(view.web.host) } } : {}),
+    ...(view.webSearch ? { webSearch: { queries: view.webSearch.queries.map(clean) } } : {}),
     ...(view.browser ? { browser: { action: view.browser.action, origin: clean(view.browser.origin), url: clean(view.browser.url),
       selector: clean(view.browser.selector), ...(view.browser.text !== undefined ? { text: clean(view.browser.text) } : {}),
       ...(view.browser.clear ? { clear: true } : {}), ...(view.browser.submit ? { submit: true } : {}) } } : {}),
@@ -1020,6 +1031,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       assertAllowed, redactText: clean, captureTransmission: true, echoCommandOutput: false,
       onBackgroundActivity: () => control.refresh?.(),
       web: {},
+      // The main process gives it only where the server offers it (desktopCodeWebSearch); each call is an approval card.
+      webSearch: command.webSearch === true,
       ...(extensions ? { mcp: extensions.mcp, lifecycleHooks: extensions.hooks } : {}),
       backgroundCommands: !remote,
       images: true,
@@ -1050,7 +1063,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         approve: async (view) => {
           if (control.cancelled) return false;
           assertAllowed();
-          const details = [view.root, view.explanation, view.web?.url, view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.computer?.text, view.computer?.window.title, view.command?.display, view.command?.file, view.command?.cwd,
+          const details = [view.root, view.explanation, view.web?.url, ...(view.webSearch?.queries ?? []), view.mcp && JSON.stringify(view.input), view.browser?.url, view.browser?.selector, view.browser?.text, view.computer?.text, view.computer?.window.title, view.command?.display, view.command?.file, view.command?.cwd,
             ...(view.command?.args ?? []), ...(view.command?.envNames ?? []),
             ...(view.patch?.flatMap((file) => [file.path, file.beforeText, file.afterText]) ?? []),
           ];
@@ -1083,8 +1096,8 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
       },
     });
     const runner = control.runner;
-    control.queueFollowUp = (text) => {
-      if (control.cancelled || control.approval || hasCredential(text, command.connection.key) || !runner.queueFollowUp(text)) return false;
+    control.queueFollowUp = (text, _requestId, pictures) => {
+      if (control.cancelled || control.approval || hasCredential(text, command.connection.key) || !runner.queueFollowUp(text, imagesFrom(pictures))) return false;
       task.pendingFollowUp = clean(text);
       publish();
       return true;
@@ -1114,7 +1127,7 @@ async function execute(command: Extract<WorkerCommand, { type: "start" | "resume
         : requested);
       if (sourceEdits) verifiedContinuationEdits(sourceEdits);
       await control.runner.runTask(prompt, command.input.effort, continuation || references.length || slash
-        ? { visiblePrompt: command.input.prompt, references } : undefined);
+        ? { visiblePrompt: command.input.prompt, references } : undefined, imagesFrom(command.pictures));
       if (!continuation && command.input.mode === "plan" && !references.length && !slash) {
         const first = journal.state.messages.find((message) => message.role === "user");
         if (first && first.content === prompt) first.content = command.input.prompt;

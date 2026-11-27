@@ -218,7 +218,8 @@ export function CodeExecutionSettings({ snapshot, language, actionFailed, act, e
     <CodeBrowserSettings snapshot={snapshot} language={language} act={act} />
     <CodeComputerSettings language={language} />
     <CodeSandboxSettings language={language} />
-    <CodeCloudSettings language={language} enabled={snapshot?.capabilities?.managedCode === true} remoteEnabled={snapshot?.remoteEnabled === true} />
+    <CodeCloudSettings language={language} enabled={snapshot?.capabilities?.managedCode === true} remoteEnabled={snapshot?.remoteEnabled === true}
+      cloudEnabled={snapshot?.capabilities?.cloudExecution === true} />
     <RemoteProjectPanel language={language} withSwitch />
     <RemoteControlSettings language={language} />
     {actionFailed && <p role="alert">{copy.settingsFailed}</p>}

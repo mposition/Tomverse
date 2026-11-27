@@ -57,8 +57,12 @@ export const externalApiAdmissionHook =
         clientName: string | null;
         requestDigest: string;
         idempotencyKeyDigest: string | null;
-        /** Which wire protocol the request arrived on; content-free metadata. */
-        protocol?: ExternalApiProtocol;
+        /**
+         * Which wire protocol the request arrived on; content-free metadata.
+         * `web_search` is the coding API's web search (lib/codeWebSearch.ts),
+         * which generates nothing and is not a model protocol.
+         */
+        protocol?: ExternalApiProtocol | "web_search";
         /** Which external API the request came through (its address); content-free. */
         surface: ExternalApiSurface;
         /**

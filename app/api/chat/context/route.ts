@@ -251,7 +251,9 @@ export async function POST(request: Request) {
         // them would send a block nothing reserved against.
         // A project with context on always gets a bundle: the send refuses to
         // answer such a conversation without one.
-        if (!context.memory.decision.allowed && context.profileTokens === 0 && !context.project?.project) {
+        // Personal instructions are priced input tokens too.
+        if (!context.memory.decision.allowed && context.profileTokens === 0 && !context.project?.project &&
+            !context.preferenceTokens) {
             return Response.json(
                 {
                     ok: true,

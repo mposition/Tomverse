@@ -18,8 +18,19 @@ const MAX_CLIP = 1600;
 
 type Spot = { error: string } | { x: number; y: number; matches: number; tag: string; name: string };
 type Box = { error: string } | { x: number; y: number; width: number; height: number };
-type Described = { tag: string; selector: string; text: string; url: string;
+type Described = { tag: string; selector: string; text: string; url: string; secret?: boolean;
   box: { x: number; y: number; width: number; height: number }; page: { x: number; y: number } };
+
+/** A picture that is still too large as a JPEG is made smaller until it fits, so the model never receives more than the CLI takes. */
+function shrinkJpeg(base64: string): string {
+  let image = nativeImage.createFromBuffer(Buffer.from(base64, "base64"));
+  for (let attempt = 0; attempt < 6 && !image.isEmpty(); attempt += 1) {
+    image = image.resize({ width: Math.max(1, Math.round(image.getSize().width * 0.7)) });
+    const data = image.toJPEG(70).toString("base64");
+    if (data.length <= MAX_SHOT_BASE64) return data;
+  }
+  return base64;
+}
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const clamp = (value: number) => Math.max(1, Math.min(MAX_CLIP, Math.round(value)));
@@ -60,7 +71,9 @@ export function createBrowserDriver(contents: WebContents, tab: string, view: { 
       format, ...(format === "jpeg" ? { quality: 70 } : {}), ...(clip ? { clip: { ...clip, scale: 1 } } : {}), captureBeyondViewport: false,
     })).data;
     const png = await shot("png");
-    return png.length <= MAX_SHOT_BASE64 ? { mediaType: "image/png" as const, base64: png } : { mediaType: "image/jpeg" as const, base64: await shot("jpeg") };
+    if (png.length <= MAX_SHOT_BASE64) return { mediaType: "image/png" as const, base64: png };
+    const jpeg = await shot("jpeg");
+    return { mediaType: "image/jpeg" as const, base64: jpeg.length <= MAX_SHOT_BASE64 ? jpeg : shrinkJpeg(jpeg) };
   };
 
   const stopPicking = async () => {
@@ -78,17 +91,17 @@ export function createBrowserDriver(contents: WebContents, tab: string, view: { 
       const info = result.result.value;
       if (!info || typeof info.selector !== "string") return;
       let thumbnail: string | undefined;
-      let id = "pick-" + randomBytes(4).toString("hex");
-      if (info.box.width >= 1 && info.box.height >= 1) {
+      const id = "pick-" + randomBytes(4).toString("hex");
+      // No picture of a secret field, or of anything with one under it: the picture would go to a model with the person's message.
+      const withheld = info.secret ? "secret" as const : info.box.width < 1 || info.box.height < 1 ? "empty" as const : undefined;
+      if (!withheld) {
         const picture = await capture({ x: info.page.x, y: info.page.y, width: clamp(info.box.width), height: clamp(info.box.height) });
         rememberPick(id, { ...picture, url: info.url });
         const image = nativeImage.createFromBuffer(Buffer.from(picture.base64, "base64"));
         if (!image.isEmpty()) thumbnail = image.resize({ width: Math.min(240, image.getSize().width) }).toDataURL();
-      } else {
-        id = "pick-" + randomBytes(4).toString("hex");
       }
       onPick?.({
-        id, tab, url: info.url.slice(0, 2048), selector: info.selector.slice(0, 500), tag: String(info.tag).slice(0, 40), text: String(info.text).slice(0, 160),
+        id, tab, ...(withheld ? { withheld } : {}), url: info.url.slice(0, 2048), selector: info.selector.slice(0, 500), tag: String(info.tag).slice(0, 40), text: String(info.text).slice(0, 160),
         box: { x: Math.round(info.box.x), y: Math.round(info.box.y), width: Math.round(info.box.width), height: Math.round(info.box.height) },
         ...(thumbnail && thumbnail.length < 200_000 ? { thumbnail } : {}),
       });

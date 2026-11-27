@@ -15,9 +15,15 @@ export const remoteTargetInput = z.object({
 }).strict();
 export type RemoteTargetInput = z.infer<typeof remoteTargetInput>;
 
+/** How the agent's commands are started on the remote machine: `sh -c` (the default) or `bash -lc`, which reads the remote user's profile. */
+export const remoteShell = z.enum(["sh", "bash-login"]);
+export type RemoteShell = z.infer<typeof remoteShell>;
+
 export const remoteProjectInput = z.discriminatedUnion("action", [
   z.object({ action: z.literal("read") }).strict(),
   z.object({ action: z.literal("set-enabled"), enabled: z.boolean() }).strict(),
+  /** For the remote project that is open now: how its commands are started. Takes effect for the next task. */
+  z.object({ action: z.literal("set-shell"), shell: remoteShell }).strict(),
   z.object({ action: z.literal("test"), target: remoteTargetInput }).strict(),
   z.object({ action: z.literal("open"), target: remoteTargetInput }).strict(),
   z.object({ action: z.literal("reconnect") }).strict(),
@@ -39,8 +45,8 @@ export type RemoteRecent = { destination: string; port?: number; folder: string 
 
 export type RemoteConnectionState = "connected" | "lost" | "unknown";
 
-/** The remote project that is open, as the window shows it. */
-export type RemoteCurrent = { label: string; folder: string; state: RemoteConnectionState };
+/** The remote project that is open, as the window shows it. `shell` is in the Settings view; the status above the composer does not need it. */
+export type RemoteCurrent = { label: string; folder: string; state: RemoteConnectionState; shell?: RemoteShell };
 
 export type RemoteView = {
   /** The switch in Settings. Off: nothing of this exists and no ssh is started. */

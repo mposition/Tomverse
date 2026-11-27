@@ -69,7 +69,7 @@ export type CodexTurnObservation = {
   status: "running" | "completed" | "interrupted" | "failed";
   session: Assignment;
   threadEffort?: string;
-  requestedEffort?: "low" | "high";
+  requestedEffort?: "low" | "medium" | "high";
   usage?: Extract<CodeNativeUsage, { source: "codex_thread" }>;
   hasUnconfirmedCommand?: true;
   usageLimitExceeded?: true;
@@ -169,7 +169,7 @@ export async function inspectCodexSavedTurn(child: CodexStdio, input: CodexConne
 
 export async function observeCodexFixtureTurn(
   child: CodexStdio,
-  input: CodexConnection & { model: string; prompt: string; planOnly?: boolean; effort?: "low" | "high";
+  input: CodexConnection & { model: string; prompt: string; planOnly?: boolean; effort?: "low" | "medium" | "high";
     history?: { previous?: CodexPreviousTurn }; patchTool?: NativePatchTool; verifyDestination?: true; verifySource?: (signal: AbortSignal) => Promise<void>;
     workspace?: CodexWorkspace },
   publish: (observation: CodexTurnObservation) => void,
