@@ -468,7 +468,7 @@ test("passkeys: a registered passkey confirms allow once and follow-ups, each bo
   assert.equal(JSON.stringify(listed).includes("publicKey"), false);
 
   // "Allow once" now needs the passkey; deny and stop do not.
-  const approvalOf = (id: string) => ({ ...snapshot(), approval: { ...snapshot().approval!, id } });
+  const approvalOf = (id: string) => ({ ...snapshot(), tasks: [{ ...snapshot().tasks[0]!, canFollowUp: true }], approval: { ...snapshot().approval!, id } });
   const first = randomUUID();
   await syncAs(pc.token, { snapshot: approvalOf(first), acks: [] });
   const once = (id: string, extra: Record<string, unknown> = {}) => answer(pc.deviceId, { approvalId: id, ...extra });
@@ -487,17 +487,21 @@ test("passkeys: a registered passkey confirms allow once and follow-ups, each bo
   // An assertion without user verification, or from another origin, is refused.
   assert.equal((await send({ ...once(first), passkey: await confirm(once(first), { flags: 0x01 }) })).status, 403);
   assert.equal((await send({ ...once(first), passkey: await confirm(once(first), { origin: "https://evil.example" }) })).status, 403);
-  // An assertion made for one command does not confirm another request.
+  // An assertion made for "allow once" does not confirm a follow-up, whatever the PC reports as open.
   const forFirst = await confirm(once(first));
   const second = randomUUID();
-  assert.equal((await send({ ...once(second), passkey: forFirst })).status, 403);
+  assert.equal((await send({ kind: "follow_up", deviceId: pc.deviceId, taskKey: TASK, text: "Run the linter too.", passkey: forFirst })).status, 403);
+  // A command the PC no longer reports is refused before the challenge is used.
+  assert.deepEqual((await send({ ...once(second), passkey: await confirm(once(first)) })).body, { ok: false, code: "APPROVAL_NOT_OPEN" });
   // The right one is accepted once, and its challenge cannot be replayed.
   const proof = await confirm(once(first));
   const accepted = await send({ ...once(first), passkey: proof });
   assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
   const audit = await prisma.adminAuditLog.findFirst({ where: { targetId: accepted.body.id } });
   assert.equal((audit!.metadata as Record<string, unknown>).passkeyId, listed.passkeys[0].id);
-  assert.equal((await send({ ...once(first), passkey: proof })).status, 403);
+  // The same assertion again: the request is answered, which is said before the challenge is looked at; and the challenge itself is gone.
+  assert.deepEqual((await send({ ...once(first), passkey: proof })).body, { ok: false, code: "ALREADY_ANSWERED" });
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count({ where: { id: proof.challengeId } }), 0);
 
   // Deny and stop reduce what happens: no passkey, and the server issues none for them.
   await syncAs(pc.token, { snapshot: approvalOf(second), acks: [] });
@@ -597,4 +601,48 @@ test("passkeys: challenges live two minutes and maintenance sweeps the expired",
   assert.equal(late.status, 409);
   await purgeDesktopRemotePasskeyChallenges();
   assert.equal(await prisma.desktopRemotePasskeyChallenge.count(), 0);
+});
+
+test("passkeys: two first registrations that both saw no passkey cannot both go through, and a stale command burns no challenge", async () => {
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const user = await createUser("pk-race");
+  const pc = await desktopFor(user.id);
+  const session = webSession(user.id);
+  const call = async (body: object) => {
+    currentSession = session;
+    const response = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Origin: SITE } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  const mine = softPasskey(SITE);
+  const attacker = softPasskey(SITE);
+  // Both options are issued while the account has no passkey, so neither carries an existing passkey's confirmation.
+  const first = await call({ action: "options-register" });
+  const second = await call({ action: "options-register" });
+  assert.equal(first.body.confirm, undefined);
+  assert.equal(second.body.confirm, undefined);
+  const attempts = await Promise.all([
+    call({ action: "register", challengeId: first.body.challengeId, label: "Mine", ...mine.create(first.body.publicKey) }),
+    call({ action: "register", challengeId: second.body.challengeId, label: "Other", ...attacker.create(second.body.publicKey) }),
+  ]);
+  assert.deepEqual(attempts.map((attempt) => attempt.status).sort(), [201, 428]);
+  assert.equal(await prisma.desktopRemotePasskey.count({ where: { userId: user.id } }), 1);
+
+  // A request that is not open, or changed since it was reported, is refused before a challenge exists.
+  const registered = (await (await listAs(session)).json()).passkey.passkeys as Array<{ id: string }>;
+  assert.equal(registered.length, 1);
+  await syncAs(pc.token, { snapshot: snapshot(), acks: [] });
+  const before = await prisma.desktopRemotePasskeyChallenge.count({ where: { userId: user.id } });
+  const stale = await call({ action: "options-command", command: answer(pc.deviceId, { digest: "b".repeat(64) }) });
+  assert.deepEqual([stale.status, stale.body.code], [409, "APPROVAL_CHANGED"]);
+  assert.deepEqual((await call({ action: "options-command", command: answer("no-such-device") })).status, 404);
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count({ where: { userId: user.id } }), before);
+  // An answer that was given meanwhile is said so before the person is asked for the passkey.
+  currentSession = session;
+  assert.equal((await commands.POST(new Request(`${SITE}/api/desktop/remote/commands`, {
+    method: "POST", body: JSON.stringify(answer(pc.deviceId, { decision: "deny" })), headers: { "Content-Type": "application/json", Origin: SITE },
+  }))).status, 201);
+  const answered = await call({ action: "options-command", command: answer(pc.deviceId) });
+  assert.deepEqual([answered.status, answered.body.code], [409, "ALREADY_ANSWERED"]);
 });

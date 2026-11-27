@@ -1,5 +1,6 @@
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { desktopRemoteNeedsPasskey, desktopRemotePasskeyRequest } from "@/lib/desktopRemoteControlContract";
+import { precheckDesktopRemoteCommand } from "@/lib/desktopRemoteControlStore";
 import { desktopRemoteMayAct, desktopRemoteWebSession, remoteJson } from "@/lib/desktopRemoteControlWeb";
 import {
   assertionOptions, commandBinding, confirmPasskey, PasskeyRefused, passkeyRelyingParty, registerPasskey, registrationOptions, removalBinding,
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
     if (body.action === "options-command") {
       // Deny and stop reduce what happens: there is nothing to confirm.
       if (!desktopRemoteNeedsPasskey(body.command)) throw new PasskeyRefused("INVALID");
+      // No challenge, and no biometric prompt, for a command the PC's latest report no longer allows.
+      const stale = await precheckDesktopRemoteCommand(userId, body.command);
+      if (stale) return remoteJson(stale === "DEVICE_NOT_FOUND" ? 404 : 409, { ok: false, code: stale });
       return remoteJson(200, { ok: true, ...await assertionOptions(userId, rp, "command", commandBinding(body.command)) });
     }
     if (body.action === "register") {

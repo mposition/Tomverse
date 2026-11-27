@@ -39,7 +39,8 @@ export function passkeyRelyingParty(request: Request): RelyingParty | null {
   let url: URL;
   try { url = new URL(header); } catch { return null; }
   if (url.origin !== header || (url.protocol !== "https:" && url.protocol !== "http:")) return null;
-  if (url.protocol === "http:" && url.hostname !== "localhost") return null;
+  // Plain http only for localhost, and never in production.
+  if (url.protocol === "http:" && (url.hostname !== "localhost" || process.env.NODE_ENV === "production")) return null;
   if (!isAllowedRequestHost(url.host)) return null;
   return { origin: url.origin, rpId: url.hostname };
 }
@@ -175,7 +176,11 @@ export async function registerPasskey(input: {
   }
   return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await takeAuditChainLock(tx);
-    if ((await tx.desktopRemotePasskey.count({ where: { userId } })) >= DESKTOP_REMOTE_PASSKEY_LIMITS.perAccount) throw new PasskeyRefused("LIMIT");
+    // Counted again under the lock that serializes registrations: two first registrations that both saw no passkey outside it
+    // cannot both go through, because the second finds the first and has no existing passkey's confirmation.
+    const held = await tx.desktopRemotePasskey.count({ where: { userId } });
+    if (held >= DESKTOP_REMOTE_PASSKEY_LIMITS.perAccount) throw new PasskeyRefused("LIMIT");
+    if (held > 0 && confirmedBy === null) throw new PasskeyRefused("CONFIRMATION_REQUIRED");
     if (await tx.desktopRemotePasskey.findUnique({ where: { credentialId: credential.credentialId }, select: { id: true } })) throw new PasskeyRefused("DUPLICATE");
     const row = await tx.desktopRemotePasskey.create({
       data: {

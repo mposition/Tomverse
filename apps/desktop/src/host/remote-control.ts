@@ -223,10 +223,15 @@ export function approvalDigest(request: ApprovalRequest): string {
  */
 export type RemotePreviewMode = "none" | "counts" | "excerpt";
 
-/** One changed line as it may leave the PC: its indentation is kept (it can change what the code does), the rest is redacted. */
-function previewLine(prefix: "+" | "-", text: string, key: string | undefined): string {
-  const indent = Math.min(16, (/^[ \t]*/.exec(text)?.[0] ?? "").replaceAll("\t", "  ").length);
-  return `${prefix} ${" ".repeat(indent)}${remoteText(text, key, DESKTOP_REMOTE_LIMITS.previewLine - indent)}`;
+/**
+ * One changed line as it may leave the PC: redacted like every other line, but with its spaces kept as they are (a different
+ * number of spaces in a string or an indentation can change what the code does, and the person reads this to decide). A tab is
+ * shown as two spaces, other control characters are made visible, and only the end of the line is trimmed.
+ */
+export function previewLine(prefix: "+" | "-", text: string, key: string | undefined): string {
+  let value = cleanText(text.replaceAll("\t", "  "), key);
+  for (const [shape, replacement] of SECRET_SHAPES) value = value.replace(shape, replacement);
+  return `${prefix} ${wholeText(value.replace(/[\r\n]+/g, " ").trimEnd(), DESKTOP_REMOTE_LIMITS.previewLine)}`;
 }
 
 type RemoteFile = NonNullable<ApprovalRequest["files"]>[number];

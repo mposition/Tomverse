@@ -477,6 +477,9 @@ test("an excerpt holds only changed lines, redacted, with indentation kept, and 
   const many = changeCard(Array.from({ length: 10 }, (_, index) => ({ path: `f${index}.ts`, before: "a\n", after: Array.from({ length: 20 }, (_, n) => `v${n}`).join("\n") + "\n" })));
   const total = summarize(many, "excerpt").files.reduce((sum, file) => sum + (file.preview?.length ?? 0), 0);
   assert.equal(total, 40);
+  // The spaces inside a line are the code's: they are kept, and a tab is two spaces.
+  const spaced = summarize(changeCard([{ path: "s.ts", before: "x\n", after: "if (a)\n\treturn  \"a   b\";\n" }]), "excerpt").files[0]!;
+  assert.deepEqual(spaced.preview, ["- x", "+ if (a)", "+   return  \"a   b\";"]);
   // A line is cut to its limit.
   const wide = summarize(changeCard([{ path: "w.ts", before: null, after: "x".repeat(500) + "\n", action: "create" }]), "excerpt").files[0]!;
   assert.ok(wide.preview![0]!.length <= 122);
