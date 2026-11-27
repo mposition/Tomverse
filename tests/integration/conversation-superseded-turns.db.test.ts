@@ -498,3 +498,28 @@ test("a transcript sent without ids still leaves the replaced turn out, and a re
   assert.match(sent, /STANDING-ANSWER/);
   assert.match(sent, /NEXT-QUESTION/);
 });
+
+test("a regenerate request sent without ids leaves out the turn it replaces before that turn is marked", async () => {
+  const owner = await createUser();
+  const conversation = await createConversation(owner.id);
+  await seedTurns(conversation.id, [
+    ["q1", "ASKED-QUESTION"],
+    ["a1", "ANSWER-BEING-REPLACED"],
+  ]);
+  signInAs(owner);
+  // Nothing is marked yet: this very request names the turn it replaces.
+  const response = await ask(
+    conversation.id,
+    [
+      { role: "user", content: "ASKED-QUESTION" },
+      { role: "assistant", content: "ANSWER-BEING-REPLACED" },
+      { role: "user", content: "ASKED-QUESTION" },
+    ],
+    { supersedesMessageIds: ["q1", "a1"] }
+  );
+  assert.equal(response.status, 200, await response.clone().text());
+  await drain(response);
+  const sent = sentText();
+  assert.doesNotMatch(sent, /ANSWER-BEING-REPLACED/);
+  assert.equal(sent.split("ASKED-QUESTION").length - 1, 1, "only the question being answered is sent");
+});

@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { ChatAccessError } from "@/lib/chatSecurity";
+import { replacedMessageIndexes } from "@/lib/chatSupersededAlignment";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { prisma } from "@/lib/prisma";
 
@@ -84,12 +85,12 @@ export async function markMessagesSuperseded(
  * one that did. The last message is the one being answered and always stays.
  * `replacing` is the turn this very request replaces, left out at once.
  *
- * A message sent without an id (the id is optional in the chat API) is matched
- * by role and text instead, in order: each replaced row takes the earliest
- * id-less message with the same role and text that no other row took. A
- * replaced turn always comes before the turn that replaced it, and a
- * regenerate asks the same question again, so the earliest copy is the
- * replaced one and the question that stands keeps its place.
+ * A message sent without an id (the id is optional in the chat API) cannot be
+ * told by its text: a regenerate repeats the question, and the same question
+ * may have been asked before. Such a request is aligned to the stored
+ * conversation by position (lib/chatSupersededAlignment.ts), and only the
+ * messages that line up with a replaced row -- or with the turn this request
+ * replaces, not yet marked -- leave.
  */
 export async function withoutSupersededChatMessages<T extends { id?: string; role?: string; content?: unknown }>(input: {
   userId: string | null | undefined;
@@ -99,33 +100,39 @@ export async function withoutSupersededChatMessages<T extends { id?: string; rol
 }): Promise<T[]> {
   const { userId, conversationId, messages, replacing } = input;
   if (!userId || !conversationId || messages.length < 2) return messages;
-  const rows = await prisma.message.findMany({
-    where: { conversationId, supersededAt: { not: null }, conversation: { userId } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { id: true, role: true, content: true },
-  });
-  const excluded = new Set([...rows.map((row) => row.id), ...bothSpellings(conversationId, replacing)]);
-  if (excluded.size === 0) return messages;
   const last = messages.length - 1;
-  const dropped = new Set<number>();
-  messages.forEach((message, index) => {
-    if (index !== last && message.id && (excluded.has(message.id) || excluded.has(scopedMessageId(conversationId, message.id)))) {
-      dropped.add(index);
-    }
-  });
-  if (messages.some((message, index) => index !== last && !message.id)) {
-    for (const row of rows) {
-      const match = messages.findIndex(
-        (message, index) =>
-          index !== last &&
-          !message.id &&
-          !dropped.has(index) &&
-          message.role === row.role &&
-          typeof message.content === "string" &&
-          message.content === row.content
-      );
-      if (match !== -1) dropped.add(match);
-    }
+  const replacingIds = new Set(bothSpellings(conversationId, replacing));
+  const sameId = (messageId: string, rowId: string) =>
+    rowId === messageId || rowId === scopedMessageId(conversationId, messageId);
+  const withoutIndexes = (dropped: ReadonlySet<number>) =>
+    dropped.size === 0 ? messages : messages.filter((_, index) => !dropped.has(index));
+
+  if (messages.every((message, index) => index === last || message.id)) {
+    // Every message names its row: ids alone decide.
+    const rows = await prisma.message.findMany({
+      where: { conversationId, supersededAt: { not: null }, conversation: { userId } },
+      select: { id: true },
+    });
+    const excluded = new Set([...rows.map((row) => row.id), ...replacingIds]);
+    if (excluded.size === 0) return messages;
+    const dropped = new Set<number>();
+    messages.forEach((message, index) => {
+      if (index !== last && message.id && [...excluded].some((rowId) => sameId(message.id!, rowId))) dropped.add(index);
+    });
+    return withoutIndexes(dropped);
   }
-  return dropped.size === 0 ? messages : messages.filter((_, index) => !dropped.has(index));
+
+  const rows = await prisma.message.findMany({
+    where: { conversationId, conversation: { userId } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, role: true, content: true, supersededAt: true },
+  });
+  const alignmentRows = rows.map((row) => ({
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    replaced: row.supersededAt !== null || replacingIds.has(row.id),
+  }));
+  if (!alignmentRows.some((row) => row.replaced)) return messages;
+  return withoutIndexes(replacedMessageIndexes(messages, alignmentRows, sameId));
 }
