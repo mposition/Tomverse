@@ -198,11 +198,12 @@ const ENGLISH_STRING_CEILING = {
   // The rest of the page is translated in all six.
   // +1 zh, fr, de, es and pt (2026-11-21): `externalApi.colApi`, the
   // recent-requests "API" label, written as API in every language (same as ko).
-  // +1 fr (2026-11-27): `attachFormatGroupAudio`, "Audio", the ordinary French word.
+  // +1 fr, de and es (2026-11-27): `attachFormatGroupAudio`, "Audio", the
+  // ordinary French, German and Spanish word (Portuguese writes "Áudio").
   zh: 14,
   fr: 49,
-  de: 36,
-  es: 26,
+  de: 37,
+  es: 27,
   pt: 23,
 };
 
