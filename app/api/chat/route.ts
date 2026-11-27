@@ -33,12 +33,19 @@ import {
 } from "@/lib/attachmentContextPrompt";
 import {
     attachmentKindForFormat,
-    CHAT_ATTACHMENT_MEDIA_TYPES,
+    chatAttachmentMediaTypeAccepted,
     formatByMediaType,
     providerMediaTypeForFormat,
     resolveChatAttachmentFormat,
     type ChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
+import {
+    chatAudioAttachmentEnabled,
+    readStoredAudioTranscript,
+    resolveRecordingAttachmentId,
+    transcribeAudioAttachmentOnce,
+} from "@/lib/chatAudioAttachment";
+import { CHAT_AUDIO_ATTACHMENT_MAX_BYTES, inspectAudioAttachment } from "@/lib/chatAudioAttachmentCore";
 import { decodeAttachmentText } from "@/lib/chatAttachmentText";
 import { ChatArchiveError, expandChatArchive } from "@/lib/chatArchive";
 import {
@@ -799,7 +806,7 @@ const uploadPreparationSchema = z.union([
             name: z.string().trim().min(1).max(120),
             mediaType: z
                 .string()
-                .refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
+                .refine((value) => chatAttachmentMediaTypeAccepted(value, { audio: chatAudioAttachmentEnabled() })),
             size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
         })
         .strict(),
@@ -816,7 +823,7 @@ const finalizeAttachmentSchema = z
     .object({
         key: z.string().min(1).max(512),
         name: z.string().trim().min(1).max(200),
-        mediaType: z.string().refine((value) => CHAT_ATTACHMENT_MEDIA_TYPES.has(value)),
+        mediaType: z.string().refine((value) => chatAttachmentMediaTypeAccepted(value, { audio: chatAudioAttachmentEnabled() })),
         size: z.number().int().positive().max(MAX_ATTACHMENT_SIZE),
     })
     .strict();
@@ -1019,6 +1026,7 @@ export async function PUT(req: Request) {
         const preparedFormat = resolveChatAttachmentFormat({
             filename: name,
             declaredMediaType: mediaType,
+            audio: chatAudioAttachmentEnabled(),
         });
         if (
             !name ||
@@ -1034,7 +1042,11 @@ export async function PUT(req: Request) {
                 { status: 400 }
             );
         }
-        if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_SIZE) {
+        if (
+            !Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_SIZE ||
+            // The transcription provider's own per-file ceiling is lower.
+            (preparedFormat.category === "audio" && size > CHAT_AUDIO_ATTACHMENT_MAX_BYTES)
+        ) {
             return Response.json(
                 { error: "Attachment is too large." },
                 { status: 400 }
@@ -1113,7 +1125,7 @@ export async function PATCH(req: Request) {
         // an animated GIF surfaced as a failed chat turn rather than a
         // rejected file. The object is read back and put through the same
         // parsers the guest path has always run.
-        const format = formatByMediaType(mediaType);
+        const format = formatByMediaType(mediaType, { audio: chatAudioAttachmentEnabled() });
         if (!format) {
             return Response.json(
                 { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
@@ -4317,11 +4329,14 @@ async function handleChatPost(
                 name,
                 buffer,
                 fromArchive,
+                transcriptAttachmentId = null,
             }: {
                 format: ChatAttachmentFormat;
                 name: string;
                 buffer: Buffer;
                 fromArchive: boolean;
+                /** A bound recording's row: its transcript is paid for once. */
+                transcriptAttachmentId?: string | null;
             }): Promise<"ok" | "no-text" | "unreadable"> => {
                 if (format.category === "image") {
                     if (!modelSupportsImageInput(modelConfig)) {
@@ -4446,6 +4461,70 @@ async function handleChatPost(
                     }
                     textAttachments.push({ name, kind, text });
                 };
+
+                if (format.category === "audio") {
+                    // docs/policy/chat-attachment-formats.md 2.4. Transcribed
+                    // once and cached on the attachment row; an earlier file is
+                    // named and left out rather than failing today's turn.
+                    if (!chatAudioAttachmentEnabled() || !access.subjectKey) {
+                        // A result already paid for -- this row's, or the one it
+                        // was copied from -- is still read; only a new
+                        // transcription is withheld.
+                        if (!isLatestMessage && transcriptAttachmentId) {
+                            const stored = await readStoredAudioTranscript(transcriptAttachmentId);
+                            if (stored && stored !== "no_text") {
+                                for (const entry of stored) addExtractedText(entry.kind, entry.text);
+                                return "ok";
+                            }
+                        }
+                        if (!isLatestMessage) return omitPastAttachment();
+                        throw new ChatAccessError(400, "UNSUPPORTED_ATTACHMENT_TYPE",
+                            "Audio attachments are not available.");
+                    }
+                    const inspection = inspectAudioAttachment({
+                        bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+                        mediaType: format.mediaType,
+                    });
+                    if (!inspection.ok) {
+                        if (!isLatestMessage) return omitPastAttachment();
+                        throw new ChatAccessError(inspection.code === "ATTACHMENT_AUDIO_TOO_LONG" ? 413 : 400,
+                            inspection.code, "The attached recording cannot be transcribed.");
+                    }
+                    // Only a recording saved with its message is transcribed:
+                    // its row is what the one paid transcription is claimed and
+                    // stored on, so every request for it -- another model, a
+                    // retry -- reads that one. An upload nothing has bound has
+                    // no such row; the composer always saves the message first.
+                    if (!transcriptAttachmentId) {
+                        if (!isLatestMessage) return omitPastAttachment();
+                        throw new ChatAccessError(409, "AUDIO_TRANSCRIPTION_UNAVAILABLE",
+                            "A recording is transcribed once it is saved with its message.");
+                    }
+                    try {
+                        const entries = await transcribeAudioAttachmentOnce({
+                            bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+                            mediaType: format.mediaType,
+                            extension: format.extensions[0],
+                            durationSeconds: inspection.durationSeconds,
+                            subjectKey: access.subjectKey,
+                            traceId,
+                            attachmentId: transcriptAttachmentId,
+                            signal: req.signal,
+                        });
+                        for (const entry of entries) addExtractedText(entry.kind, entry.text);
+                    } catch (error) {
+                        // An earlier message's refusal (no budget, provider
+                        // down, no speech) leaves the file out. Anything else
+                        // goes to `deliverAttachment`, which leaves it out too
+                        // -- except a storage or retryable database fault and a
+                        // cancelled request, which stop the turn as they do for
+                        // every other file: a seconds-ledger write that failed
+                        // that way has an outcome nobody knows yet.
+                        if (!isLatestMessage && error instanceof ChatAccessError) return omitPastAttachment();
+                        throw error;
+                    }
+                    return "ok";
+                }
 
                 if (format.category === "pdf") {
                     let extractedPdfText = "";
@@ -4840,6 +4919,10 @@ async function handleChatPost(
                 const format = resolveChatAttachmentFormat({
                     filename: attachment.name,
                     declaredMediaType: attachment.mediaType,
+                    // Recognised whatever the switch says, so a conversation
+                    // that once carried a recording still opens after it is
+                    // turned off; the audio branch decides what to do with it.
+                    audio: true,
                 });
                 if (!format || format.mediaType !== attachment.mediaType) {
                     throw new Error("Unsupported attachment.");
@@ -4930,6 +5013,10 @@ async function handleChatPost(
                   It answers to the same past-file share and parse budget as a
                   freshly read one, and does not count towards the request's
                   byte total, because no bytes are read.
+
+                  A recording's stored transcript is read whatever either switch
+                  says: it was paid for, and reading it costs nothing. Only a new
+                  transcription waits on the audio switch (the audio branch).
                 */
                 const textCacheEligible =
                     !isLatestMessage &&
@@ -4937,7 +5024,7 @@ async function handleChatPost(
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
-                    attachmentTextCacheEnabled();
+                    (attachmentTextCacheEnabled() || format.category === "audio");
                 if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
@@ -5202,15 +5289,29 @@ async function handleChatPost(
                     const filePartsBefore = fileParts.length;
                     const parseRoomBefore =
                         CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
+                    // A recording is claimed, transcribed and stored on its own
+                    // bound row, whatever the text cache switch says and however
+                    // the request named it (docs/policy/chat-attachment-formats.md
+                    // 2.4.1); `transcribeAudioAttachmentOnce` writes it.
+                    const recordingAttachmentId =
+                        format.category === "audio" && !isGuestObject && access.userId
+                            ? await resolveRecordingAttachmentId({
+                                  userId: access.userId,
+                                  attachmentId: resolved?.attachmentId ?? null,
+                                  uploadId: resolved?.uploadId ?? null,
+                                  objectKey: attachment.objectKey,
+                              })
+                            : null;
                     await deliverAttachment(attachmentName, () =>
                         ingestAttachmentFile({
                             format,
                             name: attachmentName,
                             buffer: attachmentBuffer,
                             fromArchive: false,
+                            transcriptAttachmentId: recordingAttachmentId,
                         })
                     );
-                    if (textCacheEligible) {
+                    if (textCacheEligible && format.category !== "audio") {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).

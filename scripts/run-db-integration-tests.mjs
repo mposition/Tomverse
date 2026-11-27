@@ -245,6 +245,8 @@ run(
     "tests/integration/chat-token-quota.db.test.ts",
     "tests/integration/fallback-pricing-metrics.db.test.ts",
     "tests/integration/chat-attempt-usage.db.test.ts",
+    // Two requests for one recording pay for one transcription.
+    "tests/integration/chat-audio-transcript-claim.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",
     // AMUX scheduling ownership is a database CAS: two claimants must leave
     // exactly one owner and one append-only route decision, and a failed
