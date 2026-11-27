@@ -5,7 +5,7 @@ import {
   Search, ShieldCheck, SlidersHorizontal, Sparkles, Square, SquareTerminal, Sun, X,
 } from "lucide-react";
 import "@tomverse/ui-tokens/tokens.css";
-import "@tomverse/ui-tokens/select.css";
+import "./select.css";
 import "@tomverse/ui-tokens/wordmark.css";
 import logo from "../../../../public/tomverse-logo.png";
 import { usagePercent } from "../../../../components/chat/UsagePercentGauge";

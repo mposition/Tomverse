@@ -15,7 +15,7 @@
   --muted: #52627d;
   --action: #385af5;
   --focus: #385af5;
-  /* The shared dropdown design (@tomverse/ui-tokens/select.css) in this shell's palette. */
+  /* The dropdown design (select.css) in this shell's palette. */
   --tv-select-surface: var(--surface);
   --tv-select-border: var(--line);
   --tv-select-text: var(--text);

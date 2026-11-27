@@ -1,6 +1,5 @@
 /*
- * One dropdown design for Tomverse clients. The desktop shell imports it; any
- * other client gets the same design by importing this file.
+ * The dropdown design of the desktop shell: one look for every `<select>`.
  *
  * It styles the platform `<select>` itself (CSS "customizable select",
  * `appearance: base-select`) instead of replacing it with a scripted listbox.
@@ -18,16 +17,17 @@
  *     the better list, so it is left alone;
  *   - single-choice dropdowns. `multiple` and `size` list boxes are untouched.
  *
- * Everything sits in the `base` cascade layer. Under Tailwind that is its own
- * base layer, so a utility class on a `<select>` (border, radius, padding,
- * colour) still wins; in a client with plain CSS every unlayered rule wins.
- * This file therefore only supplies what a call site left unsaid, plus the
- * open list, which no call site styles.
+ * Everything sits in the `base` cascade layer, and main.tsx imports this file
+ * ahead of the shell's own stylesheets: every unlayered rule of the shell wins over it,
+ * and so do the Tailwind utilities of the shared model picker. This file
+ * therefore only supplies what a call site left unsaid, plus the open list,
+ * which no call site styles.
  *
- * A client re-points the `--tv-select-*` properties to its own palette (the
- * desktop shell does); the literals below are a neutral zinc and blue.
- * Follows docs/policy/shared-packages.md: no Tailwind at-rule, no outside
- * import, and no `var()` this file does not define.
+ * styles.css re-points the `--tv-select-*` properties to the shell's palette;
+ * the literals below are the fallback. The file keeps to what a shared
+ * package stylesheet may contain (docs/policy/shared-packages.md: no Tailwind
+ * at-rule, no outside import, no `var()` it does not define), so it can move
+ * to `@tomverse/ui-tokens` unchanged if the web app adopts the design.
  */
 
 @layer base {
