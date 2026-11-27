@@ -29,6 +29,13 @@ const started = z.object({
 
 type Call = (request: { path: string; method: "POST"; body: object }) => Promise<Response>;
 
+/** Compared as bytes: two strings of one length can still differ in byte length, and timingSafeEqual throws on that. */
+function sameBytes(left: string, right: string) {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 function providerUrl(value: string, provider: DesktopLinkProvider) {
   const url = new URL(value);
   if (url.protocol !== "https:" || url.hostname !== LINK_PROVIDER_HOSTS[provider] || url.username || url.password) {
@@ -70,8 +77,7 @@ export async function linkLoginMethodThroughBrowser(options: {
     const answered = code !== null ? code.length >= 1 && code.length <= DESKTOP_LINK_CODE_MAX_LENGTH && error === null
       : error !== null && /^[a-z_]{1,64}$/.test(error);
     // Exactly the state and one answer, and the state is the one this attempt was given.
-    if (!linkState || !state || state.length !== linkState.length || !timingSafeEqual(Buffer.from(state), Buffer.from(linkState)) ||
-        params.size !== 2 || !answered) {
+    if (!linkState || !state || !sameBytes(state, linkState) || params.size !== 2 || !answered) {
       showBrowserResult(response, 400, "The Tomverse Desktop request was invalid.");
       return;
     }

@@ -84,7 +84,9 @@ test("a return with another state, extra values, or the wrong host is refused an
     // Collected rather than asserted inside: the flow ends at the genuine return and would hide a later throw.
     browser = (async () => {
       for (const [query, host] of [
-        [{ state: "dl1." + "x".repeat(linkState.length - 4), code: "attacker" }], [{ state: linkState, code: "c", extra: "1" }],
+        [{ state: "dl1." + "x".repeat(linkState.length - 4), code: "attacker" }],
+        // Same number of characters, different number of bytes: a byte comparison that throws would end the app.
+        [{ state: "é".repeat(linkState.length), code: "attacker" }], [{ state: linkState, code: "c", extra: "1" }],
         [{ state: linkState }], [{ state: linkState, code: "c", error: "access_denied" }],
         [{ state: linkState, code: "c" }, "evil.example"], [{ state: linkState, code: "genuine" }],
       ] as const) statuses.push((await returnToApp(query, host)).status);
@@ -93,7 +95,7 @@ test("a return with another state, extra values, or the wrong host is refused an
   assert.deepEqual(await api.handle({ action: "linkLoginMethod", method: "google" }), { status: "saved" });
   await browser;
   // Refused: another state, an extra value, no answer, two answers, another host. Then the genuine one.
-  assert.deepEqual(statuses, [400, 400, 400, 400, 404, 200]);
+  assert.deepEqual(statuses, [400, 400, 400, 400, 400, 404, 200]);
   assert.equal(seen.length, 2);
   assert.equal(seen[1].body.code, "genuine");
 });
