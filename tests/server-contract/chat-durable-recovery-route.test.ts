@@ -142,8 +142,21 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
       attemptReadExpectedConversationId = expectedConversationId;
       return attemptReconciledRow === undefined ? attemptRow : attemptReconciledRow;
     },
+    requestChatResponseAttemptStop: async (
+      userId: string,
+      assistantMessageId: string,
+      expectedConversationId: string
+    ) => {
+      attemptStopCalls.push({ userId, assistantMessageId, expectedConversationId });
+      const stopped = attemptRow?.status === "streaming" || attemptRow?.status === "claimed";
+      if (stopped && attemptRow) {
+        attemptRow = { ...attemptRow, status: "cancelled", finishReason: "cancelled", terminalAt: new Date("2026-09-13T01:03:00.000Z") };
+      }
+      return { stopped, attempt: attemptRow };
+    },
   },
 });
+let attemptStopCalls: Array<{ userId: string; assistantMessageId: string; expectedConversationId: string }> = [];
 mock.module(mod("lib/messageAttachmentStorage.ts"), {
   namedExports: { MessageAttachmentResolveError: AttachmentResolve },
 });
@@ -496,6 +509,108 @@ test("draft PUT returns the exact row written without a success-path reread", as
   assert.equal(draftReadCount, 0);
   assert.equal(hydratedDraftRow, writtenDraftRow);
   assert.equal((await response.json()).draft.revision, 7);
+});
+
+/* -------------------------------------------------- the explicit stop ---- */
+
+const activeAttempt = () => ({
+  assistantMessageId: "assistant_1",
+  userId: "user_1",
+  conversationId: "conv_1",
+  sourceUserMessageId: "msg_1",
+  fingerprint: "a".repeat(64),
+  requestedModelId: "provider/model",
+  actualModelId: "provider/model",
+  provider: "provider",
+  status: "streaming",
+  partialContent: "committed",
+  checkpointRevision: 2,
+  ownerId: "worker-secret",
+  leaseExpiresAt: new Date("2026-09-13T01:02:00.000Z"),
+  finishReason: null,
+  failureCode: null,
+  terminalAt: null,
+  createdAt: new Date("2026-09-13T01:00:00.000Z"),
+  updatedAt: new Date("2026-09-13T01:01:00.000Z"),
+});
+const stop = async (body: unknown = { action: "stop" }) => {
+  const { attemptRoute } = await loadRoutes();
+  return attemptRoute.POST(request("/api/products/chat/attempts/assistant_1", "POST", body), {
+    params: Promise.resolve({ assistantMessageId: "assistant_1" }),
+  });
+};
+const withSwitch = async <T,>(value: string | undefined, run: () => Promise<T>) => {
+  const previous = process.env.CHAT_CONTINUE_AFTER_DISCONNECT;
+  if (value === undefined) delete process.env.CHAT_CONTINUE_AFTER_DISCONNECT;
+  else process.env.CHAT_CONTINUE_AFTER_DISCONNECT = value;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.CHAT_CONTINUE_AFTER_DISCONNECT;
+    else process.env.CHAT_CONTINUE_AFTER_DISCONNECT = previous;
+  }
+};
+
+test("a stop with the switch off writes nothing and reports the current state", async () => {
+  attemptRow = activeAttempt();
+  attemptStopCalls = [];
+  const response = await withSwitch(undefined, () => stop());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const body = await response.json();
+  assert.equal(body.stopped, false);
+  assert.equal(body.attempt.status, "streaming");
+  assert.deepEqual(attemptStopCalls, []);
+  // Any value but "on" is off.
+  await withSwitch("true", () => stop());
+  assert.deepEqual(attemptStopCalls, []);
+});
+
+test("a stop with the switch on records it in the owner's authorized attempt", async () => {
+  attemptRow = activeAttempt();
+  attemptStopCalls = [];
+  const response = await withSwitch("on", () => stop());
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.stopped, true);
+  assert.equal(body.attempt.status, "cancelled");
+  assert.equal("ownerId" in body.attempt, false);
+  assert.deepEqual(attemptStopCalls, [
+    { userId: "user_1", assistantMessageId: "assistant_1", expectedConversationId: "conv_1" },
+  ]);
+  assert.deepEqual(authorizedScopes, ["conv_1"]);
+});
+
+test("a stop of a foreign, missing or locked attempt writes nothing", async () => {
+  attemptStopCalls = [];
+  attemptRow = null;
+  const missing = await withSwitch("on", () => stop());
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).code, "CHAT_ATTEMPT_NOT_FOUND");
+
+  attemptRow = activeAttempt();
+  deniedAccessScopes = new Set(["conv_1"]);
+  const locked = await withSwitch("on", () => stop());
+  assert.equal(locked.status, 404);
+  assert.equal(locked.headers.get("Cache-Control"), "private, no-store");
+  assert.deepEqual(attemptStopCalls, []);
+});
+
+test("a stop request carries nothing but the stop", async () => {
+  attemptRow = activeAttempt();
+  attemptStopCalls = [];
+  const response = await withSwitch("on", () => stop({ action: "stop", status: "completed" }));
+  assert.notEqual(response.status, 200);
+  assert.deepEqual(attemptStopCalls, []);
+});
+
+test("a stop without a session is refused before anything is read", async () => {
+  session = null;
+  attemptRow = activeAttempt();
+  attemptStopCalls = [];
+  const response = await withSwitch("on", () => stop());
+  assert.equal(response.status, 401);
+  assert.deepEqual(attemptStopCalls, []);
 });
 
 test("attempt GET makes foreign and missing ids indistinguishable", async () => {

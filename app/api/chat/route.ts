@@ -378,6 +378,12 @@ import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
 import { buildStreamKeepaliveChunk } from "@/lib/chatStreamKeepalive";
 import { resolveChatStreamKeepalivePlan } from "@/lib/chatStreamKeepalivePlan";
+import {
+    CHAT_CONTINUE_AFTER_DISCONNECT_HEADER,
+    chatContinueAfterDisconnectEnabled,
+    isStoppedChatAttempt,
+    resolveDetachedChatTurnPlan,
+} from "@/lib/chatContinueAfterDisconnect";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import {
     conversationLockedResponse,
@@ -516,6 +522,7 @@ import {
     ChatAttemptIdentityConflictError,
     ChatAttemptScopeError,
     claimChatResponseAttempt,
+    peekChatResponseAttempt,
     terminalChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 import {
@@ -5767,9 +5774,32 @@ async function handleChatPost(
           disconnects mid-answer does not leave a search running for a turn
           nobody is reading.
         */
+        /*
+          lib/chatContinueAfterDisconnect.ts. With the switch on, a durable
+          turn's provider and tool work no longer listen to the request signal
+          directly -- a dropped connection must not abort them -- but to this
+          turn's own controller, which `cancelTurnSafely` aborts on a stop, on
+          a disconnect that is not detached, and on a detached stall. With the
+          switch off `clientSignal` *is* the request signal, so nothing about
+          today's path changes. Research Preview keeps its own bounded run
+          signal and is never detached. Neither is a turn with a plugin (MCP)
+          or project tools: those were built on the request signal above, and
+          a plugin may act on an outside system, which should not go on after
+          the person watching it has gone.
+        */
+        const continueAfterDisconnect =
+            Boolean(durableAttempt) &&
+            !isResearchPreview &&
+            !mcpConnector &&
+            !projectTools &&
+            chatContinueAfterDisconnectEnabled();
+        const turnAbortController = new AbortController();
+        const clientSignal: AbortSignal = continueAfterDisconnect
+            ? turnAbortController.signal
+            : req.signal;
         const researchPreviewRunSignal = isResearchPreview
             ? AbortSignal.any([req.signal, AbortSignal.timeout(120_000)])
-            : req.signal;
+            : clientSignal;
         const recordAppManagedSearchOutcome = (event: {
             status: string;
             reason?: string;
@@ -5823,7 +5853,7 @@ async function handleChatPost(
                               readiness: searchBackendReadiness,
                               webSearchEnabled: true,
                           }) ?? 0,
-                      signal: req.signal,
+                      signal: clientSignal,
                       onOutcome: recordAppManagedSearchOutcome,
                   })
                 : null);
@@ -6373,6 +6403,9 @@ async function handleChatPost(
           (lib/chatStreamKeepalive.ts).
         */
         let providerPartsObserved = 0;
+        // When the latest part arrived. A detached turn (no reader left to
+        // time it out) ends itself on this -- see `continueDetached`.
+        let lastProviderPartAt = Date.now();
         type ProviderPartObserver = (event: {
             chunk: unknown;
         }) => PromiseLike<void> | void;
@@ -6380,6 +6413,7 @@ async function handleChatPost(
             (forward: ProviderPartObserver | null): ProviderPartObserver =>
             (event) => {
                 providerPartsObserved += 1;
+                lastProviderPartAt = Date.now();
                 return forward?.(event);
             };
         const forwardedOnChunk = (config: unknown) => {
@@ -6443,9 +6477,11 @@ async function handleChatPost(
                     model: activeModel,
                     messages: sdkMessages,
                     // The request signal closes the provider promptly when the
-                    // client goes away. The attempt-local controller is kept
-                    // separately so replacing or timing out one attempt never
-                    // aborts a later fallback attempt.
+                    // client goes away -- or, on a turn that may continue after
+                    // a disconnect, the turn's own signal (`clientSignal`). The
+                    // attempt-local controller is kept separately so replacing
+                    // or timing out one attempt never aborts a later fallback
+                    // attempt.
                     abortSignal: AbortSignal.any([
                         researchPreviewRunSignal,
                         initialAttemptAbortController.signal,
@@ -6689,6 +6725,16 @@ async function handleChatPost(
         let turnCancellation: Promise<void> | null = null;
         let completionCommitted = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
+        /**
+         * Set once the client's connection is gone and the turn carries on
+         * without it (lib/chatContinueAfterDisconnect.ts). The turn stays
+         * `open`; only the writes to the dead response become no-ops, in
+         * `enqueueSafely`, `closeSafely` and `errorSafely`. Never set with the
+         * switch off.
+         */
+        let responseDetached = false;
+        /** A detached or finishing turn found the user's stop in its attempt row. */
+        let attemptStoppedByUser = false;
         let detachRequestAbortListener: () => void = () => {};
         let fallbackTransition: Promise<void> | null = null;
         let pendingFallbackAbortController: AbortController | null = null;
@@ -6874,12 +6920,18 @@ async function handleChatPost(
                             // terminal CAS is reconciled by the lease expiry;
                             // it must never skip charging/refunding the provider
                             // request which already ran.
-                            logRequestError(
-                                "chat_durable_attempt_terminal_failed",
-                                traceId,
-                                attemptError,
-                                dispatched.modelId
-                            );
+                            //
+                            // A turn the user stopped through the attempt
+                            // endpoint finds its row already `cancelled`; that
+                            // refusal is the stop, not a failure.
+                            if (!attemptStoppedByUser) {
+                                logRequestError(
+                                    "chat_durable_attempt_terminal_failed",
+                                    traceId,
+                                    attemptError,
+                                    dispatched.modelId
+                                );
+                            }
                         }
                     }
                     const providerUsageSnapshot =
@@ -7214,6 +7266,10 @@ async function handleChatPost(
             // have crossed streamText's provider boundary.
             dispatched.abortController.abort(reason);
             pendingFallbackAbortController?.abort(reason);
+            // The tools' signal when the request signal is not theirs (see
+            // `clientSignal`). Aborting it with the switch off changes
+            // nothing: nothing listens to it.
+            turnAbortController.abort(reason);
             turnCancellation ??= (async () => {
                 // Once a fallback provider exists, the primary close and the
                 // active-attempt swap are one ownership transition. Let it
@@ -7242,6 +7298,8 @@ async function handleChatPost(
             value: string
         ) => {
             if (streamState !== "open") return false;
+            // Nobody is reading. The turn goes on; the write goes nowhere.
+            if (responseDetached) return true;
             try {
                 controller.enqueue(value);
                 return true;
@@ -7304,6 +7362,10 @@ async function handleChatPost(
             controller: ReadableStreamDefaultController<string>
         ) => {
             if (streamState !== "open") return false;
+            if (responseDetached) {
+                streamState = "closed";
+                return true;
+            }
             try {
                 controller.close();
                 streamState = "closed";
@@ -7326,6 +7388,10 @@ async function handleChatPost(
             error: unknown
         ) => {
             if (streamState !== "open") return false;
+            if (responseDetached) {
+                streamState = "cancelled";
+                return true;
+            }
             try {
                 controller.error(error);
                 streamState = "cancelled";
@@ -7643,7 +7709,7 @@ async function handleChatPost(
                 // changed environment mid-request, which is not a thing that
                 // should be able to change what this turn was offered.
                 searchBackendReadiness,
-                searchAbortSignal: req.signal,
+                searchAbortSignal: clientSignal,
                 traceId,
                 attemptIndex: dispatched.attemptIndex + 1,
                 // `docs/policy/tomverse-chat-routing.md` §10, in the
@@ -7807,7 +7873,7 @@ async function handleChatPost(
                     plannerVersion: "none",
                     adapterVersion: "vercel-ai-sdk-streamText-v1",
                 });
-                if (req.signal.aborted || streamState !== "open") {
+                if (clientSignal.aborted || streamState !== "open") {
                     await abandonFallback("request_aborted_before_dispatch");
                     // Cancellation owns the primary terminal from here. Tell
                     // the outer failure path the turn was handled so it cannot
@@ -7829,7 +7895,7 @@ async function handleChatPost(
                     messages: fallbackSdkMessages,
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     abortSignal: AbortSignal.any([
-                        req.signal,
+                        clientSignal,
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
@@ -7865,11 +7931,11 @@ async function handleChatPost(
                     plan.modelId
                 );
                 await abandonFallback("dispatch_failed");
-                return streamState !== "open" || req.signal.aborted;
+                return streamState !== "open" || clientSignal.aborted;
             }
             if (!nextStream) {
                 await abandonFallback("dispatch_failed");
-                return streamState !== "open" || req.signal.aborted;
+                return streamState !== "open" || clientSignal.aborted;
             }
 
             try {
@@ -8099,7 +8165,173 @@ async function handleChatPost(
                 }
             }
         };
+        /*
+          lib/chatContinueAfterDisconnect.ts: a connection that closes without
+          an explicit stop no longer ends a durable turn when the switch is on.
+
+          `detachFromClient` is the one place that decides, and it is
+          synchronous for the same reason `cancelTurnSafely` is: whichever of
+          the request abort and the body cancel arrives first must settle the
+          question before an in-flight provider read resolves. Detaching does
+          not wait for anything -- it closes the dead response, turns its
+          writes into no-ops and hands the turn to `continueDetached`, which
+          looks for the user's stop in the attempt row before it reads on.
+        */
+        const detachedTurnPlan = resolveDetachedChatTurnPlan();
+        let responsePull: Promise<void> | null = null;
+        const detachedAttemptIdentity = durableAttempt
+            ? {
+                  userId: durableAttempt.userId,
+                  assistantMessageId: durableAttempt.assistantMessageId,
+              }
+            : null;
+        const userStoppedAttempt = async () => {
+            if (!detachedAttemptIdentity) return false;
+            try {
+                const attempt = await peekChatResponseAttempt(
+                    detachedAttemptIdentity.userId,
+                    detachedAttemptIdentity.assistantMessageId
+                );
+                if (!isStoppedChatAttempt(attempt)) return false;
+                attemptStoppedByUser = true;
+                return true;
+            } catch (error) {
+                // An unreadable row is not a stop. The next read tries again,
+                // and every other bound on the turn still applies.
+                logRequestError(
+                    "chat_detached_stop_read_failed",
+                    traceId,
+                    error,
+                    dispatched.modelId
+                );
+                return false;
+            }
+        };
+        const USER_STOP_REASON = "user stopped the response";
+        const continueDetached = async () => {
+            // A stop races its own fetch abort. Give it a moment to land
+            // before reading on; nothing is read from the provider meanwhile,
+            // so nothing is added to what a stop would be charged for.
+            const graceEndsAt = Date.now() + detachedTurnPlan.stopGraceMs;
+            for (;;) {
+                if (streamState !== "open") return;
+                if (await userStoppedAttempt()) {
+                    await cancelTurnSafely(USER_STOP_REASON);
+                    return;
+                }
+                if (Date.now() >= graceEndsAt) break;
+                await new Promise((settle) =>
+                    setTimeout(settle, Math.min(500, detachedTurnPlan.stopGraceMs))
+                );
+            }
+            if (streamState !== "open") return;
+            console.info(
+                JSON.stringify({
+                    event: "chat_stream_client_detached",
+                    traceId,
+                    modelId: dispatched.modelId,
+                    provider: dispatched.provider,
+                    visibleTokenEmitted,
+                    timestamp: new Date().toISOString(),
+                })
+            );
+            let watching = false;
+            const watch = setInterval(() => {
+                if (streamState !== "open") {
+                    clearInterval(watch);
+                    return;
+                }
+                if (
+                    visibleTokenEmitted &&
+                    Date.now() - lastProviderPartAt >
+                        detachedTurnPlan.providerIdleMs
+                ) {
+                    // The rule the browser's silence watchdog applied to a
+                    // connected turn, applied here because no browser is
+                    // left to apply it. Prorated, as its abort would have been.
+                    clearInterval(watch);
+                    console.warn(
+                        JSON.stringify({
+                            event: "chat_stream_detached_provider_idle",
+                            traceId,
+                            modelId: dispatched.modelId,
+                            idleMs: Date.now() - lastProviderPartAt,
+                            timestamp: new Date().toISOString(),
+                        })
+                    );
+                    void cancelTurnSafely("detached provider stopped producing");
+                    return;
+                }
+                if (watching) return;
+                watching = true;
+                void userStoppedAttempt()
+                    .then((stopped) => {
+                        if (stopped) {
+                            clearInterval(watch);
+                            return cancelTurnSafely(USER_STOP_REASON);
+                        }
+                    })
+                    .finally(() => {
+                        watching = false;
+                    });
+            }, detachedTurnPlan.stopPollMs);
+            watch.unref?.();
+            const detachedSink = {
+                desiredSize: 1,
+                enqueue: () => {},
+                close: () => {},
+                error: () => {},
+            } as unknown as ReadableStreamDefaultController<string>;
+            try {
+                // The response's own pull may still be inside a read. Never
+                // two at once: the completion branch must run exactly once.
+                await responsePull?.catch(() => undefined);
+                while (streamState === "open" && !released) {
+                    await protectedSource.pull(detachedSink);
+                }
+            } catch (error) {
+                logRequestError(
+                    "chat_detached_turn_failed",
+                    traceId,
+                    error,
+                    dispatched.modelId
+                );
+                await cancelTurnSafely(error);
+            } finally {
+                clearInterval(watch);
+            }
+        };
+        const detachFromClient = (reason: unknown) => {
+            if (responseDetached) return true;
+            if (
+                !continueAfterDisconnect ||
+                !durableAttempt ||
+                completionCommitted ||
+                released ||
+                streamState !== "open"
+            ) {
+                return false;
+            }
+            responseDetached = true;
+            if (streamController) {
+                try {
+                    streamController.close();
+                } catch {
+                    // Already closed or cancelled from the reader's side.
+                }
+            }
+            void continueDetached().catch((error) => {
+                logRequestError(
+                    "chat_detached_turn_failed",
+                    traceId,
+                    error ?? reason,
+                    dispatched.modelId
+                );
+            });
+            return true;
+        };
         const onRequestAbort = () => {
+            if (detachFromClient(req.signal.reason ?? "request aborted")) return;
             const cancellation = cancelTurnSafely(
                 req.signal.reason ?? "request aborted"
             );
@@ -8135,7 +8367,10 @@ async function handleChatPost(
             req.signal.removeEventListener("abort", onRequestAbort);
         };
         if (req.signal.aborted) onRequestAbort();
-        const protectedStream = new ReadableStream<string>({
+        // A named source rather than an inline one, so a detached turn
+        // (`continueDetached`) can go on pulling the same steps with nobody
+        // reading the response.
+        const protectedSource = {
             start(controller) {
                 streamController = controller;
                 if (streamState !== "open") controller.close();
@@ -8950,10 +9185,45 @@ async function handleChatPost(
                     firstVisibleTokenAt ??= new Date();
                     latency.content();
                     // Checkpoint only bytes the browser was successfully
-                    // offered. The writer coalesces chunks and applies owner,
-                    // revision and database-clock lease CAS.
+                    // offered -- or, on a detached turn, bytes the browser's
+                    // attempt poller is now the only way to receive. The
+                    // writer coalesces chunks and applies owner, revision and
+                    // database-clock lease CAS.
                     durableCheckpointWriter?.observe(generatedText);
                 } catch (error) {
+                    /*
+                      The user's stop, met at the finish line.
+
+                      A stop recorded through the attempt endpoint turns the
+                      row terminal, so the completion branch's final
+                      checkpoint -- or its Message transaction -- is refused
+                      by the CAS. That refusal must not be filed as a provider
+                      failure and settled `failed`: a failed turn is not
+                      charged, and the answer has already been streamed. It is
+                      the stop, and settles as a stop.
+                    */
+                    if (
+                        error instanceof ChatAttemptCasError &&
+                        (await userStoppedAttempt())
+                    ) {
+                        // Prorated, unless the completed settlement already
+                        // committed -- then the provider finished first and
+                        // the stop was too late, as an abort after completion
+                        // always was.
+                        await cancelTurnSafely(USER_STOP_REASON);
+                        // `closeSafely` refuses once the turn is cancelled,
+                        // and a reader still attached must not be left
+                        // waiting on a stream nothing will write to again.
+                        if (!responseDetached) {
+                            try {
+                                controller.close();
+                            } catch {
+                                // Already closed or cancelled by the reader.
+                            }
+                        }
+                        await releaseSafely();
+                        return;
+                    }
                     const wasAlreadyCancelled = streamState !== "open";
                     if (
                         wasAlreadyCancelled ||
@@ -9195,8 +9465,34 @@ async function handleChatPost(
                 }
             },
             async cancel(reason) {
+                if (detachFromClient(reason)) return;
                 await cancelTurnSafely(reason);
             },
+        } satisfies UnderlyingDefaultSource<string>;
+        const protectedStream = new ReadableStream<string>({
+            start: (controller) => {
+                protectedSource.start(controller);
+                // Detached before the response existed (the request was
+                // already gone): the turn is the detached reader's alone.
+                if (responseDetached && streamState === "open") controller.close();
+            },
+            pull: (controller) => {
+                if (responseDetached) {
+                    // Never a second reader beside `continueDetached`: the
+                    // completion branch must run exactly once.
+                    try {
+                        controller.close();
+                    } catch {
+                        // Already closed.
+                    }
+                    return;
+                }
+                // Remembered so a detached turn never starts a pull while
+                // this one is still inside a read.
+                responsePull = protectedSource.pull(controller);
+                return responsePull;
+            },
+            cancel: (reason) => protectedSource.cancel(reason),
         });
 
         const headers = new Headers({
@@ -9208,6 +9504,12 @@ async function handleChatPost(
             "Cache-Control": "private, no-store, no-transform",
             "X-Request-ID": traceId,
             ...(durableAttempt ? { "X-Chat-Response-Mode": "stream" } : {}),
+            // Tells the browser a stop has to be said out loud
+            // (lib/chatContinueAfterDisconnect.ts): this turn will not end
+            // just because its connection does.
+            ...(continueAfterDisconnect && durableAttempt
+                ? { [CHAT_CONTINUE_AFTER_DISCONNECT_HEADER]: "on" }
+                : {}),
         });
         if (!durableAttempt) {
             headers.set("Cache-Control", "no-cache, no-transform");

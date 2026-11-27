@@ -173,6 +173,23 @@ sets `terminalAt` in the same update. A completed value must also preserve the
 committed prefix. Terminal rows are immutable. A stale worker cannot overwrite
 a newer checkpoint or terminal result.
 
+The one terminal write that is not the worker's is the user's explicit stop,
+and it exists only with `CHAT_CONTINUE_AFTER_DISCONNECT=on`
+(`lib/chatContinueAfterDisconnect.ts`): a durable turn whose connection
+closes without a stop then keeps generating, so a stop has to be recorded
+somewhere every process can read. `POST /api/products/chat/attempts/[id]`
+with `{"action":"stop"}` runs the expired-lease reconciliation first, then
+one owner- and authorized-conversation-scoped conditional update that turns a
+row that is still `claimed`/`streaming` with a live database-clock lease into
+`cancelled` with its committed prefix. It names no worker or revision -- the
+stop must win against whichever worker holds the lease -- and that worker's
+next checkpoint or terminal CAS is then refused like any other write to a
+terminal row. A detached stream reads its row (for a short grace after the
+disconnect, then about once a second) and cancels with the ordinary prorated
+settlement; a stop that meets the completion branch's final CAS settles as a
+stop, never as an unbilled failure. With the switch off the endpoint answers
+with the current state and writes nothing.
+
 Visible stream prefixes are coalesced by size or one second, whichever arrives
 first. A small final chunk therefore receives a scheduled checkpoint even when
 no later chunk arrives; terminal flush remains the final owner/revision/database

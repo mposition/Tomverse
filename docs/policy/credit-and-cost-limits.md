@@ -886,6 +886,23 @@ completion 모양의 토큰 예약은 체계적으로 어긋납니다.
 `pricingVersion`·`costSource`·`longContextThresholdTokens`가 reservation payload와
 `pricingSnapshot`에 저장되고, 정산은 그 값으로 이뤄집니다.
 
+### 연결이 끊긴 durable Chat turn (기본 꺼짐 스위치)
+
+`CHAT_CONTINUE_AFTER_DISCONNECT=on`일 때만 바뀝니다(`lib/chatContinueAfterDisconnect.ts`).
+꺼져 있으면 요청 연결이 끊긴 turn은 예전처럼 provider 호출을 중단하고 생성분 비례
+`cancelled`로 정산합니다.
+
+- 켜져 있으면 응답 시도 행이 있는 계정 Chat turn(Research Preview, plugin·project 도구
+  turn 제외)은 **명시적 Stop 없이** 연결만 끊겼을 때 provider 호출을 계속하고, 끝나면
+  연결이 유지된 turn과 똑같이 `completed`로 정산합니다. 연결을 끊어 덜 내는 길은
+  없습니다 — 계속되면 완료 과금, 사용자가 멈추면 지금과 같은 비례 과금입니다.
+- Stop은 attempt 행에 기록되고(`POST /api/products/chat/attempts/[id]`), 떨어진 turn이
+  그 행을 읽어 즉시 `cancelled` 비례 정산합니다. 완료 직전 최종 checkpoint에서 Stop을
+  만나도 `failed`(무과금)가 아니라 `cancelled`로 정산합니다.
+- 떨어진 turn도 lease heartbeat, 첫 토큰 기한, 출력 상한, tool step 상한을 그대로
+  받습니다. 첫 토큰 이후 provider가 아무 part도 내지 않으면(기본 90초, 브라우저의
+  무응답 기준과 같음) 서버가 스스로 비례 `cancelled`로 끝냅니다.
+
 ## 4. 예약 정확도
 
 - 입력 토큰 추정은 `lib/chatTokenEstimate.ts` 하나로 통일했습니다. CJK 문자는

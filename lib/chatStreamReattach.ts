@@ -210,6 +210,41 @@ export const settleInterruptedChatAttempt = (
   return attempt;
 };
 
+/* -------------------------------------------------------------------------- */
+/* An explicit stop                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Tells the server the user stopped this turn (lib/chatContinueAfterDisconnect.ts).
+ *
+ * With CHAT_CONTINUE_AFTER_DISCONNECT on, a fetch abort alone reads as a
+ * dropped connection and the turn would carry on; this is what makes a stop
+ * a stop. `keepalive` so a stop followed by closing the tab still arrives.
+ * Best effort and never thrown: the abort that accompanies it still ends
+ * everything on this side, and a server with the switch off ignores it.
+ */
+export const requestChatAttemptStop = async (
+  assistantMessageId: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<boolean> => {
+  try {
+    const response = await fetchImpl(
+      `/api/products/chat/attempts/${encodeURIComponent(assistantMessageId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+        cache: "no-store",
+        keepalive: true,
+      }
+    );
+    await response.body?.cancel().catch(() => undefined);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 /** Tests only. */
 export const resetInterruptedChatAttempts = () => {
   pendingByKey.clear();

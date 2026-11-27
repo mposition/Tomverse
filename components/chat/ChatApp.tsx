@@ -78,6 +78,7 @@ import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { CHAT_CONTINUE_AFTER_DISCONNECT_HEADER } from "@/lib/chatContinueAfterDisconnect";
 import {
   decideChatStreamReattach,
   handOffInterruptedChatAttempt,
@@ -85,6 +86,7 @@ import {
   isInterruptedChatAttempt,
   pendingInterruptedChatAttempts,
   recoveredPartialText,
+  requestChatAttemptStop,
   settleInterruptedChatAttempt,
   shouldApplyPolledPartial,
   watchInterruptedChatAttempts,
@@ -805,12 +807,32 @@ function ChatAppComponent({
   // for the whole page, so returning to a conversation that is still streaming
   // would otherwise stop it on arrival with a "stop all" nobody pressed here.
   const lastStopSignalRef = useRef(stopSignal);
+  /*
+    A stop pressed while this panel is reading attempts rather than a stream
+    (a reload, or a stream handed over after it broke): there is no fetch to
+    abort, so the stop goes to the attempt endpoint, and a handed-over turn
+    is no longer one that "broke" -- when the server ends it, it ends as the
+    user's stop. A server with CHAT_CONTINUE_AFTER_DISCONNECT off ignores the
+    request, as a stop here always was ignored.
+  */
+  const durableAttemptIdsRef = useRef(durableAttemptIds);
+  useLayoutEffect(() => {
+    durableAttemptIdsRef.current = durableAttemptIds;
+  });
+  const stopPolledAttempts = useCallback(() => {
+    const key = runtimeKeyRef.current;
+    for (const assistantMessageId of durableAttemptIdsRef.current) {
+      settleInterruptedChatAttempt(key, assistantMessageId);
+      void requestChatAttemptStop(assistantMessageId);
+    }
+  }, []);
   useEffect(() => {
     if (stopSignal === undefined) return;
     if (lastStopSignalRef.current === stopSignal) return;
     lastStopSignalRef.current = stopSignal;
     abortChatRuntime(runtimeKeyRef.current, "user_stop_all");
-  }, [stopSignal]);
+    stopPolledAttempts();
+  }, [stopPolledAttempts, stopSignal]);
 
   // Lets the message list offer a per-panel stop button, distinct from the
   // shell's "stop all" button which drives every panel via stopSignal. Both
@@ -818,7 +840,8 @@ function ChatAppComponent({
   // running in a conversation the user walked away from.
   const stopThisPanel = useCallback(() => {
     abortChatRuntime(runtimeKeyRef.current, "user_stop");
-  }, []);
+    stopPolledAttempts();
+  }, [stopPolledAttempts]);
 
   const isConversationEmpty =
     messages.length === 0 ||
@@ -2657,6 +2680,29 @@ function ChatAppComponent({
         detachPageLivenessListeners = () => {
           document.removeEventListener("visibilitychange", recheckLiveness);
           window.removeEventListener("online", recheckLiveness);
+        };
+      }
+      if (
+        durableStream &&
+        response.headers.get(CHAT_CONTINUE_AFTER_DISCONNECT_HEADER) === "on"
+      ) {
+        // This server goes on generating when the connection closes
+        // (lib/chatContinueAfterDisconnect.ts), so the fetch abort a stop
+        // causes is not enough to stop it: the stop is said out loud, in the
+        // same moment. A timeout or an identity switch is not a stop and
+        // says nothing.
+        const stoppedMessageId = assistantMessageId;
+        const stopOnServer = () => {
+          const cause = getChatRuntimeAbortCause(runKey, controller);
+          if (cause === "user_stop" || cause === "user_stop_all") {
+            void requestChatAttemptStop(stoppedMessageId);
+          }
+        };
+        controller.signal.addEventListener("abort", stopOnServer, { once: true });
+        const detachPageListeners = detachPageLivenessListeners;
+        detachPageLivenessListeners = () => {
+          detachPageListeners();
+          controller.signal.removeEventListener("abort", stopOnServer);
         };
       }
 

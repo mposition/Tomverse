@@ -75,14 +75,14 @@ test("attempt write CAS evaluates leases on the database clock", () => {
   const persistence = read("lib/chatResponseAttemptPersistence.ts");
   const atomicUpdates = persistence.match(/UPDATE "ChatResponseAttempt"[\s\S]*?CURRENT_TIMESTAMP/g) ?? [];
   assert.equal(atomicUpdates.length >= 2, true);
-  assert.equal(
-    (
-      persistence.match(
-        /"leaseExpiresAt" > \(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'\)/g
-      ) ?? []
-    ).length,
-    2
-  );
+  // Every live-lease predicate -- the owner's checkpoint and terminal CAS,
+  // and the user's stop -- compares against the database clock. A structural
+  // check rather than a count, so adding a guarded write does not break it.
+  const leaseChecks = persistence.match(/"leaseExpiresAt" > [^\n]*/g) ?? [];
+  assert.equal(leaseChecks.length >= 2, true);
+  for (const check of leaseChecks) {
+    assert.match(check, /^"leaseExpiresAt" > \(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'\)/);
+  }
   assert.doesNotMatch(persistence, /"leaseExpiresAt" > CURRENT_TIMESTAMP/);
   assert.doesNotMatch(persistence, /leaseExpiresAt: \{ gt: now \}/);
 });
