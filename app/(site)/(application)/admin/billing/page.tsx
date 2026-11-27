@@ -9,9 +9,15 @@ import {
   type PromoRiskRow,
 } from "@/components/admin/AdminRiskPanels";
 import { PromotionDiagnosticsPanel } from "@/components/admin/PromotionDiagnosticsPanel";
+import {
+  AdminPlanChangesPanel,
+  ROW_LIMIT as PLAN_CHANGE_ROW_LIMIT,
+  type AdminPlanChangeRow,
+} from "@/components/admin/AdminPlanChangesPanel";
+import { adminPlanChangesMessages } from "@/lib/adminMessages/planChanges";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { hasAdminPermission } from "@/lib/adminAuth";
-import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { getAdminLocale, getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminBillingMessages } from "@/lib/adminMessages/billing";
 import { adminRiskPanelsMessages } from "@/lib/adminMessages/riskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
@@ -35,6 +41,9 @@ const settledValue = <T,>(result: PromiseSettledResult<T>): T | null => {
   console.error("Failed to read billing console data:", result.reason);
   return null;
 };
+
+// A module-level clock read keeps `react-hooks/purity` from flagging the server component.
+const currentTimeMs = () => Date.now();
 
 /**
  * Plans & pricing: the plan catalogue, the localized prices, promotions, and
@@ -81,6 +90,63 @@ export default async function AdminBillingPage({
       query={query}
     />
   );
+
+  if (tab.id === "plan-changes") {
+    // Read-only, like diagnostics: the customer cancels a scheduled change and
+    // the webhook settles every row.
+    const since = new Date(currentTimeMs() - 30 * 24 * 60 * 60 * 1000);
+    const select = {
+      id: true,
+      userId: true,
+      execution: true,
+      fromTier: true,
+      toTier: true,
+      billingInterval: true,
+      status: true,
+      renewalDecision: true,
+      appliesAt: true,
+      confirmedAt: true,
+      settledAt: true,
+    } as const;
+    const [pendingRead, recentRead, planChangeMessages, locale] = await Promise.all([
+      prisma.planChangeRequest
+        .findMany({ where: { status: "pending" }, orderBy: { confirmedAt: "asc" }, take: PLAN_CHANGE_ROW_LIMIT, select })
+        .then((rows) => ({ ok: true as const, rows }), (error) => ({ ok: false as const, error })),
+      prisma.planChangeRequest
+        .findMany({
+          where: { status: { in: ["applied", "cancelled", "failed"] }, settledAt: { gte: since } },
+          orderBy: { settledAt: "desc" },
+          take: PLAN_CHANGE_ROW_LIMIT,
+          select,
+        })
+        .then((rows) => ({ ok: true as const, rows }), (error) => ({ ok: false as const, error })),
+      getAdminMessages(adminPlanChangesMessages),
+      getAdminLocale(),
+    ]);
+    const toRows = (read: typeof pendingRead): AdminPlanChangeRow[] | null => {
+      if (!read.ok) {
+        console.error("Failed to read plan changes:", read.error);
+        return null;
+      }
+      return read.rows.map((row) => ({
+        ...row,
+        appliesAt: row.appliesAt?.toISOString() ?? null,
+        confirmedAt: row.confirmedAt?.toISOString() ?? null,
+        settledAt: row.settledAt?.toISOString() ?? null,
+      }));
+    };
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AdminPlanChangesPanel
+          pending={toRows(pendingRead)}
+          recent={toRows(recentRead)}
+          messages={planChangeMessages}
+          locale={locale === "ko" ? "ko-KR" : "en-AU"}
+        />
+      </div>
+    );
+  }
 
   if (tab.id === "diagnostics") {
     // Read-only, and it loads nothing of its own: the promotion list is all it needs.

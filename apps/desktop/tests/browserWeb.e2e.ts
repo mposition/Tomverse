@@ -388,6 +388,12 @@ test("in a connected Review the globe opens the panel beside the columns, and si
     await expect(panel).toBeVisible();
     await expect(columns).toHaveCount(3);
     await expect.poll(async () => (await columns.first().boundingBox())!.width).toBeLessThan(columnWidth);
+    // Beside the panel the Review shows one column at a time: its model chips and hint stay inside its own width, and the view switch is gone.
+    const toolbar = desktop.locator(".review-column-toolbar");
+    await expect.poll(() => toolbar.evaluate((node) => [node, ...node.querySelectorAll(":scope > *")].every((part) => part.scrollWidth <= part.clientWidth))).toBe(true);
+    await expect(columns.filter({ visible: true })).toHaveCount(1);
+    await expect(desktop.getByRole("button", { name: "Side by side", exact: true })).toBeHidden();
+    await expect(desktop.getByTestId("review-focus-model")).toHaveCount(3);
     await desktop.getByRole("textbox", { name: "Address" }).fill("localhost:" + port);
     await desktop.getByRole("textbox", { name: "Address" }).press("Enter");
     await expect.poll(() => panelPage(app, `http://localhost:${port}/`)?.title()).toBe("Local page");

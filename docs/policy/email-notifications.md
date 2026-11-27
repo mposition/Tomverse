@@ -3852,6 +3852,7 @@ Sending domains입니다. **DMARC는 제공자가 발급하지도 보고하지�
 | 환불 접수·승인·거절 | `billing` |
 | `founding_tester_pass_started` · `_reminder` · `_ended` | `billing` |
 | `admin_plan_changed` | `billing` |
+| `plan_change_upgraded` · `plan_change_downgrade_scheduled` | `billing` |
 | 피드백 접수·검토·처리 결과(제출자) | `support` |
 | 고객지원 접수 알림(운영자) | `operations` |
 | `ops_model_lifecycle_daily` | `operations` |

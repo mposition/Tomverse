@@ -486,7 +486,7 @@ export function PricingPage() {
           <p className="note">{copy.plans.note}</p>
           {/* One change screen for the page, opened by whichever card offers a change: a subscriber
               has exactly one subscription to change, and two dialogs would be two focus traps. */}
-          {planChangeTarget && account.billingInterval ? <PlanChangeDialog open
+          {planChangeTarget ? <PlanChangeDialog open
             onOpenChange={(open) => setPlanChangeTarget(open ? planChangeTarget : null)}
             targetTier={planChangeTarget} billingInterval={account.billingInterval} lang={lang}
             returnFocusToRef={planChangeTriggerRef} /> : null}
