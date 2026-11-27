@@ -10,6 +10,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 
 /**
  * Desktop Code on the signed-in Desktop session (owner decision 2026-11-27): with a server that names
@@ -123,9 +124,9 @@ test("Code runs on the signed-in Desktop session: no key step, the session's tok
     // Desktop renews the token by itself; the next request carries the new one.
     await expect.poll(async () => (await app!.evaluate(() => (globalThis as Host).calls)).includes("/api/auth/desktop/refresh"),
       { timeout: 60_000 }).toBe(true);
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect.poll(async () => (await state()).root).toBeTruthy();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await page.getByRole("textbox", { name: "Code request" }).fill("Summarize notes.txt");
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect(page.getByText("Done on the session.").first()).toBeVisible({ timeout: 30_000 });

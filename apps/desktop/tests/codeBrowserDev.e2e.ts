@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
 import { launchNativeFixture, removeNativeFixtureDirectory } from "./launch-native-fixture";
+import { openCodeProject } from "./code-project-fixture";
 
 /**
  * The browser panel as a development preview: the person's own sites on this computer and network, a sign-in that outlasts the tab
@@ -269,7 +270,7 @@ test("a sign-in outlasts the tab, the panel and the app, belongs to the project,
   try {
     run = await launch(gateway);
     const { app, page } = run;
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const who = site.origin + "/whoami";
     await visit(page, app, site.origin + "/login", "Signed in");
     // The same tab, another tab, and a tab opened after the first one was closed all hold the sign-in.
@@ -297,12 +298,12 @@ test("a sign-in outlasts the tab, the panel and the app, belongs to the project,
     // Another project (another folder) has a profile of its own.
     await app.close();
     other = await launch(gateway, { folder: await mkdtemp(join(tmpdir(), "tomverse-browser-dev-other-")) });
-    await other.page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(other.page);
     await expect.poll(async () => (await visit(other!.page, other!.app, who, "Who")).locator("#cookie").textContent()).toBe("cookie=[]");
     await other.app.close();
     // The app restarted on the same project: the sign-in, which the site gave no expiry, is still there.
     again = await launch(gateway, { folder: run.folder });
-    await again.page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(again.page);
     await expect.poll(async () => (await visit(again!.page, again!.app, who + "?restart", "Who")).locator("#cookie").textContent()).toBe("cookie=[dev_session=signed-in]");
     // Clear browser data: a confirmation dialog first (cancelling keeps everything), then the profile is empty and the page signed out.
     await answerDialogs(again.app, { response: 0, checkboxChecked: false });
