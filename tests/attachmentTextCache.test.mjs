@@ -94,7 +94,9 @@ test("what is stored is read back exactly, and anything else is a miss", () => {
 });
 
 test("only model-independent extractors are cached", () => {
-    assert.deepEqual([...ATTACHMENT_TEXT_CACHE_CATEGORIES].sort(), ["legacy-office", "office", "pdf", "text"]);
+    // "audio" is a transcript: the configured transcription model is fixed per
+    // deployment, not chosen per turn (docs/policy/chat-attachment-formats.md 2.4.1).
+    assert.deepEqual([...ATTACHMENT_TEXT_CACHE_CATEGORIES].sort(), ["audio", "legacy-office", "office", "pdf", "text"]);
     for (const category of ["image", "archive", "iwork"]) {
         assert.equal(ATTACHMENT_TEXT_CACHE_CATEGORIES.has(category), false, category);
     }
@@ -119,6 +121,21 @@ test("the route caches only an account's earlier, bound file, and never the turn
     ]) {
         assert.ok(eligibility.includes(condition), condition);
     }
+    // Reviews r-20261127-082100-427572 and r-20261127-110354-67c5f8: a
+    // recording's transcript is claimed and stored on its own bound row by
+    // transcribeAudioAttachmentOnce -- the turn's own recording included, and
+    // whatever CHAT_ATTACHMENT_TEXT_CACHE says -- so the route neither gates it
+    // on the text cache nor writes it a second time.
+    const recording = route.slice(route.indexOf("const recordingAttachmentId ="));
+    const recordingRule = recording.slice(0, recording.indexOf(";"));
+    assert.ok(recordingRule.includes('format.category === "audio"'));
+    assert.ok(!recordingRule.includes("textCacheEligible") && !recordingRule.includes("attachmentTextCacheEnabled"));
+    assert.ok(route.includes("transcriptAttachmentId: recordingAttachmentId,"));
+    assert.ok(route.includes('if (textCacheEligible && format.category !== "audio") {'));
+    // Review r-20261127-114544-4444fa: an earlier recording's stored transcript
+    // is read with the text cache off as well -- and this read comes before the
+    // file is ingested, so before the audio switch is ever consulted.
+    assert.ok(eligibility.includes('(attachmentTextCacheEnabled() || format.category === "audio")'));
     // A cache hit answers to the same past-file share and parse budget.
     const hit = route.slice(start, route.indexOf("let attachmentBuffer: Buffer;", start));
     assert.match(hit, /pastAttachmentTokens \+ tokens > pastAttachmentTokenBudget/);

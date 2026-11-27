@@ -520,6 +520,10 @@ export const zhHant = {
         attachFormatGroupMarkup: "標記語言",
         attachFormatGroupCode: "程式碼",
         attachFormatGroupArchive: "壓縮檔",
+        attachFormatGroupAudio: "音訊",
+        attachmentAudioTooLong: "錄音最長可為 10 分鐘。請剪短檔案或拆分為較短的部分。",
+        audioTranscriptionUnavailable: "目前無法轉寫此錄音，請稍後再試。",
+        audioTranscriptionLimitReached: "今天的音訊轉寫額度已用完。請明天再試，或附加較短的錄音。",
         attachFormatsOverflow: "另有 {count} 個",
         // Guest file attachments: one temporary local file per message.
         guestAttachmentOneFile: "訪客可附加 1 個本機檔案",

@@ -32,6 +32,9 @@ mock.module(mod("lib/appSettings.ts"), { namedExports: {
 mock.module(mod("lib/webSearchBackendRuntime.ts"), { namedExports: {
   resolveWebSearchBackendReadiness: () => ({ brave: false }),
 } });
+mock.module(mod("lib/chatAudioAttachment.ts"), { namedExports: {
+  chatAudioAttachmentEnabled: () => false,
+} });
 mock.module(mod("lib/chatStarterCapabilityResolution.ts"), { namedExports: {
   resolveChatStarterCapabilities: () => [],
 } });
@@ -54,6 +57,9 @@ mock.module(mod("components/chat/HelpGuideAccess.tsx"), { namedExports: {
 } });
 mock.module(mod("components/images/ImageModelCatalogProvider.tsx"), { namedExports: {
   ImageModelCatalogProvider: () => null,
+} });
+mock.module(mod("components/chat/ChatAudioAttachmentContext.tsx"), { namedExports: {
+  ChatAudioAttachmentProvider: () => null,
 } });
 mock.module(mod("components/chat/PromptRefinerFixtureRefreshLoader.tsx"), { namedExports: {
   PromptRefinerFixtureRefreshLoader: () => null,
