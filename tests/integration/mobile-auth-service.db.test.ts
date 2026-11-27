@@ -1704,6 +1704,9 @@ test("Desktop Chat prepares signed memory only for its current saved question an
     assert.equal(stopped.status, 200);
     assert.deepEqual(await stopped.json(), { ok: true, contextBundle: null, memoryUsedCount: 0, reason: "account_off" });
     process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "false";
+    // The route is enrolled with Review writes too, so Chat writes off alone no longer unenrols it: a Chat is refused, not unauthenticated.
+    assert.equal((await context.POST(prepare(payload))).status, 403);
+    process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "false";
     assert.equal((await context.POST(prepare(payload))).status, 401);
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: MEMORY_INJECTION_FLAG_KEY } });
