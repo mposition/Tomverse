@@ -209,6 +209,34 @@ test("the model's own text cannot carry the fold markers, even split across delt
   assert.equal(joined, "a  b");
 });
 
+// Review r-20261127-082100-427572: the count is the reader's. A provider that
+// produces ahead of the reader -- the SDK reading ahead, or a slow client --
+// has started every run it produced before the ceiling is seen, so the ceiling
+// bounds the answer and the abort, not the bill. Pinned so no comment or
+// policy line claims otherwise (docs/policy/chat-attachment-formats.md 2.3.1).
+test("the ceiling counts what the reader sees, not what the provider ran", async () => {
+  let started = 0;
+  async function* provider() {
+    for (let i = 1; i <= 6; i += 1) {
+      started += 1;
+      yield call(`c${i}`, `print(${i})`);
+      yield result(`c${i}`, `${i}\n`);
+    }
+  }
+  // Everything produced before the reader takes its first part.
+  const produced = [];
+  for await (const part of provider()) produced.push(part);
+  let ceilings = 0;
+  const text = await read(createCodeExecutionTextStream(parts(...produced), {
+    maxCalls: CODE_EXECUTION_MAX_CALLS_PER_TURN, onCeiling: () => { ceilings += 1; },
+  }));
+  assert.equal(ceilings, 1);
+  assert.equal(text.split(CODE_EXECUTION_CODE_META).length - 1, CODE_EXECUTION_MAX_CALLS_PER_TURN);
+  assert.equal(started, 6);
+  // The request plus six runs is more passes than the reservation holds.
+  assert.ok(1 + started > CODE_EXECUTION_RESERVED_PASSES);
+});
+
 test("the call past the ceiling ends the stream and aborts the request", async () => {
   let ceilings = 0;
   const items = [{ type: "text-delta", id: "t", text: "Working." }];

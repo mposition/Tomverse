@@ -112,3 +112,46 @@ export const writeAttachmentTextCache = async (
           "createdAt" = CURRENT_TIMESTAMP`;
   return true;
 };
+
+/**
+ * A row of this version is a claim, not text: one request is producing the
+ * attachment's text right now and the others wait for it
+ * (`transcribeAudioAttachmentOnce` in lib/chatAudioAttachment.ts). Below every
+ * cache version, so `readAttachmentTextCache` never reads it, the next write
+ * replaces it, and deleting the attachment deletes it.
+ */
+export const ATTACHMENT_TEXT_CLAIM_VERSION = 0;
+
+/**
+ * Takes the claim to produce this attachment's text, in one statement, so two
+ * requests cannot both take it. Answers false when the text is already stored
+ * or another request's claim is younger than `staleSeconds`; a claim older
+ * than that belonged to a request that died, and is taken over.
+ */
+export const claimAttachmentTextCache = async (
+  attachmentId: string,
+  token: string,
+  staleSeconds: number
+): Promise<boolean> => {
+  const claim = JSON.stringify({ claim: token });
+  const rows = await prisma.$queryRaw<Array<{ attachmentId: string }>>`
+    INSERT INTO "MessageAttachmentTextCache" ("attachmentId", "version", "entries")
+    VALUES (${attachmentId}, ${ATTACHMENT_TEXT_CLAIM_VERSION}, ${claim}::jsonb)
+    ON CONFLICT ("attachmentId") DO UPDATE
+      SET "version" = EXCLUDED."version",
+          "entries" = EXCLUDED."entries",
+          "createdAt" = CURRENT_TIMESTAMP
+      WHERE "MessageAttachmentTextCache"."version" NOT IN (${ATTACHMENT_TEXT_CLAIM_VERSION}, ${ATTACHMENT_TEXT_CACHE_VERSION})
+         OR ("MessageAttachmentTextCache"."version" = ${ATTACHMENT_TEXT_CLAIM_VERSION}
+             AND "MessageAttachmentTextCache"."createdAt" < CURRENT_TIMESTAMP - ${Math.max(1, Math.ceil(staleSeconds))}::int * INTERVAL '1 second')
+    RETURNING "attachmentId"`;
+  return rows.length > 0;
+};
+
+/** Gives back this request's claim; text written over it is left alone. */
+export const releaseAttachmentTextClaim = (attachmentId: string, token: string) =>
+  prisma.$executeRaw`
+    DELETE FROM "MessageAttachmentTextCache"
+    WHERE "attachmentId" = ${attachmentId}
+      AND "version" = ${ATTACHMENT_TEXT_CLAIM_VERSION}
+      AND "entries"->>'claim' = ${token}`;

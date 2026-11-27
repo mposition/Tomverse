@@ -26,7 +26,12 @@ import {
   mp3DurationSeconds,
   wavPcmDurationSeconds,
 } from "../lib/chatAudioAttachmentCore.ts";
-import { transcribeAudioAttachment, chatAudioAttachmentEnabled } from "../lib/chatAudioAttachment.ts";
+import {
+  AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS,
+  chatAudioAttachmentEnabled,
+  transcribeAudioAttachment,
+  transcribeAudioAttachmentOnce,
+} from "../lib/chatAudioAttachment.ts";
 import {
   ChatAttachmentValidationError,
   validateChatAttachmentUpload,
@@ -407,4 +412,76 @@ test("an exhausted seconds budget is its own refusal and never reaches the provi
     (error) => error.code === "AUDIO_TRANSCRIPTION_LIMIT_REACHED" && error.status === 429 && error.retryAfter === 3600
   );
   assert.deepEqual(events, []);
+});
+
+// -- One paid transcription per recording -------------------------------------
+
+// Review r-20261127-082100-427572: several models answering one message are
+// several requests. The store below claims the way the SQL does -- one
+// statement, so the second claimant loses -- and the real database version of
+// this is tests/integration/chat-audio-transcript-claim.db.test.ts.
+const memoryStore = (overrides = {}) => {
+  const rows = new Map();
+  let clock = 0;
+  return {
+    rows,
+    read: async (id) => (rows.get(id)?.entries ?? null),
+    claim: async (id, token) => {
+      if (rows.has(id)) return false;
+      rows.set(id, { claim: token });
+      return true;
+    },
+    write: async (id, entries) => { rows.set(id, { entries }); },
+    release: async (id, token) => { if (rows.get(id)?.claim === token) rows.delete(id); },
+    wait: async (ms) => { clock += ms; await new Promise((resolve) => setImmediate(resolve)); },
+    now: () => clock,
+    ...overrides,
+  };
+};
+const slowTranscription = (events, outcome = { ok: true, text: "Minutes.", usage: { kind: "duration", seconds: 3 } }) => {
+  const deps = fakeDeps(outcome, events);
+  const transcribe = deps.transcribe;
+  deps.transcribe = async (request) => {
+    // Long enough for the other request to arrive and find the claim taken.
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    return transcribe(request);
+  };
+  return deps;
+};
+const once = (store, transcription) =>
+  quietly(() => transcribeAudioAttachmentOnce({ ...attachment, attachmentId: "att-1" }, { store, transcription }));
+
+test("two requests for one recording pay for one transcription", async () => {
+  const store = memoryStore();
+  const events = [];
+  const transcription = slowTranscription(events);
+  const [first, second] = await Promise.all([once(store, transcription), once(store, transcription)]);
+  assert.deepEqual(first, [{ kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes." }]);
+  assert.deepEqual(second, first);
+  assert.equal(events.filter(([event]) => event === "transcribe").length, 1);
+  assert.equal(events.filter(([event]) => event === "reserve").length, 1);
+  assert.deepEqual(store.rows.get("att-1"), { entries: first });
+});
+
+test("a failed transcription gives its claim back and the next request tries in turn", async () => {
+  const store = memoryStore();
+  const events = [];
+  const failing = slowTranscription(events, { ok: false, code: "provider_unavailable", status: 503, disposition: "refused" });
+  await assert.rejects(once(store, failing), (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+  assert.equal(store.rows.has("att-1"), false);
+  const retried = await once(store, slowTranscription(events));
+  assert.deepEqual(retried, [{ kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes." }]);
+});
+
+test("a claim that never resolves is waited out, not waited on forever", async () => {
+  const events = [];
+  // Taken, with nothing ever written: a holder that died, as the store sees it.
+  const store = memoryStore({ claim: async () => false });
+  const entries = await once(store, slowTranscription(events));
+  assert.deepEqual(entries, [{ kind: AUDIO_TRANSCRIPT_KIND, text: "Minutes." }]);
+  assert.ok(store.now() > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000);
+  assert.equal(events.filter(([event]) => event === "transcribe").length, 1);
+  // A store that cannot claim at all is no reason to fail the turn.
+  const broken = memoryStore({ claim: async () => { throw new Error("database down"); } });
+  assert.equal((await once(broken, slowTranscription([]))).length, 1);
 });

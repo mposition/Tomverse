@@ -143,34 +143,46 @@ import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실�
   없고(Perplexity 검색과 같은 범주), 그 도구가 더하는 token은 다른 입력처럼 요청 전에
   예약한다. 2026-11-27 공식 가격 문서 확인:
   - Google: "추가 요금 없음". 생성 코드·실행 결과는 output token이고, 실행을 쓰면
-    "원래 프롬프트, 생성 코드, 실행 결과"가 중간 token으로 input 과금된다. 그래서
-    가산은 없지만 **청구될 수 있는 실행마다 프롬프트를 한 번 더 읽는 provider pass로
-    예약한다**(독립 검토 r-20261127-073816-5a1bf4). route가 예산을 만들기 전에 도구를
-    정하고, `toolInputPasses`와 `longContextToolInputPasses`에 4 pass
-    (`CODE_EXECUTION_RESERVED_PASSES`: 요청 1 + 청구될 수 있는 실행 3)를 넣는다. 예약
-    입력은 프롬프트 × 4 + 출력 상한 × 3이다(다단계 반복과 같은 식, `providerCallPasses`
-    4가 예약에 저장된다). 한 pass는 프롬프트와 그때까지의 출력이고, 코드와 결과는 Gemini가
-    output token으로 세므로 요청의 출력 상한 안이다(공급자 문서는 결과 크기 상한을 따로
-    적지 않는다). 128k 이하 turn은 크레딧이 고정 가중치 그대로이고 provider 예산 예약만
-    커진다(Gemini 3.6 Flash, 입력 2,000 token: 64,440 → 368,352 µUSD). 128k를 넘는 turn은
-    실제 비용 크레딧이라 크레딧 예약도 커지고(입력 200,000 token: 317 → 795 크레딧),
-    정산은 예약을 넘지 않는다. SDK가 `toolUsePromptTokenCount`를 input token에 더하므로
-    정산은 공급자가 보고한 사용량이다.
+    "원래 프롬프트, 생성 코드, 실행 결과"가 중간 token으로 input 과금된다. 가산은 없고,
+    실행마다 프롬프트를 한 번 더 읽는 것으로 보고 provider pass로 예약한다(독립 검토
+    r-20261127-073816-5a1bf4). route가 예산 전에 도구를 정하고 `toolInputPasses`와
+    `longContextToolInputPasses`에 4 pass(`CODE_EXECUTION_RESERVED_PASSES`)를 넣어, 예약
+    입력은 프롬프트 × 4 + 출력 상한 × 3이 된다(`providerCallPasses` 4가 예약에 저장된다).
+    128k 이하 turn은 크레딧이 고정 가중치 그대로이고 provider 예산 예약만 커진다(Gemini
+    3.6 Flash, 입력 2,000 token: 64,440 → 368,352 µUSD). 128k를 넘는 turn은 크레딧 예약도
+    커진다(입력 200,000 token: 317 → 795 크레딧). 정산은 공급자가 보고한 사용량이다(SDK가
+    `toolUsePromptTokenCount`를 input token에 더한다). 이 예약은 최악값이 아니다(다음 항목).
   - OpenAI code interpreter: 1 GB 컨테이너 20분 세션당 US$0.03(분 단위, 최소 5분).
   - Anthropic: 컨테이너 시간당 US$0.05(최소 5분). web_search_20260209 이후 도구와
     함께면 무료지만 이 앱은 web_search_20250305를 보낸다.
   OpenAI·Anthropic은 토큰 밖 과금이라 가산 크레딧이 필요한데 그 값이 정해지지
   않았으므로 `surcharge_unapproved`로 거절한다. 값이 정해지면 가산·예약·정산 연결이
   웹 검색과 같은 모양으로 필요하다.
+- **코드 실행 turn은 예약보다 높게 정산될 수 있다 — 운영자 결정 대기**(독립 검토
+  r-20261127-082100-427572). 공식 문서(https://ai.google.dev/gemini-api/docs/code-execution,
+  지금은 https://aistudio.google.com/docs/code-execution 으로 옮겨짐, API reference
+  https://aistudio.google.com/api-reference/caching, 2026-11-27 확인)는 한 요청의 청구를
+  묶는 상한을 주지 않는다.
+  - 횟수: 문서가 적는 수는 오류 뒤 재생성 "최대 5회"뿐이고 전체 실행 횟수 상한은 없다.
+    `codeExecution` 도구에는 field가 없어 요청으로 실행 횟수를 묶을 수 없다.
+  - 크기: 실행 결과(`CodeExecutionResult.output`)의 크기 상한이 없고, `maxOutputTokens`가
+    코드·결과·중간 token을 묶는지 말하지 않는다. 실행마다 원래 프롬프트가 다시 과금되는지도
+    명시하지 않는다(위 예약은 그렇다고 가정한다).
+  - 세는 위치: 아래 상한은 stream을 읽는 쪽이 `tool-call`을 볼 때 센다. 공급자는 읽는 쪽을
+    기다리지 않으므로 SDK가 미리 읽거나 읽기가 느리면 세 번째를 보기 전에 더 많은 실행을
+    시작했을 수 있다(`tests/chatCodeExecution.test.mjs`가 이 사실을 고정한다).
+
+  128k 이하 turn은 크레딧이 고정이라 사용자 청구는 그대로이고, 초과분은 정산이 실제
+  사용량으로 provider 예산에 기록한다. 128k를 넘는 turn은 크레딧 정산이 예약에서 멈추므로
+  초과 원가를 회사가 부담한다. **스위치는 기본 꺼짐을 유지하고, 운영자가 다음 중 하나를
+  정하기 전에는 켜지 않는다:** (1) 이 기능에서 코드 실행을 뺀다. (2) 상한 없는 초과를
+  받아들이고 사후 정산과 별도 상한(예: 코드 실행 turn 전용 provider 예산)으로 막는다.
 - **상한**: 답 하나에 보이는 실행 2회. Gemini에는 실행 횟수를 묶는 요청 parameter가
-  없어서 강제할 수 있는 유일한 정지는 이 프로세스가 stream을 끊는 것이다. 실행은
-  `tool-call`이 도착할 때 보이고 그때는 공급자가 이미 시작한 뒤이므로, 세 번째
-  호출이 attempt를 abort하고 그 세 번째는 실행·청구됐을 수 있다 — 청구될 수 있는
-  실행은 답 하나에 최대 3회, 한 번에 30초(Gemini 자체 상한). 이 수는 예약에서 나온다:
-  예약은 최대 4 pass(`createChatBudget`의 clamp, 저장된 `providerCallPasses`의 검증
-  범위)이고 첫 pass가 요청 자체이므로 실행은 3회까지 담긴다. 처음의 5회를 2회로 줄인
-  이유다. abort는 요청 연결을 닫는 것까지이고, 닫힌 뒤 공급자가 생성을 이어 가 청구하는지는
-  공급자 문서가 말하지 않는다(사용자 취소와 같은 가정).
+  없어서 이 프로세스가 할 수 있는 정지는 stream을 끊는 것뿐이다. 읽는 쪽이 세 번째
+  `tool-call`을 보면 attempt를 abort한다. 한 번에 30초(Gemini 자체 상한). 이것은 답에
+  보이는 실행 수와 계속 실행하는 turn을 끊는 시점의 상한이고, 청구 상한이 아니다(위 항목).
+  공급자가 읽는 쪽에서 멈춘다면 4 pass 안에 드는 수라서 5회를 2회로 줄였다. abort는 요청
+  연결을 닫는 것까지이고, 닫힌 뒤 공급자가 생성을 이어 가 청구하는지도 문서가 말하지 않는다.
 - **오류**: 이 stream은 ai@7의 `textStream`처럼 `text-delta` 외의 부분을 버린다.
   공급자 오류는 그대로 `streamText`의 `onError`(`observeStreamError`)가 받는다.
 - **보이는 모양**: 실행한 코드와 출력이 답 안의 code fence로 들어가고, 웹 composer는
@@ -236,6 +248,12 @@ import 하지 않는다.** 첨부 파일은 실행되지 않는다. 코드 실�
   읽는다(다른 형식은 이전 메시지일 때만 캐시를 쓴다). 이때도 녹음 파일은 평소처럼
   읽으므로 handle·요청 총 크기·사라진 파일의 410은 캐시가 없을 때와 같고, 캐시는
   유료 전사만 대신한다. 스위치가 꺼져 있으면 이번 메시지의 캐시도 읽지 않는다.
+  **같은 녹음을 여러 요청이 동시에 읽으면 한 요청만 전사한다**(독립 검토
+  r-20261127-082100-427572, 여러 모델이 같은 메시지에 답할 때). 같은 테이블에 claim 행
+  (`version` 0, 캐시로는 읽히지 않는다)을 한 문장으로 먼저 잡은 요청이 초 예산을 예약하고
+  전사해 저장하며, 나머지는 0.5초마다 다시 보고 저장된 전사문을 읽는다. claim은 연장되지
+  않고 150초(전사 timeout 120초 + 30초)가 지나면 다음 요청이 넘겨받는다. 전사가 실패하면
+  claim을 돌려주고 기다리던 요청이 하나씩 차례로 다시 시도한다. migration은 필요 없다.
   행이 아직 없으면 다음 turn이 한 번 더 전사하고 저장한다. 캐시는 첨부 행에서
   cascade로 지워지므로 대화·계정 삭제 규칙이 그대로 적용된다
   (`docs/policy/user-attachment-persistence.md §7.1`). 원본 녹음도 다른 첨부와 같은

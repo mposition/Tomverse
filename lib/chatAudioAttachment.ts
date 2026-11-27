@@ -1,5 +1,14 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
+import {
+    claimAttachmentTextCache,
+    readAttachmentTextCache,
+    releaseAttachmentTextClaim,
+    writeAttachmentTextCache,
+    type CachedAttachmentText,
+} from "@/lib/attachmentTextCache";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import {
     audioTranscriptEntry,
@@ -71,7 +80,7 @@ const report = (fields: Record<string, string | number | null | undefined>) => {
  * `durationSeconds` is the length `inspectAudioAttachment` read from the bytes;
  * the caller has already refused a file without one.
  */
-type AudioTranscriptionDeps = {
+export type AudioTranscriptionDeps = {
     reserve: typeof reserveVoiceBudgets;
     settle: typeof settleVoiceBudgets;
     release: typeof releaseVoiceBudgets;
@@ -195,5 +204,109 @@ export const transcribeAudioAttachment = async (
         // Reached unsettled only when something threw before the provider
         // answered, so nothing was billed.
         if (!settled) await release(reservation).catch(() => undefined);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// One paid transcription per recording, however many requests ask at once
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a claim stands before another request may take it over: the
+ * transcription's own timeout, plus room to settle and store its result.
+ */
+export const AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS =
+    Math.ceil(CHAT_AUDIO_TRANSCRIPTION_TIMEOUT_MS / 1000) + 30;
+/** How often a waiting request looks again. */
+export const AUDIO_TRANSCRIPT_CLAIM_POLL_MS = 500;
+
+export type AudioTranscriptStore = {
+    read: (attachmentId: string) => Promise<CachedAttachmentText[] | null>;
+    claim: (attachmentId: string, token: string, staleSeconds: number) => Promise<boolean>;
+    write: (attachmentId: string, entries: readonly CachedAttachmentText[]) => Promise<unknown>;
+    release: (attachmentId: string, token: string) => Promise<unknown>;
+    wait: (ms: number, signal?: AbortSignal) => Promise<void>;
+    now: () => number;
+};
+
+const pause = (ms: number, signal?: AbortSignal) =>
+    new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) return reject(signal.reason);
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        const onAbort = () => {
+            clearTimeout(timer);
+            reject(signal?.reason);
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+    });
+
+const defaultStore = (): AudioTranscriptStore => ({
+    read: readAttachmentTextCache,
+    claim: claimAttachmentTextCache,
+    write: writeAttachmentTextCache,
+    release: releaseAttachmentTextClaim,
+    wait: pause,
+    now: Date.now,
+});
+
+/**
+ * The transcript of a bound attachment, paid for by one request only.
+ *
+ * Review r-20261127-082100-427572: several models answering the same message
+ * are several requests, and each used to miss the cache, transcribe and book
+ * the seconds again. Now the first to claim the attachment
+ * (`claimAttachmentTextCache`, one statement) transcribes and stores the
+ * transcript; the others wait for it and read it. A claim is never extended,
+ * so a request that died stops blocking the rest once it is
+ * `AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS` old, and the next one takes over.
+ *
+ * A failed transcription gives its claim back and the next waiter tries in
+ * its turn -- one at a time, never side by side. A wait that outlives a stale
+ * claim (a store that keeps answering "taken" without a transcript to read)
+ * transcribes without the claim, the behaviour before it existed, rather than
+ * failing a turn it could answer.
+ */
+export const transcribeAudioAttachmentOnce = async (
+    input: Parameters<typeof transcribeAudioAttachment>[0] & {
+        attachmentId: string;
+        signal?: AbortSignal;
+    },
+    deps: { store?: AudioTranscriptStore; transcription?: AudioTranscriptionDeps } = {}
+): Promise<CachedAttachmentText[]> => {
+    const store = deps.store ?? defaultStore();
+    const { attachmentId, signal, ...transcription } = input;
+    const token = randomUUID();
+    const giveUpAt =
+        store.now() + AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 + 2 * AUDIO_TRANSCRIPT_CLAIM_POLL_MS;
+    for (;;) {
+        signal?.throwIfAborted();
+        const cached = await store.read(attachmentId);
+        if (cached) return cached;
+        let claimed: boolean;
+        try {
+            claimed = await store.claim(attachmentId, token, AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS);
+        } catch {
+            // The claim is an economy, not a permission: without it the
+            // transcription is still booked against the seconds budget.
+            report({ outcome: "claim_unavailable", traceId: input.traceId });
+            return [await transcribeAudioAttachment(transcription, deps.transcription)];
+        }
+        if (claimed) {
+            try {
+                const entry = await transcribeAudioAttachment(transcription, deps.transcription);
+                await store.write(attachmentId, [entry]).catch(() => undefined);
+                return [entry];
+            } finally {
+                await store.release(attachmentId, token).catch(() => undefined);
+            }
+        }
+        if (store.now() > giveUpAt) {
+            report({ outcome: "claim_wait_exhausted", traceId: input.traceId });
+            return [await transcribeAudioAttachment(transcription, deps.transcription)];
+        }
+        await store.wait(AUDIO_TRANSCRIPT_CLAIM_POLL_MS, signal);
     }
 };

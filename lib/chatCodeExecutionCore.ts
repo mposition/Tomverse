@@ -30,6 +30,23 @@
  *   is sent (`CODE_EXECUTION_RESERVED_PASSES`). Settlement prices the usage the
  *   provider reports; the AI SDK counts `toolUsePromptTokenCount` into input
  *   tokens.
+ *
+ * ## That reservation is a hold, not a bound -- operator decision pending
+ *
+ * Review r-20261127-082100-427572. Nothing Google documents bounds what one
+ * request can bill (https://ai.google.dev/gemini-api/docs/code-execution, now
+ * served at https://aistudio.google.com/docs/code-execution, read 2026-11-27):
+ * the only count it states is that after an error the model "may decide to
+ * regenerate the code output. This can happen up to 5 times" -- a limit on
+ * retries, not on runs; the `codeExecution` tool takes no fields, so no request
+ * parameter caps runs; no size limit is given for a result; and nothing says
+ * whether `maxOutputTokens` bounds the code, the results or the intermediate
+ * tokens. The ceiling below counts runs as the reader of the stream sees them,
+ * which is after the provider produced them and possibly after it started
+ * more. So a turn can settle above what it reserved. The switch stays off by
+ * default and is not to be turned on until the operator decides between
+ * dropping the tool and accepting that excess behind a separate limit
+ * (docs/policy/chat-attachment-formats.md 2.3.1).
  * - OpenAI code interpreter: US$0.03 per 20-minute session of a 1 GB container,
  *   billed by the minute with a 5-minute minimum.
  * - Anthropic code execution: US$0.05 per container-hour, 5-minute minimum,
@@ -55,30 +72,31 @@ export const CODE_EXECUTION_TOOL_NAME = "code_execution";
 /**
  * Runs one answer may show before it is stopped.
  *
- * Gemini takes no request parameter that caps its runs, so the only
- * enforceable stop is this process cutting the stream. A run is seen when its
- * `tool-call` part arrives, which is after the provider has started it -- so
- * the call past the ceiling is the one that aborts the attempt, and that run
- * may already have executed and been billed. Billable runs are this number
- * plus one, each of at most 30 seconds (Gemini's own limit).
+ * Gemini takes no request parameter that caps its runs, so the only stop this
+ * process has is cutting the stream. A run is counted when its `tool-call`
+ * part reaches the reader of the stream, which is after the provider produced
+ * it -- and the provider does not wait for the reader: a slow reader, or the
+ * SDK reading ahead, lets it start further runs before this count sees the
+ * third. Each run is at most 30 seconds (Gemini's own limit).
  *
- * Sized by the reservation rather than chosen on its own: each billable run is
- * a provider pass (the prompt billed again), the budget holds at most four
- * passes (`createChatBudget` clamps `toolInputPasses` to 4 and the stored
- * `providerCallPasses` is validated to that range), and the first pass is the
- * request itself. Three billable runs, so two shown.
+ * What this bounds is what one answer shows and how soon a turn that keeps
+ * running is cut off, not what the provider bills (see the note above). Two,
+ * so a turn that would be held to four passes if the provider stopped where the
+ * reader does is aborted at the third run seen.
  */
 export const CODE_EXECUTION_MAX_CALLS_PER_TURN = 2;
 
 /**
  * Provider passes a code-execution turn reserves: the request itself, then one
- * per run that can be billed -- the runs shown and the one that aborts.
+ * per run the reader can see before it aborts -- the runs shown and the one
+ * that aborts.
  *
- * Each pass is bounded the way the budget's multi-pass reservation already
- * bounds an application tool loop's call: the prompt, plus everything the turn
- * has output so far -- which Gemini counts as output tokens, code and results
- * included, and which the request's output cap bounds. A test pins that
- * `createChatBudget` reserves this many passes instead of clamping it down.
+ * Each pass is sized the way the budget's multi-pass reservation sizes an
+ * application tool loop's call: the prompt, plus the output cap. It is the
+ * largest hold the existing mechanism takes (`createChatBudget` clamps to 4),
+ * and a test pins that it is not clamped down. It is not the worst case: the
+ * provider may bill more runs than the reader saw, and results of a size no
+ * document bounds.
  */
 export const CODE_EXECUTION_RESERVED_PASSES = CODE_EXECUTION_MAX_CALLS_PER_TURN + 2;
 

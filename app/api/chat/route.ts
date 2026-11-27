@@ -38,7 +38,11 @@ import {
     resolveChatAttachmentFormat,
     type ChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
-import { chatAudioAttachmentEnabled, transcribeAudioAttachment } from "@/lib/chatAudioAttachment";
+import {
+    chatAudioAttachmentEnabled,
+    transcribeAudioAttachment,
+    transcribeAudioAttachmentOnce,
+} from "@/lib/chatAudioAttachment";
 import {
     codeExecutionReservedPasses,
     createCodeExecutionTextStream,
@@ -4274,11 +4278,14 @@ async function handleChatPost(
                 name,
                 buffer,
                 fromArchive,
+                transcriptAttachmentId = null,
             }: {
                 format: ChatAttachmentFormat;
                 name: string;
                 buffer: Buffer;
                 fromArchive: boolean;
+                /** A bound recording's row: its transcript is paid for once. */
+                transcriptAttachmentId?: string | null;
             }): Promise<"ok" | "no-text" | "unreadable"> => {
                 if (format.category === "image") {
                     if (!modelSupportsImageInput(modelConfig)) {
@@ -4423,15 +4430,24 @@ async function handleChatPost(
                             inspection.code, "The attached recording cannot be transcribed.");
                     }
                     try {
-                        const entry = await transcribeAudioAttachment({
+                        const transcription = {
                             bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
                             mediaType: format.mediaType,
                             extension: format.extensions[0],
                             durationSeconds: inspection.durationSeconds,
                             subjectKey: access.subjectKey,
                             traceId,
-                        });
-                        addExtractedText(entry.kind, entry.text);
+                        };
+                        // A bound recording is transcribed by one request only;
+                        // another model answering the same message waits for it.
+                        const entries = transcriptAttachmentId
+                            ? await transcribeAudioAttachmentOnce({
+                                  ...transcription,
+                                  attachmentId: transcriptAttachmentId,
+                                  signal: req.signal,
+                              })
+                            : [await transcribeAudioAttachment(transcription)];
+                        for (const entry of entries) addExtractedText(entry.kind, entry.text);
                     } catch (error) {
                         if (!isLatestMessage && error instanceof ChatAccessError) return omitPastAttachment();
                         throw error;
@@ -5234,6 +5250,7 @@ async function handleChatPost(
                             name: attachmentName,
                             buffer: attachmentBuffer,
                             fromArchive: false,
+                            transcriptAttachmentId: textCacheEligible ? resolved!.attachmentId! : null,
                         })
                     );
                     if (textCacheEligible) {
