@@ -8,7 +8,7 @@ import { SEARCH_SCRIPT } from "../src/remote-scripts.js";
 import { RemoteError, remoteShellCommand } from "../src/remote-target.js";
 import { planRemoteCommand, RemoteWorkspace } from "../src/remote-workspace.js";
 import { PathError } from "../src/workspace.js";
-import { dashShim, HAS_SH, makeFakeRemote, realTool, remotePath, shimFolder } from "./remote-fixture.js";
+import { dashShim, FAKE_SSH, HAS_SH, makeFakeRemote, realTool, remotePath, shimFolder, tempFolder } from "./remote-fixture.js";
 
 const skip = !HAS_SH && "needs a POSIX sh (Git for Windows has one)";
 
@@ -762,4 +762,31 @@ test("a login-shell command is ended on the remote machine when the task stops, 
 test("a shell the script does not know is refused before anything starts, as a machine without it is", { skip }, async () => {
     const { workspace } = await loginShell("zsh");
     await assert.rejects(runIn(workspace, { command: "echo hi" }), remoteError("unsupported-remote"));
+});
+
+test("a login profile that changes folder cannot move an approved command out of the project folder", { skip }, async () => {
+  const remote = await connected();
+  // A home folder with a profile that goes somewhere else, where a file of the same name waits.
+  const home = tempFolder("home");
+  const elsewhere = tempFolder("elsewhere");
+  writeFileSync(join(elsewhere, "victim.txt"), "must stay\n");
+  writeFileSync(join(home, ".bash_profile"), `cd "${remotePath(elsewhere)}"\nexport TV_PROFILE_READ=yes\n`);
+  writeFileSync(join(remote.root, "victim.txt"), "project copy\n");
+  const runner = createSshRunner({ file: process.execPath, prefixArgs: [FAKE_SSH], env: { HOME: remotePath(home) } });
+  const workspace = new RemoteWorkspace({ ...remote.target, shell: "bash-login" }, runner);
+  await workspace.connect();
+  // Without the fix the profile's cd decides where this runs: it would delete the other folder's file.
+  const shell = await runIn(workspace, { command: "pwd; echo $TV_PROFILE_READ; rm victim.txt" });
+  assert.equal(shell.stdout.trim(), `${workspace.root}\nyes`, "the profile ran (it set the variable) and the command still ran in the project folder");
+  assert.equal(existsSync(join(elsewhere, "victim.txt")), true, "the file outside the project was not touched");
+  assert.equal(existsSync(join(remote.root, "victim.txt")), false, "the project's own file was the one removed");
+  writeFileSync(join(remote.root, "victim.txt"), "project copy\n");
+  const argv = await runIn(workspace, { argv: ["sh", "-c", "pwd; rm victim.txt"] });
+  assert.equal(argv.stdout.trim(), workspace.root);
+  assert.equal(existsSync(join(elsewhere, "victim.txt")), true);
+  assert.equal(existsSync(join(remote.root, "victim.txt")), false);
+  // A profile that removes the project folder's way back (it cannot be entered again) runs nothing.
+  writeFileSync(join(home, ".bash_profile"), `cd "${remotePath(elsewhere)}"\nexport PATH=/nonexistent\n`);
+  const kept = await runIn(workspace, { command: "echo ran" });
+  assert.equal(kept.stdout.includes("ran"), true, "a profile that only changes PATH and folder still runs the command, in the project folder");
 });

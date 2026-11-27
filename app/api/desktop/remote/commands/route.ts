@@ -2,7 +2,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { desktopRemoteCommandRequest, desktopRemoteCommandSubmission, desktopRemoteNeedsPasskey } from "@/lib/desktopRemoteControlContract";
 import { DesktopRemoteRefused, precheckDesktopRemoteCommand, recordDesktopRemoteCommand } from "@/lib/desktopRemoteControlStore";
 import { desktopRemoteMayAct, desktopRemoteWebSession, remoteJson } from "@/lib/desktopRemoteControlWeb";
-import { commandBinding, confirmPasskey, countPasskeys, PasskeyRefused, passkeyRelyingParty } from "@/lib/desktopRemotePasskeyStore";
+import { commandBinding, countPasskeys, PasskeyRefused, passkeyRelyingParty, recordPasskeyUse, verifyPasskey } from "@/lib/desktopRemotePasskeyStore";
 import { desktopRemotePasskeyEnabled } from "@/lib/nativeBearerGate";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const submission = await readLimitedJson(request, 8 * 1024, desktopRemoteCommandSubmission);
     const passkey = submission.kind === "stop" ? undefined : submission.passkey;
     const command = desktopRemoteCommandRequest.parse(Object.fromEntries(Object.entries(submission).filter(([name]) => name !== "passkey")));
-    let passkeyId: string | undefined;
+    let passkeyUse: Parameters<typeof recordDesktopRemoteCommand>[0]["passkeyUse"];
     if (desktopRemotePasskeyEnabled() && desktopRemoteNeedsPasskey(command) && (await countPasskeys(auth.session.user.id)) > 0) {
       if (!passkey) return remoteJson(428, { ok: false, code: "PASSKEY_REQUIRED" });
       // A request that changed or was answered meanwhile is said so before the challenge is used up.
@@ -32,9 +32,12 @@ export async function POST(request: Request) {
       if (stale) return remoteJson(stale === "DEVICE_NOT_FOUND" ? 404 : 409, { ok: false, code: stale });
       const rp = passkeyRelyingParty(request);
       if (!rp) return remoteJson(403, { ok: false, code: "PASSKEY_INVALID" });
-      passkeyId = (await confirmPasskey({ userId: auth.session.user.id, rp, purpose: "command", bindingHash: commandBinding(command), assertion: passkey })).passkeyId;
+      // The assertion is checked here; the passkey's counter and last-use time move in the transaction that records the answer, so an
+      // answer that lost a race leaves no passkey use behind.
+      const verified = await verifyPasskey({ userId: auth.session.user.id, rp, purpose: "command", bindingHash: commandBinding(command), assertion: passkey });
+      passkeyUse = { passkeyId: verified.passkeyId, apply: (tx) => recordPasskeyUse(tx, verified) };
     }
-    const { id } = await recordDesktopRemoteCommand({ session: auth.session, request, command, passkeyId });
+    const { id } = await recordDesktopRemoteCommand({ session: auth.session, request, command, passkeyUse });
     return remoteJson(201, { ok: true, id });
   } catch (error) {
     if (error instanceof PasskeyRefused) return remoteJson(403, { ok: false, code: "PASSKEY_INVALID" });

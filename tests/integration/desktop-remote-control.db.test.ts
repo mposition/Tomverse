@@ -558,7 +558,7 @@ test("passkeys: another is added only with an existing one, removal needs one, a
 
   // Another account sees none of them and cannot remove them.
   assert.deepEqual((await (await listAs(webSession(stranger.id))).json()).passkey.passkeys, []);
-  assert.equal((await call({ action: "options-remove", passkeyId: mine[0]!.id }, webSession(stranger.id))).status, 409);
+  assert.equal((await call({ action: "options-remove", passkeyId: mine[0]!.id }, webSession(stranger.id))).status, 404);
 
   // Removal needs an assertion made for that removal.
   const options = await call({ action: "options-remove", passkeyId: mine[1]!.id });
@@ -645,4 +645,69 @@ test("passkeys: two first registrations that both saw no passkey cannot both go 
   }))).status, 201);
   const answered = await call({ action: "options-command", command: answer(pc.deviceId) });
   assert.deepEqual([answered.status, answered.body.code], [409, "ALREADY_ANSWERED"]);
+});
+
+test("passkeys: no challenge for a passkey that is not yours, and an answer that lost leaves no use of the passkey behind", async () => {
+  process.env.TOMVERSE_DESKTOP_REMOTE_PASSKEY_ENABLED = "true";
+  process.env.NEXTAUTH_URL = SITE;
+  const passkeyRoute = (await import(mod("app/api/desktop/remote/passkey/route.ts"))) as Route;
+  const user = await createUser("pk-lost");
+  const other = await createUser("pk-other");
+  const pc = await desktopFor(user.id);
+  const session = webSession(user.id);
+  const call = async (body: object, as: Session = session) => {
+    currentSession = as;
+    const response = await passkeyRoute.POST!(new Request(`${SITE}/api/desktop/remote/passkey`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Origin: SITE } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  const send = async (body: object) => {
+    currentSession = session;
+    const response = await commands.POST(new Request(`${SITE}/api/desktop/remote/commands`, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Origin: SITE } }));
+    return { status: response.status, body: await response.json() as Json };
+  };
+  const phone = softPasskey(SITE);
+  const stranger = softPasskey(SITE);
+  const first = await call({ action: "options-register" });
+  await call({ action: "register", challengeId: first.body.challengeId, label: "Phone", ...phone.create(first.body.publicKey) });
+  const theirs = await call({ action: "options-register" }, webSession(other.id));
+  await call({ action: "register", challengeId: theirs.body.challengeId, label: "Theirs", ...stranger.create(theirs.body.publicKey) }, webSession(other.id));
+  const strangerKey = await prisma.desktopRemotePasskey.findFirstOrThrow({ where: { userId: other.id } });
+  const mine = await prisma.desktopRemotePasskey.findFirstOrThrow({ where: { userId: user.id } });
+
+  // Asking for a removal challenge of someone else's passkey, or of one that does not exist, issues nothing.
+  const before = await prisma.desktopRemotePasskeyChallenge.count({ where: { userId: user.id } });
+  assert.equal((await call({ action: "options-remove", passkeyId: strangerKey.id })).status, 404);
+  assert.equal((await call({ action: "options-remove", passkeyId: randomUUID() })).status, 404);
+  assert.equal(await prisma.desktopRemotePasskeyChallenge.count({ where: { userId: user.id } }), before);
+
+  // An assertion made for an answer that is then given another way is refused, and the passkey shows no use.
+  const approval = randomUUID();
+  const withApproval = { ...snapshot(), approval: { ...snapshot().approval!, id: approval } };
+  await syncAs(pc.token, { snapshot: withApproval, acks: [] });
+  const command = answer(pc.deviceId, { approvalId: approval });
+  const asked = await call({ action: "options-command", command });
+  const assertion = { challengeId: asked.body.challengeId, ...phone.get(asked.body.publicKey) };
+  assert.equal((await send(answer(pc.deviceId, { approvalId: approval, decision: "deny" }))).status, 201);
+  const lost = await send({ ...command, passkey: assertion });
+  assert.deepEqual([lost.status, lost.body.code], [409, "ALREADY_ANSWERED"]);
+  const untouched = await prisma.desktopRemotePasskey.findUniqueOrThrow({ where: { id: mine.id } });
+  assert.equal(untouched.lastUsedAt, null);
+  assert.equal(Number(untouched.signCount), 0);
+
+  // Two answers for one request at once, each with its own assertion: one wins and uses the passkey once.
+  const second = randomUUID();
+  await syncAs(pc.token, { snapshot: { ...snapshot(), approval: { ...snapshot().approval!, id: second } }, acks: [] });
+  const racing = answer(pc.deviceId, { approvalId: second });
+  const one = await call({ action: "options-command", command: racing });
+  const two = await call({ action: "options-command", command: racing });
+  const results = await Promise.all([
+    send({ ...racing, passkey: { challengeId: one.body.challengeId, ...phone.get(one.body.publicKey) } }),
+    send({ ...racing, passkey: { challengeId: two.body.challengeId, ...phone.get(two.body.publicKey) } }),
+  ]);
+  assert.ok(results.every((result) => [201, 403, 409].includes(result.status)), JSON.stringify(results.map((result) => result.status)));
+  assert.equal(results.filter((result) => result.status === 201).length, 1);
+  const audited = await prisma.adminAuditLog.count({ where: { action: "desktop_remote.approval_answered", actorUserId: user.id, targetId: { in: results.filter((result) => result.status === 201).map((result) => result.body.id as string) } } });
+  assert.equal(audited, 1);
+  const used = await prisma.desktopRemotePasskey.findUniqueOrThrow({ where: { id: mine.id } });
+  assert.notEqual(used.lastUsedAt, null);
 });

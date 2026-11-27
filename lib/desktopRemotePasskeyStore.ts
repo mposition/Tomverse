@@ -196,13 +196,42 @@ export async function registerPasskey(input: {
   });
 }
 
+/** Whether this passkey is the account's own. Asked before a challenge is issued for it. */
+export async function ownsPasskey(userId: string, passkeyId: string): Promise<boolean> {
+  return (await prisma.desktopRemotePasskey.count({ where: { id: passkeyId, userId } })) === 1;
+}
+
+export type Verified = { passkeyId: string; userId: string; from: bigint; to: number };
+
 /**
- * Checks the person's assertion for one purpose and one binding. The challenge is taken first and is gone whatever
- * follows. Returns the passkey that signed. The counter moves only if it is still what was read (a race is a refusal).
+ * Moves the passkey's counter and last-use time, only if the counter is still what was read (a race is a refusal). Run in the
+ * transaction of what the passkey confirmed, so that a confirmation that led to nothing (the request was answered meanwhile)
+ * leaves no trace of a use.
+ */
+export async function recordPasskeyUse(client: Prisma.TransactionClient | typeof prisma, verified: Verified): Promise<void> {
+  const moved = await client.desktopRemotePasskey.updateMany({
+    where: { id: verified.passkeyId, userId: verified.userId, signCount: verified.from },
+    data: { signCount: BigInt(verified.to), lastUsedAt: new Date() },
+  });
+  if (moved.count !== 1) throw new PasskeyRefused("INVALID");
+}
+
+/**
+ * Checks the person's assertion for one purpose and one binding, and moves the counter at once. The challenge is taken first
+ * and is gone whatever follows. Returns the passkey that signed.
  */
 export async function confirmPasskey(input: {
   userId: string; rp: RelyingParty; purpose: "enroll" | "command" | "remove"; bindingHash: string; assertion: DesktopRemotePasskeyAssertion;
 }): Promise<{ passkeyId: string }> {
+  const verified = await verifyPasskey(input);
+  await recordPasskeyUse(prisma, verified);
+  return { passkeyId: verified.passkeyId };
+}
+
+/** The same check without moving the counter: the caller moves it with `recordPasskeyUse` inside its own transaction. */
+export async function verifyPasskey(input: {
+  userId: string; rp: RelyingParty; purpose: "enroll" | "command" | "remove"; bindingHash: string; assertion: DesktopRemotePasskeyAssertion;
+}): Promise<Verified> {
   const challenge = await takeChallenge(input.userId, input.assertion.challengeId, input.purpose, input.bindingHash);
   const stored = await prisma.desktopRemotePasskey.findFirst({ where: { credentialId: input.assertion.credentialId, userId: input.userId } });
   if (!stored || stored.rpId !== input.rp.rpId) throw new PasskeyRefused("INVALID");
@@ -217,12 +246,7 @@ export async function confirmPasskey(input: {
     if (error instanceof WebAuthnError) throw new PasskeyRefused("INVALID");
     throw error;
   }
-  const moved = await prisma.desktopRemotePasskey.updateMany({
-    where: { id: stored.id, userId: input.userId, signCount: stored.signCount },
-    data: { signCount: BigInt(signCount), lastUsedAt: new Date() },
-  });
-  if (moved.count !== 1) throw new PasskeyRefused("INVALID");
-  return { passkeyId: stored.id };
+  return { passkeyId: stored.id, userId: input.userId, from: stored.signCount, to: signCount };
 }
 
 /** Removes one of the account's passkeys, with the person's audit entry in the same transaction. */

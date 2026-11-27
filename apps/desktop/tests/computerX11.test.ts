@@ -317,7 +317,7 @@ test("a click puts the pointer on the point, reads it back, clicks, and reports 
   const { backend, x } = setup();
   const done = await backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "right", double: false }, OWN_PID);
   assert.equal(done.performed, true, done.reason);
-  assert.deepEqual(x.inputCalls().map((call) => call.args), [["mousemove", "--sync", "150", "140"], ["click", "3"]]);
+  assert.deepEqual(x.inputCalls().map((call) => call.args), [["mousemove", "--sync", "150", "140"], ["mousemove", "--sync", "150", "140", "click", "3"]]);
   assert.deepEqual([done.delivered, done.planned], [1, 1]);
   assert.equal(typeof done.sentTick, "number");
   assert.ok(Math.abs(tickDistance(done.sentTick!, x.now() >>> 0)) < 200);
@@ -326,17 +326,19 @@ test("a click puts the pointer on the point, reads it back, clicks, and reports 
   stuck.x.onCall((call) => { if (call.file === "xdotool" && call.args[0] === "getmouselocation") stuck.x.person("mouse"); });
   const refused = await stuck.backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: false }, OWN_PID);
   assert.equal(refused.reason, "cursor-failed");
-  assert.equal(stuck.x.inputCalls().some((call) => call.args[0] === "click"), false);
+  assert.equal(stuck.x.inputCalls().some((call) => call.args.includes("click")), false);
 });
 
 test("a double click stops after the first click if the person moved the pointer, and says how much went out", async () => {
   const { backend, x } = setup();
-  x.onCall((call) => { if (call.file === "xdotool" && call.args[0] === "click") x.person("mouse"); });
+  // The person moves the mouse right after the click program ended (the program itself puts the pointer back before it clicks).
+  let after = false;
+  x.onCall((call) => { if (after) { after = false; x.person("mouse"); } if (call.file === "xdotool" && call.args.includes("click")) after = true; });
   const done = await backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: true }, OWN_PID);
   assert.equal(done.performed, false);
   assert.ok(["cursor-moved", "user-input"].includes(done.reason!), done.reason);
   assert.deepEqual([done.delivered, done.planned], [1, 2]);
-  assert.equal(x.inputCalls().filter((call) => call.args[0] === "click").length, 1);
+  assert.equal(x.inputCalls().filter((call) => call.args.includes("click")).length, 1);
 });
 
 test("the person's own input before an action stops it, and the agent's own input does not look like the person's", async () => {
@@ -443,11 +445,12 @@ test("a scroll sends a few notches at a time on the wheel buttons, checking the 
   const { backend, x } = setup();
   const done = await backend.act(ref(), size, { kind: "scroll", x: 400, y: 200, dx: -3, dy: 10 }, OWN_PID);
   assert.deepEqual([done.performed, done.delivered, done.planned], [true, 13, 13]);
-  const wheel = x.inputCalls().filter((call) => call.args[0] === "click").map((call) => [call.args[2], call.args[5]]);
+  const wheel = x.inputCalls().filter((call) => call.args.includes("click")).map((call) => [call.args[call.args.indexOf("--repeat") + 1], call.args.at(-1)]);
   assert.deepEqual(wheel, [["4", "5"], ["4", "5"], ["2", "5"], ["3", "6"]]);
   // The person moves the mouse after the first step.
   const other = setup();
-  other.x.onCall((call) => { if (call.file === "xdotool" && call.args[0] === "click") other.x.person("mouse"); });
+  let after = false;
+  other.x.onCall((call) => { if (after) { after = false; other.x.person("mouse"); } if (call.file === "xdotool" && call.args.includes("click")) after = true; });
   const stopped = await other.backend.act(ref(), size, { kind: "scroll", x: 400, y: 200, dx: 0, dy: 10 }, OWN_PID);
   assert.equal(stopped.performed, false);
   assert.deepEqual([stopped.delivered, stopped.planned], [4, 10]);
@@ -457,9 +460,9 @@ test("a scroll sends a few notches at a time on the wheel buttons, checking the 
 test("aborting a request stops it before the next program is run", async () => {
   const { backend, x } = setup();
   const stop = new AbortController();
-  x.onCall((call) => { if (call.file === "xdotool" && call.args[0] === "click") stop.abort(); });
+  x.onCall((call) => { if (call.file === "xdotool" && call.args.includes("click")) stop.abort(); });
   await assert.rejects(backend.act(ref(), size, { kind: "click", x: 5, y: 5, button: "left", double: true }, OWN_PID, stop.signal));
-  assert.equal(x.inputCalls().filter((call) => call.args[0] === "click").length, 1, "the second click never went out");
+  assert.equal(x.inputCalls().filter((call) => call.args.includes("click")).length, 1, "the second click never went out");
 });
 
 test("only the five tools are ever run, and only the window id, numbers and the typed text are in their arguments", async () => {
@@ -551,7 +554,7 @@ test("a click is refused when what is under the pointer is not the window, howev
   assert.equal(await covers(backend), false);
   const refused = await backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: false }, OWN_PID);
   assert.deepEqual([refused.performed, refused.reason], [false, "covered-point"]);
-  assert.equal(x.inputCalls().some((call) => call.args[0] === "click"), false, "the pointer was placed, nothing was clicked");
+  assert.equal(x.inputCalls().some((call) => call.args.includes("click")), false, "the pointer was placed, nothing was clicked");
   // A part of the window itself (a widget inside it) is the window.
   const part: FakeWindow = { xid: 0x4a00009, pid: 4321, cls: "Gedit", instance: "gedit", title: "editor area", x: 100, y: 80, w: 800, h: 400, parent: EDITOR.xid };
   const inner = setup([part]);
@@ -560,7 +563,7 @@ test("a click is refused when what is under the pointer is not the window, howev
   // A popup that appears between two wheel steps stops the scroll.
   const wheel = setup([{ ...hidden, x: 5000 }]);
   let after = 0;
-  wheel.x.onCall((call) => { if (call.file === "xdotool" && call.args[0] === "click") after += 1; if (after === 1 && call.file === "xdotool" && call.args[0] === "getmouselocation") wheel.x.windows.get(hidden.xid)!.x = 140; });
+  wheel.x.onCall((call) => { if (call.file === "xdotool" && call.args.includes("click")) after += 1; if (after === 1 && call.file === "xdotool" && call.args[0] === "getmouselocation") wheel.x.windows.get(hidden.xid)!.x = 140; });
   const stopped = await wheel.backend.act(ref(), size, { kind: "scroll", x: 50, y: 60, dx: 0, dy: 10 }, OWN_PID);
   assert.equal(stopped.performed, false);
   assert.ok(["covered-point", "covered"].includes(stopped.reason!), stopped.reason);
@@ -588,7 +591,7 @@ test("the person's input right after the agent's own, before the idle time was r
   const clicking = setup();
   let clicked = false;
   clicking.x.onCall((call) => {
-    if (call.file === "xdotool" && call.args[0] === "click") clicked = true;
+    if (call.file === "xdotool" && call.args.includes("click")) clicked = true;
     else if (clicked && call.file === "xprintidle") { clicked = false; clicking.x.advance(100); clicking.x.person("key"); }
   });
   const double = await clicking.backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: true }, OWN_PID);
@@ -636,4 +639,55 @@ test("the compositor's overlay cannot be told from a window made to look like it
   assert.equal(await covers(setup([], { trustOverlay: true }).backend), false);
   const lock: FakeWindow = { ...POPUP, xid: 0x7000002, x: 0, y: 0, w: 1920, h: 1080 };
   assert.equal(await covers(setup([lock], { trustOverlay: true }).backend), true);
+});
+
+test("the first click and the first wheel step are looked at again just before they go out, and go out at the checked point in the same program run", async () => {
+  // The person moves the pointer after the window and the pointer were checked and before the click: the click is refused.
+  const moved = setup();
+  let placed = 0;
+  moved.x.onCall((call) => {
+    if (call.file === "xdotool" && call.args[0] === "getmouselocation") placed += 1;
+    // The 3rd look at the pointer is the one right before the first input (gate, pointer window, then the look before the click).
+    if (placed === 3 && call.file === "xdotool" && call.args[0] === "getmouselocation") moved.x.person("mouse");
+  });
+  const refused = await moved.backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: false }, OWN_PID);
+  assert.equal(refused.performed, false);
+  assert.ok(["cursor-moved", "covered-point", "user-input"].includes(refused.reason!), refused.reason);
+  assert.equal(moved.x.inputCalls().some((call) => call.args.includes("click")), false, "nothing was clicked");
+
+  // The same for the first wheel step.
+  const wheel = setup();
+  let looks = 0;
+  wheel.x.onCall((call) => {
+    if (call.file === "xdotool" && call.args[0] === "getmouselocation") looks += 1;
+    if (looks === 3 && call.file === "xdotool" && call.args[0] === "getmouselocation") wheel.x.person("mouse");
+  });
+  const scrolled = await wheel.backend.act(ref(), size, { kind: "scroll", x: 50, y: 60, dx: 0, dy: 3 }, OWN_PID);
+  assert.equal(scrolled.performed, false);
+  assert.equal(wheel.x.inputCalls().some((call) => call.args.includes("click")), false);
+
+  // Every click and wheel step carries the move to the checked point in its own program run.
+  const { backend, x } = setup();
+  await backend.act(ref(), size, { kind: "click", x: 50, y: 60, button: "left", double: true }, OWN_PID);
+  await backend.act(ref(), size, { kind: "scroll", x: 50, y: 60, dx: 0, dy: 5 }, OWN_PID);
+  const sends = x.inputCalls().filter((call) => call.args.includes("click"));
+  assert.equal(sends.length, 4);
+  for (const call of sends) assert.deepEqual(call.args.slice(0, 4), ["mousemove", "--sync", "150", "140"]);
+});
+
+test("a key the person presses while the pointer is being checked, after the agent moved it, still stops the click and the wheel", async () => {
+  for (const action of [
+    { kind: "click" as const, x: 50, y: 60, button: "left" as const, double: false },
+    { kind: "scroll" as const, x: 50, y: 60, dx: 0, dy: 3 },
+  ]) {
+    const { backend, x } = setup();
+    let moved = false;
+    x.onCall((call) => {
+      if (call.file === "xdotool" && call.args[0] === "mousemove") moved = true;
+      else if (moved && call.file === "xdotool" && call.args[0] === "getmouselocation") { moved = false; x.advance(150); x.person("key"); }
+    });
+    const result = await backend.act(ref(), size, action, OWN_PID);
+    assert.deepEqual([result.performed, result.reason], [false, "user-input"], action.kind);
+    assert.equal(x.inputCalls().some((call) => call.args.includes("click")), false, "nothing was sent");
+  }
 });

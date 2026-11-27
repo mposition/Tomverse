@@ -3,7 +3,7 @@ import { desktopRemoteNeedsPasskey, desktopRemotePasskeyRequest } from "@/lib/de
 import { precheckDesktopRemoteCommand } from "@/lib/desktopRemoteControlStore";
 import { desktopRemoteMayAct, desktopRemoteWebSession, remoteJson } from "@/lib/desktopRemoteControlWeb";
 import {
-  assertionOptions, commandBinding, confirmPasskey, PasskeyRefused, passkeyRelyingParty, registerPasskey, registrationOptions, removalBinding,
+  assertionOptions, commandBinding, confirmPasskey, ownsPasskey, PasskeyRefused, passkeyRelyingParty, registerPasskey, registrationOptions, removalBinding,
   removePasskey,
 } from "@/lib/desktopRemotePasskeyStore";
 import { desktopRemotePasskeyEnabled } from "@/lib/nativeBearerGate";
@@ -31,7 +31,11 @@ export async function POST(request: Request) {
     await consumeApiRateLimit(request, userId, "desktop-remote-passkey", { minute: 20, day: 300 });
     const body = await readLimitedJson(request, 48 * 1024, desktopRemotePasskeyRequest);
     if (body.action === "options-register") return remoteJson(200, { ok: true, ...await registrationOptions(auth.session, rp) });
-    if (body.action === "options-remove") return remoteJson(200, { ok: true, ...await assertionOptions(userId, rp, "remove", removalBinding(body.passkeyId)) });
+    if (body.action === "options-remove") {
+      // No challenge is issued for a passkey that is not the account's own.
+      if (!await ownsPasskey(userId, body.passkeyId)) throw new PasskeyRefused("NOT_FOUND");
+      return remoteJson(200, { ok: true, ...await assertionOptions(userId, rp, "remove", removalBinding(body.passkeyId)) });
+    }
     if (body.action === "options-command") {
       // Deny and stop reduce what happens: there is nothing to confirm.
       if (!desktopRemoteNeedsPasskey(body.command)) throw new PasskeyRefused("INVALID");

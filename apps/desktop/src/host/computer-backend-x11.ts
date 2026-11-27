@@ -404,11 +404,13 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     return false;
   }
 
-  /** Puts the pointer on the target and reads it back. */
+  /**
+   * Puts the pointer on the target. Moving it is the agent's own input, so the baseline of the person's input is taken right
+   * after the move, before anything is read back: what the person does while the pointer is being checked is then still seen.
+   */
   async function place(screen: { x: number; y: number }, signal?: AbortSignal) {
     await text("xdotool", ["mousemove", "--sync", String(screen.x), String(screen.y)], signal);
-    const at = await pointer(signal);
-    return at !== null && at.x === screen.x && at.y === screen.y;
+    return ownInput(signal);
   }
 
   const buttonOf = (button: "left" | "right") => (button === "right" ? "3" : "1");
@@ -499,12 +501,20 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       const target = parseX11WindowId(window.id).xid;
       signal?.throwIfAborted();
       if (await inputSince(signal)) return refuse("user-input");
-      const placed = await place(screen, signal);
-      if (!placed) return refuse("cursor-failed");
+      const placedAt = await place(screen, signal);
+      if (placedAt.person) return refuse("user-input", withTick(placedAt.tick));
+      const at = await pointer(signal);
+      if (!at || at.x !== screen.x || at.y !== screen.y) return refuse("cursor-failed", withTick(placedAt.tick));
       // What is under the pointer must be this window (or a part of it): a popup that no window manager manages is found this way.
-      if (!await pointerIsOver(target, signal)) return refuse("covered-point");
+      if (!await pointerIsOver(target, signal)) return refuse("covered-point", withTick(placedAt.tick));
+      /**
+       * The input itself: the pointer goes to the checked point in the same program run as the click or the wheel, so a pointer the
+       * person moved since the last look is put back and the input lands on the point that was checked. What remains between the
+       * last look and the program's start is a few milliseconds, which a separate run cannot close.
+       */
+      const atPoint = ["mousemove", "--sync", String(screen.x), String(screen.y)];
 
-      /** The window and the pointer, looked at again before the next input goes out. */
+      /** The window and the pointer, looked at again before the next input goes out, the first one included. */
       const stillThere = async (): Promise<string | null> => {
         const again = await gate(window, size, { x: action.x, y: action.y }, handBackFrom, signal);
         if (!again.ok) return again.reason;
@@ -517,15 +527,13 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       if (action.kind === "click") {
         const planned = action.double ? 2 : 1;
         let delivered = 0;
-        let lastTick: number | undefined;
+        let lastTick: number | undefined = placedAt.tick;
         let person = false;
         for (let index = 0; index < planned; index += 1) {
           signal?.throwIfAborted();
-          if (index > 0) {
-            const why = person ? "user-input" : await stillThere();
-            if (why) return refuse(why, { delivered, planned, ...withTick(lastTick) });
-          }
-          const sent = await text("xdotool", ["click", buttonOf(action.button)], signal);
+          const why = person ? "user-input" : await stillThere();
+          if (why) return refuse(why, { delivered, planned, ...withTick(lastTick) });
+          const sent = await text("xdotool", [...atPoint, "click", buttonOf(action.button)], signal);
           const own = await ownInput(signal);
           lastTick = own.tick ?? lastTick;
           person = own.person;
@@ -541,17 +549,15 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       if (action.dx) steps.push({ button: action.dx > 0 ? "7" : "6", notches: Math.abs(action.dx) });
       const planned = steps.reduce((sum, step) => sum + step.notches, 0);
       let delivered = 0;
-      let lastTick: number | undefined;
+      let lastTick: number | undefined = placedAt.tick;
       let person = false;
       for (const step of steps) {
         for (let left = step.notches; left > 0; left -= WHEEL_PIECE) {
           signal?.throwIfAborted();
-          if (delivered > 0) {
-            const why = person ? "user-input" : await stillThere();
-            if (why) return refuse(why, { delivered, planned, ...withTick(lastTick) });
-          }
+          const why = person ? "user-input" : await stillThere();
+          if (why) return refuse(why, { delivered, planned, ...withTick(lastTick) });
           const count = Math.min(WHEEL_PIECE, left);
-          const sent = await text("xdotool", ["click", "--repeat", String(count), "--delay", "30", step.button], signal);
+          const sent = await text("xdotool", [...atPoint, "click", "--repeat", String(count), "--delay", "30", step.button], signal);
           const own = await ownInput(signal);
           lastTick = own.tick ?? lastTick;
           person = own.person;
