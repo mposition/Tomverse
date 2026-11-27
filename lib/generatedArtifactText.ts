@@ -332,6 +332,19 @@ const findAttributeProblem = (tagInner: string, tagName: string): string | null 
  * So `strict` is on for `.svg` and `.xml`, and off for `.html`/`.htm` -- where
  * turning it on would reject ordinary, working pages.
  *
+ * ## What the HTML pass forgives
+ *
+ * Three more things a browser reads without complaint, each of which used to
+ * reject a working page. The body of `<script>`, `<style>`, `<textarea>` and
+ * `<title>` is text, so `for (let i = 0; i < n; i++)` is not a tag. A `<` that
+ * is not followed by a letter, `/`, `!` or `?` is a less-than sign. And the
+ * end tags HTML lets an author leave off (`</li>`, `</p>`, `</td>`, ...) may
+ * be missing: a closing tag also closes the optional-end elements open inside
+ * it. What is still refused is the broken part -- an unterminated tag,
+ * comment or raw-text element, or a closing tag that would have to cross an
+ * element whose end tag is not optional (`<div><span></div>`), and an
+ * element left open at the end of the file (a truncated page).
+ *
  * Returns the first problem, or null.
  */
 export const findMarkupProblem = (
@@ -346,6 +359,16 @@ export const findMarkupProblem = (
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
   ]);
+  // HTML only. Elements whose end tag the HTML syntax lets an author omit.
+  const optionalEndElements = new Set([
+    "html", "head", "body", "p", "li", "dt", "dd", "rt", "rp", "optgroup",
+    "option", "colgroup", "caption", "thead", "tbody", "tfoot", "tr", "td", "th",
+  ]);
+  // HTML only. Elements whose content is text up to the matching end tag.
+  const rawTextElements = new Set(["script", "style", "textarea", "title"]);
+  // HTML only. A browser ignores (or repairs) these closing tags when nothing
+  // is open to close.
+  const forgivenStrayEndTags = new Set(["p", "br"]);
 
   let index = 0;
   while (index < source.length) {
@@ -368,6 +391,13 @@ export const findMarkupProblem = (
       const end = source.indexOf(">", open + 2);
       if (end === -1) return "an unterminated declaration";
       index = end + 1;
+      continue;
+    }
+
+    // In HTML a "<" that cannot start a tag is text ("i<n", "a < b"). XML has
+    // no such thing: there it falls through and is reported.
+    if (!strict && !/[A-Za-z/]/.test(source[open + 1] ?? "")) {
+      index = open + 1;
       continue;
     }
 
@@ -410,7 +440,25 @@ export const findMarkupProblem = (
     const name = strict ? rawName : rawName.toLowerCase();
 
     if (!name) return "a tag with no name";
-    if (closing) {
+    if (closing && !strict) {
+      const found = stack.lastIndexOf(name);
+      if (found === -1) {
+        if (!forgivenStrayEndTags.has(name)) {
+          return stack.length === 0
+            ? `a closing </${name}> with nothing open`
+            : `</${name}> where </${stack[stack.length - 1]}> was expected`;
+        }
+      } else {
+        // Everything opened inside the element being closed is closed with
+        // it, which is only legal where that element's end tag is optional.
+        for (let above = stack.length - 1; above > found; above -= 1) {
+          if (!optionalEndElements.has(stack[above]!)) {
+            return `</${name}> where </${stack[above]}> was expected`;
+          }
+        }
+        stack.length = found;
+      }
+    } else if (closing) {
       const expected = stack.pop();
       if (expected === undefined) return `a closing </${name}> with nothing open`;
       if (expected !== name) return `</${name}> where </${expected}> was expected`;
@@ -428,6 +476,16 @@ export const findMarkupProblem = (
       if (!selfClosing && (strict || !voidElements.has(name))) {
         stack.push(name);
       }
+      if (!strict && !selfClosing && rawTextElements.has(name)) {
+        // The body is text, so the next tag is the matching end tag -- or
+        // there is none, which is a page that was cut off.
+        const end = new RegExp(`</${name}(?=[\\s/>])`, "gi");
+        end.lastIndex = cursor + 1;
+        const match = end.exec(source);
+        if (!match) return `<${name}> is never closed`;
+        index = match.index;
+        continue;
+      }
     }
 
     index = cursor + 1;
@@ -441,7 +499,13 @@ export const findMarkupProblem = (
     }
   }
 
-  if (stack.length > 0) return `<${stack[stack.length - 1]}> is never closed`;
+  // At the end of an HTML page the elements whose end tag is optional may
+  // still be open; the innermost one that may not be is the problem.
+  for (let depth = stack.length - 1; depth >= 0; depth -= 1) {
+    if (strict || !optionalEndElements.has(stack[depth]!)) {
+      return `<${stack[depth]}> is never closed`;
+    }
+  }
   return null;
 };
 

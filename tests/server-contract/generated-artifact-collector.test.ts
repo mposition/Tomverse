@@ -333,6 +333,44 @@ const capturedConsoleError = (t: { mock: typeof mock }) => {
     errors.mock.calls.map((call) => JSON.stringify(call.arguments)).join("\n");
 };
 
+test("a PDF with hanja is created; a character its font lacks is told to the model, not hidden", async () => {
+  resetWorld();
+  const subject = await collector();
+  const clean = await subject.run("document", {
+    filename: "contract.pdf",
+    format: "pdf",
+    blocks: [{ type: "paragraph", text: "甲은 乙에게 ㈜톰버스의 대금 100㎡ ①을 지급한다." }],
+  });
+  assert.equal(clean.status, "created", JSON.stringify(clean));
+  assert.doesNotMatch(String(clean.note), /Notice:/);
+
+  const stray = await subject.run("document", {
+    filename: "contract2.pdf",
+    format: "pdf",
+    blocks: [{ type: "paragraph", text: "甲은 乙에게 대금을 지급한다. 계약 체결을 축하합니다 🎉" }],
+  });
+  assert.equal(stray.status, "created", JSON.stringify(stray));
+  assert.match(String(stray.note), /Notice: The PDF font has no glyph for 1 character of this document \(🎉\)/);
+  assert.match(String(stray.note), /download button/);
+  assert.equal(world.puts.length, 2);
+});
+
+test("a PDF in a language its font cannot draw fails with the characters named", async (t) => {
+  resetWorld();
+  capturedConsoleError(t);
+  const subject = await collector();
+  const report = await subject.run("document", {
+    filename: "arabic.pdf",
+    format: "pdf",
+    blocks: [{ type: "paragraph", text: "مرحبا بكم في تقرير الربع الأول من هذا العام" }],
+  });
+  assert.equal(report.status, "failed");
+  assert.match(String(report.reason), /does not cover this document's writing system/);
+  assert.match(String(report.reason), /م/u);
+  assert.equal(world.puts.length, 0);
+  assert.equal(subject.stored.length, 0);
+});
+
 test("a render failure logs metadata, while the model still reads the parser's message", async (t) => {
   resetWorld();
   const logged = capturedConsoleError(t);
