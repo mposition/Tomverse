@@ -20,7 +20,7 @@ export const columnsQuestion = "Which web framework should a small team pick for
 
 export type ColumnsState = {
   saves: Array<{ clientRequestId: string; content: string; modelId?: string }>;
-  dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string; webSearchMode?: string; currentLocation?: unknown; contextBundle?: string }>;
+  dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string; webSearchMode?: string; currentLocation?: unknown; contextBundle?: string; deepResearchDepth?: string }>;
   models: string[];
   /** Every change the app saved to the Review, and the web search mode the Review holds now. */
   updates: Array<Record<string, unknown>>;
@@ -30,10 +30,12 @@ export type ColumnsState = {
   /** Dictation clips the server received, and requests to the voice conversation route. */
   clips: number;
   voiceRequests: number;
+  /** Status checks the server answered for a Deep Research column. */
+  polls: number;
 };
 
 /** A saved Review with one question and three answers behind a faked server; nothing leaves this computer. */
-export async function launchReviewColumns(options: { width?: number; height?: number } = {}) {
+export async function launchReviewColumns(options: { width?: number; height?: number; research?: boolean } = {}) {
   if (!columnsOrigin) throw new Error("DESKTOP_E2E_AUTH_ORIGIN is not set.");
   const profile = await mkdtemp(join(tmpdir(), "tomverse-review-columns-"));
   await writeFile(join(profile, "language.txt"), "en");
@@ -43,13 +45,14 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
       const host = globalThis as typeof globalThis & { columns: ColumnsState };
       type ColumnsState = {
         saves: Array<{ clientRequestId: string; content: string; modelId?: string }>;
-        dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string; webSearchMode?: string; currentLocation?: unknown; contextBundle?: string }>;
+        dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string; webSearchMode?: string; currentLocation?: unknown; contextBundle?: string; deepResearchDepth?: string }>;
         models: string[];
         updates: Array<Record<string, unknown>>;
         webSearchMode: string;
         contexts: string[];
         clips: number;
         voiceRequests: number;
+        polls: number;
       };
       const table = "| Option | Best for | Cost |\n| --- | --- | --- |\n| Next.js | Full-stack apps | Hosting |\n| Vite + React | Fast client dashboards | Low |\n| SvelteKit | Small bundles | Low |";
       const answers: Record<string, string> = {
@@ -68,7 +71,7 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
       // An answer saved before answers carried their model: it has no column to go to.
       messages.push({ id: "answer-legacy", role: "assistant", content: "An older answer saved without its model.", status: "normal",
         createdAt: new Date(2_500).toISOString() });
-      host.columns = { saves: [], dispatches: [], models: fixture.models.map((model) => model.id), updates: [], webSearchMode: "off", contexts: [], clips: 0, voiceRequests: 0 } satisfies ColumnsState;
+      host.columns = { saves: [], dispatches: [], models: fixture.models.map((model) => model.id), updates: [], webSearchMode: "off", contexts: [], clips: 0, voiceRequests: 0, polls: 0 } satisfies ColumnsState;
       const realFetch = globalThis.fetch;
       shell.openExternal = async (href) => {
         const target = new URL(href);
@@ -85,10 +88,12 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
         if (url.pathname === "/api/auth/desktop/session") return Response.json({ ok: true, account: { id: "columns-fixture", name: "Columns Fixture", email: "columns@example.test" } });
         if (url.pathname === "/api/products/chat/capabilities") {
           return Response.json({ autoSelection: { offered: false }, desktopReview: { easy: true, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true,
-            desktopTurnLocation: true, desktopReviewContext: true, desktopReviewTools: true, desktopVoiceInput: true });
+            desktopTurnLocation: true, desktopReviewContext: true, desktopReviewTools: true, desktopVoiceInput: true,
+            ...(fixture.research ? { desktopReviewDeepResearch: true } : {}) });
         }
         if (url.pathname === "/api/models/catalog") {
-          return Response.json({ models: fixture.models.map((model) => ({ ...model, minimumPlan: "Free", publiclyListed: true, status: "enabled", enabled: true })) });
+          const researchModel = { id: "perplexity/sonar-deep-research", name: "Perplexity Sonar Deep Research", provider: "perplexity", usageClass: "deep-research" };
+          return Response.json({ models: [...fixture.models, ...(fixture.research ? [researchModel] : [])].map((model) => ({ ...model, minimumPlan: "Free", publiclyListed: true, status: "enabled", enabled: true })) });
         }
         if (url.pathname === "/api/conversations") return Response.json([{ ...fixture.review, selectedModels: host.columns.models }]);
         if (url.pathname === path && init?.method === "PATCH") {
@@ -120,6 +125,14 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
           return Response.json({ transcript: "Which one is cheaper to run?" });
         }
         if (url.pathname === "/api/chat/voice") { host.columns.voiceRequests += 1; return Response.json({ code: "VOICE_CONVERSATION_FORBIDDEN" }, { status: 403 }); }
+        if (url.pathname === "/api/chat/deep-research/status") {
+          const pending = messages.find((message) => message.id === JSON.parse(String(init?.body)).assistantMessageId && message.status === "pending");
+          if (!pending) return Response.json({}, { status: 404 });
+          host.columns.polls += 1;
+          const content = "Research report with a [reference](https://example.test/source).";
+          Object.assign(pending, { status: "normal", pendingJobId: null, content });
+          return Response.json({ status: "completed", content });
+        }
         if (url.pathname === "/api/chat/preflight") return Response.json({ ok: true, admissionToken: "columns-comparison", contextBundle: null });
         if (url.pathname === "/api/chat/context") {
           const prepared = JSON.parse(String(init?.body));
@@ -129,8 +142,14 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
         if (url.pathname === "/api/chat") {
           const body = JSON.parse(String(init?.body));
           host.columns.dispatches.push({ modelId: body.modelId, sourceUserMessageId: body.sourceUserMessageId, admissionToken: body.admissionToken,
-            webSearchMode: body.webSearchMode, currentLocation: body.currentLocation, contextBundle: body.contextBundle,
+            webSearchMode: body.webSearchMode, currentLocation: body.currentLocation, contextBundle: body.contextBundle, deepResearchDepth: body.deepResearchDepth,
             transcript: body.messages.map((message: { role: string; content: string }) => message.role + ": " + message.content) });
+          if (body.deepResearchDepth) {
+            // A research run answers with a receipt and a pending answer that is polled.
+            messages.push({ id: body.assistantMessageId, role: "assistant", modelId: body.modelId, content: "", status: "pending", pendingJobId: "research-job",
+              createdAt: new Date(20_000 + messages.length).toISOString() });
+            return Response.json({ deepResearchJobId: body.assistantMessageId, status: "submitted" }, { headers: { "X-Chat-Response-Mode": "async-job" } });
+          }
           const reply = "Follow-up answer from " + body.modelId;
           messages.push({ id: body.assistantMessageId, role: "assistant", modelId: body.modelId, content: reply, status: "normal",
             createdAt: new Date(20_000 + messages.length).toISOString() });
@@ -138,7 +157,7 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
         }
         return new Response(null, { status: 404 });
       };
-    }, { origin: columnsOrigin, review: columnsReview, models: columnModels, question: columnsQuestion });
+    }, { origin: columnsOrigin, review: columnsReview, models: columnModels, question: columnsQuestion, research: options.research === true });
     if (options.width) {
       await app.evaluate(({ BrowserWindow }, size) => { BrowserWindow.getAllWindows()[0]?.setSize(size.width, size.height); },
         { width: options.width, height: options.height ?? 1000 });

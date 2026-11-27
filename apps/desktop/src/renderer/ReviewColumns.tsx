@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { ArrowDown, ArrowUp, GripVertical, X } from "lucide-react";
 import { decideWebSearchBadge } from "../../../../lib/webSearchStatusBadge";
+import { DEEP_RESEARCH_MODEL_ID } from "../../../../lib/deepResearchModel";
 import { reviewFocusHint, reviewReorderHint, reviewWorkspaceCopy } from "../../../../lib/reviewWorkspaceCopy";
 import { reviewProviderName } from "../../../../lib/reviewProviderName";
 import type { Language } from "../../../../lib/language";
@@ -262,7 +263,9 @@ function ReviewColumn({ language, messages, column, columnIds, position, count, 
               </div>
               <div className="review-answer-bubble">
                 {answer.content && <CopyAnswer content={answer.content} language={language} />}
-                <ChatMarkdown content={answer.content} language={language} />
+                {!answer.content && answer.modelId === DEEP_RESEARCH_MODEL_ID && (answer.status === "pending" || answer.status === "error")
+                  ? <p role="status" data-testid="review-research-status">{answer.status === "pending" ? chat.deepResearchSearchingStatus : chat.responseError}</p>
+                  : <ChatMarkdown content={answer.content} language={language} />}
                 <GeneratedFiles artifacts={answer.artifacts} language={language} />
                 <AnswerExtras message={answer} language={language} product="review" />
                 {effort?.applied && <small className="chat-effort">{common.reasoningEffort} · {effortNames[effort.applied]}
@@ -288,7 +291,8 @@ function ReviewColumn({ language, messages, column, columnIds, position, count, 
         if (pane) pane.scrollTo({ top: pane.scrollHeight, behavior: "smooth" });
       }}><ArrowDown size={14} aria-hidden="true" /> {chat.scrollToLatest}</button>}
     </div>
-    {count > 1 && canAsk && <form className="review-column-ask" data-testid="review-model-only-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+    {/* A research report is a run of its own: it takes no follow-up from the column. */}
+    {count > 1 && canAsk && modelId !== DEEP_RESEARCH_MODEL_ID && <form className="review-column-ask" data-testid="review-model-only-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <textarea rows={1} value={draft} disabled={!on || busy} data-testid="review-model-only-input" placeholder={chat.modelOnlyPlaceholder}
         aria-label={fill(chat.modelOnlyInputLabel, { model: name })} onChange={(event) => setDraft(event.currentTarget.value)}
         onKeyDown={(event) => {

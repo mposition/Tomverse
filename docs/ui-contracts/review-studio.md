@@ -210,6 +210,12 @@ model continue through an eligible regular model. Professional retains the
 existing manual expansion. Existing admission, entitlement and execution
 limits apply to any selected research model.
 
+Desktop offers the same `+` menu row only in Professional and only where the server names `desktopReviewDeepResearch`
+(`TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED`, default off). A run is one more column of the Review that
+the question is put to alone, at that model's own price; the other columns keep their transcript. The Review holds
+the models the composer shows plus Deep Research, so the row is switched off, with its reason, while every place of the
+plan is taken. Coverage: `apps/desktop/tests/reviewColumns.e2e.ts`.
+
 ## Credit presentation (owner direction, 2026-10-20)
 
 Text composers show no credit estimate or variable-cost badge, including their

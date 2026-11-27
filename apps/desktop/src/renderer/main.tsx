@@ -517,7 +517,7 @@ function Desktop() {
   const chat = useChatHistory(chatActive, "chat", accountDraft, language, snapshot?.capabilities?.deepResearch);
   const reviewActive = workspace === "review" && account?.stage === "connected";
   const nativeReview = !settingsView && reviewActive;
-  const review = useChatHistory(reviewActive, "review", accountDraft, language);
+  const review = useChatHistory(reviewActive, "review", accountDraft, language, snapshot?.capabilities?.reviewDeepResearch);
   async function openImportedConversation(id: string, product: "chat" | "review" = "chat") {
     const history = product === "chat" ? chat : review;
     const row = (await window.desktop.chatHistory(product)).find(conversation => conversation.id === id);
@@ -1201,6 +1201,7 @@ ${text}` : text;
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.dictationAvailable === true}
           composerTools={snapshot?.capabilities?.reviewTools} deviceLocation={snapshot?.chatLocationAvailable === true}
+          deepResearch={snapshot?.capabilities?.reviewDeepResearch}
           onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">

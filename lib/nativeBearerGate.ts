@@ -376,6 +376,14 @@ export function desktopDeepResearchEnabled() {
 }
 
 /**
+ * Deep Research from a Desktop Review: one Deep Research answer is a column of the Review, put to that model alone.
+ * Its own switch, default off, on top of the Review writes: the paid run is a separate decision from Chat's.
+ */
+export function desktopReviewDeepResearchEnabled() {
+  return desktopReviewWriteEnabled() && process.env.TOMVERSE_DESKTOP_REVIEW_DEEP_RESEARCH_ENABLED === "true";
+}
+
+/**
  * Desktop's in-app plan and payment screens. A display switch only: Desktop
  * calls the same billing routes as the web through the account settings
  * session, so it stays off unless that session is enabled too.
@@ -411,7 +419,7 @@ export function desktopChatTurnField(key: string): boolean {
 
 export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_REMOTE_SYNC) return (method === "POST" || method === "DELETE") && process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true";
-  if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && desktopDeepResearchEnabled();
+  if (path === DESKTOP_DEEP_RESEARCH_STATUS) return method === "POST" && (desktopDeepResearchEnabled() || desktopReviewDeepResearchEnabled());
   if (path === DESKTOP_CHAT_CONTEXT) return method === "POST" && (desktopChatWriteEnabled() || desktopReviewWriteEnabled());
   if (path === DESKTOP_VOICE_CONVERSATION || path === DESKTOP_VOICE_TRANSCRIPTION) return method === "POST" && desktopVoiceEnabled();
   if (path === DESKTOP_CHAT_TURN && ["PUT", "PATCH", "DELETE"].includes(method) && desktopAttachmentEnabled()) return true;
