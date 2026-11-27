@@ -390,6 +390,109 @@ test("HTML keeps every one of those, because a browser does too", () => {
   assert.equal(text("html", page), `${page}\n`);
 });
 
+/*
+ * A page a model writes is rejected only when it is broken, not when it is
+ * merely HTML. These are the shapes that used to be refused: a "<" inside a
+ * script, and end tags the HTML syntax lets an author leave off.
+ */
+test("an inline script with a less-than comparison is delivered", () => {
+  const page =
+    "<!DOCTYPE html><html><head><title>a < b</title><style>ul > li { color: red }</style></head>" +
+    "<body><script>for (let i = 0; i < 10; i++) { if (i<3 && i>1) log(\"<b>\"); }</script>" +
+    "<p>done</p></body></html>";
+  assert.equal(text("html", page), `${page}\n`);
+  assert.equal(text("htm", page, "page.htm"), `${page}\n`);
+  assert.equal(findMarkupProblem(page), null);
+});
+
+test("a raw-text element is closed by its own end tag in any case, and only by it", () => {
+  const page =
+    "<body><SCRIPT type=text/javascript>var s = '<div>' + \"</scripts>\";</SCRIPT>" +
+    "<textarea><b>not a tag</textarea><p>x</p></body>";
+  assert.equal(findMarkupProblem(page), null);
+  // A page cut off inside a script is a truncated page, and is still refused.
+  assert.match(findMarkupProblem("<body><script>if (a < b) {"), /<script> is never closed/);
+  assert.match(findMarkupProblem("<style>a { color: red }"), /<style> is never closed/);
+});
+
+test("a less-than sign that cannot start a tag is text in HTML", () => {
+  assert.equal(findMarkupProblem("<p>if x<3 and y < 5 then 2 <3 </p>"), null);
+  assert.equal(findMarkupProblem("<p>ends with <"), null);
+});
+
+test("HTML end tags that the syntax lets an author omit may be missing", () => {
+  const page =
+    "<!DOCTYPE html><html><head><title>t</title></head><body>" +
+    "<ul><li>one<li>two<ul><li>nested</ul><li>three</ul>" +
+    "<p>first paragraph<p>second paragraph" +
+    "<table><tr><th>A<th>B<tr><td>1<td>2</table>" +
+    "<dl><dt>term<dd>description<dt>next<dd>more</dl>" +
+    "<select><option>a<option>b</select>";
+  assert.equal(findMarkupProblem(page), null);
+  assert.equal(text("html", page), `${page}\n`);
+  assert.equal(findMarkupProblem("<html><body><p>no closing html or body"), null);
+  assert.equal(findMarkupProblem("<div><p>closed by its parent</div>"), null);
+  // A stray </p> and </br> are repaired by a browser rather than refused.
+  assert.equal(findMarkupProblem("<div>text</p></div><br></br>"), null);
+});
+
+test("HTML that is actually broken is still refused", () => {
+  assert.match(findMarkupProblem("<div><span>x</div>"), /<\/div> where <\/span> was expected/);
+  assert.match(findMarkupProblem("<ul><li>x<div>y</li></ul>"), /<\/li> where <\/div> was expected/);
+  assert.match(findMarkupProblem("<div><ul><li>x"), /<ul> is never closed/);
+  assert.match(findMarkupProblem("<div>text"), /<div> is never closed/);
+  assert.match(findMarkupProblem("<b></i>"), /was expected/);
+  assert.match(findMarkupProblem("</div>"), /nothing open/);
+  assert.match(findMarkupProblem("<p>a <b"), /unterminated tag/);
+  assert.match(findMarkupProblem('<a href="x>y</a>'), /unterminated attribute value|unterminated tag/);
+  assert.match(findMarkupProblem("<p>x</p><!-- never ends"), /unterminated comment/);
+  assert.throws(() => text("html", "<div><p>text"), TextContentError);
+  assert.throws(() => text("html", "<p>a</p><!-- oops"), TextContentError);
+});
+
+test("an HTML page inside a zip gets the same forgiveness as a file on its own", () => {
+  const page =
+    "<html><body><ul><li>one<li>two</ul><script>for (var i = 0; i < 3; i++) {}</script></body></html>";
+  const files = unzipSync(
+    buildArchive({
+      ...PROJECT,
+      entries: [
+        { path: "site/index.html", format: "html", content: page },
+        { path: "README.md", format: "md", content: "# Site\n" },
+      ],
+    })
+  );
+  assert.equal(decode(files["site/index.html"]), `${page}\n`);
+  assert.throws(
+    () =>
+      renderArchive(
+        admitArchiveSpec({
+          ...PROJECT,
+          entries: [{ path: "bad.html", format: "html", content: "<div><span>x</div>" }],
+        }).spec
+      ),
+    TextContentError
+  );
+});
+
+test("XML and SVG keep the strict rules the HTML pass relaxes", () => {
+  // The same shapes HTML now accepts are fatal to an XML parser.
+  assert.throws(() => text("xml", "<a><b>text</a>"), TextContentError);
+  assert.throws(() => text("xml", "<ul><li>one<li>two</ul>"), TextContentError);
+  assert.throws(() => text("xml", "<a>if x < 3</a>"), TextContentError);
+  assert.match(findMarkupProblem("<a><b>x</a>", { strict: true }), /<\/a> where <\/b> was expected/);
+  assert.match(findMarkupProblem("<p>a</p><p>b", { strict: true }), /<p> is never closed/);
+  assert.match(findMarkupProblem("<a>", { strict: true }), /never closed/);
+  // A <script> in an SVG is refused before the scanner ever runs.
+  assert.throws(
+    () => text("svg", '<svg xmlns="http://www.w3.org/2000/svg"><script>if (a < b) {}</script></svg>'),
+    /may not contain a <script> element/
+  );
+  // Case still matters in XML, where it does not in HTML.
+  assert.throws(() => text("svg", '<svg xmlns="http://www.w3.org/2000/svg"><Text>hi</text></svg>'), TextContentError);
+  assert.equal(findMarkupProblem("<BODY><P>a</p></Body>"), null);
+});
+
 test("the references XML does accept still pass", () => {
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg"><text>A &amp; B &lt; C &#65; &#x42;</text></svg>';
