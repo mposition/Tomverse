@@ -2943,6 +2943,9 @@ function connectedAccountData() {
         language: () => state.language ?? "en",
         origin: accountOrigin ?? DESKTOP_LIVE_ORIGIN,
         pickFile: pickLocalFile,
+        openExternal: (url) => shell.openExternal(url),
+        linkProviders: () => state.capabilities?.socialLink ?? [],
+        signal,
       }),
     };
   }

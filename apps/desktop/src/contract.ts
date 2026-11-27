@@ -414,6 +414,8 @@ export type Snapshot = {
     turnLocation?: boolean; chatPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;
     /** Dictation in every composer, and the two-way voice conversation in Chat. */
     voiceInput?: boolean; voiceConversation?: VoiceConversationCapability | null;
+    /** The providers the server lets this device add as a login method from Settings (Google, Microsoft). */
+    socialLink?: ("google" | "azure-ad")[];
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */

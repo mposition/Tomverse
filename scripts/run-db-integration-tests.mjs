@@ -671,6 +671,9 @@ run(
     "tests/integration/admin-audit-integrity-walk.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
+    // Adding Google or Microsoft from Desktop: only the user who started the link and holds the PKCE verifier may spend
+    // the provider code, and a refused attempt writes nothing.
+    "tests/integration/desktop-oauth-link.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
     "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",

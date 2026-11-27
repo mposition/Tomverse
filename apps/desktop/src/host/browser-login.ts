@@ -90,7 +90,7 @@ export async function signInByDesktopEmail(input: DesktopLoginEmail, version: st
   return { ok: true, session: { tokens, account: await readBrowserAccount(tokens.accessToken, signal, origin) } };
 }
 
-function showBrowserResult(response: ServerResponse, status: number, message: string) {
+export function showBrowserResult(response: ServerResponse, status: number, message: string) {
   response.writeHead(status, {
     "Content-Type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
