@@ -133,10 +133,12 @@ export function createVoiceHost(deps: {
       for (const controller of live.values()) controller.abort();
       if (had) deps.notifyStop();
       if (reservation) {
+        // Whatever becomes of the request (refused, unreachable, a reply that cannot be read), the wait ends with it.
         const asked: Promise<void> = Promise.resolve()
           .then(() => send({ action: "stop", reservationId: reservation }, AbortSignal.timeout(3_000)))
-          .then((response) => response.body?.cancel(), () => { /* The closed stream ends it on the server as well. */ })
-          .then(() => { if (ending === asked) ending = undefined; });
+          .then((response) => response.body?.cancel())
+          .catch(() => { /* The closed stream ends it on the server as well. */ })
+          .finally(() => { if (ending === asked) ending = undefined; });
         ending = asked;
       }
       return ending ?? Promise.resolve();

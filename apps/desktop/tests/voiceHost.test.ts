@@ -210,6 +210,22 @@ test("on sleep, a closing window, a quit or a lost account this process ends the
   assert.equal(sent.length, count);
 });
 
+test("the wait for the stop request always ends: a refusal, an unreachable server and a reply that cannot be read all release it", async () => {
+  const broken = { body: { cancel: () => Promise.reject(new Error("the reply could not be discarded")) } } as unknown as Response;
+  for (const reply of [async () => broken, async () => { throw new Error("offline"); }, async () => Response.json({ code: "VOICE_SESSION_ENDED" }, { status: 409 }),
+    () => { throw new Error("thrown before any request"); }]) {
+    const stream = session();
+    const { host } = harness({ reply: (body) => body.action === "start" ? stream.response : Response.json({ ok: true }) });
+    host.arm(); host.microphoneOpened();
+    await host.request(start());
+    stream.push("data: {\"type\":\"ready\",\"reservationId\":\"voice-r9\"}\n\n");
+    await settle();
+    await host.end(reply as never);
+    assert.equal(host.active(), false, "nothing keeps a close or a quit waiting");
+    assert.equal(host.arm(), true, "and the next session can be started");
+  }
+});
+
 test("a sign-out ends the session with the token it still has, and an unreachable server holds it for a moment only", async () => {
   const stream = session();
   const { host, sent } = harness({ reply: (body) => {
