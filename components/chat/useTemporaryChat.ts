@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import {
+  temporaryChatOnLeave,
+  temporaryChatOnView,
+  type TemporaryChatTracker,
+} from "@/lib/temporaryChatClientCore";
 
 /**
  * The browser half of temporary Chat (lib/temporaryChatAccess.ts).
@@ -11,14 +16,9 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
  * (`createFields`, spread into the create request), which conversation the
  * create returned as temporary (`adoptCreated`), and whether the open
  * conversation is that one (`isActive`). Everything else -- the availability
- * read, deleting the conversation when the person leaves it, deleting it when
- * the page is closed -- happens here, so the page carries a few lines rather
- * than the lifecycle.
- *
- * "Leaving" is the open conversation changing away from the temporary one
- * after it was opened, or the page going away. Both delete it through the
- * ordinary conversation delete. Anything that slips past both (a crash, a
- * lost connection) is deleted by the server at its expiry.
+ * read and deleting the conversation when the person leaves it -- happens
+ * here, so the page carries a few lines rather than the lifecycle. When to
+ * delete is decided in lib/temporaryChatClientCore.ts.
  */
 export type TemporaryChatController = {
   available: boolean;
@@ -52,7 +52,7 @@ export function useTemporaryChat(input: {
   const { enabled, ownerKey, currentChatId } = input;
   const [available, setAvailable] = useState<{ owner: string; value: boolean } | null>(null);
   const [armedFor, setArmedFor] = useState<string | null>(null);
-  const [active, setActive] = useState<{ owner: string; id: string; entered: boolean } | null>(null);
+  const [active, setActive] = useState<TemporaryChatTracker>(null);
   const activeRef = useRef(active);
   useEffect(() => { activeRef.current = active; }, [active]);
 
@@ -68,36 +68,32 @@ export function useTemporaryChat(input: {
     return () => controller.abort();
   }, [enabled, ownerKey]);
 
-  // Opening the temporary conversation marks it entered; moving to any other
-  // conversation (or to a new one) afterwards deletes it. A conversation of
-  // another account is simply not this one's (`isActive` checks the owner).
-  // State changes are deferred a microtask, as elsewhere on this page, so the
-  // effect only reacts to the navigation it observed.
+  // The open conversation or the account changed. State changes are deferred
+  // a microtask, as elsewhere on this page, so the effect only reacts to the
+  // change it observed.
   useEffect(() => {
-    if (!active || active.owner !== ownerKey) return;
-    if (currentChatId === active.id) {
-      if (!active.entered) {
-        queueMicrotask(() => {
-          setActive((current) => (current?.id === active.id ? { ...current, entered: true } : current));
-          setArmedFor(null);
-        });
-      }
-      return;
-    }
-    if (active.entered) {
-      void deleteConversation(active.id);
-      queueMicrotask(() => setActive((current) => (current?.id === active.id ? null : current)));
-    }
+    const step = temporaryChatOnView(active, { ownerKey, currentChatId });
+    if (step.deleteId) void deleteConversation(step.deleteId);
+    if (step.next === active && !step.disarm) return;
+    queueMicrotask(() => {
+      setActive((current) => (current?.id === active?.id ? step.next : current));
+      if (step.disarm) setArmedFor(null);
+    });
   }, [active, currentChatId, ownerKey]);
 
-  // Closing or reloading the page leaves the conversation as well.
+  // The Chat screen going away is leaving too: an in-app navigation unmounts
+  // it, and a reload or a closed tab fires `pagehide`. Both delete what is
+  // tracked; a second request for the same conversation is a harmless 404.
   useEffect(() => {
     const leave = () => {
-      const current = activeRef.current;
-      if (current) void deleteConversation(current.id, true);
+      const id = temporaryChatOnLeave(activeRef.current);
+      if (id) void deleteConversation(id, true);
     };
     window.addEventListener("pagehide", leave);
-    return () => window.removeEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
   }, []);
 
   const isAvailable = enabled && Boolean(ownerKey) && available?.owner === ownerKey && available.value;
@@ -112,9 +108,11 @@ export function useTemporaryChat(input: {
   const adoptCreated = useCallback((created: unknown) => {
     const record = created as { id?: unknown; temporary?: unknown } | null;
     if (!ownerKey || record?.temporary !== true || typeof record.id !== "string") return;
-    setActive({ owner: ownerKey, id: record.id, entered: false });
+    const tracked = { owner: ownerKey, id: record.id, entered: false };
+    // Read by the unmount and pagehide paths before the next render commits.
+    activeRef.current = tracked;
+    setActive(tracked);
   }, [ownerKey]);
-
   const matchesPending = useCallback(
     (conversationId: string) => armed === Boolean(active?.owner === ownerKey && active?.id === conversationId),
     [active, armed, ownerKey]

@@ -7,10 +7,12 @@ import type { Language } from "@/lib/language";
  * features ship without editing the shared per-language bundles.
  *
  * The temporary Chat sentence is a promise about data and says only what the
- * server does: the conversation is left out of the list and search, reads and
- * writes no memory, and is deleted when the person leaves it or 24 hours
- * after it started (lib/temporaryChatAccess.ts). It does not claim that
- * nothing is stored meanwhile, because the conversation is stored until then.
+ * product does: the conversation is left out of the list and search, reads and
+ * writes no memory, is deleted when the person leaves it, and whatever could
+ * not be deleted then (a lost connection, a sign-out) is deleted by the
+ * server 24 hours after it started (lib/temporaryChatAccess.ts,
+ * lib/temporaryChatClientCore.ts). It does not claim that nothing is stored
+ * meanwhile, because the conversation is stored until then.
  */
 const en = {
   title: "Personal instructions",
@@ -36,7 +38,7 @@ const en = {
   reload: "Reload",
   temporaryToggle: "Temporary chat",
   temporaryOn: "Temporary chat is on",
-  temporaryDescription: "Temporary chats don't appear in your chat list or search, don't use or create memories, and are deleted when you leave them or 24 hours after they start.",
+  temporaryDescription: "Temporary chats don't appear in your chat list or search and don't use or create memories. They're deleted when you leave them; one that can't be deleted then is deleted 24 hours after it started.",
   temporaryBanner: "Temporary chat",
   temporaryEnd: "End temporary chat",
   temporaryCreateFailed: "A temporary chat could not be started. Try again or turn temporary chat off.",
@@ -77,7 +79,7 @@ const ko: Copy = {
   reload: "다시 불러오기",
   temporaryToggle: "임시 채팅",
   temporaryOn: "임시 채팅 켜짐",
-  temporaryDescription: "임시 채팅은 대화 목록과 검색에 나타나지 않고, 메모리를 쓰지도 만들지도 않으며, 대화를 떠나거나 시작하고 24시간이 지나면 삭제됩니다.",
+  temporaryDescription: "임시 채팅은 대화 목록과 검색에 나타나지 않고 메모리를 쓰지도 만들지도 않습니다. 대화를 떠나면 삭제되고, 그때 지우지 못한 대화도 시작하고 24시간이 지나면 삭제됩니다.",
   temporaryBanner: "임시 채팅 중",
   temporaryEnd: "임시 채팅 끝내기",
   temporaryCreateFailed: "임시 채팅을 시작하지 못했습니다. 다시 시도하거나 임시 채팅을 끄고 보내 주세요.",
@@ -116,7 +118,7 @@ const de: Copy = {
   reload: "Neu laden",
   temporaryToggle: "Temporärer Chat",
   temporaryOn: "Temporärer Chat ist an",
-  temporaryDescription: "Temporäre Chats erscheinen nicht in deiner Chatliste oder Suche, nutzen und erstellen keine Erinnerungen und werden gelöscht, wenn du sie verlässt, oder 24 Stunden nach dem Start.",
+  temporaryDescription: "Temporäre Chats erscheinen nicht in deiner Chatliste oder Suche und nutzen oder erstellen keine Erinnerungen. Sie werden gelöscht, wenn du sie verlässt; was dann nicht gelöscht werden kann, wird 24 Stunden nach dem Start gelöscht.",
   temporaryBanner: "Temporärer Chat",
   temporaryEnd: "Temporären Chat beenden",
   temporaryCreateFailed: "Der temporäre Chat konnte nicht gestartet werden. Versuche es erneut oder schalte den temporären Chat aus.",
@@ -155,7 +157,7 @@ const es: Copy = {
   reload: "Volver a cargar",
   temporaryToggle: "Chat temporal",
   temporaryOn: "Chat temporal activado",
-  temporaryDescription: "Los chats temporales no aparecen en tu lista de chats ni en la búsqueda, no usan ni crean recuerdos y se eliminan cuando sales de ellos o 24 horas después de empezar.",
+  temporaryDescription: "Los chats temporales no aparecen en tu lista de chats ni en la búsqueda y no usan ni crean recuerdos. Se eliminan cuando sales de ellos; si no se pueden eliminar en ese momento, se eliminan 24 horas después de empezar.",
   temporaryBanner: "Chat temporal",
   temporaryEnd: "Terminar chat temporal",
   temporaryCreateFailed: "No se pudo iniciar el chat temporal. Inténtalo de nuevo o desactiva el chat temporal.",
@@ -194,7 +196,7 @@ const fr: Copy = {
   reload: "Recharger",
   temporaryToggle: "Discussion temporaire",
   temporaryOn: "Discussion temporaire activée",
-  temporaryDescription: "Les discussions temporaires n'apparaissent ni dans votre liste ni dans la recherche, n'utilisent et ne créent aucun souvenir, et sont supprimées quand vous les quittez ou 24 heures après leur début.",
+  temporaryDescription: "Les discussions temporaires n'apparaissent ni dans votre liste ni dans la recherche et n'utilisent ni ne créent de souvenirs. Elles sont supprimées quand vous les quittez ; celles qui ne peuvent pas l'être à ce moment sont supprimées 24 heures après leur début.",
   temporaryBanner: "Discussion temporaire",
   temporaryEnd: "Terminer la discussion temporaire",
   temporaryCreateFailed: "Impossible de démarrer la discussion temporaire. Réessayez ou désactivez la discussion temporaire.",
@@ -233,7 +235,7 @@ const pt: Copy = {
   reload: "Recarregar",
   temporaryToggle: "Chat temporário",
   temporaryOn: "Chat temporário ativado",
-  temporaryDescription: "Chats temporários não aparecem na sua lista de chats nem na busca, não usam nem criam memórias e são excluídos quando você sai deles ou 24 horas depois de começarem.",
+  temporaryDescription: "Chats temporários não aparecem na sua lista de chats nem na busca e não usam nem criam memórias. São excluídos quando você sai deles; os que não puderem ser excluídos nesse momento são excluídos 24 horas depois de começarem.",
   temporaryBanner: "Chat temporário",
   temporaryEnd: "Encerrar chat temporário",
   temporaryCreateFailed: "Não foi possível iniciar o chat temporário. Tente novamente ou desative o chat temporário.",
@@ -272,7 +274,7 @@ const zh: Copy = {
   reload: "重新加载",
   temporaryToggle: "临时聊天",
   temporaryOn: "临时聊天已开启",
-  temporaryDescription: "临时聊天不会出现在聊天列表和搜索中，不使用也不创建记忆，并会在你离开时或开始 24 小时后被删除。",
+  temporaryDescription: "临时聊天不会出现在聊天列表和搜索中，也不使用或创建记忆。离开时即被删除；届时未能删除的，会在开始 24 小时后删除。",
   temporaryBanner: "临时聊天",
   temporaryEnd: "结束临时聊天",
   temporaryCreateFailed: "无法开始临时聊天。请重试，或关闭临时聊天后再发送。",
@@ -311,7 +313,7 @@ const zhHant: Copy = {
   reload: "重新載入",
   temporaryToggle: "臨時聊天",
   temporaryOn: "臨時聊天已開啟",
-  temporaryDescription: "臨時聊天不會出現在聊天列表和搜尋中，不使用也不建立記憶，並會在你離開時或開始 24 小時後被刪除。",
+  temporaryDescription: "臨時聊天不會出現在聊天列表和搜尋中，也不使用或建立記憶。離開時即被刪除；屆時未能刪除的，會在開始 24 小時後刪除。",
   temporaryBanner: "臨時聊天",
   temporaryEnd: "結束臨時聊天",
   temporaryCreateFailed: "無法開始臨時聊天。請重試，或關閉臨時聊天後再傳送。",
