@@ -674,3 +674,20 @@ test("the first click and the first wheel step are looked at again just before t
   assert.equal(sends.length, 4);
   for (const call of sends) assert.deepEqual(call.args.slice(0, 4), ["mousemove", "--sync", "150", "140"]);
 });
+
+test("a key the person presses while the pointer is being checked, after the agent moved it, still stops the click and the wheel", async () => {
+  for (const action of [
+    { kind: "click" as const, x: 50, y: 60, button: "left" as const, double: false },
+    { kind: "scroll" as const, x: 50, y: 60, dx: 0, dy: 3 },
+  ]) {
+    const { backend, x } = setup();
+    let moved = false;
+    x.onCall((call) => {
+      if (call.file === "xdotool" && call.args[0] === "mousemove") moved = true;
+      else if (moved && call.file === "xdotool" && call.args[0] === "getmouselocation") { moved = false; x.advance(150); x.person("key"); }
+    });
+    const result = await backend.act(ref(), size, action, OWN_PID);
+    assert.deepEqual([result.performed, result.reason], [false, "user-input"], action.kind);
+    assert.equal(x.inputCalls().some((call) => call.args.includes("click")), false, "nothing was sent");
+  }
+});

@@ -404,11 +404,13 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
     return false;
   }
 
-  /** Puts the pointer on the target and reads it back. */
+  /**
+   * Puts the pointer on the target. Moving it is the agent's own input, so the baseline of the person's input is taken right
+   * after the move, before anything is read back: what the person does while the pointer is being checked is then still seen.
+   */
   async function place(screen: { x: number; y: number }, signal?: AbortSignal) {
     await text("xdotool", ["mousemove", "--sync", String(screen.x), String(screen.y)], signal);
-    const at = await pointer(signal);
-    return at !== null && at.x === screen.x && at.y === screen.y;
+    return ownInput(signal);
   }
 
   const buttonOf = (button: "left" | "right") => (button === "right" ? "3" : "1");
@@ -499,13 +501,12 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       const target = parseX11WindowId(window.id).xid;
       signal?.throwIfAborted();
       if (await inputSince(signal)) return refuse("user-input");
-      const placed = await place(screen, signal);
-      if (!placed) return refuse("cursor-failed");
-      // What is under the pointer must be this window (or a part of it): a popup that no window manager manages is found this way.
-      if (!await pointerIsOver(target, signal)) return refuse("covered-point");
-      // Moving the pointer was the agent's own input: the person's input is told from it again from here on.
-      const placedAt = await ownInput(signal);
+      const placedAt = await place(screen, signal);
       if (placedAt.person) return refuse("user-input", withTick(placedAt.tick));
+      const at = await pointer(signal);
+      if (!at || at.x !== screen.x || at.y !== screen.y) return refuse("cursor-failed", withTick(placedAt.tick));
+      // What is under the pointer must be this window (or a part of it): a popup that no window manager manages is found this way.
+      if (!await pointerIsOver(target, signal)) return refuse("covered-point", withTick(placedAt.tick));
       /**
        * The input itself: the pointer goes to the checked point in the same program run as the click or the wheel, so a pointer the
        * person moved since the last look is put back and the input lands on the point that was checked. What remains between the
