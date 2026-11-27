@@ -4320,6 +4320,28 @@ domains:
       export (owner decision 2026-11-26): a follow-up's text lives on in the
       task on the person's own PC.
 
+  - domain: codeCloudJob
+    prismaModel: CodeCloudJob
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One Desktop cloud Code task (docs/ops/desktop-cloud-execution.md): the
+      person's instruction, the models and credit cap they chose, the progress
+      lines the runner reported, a short summary and where the uploaded
+      repository bundle and the resulting patch sit in object storage
+      (code-cloud/<id>/...). The bundle is removed when the task ends; the
+      row, its lines and its patch are removed by the maintenance sweep seven
+      days later. Account deletion removes the rows in its own transaction and
+      gives both object keys of every task a tombstone on the shared object
+      cleanup queue (lib/codeCloudDeletion.ts), so the objects go with them;
+      the User cascade is the backstop for the rows. Credits are not here: the
+      task's managed reservation is CodeTaskReservation, which has its own row.
+
   - domain: externalApiKey
     prismaModel: ExternalApiKey
     userLinkageRole: subject

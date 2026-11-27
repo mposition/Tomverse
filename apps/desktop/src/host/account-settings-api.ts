@@ -11,7 +11,11 @@ const settingsCredential = z.object({
   expiresAt: z.number().int().refine((value) => value > Date.now() && value <= Date.now() + 360_000),
 }).strict();
 
-export type SettingsRequest = { path: string; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: object };
+export type SettingsRequest = {
+  path: string; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: object;
+  /** Bytes sent as they are with their own content type, instead of a JSON body (a cloud task's repository bundle). */
+  raw?: { bytes: Uint8Array; type: string };
+};
 
 function settingsRequest(input: DesktopAccountSettingsInput): SettingsRequest {
   switch (input.action) {
@@ -178,7 +182,7 @@ export function createAccountSettingsApi(
     return renewal;
   }
 
-  async function send({ path, method = "GET", body }: SettingsRequest, accept = "application/json", timeout?: number, extra?: Record<string, string>) {
+  async function send({ path, method = "GET", body, raw }: SettingsRequest, accept = "application/json", timeout?: number, extra?: Record<string, string>) {
     const session = await credential();
     const cookie = origin.startsWith("https:") ? "__Secure-next-auth.session-token" : "next-auth.session-token";
     // The session cookie goes to the account origin and nowhere else, whatever path a module builds.
@@ -193,10 +197,10 @@ export function createAccountSettingsApi(
       else headers[name] = value;
     }
     return transport(url, {
-      method, body: body ? JSON.stringify(body) : undefined,
+      method, body: raw ? new Uint8Array(raw.bytes) : body ? JSON.stringify(body) : undefined,
       headers: {
         ...headers, Cookie: [cookie + "=" + session.token, ...added].join("; "), Origin: origin, Accept: accept,
-        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(raw ? { "Content-Type": raw.type } : body ? { "Content-Type": "application/json" } : {}),
       },
       redirect: "error", cache: "no-store", signal: signal(timeout),
     });

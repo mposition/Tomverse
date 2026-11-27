@@ -696,6 +696,13 @@ const REGISTRY = {
     reason:
       "user_revoked, and deliberately nothing else. Account deletion is the other way a device stops being usable and is absent on purpose: it takes the row with it through the cascade, so a value for it would be one nothing could ever write and a state nobody could query for.",
   },
+  CodeCloudJob_status_check: {
+    owner: "list",
+    module: "lib/codeCloudContract.ts",
+    list: "CODE_CLOUD_JOB_STATUSES",
+    reason:
+      "A Desktop cloud Code task from creation to its end: waiting for its bundle, queued, claimed by a runner while its credits are reserved, running, and the three ends. Written only by lib/codeCloudService.ts; the runner reports an outcome from the same contract's finish list, never a stored status.",
+  },
   DesktopRemoteCommand_kind_check: {
     owner: "list",
     module: "lib/desktopRemoteControlContract.ts",

@@ -14,6 +14,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredCodeTasks } from "@/lib/codeManagedService";
+import { sweepCodeCloudJobsQuietly } from "@/lib/codeCloudService";
 import {
   databaseErrorMetadata,
   isRetryableDatabaseError,
@@ -132,6 +133,9 @@ export async function POST(request: Request) {
       console.warn(JSON.stringify({ event: "code_lease_sweep_deferred" }));
       return { interrupted: 0, deferred: true };
     });
+    // Desktop cloud jobs: ends jobs whose runner stopped reporting (with their reservations), fails expired uploads and
+    // queue waits, and deletes finished jobs past retention with their objects. Never throws.
+    const codeCloudJobs = await sweepCodeCloudJobsQuietly();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -271,6 +275,7 @@ export async function POST(request: Request) {
       result: {
         ...result,
         codeTasks,
+        codeCloudJobs,
         deepResearchSettlements,
         voiceConversations,
         researchPreviewRuns,
@@ -297,6 +302,7 @@ export async function POST(request: Request) {
         success: true,
         result,
         codeTasks,
+        codeCloudJobs,
         deepResearchSettlements,
         voiceConversations,
         researchPreviewRuns,

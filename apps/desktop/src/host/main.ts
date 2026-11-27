@@ -36,6 +36,9 @@ import { createBillingApi, type BillingApi } from "./billing-api";
 import { createManagedCodeClient } from "./managed-code-client";
 import { createManagedCodeSession, type ManagedCodeSession } from "./managed-code-session";
 import { desktopManagedCodeInput } from "../managed-code-contract";
+import { desktopCloudExecutionInput } from "../cloud-execution-contract";
+import { createCloudExecutionClient } from "./cloud-execution-client";
+import { createCloudExecutionHost, type CloudExecutionHost, type CloudProject } from "./cloud-execution-host";
 import { createBillingWindowHost } from "./billing-window";
 import { desktopBillingInput, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
@@ -2994,6 +2997,30 @@ async function managedCode(value: unknown) {
   return managedCodeSession.session.run(input);
 }
 
+// Cloud Code tasks share the account session too; the host keeps the jobs of the signed-in window. The project is the
+// one open now: its tracked files are the snapshot, and the patch is applied back only to that same folder.
+let cloudExecutionHost: { signal: AbortSignal; host: CloudExecutionHost } | undefined;
+async function cloudProject(): Promise<CloudProject> {
+  const project = projectRoot;
+  if (!project || !state.root) return { unavailable: "noProject" };
+  if (project.remote) return { unavailable: "remoteProject" };
+  const repository = await readGitProject(project);
+  if (!repository || repository === "unavailable") return { unavailable: "notGit" };
+  return { name: basename(repository.root), git: { root: repository.root, executable: repository.executable } };
+}
+async function cloudExecution(value: unknown) {
+  const input = desktopCloudExecutionInput.parse(value);
+  if (!state.capabilities?.cloudExecution) throw new Error("Cloud execution is unavailable.");
+  const settings = connectedSettingsApi();
+  const signal = chatSession.signal;
+  if (cloudExecutionHost?.signal !== signal) {
+    const managed = createManagedCodeClient({ send: settings.send, signal });
+    cloudExecutionHost = { signal, host: createCloudExecutionHost({ client: createCloudExecutionClient({ send: settings.send, signal }),
+      catalog: () => managed.catalog(), project: cloudProject, signal }) };
+  }
+  return cloudExecutionHost.host.run(input);
+}
+
 async function sendChat(request: ChatTurnInput): Promise<ChatTurnResult> {
   const { handoffId, ...draft } = request;
   if (draft.deepResearchDepth || draft.modelId === DEEP_RESEARCH_MODEL_ID) {
@@ -4102,6 +4129,7 @@ function registerIpc() {
   main("desktop:assistant-import", (value) => connectedAssistantImport().handle(assistantImportInput.parse(value)));
   main("desktop:billing", billing);
   main("desktop:managed-code", managedCode);
+  main("desktop:cloud-execution", cloudExecution);
   main("desktop:chat-extras", (value) => runChatExtras(value, connectedSettingsApi()));
   main("desktop:review-export", (value) => saveGeneratedFile(() => reviewExportFile(value, connectedSettingsApi()), nativeCopy().saveGenerated, "Review analysis"));
   main("desktop:projects", createProjectActions({ settings: connectedSettingsApi, origin: () => accountOrigin ?? DESKTOP_LIVE_ORIGIN,

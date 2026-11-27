@@ -74,6 +74,11 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/code/v1/responses",
   "/api/code/anthropic/v1/messages",
   "/api/code/anthropic/v1/messages/count_tokens",
+  // The Desktop cloud execution runner service (docs/ops/desktop-cloud-execution.md). A server, not a browser: it
+  // holds the runner secret and a per-claim job token and sends no Origin. Same condition, pinned by
+  // tests/codeCloudBoundary.test.mjs: the handler reads no session or cookie. Exact path only; the person's own job
+  // routes under /api/code/cloud keep this check.
+  "/api/code/cloud/runner",
 ];
 
 const parseOrigin = (value: string | null) => {

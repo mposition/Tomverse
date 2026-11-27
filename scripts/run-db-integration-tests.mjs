@@ -1168,6 +1168,17 @@ run(
     "tests/integration/code-managed-execution.db.test.mjs"],
   "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
 );
+// Desktop cloud execution over the real managed Code reservation and shared
+// credit ledger: create, upload, claim, report, call, finish, stop, the
+// runner-lost sweep and retention. Fakes the model provider and catalogue;
+// own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/code-cloud-execution.db.test.mjs"],
+  "Running the Desktop cloud execution job, reservation, settlement and sweep scenarios",
+);
 // The external inference API fakes only the model provider and exercises the
 // real shared credit ledger, key cap and revocation race. Own process for its
 // module mocks.

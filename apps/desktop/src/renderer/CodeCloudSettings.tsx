@@ -3,14 +3,15 @@ import type { Language } from "../../../../lib/language";
 import { desktopManagedCodeCopy, type DesktopManagedCodeCopy } from "../../../../locales/desktopManagedCode";
 import { describeExecutionLocations, type ExecutionLocationId } from "../execution-location";
 import { MANAGED_MAX_APPROVED_CREDITS, type DesktopManagedCodeInput, type ManagedCodeView, type ManagedReservationView } from "../managed-code-contract";
+import { CodeCloudTasks } from "./CodeCloudTasks";
 import "./code-cloud.css";
 
 type Copy = DesktopManagedCodeCopy;
 const POLL_MS = 5_000;
 
-const locationText = (copy: Copy): Record<ExecutionLocationId, [string, string]> => ({
+const locationText = (copy: Copy, cloudOn: boolean): Record<ExecutionLocationId, [string, string]> => ({
   local: [copy.locLocal, copy.locLocalDetail], worktree: [copy.locWorktree, copy.locWorktreeDetail],
-  ssh: [copy.locSsh, copy.locSshDetail], cloud: [copy.locCloud, copy.locCloudDetail],
+  ssh: [copy.locSsh, copy.locSshDetail], cloud: [copy.locCloud, cloudOn ? copy.locCloudOnDetail : copy.locCloudDetail],
 });
 
 function endedText(copy: Copy, reservation: ManagedReservationView) {
@@ -97,10 +98,10 @@ function ReserveForm({ copy, view, busy, run }: {
   </form>;
 }
 
-function CloudSection({ language, remoteEnabled }: { language: Language; remoteEnabled: boolean }) {
+function CloudSection({ language, remoteEnabled, managedEnabled, cloudEnabled }: { language: Language; remoteEnabled: boolean; managedEnabled: boolean; cloudEnabled: boolean }) {
   const copy = desktopManagedCodeCopy[language];
-  // The SSH row follows the remote-projects switch of this computer; cloud stays unavailable.
-  const locations = describeExecutionLocations(remoteEnabled ? { ssh: { available: true } } : {});
+  // The SSH row follows the remote-projects switch of this computer; the cloud row follows the server's capability.
+  const locations = describeExecutionLocations({ ...(remoteEnabled ? { ssh: { available: true } } : {}), cloud: cloudEnabled });
   const [view, setView] = useState<ManagedCodeView | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -110,10 +111,11 @@ function CloudSection({ language, remoteEnabled }: { language: Language; remoteE
     window.desktop.managedCode(input).then((next) => { setView(next); setFailed(false); }, () => setFailed(true)).finally(() => setBusy(false));
   }, []);
   useEffect(() => {
+    if (!managedEnabled) return undefined;
     let current = true;
     window.desktop.managedCode({ action: "read" }).then((next) => { if (current) setView(next); }, () => { if (current) setFailed(true); });
     return () => { current = false; };
-  }, []);
+  }, [managedEnabled]);
   // The main process keeps the reservation alive; this only re-reads what its receipts say.
   const active = view?.reservation?.state === "active";
   useEffect(() => {
@@ -125,7 +127,7 @@ function CloudSection({ language, remoteEnabled }: { language: Language; remoteE
     return () => { current = false; clearInterval(handle); };
   }, [active]);
 
-  const names = locationText(copy);
+  const names = locationText(copy, cloudEnabled);
   return <section className="managed-code" aria-labelledby="managed-code-heading" data-testid="managed-code">
     <h3 id="managed-code-heading">{copy.heading}</h3>
     <h4>{copy.locationsHeading}</h4>
@@ -135,18 +137,23 @@ function CloudSection({ language, remoteEnabled }: { language: Language; remoteE
         <span>{location.available ? copy.availableLabel : copy.unavailableLabel}</span>
       </li>)}
     </ul>
-    <h4>{copy.creditsHeading}</h4>
-    <p>{copy.creditsIntro}</p>
-    <p data-testid="managed-no-runner">{copy.noRunner}</p>
-    {view?.reservation
-      ? <Reservation copy={copy} reservation={view.reservation} busy={busy} run={run} />
-      : view ? <ReserveForm copy={copy} view={view} busy={busy} run={run} /> : null}
-    {view?.refusal && <p role="alert" data-testid="managed-refusal" data-reason={view.refusal}>{copy.refusal[view.refusal]}</p>}
-    {failed && <p role="alert" data-testid="managed-failed">{copy.refusal.unavailable}</p>}
+    {cloudEnabled && <CodeCloudTasks language={language} />}
+    {managedEnabled && <>
+      <h4>{copy.creditsHeading}</h4>
+      <p>{copy.creditsIntro}</p>
+      <p data-testid="managed-no-runner">{copy.noRunner}</p>
+      {view?.reservation
+        ? <Reservation copy={copy} reservation={view.reservation} busy={busy} run={run} />
+        : view ? <ReserveForm copy={copy} view={view} busy={busy} run={run} /> : null}
+      {view?.refusal && <p role="alert" data-testid="managed-refusal" data-reason={view.refusal}>{copy.refusal[view.refusal]}</p>}
+      {failed && <p role="alert" data-testid="managed-failed">{copy.refusal.unavailable}</p>}
+    </>}
   </section>;
 }
 
-/** Desktop > Execution and limits > Cloud and managed credits. Nothing renders unless the server's capability is on. */
-export function CodeCloudSettings({ language, enabled, remoteEnabled = false }: { language: Language; enabled: boolean; remoteEnabled?: boolean }) {
-  return enabled ? <CloudSection language={language} remoteEnabled={remoteEnabled} /> : null;
+/** Desktop > Execution and limits > Cloud and managed credits. Nothing renders unless one of the server's two capabilities is on. */
+export function CodeCloudSettings({ language, enabled, remoteEnabled = false, cloudEnabled = false }: {
+  language: Language; enabled: boolean; remoteEnabled?: boolean; cloudEnabled?: boolean;
+}) {
+  return enabled || cloudEnabled ? <CloudSection language={language} remoteEnabled={remoteEnabled} managedEnabled={enabled} cloudEnabled={cloudEnabled} /> : null;
 }

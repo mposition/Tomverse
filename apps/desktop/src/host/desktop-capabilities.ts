@@ -23,6 +23,7 @@ const capabilities = z.object({
   desktopCodeMcp: z.boolean().optional(),
   desktopBilling: z.boolean().optional(),
   desktopManagedCode: z.boolean().optional(),
+  desktopCloudExecution: z.boolean().optional(),
   // What this server accepts in a Desktop turn. An older server names none of them, and the app then offers none.
   desktopTurnLocation: z.boolean().optional(),
   desktopChatPlugin: z.boolean().optional(),
@@ -55,6 +56,7 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     googleDrive: data.desktopGoogleDrive === true, deepResearch: data.desktopDeepResearch === true,
     plugins: data.desktopPlugins === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
     managedCode: data.desktopManagedCode === true,
+    cloudExecution: data.desktopCloudExecution === true,
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,
     reviewContext: data.desktopReviewContext === true,
     reviewTools: data.desktopReviewTools === true && data.desktopReviewContext === true,

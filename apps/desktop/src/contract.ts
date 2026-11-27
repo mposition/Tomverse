@@ -26,6 +26,7 @@ import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
+import type { CloudExecutionView, DesktopCloudExecutionInput } from "./cloud-execution-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -410,6 +411,8 @@ export type Snapshot = {
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
     billing?: boolean; managedCode?: boolean;
+    /** Code tasks on a Tomverse runner (cloud-execution-contract.ts): the server names it only when its switch is on. */
+    cloudExecution?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */
     turnLocation?: boolean; chatPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;
     /** Dictation in every composer, and the two-way voice conversation in Chat. */
@@ -549,6 +552,7 @@ export type DesktopApi = {
   subscribeBilling(listener: (state: BillingState) => void): () => void;
   /** Managed Code credits: read the catalogue and the reservation, reserve, release. Credit numbers are the server's receipt values. */
   managedCode(input: DesktopManagedCodeInput): Promise<ManagedCodeView>;
+  cloudExecution(input: DesktopCloudExecutionInput): Promise<CloudExecutionView>;
   chatExtras<Action extends ChatExtrasAction>(input: Extract<ChatExtrasInput, { action: Action }>): Promise<ChatExtrasOutput[Action]>;
   exportReviewAnalysis(input: ReviewExportInput): Promise<boolean>;
   projects<Action extends DesktopProjectAction>(input: Extract<DesktopProjectInput, { action: Action }>): Promise<DesktopProjectOutcome<Action>>;

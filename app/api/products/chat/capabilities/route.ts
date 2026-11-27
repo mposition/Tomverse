@@ -5,6 +5,7 @@ import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
 import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
+import { desktopCloudExecutionEnabled } from "@/lib/desktopCloudExecutionSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
@@ -81,6 +82,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopDeepResearch: desktopDeepResearchEnabled() && Boolean(resolveProviderApiKey("perplexity")),
     desktopBilling: desktopBillingEnabled(),
     desktopManagedCode: desktopManagedCodeEnabled(),
+    // Cloud execution of a Code task on a runner (docs/ops/desktop-cloud-execution.md). Desktop offers the cloud location only on this.
+    desktopCloudExecution: desktopCloudExecutionEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
     // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
     // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
