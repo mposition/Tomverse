@@ -229,9 +229,25 @@ A CAS refusal of a checkpoint (lost lease, another owner, a moved revision, the
 user's stop) ends the writer at once and is thrown by the terminal flush, as
 before. A transient write failure (a dropped connection, a pool timeout) is no
 longer latched: it is logged as `chat_attempt_checkpoint_retry`, the content
-stays pending and is written again one interval later, and the terminal flush
-writes the final prefix itself if no earlier cycle did. Only a failure of that
-final write fails the turn. Errors raised after the provider's stream reported
+stays pending and is written again one interval later (a coalescing timer
+armed while the failing write was in flight is replaced, so it cannot cut that
+interval short), and the terminal flush writes the final prefix itself if no
+earlier cycle did. Only a failure of that final write fails the turn.
+
+A failed checkpoint write may still have committed -- the UPDATE ran and only
+its answer was lost -- leaving the row one revision ahead of the writer. So
+after a transient write failure (a lease renewal included) nothing is written
+until the row has been read: the same revision means the write did not land
+and it is retried; one revision on, with this owner, an active status and
+exactly the content that write carried, means it landed and the writer adopts
+that revision; another owner, a terminal row (the user's stop, an expired
+lease) or any other revision is a refusal, surfaced as before. A read that
+fails leaves the write unsettled and is tried again next cycle, and at the
+terminal flush it is the turn's error -- nothing is written blind. The terminal
+flush still makes its own fresh write: a write that was only reconciled does
+not count as the final owner/revision/lease CAS.
+
+Errors raised after the provider's stream reported
 done -- a refused attempt CAS or a database error in the final checkpoint, the
 settlement or the Message write -- are this application's: they are classified
 with the stream-failure `completion` phase (never a fallback) and are not

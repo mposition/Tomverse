@@ -182,6 +182,8 @@ const hooks: {
 } = {};
 /** Errors the next checkpoint writes throw, in order. */
 let checkpointFailures: unknown[] = [];
+/** Errors thrown by the next checkpoint writes *after* they committed. */
+let checkpointAckLost: unknown[] = [];
 const terminals: Array<{ status: string; writer: "owner" }> = [];
 const isTerminal = (status: string) => ["completed", "failed", "cancelled"].includes(status);
 /** What POST .../attempts/[id] {action: "stop"} writes. */
@@ -235,6 +237,9 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
       row = { ...row, status: "streaming", partialContent: input.partialContent, checkpointRevision: row.checkpointRevision + 1 };
       const written = row;
       hooks.afterCheckpoint?.(written);
+      // The UPDATE committed and its answer was lost on the way back.
+      const lostAck = checkpointAckLost.shift();
+      if (lostAck) throw lostAck;
       return written;
     },
     terminalChatResponseAttempt: async (input: { status: string; finalContent: string; expectedRevision: number }) => {
@@ -922,4 +927,26 @@ test("a stop that the final checkpoint meets is still a prorated stop with nothi
   await until("the settlement", () => ledger.settlements.length > 0);
   assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["cancelled"]);
   assert.deepEqual(world.messages, []);
+});
+
+/*
+  Major 2 at the route. A checkpoint whose UPDATE committed and whose answer
+  was lost left the writer one revision behind its row; the retry was refused
+  as a conflict, latched, and the final flush failed the turn the user had
+  read. The writer now reads the row before writing again and catches up.
+*/
+test("a checkpoint that committed but lost its answer does not fail the turn", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  checkpointAckLost = [retryableWriteError()];
+  try {
+    const { readToEnd } = await start({ first: "Partial.", then: "finish", rest: " The end." }, false);
+    releaseRest();
+    await readToEnd();
+    await until("the saved answer", () => world.messages.length > 0);
+    assert.equal(world.messages[0].content, "Partial. The end.");
+    assert.deepEqual(terminals.map((t) => t.status), ["completed"]);
+    assert.deepEqual(ledger.settlements.map((s) => s.outcome), ["completed"]);
+  } finally {
+    checkpointAckLost = [];
+  }
 });

@@ -8,6 +8,7 @@ import {
 import {
   ChatAttemptCasError,
   checkpointChatResponseAttempt,
+  peekChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
 
 export const CHAT_DURABLE_PARTIAL_MAX_CHARACTERS = 100_000;
@@ -54,6 +55,17 @@ const isAttemptRefusal = (error: unknown) =>
  * cycle managed. The 2026-11-21 lease invariant is untouched: every write
  * still carries a fresh lease, and the terminal flush is still the
  * authoritative owner/revision/lease CAS.
+ *
+ * A failed write may still have committed -- the UPDATE ran and only its
+ * answer was lost -- and then the row's revision is one ahead of this
+ * writer's, so a blind retry would be refused as a conflict and fail the
+ * turn. So after a transient write failure nothing is written until the row
+ * itself has been read (`reconcile`): the same revision means it did not
+ * land and is retried; one revision on, with this owner and exactly this
+ * content, means it landed and the writer catches up; anything else -- another
+ * owner, a terminal row (the user's stop, an expired lease), an unexpected
+ * revision -- is a refusal, as before. A read that fails leaves it unsettled
+ * and is tried again next cycle; nothing is written in between.
  */
 export function createChatResponseAttemptCheckpointWriter(input: {
   userId: string;
@@ -61,7 +73,14 @@ export function createChatResponseAttemptCheckpointWriter(input: {
   ownerId: string;
   initialRevision: number;
   requestedModelId: string;
-}, persistCheckpoint: typeof checkpointChatResponseAttempt = checkpointChatResponseAttempt) {
+}, persistCheckpoint: typeof checkpointChatResponseAttempt = checkpointChatResponseAttempt,
+readAttempt: (
+  userId: string,
+  assistantMessageId: string
+) => Promise<Pick<
+  ChatResponseAttemptRecord,
+  "ownerId" | "status" | "checkpointRevision" | "partialContent"
+> | null> = peekChatResponseAttempt) {
   let revision = input.initialRevision;
   let persistedContent = "";
   let pendingContent: string | null = null;
@@ -73,6 +92,10 @@ export function createChatResponseAttemptCheckpointWriter(input: {
   let lastStartedAt = Date.now();
   let actualModelId: string | null = null;
   let provider: string | null = null;
+  /** A write that failed transiently, until the row says whether it landed. */
+  let unconfirmed: { content: string; expectedRevision: number } | null = null;
+  /** Writes that succeeded, so flush can tell whether it wrote one itself. */
+  let writes = 0;
 
   const scheduleAt = (at: number) => {
     if (scheduled) return;
@@ -80,35 +103,74 @@ export function createChatResponseAttemptCheckpointWriter(input: {
     scheduled.unref?.();
   };
 
+  const write = async (content: string) => {
+    const expectedRevision = revision;
+    try {
+      const updated = await persistCheckpoint({
+        userId: input.userId,
+        assistantMessageId: input.assistantMessageId,
+        ownerId: input.ownerId,
+        expectedRevision,
+        partialContent: content,
+        actualModelId,
+        provider,
+        leaseExpiresAt: new Date(
+          Date.now() + CHAT_RESPONSE_ATTEMPT_MAX_LEASE_MS - LEASE_RENEWAL_HEADROOM_MS
+        ),
+      });
+      if (!updated) throw new Error("CHAT_ATTEMPT_CHECKPOINT_NOT_FOUND");
+      revision = updated.checkpointRevision;
+      persistedContent = updated.partialContent;
+      writes += 1;
+    } catch (error) {
+      // A refusal is known not to have written. Anything else may have.
+      if (!isAttemptRefusal(error)) unconfirmed = { content, expectedRevision };
+      throw error;
+    }
+  };
+
+  /** Settles an unconfirmed write from the row itself; see the doc above. */
+  const reconcile = async () => {
+    if (!unconfirmed) return;
+    const { content, expectedRevision } = unconfirmed;
+    // A read that throws leaves the write unconfirmed for the next cycle.
+    const row = await readAttempt(input.userId, input.assistantMessageId);
+    if (!row) throw new Error("CHAT_ATTEMPT_CHECKPOINT_NOT_FOUND");
+    if (row.ownerId !== input.ownerId) throw new ChatAttemptCasError("owner_changed");
+    if (row.status !== "claimed" && row.status !== "streaming") {
+      throw new ChatAttemptCasError("attempt_terminal");
+    }
+    if (row.checkpointRevision === expectedRevision) {
+      // It did not land: write again.
+      unconfirmed = null;
+      return;
+    }
+    if (row.checkpointRevision === expectedRevision + 1 && row.partialContent === content) {
+      // It landed, and only the answer was lost.
+      revision = row.checkpointRevision;
+      persistedContent = row.partialContent;
+      unconfirmed = null;
+      return;
+    }
+    throw new ChatAttemptCasError("revision_conflict");
+  };
+
   const pump = () => {
     if (scheduled) {
       clearTimeout(scheduled);
       scheduled = null;
     }
-    if (running || failure || pendingContent === null) return;
+    if (running || failure || (pendingContent === null && !unconfirmed)) return;
     let inFlight: string | null = null;
     running = (async () => {
+      await reconcile();
       while (pendingContent !== null && !failure) {
         const next = pendingContent;
         pendingContent = null;
         if (next === persistedContent) continue;
         inFlight = next;
         lastStartedAt = Date.now();
-        const updated = await persistCheckpoint({
-          userId: input.userId,
-          assistantMessageId: input.assistantMessageId,
-          ownerId: input.ownerId,
-          expectedRevision: revision,
-          partialContent: next,
-          actualModelId,
-          provider,
-          leaseExpiresAt: new Date(
-            Date.now() + CHAT_RESPONSE_ATTEMPT_MAX_LEASE_MS - LEASE_RENEWAL_HEADROOM_MS
-          ),
-        });
-        if (!updated) throw new Error("CHAT_ATTEMPT_CHECKPOINT_NOT_FOUND");
-        revision = updated.checkpointRevision;
-        persistedContent = updated.partialContent;
+        await write(next);
         inFlight = null;
       }
     })()
@@ -118,9 +180,16 @@ export function createChatResponseAttemptCheckpointWriter(input: {
           return;
         }
         // Not latched. Keep what did not land, unless newer content already
-        // replaced it, and try again one interval from now.
+        // replaced it, and try again one interval from now -- reconciling
+        // first if the failure may have been a write that landed.
         if (pendingContent === null && inFlight !== null) pendingContent = inFlight;
         retryAt = Date.now() + CHAT_DURABLE_CHECKPOINT_INTERVAL_MS;
+        // A coalescing timer armed while the write was in flight would fire
+        // before `retryAt` and defeat the backoff: replace it.
+        if (scheduled) {
+          clearTimeout(scheduled);
+          scheduled = null;
+        }
         const named = error as { name?: unknown; code?: unknown } | null;
         console.warn(JSON.stringify({
           event: "chat_attempt_checkpoint_retry",
@@ -131,7 +200,7 @@ export function createChatResponseAttemptCheckpointWriter(input: {
       })
       .finally(() => {
         running = null;
-        if (pendingContent === null || failure) return;
+        if (failure || (pendingContent === null && !unconfirmed)) return;
         if (Date.now() < retryAt) scheduleAt(retryAt);
         else pump();
       });
@@ -146,28 +215,21 @@ export function createChatResponseAttemptCheckpointWriter(input: {
    * A failed renewal is logged and left for the next tick, never turned into
    * the writer's failure: the terminal flush still performs the authoritative
    * owner/revision/lease CAS, and a turn short enough to need no renewal must
-   * not fail on one.
+   * not fail on one. The next tick settles it first (`reconcile`) and renews
+   * only if it did not land.
    */
   const renewLease = () => {
     if (failure || running || pendingContent !== null) return;
-    if (Date.now() - lastStartedAt < CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS) return;
+    if (!unconfirmed && Date.now() - lastStartedAt < CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS) {
+      return;
+    }
     lastStartedAt = Date.now();
     running = (async () => {
-      const updated = await persistCheckpoint({
-        userId: input.userId,
-        assistantMessageId: input.assistantMessageId,
-        ownerId: input.ownerId,
-        expectedRevision: revision,
-        partialContent: persistedContent,
-        actualModelId,
-        provider,
-        leaseExpiresAt: new Date(
-          Date.now() + CHAT_RESPONSE_ATTEMPT_MAX_LEASE_MS - LEASE_RENEWAL_HEADROOM_MS
-        ),
-      });
-      if (!updated) throw new Error("CHAT_ATTEMPT_CHECKPOINT_NOT_FOUND");
-      revision = updated.checkpointRevision;
-      persistedContent = updated.partialContent;
+      const revisionBefore = revision;
+      await reconcile();
+      // A renewal that landed already renewed the lease.
+      if (revision !== revisionBefore) return;
+      await write(persistedContent);
     })()
       .catch((error) => {
         const named = error as { name?: unknown; code?: unknown } | null;
@@ -218,7 +280,7 @@ export function createChatResponseAttemptCheckpointWriter(input: {
       clearTimeout(scheduled);
       scheduled = null;
     }
-    const revisionAtFlushStart = revision;
+    const writesAtFlushStart = writes;
     const finalContent = durablePrefix(content);
     pendingContent = finalContent;
     pump();
@@ -230,28 +292,22 @@ export function createChatResponseAttemptCheckpointWriter(input: {
       scheduled = null;
     }
     pendingContent = null;
-    // Even when no new characters arrived since the last coalesced write, the
-    // terminal path needs a fresh owner/revision/DB-clock CAS. Otherwise an
-    // expired writer whose final prefix already matched could skip persistence
-    // entirely and continue into billing or Message side effects. And a final
-    // prefix an earlier cycle failed to write is written here, directly: an
-    // error now is the turn's.
-    if (revision === revisionAtFlushStart || persistedContent !== finalContent) {
-      const updated = await persistCheckpoint({
-        userId: input.userId,
-        assistantMessageId: input.assistantMessageId,
-        ownerId: input.ownerId,
-        expectedRevision: revision,
-        partialContent: finalContent,
-        actualModelId,
-        provider,
-        leaseExpiresAt: new Date(
-          Date.now() + CHAT_RESPONSE_ATTEMPT_MAX_LEASE_MS - LEASE_RENEWAL_HEADROOM_MS
-        ),
-      });
-      if (!updated) throw new Error("CHAT_ATTEMPT_CHECKPOINT_NOT_FOUND");
-      revision = updated.checkpointRevision;
-      persistedContent = updated.partialContent;
+    try {
+      // An unsettled write is settled before the terminal one; a read that
+      // fails now is the turn's error -- nothing is written blind.
+      await reconcile();
+      // Even when no new characters arrived since the last coalesced write,
+      // the terminal path needs a fresh owner/revision/DB-clock CAS --
+      // a write, not a read. Otherwise an expired writer whose final prefix
+      // already matched could skip persistence entirely and continue into
+      // billing or Message side effects. And a final prefix an earlier cycle
+      // failed to write is written here, directly: an error now is the turn's.
+      if (writes === writesAtFlushStart || persistedContent !== finalContent) {
+        await write(finalContent);
+      }
+    } catch (error) {
+      if (isAttemptRefusal(error)) failure = error;
+      throw error;
     }
     return { revision, partialContent: persistedContent, actualModelId, provider };
   };
