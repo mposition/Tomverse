@@ -5,9 +5,9 @@ import { randomUUID } from "node:crypto";
 import {
     claimAttachmentTextCache,
     readAttachmentTranscriptOutcome,
-    readInheritedTranscriptOutcome,
     releaseAttachmentTextClaim,
     renewAttachmentTextClaim,
+    resolveRecordingRoot,
     writeAttachmentNoTextOutcome,
     writeAudioTranscript,
     type AudioTranscriptOutcome,
@@ -288,10 +288,10 @@ export const resolveRecordingAttachmentId = async (input: {
 export const AUDIO_TRANSCRIPT_CLAIM_POLL_MS = 500;
 
 export type AudioTranscriptStore = {
-    /** The stored transcript, "no_text" for a recording found to hold no speech, or null. */
-    read: (attachmentId: string) => Promise<AudioTranscriptOutcome | null>;
-    /** The same, from the attachment this one was copied from (a resend, an edit). */
-    readInherited: (attachmentId: string) => Promise<AudioTranscriptOutcome | null>;
+    /** The row the recording is keyed on: the topmost original of a copy (a resend, an edit). */
+    resolveKey: (attachmentId: string) => Promise<string>;
+    /** The stored result, "newer_version" when a newer instance wrote it, or null. */
+    read: (attachmentId: string) => Promise<AudioTranscriptOutcome | "newer_version" | null>;
     claim: (attachmentId: string, token: string, staleSeconds: number) => Promise<boolean>;
     /** True only while this token still holds the claim; restarts its clock. */
     renew: (attachmentId: string, token: string) => Promise<boolean>;
@@ -319,8 +319,8 @@ const pause = (ms: number, signal?: AbortSignal) =>
     });
 
 const defaultStore = (): AudioTranscriptStore => ({
+    resolveKey: resolveRecordingRoot,
     read: readAttachmentTranscriptOutcome,
-    readInherited: readInheritedTranscriptOutcome,
     claim: claimAttachmentTextCache,
     renew: renewAttachmentTextClaim,
     write: writeAudioTranscript,
@@ -331,17 +331,21 @@ const defaultStore = (): AudioTranscriptStore => ({
 });
 
 /**
- * A recording's paid result, its own or its original's, without claiming or
- * paying for anything: what an earlier message reads when a new transcription
- * is not allowed (the audio switch off). Null when none is stored or the
- * store cannot answer.
+ * A recording's paid result, read without claiming or paying for anything:
+ * what an earlier message uses when a new transcription is not allowed (the
+ * audio switch off). Null when none is stored or the store cannot answer --
+ * safe here, since nothing is paid for on a miss; the file is left out.
  */
 export const readStoredAudioTranscript = async (
     attachmentId: string,
-    store: Pick<AudioTranscriptStore, "read" | "readInherited"> = defaultStore()
-): Promise<AudioTranscriptOutcome | null> =>
-    (await store.read(attachmentId).catch(() => null)) ??
-    (await store.readInherited(attachmentId).catch(() => null));
+    store: Pick<AudioTranscriptStore, "resolveKey" | "read"> = defaultStore()
+): Promise<AudioTranscriptOutcome | null> => {
+    const stored = await store
+        .resolveKey(attachmentId)
+        .then((key) => store.read(key))
+        .catch(() => null);
+    return stored === "newer_version" ? null : stored;
+};
 
 /** Retryable, and nothing was paid: another request has, or will. */
 const transcriptionBusy = () =>
@@ -363,11 +367,15 @@ const noSpeech = () =>
  * its claim and by no other.
  *
  * Several models answering one message are several requests; the first to
- * claim the attachment (`claimAttachmentTextCache`, one statement) books,
+ * claim the recording (`claimAttachmentTextCache`, one statement) books,
  * transcribes and stores the result, and the rest wait for it and read it.
- * A request that cannot take the claim -- the store failed, or the wait ran
- * out -- never pays: it ends in a retryable refusal (the message being
- * answered fails with it, an earlier one leaves the file out).
+ * The recording's key is its topmost original's row (`resolveRecordingRoot`),
+ * so a resent or edited copy shares the original's claim and result. Before
+ * the claim nothing is paid for, and anything that cannot be answered ends in
+ * a retryable refusal rather than a call: the key or the stored result cannot
+ * be read, a newer instance's result is there, the claim cannot be written,
+ * or the wait ran out (the message being answered fails with it, an earlier
+ * one leaves the file out).
  *
  * One rule decides whether the claim is given back (review
  * r-20261127-122037-b72ce5): only when nothing can have been paid for.
@@ -405,7 +413,7 @@ export const transcribeAudioAttachmentOnce = async (
     deps: { store?: AudioTranscriptStore; transcription?: AudioTranscriptionDeps } = {}
 ): Promise<CachedAttachmentText[]> => {
     const store = deps.store ?? defaultStore();
-    const { attachmentId, signal, ...transcription } = input;
+    const { signal, ...transcription } = input;
     const token = randomUUID();
     const giveUpAt =
         store.now() + AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000 + 2 * AUDIO_TRANSCRIPT_CLAIM_POLL_MS;
@@ -416,21 +424,25 @@ export const transcribeAudioAttachmentOnce = async (
         }
         report({ outcome: "transcript_store_failed", traceId: input.traceId });
     };
-    for (let first = true; ; first = false) {
+    /** A read in front of the paid call that fails stops the call: it is not a miss. */
+    const beforeAnyCall = async <T>(read: () => Promise<T>, outcome: string): Promise<T> => {
+        try {
+            return await read();
+        } catch {
+            report({ outcome, traceId: input.traceId });
+            throw transcriptionBusy();
+        }
+    };
+    // One recording, one key: a copy (a resend, an edit) claims, reads and
+    // stores on its topmost original, so the two share one claim and one result.
+    const attachmentId = await beforeAnyCall(() => store.resolveKey(input.attachmentId), "key_unavailable");
+    for (;;) {
         signal?.throwIfAborted();
-        let stored = await store.read(attachmentId).catch(() => null);
-        if (!stored && first) {
-            // A copy of a recording already paid for (a resend, an edit) takes
-            // its original's result instead of paying again, and stores it on
-            // this row so the next turn finds it directly.
-            stored = await store.readInherited(attachmentId).catch(() => null);
-            if (stored) {
-                const outcome = stored;
-                await (outcome === "no_text"
-                    ? store.writeNoText(attachmentId)
-                    : store.write(attachmentId, outcome)
-                ).catch(() => false);
-            }
+        const stored = await beforeAnyCall(() => store.read(attachmentId), "read_unavailable");
+        if (stored === "newer_version") {
+            // Written by a newer instance: neither read nor replaced here.
+            report({ outcome: "newer_result_version", traceId: input.traceId });
+            throw transcriptionBusy();
         }
         if (stored === "no_text") throw noSpeech();
         if (stored) return stored;

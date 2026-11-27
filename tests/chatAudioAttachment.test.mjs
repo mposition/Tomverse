@@ -466,11 +466,13 @@ const memoryStore = (overrides = {}) => {
   let clock = 0;
   const store = {
     rows,
+    // Copies (a resend, an edit) are keyed on their original, here "att-1".
+    resolveKey: async (id) => (id.startsWith("copy-") ? "att-1" : id),
     read: async (id) => {
       const row = rows.get(id);
+      if (row?.newer) return "newer_version";
       return row?.noText ? "no_text" : (row?.entries ?? null);
     },
-    readInherited: async () => null,
     // As the SQL does: a missing row or a stale claim is taken, nothing else.
     claim: async (id, token, staleSeconds) => {
       const row = rows.get(id);
@@ -768,19 +770,61 @@ test("the audio result version sits in its own band, far from the extractor's", 
   assert.equal(isCurrentAttachmentTextVersion(ATTACHMENT_TEXT_CLAIM_VERSION), false);
 });
 
-test("a copy of a recording already paid for takes its original's result and pays nothing", async () => {
-  const transcript = [{ kind: AUDIO_TRANSCRIPT_KIND, text: "From the original." }];
-  for (const inherited of [transcript, "no_text"]) {
-    const store = memoryStore({ readInherited: async () => inherited });
-    const events = [];
-    const outcome = once(store, slowTranscription(events));
-    if (inherited === "no_text") {
-      await assert.rejects(outcome, (error) => error.code === "ATTACHMENT_NO_TEXT");
-      assert.deepEqual(store.rows.get("att-1"), { noText: true }, "kept on the copy's own row");
-    } else {
-      assert.deepEqual(await outcome, transcript);
-      assert.deepEqual(store.rows.get("att-1"), { entries: transcript }, "kept on the copy's own row");
-    }
-    assert.deepEqual(events, [], "nothing booked, nothing transcribed");
+// Review r-20261127-130501-49aa96: one recording, one key. A copy claims,
+// reads and stores on its original's row, so the two share everything.
+const onceFor = (id, store, transcription) =>
+  quietly(() => transcribeAudioAttachmentOnce({ ...attachment, attachmentId: id }, { store, transcription }));
+
+test("a copy and its original asked together pay for one transcription", async () => {
+  const store = memoryStore();
+  const events = [];
+  const transcription = slowTranscription(events);
+  const [original, copy] = await Promise.all([
+    onceFor("att-1", store, transcription),
+    onceFor("copy-1", store, transcription),
+  ]);
+  assert.deepEqual(copy, original);
+  assert.equal(transcribedIn(events), 1);
+  assert.equal(events.filter(([event]) => event === "reserve").length, 1);
+  assert.equal(store.rows.has("copy-1"), false, "nothing is kept on the copy's own row");
+});
+
+test("a copy asked while its original's claim stands does not pay", async () => {
+  for (const held of ["transcribing now", "kept after an indeterminate failure"]) {
+    const store = memoryStore();
+    store.rows.set("att-1", { claim: held, at: 0 });
+    const copyEvents = [];
+    const wait = store.wait;
+    store.wait = async (ms) => {
+      if (store.now() + ms > AUDIO_TRANSCRIPT_CLAIM_STALE_SECONDS * 1000) throw new Error("stale from here on");
+      await wait(ms);
+    };
+    await assert.rejects(onceFor("copy-1", store, slowTranscription(copyEvents)), /stale from here on/);
+    assert.equal(transcribedIn(copyEvents), 0, held);
+    assert.equal(store.rows.get("att-1").claim, held, "the original's claim is untouched");
   }
+});
+
+test("a key or a stored result that cannot be read stops the call", async () => {
+  for (const override of [
+    { resolveKey: async () => { throw new Error("chain lookup failed"); } },
+    { read: async () => { throw new Error("result lookup failed"); } },
+  ]) {
+    const store = memoryStore(override);
+    const events = [];
+    await assert.rejects(once(store, slowTranscription(events)),
+      (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE" && error.status === 503);
+    assert.deepEqual(events, [], "nothing booked, nothing transcribed");
+    assert.equal(store.rows.has("att-1"), false, "no claim taken");
+  }
+});
+
+test("a result written by a newer instance is neither read nor replaced", async () => {
+  const store = memoryStore();
+  store.rows.set("att-1", { newer: true });
+  const events = [];
+  await assert.rejects(once(store, slowTranscription(events)),
+    (error) => error.code === "AUDIO_TRANSCRIPTION_UNAVAILABLE");
+  assert.deepEqual(events, []);
+  assert.deepEqual(store.rows.get("att-1"), { newer: true });
 });

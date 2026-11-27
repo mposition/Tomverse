@@ -163,9 +163,9 @@ export const ATTACHMENT_TEXT_CLAIM_VERSION = 0;
  * claim older than `staleSeconds` (its request died), and a paid result of an
  * older AUDIO_TRANSCRIPT_RESULT_VERSION (re-transcription on purpose). Every
  * other row -- a current paid result, a fresh claim, anything at an extractor
- * version -- answers false (review r-20261127-124325-a4352d: it used to take
- * over any row not at the extractor version, so bumping that version would
- * have made every paid transcript claimable).
+ * version, and a result of a *newer* audio version, which a rolled-back or
+ * not-yet-updated instance must leave alone -- answers false (reviews
+ * r-20261127-124325-a4352d, r-20261127-130501-49aa96).
  */
 export const claimAttachmentTextCache = async (
   attachmentId: string,
@@ -183,7 +183,7 @@ export const claimAttachmentTextCache = async (
       WHERE ("MessageAttachmentTextCache"."version" = ${ATTACHMENT_TEXT_CLAIM_VERSION}
              AND "MessageAttachmentTextCache"."createdAt" < CURRENT_TIMESTAMP - ${Math.max(1, Math.ceil(staleSeconds))}::int * INTERVAL '1 second')
          OR ("MessageAttachmentTextCache"."version" >= ${AUDIO_TRANSCRIPT_VERSION_BAND}
-             AND "MessageAttachmentTextCache"."version" <> ${AUDIO_TRANSCRIPT_RESULT_VERSION})
+             AND "MessageAttachmentTextCache"."version" < ${AUDIO_TRANSCRIPT_RESULT_VERSION})
     RETURNING "attachmentId"`;
   return rows.length > 0;
 };
@@ -233,33 +233,39 @@ const audioOutcome = (entries: unknown): AudioTranscriptOutcome | null => {
  * the result version whose `entries` is the object `{ "outcome": "no_text" }`
  * rather than a list, so `readAttachmentTextCache` -- and every other reader
  * -- still sees a miss, and the claim never takes it over. Only the audio
- * result version is consulted: the extractor's is not.
+ * result version is consulted: the extractor's is not. A result of a newer
+ * audio version answers "newer_version": an instance older than the row
+ * neither reads nor replaces it (review r-20261127-130501-49aa96). Errors are
+ * thrown, never read as a miss: a miss is what lets a request pay.
  */
 export const readAttachmentTranscriptOutcome = async (
   attachmentId: string
-): Promise<AudioTranscriptOutcome | null> => {
+): Promise<AudioTranscriptOutcome | "newer_version" | null> => {
   const rows = await prisma.$queryRaw<Array<{ version: number; entries: unknown }>>`
     SELECT "version", "entries" FROM "MessageAttachmentTextCache"
     WHERE "attachmentId" = ${attachmentId}`;
   const row = rows[0];
-  if (!row || row.version !== AUDIO_TRANSCRIPT_RESULT_VERSION) return null;
+  if (!row) return null;
+  if (row.version > AUDIO_TRANSCRIPT_RESULT_VERSION) return "newer_version";
+  if (row.version !== AUDIO_TRANSCRIPT_RESULT_VERSION) return null;
   return audioOutcome(row.entries);
 };
 
 /**
- * The paid result of the recording this attachment was copied from, if any.
+ * The row a recording is claimed and stored on: the topmost original this
+ * attachment was copied from, or the attachment itself.
  *
  * Resending or editing a message, and consuming a saved draft, copy each file
  * to a new object and bind it as a new row that names its original in
  * `sourceAttachmentId` (lib/messageAttachmentResend.ts). The bytes are the
- * same, so the transcript is too: the nearest ancestor's result, up to eight
- * copies back, same account, same media type and size. An ancestor that was
- * deleted took its result with it, and the copy is transcribed afresh.
+ * same, so they are one recording with one key: the chain is followed up to
+ * eight copies, same account, same media type and size, and every copy claims,
+ * reads and stores on the row at its top (review r-20261127-130501-49aa96).
+ * When an original was deleted the chain stops at the highest row still
+ * there, whose result the deletion did not touch. Errors are thrown.
  */
-export const readInheritedTranscriptOutcome = async (
-  attachmentId: string
-): Promise<AudioTranscriptOutcome | null> => {
-  const rows = await prisma.$queryRaw<Array<{ entries: unknown }>>`
+export const resolveRecordingRoot = async (attachmentId: string): Promise<string> => {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     WITH RECURSIVE "origin" AS (
       SELECT "id", "userId", "mediaType", "size" FROM "MessageAttachment" WHERE "id" = ${attachmentId}
     ), "chain" ("id", "sourceAttachmentId", "depth") AS (
@@ -272,13 +278,8 @@ export const readInheritedTranscriptOutcome = async (
       JOIN "origin" o ON a."userId" = o."userId" AND a."mediaType" = o."mediaType" AND a."size" = o."size"
       WHERE c."depth" < 8
     )
-    SELECT t."entries"
-    FROM "chain" c
-    JOIN "MessageAttachmentTextCache" t ON t."attachmentId" = c."id"
-    WHERE c."depth" > 0 AND t."version" = ${AUDIO_TRANSCRIPT_RESULT_VERSION}
-    ORDER BY c."depth"
-    LIMIT 1`;
-  return rows[0] ? audioOutcome(rows[0].entries) : null;
+    SELECT "id" FROM "chain" ORDER BY "depth" DESC LIMIT 1`;
+  return rows[0]?.id ?? attachmentId;
 };
 
 /** Stores a paid transcript at the audio result version, over whatever row was there. */
