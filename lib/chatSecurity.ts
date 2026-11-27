@@ -6387,7 +6387,7 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid guest verification token."
         );
     }
-    if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "high") {
+    if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "medium" && payload.reasoningEffort !== "high") {
         throw new ChatAccessError(400, "INVALID_REASONING_EFFORT", "Invalid reasoning effort.");
     }
 
@@ -6593,7 +6593,7 @@ export const validateChatPayload = (body: unknown) => {
         sourceUserMessageId?: string;
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
-        reasoningEffort?: "low" | "high";
+        reasoningEffort?: "low" | "medium" | "high";
         webSearchMode?: WebSearchMode;
         mcpConnectionId?: string;
         admissionToken?: string;

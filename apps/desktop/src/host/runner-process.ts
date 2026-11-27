@@ -307,7 +307,7 @@ async function executeCodexFixture(command: Extract<WorkerCommand, { type: "star
     const result = await runCodexFixture(command.fixture, { project: command.project, prompt: inputPrompt,
       mode: command.mode, clientVersion: command.clientVersion, signal: control.abort.signal, patchTool: patches?.tool,
       protectedRoots: protectedRoots(command.protectedRoot), connectionKey: command.connectionKey,
-      effort: task.effort === "low" || task.effort === "high" ? task.effort : undefined,
+      effort: task.effort === "low" || task.effort === "medium" || task.effort === "high" ? task.effort : undefined,
       verifyDestination: command.apiSource && true, verifySource: beforeTurn,
       history: command.history && { home: join(command.history.directory, "profile"), previous: previousTurn },
     }, (observation) => {

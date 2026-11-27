@@ -414,7 +414,7 @@ const DESKTOP_CHAT_TURN_FIELDS: ReadonlySet<string> = new Set(["messages", "mode
  * message ("Current location"), as on the web. A chosen plugin needs the plugins switch; the route keeps it to Chat.
  */
 export function desktopChatTurnField(key: string): boolean {
-  return DESKTOP_CHAT_TURN_FIELDS.has(key) || (key === "mcpConnectionId" && desktopPluginsEnabled());
+  return DESKTOP_CHAT_TURN_FIELDS.has(key) || (key === "mcpConnectionId" && desktopPluginsEnabled()) || (key === "promptRefinerDecision" && desktopPromptRefinerEnabled());
 }
 
 export function desktopWriteApiRoute(path: string, method: string): boolean {
@@ -431,4 +431,15 @@ export function desktopWriteApiRoute(path: string, method: string): boolean {
   if (path === DESKTOP_CHAT_CREATE || method === "DELETE") return false;
   return desktopChatWriteRoute(path, method) || (method === "POST" &&
     [DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_ROUTING, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_IMAGE_GENERATIONS].includes(path));
+}
+
+/**
+ * Desktop's use of the Prompt Refiner, Chat only. Enrollment: a Desktop turn may carry the server-held decision the
+ * Auto send preparation returned. The release authority, kill switch, budget and one-time consume stay the
+ * server's own (lib/promptRefinerChatExecutionStore.ts); this switch does not widen any of them. Desktop prepares
+ * the draft and the scope through the account settings session, so that session has to be enabled too.
+ */
+export function desktopPromptRefinerEnabled() {
+  return desktopChatWriteEnabled() && process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED === "true" &&
+    process.env.TOMVERSE_DESKTOP_PROMPT_REFINER_ENABLED === "true";
 }

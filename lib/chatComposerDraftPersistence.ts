@@ -195,12 +195,14 @@ export async function deleteChatComposerDraft(input: {
   userId: string;
   scopeKey: string;
   expectedRevision: number;
+  expectedCreatedAt?: Date;
 }) {
   const deleted = await prisma.chatComposerDraft.deleteMany({
     where: {
       userId: input.userId,
       scopeKey: input.scopeKey,
       revision: input.expectedRevision,
+      ...(input.expectedCreatedAt ? { createdAt: input.expectedCreatedAt } : {}),
     },
   });
   if (deleted.count === 1) return;

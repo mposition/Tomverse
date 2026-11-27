@@ -39,7 +39,7 @@ export function buildSearchMetadataTrailerChunk(execution: unknown): string {
  */
 export type ChatStreamTrailer = {
   searchMetadata: unknown;
-  appliedReasoningEffort?: import("@/lib/reasoningEffort").ReasoningEffort;
+  appliedReasoningEffort?: import("@/lib/reasoningEffort").AppliedReasoningEffort;
   continuationReceipt?: ContinuationReceipt;
   completion?: {
     status: ChatCompletionStatus;
@@ -150,7 +150,7 @@ export function parseChatStreamTrailer(
         }
       : {}),
     searchMetadata: projectResearchSearchMetadata(record.searchMetadata ?? null),
-    ...(record.appliedReasoningEffort === "default" || record.appliedReasoningEffort === "low" || record.appliedReasoningEffort === "high"
+    ...(record.appliedReasoningEffort === "default" || record.appliedReasoningEffort === "low" || record.appliedReasoningEffort === "medium" || record.appliedReasoningEffort === "high"
       ? { appliedReasoningEffort: record.appliedReasoningEffort } : {}),
     ...(parseContinuationReceipt(record.continuationReceipt) ? { continuationReceipt: parseContinuationReceipt(record.continuationReceipt) } : {}),
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)

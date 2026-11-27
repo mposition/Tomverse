@@ -22,7 +22,8 @@ export const chatHistorySearchInput = z.object({ query: chatSearch, product: des
 export const chatPageInput = z.object({ id: chatId, cursor: chatId.optional(), product: desktopTextProduct.optional() }).strict();
 export const chatSourceInput = z.object({ id: chatId, offset: z.number().int().nonnegative().optional() }).strict();
 export const chatRenameInput = z.object({ id: chatId, title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH) }).strict();
-export const chatEffort = z.enum(["low", "default", "high"]);
+// `medium` is a step only a server that names `desktopReasoningSteps` takes; the host refuses to send it otherwise.
+export const chatEffort = z.enum(["low", "medium", "default", "high"]);
 export const composerOptions = z.object({
   webSearchMode: z.enum(["off", "always"]).optional(),
   memoryMode: z.enum(["inherit", "on", "off"]).optional(),

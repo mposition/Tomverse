@@ -26,6 +26,7 @@ import { DesktopResearchSetup } from "./DesktopResearchSetup";
 import { BrandMark } from "./ReviewBrand";
 import { ReviewColumns, UserBubble, type ReviewLive } from "./ReviewColumns";
 import { ChatMarkdown } from "./ChatTranscript";
+import { effortLabel } from "./CodeEngine";
 import { arrangeColumns } from "../review-columns";
 import type { ImageCapability } from "../images-contract";
 
@@ -147,7 +148,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const starters = workspaceWelcomeCopy[language].starter.cards;
   const common = desktopChatCopy[language];
   const shell = desktopShellCopy[language];
-  const effortNames = { low: shell.lowEffort, default: shell.defaultEffort, high: shell.highEffort };
+  const effortNames = { low: shell.lowEffort, medium: effortLabel(language, "medium"), default: shell.defaultEffort, high: shell.highEffort };
   const [catalog, setCatalog] = useState<ChatModel[]>([]);
   const models = useMemo(() => catalog.filter(({ id }) => id !== DEEP_RESEARCH_MODEL_ID), [catalog]);
   const researchModel = deepResearch ? catalog.find(({ id }) => id === DEEP_RESEARCH_MODEL_ID) : undefined;
@@ -194,7 +195,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   let nextChosen = 0;
   const shownProviders = providerIds.map((provider) => choices.includes(provider) ? choices[nextChosen++]! : provider);
   const levels = mode === "professional" && choices.length
-    ? (["low", "high"] as const).filter((level) =>
+    ? (["low", "medium", "high"] as const).filter((level) =>
       choices.every((modelId) => eligible.find((model) => model.id === modelId)?.reasoningEfforts?.includes(level)))
     : [];
   const actualEffort = effort === "default" || levels.includes(effort) ? effort : "default";

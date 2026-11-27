@@ -128,7 +128,7 @@ export async function runCodexFixture(
   fixture: CliFixtureInput,
   input: { project: ProjectRoot; prompt: string; mode: "ask" | "plan" | "agent"; clientVersion: string; signal: AbortSignal; patchTool?: NativePatchTool;
     protectedRoots?: string[]; connectionKey?: string;
-    effort?: "low" | "high"; history?: { home: string; previous?: CodexPreviousTurn }; verifyDestination?: true; verifySource?: (signal: AbortSignal) => Promise<void> },
+    effort?: "low" | "medium" | "high"; history?: { home: string; previous?: CodexPreviousTurn }; verifyDestination?: true; verifySource?: (signal: AbortSignal) => Promise<void> },
   publish: (observation: CodexTurnObservation) => void,
   steeringReady: (steer: CodexSteer) => void,
 ): Promise<Extract<RunStatus, "completed" | "stopped" | "failed" | "unknown" | "blocked">> {
