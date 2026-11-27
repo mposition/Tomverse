@@ -66,6 +66,16 @@ const nextConfig: NextConfig = {
   // Authorization codes, state and email sign-in links must not enter dev logs.
   logging: { incomingRequests: { ignore: [/\/(?:api\/mcp\/oauth\/callback|auth\/email\/verify)(?:\?|$)/] } },
   poweredByHeader: false,
+  // The browser's own build id, for browser error reports
+  // (lib/clientErrorReporter.ts): a page left open across a deploy runs the
+  // old build while the server answers as the new one, so the server's commit
+  // cannot stand in for it. Inlined at build time; empty when no commit is
+  // known, and nothing reads it as anything but a label.
+  env: {
+    NEXT_PUBLIC_APP_VERSION:
+      process.env.NEXT_PUBLIC_APP_VERSION ||
+      (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 12),
+  },
   serverExternalPackages: ["officeparser"],
   // Workspace packages ship TypeScript source and no build output, so the app
   // that consumes them compiles them (docs/policy/shared-packages.md).
