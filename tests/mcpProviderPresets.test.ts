@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { MCP_PROVIDERS } from "@/lib/mcpProviderCatalog";
 import { MCP_PROVIDER_PRESETS, providerEnvironmentPrefix } from "@/lib/mcpProviderPresets";
-import { mcpServers } from "@/lib/mcpConnectorPolicy";
+import { mcpAuthorizationRedirect, mcpServers } from "@/lib/mcpConnectorPolicy";
 import { validateMcpEndpoint } from "@/lib/mcpConnectorClient";
 
 test("catalog entries never grant connections and disabled preview ignores preset configuration", () => {
@@ -61,15 +61,43 @@ test("Google Gmail, Calendar and Drive stay closed until the operator registers 
     assert.equal(server.oauth?.tokenUrl, "https://oauth2.googleapis.com/token");
     assert.equal(server.oauth?.registrationUrl, undefined);
     assert.equal(server.oauth?.clientSecretEnv, `${providerEnvironmentPrefix(server.id)}_CLIENT_SECRET`);
-    // Refresh tokens need offline access; the default asks only for read access.
-    assert.ok(server.oauth?.scope.split(" ").includes("offline_access"), server.id);
-    assert.ok(server.oauth?.scope.split(" ").every(scope => scope === "offline_access" || /readonly$/.test(scope)), server.id);
-    assert.ok(server.oauth?.selectableScopes?.includes("offline_access"), server.id);
+    // The default asks only for read access. Offline access is Google's
+    // access_type=offline request parameter, not a scope: Google's OAuth
+    // endpoints document no `offline_access` scope.
+    assert.ok(server.oauth?.scope.split(" ").every(scope => /^https:\/\/www\.googleapis\.com\/auth\/[a-z.]+readonly$/.test(scope)), server.id);
+    assert.equal(server.oauth?.selectableScopes?.includes("offline_access"), false, server.id);
+    assert.deepEqual(server.oauth?.authorizationParams, { access_type: "offline", prompt: "consent" });
     assert.deepEqual(server.readTools, []);
     assert.equal(JSON.stringify(server).includes("synthetic-client-secret"), false);
   }
   // An operator scope outside Google's published list closes the provider rather than widening it.
   assert.deepEqual(mcpServers({ ...env, MCP_CONNECTOR_PROVIDERS: "gmail", MCP_PROVIDER_GMAIL_SCOPE: "https://mail.google.com/" }), []);
+  assert.deepEqual(mcpServers({ ...env, MCP_CONNECTOR_PROVIDERS: "gmail", MCP_PROVIDER_GMAIL_SCOPE: "offline_access" }), []);
+});
+
+test("only the Google profiles carry extra authorization parameters; every other request is the SDK's URL byte for byte", () => {
+  const withParams = MCP_PROVIDER_PRESETS.filter(profile => "oauth" in profile && profile.oauth && "authorizationParams" in profile.oauth);
+  assert.deepEqual(withParams.map(profile => profile.id).sort(), ["gmail", "google-calendar", "google-drive"]);
+  for (const profile of MCP_PROVIDER_PRESETS.filter(p => p.auth === "oauth" && !["gmail", "google-calendar", "google-drive"].includes(p.id))) {
+    const prefix = providerEnvironmentPrefix(profile.id);
+    const env: Record<string, string> = { MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: profile.id,
+      [`${prefix}_CLIENT_ID`]: "synthetic-client", [`${prefix}_CLIENT_SECRET`]: "synthetic-client-secret" };
+    if ("oauth" in profile && profile.oauth?.scopeRequired) env[`${prefix}_SCOPE`] = profile.oauth.allowedScopes[0];
+    if ("oauth" in profile && !profile.oauth?.scope && !env[`${prefix}_SCOPE`]) env[`${prefix}_TOKEN_SCOPE`] = profile.oauth?.allowedScopes[0] ?? "x";
+    for (const server of mcpServers(env)) {
+      // Absent, not undefined-valued: the connection policy digest is a JSON hash.
+      assert.equal("authorizationParams" in (server.oauth ?? {}), false, profile.id);
+    }
+  }
+  const sdkUrl = new URL("https://mcp.linear.app/authorize?response_type=code&client_id=a%20b&code_challenge=x-_~&code_challenge_method=S256&redirect_uri=https%3A%2F%2Ftomverse.app%2Fapi%2Fmcp%2Foauth%2Fcallback&state=s&scope=read+write&resource=https%3A%2F%2Fmcp.linear.app%2Fmcp");
+  assert.equal(mcpAuthorizationRedirect(sdkUrl, undefined), sdkUrl.href);
+  const google = new URL(mcpAuthorizationRedirect(
+    new URL("https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=c&state=s&prompt=consent"),
+    { access_type: "offline", prompt: "consent" }
+  ));
+  assert.equal(google.searchParams.get("access_type"), "offline");
+  assert.deepEqual(google.searchParams.getAll("prompt"), ["consent"]);
+  assert.equal(google.searchParams.get("client_id"), "c");
 });
 
 test("static app setup and unspecified scope requirements remain closed", () => {

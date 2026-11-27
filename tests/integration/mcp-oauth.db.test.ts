@@ -27,6 +27,8 @@ async function authorize(userId: string) {
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
   assert.equal(url.searchParams.get("redirect_uri"), callback);
   assert.equal(url.searchParams.get("resource"), `http://127.0.0.1:${fixture.port}/mcp`);
+  // A profile without authorizationParams gets no Google-only parameters.
+  assert.equal(url.searchParams.has("access_type"), false); assert.equal(url.searchParams.has("prompt"), false);
   const response = await fetch(url, { redirect: "manual" }); assert.equal(response.status, 302);
   const location = new URL(response.headers.get("location")!);
   return { state: location.searchParams.get("state")!, code: location.searchParams.get("code")!, issuer: location.searchParams.get("iss")! };

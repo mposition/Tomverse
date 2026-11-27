@@ -86,9 +86,14 @@ to Google's own remote MCP servers (`gmailmcp`, `calendarmcp`, `drivemcp` on
 stays absent until the operator sets `MCP_PROVIDER_<ID>_CLIENT_ID` and
 `_CLIENT_SECRET` from a Google Cloud web OAuth client created with "Use this
 client for an AI-powered agent". `allowedScopes` is Google's published list for
-each server; the default asks for read access plus `offline_access`, which
-Google's Workspace MCP guide names as the way to receive a refresh token (the
-SDK adds `prompt=consent` with it). Gmail scopes and `drive.readonly` are
+each server and the default asks for read access only. A refresh token comes
+from the authorization-request parameters `access_type=offline` and
+`prompt=consent` (Google issues one only on a consented grant), which these
+three profiles declare in `oauth.authorizationParams`, a closed list the policy
+schema accepts; no other profile declares it, so their authorization URLs are
+the SDK's unchanged. `offline_access` is not used: Google's OAuth web-server
+and OpenID Connect documents and its discovery document name no such scope.
+Gmail scopes and `drive.readonly` are
 Google *restricted* scopes: an app used by people outside the Workspace needs
 restricted-scope verification and a security assessment before more than test
 users can connect.

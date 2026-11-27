@@ -77,15 +77,18 @@
         "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
         "tokenUrl": "https://oauth2.googleapis.com/token",
         "tokenAuthMethod": "client_secret_post",
-        "scope": "offline_access https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.readonly",
+        "scope": "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.readonly",
         "allowedScopes": [
-          "offline_access",
           "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
           "https://www.googleapis.com/auth/calendar.events.freebusy",
           "https://www.googleapis.com/auth/calendar.events.readonly",
           "https://www.googleapis.com/auth/calendar.events"
         ],
         "scopeRequired": true,
+        "authorizationParams": {
+          "access_type": "offline",
+          "prompt": "consent"
+        },
         "metadataUrl": "https://accounts.google.com/.well-known/openid-configuration"
       },
       "source": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-calendar"
@@ -101,14 +104,17 @@
         "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
         "tokenUrl": "https://oauth2.googleapis.com/token",
         "tokenAuthMethod": "client_secret_post",
-        "scope": "offline_access https://www.googleapis.com/auth/gmail.readonly",
+        "scope": "https://www.googleapis.com/auth/gmail.readonly",
         "allowedScopes": [
-          "offline_access",
           "https://www.googleapis.com/auth/gmail.readonly",
           "https://www.googleapis.com/auth/gmail.compose",
           "https://www.googleapis.com/auth/gmail.modify"
         ],
         "scopeRequired": true,
+        "authorizationParams": {
+          "access_type": "offline",
+          "prompt": "consent"
+        },
         "metadataUrl": "https://accounts.google.com/.well-known/openid-configuration"
       },
       "source": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/gmail"
@@ -295,13 +301,16 @@
         "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
         "tokenUrl": "https://oauth2.googleapis.com/token",
         "tokenAuthMethod": "client_secret_post",
-        "scope": "offline_access https://www.googleapis.com/auth/drive.readonly",
+        "scope": "https://www.googleapis.com/auth/drive.readonly",
         "allowedScopes": [
-          "offline_access",
           "https://www.googleapis.com/auth/drive.readonly",
           "https://www.googleapis.com/auth/drive.file"
         ],
         "scopeRequired": true,
+        "authorizationParams": {
+          "access_type": "offline",
+          "prompt": "consent"
+        },
         "metadataUrl": "https://accounts.google.com/.well-known/openid-configuration"
       },
       "source": "https://github.com/openai/plugins/tree/0722921d5542fc593105c27bd52630babd8b8c2a/plugins/google-drive"
