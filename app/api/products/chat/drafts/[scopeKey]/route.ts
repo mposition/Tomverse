@@ -220,6 +220,7 @@ export async function DELETE(request: Request, { params }: Params) {
         userId: scope.userId,
         scopeKey: scope.scopeKey,
         expectedRevision: body.expectedRevision,
+        ...(body.expectedCreatedAt ? { expectedCreatedAt: new Date(body.expectedCreatedAt) } : {}),
       });
     } catch (error) {
       if (error instanceof ChatDraftRevisionConflictError) {

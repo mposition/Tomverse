@@ -64,7 +64,7 @@ test("an Auto turn writes its draft, takes a scope, prepares, and hands back the
   await attempt.finish();
   assert.deepEqual(fake.calls.slice(3).map(({ method, path, body }) => ({ method, path, body })), [
     { method: "GET", path: draftPath, body: undefined },
-    { method: "DELETE", path: draftPath, body: { expectedRevision: 1 } },
+    { method: "DELETE", path: draftPath, body: { expectedRevision: 1, expectedCreatedAt: createdAt } },
   ]);
   await attempt.finish();
   assert.equal(fake.calls.filter(({ method }) => method === "DELETE").length, 1, "the draft is removed once");
@@ -133,6 +133,8 @@ test("a draft whose write was answered but not readable is still found and remov
   assert.deepEqual(methods(unreadable.calls), ["PUT"], "no scope and no paid call without a revision to name");
   await attempt.finish();
   assert.deepEqual(methods(unreadable.calls), ["PUT", "GET", "DELETE"]);
+  // With no creation time from the write, the one just read is the one the delete is bound to.
+  assert.deepEqual(unreadable.calls.at(-1)?.body, { expectedRevision: 1, expectedCreatedAt: createdAt });
 });
 
 test("a transport failure is the typed original, and a stop ends the turn after removing the draft", async () => {

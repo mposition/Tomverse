@@ -28,6 +28,7 @@ let receiptResult: Record<string, unknown> = {
   attachments: [],
 };
 let receiptInput: Record<string, unknown> | null = null;
+let deleteInput: Record<string, unknown> | null = null;
 let receiptConversation: {
   userId: string;
   password: string | null;
@@ -127,7 +128,7 @@ mock.module(mod("lib/chatComposerDraftPersistence.ts"), {
       if (draft.expectedRevision === 99) throw new DraftConflict(4);
       return writtenDraftRow ?? draftRow;
     },
-    deleteChatComposerDraft: async () => undefined,
+    deleteChatComposerDraft: async (input: Record<string, unknown>) => { deleteInput = input; },
   },
 });
 mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
@@ -208,6 +209,7 @@ test.beforeEach(() => {
   hydratedDraftRow = null;
   receiptResult = { outcome: "unchanged", attachments: [] };
   receiptInput = null;
+  deleteInput = null;
   receiptConversation = {
     userId: "user_1", password: null, kind: "chat", productKey: "chat",
   };
@@ -403,6 +405,29 @@ test("draft GET turns a dangling attachment into an explicit recoverable conflic
   assert.equal(body.currentDraft.text, "Keep the recoverable text.");
   assert.deepEqual(body.currentDraft.attachmentReferences, []);
   assert.deepEqual(body.currentDraft.attachments, []);
+});
+
+test("a draft delete may name the creation time it read, so only that draft is removed", async () => {
+  const { draftRoute } = await loadRoutes();
+  const remove = (body: unknown) => draftRoute.DELETE(request("/api/products/chat/drafts/conversation_1", "DELETE", body), {
+    params: Promise.resolve({ scopeKey: "conversation_1" }),
+  });
+  const createdAt = "2026-11-27T00:00:00.123Z";
+  assert.equal((await remove({ expectedRevision: 1, expectedCreatedAt: createdAt })).status, 204);
+  assert.equal(deleteInput?.expectedRevision, 1);
+  assert.deepEqual(deleteInput?.expectedCreatedAt, new Date(createdAt));
+  // Without it the delete is by revision alone, as before.
+  deleteInput = null;
+  assert.equal((await remove({ expectedRevision: 2 })).status, 204);
+  assert.equal(deleteInput?.expectedRevision, 2);
+  assert.equal("expectedCreatedAt" in (deleteInput ?? {}), false);
+  // A malformed time, or any other field, is refused before anything is removed.
+  deleteInput = null;
+  for (const body of [{ expectedRevision: 1, expectedCreatedAt: "yesterday" }, { expectedRevision: 1, expectedCreatedAt: 5 },
+    { expectedRevision: 1, expectedUpdatedAt: createdAt }]) {
+    assert.equal((await remove(body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal(deleteInput, null);
 });
 
 test("an access refusal remains no-store", async () => {

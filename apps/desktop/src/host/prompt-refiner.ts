@@ -71,7 +71,9 @@ export async function prepareRefinedTurn(settings: Sender, input: { conversation
       if (!current?.success || !current.data.draft) return;
       const { revision, text, createdAt: created } = current.data.draft;
       if (text !== input.prompt || (createdAt !== undefined && created !== createdAt)) return;
-      const response = await call(draftPath, "DELETE", { expectedRevision: revision }, STEP_TIMEOUT_MS);
+      // The delete names the draft that was read, so it applies only to that one: a draft another client started in between,
+      // also at revision 1, is left alone by the server in the same statement.
+      const response = await call(draftPath, "DELETE", { expectedRevision: revision, expectedCreatedAt: created }, STEP_TIMEOUT_MS);
       await response.body?.cancel().catch(() => {});
     } catch { /* A draft left behind only restores the text that was sent, and the next write reports it as a conflict. */ }
   };
