@@ -439,8 +439,10 @@ export type ImageAssetMaintenanceResult = {
  * (same contract as drainNotificationDeliveriesQuietly). Alongside the R2
  * tombstone sweep, this is the recovery for generations whose executor died:
  * one that never started is re-driven through `scheduleRedrive` (the route
- * passes `after`), one that had started is refunded. The claims inside the
- * service make both race-safe against a worker that is merely slow. It also
+ * passes `after`) while IMAGE_PENDING_REDRIVE_ENABLED is `on` and refunded
+ * while it is off (the default), one that had started is refunded. The claims
+ * inside the service make both race-safe against a worker that is merely
+ * slow. It also
  * returns the user credits of a reservation whose generation went with a
  * deleted conversation, which no generation-led path can reach.
  */

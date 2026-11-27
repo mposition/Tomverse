@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { after, beforeEach, test } from "node:test";
+import { after, beforeEach, test, type TestContext } from "node:test";
 
 import {
   isImageGenerationEnabled,
@@ -1797,6 +1797,17 @@ const capturedRedrives = () => {
   };
 };
 
+/** Sets IMAGE_PENDING_REDRIVE_ENABLED for the rest of one test. */
+const switchPendingRedrive = (t: TestContext, value: string | undefined) => {
+  const prior = process.env.IMAGE_PENDING_REDRIVE_ENABLED;
+  if (value === undefined) delete process.env.IMAGE_PENDING_REDRIVE_ENABLED;
+  else process.env.IMAGE_PENDING_REDRIVE_ENABLED = value;
+  t.after(() => {
+    if (prior === undefined) delete process.env.IMAGE_PENDING_REDRIVE_ENABLED;
+    else process.env.IMAGE_PENDING_REDRIVE_ENABLED = prior;
+  });
+};
+
 /** Provider calls answered while `run` ran; call it inside the stand-ins. */
 const countingProviderCalls = async (run: () => Promise<unknown>) => {
   const answer = globalThis.fetch;
@@ -1834,7 +1845,8 @@ const openAiBudgetHeld = async () =>
     )?.count ?? 0
   );
 
-test("a pending generation whose executor died is re-driven once and settles instead of refunding", async () => {
+test("a pending generation whose executor died is re-driven once and settles instead of refunding", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const user = await createUser();
   const result = await requestImageGeneration(requestInput(user.id));
@@ -1877,7 +1889,8 @@ test("a pending generation whose executor died is re-driven once and settles ins
   assert.equal(later.refunded, 0);
 });
 
-test("a slow executor racing the re-drive leaves one provider call and one settlement", async () => {
+test("a slow executor racing the re-drive leaves one provider call and one settlement", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const user = await createUser();
   const result = await requestImageGeneration(requestInput(user.id));
@@ -1906,7 +1919,8 @@ test("a slow executor racing the re-drive leaves one provider call and one settl
   );
 });
 
-test("a processing generation is refunded on the stale window and never re-driven", async () => {
+test("a processing generation is refunded on the stale window and never re-driven", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const user = await createUser();
   const result = await requestImageGeneration(requestInput(user.id));
@@ -1938,7 +1952,8 @@ test("a processing generation is refunded on the stale window and never re-drive
   assert.equal(await openAiBudgetHeld(), 11_000);
 });
 
-test("a target queued behind a live sibling is left to its own executor", async () => {
+test("a target queued behind a live sibling is left to its own executor", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const user = await createUser();
   const result = await requestImageGeneration(
@@ -1968,7 +1983,8 @@ test("a target queued behind a live sibling is left to its own executor", async 
   assert.ok((await imageReservation(queued.generationId)).reconciledAt);
 });
 
-test("a re-drive that never claimed its row is refunded a stale window after it was scheduled", async () => {
+test("a re-drive that never claimed its row is refunded a stale window after it was scheduled", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const user = await createUser();
   const result = await requestImageGeneration(requestInput(user.id));
@@ -2003,7 +2019,8 @@ test("a re-drive that never claimed its row is refunded a stale window after it 
   assert.equal((await imageReservation(result.generationId)).outcome, "failed");
 });
 
-test("a pending generation past the re-drive age is refunded, not run", async () => {
+test("a pending generation past the re-drive age is refunded, not run", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const user = await createUser();
   const result = await requestImageGeneration(requestInput(user.id));
@@ -2017,7 +2034,8 @@ test("a pending generation past the re-drive age is refunded, not run", async ()
   assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
 });
 
-test("one sweep re-drives at most its batch and leaves the rest unmarked for the next", async () => {
+test("one sweep re-drives at most its batch and leaves the rest unmarked for the next", async (t) => {
+  switchPendingRedrive(t, "on");
   await enableImageGeneration();
   const generationIds: string[] = [];
   for (let index = 0; index <= IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP; index += 1) {
@@ -2039,6 +2057,78 @@ test("one sweep re-drives at most its batch and leaves the rest unmarked for the
   const second = await reconcileStaleImageGenerations(minutesLater(6), 25, redrive.options);
   assert.equal(second.redriven, 1);
   assert.equal(redrive.runs.length, 2);
+});
+
+test("the re-drive switch: off refunds a stale pending generation as before, on re-drives it", async (t) => {
+  // Off is the default: absent, and any value that is not exactly "on".
+  switchPendingRedrive(t, undefined);
+  await enableImageGeneration();
+  for (const value of [undefined, "true"]) {
+    if (value === undefined) delete process.env.IMAGE_PENDING_REDRIVE_ENABLED;
+    else process.env.IMAGE_PENDING_REDRIVE_ENABLED = value;
+    const user = await createUser();
+    const result = await requestImageGeneration(requestInput(user.id));
+    // The maintenance route always hands a scheduler over; off, it goes unused.
+    const redrive = capturedRedrives();
+
+    const early = await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+    assert.deepEqual(
+      { redriven: early.redriven, refunded: early.refunded, runs: redrive.runs.length },
+      { redriven: 0, refunded: 0, runs: 0 }
+    );
+    assert.equal((await imageReservation(result.generationId)).reconciledAt, null);
+
+    const sweep = await reconcileStaleImageGenerations(minutesLater(13), 25, redrive.options);
+    assert.equal(sweep.redriven, 0);
+    assert.equal(sweep.refunded, 1);
+    assert.equal(redrive.runs.length, 0);
+    const generation = await prisma.imageGeneration.findUniqueOrThrow({
+      where: { id: result.generationId },
+    });
+    assert.equal(generation.failurePhase, "stale_job_reconciled");
+    const reservation = await imageReservation(result.generationId);
+    assert.equal(reservation.outcome, "failed");
+    assert.equal(reservation.reconciledAt, null);
+    assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
+  }
+
+  process.env.IMAGE_PENDING_REDRIVE_ENABLED = "on";
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  const redrive = capturedRedrives();
+  const sweep = await reconcileStaleImageGenerations(minutesLater(5), 25, redrive.options);
+  assert.equal(sweep.redriven, 1);
+  assert.equal(sweep.refunded, 0);
+  assert.equal(redrive.runs.length, 1);
+  assert.ok((await imageReservation(result.generationId)).reconciledAt);
+  const calls = await withImageExecutionStandIns(() =>
+    countingProviderCalls(() => redrive.runs[0]())
+  );
+  assert.equal(calls, 1);
+  assert.equal((await imageReservation(result.generationId)).outcome, "completed");
+});
+
+test("a row marked while the switch was on is refunded on the stale window once it is off", async (t) => {
+  switchPendingRedrive(t, "on");
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+  // Marked and scheduled, then the run never happens and the switch goes off.
+  const lost = capturedRedrives();
+  assert.equal(
+    (await reconcileStaleImageGenerations(minutesLater(5), 25, lost.options)).redriven,
+    1
+  );
+  process.env.IMAGE_PENDING_REDRIVE_ENABLED = "off";
+
+  // Switched on, a mark this recent would be left for its re-drive; off, the
+  // row is an ordinary stale pending one and is refunded, so nothing is left
+  // that neither arm will take.
+  const sweep = await reconcileStaleImageGenerations(minutesLater(13), 25, lost.options);
+  assert.equal(sweep.redriven, 0);
+  assert.equal(sweep.refunded, 1);
+  assert.equal((await imageReservation(result.generationId)).outcome, "failed");
+  assert.equal(await monthlyPlanCreditsUsed(user.id), 0);
 });
 
 /* ------------------------------------------------------------------------- */

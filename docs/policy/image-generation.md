@@ -273,9 +273,10 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   claim이 조건부라서 15분 reconciliation sweep이나 미래의 전용 worker
   서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
   Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
-  실행은 정확히 stale 케이스다. 아직 claim되지 않은 `pending` 행은 sweep이
-  한 번 재구동하고, 이미 시작된 `processing` 행은 `failed` 처리 후 전액
-  환급한다(아래 "`pending` 재구동").
+  실행은 정확히 stale 케이스다. 아직 claim되지 않은 `pending` 행은 재구동
+  스위치가 켜져 있으면 sweep이 한 번 재구동하고 꺼져 있으면(기본) 환급한다.
+  이미 시작된 `processing` 행은 `failed` 처리 후 전액 환급한다(아래
+  "`pending` 재구동").
 - **`after()`의 실행 시간은 그 route의 max duration이다**(Next `after`
   레퍼런스). proxy timeout이 아니라 이쪽이 실제 제약이므로 실행자를
   구동하는 route는 예산을 명시한다. 값은
@@ -283,7 +284,8 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   backoff·그룹 상한·provider job 하한에서 유도한다
   (`lib/imageGenerationStateCore.ts`). 잘린 실행자는 지연이 아니다 —
   실행 중이던 시도는 `processing`에 남고 sweep은 그것을 환급만 하므로 그
-  요청은 사라진다(시작하지 못한 target은 `pending`으로 남아 재구동된다).
+  요청은 사라진다(시작하지 못한 target은 `pending`으로 남아, 재구동
+  스위치가 켜져 있으면 재구동되고 꺼져 있으면 환급된다).
   stale 임계값이 한 시도의 최악 소요보다 크다는 조건과 함께
   `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
 - 배포·프로세스 종료로 실행 도중 멈춘(`processing`) stale 작업은
@@ -293,6 +295,13 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **`pending` 재구동**: claim되지 않은 `pending` 행은 provider가 호출되지
   않은 것이 확실하므로(claim이 호출보다 먼저다) 15분 sweep이 환급 대신
   한 번 실행한다. 사용자는 요청을 잃지 않는다.
+  - **스위치: `IMAGE_PENDING_REDRIVE_ENABLED`, 기본 꺼짐.** 값이 정확히
+    `on`일 때만 돈다(`imagePendingRedriveEnabled`). 재구동은 sweep이 스스로
+    유료 provider 호출을 시작하는 동작이므로 배포만으로 켜지지 않고, 켜는
+    시점은 운영자가 정한다. 꺼져 있으면 sweep은 이 기능 이전과 같다 —
+    `reconciledAt`을 표시하지 않고, stale 창(12분)이 지난 `pending` 행을
+    모두 환급한다. 켰다가 끄면 표시만 되고 claim되지 않은 행도 같은 12분
+    규칙으로 환급되므로, 환급도 재구동도 되지 않고 남는 행은 없다.
   - 대상: `IMAGE_PENDING_REDRIVE_AFTER_MS`(2분) 넘게 claim되지 않았고
     `IMAGE_PENDING_REDRIVE_MAX_AGE_MS`(1시간)보다 젊으며, 같은 그룹에
     살아 있는(stale 창 안의) `processing`·`settling` 시도가 없고, 예약이
@@ -316,8 +325,9 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
     시작하지 못한 행은 재구동이 이미 소진됐으므로 표시 시각부터 stale
     창(12분)이 지나면 환급된다. 어느 쪽도 다시 실행되지 않는다.
   - 환급으로 넘어가는 `pending` 행: 표시 후 stale 창 동안 claim되지 않은
-    행, 1시간보다 오래된 행, `reserved` 예약이 없는 행, 그리고 재구동을
-    실행할 수 없는 호출자(scheduler 없음)의 sweep. 1시간 상한은 예약 때의
+    행, 1시간보다 오래된 행, `reserved` 예약이 없는 행, 그리고 스위치가
+    꺼졌거나 재구동을 실행할 수 없는 호출자(scheduler 없음)의 sweep에서는
+    stale 창이 지난 모든 `pending` 행. 1시간 상한은 예약 때의
     일·월 provider budget 창에 잡힌 지출이 나중에 실제로 나가는 양을
     제한하고, 너무 늦은 결과로 사용자를 놀라게 하지 않기 위해서다.
 - 동시 실행은 entitlement·guardrail과 별개인 concurrency 층이며 v2에서

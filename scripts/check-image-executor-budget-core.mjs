@@ -15,10 +15,13 @@
 //    mid-group. That is not a delay: the attempt it was running stays
 //    `processing`, which the sweep can only refund, so that request is lost
 //    and its owner waits out the stale window. (Targets it had not started
-//    stay `pending` and are re-driven once by the sweep.)
+//    stay `pending` and are re-driven once by the sweep while
+//    IMAGE_PENDING_REDRIVE_ENABLED is `on`; off, the default, they are
+//    refunded too.)
 //
 // The maintenance route re-drives pending generations from its own `after()`
-// on a smaller budget, and is deliberately not listed below: it runs a bounded
+// on a smaller budget when that switch is on, and is deliberately not listed
+// below: it runs a bounded
 // batch, and what its cut-off does is defined next to
 // IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP rather than avoided.
 //

@@ -156,8 +156,10 @@ export async function POST(request: Request) {
     // died). It never throws, so it cannot turn a successful reconciliation
     // into a failed one.
     //
-    // A generation whose executor died before claiming it is re-driven from
-    // `after()`, so its provider call never holds up this response. It runs on
+    // While IMAGE_PENDING_REDRIVE_ENABLED is `on` (off by default; the service
+    // reads it, so this hand-over alone starts nothing), a generation whose
+    // executor died before claiming it is re-driven from `after()`, so its
+    // provider call never holds up this response. It runs on
     // this route's maxDuration, not the 968s an image route states; the batch
     // is bounded (IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP) and an attempt the
     // budget cuts off is refunded by a later sweep, never run twice.

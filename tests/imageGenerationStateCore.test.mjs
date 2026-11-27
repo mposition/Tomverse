@@ -10,8 +10,10 @@ import {
   IMAGE_GENERATION_FAILURE_PHASES,
   IMAGE_GENERATION_STATUSES,
   IMAGE_PENDING_REDRIVE_AFTER_MS,
+  IMAGE_PENDING_REDRIVE_FLAG,
   IMAGE_PENDING_REDRIVE_MAX_AGE_MS,
   IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP,
+  imagePendingRedriveEnabled,
   STALE_IMAGE_GENERATION_AFTER_MS,
   STALE_IMAGE_SETTLING_AFTER_MS,
   canTransitionImageGenerationStatus,
@@ -94,6 +96,20 @@ test("every abandoned pending row meets at least one sweep that can re-drive it"
   assert.ok(IMAGE_PENDING_REDRIVE_AFTER_MS < STALE_IMAGE_GENERATION_AFTER_MS);
   // A group at the fan-out ceiling fits in one sweep's batch.
   assert.ok(IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP >= IMAGE_GROUP_MAX_MODELS_BOUNDS.max);
+});
+
+test("the pending re-drive is off unless its switch says exactly on", () => {
+  // It starts paid provider calls on its own, so a deploy must not turn it on.
+  assert.equal(IMAGE_PENDING_REDRIVE_FLAG, "IMAGE_PENDING_REDRIVE_ENABLED");
+  assert.equal(imagePendingRedriveEnabled({}), false);
+  for (const value of ["", "off", "true", "1", "ON", " on"]) {
+    assert.equal(
+      imagePendingRedriveEnabled({ [IMAGE_PENDING_REDRIVE_FLAG]: value }),
+      false,
+      `"${value}" must not switch the re-drive on`
+    );
+  }
+  assert.equal(imagePendingRedriveEnabled({ [IMAGE_PENDING_REDRIVE_FLAG]: "on" }), true);
 });
 
 test("group status derives from current attempts only (policy section 11)", () => {

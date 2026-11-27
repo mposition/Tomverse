@@ -82,6 +82,7 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   imageAssetR2Key,
+  imagePendingRedriveEnabled,
   IMAGE_PENDING_REDRIVE_AFTER_MS,
   IMAGE_PENDING_REDRIVE_MAX_AGE_MS,
   IMAGE_PENDING_REDRIVE_MAX_PER_SWEEP,
@@ -2059,9 +2060,11 @@ export const processImageGeneration = async (
 export type ImageStaleRecoveryOptions = {
   /**
    * Runs the re-driven attempts once the sweep has answered, inside the
-   * caller's own budget -- the maintenance route passes `after`. Absent,
-   * nothing is re-driven and a pending row is refunded on the stale window as
-   * before: a caller that cannot run the work must not leave it waiting.
+   * caller's own budget -- the maintenance route passes `after`. Used only
+   * while IMAGE_PENDING_REDRIVE_ENABLED is `on`. Absent or switched off,
+   * nothing is re-driven or marked and a pending row is refunded on the stale
+   * window as before: a sweep that will not run the work must not leave it
+   * waiting.
    */
   scheduleRedrive?: (run: () => Promise<void>) => void;
 };
@@ -2200,7 +2203,10 @@ const pendingRowsNoRedriveWillTake = async (
  * The stale recovery promised in PR 2, in two arms.
  *
  * Re-drive (redrivePendingImageGenerations above): a `pending` row is run
- * once instead of refunded, when the caller can schedule it.
+ * once instead of refunded, when IMAGE_PENDING_REDRIVE_ENABLED is `on` (off by
+ * default) and the caller can schedule it. Otherwise this is the sweep from
+ * before the re-drive: nothing is marked and every stale pending row is
+ * refunded.
  *
  * Refund: a generation still in a live status past its window has lost its
  * executor. A `processing` or `settling` one may already have reached the
@@ -2225,14 +2231,19 @@ export const reconcileStaleImageGenerations = async (
     now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS
   );
   const redriveOldest = new Date(now.getTime() - IMAGE_PENDING_REDRIVE_MAX_AGE_MS);
+  // Read once per sweep, so both arms below see the same answer: switched off,
+  // neither the re-drive nor the refund arm's pending filter runs.
+  const scheduleRedrive = imagePendingRedriveEnabled()
+    ? options.scheduleRedrive
+    : undefined;
   // First, so a row it marks now is one the refund arm below leaves alone.
-  const redriven = options.scheduleRedrive
+  const redriven = scheduleRedrive
     ? await redrivePendingImageGenerations(
         now,
         limit,
         staleBefore,
         redriveOldest,
-        options.scheduleRedrive
+        scheduleRedrive
       ).catch((error) => {
         console.error("Image generation re-drive sweep failed:", {
           errorName: error instanceof Error ? error.name : "UnknownError",
@@ -2262,7 +2273,7 @@ export const reconcileStaleImageGenerations = async (
   // Unreadable means no pending row is refunded this sweep: waiting one more
   // sweep costs minutes, while refunding a row a re-drive is about to run
   // loses the request it was meant to save.
-  const refundablePending = options.scheduleRedrive
+  const refundablePending = scheduleRedrive
     ? await pendingRowsNoRedriveWillTake(
         stale.filter((generation) => generation.status === "pending"),
         staleBefore,

@@ -116,11 +116,26 @@ export const IMAGE_ATTEMPT_WORST_CASE_MS =
 // during the beta rollout), and this window plus the 15-minute sweep cadence
 // is exactly how long a user waits for the automatic refund. That wait now
 // applies to an attempt that had started (`processing`); one that had not is
-// re-driven on a much shorter window instead (IMAGE_PENDING_REDRIVE_AFTER_MS
-// below). Correctness does not depend on the value: the `settling` claim is
-// exactly-once, so a pathologically slow worker that finishes after the sweep
-// reclaimed its row simply loses the claim and discards the result.
+// re-driven on a much shorter window instead while the re-drive is switched on
+// (IMAGE_PENDING_REDRIVE_FLAG below). Correctness does not depend on the
+// value: the `settling` claim is exactly-once, so a pathologically slow worker
+// that finishes after the sweep reclaimed its row simply loses the claim and
+// discards the result.
 export const STALE_IMAGE_GENERATION_AFTER_MS = 12 * 60 * 1_000;
+
+/**
+ * The switch for the pending re-drive below. Off by default: a re-drive is the
+ * sweep starting a paid provider call on its own, so a deploy alone must not
+ * turn it on -- the operator does, with `IMAGE_PENDING_REDRIVE_ENABLED=on`.
+ * Any other value, absent included, is off, and off is exactly the sweep from
+ * before the re-drive existed: nothing is marked, and a pending row is refunded
+ * on the stale window like any other abandoned one.
+ */
+export const IMAGE_PENDING_REDRIVE_FLAG = "IMAGE_PENDING_REDRIVE_ENABLED";
+
+export const imagePendingRedriveEnabled = (
+  environment: Record<string, string | undefined> = process.env
+): boolean => environment[IMAGE_PENDING_REDRIVE_FLAG] === "on";
 
 // A `pending` row is one no executor has claimed, and the claim into
 // `processing` comes before the provider call, so its provider has provably
@@ -177,8 +192,8 @@ const IMAGE_PROVIDER_JOB_LIMIT_FLOOR = 2;
  * -- otherwise an unstated platform default decides where the executor is cut
  * off, and a cut-off executor is not a delay: the attempt it was running is
  * left `processing`, which the sweep can only refund, so that request is lost.
- * Targets it had not started are still `pending`, and the sweep re-drives
- * those once (IMAGE_PENDING_REDRIVE_AFTER_MS).
+ * Targets it had not started are still `pending`: the sweep re-drives those
+ * once while IMAGE_PENDING_REDRIVE_FLAG is on, and refunds them while it is off.
  */
 export const IMAGE_EXECUTOR_MAX_DURATION_SECONDS = Math.ceil(
   (Math.ceil(IMAGE_GROUP_MAX_MODELS_CEILING / IMAGE_PROVIDER_JOB_LIMIT_FLOOR) *
