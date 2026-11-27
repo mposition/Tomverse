@@ -362,6 +362,8 @@ const PLATFORM_CODES = new Set([
 export const SCHEDULED_TASK_CREDIT_CAP_CODE = "SCHEDULED_TASK_CREDIT_CAP_EXCEEDED";
 /** The reservation guard's answer once the person paused, edited or deleted the task mid-run. */
 export const SCHEDULED_TASK_RUN_CLOSED_CODE = "SCHEDULED_TASK_RUN_CLOSED";
+/** The reservation guard's answer once the feature switch or the kill switch stopped scheduled tasks mid-tick. */
+export const SCHEDULED_TASKS_DISABLED_CODE = "SCHEDULED_TASKS_DISABLED";
 
 export type RunClassification = {
   status: Exclude<ScheduledTaskRunStatus, "running">;
@@ -382,6 +384,8 @@ export const classifyChatRefusal = (status: number, code: unknown): RunClassific
   if (outcome === SCHEDULED_TASK_CREDIT_CAP_CODE) return { status: "skipped", outcome, pause: "cost_changed" };
   // The person took the task back; nothing was spent and nothing failed.
   if (outcome === SCHEDULED_TASK_RUN_CLOSED_CODE) return { status: "skipped", outcome: "task_changed", pause: null };
+  // The operator stopped scheduled tasks; nothing was spent, nothing failed, and the task is not paused.
+  if (outcome === SCHEDULED_TASKS_DISABLED_CODE) return { status: "skipped", outcome: "feature_disabled", pause: null };
   if (MODEL_CODES.has(outcome)) return { status: "skipped", outcome, pause: "model_unavailable" };
   if (status === 423) return { status: "skipped", outcome, pause: "conversation_locked" };
   if (PLATFORM_CODES.has(outcome)) return { status: "skipped", outcome, pause: null };

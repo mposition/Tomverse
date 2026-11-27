@@ -479,6 +479,8 @@ test("a run that would reserve more than approved is refused inside the reservat
 });
 
 test("the reservation guard is cumulative over a run and absent outside one", async () => {
+  // The guard reads the feature switch where credits are held.
+  await enable();
   const userId = await seedUser();
   const task = await seedTask(userId, { creditsPerRun: 5 });
   const runId = randomUUID();
@@ -800,4 +802,65 @@ test("the account export carries the tasks and runs, and deleting the account de
   await prisma.user.delete({ where: { id: userId } });
   assert.equal(await prisma.scheduledTask.count(), 0);
   assert.equal(await prisma.scheduledTaskRun.count(), 0);
+});
+
+test("turning scheduled tasks off while a tick runs starts nothing further and leaves the rest due", async () => {
+  await enable();
+  const taskIds: string[] = [];
+  for (let index = 0; index < 3; index += 1) taskIds.push((await seedTask(await seedUser())).id);
+  const before = await prisma.scheduledTask.findMany({ where: { id: { in: taskIds } }, select: { id: true, nextRunAt: true } });
+  // On at the start of the tick and for the first start; off from then on.
+  let asked = 0;
+  const calls: Call[] = [];
+  const result = await runScheduledTasksTick({
+    dispatch: async () => completingChat(calls),
+    enabled: async () => (asked += 1) <= 2,
+  });
+  assert.equal(result.enabled, true);
+  assert.equal(result.claimed, 1);
+  assert.equal(result.stoppedBySwitch, true);
+  assert.equal(calls.length, 1, "one run was started before the switch went off, none after");
+  assert.equal(await prisma.scheduledTaskRun.count(), 1);
+  // The two tasks that were not started keep their time: nothing was skipped for them.
+  const after = await prisma.scheduledTask.findMany({ where: { id: { in: taskIds } }, select: { id: true, nextRunAt: true } });
+  const unchanged = after.filter((task) => before.find((row) => row.id === task.id)!.nextRunAt!.getTime() === task.nextRunAt!.getTime());
+  assert.equal(unchanged.length, 2);
+});
+
+test("a run claimed before the switch went off holds no credits: the stop is read again where they are held", async () => {
+  for (const stop of ["flag", "kill_switch"] as const) {
+    await reset();
+    await enable();
+    const task = await seedTask(await seedUser());
+    const calls: Call[] = [];
+    const previousKill = process.env.SCHEDULED_TASKS_KILL_SWITCH;
+    try {
+      const result = await runScheduledTasksTick({
+        // The tick itself still believes the feature is on (it asked a moment ago).
+        enabled: async () => true,
+        dispatch: async () => async (request) => {
+          // The operator stops scheduled tasks between the claim and the reservation.
+          if (stop === "flag") {
+            await prisma.appSetting.update({ where: { key: SCHEDULED_TASKS_FLAG_KEY }, data: { value: "false" } });
+          } else {
+            process.env.SCHEDULED_TASKS_KILL_SWITCH = "1";
+          }
+          return completingChat(calls)(request);
+        },
+      });
+      assert.equal(result.claimed, 1, stop);
+    } finally {
+      if (previousKill === undefined) delete process.env.SCHEDULED_TASKS_KILL_SWITCH;
+      else process.env.SCHEDULED_TASKS_KILL_SWITCH = previousKill;
+    }
+    const run = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { taskId: task.id } });
+    assert.equal(run.status, "skipped", stop);
+    assert.equal(run.outcome, "feature_disabled", stop);
+    assert.equal(run.reservedCredits, 0, stop);
+    assert.equal(await prisma.chatResponseAttempt.count(), 0, stop);
+    // Stopped by the operator, not by the account: the task is not paused.
+    const stored = await prisma.scheduledTask.findUniqueOrThrow({ where: { id: task.id } });
+    assert.equal(stored.status, "active", stop);
+    assert.equal(stored.pauseReason, null, stop);
+  }
 });

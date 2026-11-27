@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
+import { SCHEDULED_TASKS_FLAG_KEY } from "@/lib/scheduledTaskAccess";
 import { SCHEDULED_TASK_LIMITS } from "@/lib/scheduledTaskCore";
 import { runAsScheduledTask } from "@/lib/scheduledTaskRunContext";
 
@@ -17,7 +18,14 @@ import { runAsScheduledTask } from "@/lib/scheduledTaskRunContext";
  */
 
 const ids: { userId?: string; quoteUserIds: string[] } = { quoteUserIds: [] };
+// The reservation guard reads the feature switch where credits are held.
+const setFlag = (value: string) =>
+  prisma.appSetting.upsert({ where: { key: SCHEDULED_TASKS_FLAG_KEY }, update: { value }, create: { key: SCHEDULED_TASKS_FLAG_KEY, value } });
+before(async () => {
+  await setFlag("true");
+});
 after(async () => {
+  await prisma.appSetting.deleteMany({ where: { key: SCHEDULED_TASKS_FLAG_KEY } });
   const userIds = [...(ids.userId ? [ids.userId] : []), ...ids.quoteUserIds];
   if (userIds.length) await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   await prisma.$disconnect();
@@ -273,6 +281,17 @@ test("inside a scheduled run the route leaves the account's last Chat slot free"
   } finally {
     if (previousLimit === undefined) delete process.env.CHAT_USER_CONCURRENT;
     else process.env.CHAT_USER_CONCURRENT = previousLimit;
+  }
+
+  // The operator turns scheduled tasks off after this run was claimed: the
+  // real route holds nothing for it.
+  await setFlag("false");
+  try {
+    const stopped = await attempt(0);
+    assert.equal(stopped.code, "SCHEDULED_TASKS_DISABLED");
+    assert.equal(stopped.reservedCredits, 0);
+  } finally {
+    await setFlag("true");
   }
   await prisma.chatRequestLease.deleteMany({ where: { subjectKey: access.subjectKey } });
 });

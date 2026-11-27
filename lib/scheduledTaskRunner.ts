@@ -69,6 +69,8 @@ export type ScheduledTaskTickResult = {
    * due tasks one tick looks at).
    */
   stoppedAtLimit: "claims" | "scan" | null;
+  /** The feature switch or the kill switch went off while the tick ran: nothing further was started. */
+  stoppedBySwitch: boolean;
   executed: Record<string, number>;
 };
 
@@ -663,9 +665,10 @@ export async function runScheduledTasksTick(input: {
 }): Promise<ScheduledTaskTickResult> {
   const result: ScheduledTaskTickResult = {
     enabled: false, reconciled: 0, resumed: 0, claimed: 0, skippedLate: 0, skippedTooSoon: 0, deferred: 0,
-    examined: 0, stoppedForTime: false, stoppedAtLimit: null, executed: {},
+    examined: 0, stoppedForTime: false, stoppedAtLimit: null, stoppedBySwitch: false, executed: {},
   };
-  if (!(await (input.enabled ?? isScheduledTasksEnabled)())) return result;
+  const enabled = input.enabled ?? isScheduledTasksEnabled;
+  if (!(await enabled())) return result;
   result.enabled = true;
   const deadline = input.deadline ?? Date.now() + SCHEDULED_TASK_LIMITS.tickBudgetMs;
   const startReserveMs = input.startReserveMs ?? SCHEDULED_TASK_LIMITS.runStartReserveMs;
@@ -730,6 +733,14 @@ export async function runScheduledTasksTick(input: {
     // is left stays due (or resumable) for the next tick.
     if (Date.now() + startReserveMs > deadline) {
       result.stoppedForTime = resumable.length > 0 || inPage < page.length || moreDue;
+      return null;
+    }
+    // The emergency stop, read again before every start: a tick runs for
+    // minutes, and an operator who turns scheduled tasks off must not see it
+    // start another paid turn. What is left stays due or resumable. (The
+    // reservation guard checks once more where credits are held.)
+    if (result.stoppedBySwitch || !(await enabled())) {
+      result.stoppedBySwitch = true;
       return null;
     }
     for (let candidate = resumable.shift(); candidate; candidate = resumable.shift()) {

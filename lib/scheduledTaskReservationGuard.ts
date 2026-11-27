@@ -3,7 +3,12 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { ChatAccessError } from "@/lib/chatSecurity";
-import { SCHEDULED_TASK_CREDIT_CAP_CODE, SCHEDULED_TASK_RUN_CLOSED_CODE } from "@/lib/scheduledTaskCore";
+import { SCHEDULED_TASKS_FLAG_KEY, scheduledTasksAvailable } from "@/lib/scheduledTaskAccess";
+import {
+  SCHEDULED_TASK_CREDIT_CAP_CODE,
+  SCHEDULED_TASK_RUN_CLOSED_CODE,
+  SCHEDULED_TASKS_DISABLED_CODE,
+} from "@/lib/scheduledTaskCore";
 import { currentScheduledTaskRun } from "@/lib/scheduledTaskRunContext";
 
 /**
@@ -20,6 +25,11 @@ import { currentScheduledTaskRun } from "@/lib/scheduledTaskRunContext";
  * this run has reserved; a reservation is admitted only while that total stays
  * within what the account approved for one run, and the row is bound to the
  * first reservation so the runner can read back what was really charged.
+ *
+ * The emergency stop is read here too. A tick can spend minutes on earlier
+ * runs, so the feature switch and the kill switch are checked again in this
+ * transaction, at the moment credits would be held: a run claimed before the
+ * operator turned scheduled tasks off holds nothing and calls no provider.
  *
  * Outside a scheduled run this returns undefined and the reservation is
  * exactly what it always was.
@@ -42,6 +52,11 @@ export const scheduledTaskReservationGuard = (userId: string | null | undefined)
   ) => {
     if (!userId || userId !== scope.userId) {
       throw new ChatAccessError(403, "SCHEDULED_TASK_SCOPE_MISMATCH", "This scheduled run belongs to another account.");
+    }
+    const flag = await tx.$queryRaw<Array<{ value: string }>>`
+      SELECT "value" FROM "AppSetting" WHERE "key" = ${SCHEDULED_TASKS_FLAG_KEY}`;
+    if (!scheduledTasksAvailable({ storedFlagValue: flag[0]?.value, env: process.env })) {
+      throw new ChatAccessError(503, SCHEDULED_TASKS_DISABLED_CODE, "Scheduled tasks are turned off.");
     }
     // Run row, then task row: the order finalizeRun takes them in.
     const rows = await tx.$queryRaw<Array<{ status: string; reservedCredits: number; taskId: string; taskRevision: number }>>`
