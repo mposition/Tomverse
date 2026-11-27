@@ -1182,7 +1182,7 @@ ${text}` : text;
         plan={(usage?.account === accountDraft ? usage?.plan : undefined) ?? snapshot?.capabilities?.review?.plan ?? "Free"}
         imageCapability={imageCapability} onModelImage={openImageModel}
         deepResearch={snapshot?.capabilities?.deepResearch} composerTools={snapshot?.capabilities?.composerTools} searchReadiness={snapshot?.capabilities?.searchReadiness}
-        connectors={snapshot?.capabilities?.plugins === true} onManageConnectors={() => select("plugins")}
+        connectors={snapshot?.capabilities?.chatPlugin === true} onManageConnectors={() => select("plugins")}
         onImport={openImportedConversations}
         onCompare={snapshot?.capabilities?.review ? (prompt, id) => void act(() => compareFromChat(prompt, id)) : undefined}
         starters={snapshot?.capabilities?.chatStarters} attachments={chatAttachments} online={online}
@@ -1193,6 +1193,7 @@ ${text}` : text;
           imageCapability={imageCapability} onModelImage={openImageModel}
           onFollowUp={snapshot?.capabilities?.chatWrite ? openReviewReference : undefined}
           attachments={reviewAttachments} online={online} dictation={snapshot?.deviceFixtureAvailable === true}
+          composerTools={snapshot?.capabilities?.reviewTools} deviceLocation={snapshot?.chatLocationAvailable === true}
           onImageStarter={imageCapability ? openImageStarter : undefined}
           onImages={(offer) => { images.offerImages(offer); setImagesOpen(true); }} />
         : <div className="scroll"><div className="content">

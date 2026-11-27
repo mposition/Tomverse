@@ -51,7 +51,7 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
           ok: true, account: { id: "mcp-fixture", name: "MCP fixture", email: null },
         });
         if (target.pathname === "/api/products/chat/capabilities") return Response.json({
-          autoSelection: { offered: false }, desktopPlugins: true, desktopCodeMcp: true,
+          autoSelection: { offered: false }, desktopPlugins: true, desktopChatPlugin: true, desktopCodeMcp: true,
           desktopReview: { easy: true, modelLimit: 3, plan: "Max" },
         });
         if (target.pathname === "/api/chat/voice-transcription") {

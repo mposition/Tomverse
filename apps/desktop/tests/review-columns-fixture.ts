@@ -20,8 +20,13 @@ export const columnsQuestion = "Which web framework should a small team pick for
 
 export type ColumnsState = {
   saves: Array<{ clientRequestId: string; content: string; modelId?: string }>;
-  dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string }>;
+  dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string; webSearchMode?: string; currentLocation?: unknown; contextBundle?: string }>;
   models: string[];
+  /** Every change the app saved to the Review, and the web search mode the Review holds now. */
+  updates: Array<Record<string, unknown>>;
+  webSearchMode: string;
+  /** The models a context was prepared for, in order. */
+  contexts: string[];
 };
 
 /** A saved Review with one question and three answers behind a faked server; nothing leaves this computer. */
@@ -35,8 +40,11 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
       const host = globalThis as typeof globalThis & { columns: ColumnsState };
       type ColumnsState = {
         saves: Array<{ clientRequestId: string; content: string; modelId?: string }>;
-        dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string }>;
+        dispatches: Array<{ modelId: string; sourceUserMessageId: string; transcript: string[]; admissionToken?: string; webSearchMode?: string; currentLocation?: unknown; contextBundle?: string }>;
         models: string[];
+        updates: Array<Record<string, unknown>>;
+        webSearchMode: string;
+        contexts: string[];
       };
       const table = "| Option | Best for | Cost |\n| --- | --- | --- |\n| Next.js | Full-stack apps | Hosting |\n| Vite + React | Fast client dashboards | Low |\n| SvelteKit | Small bundles | Low |";
       const answers: Record<string, string> = {
@@ -55,7 +63,7 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
       // An answer saved before answers carried their model: it has no column to go to.
       messages.push({ id: "answer-legacy", role: "assistant", content: "An older answer saved without its model.", status: "normal",
         createdAt: new Date(2_500).toISOString() });
-      host.columns = { saves: [], dispatches: [], models: fixture.models.map((model) => model.id) } satisfies ColumnsState;
+      host.columns = { saves: [], dispatches: [], models: fixture.models.map((model) => model.id), updates: [], webSearchMode: "off", contexts: [] } satisfies ColumnsState;
       const realFetch = globalThis.fetch;
       shell.openExternal = async (href) => {
         const target = new URL(href);
@@ -71,19 +79,23 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
         if (url.pathname === "/api/auth/desktop/exchange") return Response.json({ ok: true, accessToken: "fixture-access", refreshToken: "fixture-refresh", expiresIn: 600 });
         if (url.pathname === "/api/auth/desktop/session") return Response.json({ ok: true, account: { id: "columns-fixture", name: "Columns Fixture", email: "columns@example.test" } });
         if (url.pathname === "/api/products/chat/capabilities") {
-          return Response.json({ autoSelection: { offered: false }, desktopReview: { easy: true, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true });
+          return Response.json({ autoSelection: { offered: false }, desktopReview: { easy: true, modelLimit: 3, plan: "Max" }, desktopReviewAnalysis: true, desktopComposerTools: true,
+            desktopTurnLocation: true, desktopReviewContext: true, desktopReviewTools: true });
         }
         if (url.pathname === "/api/models/catalog") {
           return Response.json({ models: fixture.models.map((model) => ({ ...model, minimumPlan: "Free", publiclyListed: true, status: "enabled", enabled: true })) });
         }
         if (url.pathname === "/api/conversations") return Response.json([{ ...fixture.review, selectedModels: host.columns.models }]);
         if (url.pathname === path && init?.method === "PATCH") {
-          host.columns.models = JSON.parse(String(init.body)).selectedModels;
+          const update = JSON.parse(String(init.body));
+          host.columns.updates.push(update);
+          if (update.selectedModels) host.columns.models = update.selectedModels;
+          if (update.webSearchMode) host.columns.webSearchMode = update.webSearchMode;
           return Response.json({ id: fixture.review.id });
         }
         if (url.pathname === path) {
           return Response.json({ ...fixture.review, messages, selectedModels: host.columns.models, messagePage: { nextCursor: null },
-            selectionMode: "manual", autoSelection: { offered: false }, webSearchMode: "off" });
+            selectionMode: "manual", autoSelection: { offered: false }, webSearchMode: host.columns.webSearchMode });
         }
         if (url.pathname === path + "/messages") {
           const [saved] = JSON.parse(String(init?.body)).messages;
@@ -94,9 +106,15 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
           return Response.json({ messageMappings: [{ requestId: saved.clientRequestId, messageId: id }] });
         }
         if (url.pathname === "/api/chat/preflight") return Response.json({ ok: true, admissionToken: "columns-comparison", contextBundle: null });
+        if (url.pathname === "/api/chat/context") {
+          const prepared = JSON.parse(String(init?.body));
+          host.columns.contexts.push(prepared.modelId);
+          return Response.json({ ok: true, contextBundle: "context-for-" + prepared.modelId });
+        }
         if (url.pathname === "/api/chat") {
           const body = JSON.parse(String(init?.body));
           host.columns.dispatches.push({ modelId: body.modelId, sourceUserMessageId: body.sourceUserMessageId, admissionToken: body.admissionToken,
+            webSearchMode: body.webSearchMode, currentLocation: body.currentLocation, contextBundle: body.contextBundle,
             transcript: body.messages.map((message: { role: string; content: string }) => message.role + ": " + message.content) });
           const reply = "Follow-up answer from " + body.modelId;
           messages.push({ id: body.assistantMessageId, role: "assistant", modelId: body.modelId, content: reply, status: "normal",
