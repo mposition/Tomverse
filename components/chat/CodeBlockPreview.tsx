@@ -52,7 +52,7 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
   const kind = codePreviewKindForLanguage(language);
 
   const built = useMemo(
-    () => (opened ? buildCodePreviewDocument(opened.kind, opened.code, { language: opened.language, labels }) : null),
+    () => (opened ? buildCodePreviewDocument(opened.kind, opened.code, { language: opened.language, labels, assetOrigin: window.location.origin }) : null),
     [opened, labels]
   );
 

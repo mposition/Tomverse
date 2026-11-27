@@ -3,12 +3,13 @@ import test from "node:test";
 
 import {
   REACT_PREVIEW_BOOTSTRAP,
-  REACT_PREVIEW_CSP,
   REACT_PREVIEW_SCRIPTS,
   artifactPreviewKind,
   buildCodePreviewDocument,
   buildReactPreviewDocument,
   buildSvgPreviewDocument,
+  reactPreviewCsp,
+  reactPreviewScriptUrls,
   codeLanguageFromClassName,
   codePreviewKindForLanguage,
 } from "../lib/chatArtifactPreview.ts";
@@ -16,8 +17,14 @@ import {
   HTML_PREVIEW_CDN_HOSTS,
   HTML_PREVIEW_CSP,
   HTML_PREVIEW_MAX_BYTES,
+  HTML_PREVIEW_VENDOR_PATH,
   buildHtmlPreviewSrcdoc,
+  htmlPreviewCsp,
 } from "../lib/htmlArtifactPreview.ts";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const ORIGIN = "https://tomverse.test";
 
 /**
  * What an answer's code block may become, and the one extra document (React)
@@ -69,26 +76,42 @@ test("a generated file previews as HTML always, and as React only with the switc
   assert.equal(artifactPreviewKind({ format: "tsx", status: "blocked" }, { react: true }), null);
 });
 
-test("React libraries come only from the preview's allowed CDNs, at an exact version, with an integrity hash", () => {
+test("React libraries are this application's own files, at an exact version, byte for byte the hash they are pinned to", () => {
   assert.equal(REACT_PREVIEW_SCRIPTS.length, 3);
-  for (const { src, integrity } of REACT_PREVIEW_SCRIPTS) {
-    assert.ok(HTML_PREVIEW_CDN_HOSTS.some((host) => src.startsWith(`${host}/`)), `${src} is on an allowed CDN`);
-    assert.match(src, /\/\d+\.\d+\.\d+\//, `${src} pins an exact version`);
-    assert.match(integrity, /^sha384-[A-Za-z0-9+/]{64}$/, `${src} has a sha384 integrity hash`);
+  for (const { path, integrity } of REACT_PREVIEW_SCRIPTS) {
+    assert.ok(path.startsWith(HTML_PREVIEW_VENDOR_PATH), `${path} is under the vendored path`);
+    assert.match(path, /-\d+\.\d+\.\d+(\.production)?\.min\.js$/, `${path} names an exact version`);
+    assert.match(integrity, /^sha384-[A-Za-z0-9+/]{64}$/, `${path} has a sha384 integrity hash`);
+    const bytes = readFileSync(new URL(`../public${path}`, import.meta.url));
+    assert.equal(`sha384-${createHash("sha384").update(bytes).digest("base64")}`, integrity, `public${path} matches its pinned hash`);
   }
-  // The allowed list itself is not widened by this feature.
-  assert.deepEqual([...HTML_PREVIEW_CDN_HOSTS], ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com"]);
+  // No third-party host: the URLs are on the origin given, and there is no URL without one.
+  for (const { src } of reactPreviewScriptUrls(ORIGIN)) assert.ok(src.startsWith(`${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`), src);
+  assert.throws(() => reactPreviewScriptUrls(""));
+  assert.throws(() => reactPreviewScriptUrls("javascript:alert(1)"));
+  assert.throws(() => reactPreviewScriptUrls("https://tomverse.test/path"));
 });
 
 test("the React document names every script it loads, and nothing else loads from anywhere", () => {
-  const html = buildReactPreviewDocument("export default () => <p>hi</p>;", { typescript: false, labels });
+  const html = buildReactPreviewDocument("export default () => <p>hi</p>;", { typescript: false, labels, assetOrigin: ORIGIN });
   const sources = [...html.matchAll(/<script src="([^"]+)" integrity="([^"]+)" crossorigin="anonymous">/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(sources, REACT_PREVIEW_SCRIPTS.map((s) => [s.src, s.integrity]));
+  assert.deepEqual(sources, reactPreviewScriptUrls(ORIGIN).map((s) => [s.src, s.integrity]));
   // No other external reference: every URL in the document is one of the three pinned files.
   // (The page's own policy names the same three; it is checked on its own below.)
-  const urls = html.replace(`content="${REACT_PREVIEW_CSP}"`, "").match(/https?:\/\/[^"'\s<>)]+/g) ?? [];
-  assert.deepEqual(urls.sort(), REACT_PREVIEW_SCRIPTS.map((s) => s.src).sort());
-  assert.doesNotMatch(html, /<(iframe|object|embed|form|base|link)\b/i);
+  const urls = html.replace(`content="${reactPreviewCsp(ORIGIN)}"`, "").match(/https?:\/\/[^"'\s<>)]+/g) ?? [];
+  assert.deepEqual(urls.sort(), reactPreviewScriptUrls(ORIGIN).map((s) => s.src).sort());
+  assert.ok(!HTML_PREVIEW_CDN_HOSTS.some((host) => html.includes(host)), "no CDN anywhere in the React page");
+  assert.doesNotMatch(html, /<(iframe|object|embed|form|base|link)/i);
+});
+
+test("with this application's origin the frame policy admits the vendored path on it and nothing else of it", () => {
+  const withOrigin = htmlPreviewCsp(ORIGIN);
+  assert.equal(withOrigin.replace(` ${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`, ""), HTML_PREVIEW_CSP);
+  const scriptSrc = withOrigin.split("; ").find((part) => part.startsWith("script-src "));
+  assert.ok(scriptSrc.endsWith(` ${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`), scriptSrc);
+  for (const bad of ["", null, undefined, "null", "https://a.test/x", "https://a.test; script-src *", "data:"]) {
+    assert.equal(htmlPreviewCsp(bad), HTML_PREVIEW_CSP, String(bad));
+  }
 });
 
 test("the in-frame bootstrap needs no eval and no Function constructor, so the frame's policy stays without 'unsafe-eval'", () => {
@@ -106,7 +129,7 @@ test("the in-frame bootstrap needs no eval and no Function constructor, so the f
 
 test("a React answer is held as text in the document, so nothing in it can close the element or add one", () => {
   const hostile = '</textarea><script>alert(1)</script><img src=x onerror="alert(2)">&amp; <b>';
-  const html = buildReactPreviewDocument(hostile, { typescript: true, labels });
+  const html = buildReactPreviewDocument(hostile, { typescript: true, labels, assetOrigin: ORIGIN });
   assert.ok(!html.includes("</textarea><script>alert(1)"));
   assert.ok(!html.includes("<img src=x"));
   assert.ok(html.includes("&lt;/textarea&gt;&lt;script&gt;alert(1)&lt;/script&gt;"));
@@ -114,12 +137,13 @@ test("a React answer is held as text in the document, so nothing in it can close
   // Exactly the four <script> tags of the preview: three libraries and the bootstrap.
   assert.equal((html.match(/<script\b/g) ?? []).length, 4);
   assert.match(html, /data-language="tsx"/);
-  assert.match(buildReactPreviewDocument("x", { typescript: false, labels }), /data-language="jsx"/);
+  assert.match(buildReactPreviewDocument("x", { typescript: false, labels, assetOrigin: ORIGIN }), /data-language="jsx"/);
 });
 
 test("the sentences the page shows are escaped into attributes, not interpreted", () => {
   const html = buildReactPreviewDocument("x", {
     typescript: false,
+    assetOrigin: ORIGIN,
     labels: { errorTitle: '"><script>alert(1)</script>', loadFailed: "a&b", noComponent: "<b>", missingPackage: "{name} \"x\"" },
   });
   assert.ok(!html.includes('"><script>alert(1)'));
@@ -132,34 +156,34 @@ test("the sentences the page shows are escaped into attributes, not interpreted"
 test("every preview document goes through the same isolation: our policy first, sandbox allow-scripts and nothing more", () => {
   const unescape = (value) => value.replace(/&quot;/g, '"').replace(/&amp;/g, "&");
   const documents = {
-    html: buildCodePreviewDocument("html", "<h1>x</h1>", { labels }),
-    svg: buildCodePreviewDocument("svg", '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>', { labels }),
-    react: buildCodePreviewDocument("react", "export default function App() { return <p>x</p>; }", { language: "tsx", labels }),
+    html: buildCodePreviewDocument("html", "<h1>x</h1>", { labels, assetOrigin: ORIGIN }),
+    svg: buildCodePreviewDocument("svg", '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>', { labels, assetOrigin: ORIGIN }),
+    react: buildCodePreviewDocument("react", "export default function App() { return <p>x</p>; }", { language: "tsx", labels, assetOrigin: ORIGIN }),
   };
   for (const [kind, built] of Object.entries(documents)) {
     assert.equal(built.ok, true, kind);
-    const srcdoc = buildHtmlPreviewSrcdoc(built.html);
+    const srcdoc = buildHtmlPreviewSrcdoc(built.html, ORIGIN);
     const match = /^<!doctype html><meta http-equiv="Content-Security-Policy" content="([^"]*)"><body[^>]*><iframe ([^>]*?) srcdoc="([^"]*)"><\/iframe>$/.exec(srcdoc);
     assert.ok(match, `${kind}: one outer document holding one frame`);
     assert.equal(match[1], "frame-src 'none'", kind);
     assert.match(match[2], /sandbox="allow-scripts"/, kind);
     assert.doesNotMatch(match[2], /allow-same-origin|allow-top-navigation|allow-popups|allow-forms|allow-modals|allow-downloads/, kind);
     const inner = unescape(match[3]);
-    assert.ok(inner.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`), `${kind}: our policy is the first element`);
+    assert.ok(inner.startsWith(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(ORIGIN)}">`), `${kind}: our policy is the first element`);
     assert.ok(HTML_PREVIEW_CSP.includes("connect-src 'none'"));
   }
   assert.equal(documents.html.html, "<h1>x</h1>", "an HTML block is the page, as written");
   // The React page adds its own, narrower policy before anything else in it: exactly the three pinned files, no image host.
   const reactHead = documents.react.html.split("<head>")[1];
-  assert.ok(reactHead.startsWith(`<meta http-equiv="Content-Security-Policy" content="${REACT_PREVIEW_CSP}">`));
+  assert.ok(reactHead.startsWith(`<meta http-equiv="Content-Security-Policy" content="${reactPreviewCsp(ORIGIN)}">`));
   const reactDirectives = Object.fromEntries(
-    REACT_PREVIEW_CSP.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name, values])
+    reactPreviewCsp(ORIGIN).split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name, values])
   );
-  assert.deepEqual(reactDirectives["script-src"], ["'unsafe-inline'", ...REACT_PREVIEW_SCRIPTS.map((script) => script.src)]);
+  assert.deepEqual(reactDirectives["script-src"], ["'unsafe-inline'", ...reactPreviewScriptUrls(ORIGIN).map((script) => script.src)]);
   assert.deepEqual(reactDirectives["img-src"], ["data:", "blob:"]);
   assert.deepEqual(reactDirectives["connect-src"], ["'none'"]);
   assert.deepEqual(reactDirectives["default-src"], ["'none'"]);
-  assert.ok(!REACT_PREVIEW_CSP.includes("'unsafe-eval'"));
+  assert.ok(!reactPreviewCsp(ORIGIN).includes("'unsafe-eval'"));
 });
 
 test("an SVG block is centred on a page and its XML prologue is dropped, the drawing itself untouched", () => {
@@ -170,12 +194,12 @@ test("an SVG block is centred on a page and its XML prologue is dropped, the dra
 });
 
 test("empty and oversized code is refused with a reason, not previewed", () => {
-  assert.deepEqual(buildCodePreviewDocument("html", "  \n ", { labels }), { ok: false, reason: "empty" });
+  assert.deepEqual(buildCodePreviewDocument("html", "  \n ", { labels, assetOrigin: ORIGIN }), { ok: false, reason: "empty" });
   const big = "x".repeat(HTML_PREVIEW_MAX_BYTES + 1);
   for (const kind of ["html", "svg", "react"]) {
-    assert.deepEqual(buildCodePreviewDocument(kind, big, { labels }), { ok: false, reason: "too_large" }, kind);
+    assert.deepEqual(buildCodePreviewDocument(kind, big, { labels, assetOrigin: ORIGIN }), { ok: false, reason: "too_large" }, kind);
   }
-  assert.equal(buildCodePreviewDocument("html", "x".repeat(HTML_PREVIEW_MAX_BYTES), { labels }).ok, true);
+  assert.equal(buildCodePreviewDocument("html", "x".repeat(HTML_PREVIEW_MAX_BYTES), { labels, assetOrigin: ORIGIN }).ok, true);
   // The limit is in bytes, as for a file: multi-byte text counts for what it weighs.
-  assert.equal(buildCodePreviewDocument("html", "가".repeat(Math.floor(HTML_PREVIEW_MAX_BYTES / 3) + 1), { labels }).ok, false);
+  assert.equal(buildCodePreviewDocument("html", "가".repeat(Math.floor(HTML_PREVIEW_MAX_BYTES / 3) + 1), { labels, assetOrigin: ORIGIN }).ok, false);
 });

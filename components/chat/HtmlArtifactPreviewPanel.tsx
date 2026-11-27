@@ -36,7 +36,7 @@ export function HtmlArtifactPreviewFrame({ html, title }: { html: string; title:
     // The embedding document's CSP nonce, if it has one (see withEmbedderNonce).
     const nonce = typeof document === "undefined" ? null : document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
     const page = typeof DOMParser === "undefined" ? html : withEmbedderNonce(html, nonce, (text) => new DOMParser().parseFromString(text, "text/html"));
-    return buildHtmlPreviewSrcdoc(page);
+    return buildHtmlPreviewSrcdoc(page, typeof window === "undefined" ? null : window.location.origin);
   }, [html]);
   return (
     <iframe
@@ -113,7 +113,7 @@ export function HtmlArtifactPreviewPanel({
         const text = new TextDecoder("utf-8").decode(bytes);
         if (format === "jsx" || format === "tsx") {
           // React source is a file the model wrote, not a page: it becomes one here, and runs in the same frame.
-          const built = buildCodePreviewDocument("react", text, { language: format, labels });
+          const built = buildCodePreviewDocument("react", text, { language: format, labels, assetOrigin: window.location.origin });
           setLoaded(built.ok ? { status: "ready", html: built.html } : { status: "too_large" });
         } else {
           setLoaded({ status: "ready", html: text });

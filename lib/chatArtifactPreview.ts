@@ -23,7 +23,7 @@
  * Pure and client-safe: strings only.
  */
 
-import { HTML_PREVIEW_MAX_BYTES } from "@/lib/htmlArtifactPreview";
+import { HTML_PREVIEW_MAX_BYTES, HTML_PREVIEW_VENDOR_PATH, previewAssetOrigin } from "@/lib/htmlArtifactPreview";
 
 export type CodePreviewKind = "html" | "svg" | "react";
 
@@ -71,42 +71,53 @@ export type PreviewDocumentLabels = {
 };
 
 /**
- * The libraries a React preview loads. Exact versions, from the CDNs the frame's
- * policy already allows, each with a subresource-integrity hash so a changed
- * file on the CDN is refused rather than run. React 18 is the last major with
+ * The libraries a React preview loads. Exact versions, served by this
+ * application from `public/vendor/artifact-preview/` (copied byte for byte
+ * from the cdnjs release, hashes below), each with a subresource-integrity
+ * hash so a changed file is refused rather than run. Self-hosted so a preview
+ * page has no third-party host to address at all: a script URL with text in
+ * its query can only reach this application. React 18 is the last major with
  * a browser build that needs no bundler.
  */
 export const REACT_PREVIEW_SCRIPTS = [
     {
-        src: "https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js",
+        path: `${HTML_PREVIEW_VENDOR_PATH}react-18.3.1.production.min.js`,
         integrity: "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z",
     },
     {
-        src: "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js",
+        path: `${HTML_PREVIEW_VENDOR_PATH}react-dom-18.3.1.production.min.js`,
         integrity: "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1",
     },
     {
-        src: "https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.2/babel.min.js",
+        path: `${HTML_PREVIEW_VENDOR_PATH}babel-standalone-7.26.2.min.js`,
         integrity: "sha384-RgwZ6hj+t5cUuE1+O8VrbNENCeVFTIjTroWdTHusMbpfssSx1gxln5reSjtRkxWs",
     },
 ] as const;
+
+/** The three files' absolute URLs on this application's origin (a `srcdoc` frame's own origin is opaque). */
+export const reactPreviewScriptUrls = (assetOrigin: string) => {
+    const origin = previewAssetOrigin(assetOrigin);
+    if (!origin) throw new Error("a React preview needs this application's origin");
+    return REACT_PREVIEW_SCRIPTS.map((script) => ({ src: `${origin}${script.path}`, integrity: script.integrity }));
+};
 
 /**
  * A second policy, ours, as the first element of the React page's `<head>`.
  * Every policy in force applies, so on top of the shared frame policy the page
  * may load exactly the three files above and run inline script (the bootstrap
- * and the compiled code), and fetch nothing else -- not another file from the
- * same CDN, not an image. The person's code is inside a `<textarea>` after
- * this element and cannot come before it.
+ * and the compiled code), and fetch nothing else -- not a CDN, not an image.
+ * The person's code is inside a `<textarea>` after this element and cannot
+ * come before it.
  */
-export const REACT_PREVIEW_CSP = [
-    "default-src 'none'",
-    `script-src 'unsafe-inline' ${REACT_PREVIEW_SCRIPTS.map((script) => script.src).join(" ")}`,
-    "style-src 'unsafe-inline'",
-    "img-src data: blob:",
-    "font-src data:",
-    "connect-src 'none'",
-].join("; ");
+export const reactPreviewCsp = (assetOrigin: string) =>
+    [
+        "default-src 'none'",
+        `script-src 'unsafe-inline' ${reactPreviewScriptUrls(assetOrigin).map((script) => script.src).join(" ")}`,
+        "style-src 'unsafe-inline'",
+        "img-src data: blob:",
+        "font-src data:",
+        "connect-src 'none'",
+    ].join("; ");
 
 const escapeText = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const escapeAttribute = (value: string) => escapeText(value).replace(/"/g, "&quot;");
@@ -184,9 +195,12 @@ export const REACT_PREVIEW_BOOTSTRAP = `(function () {
   ReactDOM.createRoot(root).render(React.createElement(Boundary, null, React.createElement(Component)));
 })();`;
 
-export function buildReactPreviewDocument(code: string, options: { typescript: boolean; labels: PreviewDocumentLabels }): string {
+export function buildReactPreviewDocument(
+    code: string,
+    options: { typescript: boolean; labels: PreviewDocumentLabels; assetOrigin: string }
+): string {
     const { labels } = options;
-    const scripts = REACT_PREVIEW_SCRIPTS.map(
+    const scripts = reactPreviewScriptUrls(options.assetOrigin).map(
         (script) => `<script src="${script.src}" integrity="${script.integrity}" crossorigin="anonymous"></script>`
     ).join("");
     // The first newline of a <textarea> is dropped by the parser, so one is put in front: the code starts exactly as written.
@@ -196,7 +210,7 @@ export function buildReactPreviewDocument(code: string, options: { typescript: b
         ` data-no-component="${escapeAttribute(labels.noComponent)}" data-missing-package="${escapeAttribute(labels.missingPackage)}">` +
         `\n${escapeText(code)}</textarea>`;
     return (
-        `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${REACT_PREVIEW_CSP}">` +
+        `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${reactPreviewCsp(options.assetOrigin)}">` +
         `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
         `<style>${PAGE_STYLE}</style></head><body><div id="root"></div><div id="tomverse-error" role="alert" hidden></div>` +
         `${source}${scripts}<script>${REACT_PREVIEW_BOOTSTRAP}</script></body></html>`
@@ -219,7 +233,7 @@ export type CodePreviewDocument = { ok: true; html: string } | { ok: false; reas
 export function buildCodePreviewDocument(
     kind: CodePreviewKind,
     code: string,
-    options: { language?: string | null; labels: PreviewDocumentLabels }
+    options: { language?: string | null; labels: PreviewDocumentLabels; assetOrigin: string }
 ): CodePreviewDocument {
     if (!code.trim()) return { ok: false, reason: "empty" };
     if (new TextEncoder().encode(code).byteLength > HTML_PREVIEW_MAX_BYTES) return { ok: false, reason: "too_large" };
@@ -227,6 +241,10 @@ export function buildCodePreviewDocument(
     if (kind === "svg") return { ok: true, html: buildSvgPreviewDocument(code) };
     return {
         ok: true,
-        html: buildReactPreviewDocument(code, { typescript: options.language?.toLowerCase() === "tsx", labels: options.labels }),
+        html: buildReactPreviewDocument(code, {
+            typescript: options.language?.toLowerCase() === "tsx",
+            labels: options.labels,
+            assetOrigin: options.assetOrigin,
+        }),
     };
 }
