@@ -78,6 +78,18 @@ import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import {
+  decideChatStreamReattach,
+  handOffInterruptedChatAttempt,
+  isDurableChatStreamResponse,
+  isInterruptedChatAttempt,
+  pendingInterruptedChatAttempts,
+  recoveredPartialText,
+  settleInterruptedChatAttempt,
+  shouldApplyPolledPartial,
+  watchInterruptedChatAttempts,
+  type ChatStreamInterruption,
+} from "@/lib/chatStreamReattach";
 import { readChatImageTurnRef, readChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
 import type { ReviewImageTurns } from "@/lib/reviewImageTurn";
@@ -604,7 +616,12 @@ function ChatAppComponent({
     new Map<string, {
       conversationId: string;
       sourceUserMessageId: string;
-      requestedModelId: string;
+      /**
+       * Null for a stream this panel reattached to after it broke: the
+       * server may have substituted the model it recorded (a retired model's
+       * successor), so the first poll's value is adopted and then held.
+       */
+      requestedModelId: string | null;
       analyticsPromptId: string | null;
     }>()
   );
@@ -637,6 +654,53 @@ function ChatAppComponent({
     attemptBackedMessageIdsRef.current = new Set();
     queueMicrotask(() => setDurableAttemptIds([]));
   }, [runtimeKey]);
+
+  /*
+    Streams that broke on this key and were handed to the attempt poller
+    instead of ending as an error (lib/chatStreamReattach.ts). Adopted on a
+    microtask so the reset above has already run, and again on every
+    hand-off. Only an account Chat panel polls; anywhere else the hand-off
+    finds no watcher and the turn ends exactly as it did before.
+  */
+  useEffect(() => {
+    if (isGuestMode || transcriptScope !== "conversation") return;
+    let active = true;
+    const adopt = () => {
+      if (!active) return;
+      const pending = pendingInterruptedChatAttempts(runtimeKey);
+      if (pending.length === 0) return;
+      for (const attempt of pending) {
+        const id = attempt.assistantMessageId;
+        attemptBackedMessageIdsRef.current.add(id);
+        if (!durableAttemptIdentityRef.current.has(id)) {
+          durableAttemptIdentityRef.current.set(id, {
+            conversationId: attempt.conversationId,
+            sourceUserMessageId: attempt.sourceUserMessageId,
+            requestedModelId: null,
+            analyticsPromptId: attempt.analyticsPromptId,
+          });
+        }
+        if (!durableAttemptRevisionsRef.current.has(id)) {
+          durableAttemptRevisionsRef.current.set(id, -1);
+        }
+        if (!durableAttemptPollStartedRef.current.has(id)) {
+          durableAttemptPollStartedRef.current.set(id, Date.now());
+        }
+      }
+      setDurableAttemptIds((current) => {
+        const missing = pending
+          .map((attempt) => attempt.assistantMessageId)
+          .filter((id) => !current.includes(id));
+        return missing.length > 0 ? [...current, ...missing] : current;
+      });
+    };
+    queueMicrotask(adopt);
+    const unwatch = watchInterruptedChatAttempts(runtimeKey, adopt);
+    return () => {
+      active = false;
+      unwatch();
+    };
+  }, [isGuestMode, runtimeKey, transcriptScope]);
     const isMobileShell = useIsMobileShell();
     const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
     const modelInput = modelInputs[modelId] || "";
@@ -1268,6 +1332,13 @@ function ChatAppComponent({
       terminal.add(assistantMessageId);
       durableAttemptPollStartedRef.current.delete(assistantMessageId);
       durableAttemptIdentityRef.current.delete(assistantMessageId);
+      const interrupted = settleInterruptedChatAttempt(key, assistantMessageId);
+      if (interrupted) {
+        // Polling could not settle a stream that broke in this panel: it
+        // ends with the error it would have ended with before reattaching.
+        interrupted.finish(null);
+        return;
+      }
       writeChatRuntimeMessages(key, (current) =>
         current.map((message) =>
           message.id === assistantMessageId &&
@@ -1355,10 +1426,15 @@ function ChatAppComponent({
           attempt.assistantMessageId !== assistantMessageId ||
           attempt.conversationId !== expectedIdentity.conversationId ||
           attempt.sourceUserMessageId !== expectedIdentity.sourceUserMessageId ||
-          attempt.requestedModelId !== expectedIdentity.requestedModelId
+          (expectedIdentity.requestedModelId !== null &&
+            attempt.requestedModelId !== expectedIdentity.requestedModelId)
         ) {
           makeTerminalRecovery(assistantMessageId, "CHAT_ATTEMPT_POLL_INVALID");
           return;
+        }
+        if (expectedIdentity.requestedModelId === null) {
+          // Adopted once, then held like any other identity field.
+          expectedIdentity.requestedModelId = attempt.requestedModelId;
         }
         const priorRevision =
           durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
@@ -1374,21 +1450,51 @@ function ChatAppComponent({
           assistantMessageId,
           Date.now() + DURABLE_ATTEMPT_POLL_INTERVAL_MS
         );
+        const interrupted = isInterruptedChatAttempt(key, assistantMessageId);
+        if (
+          interrupted &&
+          !isActiveChatResponseAttempt(attempt) &&
+          attempt.status !== "completed"
+        ) {
+          // The server ended the turn without an answer -- including a
+          // cancellation it made because the connection went away, which the
+          // user did not ask for. The panel ends it the way it ended before
+          // reattaching existed, keeping the longer of the two partials.
+          terminal.add(assistantMessageId);
+          durableAttemptPollStartedRef.current.delete(assistantMessageId);
+          durableAttemptIdentityRef.current.delete(assistantMessageId);
+          settleInterruptedChatAttempt(key, assistantMessageId)?.finish(
+            attempt.partialContent
+          );
+          return;
+        }
         if (attempt.checkpointRevision > priorRevision) {
           durableAttemptRevisionsRef.current.set(
             assistantMessageId,
             attempt.checkpointRevision
           );
-          writeChatRuntimeMessages(key, (current) =>
-            replaceAttemptBackedMessage(
+          writeChatRuntimeMessages(key, (current) => {
+            if (interrupted && isActiveChatResponseAttempt(attempt)) {
+              const shown = current.find(
+                (message) => message.id === assistantMessageId
+              )?.content;
+              if (
+                typeof shown === "string" &&
+                !shouldApplyPolledPartial(shown, attempt.partialContent)
+              ) {
+                return current;
+              }
+            }
+            return replaceAttemptBackedMessage(
               current,
               attempt,
               attemptBackedMessageIdsRef.current,
               t("chat.responseError")
-            )
-          );
+            );
+          });
         }
         if (completedMessage) {
+          settleInterruptedChatAttempt(key, assistantMessageId);
           writeChatRuntimeMessages(key, (current) => {
             if (!attemptBackedMessageIdsRef.current.has(assistantMessageId)) {
               return current;
@@ -1765,6 +1871,12 @@ function ChatAppComponent({
     // can still show whatever was generated before the abort, instead of
     // discarding it -- the catch block needs to read it too.
     let assistantText = "";
+    // What the catch block needs to decide whether a broken stream is handed
+    // to attempt polling (lib/chatStreamReattach.ts) instead of ending here.
+    let durableStream = false;
+    let streamReadFailed = false;
+    let serverReportedFailure = false;
+    let detachPageLivenessListeners = () => {};
     const buildErrorReport = (
       traceId: string | null,
       errorCode: string,
@@ -1841,6 +1953,86 @@ function ChatAppComponent({
           ),
         }
       );
+    };
+
+    /**
+     * Ends a reattached turn that the server did not finish, exactly as the
+     * catch block below would have ended it before reattaching existed: a
+     * client timeout through `endAsTimeout`, and a body read that rejected
+     * with no server code as the request-failure branch's generic error.
+     */
+    const endAsInterrupted = (interruption: ChatStreamInterruption) => {
+      if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+        conversationId: targetChatId, sourceUserMessageId,
+        status: interruption.kind === "timeout" ? "cancelled" : "error", nonempty: false });
+      if (interruption.kind === "timeout") {
+        endAsTimeout(
+          interruption.errorCode,
+          ERROR_CLASSIFICATION_SOURCE.client,
+          assistantText
+        );
+        return;
+      }
+      console.error("Chat request failed", {
+        traceId: requestTraceId || undefined,
+      });
+      if (requestTraceId && typeof window !== "undefined") {
+        window.localStorage.setItem("tomverse_last_error_trace_id", requestTraceId);
+      }
+      setAssistantMessage(
+        assistantMessageId,
+        `${t("chat.responseError")}${
+          requestTraceId ? `\n${t("chat.traceId")}: ${requestTraceId}` : ""
+        }`,
+        "error",
+        {
+          errorCode: "UNKNOWN_ERROR",
+          errorHadAttachments: attachments.length > 0,
+          errorReport: buildErrorReport(
+            requestTraceId,
+            "UNKNOWN_ERROR",
+            ERROR_CLASSIFICATION_SOURCE.client
+          ),
+        }
+      );
+    };
+
+    /**
+     * Hands a broken durable stream to the attempt poller of whichever panel
+     * shows this conversation now, instead of ending it. The server's
+     * checkpoint carries the answer on from wherever the connection dropped;
+     * the panel keeps what it already showed until a checkpoint is at least
+     * as long, and shows the server's final state. `false` when no panel is
+     * polling this key -- the turn then ends exactly as it did before.
+     */
+    const handOffInterruptedStream = (
+      interruption: ChatStreamInterruption,
+      conversationId: string
+    ) => {
+      const handedOff = handOffInterruptedChatAttempt(runKey, {
+        assistantMessageId,
+        conversationId,
+        sourceUserMessageId,
+        analyticsPromptId,
+        finish: (checkpointed) => {
+          assistantText = recoveredPartialText(assistantText, checkpointed);
+          endAsInterrupted(interruption);
+        },
+      });
+      if (!handedOff) return false;
+      // Diagnostics only, and only these fields.
+      console.warn(
+        JSON.stringify({
+          event: "chat_client_stream_reattach",
+          traceId: requestTraceId,
+          modelId,
+          interruption: interruption.kind,
+          ...(interruption.kind === "timeout"
+            ? { errorCode: interruption.errorCode }
+            : {}),
+        })
+      );
+      return true;
     };
 
     // The bundle actually presented, which a stale-recovery retry replaces.
@@ -2445,6 +2637,29 @@ function ChatAppComponent({
         throw new Error(t("chat.responseBodyMissing"));
       }
 
+      durableStream = isDurableChatStreamResponse({
+        responseMode: response.headers.get("X-Chat-Response-Mode"),
+        transcriptScope,
+        isGuest: isGuestMode,
+        isReviewProjection: Boolean(reviewProvider),
+        conversationId: targetChatId,
+      });
+      if (durableStream && typeof document !== "undefined") {
+        // A frozen page runs no timers, so a connection that died while the
+        // phone was locked or the app was in the background is checked the
+        // moment the page is back, rather than whenever the watchdog's timer
+        // next gets to run.
+        const recheckLiveness = () => {
+          if (document.visibilityState === "visible") liveness.checkNow();
+        };
+        document.addEventListener("visibilitychange", recheckLiveness);
+        window.addEventListener("online", recheckLiveness);
+        detachPageLivenessListeners = () => {
+          document.removeEventListener("visibilitychange", recheckLiveness);
+          window.removeEventListener("online", recheckLiveness);
+        };
+      }
+
       /*
         The read loop lives in lib/chatStreamConsumer.ts.
 
@@ -2460,8 +2675,12 @@ function ChatAppComponent({
         // A stream the server failed part way carries its error report in a
         // trailer written just before the break. A connection that simply
         // dropped has none, and that report stays unverified.
-        onInterrupted: (json) =>
-          adoptStreamErrorReport(parseChatStreamTrailer(json)),
+        onInterrupted: (json) => {
+          const trailer = parseChatStreamTrailer(json);
+          streamReadFailed = true;
+          serverReportedFailure = Boolean(trailer?.errorReport);
+          adoptStreamErrorReport(trailer);
+        },
         onProgress: (progress) => {
           if (progress.displayText.trim() && sourceReceipt?.status === "unknown") sourceReceipt = { ...sourceReceipt, status: "dispatched" };
           if (progress.retryingWithModelId && sourceReceipt?.attempt === 0) sourceReceipt = { ...sourceReceipt, attempt: 1, status: "unknown" };
@@ -2615,6 +2834,26 @@ function ChatAppComponent({
         );
       }
     } catch (error: unknown) {
+      // A durable stream that broke -- a client timeout, or a body read that
+      // rejected with nothing the server signed -- is read from its attempt
+      // row instead of ending here. Everything else takes the paths below,
+      // unchanged; so does this turn, if the attempt ends without an answer.
+      const interruption = decideChatStreamReattach({
+        durableStream,
+        aborted: controller.signal.aborted,
+        abortCause: getChatRuntimeAbortCause(runKey, controller),
+        streamReadFailed,
+        serverReportedFailure,
+      });
+      // Only to a panel that shows the conversation the run belongs to: a
+      // turn the user walked away from ends as it always did.
+      if (
+        interruption &&
+        targetChatId &&
+        handOffInterruptedStream(interruption, targetChatId)
+      ) {
+        return;
+      }
       const requestError =
         error && typeof error === "object"
           ? (error as {
@@ -2885,6 +3124,7 @@ function ChatAppComponent({
       }	
     } finally {
 	  liveness.stop();
+      detachPageLivenessListeners();
       latency.finish(latencyCompleted ? "completed" :
         controller.signal.aborted && classifyChatAbort(getChatRuntimeAbortCause(runKey, controller)).kind !== "timeout"
           ? "cancelled" : "failed");

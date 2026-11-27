@@ -233,6 +233,18 @@ credit, reroute, create an attempt, or submit a Message. If the predicate no
 longer matches, the read returns the newer row without retrying a mutation.
 This bounded reconciliation is what prevents polling an abandoned worker from
 reporting an active attempt forever; no other GET mutation is permitted.
+
+The same GET-only polling also takes over a durable stream that breaks while
+its panel is open (`lib/chatStreamReattach.ts`): a client liveness timeout, or
+a body read that fails without a server-signed failure trailer. The browser
+keeps the text it already showed until a checkpoint is at least as long, shows
+the canonical Message if the attempt completes, and otherwise ends the turn
+with the same error it showed before this hand-off existed -- a cancellation
+the server made because the connection went away is not presented as the
+user's stop. A stop, a failure the server reported in the trailer, and any
+stream no panel on that conversation is polling are never handed over. The
+page becoming visible or coming back online re-checks the stream's liveness
+at once, because a suspended page runs no timers.
 The direct attempt route performs a non-mutating owner lookup and conversation
 unlock check before invoking this reconciliation, so a caller without the
 unlock grant cannot cause even that bounded state transition. Destructive
