@@ -67,6 +67,20 @@ if (trustedWindow) {
       ipcRenderer.on("desktop:dictation-stop", onStop);
       return () => ipcRenderer.removeListener("desktop:dictation-stop", onStop);
     },
+    armVoice: () => ipcRenderer.invoke("desktop:voice-arm"),
+    disarmVoice: () => ipcRenderer.invoke("desktop:voice-disarm"),
+    voiceRequest: (input: Parameters<DesktopApi["voiceRequest"]>[0]) => ipcRenderer.invoke("desktop:voice-request", input),
+    abortVoice: (id: string) => ipcRenderer.invoke("desktop:voice-abort", id),
+    subscribeVoiceStream(listener: Parameters<DesktopApi["subscribeVoiceStream"]>[0]) {
+      const onEvent = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value);
+      ipcRenderer.on("desktop:voice-stream", onEvent);
+      return () => ipcRenderer.removeListener("desktop:voice-stream", onEvent);
+    },
+    subscribeVoiceStop(listener: () => void) {
+      const onStop = () => listener();
+      ipcRenderer.on("desktop:voice-stop", onStop);
+      return () => ipcRenderer.removeListener("desktop:voice-stop", onStop);
+    },
     taskPulls: (command: Parameters<DesktopApi["taskPulls"]>[0]) => ipcRenderer.invoke("desktop:task-pulls", command),
     git: (command: unknown) => ipcRenderer.invoke("desktop:git", command),
     codeBrowser: (command: Parameters<DesktopApi["codeBrowser"]>[0]) => ipcRenderer.invoke("desktop:code-browser", command),

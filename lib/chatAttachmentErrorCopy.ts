@@ -46,6 +46,12 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     ATTACHMENT_TEXT_TOO_LARGE: "chat.attachmentTextTooLarge",
     GUEST_ATTACHMENT_TEXT_TOO_LARGE: "chat.guestAttachmentTextTooLarge",
     ATTACHMENT_MODEL_IMAGE_UNSUPPORTED: "chat.attachmentModelImageUnsupported",
+    // The file on the message being sent cannot be read by the chosen model
+    // (an image for a model without image input). Earlier messages' files never
+    // raise it: they are named to the model as not included instead.
+    ATTACHMENT_MODEL_UNSUPPORTED: "chat.attachmentModelUnsupported",
+    // Scanned PDF, OCR service down, and a model that cannot read the PDF itself.
+    PDF_OCR_UNAVAILABLE: "chat.attachmentOcrUnavailable",
 
     // -- Type and size ------------------------------------------------------
     UNSUPPORTED_ATTACHMENT_TYPE: "chat.attachmentTypeError",
@@ -87,6 +93,20 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     ATTACHMENTS_DISABLED_BY_ADMIN: "chat.guestAttachmentUnavailable",
     API_RATE_LIMITED: "chat.compareRateLimited",
 };
+
+/**
+ * The send-time refusals `components/chat/ChatApp.tsx` answers from this table
+ * instead of showing the server's English sentence.
+ *
+ * Deliberately a short list, not the whole table: the rest are raised by the
+ * upload step, which has its own surface. A code is added here when the chat
+ * route can answer it on a send and the panel had no sentence for it.
+ */
+export const CHAT_SEND_LOCALIZED_ATTACHMENT_CODES: ReadonlySet<string> = new Set([
+    "ATTACHMENT_UNREADABLE",
+    "ATTACHMENT_MODEL_UNSUPPORTED",
+    "PDF_OCR_UNAVAILABLE",
+]);
 
 /**
  * The copy key for a refusal, or `null` when the code is one this client has

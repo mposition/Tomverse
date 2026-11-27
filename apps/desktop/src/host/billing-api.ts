@@ -12,7 +12,7 @@ type ApiInput = ServerInput | Extract<DesktopBillingInput, { action: "checkPurch
 /** Stripe calls behind these routes take longer than an account settings read. */
 const PROVIDER_TIMEOUT_MS = 30_000;
 const providerActions = new Set<BillingAction>(["checkout", "buyCreditPack", "previewPlanChange", "confirmPlanChange",
-  "cancelPlanChange", "cancelSubscription"]);
+  "cancelPlanChange", "cancelSubscription", "resumeRenewal"]);
 
 /** The web's own billing request for each action; the renderer never supplies a path. */
 export function billingRequest(input: ServerInput, timeZone: string | null): SettingsRequest {
@@ -43,7 +43,7 @@ export function billingRequest(input: ServerInput, timeZone: string | null): Set
       } };
     case "previewPlanChange":
       return { path: "/api/billing/plan-change/preview", method: "POST", body: {
-        targetTier: input.targetTier, billingInterval: input.billingInterval,
+        targetTier: input.targetTier, ...(input.billingInterval ? { billingInterval: input.billingInterval } : {}),
       } };
     case "confirmPlanChange":
       return { path: "/api/billing/plan-change/confirm", method: "POST", body: {
@@ -53,6 +53,8 @@ export function billingRequest(input: ServerInput, timeZone: string | null): Set
       return { path: "/api/billing/plan-change", method: "DELETE" };
     case "cancelSubscription":
       return { path: "/api/billing/cancel-subscription", method: "POST", body: {} };
+    case "resumeRenewal":
+      return { path: "/api/billing/cancel-subscription", method: "DELETE" };
     case "requestRefund":
       return { path: "/api/billing/refund-request", method: "POST", body: { reason: input.reason } };
   }

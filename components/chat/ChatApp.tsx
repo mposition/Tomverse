@@ -151,6 +151,15 @@ import {
   isGuestAutoRetryBlocked,
   type GuestAutoRetryMetadata,
 } from "@/lib/guestAutoRetry";
+import {
+  CHAT_SEND_LOCALIZED_ATTACHMENT_CODES,
+  chatAttachmentErrorCopyKey,
+} from "@/lib/chatAttachmentErrorCopy";
+import {
+  isTransientDatabaseCode,
+  transientDatabaseRetryDelayMs,
+  waitForTransientRetry,
+} from "@/lib/databaseError";
 
 const processedPromptKeys = new Set<string>();
 // One image-turn request plus two re-asks under the same answer id.
@@ -1849,6 +1858,8 @@ function ChatAppComponent({
     let activeContextBundle = researchMode ? null : contextBundle ?? null;
     let contextBundleRetries = 0;
     let contextBundleCollisionRetries = 0;
+    // The one automatic resend a transient database refusal earns.
+    let transientDatabaseRetries = 0;
     let memoryUsedCount = 0;
     // Set only on a turn the Router actually chose the model for. The server
     // omits both headers on a manual turn and on an Auto turn that fell back,
@@ -2197,6 +2208,8 @@ function ChatAppComponent({
             typeof errorBody?.error === "string" ? errorBody.error : undefined;
           (requestError as Error & { details?: unknown }).details =
             errorBody?.details;
+          (requestError as Error & { retryAfter?: string }).retryAfter =
+            res.headers.get("Retry-After") ?? undefined;
           throw requestError;
         }
 
@@ -2335,6 +2348,90 @@ function ChatAppComponent({
           assistantMessageId = freshAssistantMessageId;
           activeContextBundle = refreshed;
           contextBundleCollisionRetries += 1;
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
+        } else if (
+          !researchMode && !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          isTransientDatabaseCode(code) &&
+          transientDatabaseRetries < 1 &&
+          // A Guest Auto turn is one-shot by design; every other guest send
+          // is the same request again, as before.
+          !(isGuestMode && guestAutoCapability) &&
+          !controller.signal.aborted
+        ) {
+          // The server refused before any provider call, because a database
+          // connection did not open in time (503 DATABASE_TEMPORARILY_UNAVAILABLE
+          // with Retry-After). Nothing was answered and nothing was paid for, so
+          // the same question is sent once more after the pause the server
+          // asked for. A second refusal falls through to the localized
+          // "try again shortly" sentence below.
+          //
+          // Everything that makes a resend safe is the machinery the
+          // `already_consumed` recovery above already relies on:
+          //   * the saved question keeps its id, so it is not saved or shown
+          //     twice -- only the request is repeated;
+          //   * the answer gets a fresh id, because the server ended the first
+          //     attempt as failed and the old id would reattach to it;
+          //   * a prepared context bundle is single-use and may already have
+          //     been consumed, so it is prepared again.
+          transientDatabaseRetries += 1;
+          liveness.stop();
+          await waitForTransientRetry(
+            transientDatabaseRetryDelayMs(
+              (error as { retryAfter?: string } | null)?.retryAfter
+            ),
+            controller.signal
+          );
+          controller.signal.throwIfAborted();
+
+          if (activeContextBundle) {
+            let refreshed: string | null = null;
+            try {
+              refreshed = onContextBundleStale
+                ? await onContextBundleStale({
+                    promptId: analyticsPromptId,
+                    modelId,
+                  })
+                : contextLayout === "single"
+                  ? await prepareChatContextBundle({
+                      conversationId: isGuestMode ? null : targetChatId,
+                      modelIds: [modelId],
+                      prompt: text,
+                      previousContextBundle: activeContextBundle,
+                      projectReferences,
+                    })
+                  : null;
+            } catch {
+              // The database is still not answering; the refusal below is
+              // the honest result, not a failed refresh.
+              refreshed = null;
+            }
+            if (!refreshed) throw error;
+            activeContextBundle = refreshed;
+          }
+          controller.signal.throwIfAborted();
+
+          if (!isGuestMode) {
+            const refusedAssistantMessageId = assistantMessageId;
+            const freshAssistantMessageId = crypto.randomUUID();
+            const pending = getChatRuntimeSnapshot(runKey).messages.find(
+              (message) => message.id === refusedAssistantMessageId
+            );
+            if (!pending || pending.role !== "assistant" || pending.content) {
+              throw error;
+            }
+            writeChatRuntimeMessages(runKey, (current) =>
+              current.map((message) =>
+                message.id === refusedAssistantMessageId
+                  ? {
+                      ...message,
+                      id: freshAssistantMessageId,
+                      createdAt: new Date().toISOString(),
+                    }
+                  : message
+              )
+            );
+            assistantMessageId = freshAssistantMessageId;
+          }
           response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else {
           throw error;
@@ -2753,6 +2850,20 @@ function ChatAppComponent({
               errorCode === "TURNSTILE_NOT_CONFIGURED" ||
               errorCode === "SECURITY_NOT_CONFIGURED"
             ? t("chat.guestVerificationUnavailable")
+          : isTransientDatabaseCode(errorCode)
+            // Raised by the chat route and by the shared rate limiter alike.
+            // Reaching here means the one automatic resend was already spent
+            // (or never applied), so the person is asked to try again.
+            ? t("chat.databaseTemporarilyUnavailable")
+          : errorCode === "CHAT_APPLICATION_ERROR"
+            // The server's sentence for this code is a fixed Korean one. A
+            // database fault after paid work began (a search, a router call, a
+            // scanned page) ends here instead of as a resend, so it reads as
+            // the generic failure in the person's own language.
+            ? t("chat.responseError")
+          : CHAT_SEND_LOCALIZED_ATTACHMENT_CODES.has(errorCode) &&
+              chatAttachmentErrorCopyKey(errorCode)
+            ? t(chatAttachmentErrorCopyKey(errorCode) as string)
           : errorCode === "CHAT_RATE_LIMITED"
             ? t("chat.tooManyRequestsRetry").replace(
                 "{seconds}",

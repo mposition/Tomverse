@@ -5,7 +5,7 @@ import type { ComparisonReview, ReviewSetup } from "../../../../packages/chat-co
 import { parseChatLocation } from "@tomverse/chat-core";
 import { DESKTOP_LIVE_ORIGIN } from "../../../../lib/desktopAuthContract";
 import {
-  DESKTOP_APP_ORIGIN, DESKTOP_CHAT_CONTEXT, DESKTOP_CHAT_CREATE, DESKTOP_CHAT_HISTORY, DESKTOP_CHAT_SEARCH, DESKTOP_CHAT_TURN,
+  DESKTOP_APP_ORIGIN, DESKTOP_CHAT_CONTEXT, DESKTOP_CHAT_CREATE, DESKTOP_CHAT_HISTORY, DESKTOP_CHAT_SEARCH, DESKTOP_CHAT_TURN, DESKTOP_VOICE_CONVERSATION,
   DESKTOP_DEEP_RESEARCH_STATUS, DESKTOP_IMAGE_GENERATIONS, DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_REVIEW_ROUTING,
 } from "../../../../lib/nativeBearerGate";
 import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "../../../../lib/chatWorkspaceEntry";
@@ -33,6 +33,7 @@ import { desktopMcpReply, type DesktopMcpAction } from "../../../../lib/desktopC
 import { desktopPluginInventory } from "../plugin-contract";
 import type { McpProgressState } from "../../../../lib/mcpConnectorProgress";
 import { DesktopSessionRefused } from "./browser-login";
+import type { VoiceBody } from "../voice-contract";
 
 const DESKTOP_PLUGIN_INVENTORY = "/api/mcp/connections";
 
@@ -70,6 +71,8 @@ const uploadPreparation = z.object({
 const matchesProduct = (product: DesktopTextProduct) => product === "review" ? isDesktopReview : isDesktopChat;
 type StreamSelection = Pick<ChatTurnInput, "modelId" | "selectionMode" | "effort" | "deepResearchDepth" | "mcpConnectionId"> & {
   review?: true;
+  /** A Review turn for one model has no shared admission; it prepares its own context where the server offers that for a Review. */
+  reviewContext?: boolean;
   currentLocation?: ChatTurnInput["currentLocation"];
   admission?: { admissionToken: string; contextBundle?: string | null };
 };
@@ -144,6 +147,16 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     return { status: response.status, code: detail.success ? detail.data.code : "VOICE_TRANSCRIPTION_FAILED" };
   }
 
+  /** One action of the Chat voice conversation. The reply is handed back as it is: a session's reply is an event stream. */
+  async function voice(body: VoiceBody, turn: AbortSignal) {
+    const response = await send(DESKTOP_VOICE_CONVERSATION, "POST", body, { signal: turnSignal(turn) });
+    if (response.status === 401) {
+      await response.body?.cancel().catch(() => {});
+      throw new DesktopSessionRefused();
+    }
+    return response;
+  }
+
   async function conversation({ id, cursor, product = "chat" }: ChatPageInput, tail = false, turn?: AbortSignal) {
     const query = tail ? "?tail=1" : cursor ? "?cursor=" + encodeURIComponent(cursor) : "";
     const result = await request(pathFor(id) + query, chatConversation, "GET", undefined, { turn });
@@ -161,6 +174,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       return rows.find((row) => row.id === id && row.surface === "continuation" && (isDesktopChat(row) || isDesktopReview(row)));
     },
     transcribeDictation,
+    voice,
     async codePlugin(connectionId: string, action: DesktopMcpAction, turn: AbortSignal) {
       return request("/api/mcp/desktop-code", desktopMcpReply, "POST", { connectionId, action }, { turn });
     },
@@ -337,10 +351,11 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
         { title: Array.from(prompt.replace(/\s+/g, " ").trim()).slice(0, 80).join("") || "New review", selectedModels: models }, { turn });
       return id;
     },
-    async configureReview(current: ChatConversation, models: string[], turn: AbortSignal) {
-      if (current.selectedModels.join("\n") === models.join("\n")) return;
+    async configureReview(current: ChatConversation, models: string[], turn: AbortSignal, tools?: ReviewTurnInput["tools"]) {
+      const changed = current.selectedModels.join("\n") !== models.join("\n");
+      if (!changed && !(tools && Object.keys(tools).length)) return;
       await request(pathFor(current.id), z.object({ id: chatId }), "PATCH",
-        { selectedModels: models, selectionMode: "manual" }, { turn });
+        { ...(changed ? { selectedModels: models, selectionMode: "manual" } : {}), ...tools }, { turn });
     },
     async admitReview(current: ChatConversation, input: ReviewTurnInput, modelIds: string[], turn: AbortSignal, attachments: readonly AttachmentUpload[]) {
       return request(DESKTOP_REVIEW_PREFLIGHT, reviewAdmission, "POST", {
@@ -391,12 +406,14 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       };
       // A chosen plugin turn is never a signed-context (location fusion) turn, as on the web.
       const mcpConnectionId = input.review ? undefined : input.mcpConnectionId;
-      const contextBundle = input.review ? input.admission?.contextBundle : mcpConnectionId ? null : await prepare();
+      // Memory, the assistant and the project reach the model through this context. A Review of several models carries the one its admission was priced with.
+      const ownContext = !input.admission && !mcpConnectionId && (!input.review || input.reviewContext === true);
+      const contextBundle = input.admission ? input.admission.contextBundle : ownContext ? await prepare() : null;
       const timeout = new AbortController();
       const watchdog = createChatLivenessWatchdog({ onExpire: () => timeout.abort() });
       try {
         const stream = (bundle?: string | null) => {
-          const currentLocation = input.review ? null : parseChatLocation(input.currentLocation);
+          const currentLocation = parseChatLocation(input.currentLocation);
           return send(DESKTOP_CHAT_TURN, "POST", {
             ...(currentLocation ? { currentLocation } : {}),
             conversationId: current.id, assistantMessageId: assistantId, sourceUserMessageId: sourceId,
@@ -409,7 +426,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
           }, { signal: AbortSignal.any([turnSignal(turn), timeout.signal]) });
         };
         let response = await stream(contextBundle);
-        if (!input.review && contextBundle && response.status === 409) {
+        if (ownContext && contextBundle && response.status === 409) {
           // A signed-context refusal happens before the provider stream and keeps the same saved turn identity.
           const refusal = staleChatContext.safeParse(await response.json().catch(() => null));
           if (refusal.success) {
