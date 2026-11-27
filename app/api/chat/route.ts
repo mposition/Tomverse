@@ -4167,7 +4167,9 @@ async function handleChatPost(
             otherToolOwner: Boolean(mcpConnector),
             researchTurn: isResearchPreview || isDeepResearchTurn,
             profileActive: Boolean(conversationProfileVersionId),
-            userMessages: executionMessages.filter((m) => m.role === "user").map((m) => m.content),
+            // The user's own messages, not executionMessages: the Auto router and the Prompt Refiner can replace
+            // those with model-written text, and read_url may fetch only a link the user wrote.
+            userMessages: messages.filter((m) => m.role === "user").map((m) => m.content),
             request: req,
             signal: req.signal,
             base: projectToolsOnly,
