@@ -292,6 +292,18 @@ test("Deep Research in the Review \"+\" menu is one more column, put to that mod
       assert.deepEqual(state.models, [gpt!.id, gemini!.id, research]);
       await expect(desktop.getByTestId("review-column")).toHaveCount(3);
     });
+
+    await t.test("Easy mode routes its providers to models and keeps the research column", async () => {
+      await desktop.getByRole("button", { name: "Easy", exact: true }).click();
+      await desktop.getByRole("textbox", { name: "Review question" }).fill("One more question for the providers.");
+      await desktop.getByRole("button", { name: "Send Review question" }).click();
+      await expect.poll(async () => (await columnsState(app)).dispatches.length).toBe(5);
+      const state = await columnsState(app);
+      assert.deepEqual(state.dispatches.slice(3).map(({ modelId }) => modelId).sort(), [gemini!.id, gpt!.id].sort());
+      assert.deepEqual(state.models, [gpt!.id, gemini!.id, research], "the Review holds models, never provider names");
+      assert.ok(state.updates.every((update) => !update.selectedModels || (update.selectedModels as string[]).every((id) => id === research || columnModels.some((model) => model.id === id))));
+      await expect(desktop.getByTestId("review-column")).toHaveCount(3);
+    });
   } finally {
     await closeReviewColumns(session);
   }

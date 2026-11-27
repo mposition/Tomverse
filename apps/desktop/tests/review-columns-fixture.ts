@@ -125,6 +125,12 @@ export async function launchReviewColumns(options: { width?: number; height?: nu
           return Response.json({ transcript: "Which one is cheaper to run?" });
         }
         if (url.pathname === "/api/chat/voice") { host.columns.voiceRequests += 1; return Response.json({ code: "VOICE_CONVERSATION_FORBIDDEN" }, { status: 403 }); }
+        if (url.pathname === "/api/review/route") {
+          // Easy mode: each chosen provider is routed to the model its column holds.
+          const byProvider: Record<string, string> = { openai: "gpt-5-6-terra", google: "gemini-3-7-flash", xai: "grok-4-5" };
+          const { providers } = JSON.parse(String(init?.body)) as { providers: string[] };
+          return Response.json({ kind: "text", preset: "standard", choices: providers.map((provider) => ({ provider, modelId: byProvider[provider] ?? null })) });
+        }
         if (url.pathname === "/api/chat/deep-research/status") {
           const pending = messages.find((message) => message.id === JSON.parse(String(init?.body)).assistantMessageId && message.status === "pending");
           if (!pending) return Response.json({}, { status: 404 });

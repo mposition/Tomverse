@@ -1750,4 +1750,18 @@ test("Desktop Deep Research in a Review has its own switch, runs for that model 
   assert.deepEqual(await completed.json(), { status: "completed", content });
   const job = await prisma.perplexityAsyncJob.findUniqueOrThrow({ where: { assistantMessageId } });
   assert.equal((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: job.reservationId } })).status, "settled");
+
+  // The Review's switch does not open a Chat: with Chat's own switch off, a research run for a Chat is refused.
+  process.env.TOMVERSE_DESKTOP_DEEP_RESEARCH_ENABLED = "false";
+  const chat = await prisma.conversation.create({ data: {
+    userId: user.id, kind: "chat", productKey: "chat", selectionMode: "manual", title: "Chat research", selectedModels: JSON.stringify([DEEP_RESEARCH_MODEL_ID]),
+  } });
+  const chatQuestion = await prisma.message.create({ data: { id: randomUUID(), conversationId: chat.id, role: "user", content: "Compare the evidence again." } });
+  const submitsBefore = perplexitySubmitCalls().length;
+  const chatRun = await chatRoute.POST(request("/api/chat", {
+    conversationId: chat.id, assistantMessageId: desktopResearchAnswerId(chat.id, chatQuestion.id), sourceUserMessageId: chatQuestion.id,
+    modelId: DEEP_RESEARCH_MODEL_ID, messages: [{ id: chatQuestion.id, role: "user", content: chatQuestion.content }], deepResearchDepth: "deep",
+  }));
+  assert.equal(chatRun.status, 403, await chatRun.clone().text());
+  assert.equal(perplexitySubmitCalls().length, submitsBefore);
 });

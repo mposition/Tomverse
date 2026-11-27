@@ -3132,19 +3132,16 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
       try {
         let current = id ? await api.conversation({ id, product: "review" }, true, signal) : null;
         let modelIds = input.choices;
-        // The models the Review holds once this send is made: Deep Research is one more column, put to that model alone.
+        // Deep Research is one more column of the Review, put to that model alone.
         const limit = Math.min(3, capability.modelLimit);
-        let held = modelIds;
+        let researchHeld: string[] | undefined;
         const only = input.onlyModelId;
         if (input.deepResearchDepth) {
           if (!(await api.models()).some((model) => model.id === DEEP_RESEARCH_MODEL_ID)) throw new Error("Deep Research is unavailable.");
           // Like any send, the Review then holds the models the composer shows; a new Review gives up the last ones that do not fit.
-          held = [...(current ? input.choices : input.choices.slice(0, Math.max(0, limit - 1))), DEEP_RESEARCH_MODEL_ID];
-          if (held.length > limit) throw new Error("There is no room for Deep Research in this Review.");
+          researchHeld = [...(current ? input.choices : input.choices.slice(0, Math.max(0, limit - 1))), DEEP_RESEARCH_MODEL_ID];
+          if (researchHeld.length > limit) throw new Error("There is no room for Deep Research in this Review.");
           modelIds = [DEEP_RESEARCH_MODEL_ID];
-        } else if (!only && current?.selectedModels.includes(DEEP_RESEARCH_MODEL_ID) && modelIds.length < limit) {
-          // The research column stays while a place is free beside the models that answer.
-          held = [...modelIds, DEEP_RESEARCH_MODEL_ID];
         }
         // A follow-up for one model goes to a saved Review that already holds that model; nothing else about the Review changes.
         if (only && !current?.selectedModels.includes(only)) throw new Error("The model is not part of this Review.");
@@ -3171,6 +3168,10 @@ async function sendReview(input: ReviewTurnInput): Promise<ReviewTurnResult> {
             throw new Error("The selected models do not share this reasoning effort.");
           }
         }
+        // What the Review holds once this send is made. Easy mode has routed its providers to models by now; the research column
+        // of a Review stays while a place is free beside the models that answer.
+        const held = researchHeld ?? (!only && current?.selectedModels.includes(DEEP_RESEARCH_MODEL_ID) && modelIds.length < limit
+          ? [...modelIds, DEEP_RESEARCH_MODEL_ID] : modelIds);
         if (!id) {
           id = await api.createReview(held, input.prompt, signal);
           if (input.tools && Object.keys(input.tools).length) {
