@@ -548,6 +548,8 @@ export const en = {
         guestAiReviewVerifySignIn: "Sign in to save, share, or verify with web search.",
         guestAiReviewSignInCta: "Sign in",
         aiReviewDuplicateRequest: "This AI Review is already running.",
+        aiReviewAlreadyRunningRetryLater: "A cross-review of these answers is already running. Once it finishes, running it again returns the saved result at no extra charge; if more answers arrive in the meantime, it runs as a new review.",
+        aiReviewAlreadyRunningCheck: "Check for the result",
         attachmentUploadError: "The file could not be uploaded. Please try again.",
         attachmentUploadingLabel: "Uploading",
         attachmentUploadingHint: "The file is being sent. Please wait until it finishes.",

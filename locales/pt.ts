@@ -566,6 +566,8 @@ export const pt = {
         guestAiReviewVerifySignIn: "Entre para salvar, compartilhar ou verificar com busca na web.",
         guestAiReviewSignInCta: "Entrar",
         aiReviewDuplicateRequest: "Esta AI Review já está em execução.",
+        aiReviewAlreadyRunningRetryLater: "Uma revisão cruzada destas respostas já está em execução. Quando terminar, executá-la novamente retorna o resultado salvo sem custo adicional; se mais respostas chegarem nesse meio-tempo, ela será executada como uma nova revisão.",
+        aiReviewAlreadyRunningCheck: "Verificar o resultado",
         attachmentUploadError: "O arquivo não pôde ser enviado. Tente novamente.",
         attachmentUploadingLabel: "Enviando",
         attachmentUploadingHint: "O arquivo está sendo enviado. Aguarde a conclusão.",

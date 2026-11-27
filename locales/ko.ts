@@ -547,6 +547,8 @@ export const ko = {
         guestAiReviewVerifySignIn: "저장, 공유, 웹 검색 검증을 사용하려면 로그인하세요.",
         guestAiReviewSignInCta: "로그인",
         aiReviewDuplicateRequest: "이 AI Review는 이미 실행 중입니다.",
+        aiReviewAlreadyRunningRetryLater: "이 답변들의 교차검토가 이미 실행 중입니다. 끝난 뒤 다시 실행하면 저장된 결과를 추가 과금 없이 받을 수 있고, 그 사이 답변이 추가되면 새 검토로 실행됩니다.",
+        aiReviewAlreadyRunningCheck: "결과 확인하기",
         attachmentUploadError: "파일을 업로드하지 못했습니다. 다시 시도해 주세요.",
         attachmentUploadingLabel: "업로드 중",
         attachmentUploadingHint: "파일을 전송하고 있습니다. 완료될 때까지 기다려 주세요.",

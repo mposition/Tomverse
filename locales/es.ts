@@ -566,6 +566,8 @@ export const es = {
         guestAiReviewVerifySignIn: "Inicia sesión para guardar, compartir o verificar con búsqueda web.",
         guestAiReviewSignInCta: "Iniciar sesión",
         aiReviewDuplicateRequest: "Esta AI Review ya se está ejecutando.",
+        aiReviewAlreadyRunningRetryLater: "Ya se está ejecutando una revisión cruzada de estas respuestas. Cuando termine, al volver a ejecutarla recibirás el resultado guardado sin cargo adicional; si mientras tanto llegan más respuestas, se ejecutará como una revisión nueva.",
+        aiReviewAlreadyRunningCheck: "Comprobar el resultado",
         attachmentUploadError: "No se pudo subir el archivo. Inténtalo de nuevo.",
         attachmentUploadingLabel: "Subiendo",
         attachmentUploadingHint: "Se está enviando el archivo. Espera a que termine.",
