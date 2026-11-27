@@ -10,6 +10,7 @@ import { voiceRequestInput } from "../voice-contract";
 import { createVoiceHost } from "./voice-host";
 import { createCodeBrowserView } from "./code-browser-view";
 import { createBrowserAgentBridge } from "./browser-agent-bridge";
+import { pictureFor } from "./browser-pick-store";
 import { createDesktopComputer } from "./computer-wiring";
 import { createFixtureBackend } from "./computer-fixture-backend";
 import type { ComputerBackend } from "./computer-backend";
@@ -3770,6 +3771,8 @@ function registerIpc() {
     }
     broadcast();
   });
+  /** The pictures of the elements the instruction names (the person picked them in the browser panel); the worker attaches them for a model that can see images. */
+  const picturesOf = (text: string) => { const pictures = pictureFor(text); return pictures.length ? { pictures } : {}; };
   const startTask = async (value: unknown, parallelStart = false) => {
     const { handoffId, executionMode, workspace, ...draft } = startInput.parse(value);
     if (recoveryCheckPending()) throw new Error("Wait for the recovery check to finish.");
@@ -3865,7 +3868,7 @@ function registerIpc() {
     if (parallelStart) {
       parallel.submit({ kind: "parallel", title: cleanText(input.prompt, connection.key).slice(0, 80), folder: project.path, isolated: !!worktree,
         ...(worktree ? { worktree: worktree.info } : {}),
-        start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference } });
+        start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference, ...picturesOf(input.prompt) } });
       if (handoffId) removeWorkspaceHandoff(handoffId);
       codeReferences.clear();
       codeWorktreeDraft = undefined;
@@ -3890,7 +3893,7 @@ function registerIpc() {
       approval?.settings.automaticFrom === "tomverse_api"
       ? { mode: input.mode, project, approval } : undefined;
     send({ type: "start", runId: id, project, ...(worktree ? { sourceProject } : {}), scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference,
-      ...codeRunTools() });
+      ...picturesOf(input.prompt), ...codeRunTools() });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     codeWorktreeDraft = undefined;
@@ -3945,7 +3948,7 @@ function registerIpc() {
     return new Promise<boolean>((resolve) => {
       const requestId = randomUUID();
       pendingFollowUp = { requestId, resolve };
-      try { send({ type: "follow-up", runId: activeRunId, requestId, text }); }
+      try { send({ type: "follow-up", runId: activeRunId, requestId, text, ...picturesOf(text) }); }
       catch {
         pendingFollowUp = null;
         resolve(false);
