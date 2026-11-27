@@ -52,7 +52,7 @@ page and never the table. A tab with no screen draws `AdminTabPlaceholder`
 | Home | Metrics | `/admin/analytics` | `usage`, `product`, `ai-review`, `imports` |
 | Customers & Revenue | Users | `/admin/users` | — (the detail page declares `overview`, `billing`, `security`, `conversations`, `notes`) |
 | Customers & Revenue | Support | `/admin/support` | `feedback`, `autofix`, `privacy` (retired `fixes` falls to `feedback`) |
-| Customers & Revenue | Plans & pricing | `/admin/billing` | `plans`, `prices`, `promotions`, `diagnostics` |
+| Customers & Revenue | Plans & pricing | `/admin/billing` | `plans`, `prices`, `promotions`, `diagnostics`, `plan-changes` |
 | Customers & Revenue | Refunds | `/admin/refunds` | — |
 | Customers & Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
@@ -99,7 +99,9 @@ they were written under):
   Revenue. Billing is Plans & pricing and its editor follows the URL
   (`initialTab`): the address names the section the screen shows. Prices and
   Diagnostics are tabs of their own; Diagnostics holds what sat under the
-  promotion editor.
+  promotion editor. Plan changes (2026-11-26) is read-only: the Pro / Max
+  changes in flight and those settled in the last 30 days
+  (`components/admin/AdminPlanChangesPanel.tsx`).
 - **AI Agents** is a new group. Marketing, Product research, Engineering, SRE
   and the Agent office moved into it from Operations; QA and release and the
   billing and finance digest left Agent digests (below). The Agent office

@@ -12,6 +12,9 @@ import {
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { keepDeletionCancellation } from "@/lib/deletionCancellation";
+import { resyncSubscriptionFromStripe } from "@/lib/stripeWebhookProcessing";
 import { analyticsAttributionSchema } from "@/lib/productAnalyticsShared";
 import {
   analyticsCountryFromHeaders,
@@ -152,6 +155,226 @@ export async function POST(req: Request) {
     console.error("Subscription cancellation failed:", error);
     return NextResponse.json(
       { error: "Failed to schedule subscription cancellation." },
+      { status: 500 }
+    );
+  }
+}
+
+const RESUMABLE_STATUSES = new Set(["active", "trialing"]);
+
+/**
+ * After a resume write -- answered or not -- make sure an account that has
+ * meanwhile been scheduled for deletion ends with its cancellation back on.
+ *
+ * Runs on the failure path too: a timed-out write may still have been applied
+ * at Stripe. Putting the cancellation back is a different write (and
+ * idempotent), not a retry of the resume. Anything that leaves the outcome unknown is raised as
+ * an operational incident for a person to read back at Stripe.
+ */
+async function restoreCancellationIfDeletionPending(
+  userId: string,
+  subscriptionId: string,
+  resumeOutcome: "applied" | "unknown"
+): Promise<boolean> {
+  try {
+    // The one locked reconciler: under the account row lock it re-reads Stripe
+    // and cancels only while the account is still pending deletion, so a
+    // restore and the customer's renewal after it are never undone by this.
+    const outcome = await keepDeletionCancellation(subscriptionId);
+    return outcome.pendingDeletion;
+  } catch (error) {
+    await reportOperationalIncident({
+      code: "BILLING_RESUME_RENEWAL_DELETION_CONFLICT",
+      title: "Renewal resume raced an account deletion and the cancellation could not be restored",
+      error,
+      severity: "error",
+      context: {
+        component: "billing-resume-renewal",
+        userId,
+        subscriptionId,
+        resumeOutcome,
+      },
+    }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * The stored billing state after a resume, or after finding the subscription
+ * already renewing, is written the way the webhook writes it: re-read from
+ * Stripe and applied through the snapshot stamped before that read, which a
+ * newer read (an ordinary cancellation elsewhere, a deletion, a restore) always
+ * outranks. A failure is logged only: Stripe already has the truth, and the
+ * webhook of the same change records it.
+ */
+async function recordSubscriptionFromStripe(userId: string, subscriptionId: string) {
+  try {
+    await resyncSubscriptionFromStripe(subscriptionId);
+  } catch (error) {
+    console.error("billing.subscription.resume_record_failed", {
+      userId,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+}
+
+async function accountPendingDeletion(userId: string) {
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { accountStatus: true },
+  });
+  return account?.accountStatus === "pending_deletion";
+}
+
+const deletionPendingResponse = () =>
+  NextResponse.json(
+    { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
+    { status: 409 }
+  );
+
+/**
+ * Undo a scheduled cancellation: the subscription renews again on its current
+ * plan. It is its own control with its own label -- a plan change never does
+ * this as a side effect (docs/policy/plan-change.md section 1) -- and it is the
+ * step the plan-change refusal PLAN_CHANGE_BLOCKED_BY_CANCELLATION tells the
+ * customer to take first.
+ *
+ * Refused while an account deletion is pending: the deletion scheduled the
+ * cancellation itself, and renewing underneath it would charge an account that
+ * asked to leave. (A refund request does not cancel anything on its own --
+ * approval settles the subscription -- so it is not a reason to refuse.)
+ */
+export async function DELETE(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    await consumeApiRateLimit(req, session.user.id, "billing-resume-renewal", {
+      minute: 3,
+      day: 10,
+    });
+
+    if (!isStripeConfigured()) {
+      return NextResponse.json(
+        { code: "STRIPE_NOT_CONFIGURED", error: "Stripe is not configured." },
+        { status: 503 }
+      );
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: {
+        id: true,
+        accountStatus: true,
+        stripeSubscriptionId: true,
+        subscriptionCurrentPeriodEnd: true,
+      },
+    });
+    if (!user) {
+      return NextResponse.json(
+        { code: "USER_NOT_FOUND", error: "User not found." },
+        { status: 404 }
+      );
+    }
+    if (!user.stripeSubscriptionId) {
+      return NextResponse.json(
+        { code: "NO_ACTIVE_SUBSCRIPTION", error: "No Stripe subscription to renew." },
+        { status: 409 }
+      );
+    }
+    if (user.accountStatus === "pending_deletion") {
+      return NextResponse.json(
+        { code: "ACCOUNT_DELETION_PENDING", error: "The account is scheduled for deletion." },
+        { status: 409 }
+      );
+    }
+    // Decided on the subscription as Stripe has it now, not on the stored
+    // flag, which a missed webhook can leave stale.
+    const stripe = getStripe();
+    const current = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+    // Status first: a canceled or unpaid subscription reports
+    // cancel_at_period_end false too, and "renewal is on" would be untrue.
+    if (!RESUMABLE_STATUSES.has(current.status)) {
+      return NextResponse.json(
+        {
+          code: "SUBSCRIPTION_NOT_CHANGEABLE",
+          error: `A subscription in status "${current.status}" cannot be renewed here.`,
+        },
+        { status: 409 }
+      );
+    }
+    if (!current.cancel_at_period_end) {
+      // Already renewing: nothing to undo, and saying so is idempotent. The
+      // stored flag is corrected too -- a missed webhook would otherwise keep
+      // showing a cancellation (and this button) after a reload.
+      await recordSubscriptionFromStripe(user.id, user.stripeSubscriptionId);
+      // A deletion committed after the check above is not told "renewing".
+      if (await accountPendingDeletion(user.id)) return deletionPendingResponse();
+      return NextResponse.json({
+        success: true,
+        cancelAtPeriodEnd: false,
+        currentPeriodEnd: getPeriodEnd(current)?.toISOString() || null,
+        status: current.status,
+      });
+    }
+
+    // A deletion may land between the check above and this write. Account
+    // deletion schedules the cancellation at Stripe, records pending_deletion,
+    // then re-asserts the cancellation (lib/accountDeletion.ts); this route
+    // re-reads the account after its own write, answered or not. Between the
+    // two of them the cancellation always wins.
+    const subscriptionId = user.stripeSubscriptionId;
+    let subscription: Stripe.Subscription;
+    try {
+      subscription = await stripe.subscriptions.update(subscriptionId, {
+        cancel_at_period_end: false,
+      });
+    } catch (resumeError) {
+      // The resume's own failure is what this request reports; a failed
+      // restore has already raised its incident and is only logged here.
+      await restoreCancellationIfDeletionPending(user.id, subscriptionId, "unknown").catch(
+        (restoreError) => {
+          console.error("billing.subscription.resume_restore_failed", {
+            userId: user.id,
+            errorName: restoreError instanceof Error ? restoreError.name : "UnknownError",
+          });
+        }
+      );
+      throw resumeError;
+    }
+
+    if (await restoreCancellationIfDeletionPending(user.id, subscriptionId, "applied")) {
+      await recordSubscriptionFromStripe(user.id, subscriptionId);
+      return deletionPendingResponse();
+    }
+
+    await recordSubscriptionFromStripe(user.id, subscriptionId);
+    // A deletion committed after the reconcile re-asserts its own cancellation
+    // (lib/accountDeletion.ts); this answer must not say "renewing" to it.
+    if (await accountPendingDeletion(user.id)) return deletionPendingResponse();
+    const periodEnd = getPeriodEnd(subscription) || user.subscriptionCurrentPeriodEnd;
+    console.info("billing.subscription.renewal_resumed", {
+      userId: user.id,
+      subscriptionId: subscription.id,
+    });
+
+    return NextResponse.json({
+      success: true,
+      cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      currentPeriodEnd: periodEnd?.toISOString() || null,
+      status: subscription.status,
+    });
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Subscription renewal resume failed:", error);
+    return NextResponse.json(
+      { code: "STRIPE_ERROR", error: "Failed to resume subscription renewal." },
       { status: 500 }
     );
   }

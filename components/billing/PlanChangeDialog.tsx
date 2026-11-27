@@ -121,7 +121,12 @@ export function PlanChangeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   targetTier: "Pro" | "Max";
-  billingInterval: "monthly" | "annual";
+  /**
+   * The interval the account bills on, when the page knows it. Omitted, the
+   * server quotes on the interval Stripe reports for the subscription -- the
+   * only interval a change can ever be on.
+   */
+  billingInterval?: "monthly" | "annual" | null;
   lang: string;
   /** Called after a confirm or cancel so the page can refresh its account state. */
   onSettled?: () => void;
@@ -195,7 +200,10 @@ export function PlanChangeDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({ targetTier, billingInterval }),
+        body: JSON.stringify({
+          targetTier,
+          ...(billingInterval ? { billingInterval } : {}),
+        }),
       });
       const data = await response.json().catch(() => null);
       if (cancelled) return;

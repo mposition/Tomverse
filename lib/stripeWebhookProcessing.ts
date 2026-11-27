@@ -17,6 +17,11 @@ import { prisma } from "@/lib/prisma";
 import { promotionRiskIdentifierCutoff } from "@/lib/billingPromotionCore";
 import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { getStripe } from "@/lib/stripe";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  keepDeletionCancellation,
+  stopDeletionPendingRenewal,
+} from "@/lib/deletionCancellation";
 import {
   analyticsAttributionFromMetadata,
   recordProductAnalyticsEvent,
@@ -212,7 +217,90 @@ export async function resyncSubscriptionFromStripe(
   // was reserved against what the subscription now bills, and that comparison
   // wants the same freshly read subscription rather than a second retrieve.
   await settlePlanChangesForSubscription(subscription, eventType);
+  // Throws (for redelivery) only on the webhook path, which is the one that
+  // has a redelivery; a direct caller gets a reported incident instead.
+  await reconcileDeletionCancellation(subscription, eventType !== null);
   return synced;
+}
+
+/**
+ * An account scheduled for deletion never renews: every subscription resync
+ * runs the one locked reconciler (lib/deletionCancellation.ts). Whatever order
+ * a renewal resume and a deletion landed in at Stripe -- including a resume
+ * that timed out and was applied late -- its `customer.subscription.updated`
+ * arrives here (docs/policy/plan-change.md section 10).
+ *
+ * On the webhook path a failure throws, so the route answers 500 and Stripe
+ * redelivers: that is the durable retry. A refusal Stripe will repeat on every
+ * redelivery (an invalid request, e.g. a schedule-managed subscription), and
+ * any failure on a direct caller with no redelivery (the mobile cancel), is an
+ * operational incident instead.
+ */
+async function reconcileDeletionCancellation(
+  subscription: Stripe.Subscription,
+  canRedeliver: boolean
+) {
+  if (subscription.cancel_at_period_end) return;
+  try {
+    await keepDeletionCancellation(subscription.id);
+  } catch (error) {
+    if (canRedeliver && (error as { type?: unknown })?.type !== "StripeInvalidRequestError") {
+      throw error;
+    }
+    await reportOperationalIncident({
+      code: "ACCOUNT_DELETION_CANCELLATION_REASSERT_FAILED",
+      title: "A subscription of an account scheduled for deletion may be renewing and could not be cancelled",
+      error,
+      severity: "error",
+      context: { component: "stripe-webhook", subscriptionId: subscription.id },
+    }).catch(() => {});
+  }
+}
+
+/**
+ * A renewal invoice for an account scheduled for deletion is never collected
+ * (lib/deletionCancellation.ts `stopDeletionPendingRenewal`). Only
+ * `subscription_cycle` invoices are looked at; every other invoice returns at
+ * once, because Stripe holds an invoice's finalization while its
+ * `invoice.created` delivery fails.
+ *
+ * A failure throws: the route answers 500, Stripe redelivers, and the renewal
+ * stays an uncharged draft meanwhile. A renewal that had already been paid,
+ * and a refusal Stripe will repeat on every redelivery, are reported for a
+ * person as well.
+ */
+async function handleRenewalInvoiceCreated(invoice: Stripe.Invoice) {
+  if (invoice.billing_reason !== "subscription_cycle" || !invoice.id) return;
+  const subscriptionId = subscriptionIdFromEventObject("invoice.created", invoice);
+  if (!subscriptionId) return;
+  let outcome;
+  try {
+    outcome = await stopDeletionPendingRenewal({ subscriptionId, invoiceId: invoice.id });
+  } catch (error) {
+    if ((error as { type?: unknown })?.type === "StripeInvalidRequestError") {
+      await reportOperationalIncident({
+        code: "ACCOUNT_DELETION_RENEWAL_STOP_FAILED",
+        title: "A renewal invoice of an account scheduled for deletion could not be stopped",
+        error,
+        severity: "error",
+        context: { component: "stripe-webhook", subscriptionId, invoiceId: invoice.id },
+      }).catch(() => {});
+    }
+    throw error;
+  }
+  if (outcome.pendingDeletion && outcome.invoiceFinalized) {
+    await reportOperationalIncident({
+      code: "ACCOUNT_DELETION_RENEWAL_FINALIZED",
+      title: "An account scheduled for deletion has a renewal invoice that was already finalized",
+      severity: "error",
+      context: {
+        component: "stripe-webhook",
+        subscriptionId,
+        invoiceId: invoice.id,
+        subscriptionCancelled: outcome.cancelled,
+      },
+    }).catch(() => {});
+  }
 }
 
 export type BillingResyncOutcome = {
@@ -1015,6 +1103,9 @@ export async function processStripeEvent(event: Stripe.Event) {
         event.data.object as Stripe.Subscription,
         new Date()
       );
+      break;
+    case "invoice.created":
+      await handleRenewalInvoiceCreated(event.data.object as Stripe.Invoice);
       break;
     default:
       // Everything that means "this subscription may have moved" -- including

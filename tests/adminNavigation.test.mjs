@@ -100,7 +100,7 @@ test("the approved sitemap is the table: every group, entry and tab, in order", 
     "Customers & Revenue": [
       ["users", "/admin/users", undefined],
       ["support", "/admin/support", ["feedback", "autofix", "privacy"]],
-      ["billing", "/admin/billing", ["plans", "prices", "promotions", "diagnostics"]],
+      ["billing", "/admin/billing", ["plans", "prices", "promotions", "diagnostics", "plan-changes"]],
       ["refunds", "/admin/refunds", undefined],
       ["credit-ledger", "/admin/credit-ledger", undefined],
     ],
@@ -1215,7 +1215,7 @@ test("the retired Support tab still lands on the inbox", () => {
 });
 
 test("Billing's sections are addresses, not component state", () => {
-  assert.deepEqual(adminNavItemTabs("billing").map((tab) => tab.id), ["plans", "prices", "promotions", "diagnostics"]);
+  assert.deepEqual(adminNavItemTabs("billing").map((tab) => tab.id), ["plans", "prices", "promotions", "diagnostics", "plan-changes"]);
   const page = readPage("billing");
   assert.match(page, /initialTab=\{tab\.id as "plans" \| "prices" \| "promotions"\}/);
   // The panel draws no tab strip and keeps no tab state of its own: the screen is whatever `?tab=` says.
