@@ -178,6 +178,34 @@ first. A small final chunk therefore receives a scheduled checkpoint even when
 no later chunk arrives; terminal flush remains the final owner/revision/database
 clock barrier.
 
+A CAS refusal of a checkpoint (lost lease, another owner, a moved revision)
+ends the writer at once and is thrown by the terminal flush, as
+before. A transient write failure (a dropped connection, a pool timeout) is no
+longer latched: it is logged as `chat_attempt_checkpoint_retry`, the content
+stays pending and is written again one interval later (a coalescing timer
+armed while the failing write was in flight is replaced, so it cannot cut that
+interval short), and the terminal flush writes the final prefix itself if no
+earlier cycle did. Only a failure of that final write fails the turn.
+
+A failed checkpoint write may still have committed -- the UPDATE ran and only
+its answer was lost -- leaving the row one revision ahead of the writer. So
+after a transient write failure (a lease renewal included) nothing is written
+until the row has been read: the same revision means the write did not land
+and it is retried; one revision on, with this owner, an active status and
+exactly the content that write carried, means it landed and the writer adopts
+that revision; another owner, a terminal row (an expired lease) or any
+other revision is a refusal, surfaced as before. A read that
+fails leaves the write unsettled and is tried again next cycle, and at the
+terminal flush it is the turn's error -- nothing is written blind. The terminal
+flush still makes its own fresh write: a write that was only reconciled does
+not count as the final owner/revision/lease CAS.
+
+Errors raised after the provider's stream reported
+done -- a refused attempt CAS or a database error in the final checkpoint, the
+settlement or the Message write -- are this application's: they are classified
+with the stream-failure `completion` phase (never a fallback) and are not
+recorded as provider or model failures.
+
 Credit settlement follows the provider outcome and is separate from Message
 and attempt-state persistence. A checkpoint or terminal CAS failure is logged
 and later reconciled through lease expiry, but it cannot suppress the provider
@@ -186,6 +214,41 @@ create the assistant
 Message and complete its attempt rolls back, settlement is not repeated and the
 attempt is immediately terminalised as a public-safe internal failure rather
 than remaining active until lease expiry.
+
+That transaction is re-run, up to twice after short backoffs, when it fails
+with a retryable database error (`isRetryableDatabaseError`). No failure proves
+a rollback on its own -- a failed COMMIT has an unknown outcome -- so every
+failure is followed by a read of this turn's assistant Message: finding its own
+body and model means the try committed and nothing is written again. A failed
+write therefore ends in one of three outcomes, and only one may delete:
+
+- committed (found by the read): kept, as a success;
+- known not committed (the read found nothing): retried while retryable, and
+  then the generated-file objects are reclaimed as before;
+- unknown (the read failed too, `DatabaseWriteOutcomeUnknownError`): never
+  retried and nothing is deleted. A committed row may point at those objects;
+  if none does, the generated-artifact orphan sweep removes them later (it
+  deletes only objects older than its TTL that no `MessageArtifact` row
+  references). Download cards are not sent for rows that may not exist.
+
+A rollback leaves the final checkpoint revision unchanged, so the re-run's
+terminal CAS names the same revision. Settlement still runs before the
+transaction and is not reversed when the write finally fails: the answer was
+shown and the provider ran.
+
+On a durable turn the route then writes the attempt's terminal `failed` CAS as
+before. For an unknown outcome that CAS also decides it: the Message
+transaction carries the attempt's own terminal CAS, so `failed` can only land
+if that transaction did not commit (the objects are then reclaimed and the
+turn fails as a known failure); if it did commit, the CAS is refused by the
+`completed` row. When the CAS is refused or cannot be written, the outcome is
+still unknown here, and the stream ends without a signed failure trailer so
+the browser reads the attempt row (lib/chatStreamReattach.ts) and shows the
+canonical Message or the failure the row records. A turn without an attempt row (Review panels and other
+non-durable callers) receives `persistence: "not_saved"` (known) or
+`persistence: "unknown"` in its stream trailer, and the browser shows a
+localized notice under the answer -- "not saved", or "could not confirm it was
+saved; reload to check" -- instead of ending as if it were saved.
 
 Finish reasons and failure codes are closed, public-safe classifications shared
 by runtime parsing and database constraints. A failed attempt must use the
@@ -233,6 +296,18 @@ credit, reroute, create an attempt, or submit a Message. If the predicate no
 longer matches, the read returns the newer row without retrying a mutation.
 This bounded reconciliation is what prevents polling an abandoned worker from
 reporting an active attempt forever; no other GET mutation is permitted.
+
+The same GET-only polling also takes over a durable stream that breaks while
+its panel is open (`lib/chatStreamReattach.ts`): a client liveness timeout, or
+a body read that fails without a server-signed failure trailer. The browser
+keeps the text it already showed until a checkpoint is at least as long, shows
+the canonical Message if the attempt completes, and otherwise ends the turn
+with the same error it showed before this hand-off existed -- a cancellation
+the server made because the connection went away is not presented as the
+user's stop. A stop, a failure the server reported in the trailer, and any
+stream no panel on that conversation is polling are never handed over. The
+page becoming visible or coming back online re-checks the stream's liveness
+at once, because a suspended page runs no timers.
 The direct attempt route performs a non-mutating owner lookup and conversation
 unlock check before invoking this reconciliation, so a caller without the
 unlock grant cannot cause even that bounded state transition. Destructive

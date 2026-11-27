@@ -29,6 +29,22 @@
  * extended by a keepalive, so even a server that kept writing them forever
  * would still be given up on.
  *
+ * ## After the first visible token
+ *
+ * A turn that has started answering can still go quiet on the wire for
+ * minutes: a model writing a long tool input (a document specification), or
+ * reasoning between two steps of a tool loop, produces stream parts the user
+ * never sees. The client's inter-chunk watchdog used to count only visible
+ * text, so those turns were ended as stalls while the provider was working.
+ *
+ * The server keeps writing after the first token, but only on evidence:
+ * a `provider_active` keepalive goes out on a tick only when the provider
+ * stream itself delivered a part (any part -- reasoning, tool input, a step
+ * boundary) since the previous tick, and only when no visible text went out
+ * in that interval. A provider that has stopped producing parts produces no
+ * keepalives either, so the client's silence watchdog still sees the stall.
+ * A timer alone never vouches for a provider.
+ *
  * ## Wire format
  *
  * Same convention as lib/webSearchStreamTrailer.ts and
@@ -46,14 +62,21 @@ export const STREAM_KEEPALIVE_MARKER = `${NUL}TOMVERSE_STREAM_KEEPALIVE`;
 export type ChatStreamKeepaliveSignal = {
   /**
    * `awaiting_first_token` -- the server is still holding the provider stream
-   * open and nothing has arrived. `stalled` -- it gave up, and the turn is
-   * over.
+   * open and nothing has arrived. `provider_active` -- visible text has gone
+   * out, and the provider has delivered non-visible stream parts since the
+   * previous tick. `stalled` -- it gave up, and the turn is over.
    */
-  state: "awaiting_first_token" | "stalled";
+  state: "awaiting_first_token" | "provider_active" | "stalled";
   /** Since the provider was dispatched. Diagnostics only. */
   elapsedMs: number;
   /** Present on `stalled` only, and always this one code. */
   code?: "CHAT_FIRST_RESPONSE_TIMEOUT";
+  /**
+   * The server's tick interval, so the client can size "several missed
+   * keepalives" against the interval actually in use rather than the
+   * compiled default. Absent from servers that predate it.
+   */
+  intervalMs?: number;
 };
 
 export const buildStreamKeepaliveChunk = (
@@ -65,6 +88,12 @@ export type SplitKeepaliveSignal = {
   text: string;
   /** The last signal seen, or null. */
   signal: ChatStreamKeepaliveSignal | null;
+  /**
+   * How many complete markers were removed, parseable or not. The caller
+   * re-splits the whole accumulation on every pass, so this is what tells a
+   * new keepalive apart from one it has already counted.
+   */
+  count: number;
 };
 
 /**
@@ -79,10 +108,13 @@ export type SplitKeepaliveSignal = {
 export const splitStreamKeepaliveSignal = (
   raw: string
 ): SplitKeepaliveSignal => {
-  if (!raw.includes(STREAM_KEEPALIVE_MARKER)) return { text: raw, signal: null };
+  if (!raw.includes(STREAM_KEEPALIVE_MARKER)) {
+    return { text: raw, signal: null, count: 0 };
+  }
 
   let text = "";
   let signal: ChatStreamKeepaliveSignal | null = null;
+  let count = 0;
   let rest = raw;
 
   for (;;) {
@@ -102,10 +134,11 @@ export const splitStreamKeepaliveSignal = (
     }
     const parsed = parseSignal(rest.slice(payloadStart, end));
     if (parsed) signal = parsed;
+    count += 1;
     rest = rest.slice(end);
   }
 
-  return { text, signal };
+  return { text, signal, count };
 };
 
 const matchingBraceEnd = (raw: string, from: number): number => {
@@ -134,7 +167,11 @@ const matchingBraceEnd = (raw: string, from: number): number => {
 const parseSignal = (payload: string): ChatStreamKeepaliveSignal | null => {
   try {
     const parsed = JSON.parse(payload) as Partial<ChatStreamKeepaliveSignal>;
-    if (parsed?.state !== "awaiting_first_token" && parsed?.state !== "stalled") {
+    if (
+      parsed?.state !== "awaiting_first_token" &&
+      parsed?.state !== "provider_active" &&
+      parsed?.state !== "stalled"
+    ) {
       return null;
     }
     return {
@@ -145,6 +182,11 @@ const parseSignal = (payload: string): ChatStreamKeepaliveSignal | null => {
           : 0,
       ...(parsed.code === "CHAT_FIRST_RESPONSE_TIMEOUT"
         ? { code: parsed.code }
+        : {}),
+      ...(typeof parsed.intervalMs === "number" &&
+      Number.isSafeInteger(parsed.intervalMs) &&
+      parsed.intervalMs > 0
+        ? { intervalMs: parsed.intervalMs }
         : {}),
     };
   } catch {

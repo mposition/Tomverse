@@ -373,11 +373,31 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
   존재하거나 함께 없다.
 - `artifactsPersisted`가 true가 아닌 모든 종료 경로(취소, provider 오류, 클라이언트
   연결 끊김, fallback swap, 메시지 쓰기 실패)는 `releaseSafely()`에서
-  `discard()`로 객체를 회수한다. 기본값이 "회수"다.
-- **텍스트 없이 tool만 호출한 turn**은 빈 응답으로 보고되고 파일을 남기지
-  않는다(참조할 메시지가 없으므로 쓰는 순간 도달 불가능한 객체가 된다).
-  `generated_artifact_discarded_empty_answer`로 따로 기록하며, 이 비율이
-  0 근처를 벗어나면 지시문이 작동하지 않는다는 뜻이다.
+  `discard()`로 객체를 회수한다. 기본값이 "회수"다. **단, 메시지 쓰기의 결과를 알
+  수 없을 때**(COMMIT 결과 불명 + 커밋 확인 조회 실패)는 커밋된 행이 그 객체를
+  가리킬 수 있으므로 지우지 않고 아래 고아 sweep에 맡긴다(2026-11-27). durable turn은
+  attempt의 terminal CAS가 롤백을 확인하면 그때 회수한다.
+- **텍스트 없이 파일만 만든 turn**(모델이 본문 없이 끝났거나 tool step이 모두
+  소진된 turn)도 파일이 저장소에 하나라도 저장됐으면 답변이다. 빈 본문의
+  assistant 메시지와 파일 행을 같은 트랜잭션에 쓰고 `completed`로 정산한다(파일이
+  전달됐으므로). 서버는 본문에 어떤 언어의 문장도 써 넣지 않고, 카드 위의 한 문장
+  (`chat.artifactOnlyAnswer`)은 화면이 사용자 언어로 그린다. 2026-11-27 변경.
+  - 이 turn의 정산은 **저장 결과가 정해진 뒤**에 한다. 본문이 있는 답변은 사용자가
+    이미 읽었으므로 저장 전에 정산하지만, 파일만 있는 답변은 메시지와 파일 행이
+    생겨야 전달된다. 롤백이 확인되면 파일을 회수하고 `empty`(0 크레딧)로, 커밋됐거나
+    결과를 알 수 없으면(파일을 남겨 재조회에 맡긴다) 원래 정산으로 한다.
+  - provider가 도중에 끊은 파일만 있는 답변은 파일을 남기되 본문이 있는 끊긴 답변과
+    같이 비례 정산(`cancelled`)하고 provider 실패로 기록한다.
+- **본문도 저장된 파일도 없고 실패 카드만 있는 turn**(출력 한도에 걸린
+  `turn_incomplete`, 생성 실패 등)은 빈 본문의 메시지와 실패 카드 행을 저장해
+  §9의 "재조회 후에도 카드가 남는다"를 지킨다. 파일이 전달되지 않았으므로 정산은
+  빈 응답과 같은 `empty`(0 크레딧)이고 provider 기록·오류 보고도 빈 응답과 같다.
+  화면은 "빈 응답" 오류 대신 카드를 보여 주며, 카드 위에 문장을 붙이지 않는다.
+  durable attempt는 메시지 트랜잭션이 `completed`로 끝내므로 재조회와 attempt
+  복구가 같은 메시지를 본다. 2026-11-27 변경.
+- 메시지를 쓸 대화가 없는 turn(게스트 등)의 저장된 파일만 예전처럼 빈 응답으로
+  보고되고 파일을 남기지 않는다(참조할 메시지가 없으므로 쓰는 순간 도달 불가능한
+  객체가 된다). `generated_artifact_discarded_empty_answer`로 따로 기록한다.
 - **삭제**: 대화 삭제, 대화 일괄 삭제, 계정 삭제, 모델별 메시지 초기화 모두
   같은 트랜잭션에서 `MessageArtifactCleanup` tombstone을 남긴다.
 - **sweep**: 15분 유지보수 cron이 (a) tombstone queue를 drain하고,
@@ -489,8 +509,9 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
 
 절대 조건:
 
-- **완료 판정이 `incomplete`(= `length`)일 때만** 기록한다
-  (`resolveChatCompletionOutcome`). 정상 종료나 취소는 대상이 아니다.
+- **완료 판정이 출력 한도(`incompleteReason: "length"`)로 `incomplete`일 때만**
+  기록한다(`resolveChatCompletionOutcome`). 정상 종료, 취소, provider가 도중에 끊은
+  `interrupted`는 대상이 아니다.
 - **artifact tool 호출이 시작되지 않은 길이 초과는 지금과 같다** — 일반
   incomplete 안내만 보이고 카드는 만들지 않는다.
 - **native tool은 절대 세지 않는다.** `web_search`·`google_search`도 같은
