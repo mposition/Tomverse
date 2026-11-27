@@ -630,7 +630,9 @@ test("Desktop reads its own resources through the exact origin and route allowli
       process.env[reviewFlag] = "true";
       assert.equal((await (await capabilities.GET(read("/api/products/chat/capabilities"))).json()).desktopComposerTools, true);
       assert.equal((await rename(foreign.id, options)).status, 403);
-      assert.equal((await rename(review.id, options)).status, 403);
+      // A Desktop Review takes the composer options as a Chat does.
+      assert.equal((await rename(review.id, options)).status, 200);
+      assert.equal((await (await conversation(review.id)).json()).webSearchMode, "always");
       assert.equal((await rename(locked.id, options)).status, 423);
       assert.equal((await rename(createdId, options, { Cookie: "session=ambient" })).status, 401);
       assert.equal((await rename(createdId, { ...options, password: "will-not-change" })).status, 400);
@@ -1662,7 +1664,8 @@ test("Desktop Chat prepares signed memory only for its current saved question an
     assert.deepEqual(history?.history.map(({ id }) => id), [older.id, previous.id]);
     assert.equal((await context.POST(prepare({ ...payload, prompt: "A renderer-supplied query" }))).status, 400);
     assert.equal((await context.POST(prepare({ ...payload, conversationId: foreign.id, sourceUserMessageId: foreignQuestion.id }))).status, 403);
-    assert.equal((await context.POST(prepare({ ...payload, conversationId: review.id }))).status, 403);
+    // A Review is a writable Desktop conversation now; the question belongs to another conversation, so it is a conflict, not a refusal.
+    assert.equal((await context.POST(prepare({ ...payload, conversationId: review.id }))).status, 409);
     assert.equal((await context.POST(prepare({ ...payload, conversationId: locked.id }))).status, 423);
     assert.equal((await context.POST(prepare({ ...payload, sourceUserMessageId: older.id }))).status, 409);
     assert.equal((await context.POST(prepare({ ...payload, modelId: "another-model" }))).status, 409);
