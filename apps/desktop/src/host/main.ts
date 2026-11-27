@@ -67,11 +67,14 @@ import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
   type NativeFixtureProvider,
-  type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
+  type CliLoginOpen, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
 import { codeFallbackModelAvailable, codeCliContinuation, codeContinuation, codeFallbackSettings, codeFallbackUpdate, defaultCodeFallbackSettings, updateCodeFallbackSettings,
   type CodeCliContinuation, type CodeFallbackSettings, type CodeFallbackUpdate } from "../code-fallback";
 import { desktopProviderCliCopy } from "../../../../locales/desktopProviderCli";
-import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPath, watchVerifiedCliPath } from "./provider-cli-path";
+import { desktopProviderCliScanCopy } from "../../../../locales/desktopProviderCliScan";
+import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPath, applyCliReleaseFixture, watchVerifiedCliPath } from "./provider-cli-path";
+import { createProviderCliHost } from "./provider-cli-host";
+import { loginShellKind } from "./provider-cli-login";
 import { probeIsolatedClaudeAccount } from "./claude-account";
 import { probeIsolatedAcpAccount, probeIsolatedCliProtocol, probeIsolatedCodexAccount } from "./cli-protocol";
 import {
@@ -91,7 +94,7 @@ import { same } from "../../../tomverse-cli/src/runtime.js";
 import { createRequire } from "node:module";
 import { TerminalHost } from "./terminal-host";
 import { createTerminalApi } from "./terminal-api";
-import { createTerminalLaunch } from "./terminal-session";
+import { createTerminalLaunch, defaultShell } from "./terminal-session";
 import { terminalEnv } from "./terminal-env";
 import { codeMemoryView } from "./code-memory";
 import { createReviewActions, type ReviewTarget } from "./review-host";
@@ -312,6 +315,11 @@ const attachmentReceipts = new Map<string, AttachmentUpload>();
 let linkedCode: { accountId: string; connection: Connection } | null = null;
 let linkAttempt: AbortController | null = null;
 let catalogRequest: string | null = null;
+// Tests give a stand-in CLI a pinned release of its own. Packaged builds drop this branch.
+if (DESKTOP_FIXTURE_ALLOWED && process.env.TOMVERSE_DESKTOP_CLI_RELEASE_FIXTURE) {
+  applyCliReleaseFixture(z.partialRecord(cliProvider, z.object({ version: z.string().min(1), bytes: z.number().int().positive(), sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
+    .parse(JSON.parse(process.env.TOMVERSE_DESKTOP_CLI_RELEASE_FIXTURE)));
+}
 const state: Snapshot = {
   root: null, project: null, draftNamespace: null, handoff: null, models: [], task: null, history: [], moreHistory: false, busy: false,
   localFixture: fixture !== null, version: app.getVersion(), language: null, update: { stage: "unavailable" },
@@ -652,18 +660,24 @@ async function saveCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
   let saved: SavedCliPath | undefined;
   let changed = false;
   try {
-    let inspection = await inspectCliPath(provider, path);
-    if (inspection.status === "pathVerified") {
+    let inspection: Awaited<ReturnType<typeof inspectCliPath>> | { status: "userTrusted"; file: string; fileStamp: string } = await inspectCliPath(provider, path);
+    if (inspection.status === "versionUnverified") {
+      // A file the person trusted stays usable while it is exactly the file they trusted.
+      const trusted = await providerCli.trustedFile(provider, path);
+      if (trusted) inspection = { status: "userTrusted", ...trusted };
+    }
+    if (inspection.status === "pathVerified" || inspection.status === "userTrusted") {
       watching = watchVerifiedCliPath(provider, path, inspection.file, () => {
         changed = true;
         if (saved) invalidateCliPath(provider, saved);
       });
       if (!await cliPathStillMatches(provider, path, inspection) || changed) inspection = { status: "checkFailed" };
     }
-    const result = inspection.status === "pathVerified" ? { status: inspection.status, version: inspection.version } : inspection;
+    const result: CliPathCheck = inspection.status === "pathVerified" ? { status: inspection.status, version: inspection.version }
+      : inspection.status === "userTrusted" ? { status: "userTrusted" } : inspection;
     if (closing) return { status: "checkFailed" } as const;
-    if (result.status === "pathVerified" || result.status === "versionUnverified") {
-      saved = result.status === "pathVerified" ? { path, ...result } : { path, status: "versionUnverified" };
+    if (result.status === "pathVerified" || result.status === "versionUnverified" || result.status === "userTrusted") {
+      saved = result.status === "pathVerified" ? { path, ...result } : { path, status: result.status };
       delete state.codeFallbackCliModels[provider];
       writeCliPaths({ ...state.cliPaths, [provider]: saved });
       if (watching) {
@@ -679,6 +693,23 @@ async function saveCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
     watching?.();
     configuringCli = false;
   }
+}
+
+// Trusting records the exact file first, then saves it like any other path: the save finds the record and keeps the file usable.
+async function trustCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
+  const window = mainWindow;
+  if (!window || window.isDestroyed() || configuringCli || closing) throw new Error("The CLI settings are busy.");
+  configuringCli = true;
+  let outcome: Awaited<ReturnType<typeof providerCli.trust>>;
+  try {
+    // The person's own answer, asked by the app and not by the window: a window cannot trust a file for them.
+    const copy = desktopProviderCliScanCopy[state.language ?? "en"];
+    const answer = await dialog.showMessageBox(window, { type: "question", title: copy.trustAndUse, message: copy.trustDetail, detail: path,
+      buttons: [copy.trustAndUse, copy.cancel], defaultId: 1, cancelId: 1, noLink: true });
+    if (answer.response !== 0 || closing) return { status: "versionUnverified" } as const;
+    outcome = await providerCli.trust(provider, path);
+  } finally { configuringCli = false; }
+  return outcome === "stored" || outcome === "verified" ? saveCliPath({ provider, path }) : outcome;
 }
 
 function removeCliPath(provider: CliProvider) {
@@ -2931,6 +2962,28 @@ const terminalApi = createTerminalApi({
   },
 });
 
+// Typing the fixed sign-in command into a task terminal is the only way a sign-in starts; with the terminal off the screen explains instead.
+function typeCliLogin(command: string): CliLoginOpen {
+  if (!codeTerminalEnabled) return "terminalOff";
+  const workspace = terminalWorkspace();
+  if (!workspace) return "noTask";
+  try {
+    const terminal = terminalHost.open(workspace.task, workspace.cwd, 120, 30);
+    terminalHost.input(terminal.id, command);
+    return "opened";
+  } catch {
+    return "unavailable";
+  }
+}
+
+const providerCli = createProviderCliHost({
+  trustPath: () => join(app.getPath("userData"), "provider-cli-trust-" + createHash("sha256").update(browserSession?.accountId ?? "this-device").digest("hex") + ".json"),
+  writeTrust: writeFileAtomic,
+  hasSaved: () => Object.keys(state.cliPaths).length > 0,
+  typeIntoTerminal: typeCliLogin,
+  shell: () => loginShellKind(defaultShell().file),
+});
+
 function loadCodeTerminal() {
   try { codeTerminalEnabled = readFileSync(codeTerminalPath(), "utf8") === "enabled"; }
   catch { codeTerminalEnabled = false; }
@@ -3969,6 +4022,13 @@ function registerIpc() {
   main("desktop:choose-cli-path", (value) => chooseCliPath(cliProvider.optional().parse(value)));
   main("desktop:save-cli-path", (value) => saveCliPath(cliPathInput.parse(value)));
   main("desktop:remove-cli-path", (value) => removeCliPath(cliProvider.parse(value)));
+  main("desktop:scan-cli-providers", () => providerCli.scan());
+  main("desktop:trust-cli-path", (value) => trustCliPath(cliPathInput.parse(value)));
+  main("desktop:dismiss-cli-offer", () => providerCli.dismissOffer());
+  main("desktop:open-cli-login", (value) => {
+    const { provider, path } = cliPathInput.parse(value);
+    return providerCli.login(provider, path);
+  });
   const readCliAccount = DESKTOP_CLI_AUTH_FIXTURE_ALLOWED ? checkCliAccount : () => unknownCliAccount;
   main("desktop:check-cli-account", (value) => readCliAccount(cliProvider.parse(value)));
   const readCliProtocol = DESKTOP_CLI_PROTOCOL_CHECK_ALLOWED ? checkCliProtocol : () => ({ status: "unavailable" });
@@ -4633,6 +4693,7 @@ else {
   app.on("will-quit", () => {
     for (const close of cliPathWatches.values()) close();
     cliPathWatches.clear();
+    providerCli.close();
     cliInspection?.controller.abort();
     loginAttempt?.abort();
     linkAttempt?.abort();
