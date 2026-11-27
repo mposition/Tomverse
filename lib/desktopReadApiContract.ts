@@ -16,6 +16,7 @@ export {
   DESKTOP_CHAT_CAPABILITIES,
   DESKTOP_CHAT_HISTORY,
   DESKTOP_CHAT_SEARCH,
+  DESKTOP_PLUGIN_CATALOG,
   desktopAttachmentEnabled,
   desktopChatWriteEnabled,
   desktopComposerToolsEnabled,

@@ -179,6 +179,7 @@ if (trustedWindow) {
     cancelSignIn: () => ipcRenderer.invoke("desktop:cancel-sign-in"),
     pluginInventory: () => ipcRenderer.invoke("desktop:plugin-inventory"),
     connectorInventory: () => ipcRenderer.invoke("desktop:connector-inventory"),
+    pluginCatalog: (refresh?: boolean) => ipcRenderer.invoke("desktop:plugin-catalog", refresh === true),
     connectorAction: (input: Parameters<DesktopApi["connectorAction"]>[0]) => ipcRenderer.invoke("desktop:connector-action", input),
     chatHistory: (product?: DesktopTextProduct) => ipcRenderer.invoke("chat:history", product),
     chatSearch: (query: string, product?: DesktopTextProduct) => ipcRenderer.invoke("chat:search", { query, product }),

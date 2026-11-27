@@ -18,6 +18,8 @@ import { createWebViewHost } from "./web-view-host";
 import { browserCommand, classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserState } from "../browser-contract";
 import { createAccountSettingsApi } from "./account-settings-api";
 import { createConnectorApi } from "./connector-api";
+import { createPluginCatalog } from "./plugin-catalog";
+import { PLUGIN_LOGO_ROUTE } from "../plugin-catalog-contract";
 import { openConnectorOAuthWindow } from "./connector-oauth-window";
 import { connectorInput } from "../connector-contract";
 import { desktopConnectorCopy } from "../../../../locales/desktopConnectors";
@@ -2934,6 +2936,22 @@ function connectors() {
   return connectorApi.api;
 }
 
+let pluginCatalogHost: { signal: AbortSignal; host: ReturnType<typeof createPluginCatalog> } | undefined;
+
+// The Plugins screen's platform list is the web's, read over the Desktop bearer; the app carries none. One copy per account session.
+function pluginCatalog() {
+  const signal = chatSession.signal;
+  if (pluginCatalogHost?.signal !== signal) {
+    pluginCatalogHost = { signal, host: createPluginCatalog({
+      read: (known) => withChatAccount((api) => api.pluginCatalog(known)),
+      // A logo is a public file of the account origin: no cookie or token goes with it, and a redirect is not followed.
+      fetchLogo: (path) => fetch(new URL(path, accountOrigin ?? DESKTOP_LIVE_ORIGIN), { credentials: "omit", redirect: "error", cache: "no-store",
+        signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) }),
+    }) };
+  }
+  return pluginCatalogHost.host;
+}
+
 let accountDataApi: { signal: AbortSignal; api: AccountDataApi } | undefined;
 let importedUnlockApi: { signal: AbortSignal; api: ImportedSourceUnlock } | undefined;
 
@@ -4258,6 +4276,10 @@ function registerIpc() {
     if (!state.capabilities?.plugins) return { enabled: false, servers: [], connections: [] };
     return withChatAccount((api) => api.pluginInventory());
   });
+  main("desktop:plugin-catalog", (value) => {
+    if (!state.capabilities?.plugins || !state.capabilities.pluginCatalog) return null;
+    return pluginCatalog().read(value === true);
+  });
   main("desktop:connector-inventory", () => connectors().inventory());
   main("desktop:connector-action", (value) => connectors().run(connectorInput.parse(value)));
   main("chat:history", (value) => {
@@ -4561,6 +4583,15 @@ else {
       const address = new URL(request.url);
       if (request.method !== "GET" || address.host !== "desktop" || address.search) return new Response(null, { status: 404 });
       const route = address.pathname;
+      // A platform's logo, read from the account's server for the Plugins screen (the page may load images from this app only).
+      const logoId = PLUGIN_LOGO_ROUTE.exec(route)?.[2];
+      if (logoId) {
+        const logo = state.capabilities?.pluginCatalog && pluginCatalogHost?.signal === chatSession.signal ? await pluginCatalogHost.host.logo(logoId) : null;
+        return logo ? new Response(logo.bytes, { headers: {
+          "Content-Type": logo.type, "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache",
+          "Content-Security-Policy": "default-src 'none'; sandbox",
+        } }) : new Response(null, { status: 404 });
+      }
       const isPage = route === "/" || route === "/approval" || route === "/login" || route === "/task";
       if (!isPage && !/^\/assets\/[A-Za-z0-9_.-]+$/.test(route)) return new Response(null, { status: 404 });
       const mime = isPage ? "text/html; charset=utf-8" : assetTypes[extname(route)];

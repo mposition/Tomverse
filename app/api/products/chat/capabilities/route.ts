@@ -93,6 +93,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // Cloud execution of a Code task on a runner (docs/ops/desktop-cloud-execution.md). Desktop offers the cloud location only on this.
     desktopCloudExecution: desktopCloudExecutionEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
+    // The Plugins screen's platform list: Desktop reads the web's catalogue from GET /api/mcp/providers instead of carrying one, only where this says so.
+    desktopPluginCatalog: desktopPluginsEnabled() && mcpPreviewEnabled(),
     // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries (a switch of its own).
     desktopPluginSources: desktopPluginSourcesEnabled(),
     // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
