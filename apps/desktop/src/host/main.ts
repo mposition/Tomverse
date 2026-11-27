@@ -124,7 +124,8 @@ import {
 import { createCodeKeyVault, createSessionVault, type StorageMode, type StoredDesktopSession } from "./session-vault";
 import { readDesktopCapabilities } from "./desktop-capabilities";
 import { prepareRefinedTurn, refinerEligible, type RefinerAttempt } from "./prompt-refiner";
-import { CodeKeyRefused, readCopiedCodeKey, verifyCodeKey } from "./code-key";
+import { CodeKeyRefused, readCopiedCodeKey, requestCodeToken, verifyCodeKey } from "./code-key";
+import { codeSessionConnection } from "./code-session";
 import { DESKTOP_LIVE_ORIGIN, type DesktopIdentityProvider } from "../../../../lib/desktopAuthContract";
 import { DESKTOP_APP_ORIGIN } from "../../../../lib/desktopReadApiContract";
 import { DesktopChatContextChanged, desktopChatApi } from "./chat-api";
@@ -246,6 +247,8 @@ let loginWindow: BrowserWindow | null = null;
 let accountWindowsReady = false;
 let approvalWindow: BrowserWindow | null = null;
 let worker: Electron.UtilityProcess | null = null;
+/** Every Code runtime process alive now (the open task's and each parallel lane's): each hears the Desktop session's token. */
+const codeRuntimes = new Set<Electron.UtilityProcess>();
 let runId: string | null = null;
 let discardedRunId: string | null = null;
 let pendingFollowUp: { requestId: string; resolve: (queued: boolean) => void } | null = null;
@@ -299,6 +302,12 @@ let chatTurn: AbortController | null = null;
 let attachmentTransfer: { requestId: string; controller: AbortController } | null = null;
 const attachmentReceipts = new Map<string, AttachmentUpload>();
 let linkedCode: { accountId: string; connection: Connection } | null = null;
+/**
+ * The short Code token of the session connection (host/code-key.ts requestCodeToken): what the Code runtimes carry.
+ * The Desktop session token itself never leaves the main process.
+ */
+let codeToken: { accountId: string; token: string; expiresAt: number } | null = null;
+let codeTokenRequest: Promise<boolean> | null = null;
 let linkAttempt: AbortController | null = null;
 let catalogRequest: string | null = null;
 const state: Snapshot = {
@@ -1162,7 +1171,7 @@ function onWorkerMessage(event: WorkerEvent) {
     catalogRequest = null;
     canRestartWorker = true;
     state.models = event.type === "catalog" ? event.models : [];
-    state.codeCatalog = event.type === "catalog" ? "ready" : "failed";
+    state.codeCatalog = event.type === "catalog" ? "ready" : event.reason === "plan" ? "planRequired" : "failed";
   } else if (event.runId === runId) {
     const discarded = event.runId === discardedRunId;
     if (discarded && event.type !== "finished") return;
@@ -1216,7 +1225,7 @@ function onWorkerMessage(event: WorkerEvent) {
       refreshHistory();
       if (!discarded) void pullLinker.flush(event.task.id);
       if (!discarded) notifyCodeResult(event.task.status);
-      if (discarded && browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
+      if (discarded && browserSession && !linkedCode && !fixture) syncCodeConnection(browserSession);
       if (closing) app.quit();
     } else {
       const task = activeContinuation ? continuationView(activeContinuation, event.task)
@@ -1426,11 +1435,130 @@ function forkRunner() {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name, value]) =>
     value !== undefined && /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP|TMPDIR|LANG|LC_ALL)$/i.test(name),
   )) as Record<string, string>;
-  return utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
+  const child = utilityProcess.fork(join(__dirname, "runner-process.cjs"), [], {
     env: { ...env, TOMVERSE_DESKTOP_PROJECT_LOCKS: codeProjectLocks(), TOMVERSE_DESKTOP_CODE_MEMORY: codeMemoryDirectory(), ...extensionWorkerEnv(),
       TOMVERSE_DESKTOP_GIT_AGENT_SWITCH: gitIntegration.switchFile, TOMVERSE_DESKTOP_CODE_SANDBOX: codeSandboxDirectory(), ...remoteWorkerEnvironment() },
     stdio: "ignore", serviceName: "Tomverse Code Runtime",
   });
+  // The Desktop session's token reaches a runtime only as a message, before any task: never its environment (above).
+  codeRuntimes.add(child);
+  child.once("exit", () => codeRuntimes.delete(child));
+  child.postMessage(codeSessionMessage());
+  return child;
+}
+
+/**
+ * What every Code runtime is told about the Desktop session (host/code-session.ts): the token in force for the
+ * session connection's identity, or null -- signed out, signing out, expired, another account, or no session
+ * connection at all. Sent on every renewal and every change, so a runtime never keeps a token the app has dropped.
+ */
+function codeSessionMessage(): WorkerCommand {
+  const linked = linkedCode?.connection.session ? linkedCode : null;
+  const session = browserSession;
+  const token = codeToken;
+  const live = !!linked && !!session && session.accountId === linked.accountId && !signingOut && !invalidatingSession &&
+    !!token && token.accountId === linked.accountId && token.expiresAt > Date.now();
+  return { type: "desktop-session", identity: linked?.connection.key ?? "", token: live ? token.token : null };
+}
+
+/**
+ * A fresh Code token for the session connection, asked for with the session token in force. Done when Code adopts the
+ * session, after every renewal of the session token and before the current Code token runs out; one request at a time.
+ */
+function refreshCodeToken(owner: StoredDesktopSession): Promise<boolean> {
+  if (codeTokenRequest) return codeTokenRequest;
+  const linked = linkedCode;
+  if (!linked?.connection.session || linked.accountId !== owner.accountId || browserSession !== owner || signingOut) return Promise.resolve(false);
+  const request = (async () => {
+    try {
+      const minted = await requestCodeToken(owner.accessToken, AbortSignal.timeout(10_000), accountOrigin);
+      if (linkedCode !== linked || browserSession?.accountId !== owner.accountId || signingOut || invalidatingSession) return false;
+      codeToken = { accountId: owner.accountId, ...minted };
+      pushCodeSession();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      codeTokenRequest = null;
+    }
+  })();
+  codeTokenRequest = request;
+  return request;
+}
+
+const codeTokenDue = () => !!linkedCode?.connection.session && (!codeToken || codeToken.accountId !== linkedCode.accountId ||
+  codeToken.expiresAt - Date.now() <= 60_000);
+
+function pushCodeSession() {
+  const message = codeSessionMessage();
+  for (const child of codeRuntimes) {
+    try { child.postMessage(message); } catch { /* The runtime ended. */ }
+  }
+}
+
+/**
+ * Code on the signed-in Desktop session, when the server says so (desktopCodeSession): no Code key is connected or
+ * used. The switch happens only while no task depends on the current connection; the stored Code key file is removed,
+ * and the key itself stays valid on the server for the person's other tools.
+ */
+function adoptCodeSession(owner: StoredDesktopSession) {
+  if (fixture || browserSession !== owner || signingOut || invalidatingSession || closing) return;
+  if (linkedCode?.connection.session && linkedCode.accountId === owner.accountId) {
+    if (state.codeKey.stage !== "account") state.codeKey = { stage: "account" };
+    pushCodeSession();
+    return;
+  }
+  if (state.busy || pendingMutation || parallel.lanes.busy()) return;
+  linkAttempt?.abort();
+  linkAttempt = null;
+  pendingInspection?.settle(null);
+  codeReferences.clear();
+  workspaceHandoff = null;
+  const linked = { accountId: owner.accountId, connection: codeSessionConnection(owner.accountId, accountOrigin ?? DESKTOP_LIVE_ORIGIN) };
+  linkedCode = linked;
+  codeToken = null;
+  state.codeKey = { stage: "account" };
+  void codeKeyVault(owner.accountId).clear().catch(() => {});
+  pushCodeSession();
+  discardTransientTask(state.task);
+  state.task = null;
+  refreshHistory();
+  state.models = [];
+  state.codeCatalog = "loading";
+  void refreshCodeToken(owner).then(() => {
+    if (linkedCode !== linked) return;
+    requestCodeCatalog();
+    broadcast();
+  });
+}
+
+/** The server stopped offering Code on the session: back to the Code key path, once no task depends on the session. */
+function dropCodeSession() {
+  if (!linkedCode?.connection.session || state.busy || pendingMutation || parallel.lanes.busy()) return;
+  pendingInspection?.settle(null);
+  codeReferences.clear();
+  workspaceHandoff = null;
+  linkedCode = null;
+  codeToken = null;
+  state.codeKey = { stage: "missing" };
+  pushCodeSession();
+  discardTransientTask(state.task);
+  state.task = null;
+  refreshHistory();
+  requestCodeCatalog();
+}
+
+/** Code's connection for this account: the session where the server offers it, else a stored Code key (older servers). */
+function syncCodeConnection(owner: StoredDesktopSession) {
+  if (fixture || browserSession !== owner || signingOut || closing) return;
+  const capabilities = state.capabilities;
+  if (capabilities?.codeSession) {
+    adoptCodeSession(owner);
+    return;
+  }
+  // Unknown capabilities (the read failed) change nothing; a server that answered without the signal does.
+  if (capabilities && linkedCode?.connection.session) dropCodeSession();
+  if (!linkedCode) void restoreCodeKey(owner);
 }
 
 function bootWorker() {
@@ -1479,7 +1607,7 @@ function bootWorker() {
       canRestartWorker = false;
       bootWorker();
     }
-    if (browserSession && !linkedCode && !fixture) void restoreCodeKey(browserSession);
+    if (browserSession && !linkedCode && !fixture) syncCodeConnection(browserSession);
     broadcast();
   });
   if (DESKTOP_FIXTURE_ALLOWED && fixture) send({ type: "clean-deleted-history", protectedRoot: app.getPath("userData") });
@@ -1497,6 +1625,18 @@ function requestCodeCatalog() {
 function retryCodeCatalog() {
   if (!codeConnection() || state.busy || state.codeCatalog === "loading" || state.models.length ||
       signingOut || invalidatingSession || linkAttempt || suspended || closing || state.update.stage === "installing") return;
+  if (browserSession && codeTokenDue()) {
+    const linked = linkedCode;
+    state.codeCatalog = "loading";
+    void refreshCodeToken(browserSession).then(() => {
+      if (linkedCode !== linked) return;
+      if (worker) requestCodeCatalog();
+      else bootWorker();
+      broadcast();
+    });
+    broadcast();
+    return;
+  }
   if (worker) requestCodeCatalog();
   else bootWorker();
   broadcast();
@@ -2240,6 +2380,7 @@ async function refreshDesktopCapabilities(session: StoredDesktopSession, { keepC
   const capabilities = await readDesktopCapabilities(session.accessToken, AbortSignal.timeout(5_000), accountOrigin).catch(() => null);
   if (browserSession !== session || signingOut || closing || (keepCurrentOnFailure && !capabilities)) return;
   state.capabilities = capabilities;
+  syncCodeConnection(session);
   broadcast();
 }
 
@@ -2249,8 +2390,11 @@ function setBrowserSession(account: BrowserAccount, saved: StoredDesktopSession,
   state.language = deviceLanguage ?? account.language ?? null;
   state.account = { stage: "connected", label: account.email ?? account.name ?? "Tomverse account", storage,
     draftNamespace: createHash("sha256").update(saved.accountId).digest("hex") };
-  if (!linkedCode && !fixture) void restoreCodeKey(saved);
-  else if (fixture && state.codeCatalog === "unavailable") requestCodeCatalog();
+  // A renewed session token mints a fresh Code token for every Code runtime. Code's connection itself is settled once
+  // the capabilities say whether this server runs Code on the session (refreshDesktopCapabilities, syncCodeConnection).
+  pushCodeSession();
+  if (linkedCode?.connection.session && linkedCode.accountId === saved.accountId) void refreshCodeToken(saved);
+  if (fixture && state.codeCatalog === "unavailable") requestCodeCatalog();
   void refreshDesktopCapabilities(saved);
   scheduleSessionCheck(Math.max(0, Math.min(15_000, saved.expiresAt - Date.now() - 30_000)));
 }
@@ -2287,12 +2431,15 @@ function clearAccountWorkspace() {
   linkAttempt?.abort();
   linkAttempt = null;
   linkedCode = null;
+  codeToken = null;
   state.codeKey = { stage: "missing" };
+  pushCodeSession();
   requestCodeCatalog();
 }
 
 async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: boolean) {
-  if (linkAttempt || signingOut || state.busy || browserSession?.accountId !== owner.accountId) return;
+  // A server that runs Code on the session takes no key from Desktop (adoptCodeSession).
+  if (linkAttempt || signingOut || state.busy || browserSession?.accountId !== owner.accountId || state.capabilities?.codeSession) return;
   const attempt = new AbortController();
   linkAttempt = attempt;
   const previous = state.codeKey;
@@ -2316,7 +2463,7 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
       storage = await vault.save({ accountId: owner.accountId, key }, signal);
     }
     signal.throwIfAborted();
-    if (browserSession?.accountId !== owner.accountId) return;
+    if (browserSession?.accountId !== owner.accountId || state.capabilities?.codeSession || linkedCode?.connection.session) return;
     pendingInspection?.settle(null);
     if (codeConnection()?.key !== key) {
       codeReferences.clear();
@@ -2343,13 +2490,14 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
 }
 
 async function restoreCodeKey(owner: StoredDesktopSession) {
+  if (state.capabilities?.codeSession) return;
   const saved = await codeKeyVault(owner.accountId).read();
-  if (saved && !linkedCode && browserSession === owner) await linkCodeKey(saved.key, owner, false);
+  if (saved && !linkedCode && browserSession === owner && !state.capabilities?.codeSession) await linkCodeKey(saved.key, owner, false);
 }
 
 async function connectCopiedCodeKey() {
   const owner = browserSession;
-  if (!owner || signingOut || state.busy || linkAttempt) return;
+  if (!owner || signingOut || state.busy || linkAttempt || state.capabilities?.codeSession || linkedCode?.connection.session) return;
   const key = readCopiedCodeKey(await clipboard.readText());
   if (browserSession?.accountId !== owner.accountId || signingOut) return;
   if (!key) {
@@ -2365,6 +2513,7 @@ async function expireAccount() {
   invalidatingSession = true;
   clearTimeout(sessionExpiry);
   browserSession = null;
+  pushCodeSession();
   state.account = { stage: "expired" };
   clearAccountWorkspace();
   await sessionVault().clear().catch(() => {});
@@ -2416,6 +2565,7 @@ async function checkBrowserSession() {
     await renewBrowserSession(active);
     return;
   }
+  if (codeTokenDue()) void refreshCodeToken(active);
   try {
     const account = await readBrowserAccount(active.accessToken, AbortSignal.timeout(5_000), accountOrigin);
     if (browserSession === active && !signingOut && account.id !== active.accountId) await expireAccount();
@@ -3433,6 +3583,8 @@ async function signOut() {
   if (!active || signingOut) return;
   const connected = state.account;
   signingOut = true;
+  // Code's runtimes lose the token before anything else happens; a task that is still running sends nothing more.
+  pushCodeSession();
   chatTurn?.abort();
   attachmentTransfer?.controller.abort();
   renewal?.controller.abort();
@@ -3458,6 +3610,8 @@ async function signOut() {
     state.account = { ...connected, detail: "signOutStorageFailure" };
   } finally {
     signingOut = false;
+    // A sign-out that could not finish keeps the session, and its runtimes get the token back.
+    pushCodeSession();
     if (browserSession === active) scheduleSessionCheck(0);
     broadcast();
   }

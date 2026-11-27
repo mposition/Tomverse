@@ -3,10 +3,11 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopCodeSessionEnabled, desktopDeepResearchEnabled, desktopReviewDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopPromptRefinerEnabled, desktopRemotePreviewEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { reasoningEffortStepsEnabled } from "@/lib/reasoningEffort";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { codeWebSearchOffered } from "@/lib/codeWebSearch";
+import { externalApiEnabled, externalApiUserAllowed } from "@/lib/externalApiCatalogCore";
 import { desktopCloudExecutionEnabled } from "@/lib/desktopCloudExecutionSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
@@ -90,6 +91,9 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     // The Code agent's web_search tool (POST /api/code/v1/web-search, the coding API's key and ledger). A Desktop build gives
     // its runs the tool only where the server it reached says so; the route checks the key, plan and credits again.
     desktopCodeWebSearch: codeWebSearchOffered(userId),
+    // Desktop Code on the signed-in Desktop session, no API key (lib/externalApiCaller.ts). An older server names none of
+    // it and Desktop then keeps asking for a Code key. The plan is checked on every request, as for a key.
+    desktopCodeSession: desktopCodeSessionEnabled() && externalApiEnabled(process.env) && externalApiUserAllowed(process.env, userId),
     // Cloud execution of a Code task on a runner (docs/ops/desktop-cloud-execution.md). Desktop offers the cloud location only on this.
     desktopCloudExecution: desktopCloudExecutionEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),

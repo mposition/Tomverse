@@ -34,7 +34,7 @@ export async function GET(request: Request, context: RouteContext<"/api/user/api
         const { keyId } = await context.params;
         const owned = await prisma.externalApiKey.findFirst({ where: { id: keyId, userId }, select: { id: true } });
         if (!owned) return managementJson(404, { error: "Key not found.", code: "EXTERNAL_API_KEY_NOT_FOUND" });
-        return managementJson(200, { requests: await externalApiKeyUsage(keyId, 50) });
+        return managementJson(200, { requests: await externalApiKeyUsage({ keyId }, 50) });
     }));
 }
 

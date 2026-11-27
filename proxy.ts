@@ -51,6 +51,7 @@ import { isNativeAppOrigin } from "@/lib/nativeAppCors";
 import {
   applyMobileIdentityHeaders,
   DESKTOP_APP_ORIGIN,
+  desktopCodeSessionRoute,
   desktopReadApiRoute,
   desktopWriteApiRoute,
   generatedArtifactRevisionEnabled,
@@ -316,7 +317,10 @@ export function proxy(request: NextRequest) {
     authorization: request.headers.get("authorization"),
     registeredRoutes: [...N1B_BEARER_ROUTES, ...(nativeChat || nativeBilling || desktopBearer ? [request.nextUrl.pathname] : [])],
     verify: (token) => {
-      const verdict = verifyMobileAccessTokenString(token, desktopBearer ? { client: "desktop" } : undefined);
+      // Desktop Code's engine calls take only the short Code token (desktop-code), every other Desktop route only the
+      // Desktop session token: neither stands in for the other (docs/policy/external-api.md section 11.2).
+      const verdict = verifyMobileAccessTokenString(token, desktopBearer
+        ? { client: desktopCodeSessionRoute(request.nextUrl.pathname, request.method) ? "desktop-code" : "desktop" } : undefined);
       return verdict.ok
         ? { ok: true, identity: verdict.identity }
         : { ok: false, failure: verdict.failure };

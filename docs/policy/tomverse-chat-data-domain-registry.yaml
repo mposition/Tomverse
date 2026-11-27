@@ -4426,10 +4426,13 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
     note: >-
-      The content-free link from one API request to its key and to the shared
-      ChatCreditReservation. Removed with the key, which is removed with the
-      account; the reservation row stays detached like every Chat reservation.
-      Holds no prompt, output, tool argument or image.
+      The content-free link from one API request to its key (or, for a
+      request Desktop Code made with the signed-in Desktop session, to the
+      account itself) and to the shared ChatCreditReservation. A key request
+      is removed with the key, which is removed with the account; a Desktop
+      session request has no key and is removed with the account through its
+      own desktopUserId relation. The reservation row stays detached like
+      every Chat reservation. Holds no prompt, output, tool argument or image.
 
   - domain: mobileTokenFamily
     prismaModel: MobileTokenFamily
