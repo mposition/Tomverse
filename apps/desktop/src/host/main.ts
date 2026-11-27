@@ -108,6 +108,9 @@ import { createManagedWorktree, readGitProject, readManagedWorktree, worktreeBra
   type GitProject, type ManagedWorktree } from "./git-worktree";
 import { configureUpdates } from "./updates";
 import { createGitIntegration } from "./git-integration";
+import { createFixtureGhRunner, createGhRunner, ghFixtureFile } from "./github-cli";
+import { githubGitAuth } from "./plugin-github-auth";
+import { resolveProgram } from "./tool-process";
 import type { AgentGitResult } from "../git-actions-contract";
 import { appendTaskPage, nextTaskPage } from "./taskPaging";
 import {
@@ -174,6 +177,9 @@ const fixtureSchema = z.object({
   browserInspection: z.boolean().optional(),
   /** A test chooses this folder where the Plugins screen would open a folder dialog. */
   pluginFolder: z.string().min(1).optional(),
+  /** A test chooses this zip file where the Plugins screen would open a file dialog, and plays the server's plugin-sources switch. */
+  pluginZip: z.string().min(1).optional(),
+  pluginSources: z.boolean().optional(),
   browserAgent: z.boolean().optional(),
   /** A test lets the agent open public https sites (the person's second browser switch). */
   browserWeb: z.boolean().optional(),
@@ -3667,12 +3673,28 @@ function mayRequestDictation(contents: Electron.WebContents | null) {
 
 const pluginsHost = createPluginsHost({
   pickFolder: async () => fixture?.pluginFolder ?? (!mainWindow ? null : (await dialog.showOpenDialog(mainWindow, { title: nativeCopy().openFolder, properties: ["openDirectory"] })).filePaths[0] ?? null),
-  confirmFetch: async (address) => {
+  pickZip: async () => fixture?.pluginZip ?? (!mainWindow ? null : (await dialog.showOpenDialog(mainWindow, {
+    title: desktopPluginsCopy[state.language ?? "en"].zipDialogTitle, properties: ["openFile"], filters: [{ name: "Zip", extensions: ["zip"] }],
+  })).filePaths[0] ?? null),
+  confirmFetch: async (address, kind) => {
     if (fixture) return true;
     const copy = desktopPluginsCopy[state.language ?? "en"];
-    const question = { type: "question" as const, title: copy.fetchTitle, message: copy.fetchMessage, detail: address, buttons: [copy.fetchCancel, copy.fetchAllow], cancelId: 0, defaultId: 0, noLink: true };
+    const [title, message] = kind === "zip" ? [copy.fetchTitleZip, copy.fetchMessageZip] : kind === "npm" ? [copy.fetchTitleNpm, copy.fetchMessageNpm] : [copy.fetchTitle, copy.fetchMessage];
+    const question = { type: "question" as const, title, message, detail: address, buttons: [copy.fetchCancel, copy.fetchAllow], cancelId: 0, defaultId: 0, noLink: true };
     const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, question) : await dialog.showMessageBox(question);
     return response === 1;
+  },
+  // The extra sources follow the server's switch (the capability). A test build can stand in for it.
+  sources: () => (DESKTOP_FIXTURE_ALLOWED && fixture?.pluginSources === true) || state.capabilities?.pluginSources === true,
+  githubSignIn: async (address) => {
+    if (!fixture) {
+      const copy = desktopPluginsCopy[state.language ?? "en"];
+      const question = { type: "question" as const, title: copy.signInTitle, message: copy.signInMessage, detail: address, buttons: [copy.fetchCancel, copy.signInAllow], cancelId: 0, defaultId: 0, noLink: true };
+      const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, question) : await dialog.showMessageBox(question);
+      if (response !== 1) return null;
+    }
+    // The GitHub sign-in the person already has in the GitHub CLI (the same one the Git and pull request features use).
+    return githubGitAuth({ run: fixture ? createFixtureGhRunner(ghFixtureFile(fixture.profile)) : createGhRunner(), program: resolveProgram("gh", process.env) });
   },
 });
 

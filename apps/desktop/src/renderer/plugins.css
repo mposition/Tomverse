@@ -12,3 +12,4 @@
 .plugins-panel .plugin-preview { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .plugins-panel .plugin-preview p { overflow-wrap: anywhere; }
 .plugins-panel .plugin-preview code { font-family: var(--font-code); font-size: 0.86em; }
+.plugins-panel .plugin-official { display: flex; gap: 8px; align-items: center; margin: 4px 0; }

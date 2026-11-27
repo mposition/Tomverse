@@ -18,6 +18,18 @@ const sourceSchema = z.discriminatedUnion("kind", [
 ]);
 export type PluginSourceRecord = z.infer<typeof sourceSchema>;
 
+/**
+ * Where a plugin's files really came from when that is not a folder or a git catalog entry: a zip file, an address of a zip file, an npm
+ * package. It rides next to `source` (which then reads as a folder with the place as its text) so a copy of this program from before
+ * these sources existed still reads the whole record, instead of treating the file as invalid and replacing it on its next write.
+ */
+const originSchema = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("zip"), sha256: z.string().regex(/^[0-9a-f]{64}$/) }),
+    z.object({ kind: z.literal("zip-url"), url: z.string().max(1000), sha256: z.string().regex(/^[0-9a-f]{64}$/) }),
+    z.object({ kind: z.literal("npm"), package: z.string().max(214), version: z.string().max(100), integrity: z.string().max(300), registry: z.string().max(300).optional() }),
+]);
+export type PluginOrigin = z.infer<typeof originSchema>;
+
 const pluginSchema = z.object({
     version: z.string().max(100).optional(),
     installedAt: z.string(),
@@ -26,6 +38,7 @@ const pluginSchema = z.object({
     enabled: z.boolean(),
     disabledIn: z.array(z.string().max(1000)).max(500),
     source: sourceSchema,
+    origin: originSchema.optional(),
 });
 export type PluginRecord = z.infer<typeof pluginSchema>;
 
@@ -48,8 +61,16 @@ const stateSchema = z.object({
     plugins: z.record(z.string(), pluginSchema),
     marketplaces: z.record(z.string(), marketplaceSchema),
     approvals: z.array(z.object({ kind: z.enum(["hook", "mcp"]), hash: z.string().regex(/^[0-9a-f]{64}$/), plugin: z.string() })).max(2000),
+    /** The person turned the marketplace that comes with Desktop off: it is not added again. */
+    officialMarketplaceDeclined: z.boolean().optional(),
 });
 export type PluginState = z.infer<typeof stateSchema>;
+
+export const setOfficialMarketplaceDeclined = (home: string, declined: boolean) =>
+    updatePluginState(home, (state) => {
+        if (declined) state.officialMarketplaceDeclined = true;
+        else delete state.officialMarketplaceDeclined;
+    });
 
 export const pluginsDir = (home: string = tomverseHome()) => join(home, "plugins");
 export const installedDir = (home: string = tomverseHome()) => join(pluginsDir(home), "installed");

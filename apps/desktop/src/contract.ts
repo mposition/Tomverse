@@ -409,6 +409,8 @@ export type Snapshot = {
     googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
+    /** Plugins from a zip file, an npm package or a private GitHub repository, and the marketplace Desktop carries. */
+    pluginSources?: boolean;
     billing?: boolean; managedCode?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */
     turnLocation?: boolean; chatPlugin?: boolean; reviewContext?: boolean; reviewTools?: boolean;

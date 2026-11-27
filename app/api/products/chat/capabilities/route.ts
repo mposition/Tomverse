@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginSourcesEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
@@ -82,6 +82,8 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopBilling: desktopBillingEnabled(),
     desktopManagedCode: desktopManagedCodeEnabled(),
     desktopPlugins: desktopPluginsEnabled() && mcpPreviewEnabled(),
+    // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries (a switch of its own).
+    desktopPluginSources: desktopPluginSourcesEnabled(),
     // What this server accepts in a Desktop turn. A Desktop build offers the device position, a chosen plugin in Chat
     // and the "+" menu's choices for a Review only where the server it reached says so, whatever its own version.
     desktopTurnLocation: desktopWrite || desktopReview,

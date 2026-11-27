@@ -10,6 +10,7 @@ import {
   desktopComposerToolsEnabled,
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
+  desktopPluginSourcesEnabled,
   desktopPluginsEnabled,
   desktopReadApiRoute,
   desktopRemoteControlEnabled,
@@ -182,6 +183,32 @@ test("Desktop billing screens are off unless their own switch and the account se
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];
       else process.env[key] = previous[index];
+    });
+  }
+});
+
+test("Desktop plugin sources are off unless their own switch and the Desktop session are both on, and are independent of the connector switch", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED", "TOMVERSE_DESKTOP_PLUGINS_ENABLED", "TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  try {
+    for (const key of switches) delete process.env[key];
+    assert.equal(desktopPluginSourcesEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopPluginSourcesEnabled(), false, "the session alone opens nothing");
+    process.env.TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED = "1";
+    assert.equal(desktopPluginSourcesEnabled(), false);
+    process.env.TOMVERSE_DESKTOP_PLUGIN_SOURCES_ENABLED = "true";
+    assert.equal(desktopPluginSourcesEnabled(), true, "the connector switch is not needed");
+    assert.equal(desktopPluginsEnabled(), false, "and does not open the connector screens");
+    delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
+    assert.equal(desktopPluginSourcesEnabled(), false);
+    // It enrols no bearer route.
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute("/api/plugins/install", "POST"), false);
+    assert.equal(desktopReadApiRoute("/api/plugins/install", "GET"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index];
     });
   }
 });

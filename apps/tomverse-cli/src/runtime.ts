@@ -253,13 +253,16 @@ export { tomverseHome } from "./config.js";
 
 // Plugins (see plugin-manager.ts): Desktop lists, installs, updates and removes them; the main process confirms what was shown.
 export { PluginError } from "./plugin-fs.js";
-export { stagePlugin, commitStaged, discardStaged, removePlugin, listInstalledPlugins } from "./plugin-manager.js";
-export type { StagedPlugin, StageResult, InstalledPlugin, PluginRequest } from "./plugin-manager.js";
+export { stagePlugin, commitStaged, discardStaged, removePlugin, listInstalledPlugins, describeOrigin } from "./plugin-manager.js";
+export type { StagedPlugin, StageResult, InstalledPlugin, PluginRequest, SourceOptions, StageOptions } from "./plugin-manager.js";
 export type { PluginInspection, PluginDiff, HookSummary, McpSummary } from "./plugin-inspect.js";
-export { addMarketplace, refreshMarketplace, removeMarketplace, listMarketplaces, classifyMarketplaceInput } from "./plugin-marketplace.js";
-export type { Catalog, CatalogEntry, MarketplaceListing, MarketplaceInput } from "./plugin-marketplace.js";
-export { setPluginEnabled, setPluginEnabledIn, pluginApproved } from "./plugin-store.js";
+export { addMarketplace, refreshMarketplace, removeMarketplace, listMarketplaces, classifyMarketplaceInput, marketplacePath } from "./plugin-marketplace.js";
+export type { Catalog, CatalogEntry, MarketplaceListing, MarketplaceInput, MarketplaceOptions } from "./plugin-marketplace.js";
+export { setPluginEnabled, setPluginEnabledIn, pluginApproved, setOfficialMarketplaceDeclined, pluginsDir } from "./plugin-store.js";
+export type { PluginOrigin } from "./plugin-store.js";
 export { forgetPluginTrust } from "./project-trust.js";
 export { readPluginState, rootKey as pluginFolderKey } from "./plugin-store.js";
 export { readMarketplace } from "./plugin-marketplace.js";
-export { maskUrl } from "./plugin-git.js";
+export { maskUrl, isGithubHttps } from "./plugin-git.js";
+export type { GitAuth } from "./plugin-git.js";
+export { shownUrl } from "./plugin-download.js";
