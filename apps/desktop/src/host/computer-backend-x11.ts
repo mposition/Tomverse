@@ -23,8 +23,9 @@ import type { ActOutcome, BackendAction, ComputerBackend, LastInput, RawWindow, 
  * Not covered, said plainly: Wayland (native windows cannot be listed, captured or driven by these tools, so the backend does not
  * start there), and any desktop whose window manager does not set `_NET_ACTIVE_WINDOW`, `_NET_CLIENT_LIST_STACKING` and
  * `_NET_WM_PID`. A window that no window manager manages and that is below the chosen one is counted as covering too (their order is
- * not known), which only refuses more; a window of that kind as big as the screen that carries no class, name or process id is taken
- * for the compositor's overlay and ignored (one that carries any of them is a window of a program and covers).
+ * not known), which only refuses more; a window of that kind as big as the screen covers too, whatever it carries, unless the person
+ * set TOMVERSE_DESKTOP_COMPUTER_X11_TRUST_OVERLAY=1 to say that a property-less one is their compositor's overlay (on a compositing
+ * desktop the window then always counts as covered until they do; nothing can tell the overlay from a window made to look like it).
  * The check and the input are separate program runs, so a window that changes between them is caught by the next check, not by
  * the input. It has been run against a model of the tools in tests, never on a real X server.
  */
@@ -170,6 +171,13 @@ export type X11Options = {
   /** The program name of a process; the default reads `/proc/<pid>/exe`. */
   processName?: (pid: number) => string | null;
   now?: () => number;
+  /**
+   * The person says that a window as big as the screen with no class, name or process id, which nothing but the server's compositor
+   * makes on their desktop, is the compositor's overlay and not a window of a program. Off: such a window cannot be told from one
+   * that was made to look like the overlay, so it counts as covering whatever it is (on a compositing desktop that means the window
+   * always counts as covered, and the backend refuses to act or take a picture until the person has checked their own desktop).
+   */
+  trustCompositorOverlay?: boolean;
 };
 
 const exeName = (pid: number): string | null => {
@@ -260,9 +268,9 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
 
   /**
    * The mapped windows of the root that the window manager does not manage (override-redirect) and that overlap the window, or null
-   * when that cannot be found out. A window as big as the screen that carries no property of a program is the compositor's overlay,
-   * not a window of a program. A window of this kind below the chosen one is counted too (the order among them is not known),
-   * which only refuses more.
+   * when that cannot be found out. A window as big as the screen covers, unless the person said (`trustCompositorOverlay`) that
+   * a property-less one is their compositor's overlay. A window of this kind below the chosen one is counted too (the order among
+   * them is not known), which only refuses more.
    */
   async function unmanagedOver(own: Geometry, signal?: AbortSignal): Promise<Geometry[] | null> {
     const [root, tree] = await Promise.all([text("xwininfo", ["-root"], signal), text("xwininfo", ["-root", "-children"], signal)]);
@@ -275,9 +283,10 @@ export function createX11Backend(options: X11Options = {}): ComputerBackend {
       if (rect.kind === "vanished") continue;
       if (rect.kind === "error") return null;
       if (!rect.value.viewable || !rect.value.inputOutput || !rect.value.overrideRedirect) continue;
-      if (rect.value.width >= screen.width && rect.value.height >= screen.height) {
-        // As big as the screen: the compositor's overlay only if it has no property of a program (no class, name or process id).
-        // A full-screen popup, a lock screen or a splash of a program has them and is a window like any other.
+      if (rect.value.width >= screen.width && rect.value.height >= screen.height && options.trustCompositorOverlay === true) {
+        // As big as the screen, and the person trusts the overlay of their compositor: it is that overlay only if it has no property of
+        // a program (no class, name or process id). A full-screen popup, a lock screen or a splash of a program has them and is a
+        // window like any other. Without that trust a window like this is never looked through: it covers.
         const named = await text("xprop", ["-id", hex(child.xid), "WM_CLASS", "WM_NAME", "_NET_WM_NAME", "_NET_WM_PID"], signal);
         if (!named.ok) {
           if (vanished(named.err)) continue;

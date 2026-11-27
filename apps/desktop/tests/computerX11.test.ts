@@ -152,9 +152,10 @@ const ref = (window: FakeWindow = EDITOR): WindowRef => ({ id: `${window.xid.toS
 const OWN_PID = process.pid;
 const FRONT_APP: FakeWindow = { xid: 0x5000001, pid: 999, cls: "Other", instance: "other", title: "Other app", x: 0, y: 0, w: 300, h: 200 };
 
-function setup(extra: FakeWindow[] = [], options: { activeIsEditor?: boolean } = {}) {
+function setup(extra: FakeWindow[] = [], options: { activeIsEditor?: boolean; trustOverlay?: boolean } = {}) {
   const x = fakeX([...extra, EDITOR]);
-  const backend = createX11Backend({ run: x.run, now: x.now, processName: (pid) => ({ 4321: "gedit", 999: "other", 100: "gnome-shell" } as Record<number, string>)[pid] ?? null });
+  // Most tests are about the other checks, on a desktop whose person has said the compositor's overlay is the overlay.
+  const backend = createX11Backend({ run: x.run, now: x.now, trustCompositorOverlay: options.trustOverlay ?? true, processName: (pid) => ({ 4321: "gedit", 999: "other", 100: "gnome-shell" } as Record<number, string>)[pid] ?? null });
   if (options.activeIsEditor === false) x.activate(extra[0]!.xid);
   return { x, backend };
 }
@@ -616,4 +617,23 @@ test("a popup partly off the left or top edge of the screen is still found, and 
   const unreadable = setup([lock]);
   unreadable.x.broken.add(lock.xid);
   assert.equal(await covers(unreadable.backend), true);
+});
+
+test("the compositor's overlay cannot be told from a window made to look like it, so without the person's word it covers", async () => {
+  const untrusted = setup([], { trustOverlay: false });
+  assert.equal(await covers(untrusted.backend), true, "a property-less window as big as the screen is a window until the person says otherwise");
+  const shot = await untrusted.backend.capture(ref(), 1568);
+  assert.ok(!("gone" in shot) && shot.image === undefined && shot.status.covered === true);
+  const refused = await untrusted.backend.act(ref(), size, { kind: "click", x: 10, y: 10, button: "left", double: false }, OWN_PID);
+  assert.deepEqual([refused.performed, refused.reason], [false, "covered"]);
+  assert.equal(untrusted.x.calls.some((call) => call.file === "import"), false);
+  assert.deepEqual(untrusted.x.inputCalls(), []);
+  // With no compositor there is no overlay and nothing covers, trusted or not.
+  const plain = setup([], { trustOverlay: false });
+  plain.x.overlay(false);
+  assert.equal(await covers(plain.backend), false);
+  // Trusted: a property-less one is the overlay, and one with a class, name or process id still covers.
+  assert.equal(await covers(setup([], { trustOverlay: true }).backend), false);
+  const lock: FakeWindow = { ...POPUP, xid: 0x7000002, x: 0, y: 0, w: 1920, h: 1080 };
+  assert.equal(await covers(setup([lock], { trustOverlay: true }).backend), true);
 });

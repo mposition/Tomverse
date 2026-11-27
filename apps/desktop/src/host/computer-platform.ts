@@ -12,9 +12,11 @@ import { createX11Backend, x11Missing } from "./computer-backend-x11";
  * supported" and its switch cannot be turned on, as before. macOS (Screen Recording and Accessibility permissions) has none.
  */
 export const COMPUTER_UNVERIFIED_LINUX = "TOMVERSE_DESKTOP_COMPUTER_UNVERIFIED_LINUX";
+/** The person has checked that a property-less window as big as the screen on their desktop is their compositor's overlay (see computer-backend-x11.ts). */
+export const COMPUTER_X11_TRUST_OVERLAY = "TOMVERSE_DESKTOP_COMPUTER_X11_TRUST_OVERLAY";
 
 export function createBackendFor(platform: NodeJS.Platform, env: NodeJS.ProcessEnv = process.env, probe?: Parameters<typeof x11Missing>[1]): ComputerBackend | null {
   if (platform === "win32") return createWindowsBackend();
-  if (platform === "linux" && env[COMPUTER_UNVERIFIED_LINUX] === "1") return x11Missing(env, probe)?.length === 0 ? createX11Backend() : null;
+  if (platform === "linux" && env[COMPUTER_UNVERIFIED_LINUX] === "1") return x11Missing(env, probe)?.length === 0 ? createX11Backend({ trustCompositorOverlay: env[COMPUTER_X11_TRUST_OVERLAY] === "1" }) : null;
   return null;
 }

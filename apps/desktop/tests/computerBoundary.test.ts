@@ -58,7 +58,7 @@ test("the Linux backend is the only code that starts the X11 tools, writes no fi
   for (const name of files.filter((entry) => entry !== "computer-platform.ts" && entry !== "computer-backend-x11.ts")) assert.doesNotMatch(read(name), /createX11Backend/, name);
   const platform = read("computer-platform.ts");
   assert.match(platform, /env\[COMPUTER_UNVERIFIED_LINUX\] === "1"/);
-  assert.match(platform, /x11Missing\(env, probe\)\?\.length === 0 \? createX11Backend\(\) : null/);
+  assert.match(platform, /x11Missing\(env, probe\)\?\.length === 0 \? createX11Backend\(\{ trustCompositorOverlay: env\[COMPUTER_X11_TRUST_OVERLAY\] === "1" \}\) : null/);
   // Ctrl+V is refused in the backend as well as in the policy.
   assert.match(backend, /name === "v"\) return null/);
 });
