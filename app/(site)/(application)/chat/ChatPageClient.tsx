@@ -9520,7 +9520,7 @@ export function ChatPageClient({
         // navigated to, with the chat gone. See lib/browserDownload.ts.
         try {
             const response = await fetch(
-                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : ""}${!options.includeSource && options.format === "markdown" ? "?format=md" : ""}`,
+                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : options.format === "markdown" ? "?format=md" : ""}`,
                 {
                     cache: "no-store",
                     // The file is named with the date and words the list shows
