@@ -693,7 +693,6 @@ export const fr = {
         artifactPreviewLoading: "Chargement de l'aperçu…",
         artifactPreviewFailed: "L'aperçu n'a pas pu être chargé. Vous pouvez toujours télécharger le fichier.",
         artifactPreviewTooLarge: "Cette page est trop volumineuse pour l'aperçu. Téléchargez-la pour l'ouvrir.",
-        artifactPreviewNavigationBlocked: "La page a tenté d'ouvrir une autre adresse et a été arrêtée. Téléchargez le fichier pour l'ouvrir dans votre navigateur.",
         artifactPreviewSandboxNote: "S'exécute dans un cadre isolé, sans accès à votre compte.",
         artifactReadyLabel: "Télécharger {filename}, {type}, {size}",
         artifactFailedLabel: "Impossible de créer {type} {filename}",

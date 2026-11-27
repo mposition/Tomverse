@@ -139,12 +139,10 @@ export const searchPastChats: ChatHistorySearch = async ({ userId, query, curren
     const hits = answer.results.filter((result) => result.kind === "native");
     const ids = [...new Set(hits.map((hit) => hit.conversationId))];
     if (!ids.length) return { conversations: [], incomplete: answer.truncated };
-    const [eligible] = await Promise.all([
-        prisma.conversation.findMany({
-            where: { AND: [referenceableConversationWhere({ userId, currentConversationId }), { id: { in: ids } }] },
-            select: { id: true, title: true, productKey: true, memoryMode: true },
-        }),
-    ]);
+    const eligible = await prisma.conversation.findMany({
+        where: { AND: [referenceableConversationWhere({ userId, currentConversationId }), { id: { in: ids } }] },
+        select: { id: true, title: true, productKey: true, memoryMode: true },
+    });
     const usable = new Map(
         eligible
             .filter((row) => resolveConversationMemoryMode(row.memoryMode, settings.defaultConversationMode) === "on")

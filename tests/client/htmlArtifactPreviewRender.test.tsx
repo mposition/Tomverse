@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { GeneratedArtifactCard } from "@/components/chat/GeneratedArtifactCard";
-import { HtmlArtifactPreviewFrame, frameLeftItsDocument } from "@/components/chat/HtmlArtifactPreviewPanel";
+import { HtmlArtifactPreviewFrame } from "@/components/chat/HtmlArtifactPreviewPanel";
 import { HTML_PREVIEW_CSP } from "@/lib/htmlArtifactPreview";
 import { SUPPORTED_LANGUAGES } from "@/lib/language";
 import { de } from "@/locales/de";
@@ -48,11 +48,6 @@ test("the frame is a sandboxed srcdoc with scripts and no app origin, no navigat
   assert.match(html, /title="Preview of chart.html"/);
 });
 
-test("a second load of the frame means the page navigated itself away", () => {
-  assert.equal(frameLeftItsDocument(1), false);
-  assert.equal(frameLeftItsDocument(2), true);
-});
-
 test("a ready HTML file gets a preview button next to download; no other file and no unfinished file does", () => {
   const html = card(artifact("html"));
   assert.match(html, /data-testid="generated-artifact-html-preview"/);
@@ -73,7 +68,7 @@ test("every locale words the preview and the page-reading and past-chat status l
   assert.deepEqual(Object.keys(locales).sort(), [...SUPPORTED_LANGUAGES].map((l) => (l === "zh-Hant" ? "zhHant" : l)).sort());
   const keys = [
     "artifactPreviewOpen", "artifactPreviewClose", "artifactPreviewLoading", "artifactPreviewFailed", "artifactPreviewTooLarge",
-    "artifactPreviewNavigationBlocked", "artifactPreviewSandboxNote", "toolPageReading", "toolPageUnavailable", "toolHistorySearching",
+    "artifactPreviewSandboxNote", "toolPageReading", "toolPageUnavailable", "toolHistorySearching",
   ] as const;
   for (const [name, locale] of Object.entries(locales)) {
     for (const key of keys) {

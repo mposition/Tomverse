@@ -682,7 +682,6 @@ export const de = {
         artifactPreviewLoading: "Vorschau wird geladen…",
         artifactPreviewFailed: "Die Vorschau konnte nicht geladen werden. Die Datei kann weiterhin heruntergeladen werden.",
         artifactPreviewTooLarge: "Diese Seite ist zu groß für eine Vorschau. Lade sie herunter, um sie zu öffnen.",
-        artifactPreviewNavigationBlocked: "Die Seite wollte eine andere Adresse öffnen und wurde gestoppt. Lade die Datei herunter, um sie im Browser zu öffnen.",
         artifactPreviewSandboxNote: "Läuft in einem isolierten Rahmen ohne Zugriff auf dein Konto.",
         artifactReadyLabel: "{filename} herunterladen, {type}, {size}",
         artifactFailedLabel: "{type} {filename} konnte nicht erstellt werden",

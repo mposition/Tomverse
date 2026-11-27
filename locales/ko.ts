@@ -736,7 +736,6 @@ export const ko = {
         artifactPreviewLoading: "미리보기를 불러오는 중…",
         artifactPreviewFailed: "미리보기를 불러오지 못했습니다. 파일은 그대로 내려받을 수 있습니다.",
         artifactPreviewTooLarge: "페이지가 너무 커서 미리볼 수 없습니다. 내려받아 열어 보세요.",
-        artifactPreviewNavigationBlocked: "페이지가 다른 주소로 이동하려고 해서 멈췄습니다. 파일을 내려받아 브라우저에서 열어 보세요.",
         artifactPreviewSandboxNote: "격리된 프레임에서 실행되며 계정에는 접근할 수 없습니다.",
         artifactReadyLabel: "{filename} 다운로드, {type}, {size}",
         artifactFailedLabel: "{type} {filename}을(를) 만들지 못했습니다",

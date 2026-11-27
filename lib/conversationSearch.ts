@@ -188,7 +188,6 @@ export async function searchConversationMessages(input: {
     const { request, userId, query, displayTimeZone } = input;
     const projectScope = input.projectId ?? null;
     const excluded = input.excludeConversationId ?? "";
-    const nativeOnly = Boolean(input.modelReference);
     const modelReference = Boolean(input.modelReference);
     const memoryDefaultOff = input.modelReference?.accountMemoryDefaultOff ?? false;
     const sourceTimeoutMs = input.sourceTimeoutMs ?? SOURCE_SEARCH_TIMEOUT_MS;
@@ -368,7 +367,7 @@ export async function searchConversationMessages(input: {
                 messages: [],
                 ordinals: new Map(),
             };
-            if (authorizedSnapshotIds.length > 0 && !nativeOnly) {
+            if (authorizedSnapshotIds.length > 0 && !modelReference) {
                 const startedAt = Date.now();
                 const remaining = () => {
                     const left = sourceTimeoutMs - (Date.now() - startedAt);

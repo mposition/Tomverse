@@ -739,7 +739,6 @@ export const zhHant = {
         artifactPreviewLoading: "正在載入預覽…",
         artifactPreviewFailed: "無法載入預覽，仍可下載該檔案。",
         artifactPreviewTooLarge: "此頁面過大，無法預覽。請下載後開啟。",
-        artifactPreviewNavigationBlocked: "此頁面試圖開啟其他位址，已被阻擋。請下載檔案後在瀏覽器中開啟。",
         artifactPreviewSandboxNote: "在隔離的框架中執行，無法存取你的帳戶。",
         artifactReadyLabel: "下載 {filename}，{type}，{size}",
         artifactFailedLabel: "無法建立 {type} {filename}",

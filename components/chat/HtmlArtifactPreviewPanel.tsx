@@ -29,18 +29,14 @@ import {
  * that route's, unchanged. Nothing here reads a file by any other path.
  */
 
-/** A srcdoc frame fires `load` once. A second load means the page navigated its own frame away. */
-export const frameLeftItsDocument = (loadCount: number) => loadCount > 1;
-
 /** The frame alone: no network, no portal, so it renders anywhere. */
-export function HtmlArtifactPreviewFrame({ html, title, onLeft }: { html: string; title: string; onLeft?: () => void }) {
+export function HtmlArtifactPreviewFrame({ html, title }: { html: string; title: string }) {
   const srcDoc = useMemo(() => {
     // The embedding document's CSP nonce, if it has one (see withEmbedderNonce).
     const nonce = typeof document === "undefined" ? null : document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
     const page = typeof DOMParser === "undefined" ? html : withEmbedderNonce(html, nonce, (text) => new DOMParser().parseFromString(text, "text/html"));
     return buildHtmlPreviewSrcdoc(page);
   }, [html]);
-  const loads = useRef(0);
   return (
     <iframe
       data-testid="html-artifact-preview-frame"
@@ -50,10 +46,6 @@ export function HtmlArtifactPreviewFrame({ html, title, onLeft }: { html: string
       referrerPolicy="no-referrer"
       allow=""
       className="h-full w-full flex-1 border-0 bg-white"
-      onLoad={() => {
-        loads.current += 1;
-        if (frameLeftItsDocument(loads.current)) onLeft?.();
-      }}
     />
   );
 }
@@ -69,7 +61,6 @@ export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: Chat
   const [loaded, setLoaded] = useState<Loaded>(
     isHtmlPreviewSmallEnough(artifact.byteSize) ? { status: "loading" } : { status: "too_large" }
   );
-  const [left, setLeft] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -117,8 +108,7 @@ export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: Chat
 
   const title = t("chat.artifactPreviewAlt").replaceAll("{filename}", artifact.filename);
   const notice =
-    left ? t("chat.artifactPreviewNavigationBlocked")
-    : loaded.status === "failed" ? loaded.message
+    loaded.status === "failed" ? loaded.message
     : loaded.status === "too_large" ? t("chat.artifactPreviewTooLarge")
     : null;
 
@@ -155,7 +145,7 @@ export function HtmlArtifactPreviewPanel({ artifact, onClose }: { artifact: Chat
             {t("chat.artifactPreviewLoading")}
           </p>
         ) : loaded.status === "ready" ? (
-          <HtmlArtifactPreviewFrame html={loaded.html} title={title} onLeft={() => setLeft(true)} />
+          <HtmlArtifactPreviewFrame html={loaded.html} title={title} />
         ) : null}
       </div>
     </div>,
