@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, Square, X } from "lucide-react";
+import { AudioLines, Mic, Square, X } from "lucide-react";
 import { useVoiceRecorder } from "../../../../components/chat/useVoiceRecorder";
 import { VOICE_CLIP_MAX_BYTES } from "../../../../lib/voiceInputFormats";
 import { CHAT_MAX_MESSAGE_CHARACTERS } from "../../../../lib/chatRequestLimits";
@@ -7,9 +7,11 @@ import type { Language } from "../../../../lib/language";
 
 const copy = {
   en: { cancel: "Cancel", start: "Record voice input", stop: "Use recording as text", listening: "Recording", processing: "Transcribing",
-    denied: "Microphone access was denied.", device: "No recording device is available.", failed: "Voice input could not finish." },
+    denied: "Microphone access was denied.", device: "No recording device is available.", failed: "Voice input could not finish.",
+    command: "Speak an instruction", sendSpoken: "Send what I said" },
   ko: { cancel: "취소", start: "음성으로 입력하기", stop: "녹음을 텍스트로 사용", listening: "녹음 중", processing: "받아쓰기 중",
-    denied: "마이크 사용이 거부되었습니다.", device: "사용 가능한 녹음 장치가 없습니다.", failed: "음성 입력을 완료하지 못했습니다." },
+    denied: "마이크 사용이 거부되었습니다.", device: "사용 가능한 녹음 장치가 없습니다.", failed: "음성 입력을 완료하지 못했습니다.",
+    command: "말로 지시하기", sendSpoken: "말한 내용 보내기" },
 };
 
 export function DraftDictation(props: {
@@ -19,11 +21,34 @@ export function DraftDictation(props: {
   disabled: boolean;
   draft: string;
   setDraft: (value: string) => void;
+  /**
+   * With this the button is a spoken instruction: what was said becomes the draft and is sent at once, through the
+   * composer's own Send (see useSpokenCommand). Nothing is spoken back.
+   */
+  onCommand?: (draft: string) => void;
 }) {
   return <ScopedDraftDictation key={props.scope} {...props} />;
 }
 
-function ScopedDraftDictation({ language, maxLength = CHAT_MAX_MESSAGE_CHARACTERS, scope, disabled, draft, setDraft }: Parameters<typeof DraftDictation>[0]) {
+/**
+ * Sends a spoken instruction once the composer holds it. The composer's own Send runs after the draft is in place,
+ * so the instruction takes exactly the path typed words take. The composer owns this, because the button that
+ * heard the words is gone as soon as the draft is no longer empty.
+ */
+export function useSpokenCommand(draft: string, submit: () => void) {
+  const pending = useRef<{ draft: string; until: number } | null>(null);
+  useEffect(() => {
+    const waiting = pending.current;
+    if (!waiting) return;
+    if (Date.now() > waiting.until) { pending.current = null; return; }
+    if (waiting.draft !== draft) return;
+    pending.current = null;
+    submit();
+  });
+  return (spoken: string) => { pending.current = { draft: spoken, until: Date.now() + 2_000 }; };
+}
+
+function ScopedDraftDictation({ language, maxLength = CHAT_MAX_MESSAGE_CHARACTERS, scope, disabled, draft, setDraft, onCommand }: Parameters<typeof DraftDictation>[0]) {
   const text = language === "ko" ? copy.ko : copy.en;
   const grant = useRef<string | null>(null);
   const alive = useRef(true);
@@ -50,7 +75,10 @@ function ScopedDraftDictation({ language, maxLength = CHAT_MAX_MESSAGE_CHARACTER
     onTranscript: (transcript) => {
       const separator = draft && !/\s$/.test(draft) ? " " : "";
       const available = maxLength - draft.length - separator.length;
-      if (available > 0) setDraft(draft + separator + transcript.slice(0, available));
+      if (available <= 0) return;
+      const next = draft + separator + transcript.slice(0, available);
+      onCommand?.(next);
+      setDraft(next);
     },
   });
   const cancelVoice = useRef(voice.cancel);
@@ -87,10 +115,12 @@ function ScopedDraftDictation({ language, maxLength = CHAT_MAX_MESSAGE_CHARACTER
   const problem = status === "error" ? voice.state.code : undefined;
   const error = problem === "VOICE_PERMISSION_DENIED" || denied ? text.denied
     : problem === "VOICE_DEVICE_UNAVAILABLE" || problem === "VOICE_UNSUPPORTED_BROWSER" ? text.device : problem ? text.failed : "";
-  return <span className="desktop-dictation">
-    <button type="button" className="icon" aria-label={recording ? text.stop : text.start}
+  return <span className={onCommand ? "desktop-dictation desktop-dictation--command" : "desktop-dictation"}>
+    <button type="button" className={onCommand ? "send" : "icon"} data-testid={onCommand ? "voice-command" : undefined}
+      aria-label={recording ? (onCommand ? text.sendSpoken : text.stop) : onCommand ? text.command : text.start}
+      title={onCommand && !recording ? text.command : undefined}
       aria-pressed={recording} disabled={disabled || arming || (!idle && !recording)}
-      onClick={() => recording ? voice.stop() : void start()}>{recording ? <Square size={15} /> : <Mic size={16} />}</button>
+      onClick={() => recording ? voice.stop() : void start()}>{recording ? <Square size={15} /> : onCommand ? <AudioLines size={18} /> : <Mic size={16} />}</button>
     {recording && <span role="status">{text.listening} {voice.elapsedSeconds}s</span>}
     {!idle && !recording && <span role="status">{text.processing}</span>}
     {!idle && <button type="button" className="icon" aria-label={text.cancel}

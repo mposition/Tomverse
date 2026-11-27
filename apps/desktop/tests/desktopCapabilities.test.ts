@@ -36,3 +36,20 @@ test("what a turn may carry comes from the server that was reached, and an older
   body = { ...body, desktopReviewContext: false };
   assert.equal((await load())?.reviewTools, false);
 });
+
+test("dictation and the voice conversation are offered only where Desktop's switch and the server's own voice switch are both on", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true,
+    voiceConversation: { enabled: true, maxSeconds: 300, continuous: true, reservationSeconds: 60 } };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  // The web's voice setting alone opens nothing in Desktop.
+  assert.deepEqual([(await load())?.voiceInput, (await load())?.voiceConversation], [false, null]);
+  body = { ...body, desktopVoiceInput: true, desktopVoiceConversation: true };
+  assert.deepEqual([(await load())?.voiceInput, (await load())?.voiceConversation], [true, { continuous: true, maxSeconds: 300 }]);
+  body = { ...body, voiceConversation: { enabled: false, maxSeconds: 300 } };
+  assert.equal((await load())?.voiceConversation, null);
+  // A voice setting this build cannot read costs the conversation, not the rest of the capabilities.
+  body = { ...body, voiceConversation: { enabled: "yes" } };
+  const unread = await load();
+  assert.deepEqual([unread?.voiceInput, unread?.voiceConversation, unread?.chatWrite], [true, null, true]);
+});

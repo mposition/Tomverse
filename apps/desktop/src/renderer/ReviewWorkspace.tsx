@@ -13,7 +13,7 @@ import { desktopReviewCopy } from "../../../../locales/desktopReview";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import type { ChatConversation, ChatModel, ComposerOptions, ReviewCapability, ReviewImageOffer, ReviewTurnInput, ReviewTurnResult } from "../chat-contract";
 import { ImportedSource, type useChatHistory } from "./ChatWorkspace";
-import { DraftDictation } from "./DraftDictation";
+import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { AttachmentDraftStatus, AttachmentPicker, type DesktopAttachmentDraft } from "./AttachmentDraft";
 import { DesktopModelPicker } from "./DesktopModelPicker";
 import { SavedImageTurn } from "./ImageWorkspace";
@@ -172,6 +172,7 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
   const toolChanges = toolDraft?.scope === toolsScope ? toolDraft.changes : undefined;
   const location = useChatLocation(deviceLocation && history.account ? history.account : null);
   const { preparing, guarded } = useSendGuard(toolsScope, history.draft);
+  const speak = useSpokenCommand(history.draft, () => (document.getElementById("review-draft-input") as HTMLTextAreaElement | null)?.form?.requestSubmit());
   const [arranged, setArranged] = useState<{ key: string; ids: string[] }>();
   const [closed, setClosed] = useState<{ key: string; ids: string[] }>();
   // The models the Review holds, in the order the columns were arranged.
@@ -427,8 +428,13 @@ export function ReviewWorkspace({ history, capability, run, onFollowUp, onImages
         {dictation && <DraftDictation language={language} scope={"review:" + (history.selected?.id ?? "new")}
           disabled={run.running || attachments.uploading || preparing} draft={history.draft} setDraft={history.setDraft} />}
         <span className="spacer"/>
+        {/* With an empty draft, a spoken instruction takes the Send button's place: it is sent as typed words are, and nothing is read back. */}
         {run.running
           ? <button className="send stop" type="button" aria-label={copy.stop} onClick={() => void window.desktop.stopChat()}><Square size={16} /></button>
+          : dictation && !history.draft.trim() && !attachments.files.length
+            ? <DraftDictation language={language} scope={"review-command:" + (history.selected?.id ?? "new")}
+              disabled={!online || !choices.length || attachments.uploading || preparing} draft={history.draft} setDraft={history.setDraft}
+              onCommand={speak} />
           : <button className="send" type="submit" aria-label={copy.send}
             disabled={!online || !choices.length || (!history.draft.trim() && !attachments.files.length) || attachments.uploading || preparing}><ArrowUp size={18} /></button>}
       </div>

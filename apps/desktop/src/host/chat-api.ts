@@ -5,7 +5,7 @@ import type { ComparisonReview, ReviewSetup } from "../../../../packages/chat-co
 import { parseChatLocation } from "@tomverse/chat-core";
 import { DESKTOP_LIVE_ORIGIN } from "../../../../lib/desktopAuthContract";
 import {
-  DESKTOP_APP_ORIGIN, DESKTOP_CHAT_CONTEXT, DESKTOP_CHAT_CREATE, DESKTOP_CHAT_HISTORY, DESKTOP_CHAT_SEARCH, DESKTOP_CHAT_TURN,
+  DESKTOP_APP_ORIGIN, DESKTOP_CHAT_CONTEXT, DESKTOP_CHAT_CREATE, DESKTOP_CHAT_HISTORY, DESKTOP_CHAT_SEARCH, DESKTOP_CHAT_TURN, DESKTOP_VOICE_CONVERSATION,
   DESKTOP_DEEP_RESEARCH_STATUS, DESKTOP_IMAGE_GENERATIONS, DESKTOP_REVIEW_CREATE, DESKTOP_REVIEW_PREFLIGHT, DESKTOP_REVIEW_ROUTING,
 } from "../../../../lib/nativeBearerGate";
 import { CHAT_INITIAL_SELECTION_MODE_HEADER } from "../../../../lib/chatWorkspaceEntry";
@@ -33,6 +33,7 @@ import { desktopMcpReply, type DesktopMcpAction } from "../../../../lib/desktopC
 import { desktopPluginInventory } from "../plugin-contract";
 import type { McpProgressState } from "../../../../lib/mcpConnectorProgress";
 import { DesktopSessionRefused } from "./browser-login";
+import type { VoiceBody } from "../voice-contract";
 
 const DESKTOP_PLUGIN_INVENTORY = "/api/mcp/connections";
 
@@ -146,6 +147,16 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
     return { status: response.status, code: detail.success ? detail.data.code : "VOICE_TRANSCRIPTION_FAILED" };
   }
 
+  /** One action of the Chat voice conversation. The reply is handed back as it is: a session's reply is an event stream. */
+  async function voice(body: VoiceBody, turn: AbortSignal) {
+    const response = await send(DESKTOP_VOICE_CONVERSATION, "POST", body, { signal: turnSignal(turn) });
+    if (response.status === 401) {
+      await response.body?.cancel().catch(() => {});
+      throw new DesktopSessionRefused();
+    }
+    return response;
+  }
+
   async function conversation({ id, cursor, product = "chat" }: ChatPageInput, tail = false, turn?: AbortSignal) {
     const query = tail ? "?tail=1" : cursor ? "?cursor=" + encodeURIComponent(cursor) : "";
     const result = await request(pathFor(id) + query, chatConversation, "GET", undefined, { turn });
@@ -163,6 +174,7 @@ export function desktopChatApi(token: string, signal: AbortSignal, origin = DESK
       return rows.find((row) => row.id === id && row.surface === "continuation" && (isDesktopChat(row) || isDesktopReview(row)));
     },
     transcribeDictation,
+    voice,
     async codePlugin(connectionId: string, action: DesktopMcpAction, turn: AbortSignal) {
       return request("/api/mcp/desktop-code", desktopMcpReply, "POST", { connectionId, action }, { turn });
     },

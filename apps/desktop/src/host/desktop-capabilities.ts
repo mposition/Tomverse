@@ -28,6 +28,9 @@ const capabilities = z.object({
   desktopChatPlugin: z.boolean().optional(),
   desktopReviewContext: z.boolean().optional(),
   desktopReviewTools: z.boolean().optional(),
+  desktopVoiceInput: z.boolean().optional(),
+  desktopVoiceConversation: z.boolean().optional(),
+  voiceConversation: z.object({ enabled: z.boolean(), maxSeconds: z.number().int().positive(), continuous: z.boolean().optional() }).optional().catch(undefined),
 });
 
 const starterOrder = randomInt(STARTER_ORDER_SEED_LIMIT);
@@ -54,5 +57,9 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     managedCode: data.desktopManagedCode === true,
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,
     reviewContext: data.desktopReviewContext === true,
-    reviewTools: data.desktopReviewTools === true && data.desktopReviewContext === true };
+    reviewTools: data.desktopReviewTools === true && data.desktopReviewContext === true,
+    voiceInput: data.desktopVoiceInput === true,
+    // The conversation is offered only where Desktop's own switch and the server's voice switch are both on.
+    voiceConversation: data.desktopVoiceConversation === true && data.voiceConversation?.enabled
+      ? { continuous: data.voiceConversation.continuous === true, maxSeconds: data.voiceConversation.maxSeconds } : null };
 }

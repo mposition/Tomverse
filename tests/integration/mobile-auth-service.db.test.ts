@@ -1666,6 +1666,16 @@ test("Desktop Chat prepares signed memory only for its current saved question an
     assert.equal((await context.POST(prepare({ ...payload, conversationId: foreign.id, sourceUserMessageId: foreignQuestion.id }))).status, 403);
     // A Review is a writable Desktop conversation now; the question belongs to another conversation, so it is a conflict, not a refusal.
     assert.equal((await context.POST(prepare({ ...payload, conversationId: review.id }))).status, 409);
+    // A Review turn that one model answers alone prepares its own context: the same memory, bound to the Review.
+    const reviewPayload = { conversationId: review.id, modelId,
+      sourceUserMessageId: (await save(review.id, "Recommend a decaffeinated coffee.", 1_000)).id };
+    const reviewContext = await context.POST(prepare(reviewPayload));
+    assert.equal(reviewContext.status, 200, await reviewContext.clone().text());
+    const reviewBody = await reviewContext.json();
+    assert.equal(reviewBody.memoryUsedCount, 1);
+    assert.ok(verifyChatContextBundle(reviewBody.contextBundle, { subjectKey: user.id, conversationId: review.id, modelId }).ok);
+    assert.equal(verifyChatContextBundle(reviewBody.contextBundle, { subjectKey: user.id, conversationId: own.id, modelId }).ok, false);
+    assert.equal((await context.POST(prepare({ ...reviewPayload, modelId: "another-model" }))).status, 409);
     assert.equal((await context.POST(prepare({ ...payload, conversationId: locked.id }))).status, 423);
     assert.equal((await context.POST(prepare({ ...payload, sourceUserMessageId: older.id }))).status, 409);
     assert.equal((await context.POST(prepare({ ...payload, modelId: "another-model" }))).status, 409);
@@ -1706,8 +1716,10 @@ test("Desktop Chat prepares signed memory only for its current saved question an
     process.env.TOMVERSE_DESKTOP_CHAT_WRITE_ENABLED = "false";
     // The route is enrolled with Review writes too, so Chat writes off alone no longer unenrols it: a Chat is refused, not unauthenticated.
     assert.equal((await context.POST(prepare(payload))).status, 403);
+    assert.equal((await context.POST(prepare(reviewPayload))).status, 200);
     process.env.TOMVERSE_DESKTOP_REVIEW_ENABLED = "false";
     assert.equal((await context.POST(prepare(payload))).status, 401);
+    assert.equal((await context.POST(prepare(reviewPayload))).status, 401);
   } finally {
     await prisma.appSetting.deleteMany({ where: { key: MEMORY_INJECTION_FLAG_KEY } });
     flags.forEach((key, index) => {

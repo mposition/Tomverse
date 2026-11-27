@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { randomUUID } from "node:crypto";
-import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled } from "@/lib/nativeBearerGate";
+import { desktopBillingEnabled, desktopDeepResearchEnabled, desktopDriveEnabled, desktopPluginsEnabled, desktopVoiceEnabled } from "@/lib/nativeBearerGate";
 import { desktopManagedCodeEnabled } from "@/lib/desktopManagedCodeSwitch";
 import { mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { readGooglePickerConfig } from "@/lib/googleDrivePickerConfig";
@@ -11,7 +11,7 @@ import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { DESKTOP_APP_ORIGIN, desktopAttachmentEnabled, desktopChatWriteEnabled, desktopReviewWriteEnabled, desktopReviewAnalysisEnabled, desktopComposerToolsEnabled } from "@/lib/desktopReadApiContract";
 import {
-  getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached,
+  getOperationalFeatureFlags, isChatStarterEnabled, isExternalContinuationEnabledCached, isExternalImportEnabled, isImageGenerationEnabledCached, isVoiceInputEnabled,
 } from "@/lib/appSettings";
 import { CHAT_STARTER_MAX_VISIBLE, parseStarterOrderSeed, selectVisibleStarterCards } from "@/lib/chatStarterAvailability";
 import { chatStarterCatalogFor } from "@/lib/chatStarterCatalog";
@@ -88,6 +88,9 @@ async function desktopChatCapabilities(userId: string, orderSeed: number | null)
     desktopChatPlugin: desktopWrite && desktopPluginsEnabled() && mcpPreviewEnabled(),
     desktopReviewContext: desktopReview,
     desktopReviewTools: desktopReview && desktopComposerToolsEnabled(),
+    // Dictation and the Chat voice conversation, each only where its own switch is on as well as Desktop's.
+    desktopVoiceInput: desktopVoiceEnabled() && await isVoiceInputEnabled().catch(() => false),
+    desktopVoiceConversation: desktopVoiceEnabled() && voiceConversationConfig(process.env) !== null,
     ...(reviewPlan ? { desktopReview: { easy: reviewEasyEnabled(), modelLimit: effectivePlanModelLimit(reviewPlan), plan: reviewPlan.tier } } : {}),
     ...(images.length ? { desktopImages: { maxModels: imageGroupMaxModels(), models: images } } : {}),
   };
