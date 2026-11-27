@@ -9,6 +9,7 @@ import {
   nextOccurrence,
   planRunsScheduledTasks,
   scheduleProblem,
+  scheduledTasksHostProblem,
   scheduledTasksEntryVisible,
   SCHEDULED_TASK_CREDIT_CAP_CODE,
   SCHEDULED_TASK_FREQUENCIES,
@@ -174,4 +175,13 @@ test("three failures in a row pause the task; a skip spends nothing and counts n
   assert.deepEqual(failureStreakAfter(2, { status: "skipped", outcome: "x", pause: "insufficient_credits" }),
     { consecutiveFailures: 2, pause: "insufficient_credits" });
   assert.deepEqual(failureStreakAfter(2, { status: "succeeded", outcome: "completed", pause: null }), { consecutiveFailures: 0, pause: null });
+});
+
+test("unattended runs start only on a long-lived server, never on a serverless host", () => {
+  assert.equal(scheduledTasksHostProblem({}), null);
+  assert.equal(scheduledTasksHostProblem({ RAILWAY_ENVIRONMENT_NAME: "production", NODE_ENV: "production" }), null);
+  for (const name of ["VERCEL", "AWS_LAMBDA_FUNCTION_NAME", "NETLIFY", "FUNCTIONS_WORKER_RUNTIME"]) {
+    assert.equal(scheduledTasksHostProblem({ [name]: "1" }), "serverless_host", name);
+  }
+  assert.equal(scheduledTasksHostProblem({ VERCEL: "  " }), null);
 });

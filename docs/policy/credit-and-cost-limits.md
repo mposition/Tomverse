@@ -1239,6 +1239,7 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
 - **결과 불명은 다시 보내지 않습니다.** 회차의 assistant id는 회차 id에서 파생되므로 같은
   회차를 다시 보내도 Chat attempt에 재연결될 뿐입니다. lease가 지난 회차는 attempt 행으로만
   판정하고, 판정할 수 없으면 `unknown`으로 기록합니다.
+- **실행 위치와 시간.** 견적은 실행기가 보내는 turn을 Chat route와 같은 입력(질문, `buildChatTurnSystemBlocks`의 capability block)과 같은 예산 옵션으로 계산하고, `tests/integration/scheduled-task-chat-route.db.test.ts`가 실제 route의 예약액이 견적을 넘지 않는지 확인합니다. tick은 유지보수 요청의 `maxDuration` 안에 돌아오고, 남은 시간이 2분보다 적으면 새 회차를 시작하지 않습니다. 이미 시작한 회차는 요청이 끝난 뒤에도 답을 끝까지 읽고 스스로 정산합니다. 이것은 `next start` 서버(운영은 Railway)에서만 보장되므로(Next self-hosting 안내의 `after`), 서버리스 표지(`VERCEL`, `AWS_LAMBDA_FUNCTION_NAME`, `NETLIFY`, `FUNCTIONS_WORKER_RUNTIME`)가 있으면 아무 회차도 시작하지 않습니다(`scheduledTasksHostProblem`). 배포 중 프로세스가 내려가 끊긴 회차는 일반 Chat turn처럼 attempt 행으로 판정합니다.
 - **빈도와 동시 실행.** 가장 잦은 일정은 매일이고, 실행기는 같은 작업의 두 회차를 20시간보다
   가깝게 두지 않습니다. 계정당 예약 실행은 한 번에 하나이며(`runningUserId` unique), 계정의
   Chat lease가 한도에서 하나 모자라면 기다립니다. 활성 작업은 계정당 5개, Pro·Max 전용입니다.

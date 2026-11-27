@@ -395,3 +395,24 @@ export const failureStreakAfter = (
       (consecutiveFailures >= SCHEDULED_TASK_LIMITS.maxConsecutiveFailures ? "repeated_failures" : null),
   };
 };
+
+/**
+ * Where an unattended run may execute. The tick runs in `after()` of the
+ * maintenance request and a started turn may outlive that request: on a
+ * long-lived `next start` server (production runs on Railway) `after()` is
+ * fully supported and the server finishes pending `after()` callbacks before
+ * it exits on SIGTERM (node_modules/next/dist/docs/01-app/02-guides/self-hosting.md,
+ * "after"). On a serverless platform the work is bound to the invocation's
+ * time limit, so a paid run could be cut off mid-answer: nothing is started
+ * there. A run cut by a process exit anyway is settled from its Chat attempt
+ * row by the next tick, the same as a Chat turn cut by a deploy.
+ */
+const SERVERLESS_HOST_MARKERS = Object.freeze([
+  "VERCEL",
+  "AWS_LAMBDA_FUNCTION_NAME",
+  "NETLIFY",
+  "FUNCTIONS_WORKER_RUNTIME",
+]);
+
+export const scheduledTasksHostProblem = (env: Record<string, string | undefined>): "serverless_host" | null =>
+  SERVERLESS_HOST_MARKERS.some((name) => Boolean(env[name]?.trim())) ? "serverless_host" : null;

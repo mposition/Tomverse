@@ -3,7 +3,12 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
+import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
+import { APP_MANAGED_SEARCH_MAX_STEPS } from "@/lib/chatAttemptExecution";
+import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
+import { GENERATED_ARTIFACT_MAX_STEPS } from "@/lib/generatedArtifactTool";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import {
   assertModelAccess,
   createChatBudget,
@@ -215,16 +220,48 @@ export async function quoteScheduledRunCredits(input: {
     webSearchMode === "always" && appManagedSearchIsDispatchable(capability, readiness);
   const search = reserveTurnSearchCost({ model, capability, nativeSearchEnabled, appManagedSearchEnabled });
   if (!search.ok) throw new ScheduledTaskError(409, "WEB_SEARCH_UNAVAILABLE");
+  // The input the Chat route prices for the turn the runner sends: its one
+  // question plus the capability blocks of the same builder, given the inputs
+  // the route derives for that turn (signed in, persisted, no attachment, no
+  // location, no context bundle, not Auto-routed), and the same budget
+  // options. Pricing the question alone quoted less than the route reserved,
+  // so a task could be paused by its own first run (review
+  // r-20261127-050400-76af2f). tests/integration/scheduled-task-chat-route.db.test.ts
+  // holds the route's reservation to this figure.
+  const blocks = buildChatTurnSystemBlocks({
+    currentLocation: null,
+    modelId: model.id,
+    provider: model.provider,
+    usageClass: model.usageClass,
+    fileToolsOverride: model.fileToolsOverride ?? null,
+    autoRouted: false,
+    isDeepResearchTurn: false,
+    isAuthenticated: true,
+    canPersist: true,
+    nativeSearchEnabled,
+    nativeSearchForced: nativeSearchEnabled && capability.canForceExecution,
+    appManagedSearchEnabled,
+    turnAttachments: [],
+    imageGenerationFlagEnabled: await isImageGenerationEnabledCached(),
+    planAllowsImageGeneration: planAllowsImageGeneration(plan.tier),
+  });
+  const estimate = createTokenEstimateAccumulator().addText(input.prompt);
+  if (blocks.promptTokens > 0) estimate.addTokens(blocks.promptTokens);
   const budget = createChatBudget(
     access.kind,
     model,
-    atLeastOneToken(createTokenEstimateAccumulator().addText(input.prompt).breakdown()),
+    atLeastOneToken(estimate.breakdown()),
     {
       webSearchSurchargeCredits: getWebSearchSurchargeCredits(webSearchMode, capability, readiness),
       nativeSearchEnabled,
       appManagedSearchEnabled,
       nativeSearch: search.native,
       searchBackend: search.searchBackend,
+      promptCachePath: nativeSearchEnabled ? "chat_turn_native_search" : "chat_turn",
+      longContextToolInputPasses: Math.max(
+        blocks.artifactPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
+        appManagedSearchEnabled && capability.searchBackend ? APP_MANAGED_SEARCH_MAX_STEPS : 1
+      ),
     }
   );
   return budget.usageCredits;

@@ -21,6 +21,7 @@ import {
   nextOccurrence,
   planRunsScheduledTasks,
   SCHEDULED_TASK_LIMITS,
+  scheduledTasksHostProblem,
   type RunClassification,
   type ScheduledTaskSchedule,
 } from "@/lib/scheduledTaskCore";
@@ -716,7 +717,14 @@ export async function runScheduledTasksTick(input: {
  * route's own time limit (request start + maxDuration, less a margin), so the
  * tick returns inside the request whatever the platform enforces.
  */
-export async function runScheduledTasksQuietly(options: { deadline?: number } = {}) {
+export async function runScheduledTasksQuietly(options: { deadline?: number; env?: Record<string, string | undefined> } = {}) {
+  // Nothing unattended starts where a started turn could be cut off with the
+  // request (see scheduledTasksHostProblem).
+  const hostProblem = scheduledTasksHostProblem(options.env ?? process.env);
+  if (hostProblem) {
+    console.warn(JSON.stringify({ event: "scheduled_tasks_tick_skipped", reason: hostProblem, timestamp: new Date().toISOString() }));
+    return null;
+  }
   try {
     const result = await runScheduledTasksTick({
       dispatch: async () => (await import("@/app/api/chat/route")).POST,
