@@ -3,18 +3,15 @@
  * conversation tree (docs/policy/conversation-fork-adr-draft.md stays a draft).
  *
  * What is stored does not change: the replaced question and answer remain in
- * the conversation, and the new question is saved as an ordinary new turn. What
- * this module keeps is a small, browser-local note of which two messages were
- * replaced, so that
+ * the conversation, and the new question is saved as an ordinary new turn.
+ * The server marks the two replaced messages (`Message.supersededAt`,
+ * lib/chatSupersededMessages.ts), so that on every device and browser
  *
  *   - the model is not shown the replaced turn when it answers again, and
  *   - the replaced turn is drawn dimmed, labelled as replaced.
  *
- * The note is per browser, shared by its tabs through localStorage: a tab that
- * replaces a turn tells the others (the `storage` event), and every write
- * merges with what is stored instead of overwriting it. Another browser that
- * opens the same conversation shows both turns undimmed and sends both as
- * context, which is the same as having asked the question twice.
+ * This module is the page's side of that: which turn can be replaced, the
+ * send that replaces it, and the page's copy of the server's note.
  */
 
 import type { Message } from "@/components/chat/types";
@@ -68,154 +65,103 @@ export function withoutSuperseded<T extends { id: string }>(
 
 /* ------------------------------------------------------------------ store */
 
-const STORAGE_KEY = "tomverse:superseded-turns:v1";
-const MAX_IDS_PER_CONVERSATION = 100;
-const MAX_CONVERSATIONS = 50;
-const ARM_TTL_MS = 20_000;
-
+/**
+ * This page's copy of the conversation's note. It is filled from what the
+ * server says when the conversation loads (`rememberSupersededMessages`) and
+ * grows when a replacement this page made finishes. Nothing is kept in the
+ * browser: another tab or device learns of a replacement on its next load, and
+ * its requests are already right before then, because the chat route leaves
+ * replaced turns out of the context on its own.
+ */
 const EMPTY: ReadonlySet<string> = new Set();
 const sets = new Map<string, ReadonlySet<string>>();
 const listeners = new Set<() => void>();
-let loaded = false;
-let watchingStorage = false;
 
-const storage = (): Storage | null => {
-  try {
-    return typeof window === "undefined" ? null : window.localStorage;
-  } catch {
-    return null;
-  }
+const notify = () => {
+  for (const listener of listeners) listener();
 };
 
-function readStored(): Map<string, string[]> {
-  const stored = new Map<string, string[]>();
-  const store = storage();
-  if (!store) return stored;
-  try {
-    const parsed: unknown = JSON.parse(store.getItem(STORAGE_KEY) ?? "{}");
-    if (!parsed || typeof parsed !== "object") return stored;
-    for (const [conversationId, ids] of Object.entries(parsed)) {
-      if (Array.isArray(ids)) {
-        stored.set(conversationId, ids.filter((id): id is string => typeof id === "string"));
-      }
-    }
-  } catch {
-    // An unreadable note is the same as no note.
-  }
-  return stored;
-}
-
-/**
- * Folds what another tab wrote into what this page holds. A note only ever
- * grows (a replaced turn is never restored), so a union loses nothing from
- * either side: without it the tab that saved last would erase the other tab's
- * notes, and a tab that read once would keep sending a turn the other replaced.
- * Returns whether anything changed.
- */
-function mergeStored(): boolean {
-  let changed = false;
-  for (const [conversationId, ids] of readStored()) {
-    const current = sets.get(conversationId);
-    if (current && ids.every((id) => current.has(id))) continue;
-    changed = true;
-    const merged = new Set([...ids, ...(current ?? [])]);
-    while (merged.size > MAX_IDS_PER_CONVERSATION) merged.delete(merged.values().next().value as string);
-    sets.set(conversationId, merged);
-  }
-  return changed;
-}
-
-function load() {
-  if (loaded) return;
-  loaded = true;
-  mergeStored();
-}
-
-function persist() {
-  const store = storage();
-  if (!store) return;
-  try {
-    const entries = [...sets.entries()].slice(-MAX_CONVERSATIONS);
-    store.setItem(
-      STORAGE_KEY,
-      JSON.stringify(Object.fromEntries(entries.map(([id, ids]) => [id, [...ids]])))
-    );
-  } catch {
-    // Storage full or blocked: the note then lasts for this page load only.
-  }
+function addIds(conversationId: string, ids: readonly string[]): boolean {
+  const current = sets.get(conversationId) ?? EMPTY;
+  if (ids.every((id) => current.has(id))) return false;
+  sets.set(conversationId, new Set([...current, ...ids]));
+  return true;
 }
 
 export function getSupersededIds(conversationId: string | null | undefined): ReadonlySet<string> {
-  if (!conversationId) return EMPTY;
-  load();
-  return sets.get(conversationId) ?? EMPTY;
-}
-
-export function markTurnSuperseded(conversationId: string, ids: readonly string[]) {
-  load();
-  // Read again just before writing: another tab may have saved since this page
-  // last looked, and this write must add to its notes, not replace them.
-  mergeStored();
-  const next = new Set([...(sets.get(conversationId) ?? []), ...ids]);
-  while (next.size > MAX_IDS_PER_CONVERSATION) next.delete(next.values().next().value as string);
-  // Re-insert so the most recently touched conversation is the last one kept.
-  sets.delete(conversationId);
-  sets.set(conversationId, next);
-  persist();
-  for (const listener of listeners) listener();
-}
-
-/** Another tab wrote the note: take it in and tell this page. */
-function onStorageEvent(event: StorageEvent) {
-  if (event.key !== null && event.key !== STORAGE_KEY) return;
-  if (mergeStored()) for (const listener of listeners) listener();
+  return conversationId ? sets.get(conversationId) ?? EMPTY : EMPTY;
 }
 
 export function subscribeSuperseded(listener: () => void): () => void {
   listeners.add(listener);
-  if (!watchingStorage && typeof window !== "undefined") {
-    watchingStorage = true;
-    window.addEventListener("storage", onStorageEvent);
-  }
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0 && watchingStorage && typeof window !== "undefined") {
-      watchingStorage = false;
-      window.removeEventListener("storage", onStorageEvent);
-    }
   };
 }
 
 /**
- * Brings this page up to date with other tabs before a send reads the note.
- * The `storage` event already does this while a component is subscribed; a
- * send calls it too, so the request never leans on a stale copy.
+ * Takes in the replaced flags of a loaded conversation's messages (the
+ * server's `superseded: true`). A note only grows: a replaced turn is never
+ * restored, so a page that has not heard yet loses nothing by a union.
  */
-export function refreshSupersededFromStorage() {
-  load();
-  if (mergeStored()) for (const listener of listeners) listener();
+export function rememberSupersededMessages(
+  conversationId: string | null | undefined,
+  messages: readonly { id?: unknown; superseded?: unknown }[] | null | undefined
+) {
+  if (!conversationId || !Array.isArray(messages)) return;
+  const ids = messages
+    .filter((message) => message?.superseded === true && typeof message.id === "string")
+    .map((message) => message.id as string);
+  if (ids.length > 0 && addIds(conversationId, ids)) notify();
+}
+
+/**
+ * Tells the server, which keeps the note for every device. Best effort: the
+ * chat route records the same turn in the transaction that saved the answer,
+ * so a lost request here loses nothing.
+ */
+function saveToServer(conversationId: string, ids: readonly string[]) {
+  if (typeof fetch !== "function") return;
+  void fetch(`/api/conversations/${encodeURIComponent(conversationId)}/superseded`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageIds: ids }),
+    keepalive: true,
+  })
+    .then((response) => response.arrayBuffer())
+    .catch(() => undefined);
+}
+
+export function markTurnSuperseded(conversationId: string, ids: readonly string[], save = false) {
+  if (addIds(conversationId, ids)) notify();
+  if (save) saveToServer(conversationId, ids);
 }
 
 /**
  * One send that replaces a turn. The replaced messages leave this request's
- * context at once, but they are recorded as replaced only when the new answer
- * is reported finished through `complete`: a send that is refused (no
- * credits), fails or is stopped leaves the earlier answer standing, undimmed
- * and in later context.
+ * context at once (and the request names them, so the server can record the
+ * replacement with the answer), but they are recorded as replaced only when
+ * the new answer is reported finished through `complete`: a send that is
+ * refused (no credits), fails or is stopped leaves the earlier answer
+ * standing, undimmed and in later context.
  *
  * The progress writes of a streaming answer carry the same "normal" status as
  * the final one, so the status of a write says nothing about completion. Only
  * the code that knows the answer is finished calls `complete`: the end of the
  * stream, a durable attempt that arrives completed, and the poll or history
  * load that later finds it completed (`parkReplacement`).
+ *
+ * `save` is false for a guest, whose conversation exists in this browser only.
  */
-export function beginReplacement(conversationId: string, ids: readonly string[] | null) {
+export function beginReplacement(conversationId: string, ids: readonly string[] | null, save = false) {
   let pending = ids && ids.length > 0 ? [...ids] : null;
   return {
-    /** Everything the request must leave out: the saved note plus this turn. */
+    /** The turn this send replaces, for the request body. */
+    replacing(): readonly string[] | null {
+      return pending;
+    },
+    /** Everything the request must leave out: the note plus this turn. */
     excludedIds(): ReadonlySet<string> {
-      // Another tab may have replaced a turn since this page last looked.
-      refreshSupersededFromStorage();
       const saved = getSupersededIds(conversationId);
       return pending ? new Set([...saved, ...pending]) : saved;
     },
@@ -224,7 +170,7 @@ export function beginReplacement(conversationId: string, ids: readonly string[] 
       if (!pending || (status !== "normal" && status !== "incomplete")) return;
       const done = pending;
       pending = null;
-      markTurnSuperseded(conversationId, done);
+      markTurnSuperseded(conversationId, done, save);
     },
   };
 }
@@ -234,7 +180,9 @@ export type Replacement = ReturnType<typeof beginReplacement>;
 /**
  * A durable attempt that has not finished when the request returns: the
  * replacement waits here, under the new answer's id, until a poll or a history
- * load finds the answer finished, or the attempt ends without one.
+ * load finds the answer finished, or the attempt ends without one. A page that
+ * is reloaded first forgets it; the server has recorded the replacement with
+ * the answer, and the reloaded history carries it.
  */
 const parked = new Map<string, Replacement>();
 
@@ -250,11 +198,10 @@ export function settleParkedReplacement(answerId: string, status: Message["statu
   if (status) replacement.complete(status);
 }
 
-/** Test seam: forget everything held in memory (storage is not touched). */
+/** Test seam: forget everything held in memory. */
 export function resetSupersededForTests() {
   sets.clear();
   parked.clear();
-  loaded = false;
   armed = null;
 }
 
@@ -266,6 +213,7 @@ export function resetSupersededForTests() {
  * conversation) must leave the earlier answer as it was. The press arms the
  * note; the send consumes it, and only for the same conversation and text.
  */
+const ARM_TTL_MS = 20_000;
 let armed: { conversationId: string; text: string; ids: string[]; at: number } | null = null;
 
 export function armSupersede(conversationId: string, text: string, ids: readonly string[], now = Date.now()) {

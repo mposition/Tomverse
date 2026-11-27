@@ -10,6 +10,7 @@ import {
   lastReplaceableTurn,
   markTurnSuperseded,
   parkReplacement,
+  rememberSupersededMessages,
   resetSupersededForTests,
   settleParkedReplacement,
   subscribeSuperseded,
@@ -59,7 +60,7 @@ test("a question that carried files is not editable", () => {
   assert.equal(canEditQuestion(withFile), false);
 });
 
-test("replaced turns drop out of the request and persist per conversation", () => {
+test("replaced turns drop out of the request, per conversation", () => {
   resetSupersededForTests();
   assert.equal(getSupersededIds("c1").size, 0);
   markTurnSuperseded("c1", ["u1", "a1"]);
@@ -141,17 +142,17 @@ test("a replacement is recorded only once the new answer is written as finished"
   assert.equal(getSupersededIds("c3").size, 0);
 });
 
-test("two tabs share the replaced-turn note instead of overwriting each other", () => {
-  const listeners = new Set();
-  const data = new Map();
+test("the note comes from the server's flags and is never kept in the browser", () => {
   const previousWindow = globalThis.window;
+  const touched = [];
+  const refuse = (name) => () => {
+    touched.push(name);
+    throw new Error(`${name} must not be used`);
+  };
   globalThis.window = {
-    localStorage: {
-      getItem: (key) => data.get(key) ?? null,
-      setItem: (key, value) => data.set(key, String(value)),
-    },
-    addEventListener: (type, fn) => type === "storage" && listeners.add(fn),
-    removeEventListener: (type, fn) => type === "storage" && listeners.delete(fn),
+    localStorage: { getItem: refuse("getItem"), setItem: refuse("setItem") },
+    addEventListener: refuse("addEventListener"),
+    removeEventListener: refuse("removeEventListener"),
   };
   try {
     resetSupersededForTests();
@@ -159,34 +160,77 @@ test("two tabs share the replaced-turn note instead of overwriting each other", 
     const unsubscribe = subscribeSuperseded(() => {
       notified += 1;
     });
-    assert.equal(listeners.size, 1);
-    assert.equal(getSupersededIds("c1").size, 0);
-
-    // Another tab replaces a turn and saves; this tab hears about it.
-    data.set("tomverse:superseded-turns:v1", JSON.stringify({ c1: ["u1", "a1"] }));
-    for (const fn of listeners) fn({ key: "tomverse:superseded-turns:v1" });
+    // A loaded conversation: only messages the server flagged are replaced.
+    rememberSupersededMessages("c1", [
+      { id: "u1", superseded: true },
+      { id: "a1", superseded: true },
+      { id: "u2" },
+      { id: "a2", superseded: false },
+      { superseded: true },
+    ]);
+    assert.deepEqual([...getSupersededIds("c1")].sort(), ["a1", "u1"]);
+    assert.equal(notified, 1);
+    // A reload that says the same changes nothing, and never shrinks the note.
+    rememberSupersededMessages("c1", [{ id: "u1", superseded: true }]);
+    rememberSupersededMessages("c1", []);
+    rememberSupersededMessages(null, [{ id: "x", superseded: true }]);
     assert.equal(notified, 1);
     assert.deepEqual([...getSupersededIds("c1")].sort(), ["a1", "u1"]);
-    // An unrelated key, or news this tab already has, changes nothing.
-    for (const fn of listeners) fn({ key: "other" });
-    for (const fn of listeners) fn({ key: "tomverse:superseded-turns:v1" });
-    assert.equal(notified, 1);
-
-    // This tab saves without having heard about a newer write: nothing is lost.
-    data.set("tomverse:superseded-turns:v1", JSON.stringify({ c1: ["u1", "a1", "u2", "a2"], c2: ["x"] }));
-    markTurnSuperseded("c1", ["u3"]);
-    const saved = JSON.parse(data.get("tomverse:superseded-turns:v1"));
-    assert.deepEqual([...saved.c1].sort(), ["a1", "a2", "u1", "u2", "u3"]);
-    assert.deepEqual(saved.c2, ["x"]);
-
-    // A send reads the newest note before it builds its request.
-    data.set("tomverse:superseded-turns:v1", JSON.stringify({ c1: ["u1", "a1", "u2", "a2", "u3", "u4"], c2: ["x"] }));
-    assert.ok(beginReplacement("c1", null).excludedIds().has("u4"));
-
+    assert.ok(beginReplacement("c1", null).excludedIds().has("a1"));
     unsubscribe();
-    assert.equal(listeners.size, 0);
+    assert.deepEqual(touched, []);
   } finally {
     globalThis.window = previousWindow;
+    resetSupersededForTests();
+  }
+});
+
+test("a finished replacement is sent to the server; a guest's stays in the page", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify({ marked: 2 }), { status: 200 });
+  };
+  try {
+    resetSupersededForTests();
+    const signedIn = beginReplacement("c/1", ["u1", "a1"], true);
+    // The request names the turn it replaces, so the server can record it
+    // with the answer.
+    assert.deepEqual(signedIn.replacing(), ["u1", "a1"]);
+    signedIn.complete("error");
+    assert.equal(calls.length, 0);
+    signedIn.complete("normal");
+    assert.equal(signedIn.replacing(), null);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/api/conversations/c%2F1/superseded");
+    assert.equal(calls[0].init.method, "PUT");
+    assert.deepEqual(JSON.parse(calls[0].init.body), { messageIds: ["u1", "a1"] });
+    // Settled once.
+    signedIn.complete("normal");
+    assert.equal(calls.length, 1);
+
+    const guest = beginReplacement("guest-1", ["u2", "a2"]);
+    guest.complete("normal");
+    assert.equal(calls.length, 1);
+    assert.deepEqual([...getSupersededIds("guest-1")].sort(), ["a2", "u2"]);
+
+    // A durable answer that finished while polled goes the same way.
+    const parkedTurn = beginReplacement("c2", ["u3", "a3"], true);
+    parkReplacement("answer-3", parkedTurn);
+    settleParkedReplacement("answer-3", "incomplete");
+    assert.equal(calls.length, 2);
+    assert.deepEqual(JSON.parse(calls[1].init.body), { messageIds: ["u3", "a3"] });
+
+    // A refused write loses nothing the page shows.
+    globalThis.fetch = async () => {
+      throw new Error("offline");
+    };
+    beginReplacement("c3", ["u4", "a4"], true).complete("normal");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual([...getSupersededIds("c3")].sort(), ["a4", "u4"]);
+  } finally {
+    globalThis.fetch = previousFetch;
     resetSupersededForTests();
   }
 });
@@ -235,4 +279,8 @@ test("the chat panel reports completion at each finished-answer path, never from
   assert.ok(source.includes("replacement.complete(completedMessage.status)"));
   assert.ok(source.includes("parkReplacement(assistantMessageId, replacement)"));
   assert.ok(source.includes("settleParkedReplacement(assistantMessageId, completedMessage.status)"));
+  // The server's note is read on load, and a replacing send names its turn.
+  assert.ok(source.includes("rememberSupersededMessages(initialConversationId, data.messages)"));
+  assert.ok(source.includes("supersedesMessageIds: replacement.replacing()"));
+  assert.ok(source.includes("takeArmedSupersede(targetChatId, text), !isGuestMode)"));
 });

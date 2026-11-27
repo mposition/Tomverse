@@ -81,6 +81,7 @@ import {
   canResendQuestion,
   lastReplaceableTurn,
   parkReplacement,
+  rememberSupersededMessages,
   settleParkedReplacement,
   takeArmedSupersede,
   withoutSuperseded,
@@ -1200,6 +1201,8 @@ function ChatAppComponent({
             if (getChatRuntimeRevision(loadKey) !== revisionAtStart) return;
             if (isChatRuntimeStreaming(loadKey)) return;
 
+          // The server's note of replaced turns (lib/chatSupersededTurns.ts).
+          rememberSupersededMessages(initialConversationId, data.messages);
           if (data.messages && data.messages.length > 0) {
             const filteredMessages = reviewProvider
               ? reviewProviderTranscript<Message>(data.messages, reviewProvider, id => getModel(id)?.provider)
@@ -1777,7 +1780,7 @@ function ChatAppComponent({
     // "Regenerate" / "edit" armed a replacement of the newest turn; the send
     // that carries that exact question takes it up, so a send that never
     // starts leaves the earlier answer untouched.
-    replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text));
+    replacement = beginReplacement(targetChatId, takeArmedSupersede(targetChatId, text), !isGuestMode);
     const replacedIds = replacement.excludedIds();
     const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
@@ -2327,6 +2330,9 @@ function ChatAppComponent({
                 // The server fingerprints the attempt with it, so a reused
                 // assistant id cannot be attached to a different question.
                 sourceUserMessageId,
+                // The turn this send replaces: recorded by the server with the
+                // finished answer, even if this page is gone by then.
+                ...(replacement.replacing() && !researchMode ? { supersedesMessageIds: replacement.replacing() } : {}),
               }
             : {}),
           ...(researchMode ? { researchMode } : {}),
