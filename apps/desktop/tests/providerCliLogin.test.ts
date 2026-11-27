@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cliLoginCommandLine, cliLoginEnvironment, cliLoginFromOutput, readCliLogin, runCli, type CliOutput } from "../src/host/provider-cli-login";
+import { cliLoginCommandLine, cliLoginEnvironment, cliLoginFromOutput, loginShellKind, readCliLogin, runCli, type CliOutput } from "../src/host/provider-cli-login";
 
 const signedIn = JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "max", email: "someone@example.com" });
 const signedOut = JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider: "firstParty" });
@@ -75,14 +75,22 @@ test("A status command that does not finish is stopped, and its output is capped
   assert.equal((await pending).timedOut, true);
 });
 
-test("The sign-in command line quotes the file for the person's shell and refuses names it cannot quote", () => {
-  assert.equal(cliLoginCommandLine("openai", "C:\\Users\\Ada\\codex.exe", "win32"), "& 'C:\\Users\\Ada\\codex.exe' login\r");
-  assert.equal(cliLoginCommandLine("anthropic", "C:\\Users\\O'Brien\\claude.exe", "win32"), "& 'C:\\Users\\O''Brien\\claude.exe' auth login\r");
-  assert.equal(cliLoginCommandLine("openai", "/opt/it's here/codex", "linux"), "'/opt/it'\\''s here/codex' login\r");
-  assert.equal(cliLoginCommandLine("anthropic", "/opt/$HOME/`id`/claude", "darwin"), "'/opt/$HOME/`id`/claude' auth login\r");
+test("The sign-in command line quotes the file for the shell the terminal opens and refuses names it cannot quote", () => {
+  assert.equal(cliLoginCommandLine("openai", "C:\\Users\\Ada\\codex.exe", "powershell"), "& 'C:\\Users\\Ada\\codex.exe' login\r");
+  assert.equal(cliLoginCommandLine("anthropic", "C:\\Users\\O'Brien\\claude.exe", "powershell"), "& 'C:\\Users\\O''Brien\\claude.exe' auth login\r");
+  assert.equal(cliLoginCommandLine("openai", "/opt/it's here/codex", "posix"), "'/opt/it'\\''s here/codex' login\r");
+  assert.equal(cliLoginCommandLine("anthropic", "/opt/$HOME/`id`/claude", "posix"), "'/opt/$HOME/`id`/claude' auth login\r");
+  // Without PowerShell the terminal is cmd.exe, which reads a different syntax: the line follows the shell, and a name cmd.exe would expand is not typed.
+  assert.equal(loginShellKind("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "win32"), "powershell");
+  assert.equal(loginShellKind("C:\\Windows\\System32\\cmd.exe", "win32"), "cmd");
+  assert.equal(loginShellKind("/bin/bash", "linux"), "posix");
+  assert.equal(cliLoginCommandLine("openai", "C:\\Users\\Ada\\codex.exe", "cmd"), '"C:\\Users\\Ada\\codex.exe" login\r');
+  for (const name of ["C:\\Users\\%USERNAME%\\codex.exe", "C:\\a&b\\codex.exe", "C:\\a^b\\codex.exe", "C:\\a!b\\codex.exe", 'C:\\a"b\\codex.exe']) {
+    assert.equal(cliLoginCommandLine("openai", name, "cmd"), null, name);
+  }
   for (const name of ["/opt/a\nb/codex", "/opt/a\rb/codex", "/opt/a\u0000b", "/opt/" + String.fromCharCode(0x2018) + "x/codex", "/opt/" + String.fromCharCode(0x201b) + "x"]) {
-    assert.equal(cliLoginCommandLine("openai", name, "win32"), null);
+    for (const shell of ["powershell", "cmd", "posix"] as const) assert.equal(cliLoginCommandLine("openai", name, shell), null);
   }
   // Providers without a documented sign-in command get none.
-  for (const provider of ["google", "xai", "moonshot", "qwen", "mistral"] as const) assert.equal(cliLoginCommandLine(provider, "/opt/cli", "linux"), null);
+  for (const provider of ["google", "xai", "moonshot", "qwen", "mistral"] as const) assert.equal(cliLoginCommandLine(provider, "/opt/cli", "posix"), null);
 });

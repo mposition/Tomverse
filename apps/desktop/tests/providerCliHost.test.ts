@@ -39,6 +39,7 @@ function hostFor(world: Awaited<ReturnType<typeof setup>>, extra: { saved?: bool
     writeTrust: (path, text) => writeFileSync(path, text),
     hasSaved: () => extra.saved === true,
     typeIntoTerminal: (command) => { typed.push(command); return extra.type?.(command) ?? "opened"; },
+    shell: () => (windows ? "powershell" : "posix"),
     scan: { env: world.env, home: world.home },
     run: async (file, args): Promise<CliOutput> => { started.push({ file, args }); return { code: 1, output: "Not logged in\n", timedOut: false }; },
   });
@@ -144,6 +145,34 @@ test("Sign-in is typed only for a verified file with a documented command", { ti
     await appendFile(world.codex, "\u0000");
     assert.equal(await host.login("openai", world.codex), "unavailable");
     assert.equal(typed.length, 1);
+  } finally {
+    await rm(world.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("A saved file is resolved for a run only while its release or its trust record still holds", { timeout: 60_000 }, async () => {
+  const world = await setup();
+  try {
+    const { host } = hostFor(world);
+    const verified = { path: world.codex, status: "pathVerified" as const, version: "9.9.9" };
+    const resolved = await host.resolveSaved("openai", verified);
+    assert.deepEqual([resolved?.basis, resolved?.version, resolved?.file], ["release", "9.9.9", await realpath(world.codex)]);
+    assert.equal(await host.resolveSaved("openai", { ...verified, version: "1.0.0" }), null);
+    assert.equal(await host.resolveSaved("openai", { path: world.codex, status: "checkRequired" }), null);
+    assert.equal(await host.resolveSaved("openai", { path: world.codex, status: "versionUnverified" }), null);
+    assert.equal(await host.resolveSaved("openai", undefined), null);
+
+    // A file the person trusted is resolved only after the record exists, and not once the file changed.
+    const trusted = { path: world.claude, status: "userTrusted" as const };
+    assert.equal(await host.resolveSaved("anthropic", trusted), null);
+    assert.equal(await host.trust("anthropic", world.claude), "stored");
+    const person = await host.resolveSaved("anthropic", trusted);
+    assert.deepEqual([person?.basis, person?.version, person?.file], ["person", null, await realpath(world.claude)]);
+    await appendFile(world.claude, "x");
+    assert.equal(await host.resolveSaved("anthropic", trusted), null);
+    // A verified file that changed is refused as well.
+    await appendFile(world.codex, "x");
+    assert.equal(await host.resolveSaved("openai", verified), null);
   } finally {
     await rm(world.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

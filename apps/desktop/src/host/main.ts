@@ -68,6 +68,7 @@ import { desktopProviderCliCopy } from "../../../../locales/desktopProviderCli";
 import { desktopProviderCliScanCopy } from "../../../../locales/desktopProviderCliScan";
 import { cliPathStillMatches, inspectCliPath, releaseArchiveName, supportsCliPath, applyCliReleaseFixture, watchVerifiedCliPath } from "./provider-cli-path";
 import { createProviderCliHost } from "./provider-cli-host";
+import { loginShellKind } from "./provider-cli-login";
 import { probeIsolatedClaudeAccount } from "./claude-account";
 import { probeIsolatedAcpAccount, probeIsolatedCliProtocol, probeIsolatedCodexAccount } from "./cli-protocol";
 import {
@@ -87,7 +88,7 @@ import { same } from "../../../tomverse-cli/src/runtime.js";
 import { createRequire } from "node:module";
 import { TerminalHost } from "./terminal-host";
 import { createTerminalApi } from "./terminal-api";
-import { createTerminalLaunch } from "./terminal-session";
+import { createTerminalLaunch, defaultShell } from "./terminal-session";
 import { terminalEnv } from "./terminal-env";
 import { codeMemoryView } from "./code-memory";
 import { createReviewActions, type ReviewTarget } from "./review-host";
@@ -2889,6 +2890,7 @@ const providerCli = createProviderCliHost({
   writeTrust: writeFileAtomic,
   hasSaved: () => Object.keys(state.cliPaths).length > 0,
   typeIntoTerminal: typeCliLogin,
+  shell: () => loginShellKind(defaultShell().file),
 });
 
 function loadCodeTerminal() {

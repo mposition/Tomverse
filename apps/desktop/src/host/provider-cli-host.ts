@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { cliLoginArguments, isCliScanProvider, type CliLoginOpen, type CliPathCheck, type CliProvider, type CliScan } from "../code-execution";
-import { cliLoginCommandLine, readCliLogin, type CliRunner } from "./provider-cli-login";
+import { cliLoginArguments, isCliScanProvider, type CliLoginOpen, type CliPathCheck, type CliProvider, type CliScan, type SavedCliPath } from "../code-execution";
+import { cliLoginCommandLine, readCliLogin, type CliRunner, type LoginShell } from "./provider-cli-login";
 import { cliPathStillMatches, inspectCliPath } from "./provider-cli-path";
 import { scanCliProviders, type ScanOptions } from "./provider-cli-scan";
 import { cliTrustFile, trustRecordFor, trustedCliFile, withTrust, type CliTrustFile } from "./provider-cli-trust";
@@ -12,6 +12,8 @@ export type ProviderCliHostOptions = {
   hasSaved: () => boolean;
   /** Types the sign-in command into a task terminal, when the terminal is on and a task is open. */
   typeIntoTerminal: (command: string) => CliLoginOpen;
+  /** The syntax of the shell the terminal opens. */
+  shell: () => LoginShell;
   scan?: Pick<ScanOptions, "platform" | "arch" | "env" | "home">;
   /** Replaces the program runner, for tests. */
   run?: CliRunner;
@@ -92,8 +94,25 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       if (!cliLoginArguments[provider]) return "unavailable";
       const inspection = await inspect(provider, path);
       if (inspection.status !== "pathVerified") return "unavailable";
-      const command = cliLoginCommandLine(provider, inspection.file);
+      const command = cliLoginCommandLine(provider, inspection.file, options.shell());
       return command ? options.typeIntoTerminal(command) : "unavailable";
+    },
+
+    /**
+     * The saved file as a task may start it, checked again now: a verified file against its pinned release, a file the
+     * person trusted against its record. Null when the saved file is gone, changed or was never checked.
+     */
+    async resolveSaved(provider: CliProvider, saved: SavedCliPath | undefined, signal?: AbortSignal): Promise<{ file: string; version: string | null; basis: "release" | "person" } | null> {
+      if (!saved) return null;
+      if (saved.status === "pathVerified") {
+        const inspection = await inspect(provider, saved.path, signal);
+        return inspection.status === "pathVerified" && inspection.version === saved.version ? { file: inspection.file, version: inspection.version, basis: "release" } : null;
+      }
+      if (saved.status === "userTrusted") {
+        const trusted = await this.trustedFile(provider, saved.path, signal);
+        return trusted ? { file: trusted.file, version: null, basis: "person" } : null;
+      }
+      return null;
     },
 
     close() {

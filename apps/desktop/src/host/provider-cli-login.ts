@@ -92,12 +92,24 @@ export async function readCliLogin(provider: CliProvider, file: string, signal: 
 
 const unsafeInTypedPath = new RegExp("[\x00-\x1f\x7f" + String.fromCharCode(0x2018) + "-" + String.fromCharCode(0x201b) + String.fromCharCode(0x2028, 0x2029) + "]");
 
-/** The text typed into the person's own terminal to start the official sign-in. Null when the file name could not be quoted safely. */
-export function cliLoginCommandLine(provider: CliProvider, file: string, platform: NodeJS.Platform = process.platform): string | null {
+export type LoginShell = "powershell" | "cmd" | "posix";
+
+/** Which syntax the terminal's shell reads: Windows opens PowerShell, or cmd.exe when PowerShell is missing. */
+export function loginShellKind(shellFile: string, platform: NodeJS.Platform = process.platform): LoginShell {
+  if (platform !== "win32") return "posix";
+  return /(^|[\\/])cmd\.exe$/i.test(shellFile) ? "cmd" : "powershell";
+}
+
+/** The text typed into the person's own terminal to start the official sign-in. Null when the file name could not be quoted safely for that shell. */
+export function cliLoginCommandLine(provider: CliProvider, file: string, shell: LoginShell): string | null {
   const args = cliLoginArguments[provider];
   // Control characters, and the curly quotes PowerShell treats as quotes, are never part of a path this app types.
   if (!args || unsafeInTypedPath.test(file)) return null;
-  return platform === "win32"
+  if (shell === "cmd") {
+    // Inside quotes cmd.exe still expands %variables% and reads ^ and ! as special, so a name that has them is not typed.
+    return /["%^&|<>!]/.test(file) ? null : `"${file}" ${args.join(" ")}\r`;
+  }
+  return shell === "powershell"
     ? `& '${file.replaceAll("'", "''")}' ${args.join(" ")}\r`
     : `'${file.replaceAll("'", "'\\''")}' ${args.join(" ")}\r`;
 }
