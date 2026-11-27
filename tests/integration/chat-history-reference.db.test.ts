@@ -45,7 +45,8 @@ const seed = (
             selectedModels: '["gpt-6-luna"]',
             userId,
             title,
-            productKey: "chat",
+            // An image conversation is a Studio row (Conversation_product_modality_check).
+            productKey: extra.kind === "image" ? "studio" : "chat",
             ...(extra.password ? { password: extra.password } : {}),
             ...(extra.kind ? { kind: extra.kind } : {}),
             ...(extra.projectId ? { projectId: extra.projectId } : {}),
