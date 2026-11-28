@@ -38,12 +38,10 @@ try {
     "tests/apiCliAgentContinuation.e2e.ts", "tests/claudeDesktop.e2e.ts", "tests/codexDesktop.e2e.ts", "tests/codexEdits.e2e.ts",
     "tests/continuationRecovery.e2e.ts", "tests/taskList.e2e.ts",
     ...(process.env.TOMVERSE_DESKTOP_GROK_TASK_BINARY || process.env.TOMVERSE_DESKTOP_KIMI_TASK_BINARY ||
-      process.env.TOMVERSE_DESKTOP_ZCODE_TASK_DIR || process.env.TOMVERSE_DESKTOP_MINIMAX_TASK_DIR ||
-      process.env.TOMVERSE_DESKTOP_VIBE_TASK_ARCHIVE || process.env.TOMVERSE_DESKTOP_DEEPSEEK_TASK_ARCHIVE ? ["tests/structuredQuota.e2e.ts"] : []),
+      process.env.TOMVERSE_DESKTOP_MINIMAX_TASK_DIR || process.env.TOMVERSE_DESKTOP_VIBE_TASK_ARCHIVE ? ["tests/structuredQuota.e2e.ts"] : []),
     ...(process.env.TOMVERSE_DESKTOP_QWEN_TASK_BINARY || process.env.TOMVERSE_DESKTOP_KIMI_TASK_BINARY ? ["tests/acpDesktop.e2e.ts"] : []),
     ...(process.env.TOMVERSE_DESKTOP_QWEN_TASK_BINARY ? ["tests/qwenSubscriptionQuota.e2e.ts"] : []),
-    ...(process.env.TOMVERSE_DESKTOP_VIBE_TASK_ARCHIVE || process.env.TOMVERSE_DESKTOP_DEEPSEEK_TASK_ARCHIVE ||
-      process.env.TOMVERSE_DESKTOP_ZCODE_TASK_DIR || process.env.TOMVERSE_DESKTOP_MINIMAX_TASK_DIR ||
+    ...(process.env.TOMVERSE_DESKTOP_VIBE_TASK_ARCHIVE || process.env.TOMVERSE_DESKTOP_MINIMAX_TASK_DIR ||
       process.env.TOMVERSE_DESKTOP_GROK_TASK_BINARY || process.env.TOMVERSE_DESKTOP_ANTIGRAVITY_TASK_BINARY ?
       ["tests/mcpDesktop.e2e.ts"] : [])], {
     stdio: "inherit", windowsHide: true, env: { ...process.env, TOMVERSE_DESKTOP_TASK_QA_EXECUTABLE: executable },

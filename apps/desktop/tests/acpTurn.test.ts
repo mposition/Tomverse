@@ -14,7 +14,7 @@ import { bindProjectRoot } from "../src/host/project-root";
 const model = "fixture-model";
 const origin = "http://127.0.0.1:9222";
 
-function acpFixture(context: TestContext, provider: "qwen" | "moonshot" | "xai" | "mistral" | "deepseek",
+function acpFixture(context: TestContext, provider: "qwen" | "moonshot" | "xai" | "mistral",
   mode: "default" | "plan" | "ask", qwenSubscription = false) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
@@ -23,12 +23,11 @@ function acpFixture(context: TestContext, provider: "qwen" | "moonshot" | "xai" 
   const kimi = provider === "moonshot";
   const grok = provider === "xai";
   const vibe = provider === "mistral";
-  const deepSeek = provider === "deepseek";
   const qwenModelId = qwenSubscription ? `${model}(qwen-subscription)` : model;
   const qwenModel = { modelId: qwenModelId, _meta: { baseModelId: model, ...(qwenSubscription
     ? { baseUrl: qwenSubscriptionBaseUrl, authType: "qwen-subscription", isRuntime: false }
     : { baseUrl: `${origin}/v1`, authType: "openai", envKey: "OPENAI_API_KEY" }) } };
-  const versions = { qwen: "0.28.4", moonshot: "2.7.2", xai: "1.0.92", mistral: "3.1.4", deepseek: "0.2.2-rc.2" };
+  const versions = { qwen: "0.28.4", moonshot: "2.7.2", xai: "1.0.92", mistral: "3.1.4" };
   const version = versions[provider];
   const thread = "409ef18f-3153-415b-a4ec-e5379f6fcbcb";
   const sessionId = kimi ? `session_${thread}` : thread;
@@ -45,16 +44,9 @@ function acpFixture(context: TestContext, provider: "qwen" | "moonshot" | "xai" 
     if (request.method === "initialize") send({ id: request.id, result: { protocolVersion: 1, ...(grok ? {
       agentCapabilities: { mcpCapabilities: { http: true }, sessionCapabilities: { close: {} } },
       authMethods: [{ id: "grok.com" }, { id: "xai.api_key" }],
-    } : deepSeek ? {
-      agentInfo: { name: "deepseek-harness-acp", version: "0.0.1" },
-      agentCapabilities: { mcpCapabilities: { http: true }, sessionCapabilities: { close: {}, resume: {} } }, authMethods: [],
     } : { agentInfo: { name: kimi ? "Kimi Code CLI" : vibe ? "@mistralai/mistral-vibe" : "qwen-code", version },
       authMethods: vibe ? [] : [{ id: "openai" }] }) } });
     else if (request.method === "authenticate" || request.method === "session/close") send({ id: request.id, result: {} });
-    else if (request.method === "session/new" && deepSeek) send({ id: request.id, result: { sessionId, configOptions: [
-      { id: "model", currentValue: JSON.stringify(["deepseek-official", model]) },
-      { id: "reasoning_effort", currentValue: "off" },
-    ] } });
     else if (request.method === "session/new") send({ id: request.id, result: { sessionId,
       modes: { currentModeId: mode, ...(vibe && { availableModes: [{ id: "ask" }] }) }, ...(grok ? {
         models: { currentModelId: model },
@@ -131,26 +123,6 @@ test("Vibe retry notices keep the current task pending and must match its sessio
       assert.equal(result.quota, undefined);
       assert.deepEqual(result.messages, outcome === "completed" ? [{ role: "assistant", text: "Vibe completed the request." }] : []);
     }
-  }
-});
-
-test("DeepSeek usage and a terminal response require task evidence to confirm completion", { timeout: 10_000 }, async (context) => {
-  const project = bindProjectRoot(await realpath(await mkdtemp(join(tmpdir(), "tomverse-deepseek-result-"))));
-  context.after(() => rm(project.path, { recursive: true, force: true }));
-  for (const text of ["", "DeepSeek returned a verified answer."]) {
-    const { stdin, stdout, version, send, update, onRequest } = acpFixture(context, "deepseek", "ask");
-    onRequest((request) => {
-      if (request.method !== "session/prompt") return;
-      if (text) update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-      update({ sessionUpdate: "usage_update", used: 443, size: 128_000 });
-      send({ id: request.id, result: { stopReason: "end_turn" } });
-    });
-    const result = await observeAcpTurn({ stdin, stdout }, { project, protectedRoots: [], connectionKey: "fixture-key",
-      version, clientVersion: "1.0.0", model, origin, prompt: "A fixture turn", mode: "ask", provider: "deepseek",
-      signal: new AbortController().signal }, () => undefined);
-    assert.equal(result.status, text ? "completed" : "unknown");
-    assert.equal(result.quota, undefined);
-    assert.equal(result.messages[0]?.text ?? "", text);
   }
 });
 

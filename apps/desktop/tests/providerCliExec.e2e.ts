@@ -9,7 +9,7 @@ import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { openCodeProject } from "./code-project-fixture";
 import { launchNativeFixture } from "./launch-native-fixture";
 import type { Page } from "@playwright/test";
-import { chooseCodeModel, codeModelControl } from "./code-model-picker";
+import { chooseCodeModel, codeModelControl, codeModelPicker } from "./code-model-picker";
 
 // A made-up Z.ai key, put together at run time so no credential-shaped literal sits in the source.
 const sampleZai = ["zai", "e2e", "key", "0123456789"].join("-");
@@ -110,6 +110,12 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
       await expect(picker).toHaveAttribute("data-mode", mode);
     };
     const chooseCli = async (name: "Codex" | "Claude Code") => {
+      // A provider CLI runs on the person's own subscription: its row shows no Tomverse credit usage and no estimate.
+      await codeModelControl(page).click();
+      await expect(codeModelPicker(page).locator('[data-testid="model-option"][data-model-id^="provider-cli:"]').first()).toBeVisible();
+      await expect(codeModelPicker(page).getByTestId("model-credit-badge")).toHaveCount(0);
+      await expect(codeModelPicker(page).getByTestId("model-selection-summary")).not.toContainText(/estimate/i);
+      await page.keyboard.press("Escape");
       await chooseCodeModel(page, { model: name === "Codex" ? "provider-cli:openai" : "provider-cli:anthropic" });
       await expect(codeModelControl(page)).toContainText(name);
     };

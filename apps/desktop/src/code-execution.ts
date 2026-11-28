@@ -14,8 +14,6 @@ export const providerClis = {
   moonshot: "Kimi Code",
   mistral: "Mistral Vibe",
   minimax: "MiniMax Code",
-  deepseek: "DeepSeek Harness",
-  zhipu: "ZCode Agent",
 } as const;
 
 export type CliProvider = keyof typeof providerClis;
@@ -42,9 +40,9 @@ export const supportsIsolatedCliAccount = (provider: CliProvider): provider is "
   provider === "openai" || provider === "anthropic" || provider === "google" || provider === "xai" ||
   provider === "qwen" || provider === "moonshot" || provider === "mistral" || provider === "minimax";
 
-const cliProtocolProviders = ["openai", "anthropic", "google", "xai", "qwen", "moonshot", "mistral", "minimax", "deepseek", "zhipu"] as const satisfies readonly CliProvider[];
-export const cliUsesReleaseArchive = (provider: CliProvider) => provider === "qwen" || provider === "mistral" || provider === "deepseek";
-export const cliUsesInstallationFolder = (provider?: CliProvider) => provider === "minimax" || provider === "zhipu";
+const cliProtocolProviders = ["openai", "anthropic", "google", "xai", "qwen", "moonshot", "mistral", "minimax"] as const satisfies readonly CliProvider[];
+export const cliUsesReleaseArchive = (provider: CliProvider) => provider === "qwen" || provider === "mistral";
+export const cliUsesInstallationFolder = (provider?: CliProvider) => provider === "minimax";
 export type CliProtocolProvider = (typeof cliProtocolProviders)[number];
 
 // The scan looks for executables that the pinned release check can verify file by file. Release archives and
@@ -73,11 +71,14 @@ export const isCliProtocolProvider = (provider: CliProvider): provider is CliPro
 export type CliProtocolModel = { id: string; name: string; efforts: string[] };
 export type CliProtocolCheck =
   | { status: "verified"; protocol: "codex_app_server" | "claude_control"; models: CliProtocolModel[]; catalogComplete: boolean }
-  | { status: "verified"; protocol: "acp" | "zcode_protocol"; protocolVersion: 1; models: null }
+  | { status: "verified"; protocol: "acp"; protocolVersion: 1; models: null }
   | { status: "unavailable" | "failed" | "networkBlocked" | "cancelled" };
 
 export const codeProviders = {
   ...providerClis,
+  // Chat models without an official CLI run on the Tomverse API even when the provider CLI route is preferred.
+  deepseek: null,
+  zhipu: null,
   cohere: null,
   groq: null,
   perplexity: null,
@@ -98,14 +99,12 @@ export const claudeFixtureExecution = { executionMode: "provider_cli", provider:
 export const qwenFixtureExecution = { executionMode: "provider_cli", provider: "qwen", cli: "Qwen Code", billingSource: "unknown" } as const;
 export const kimiFixtureExecution = { executionMode: "provider_cli", provider: "moonshot", cli: "Kimi Code", billingSource: "unknown" } as const;
 export const vibeFixtureExecution = { executionMode: "provider_cli", provider: "mistral", cli: "Mistral Vibe", billingSource: "unknown" } as const;
-export const deepSeekFixtureExecution = { executionMode: "provider_cli", provider: "deepseek", cli: "DeepSeek Harness", billingSource: "unknown" } as const;
 /** Claude Code on the person's Z.ai Coding Plan (provider-cli-exec-contract.ts, the `zai` route). */
 export const zaiClaudeExecution = { executionMode: "provider_cli", provider: "anthropic", cli: "Z.ai CLI (via Claude Code)", billingSource: "provider_subscription" } as const;
-export const zCodeFixtureExecution = { executionMode: "provider_cli", provider: "zhipu", cli: "ZCode Agent", billingSource: "unknown" } as const;
 export const miniMaxFixtureExecution = { executionMode: "provider_cli", provider: "minimax", cli: "MiniMax Code", billingSource: "unknown" } as const;
 export const grokFixtureExecution = { executionMode: "provider_cli", provider: "xai", cli: "Grok Build", billingSource: "unknown" } as const;
 export const antigravityFixtureExecution = { executionMode: "provider_cli", provider: "google", cli: "Antigravity", billingSource: "unknown" } as const;
-export const nativeFixtureProvider = z.enum(["openai", "anthropic", "qwen", "moonshot", "mistral", "deepseek", "zhipu", "minimax", "xai", "google"]);
+export const nativeFixtureProvider = z.enum(["openai", "anthropic", "qwen", "moonshot", "mistral", "minimax", "xai", "google"]);
 export type NativeFixtureProvider = z.infer<typeof nativeFixtureProvider>;
 
 type CodeRoute = typeof tomverseApiExecution | { executionMode: "provider_cli"; provider: CliProvider; cli: string } | { executionMode: null };

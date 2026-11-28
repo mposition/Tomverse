@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SMART_ADAPTIVE_MODEL_ID, codePickerModel, codePickerModels } from "../src/code-model-catalog";
+import { SMART_ADAPTIVE_MODEL_ID, codePickerModel, codePickerModels, creditFreeModelIds } from "../src/code-model-catalog";
+import { liveCliModelId } from "../src/provider-cli-exec-contract";
 import { getModelUsageCredits } from "../../../lib/models";
 import { desktopShellCopy } from "../../../locales/desktopShell";
 
@@ -24,6 +25,13 @@ test("the Code picker lists the coding catalogue's own name, credits and capabil
 test("Smart Adaptive is the picker's switch, never a row of the list", () => {
   const smart = { id: SMART_ADAPTIVE_MODEL_ID, name: "Smart Adaptive", provider: "tomverse", efforts: [] };
   assert.deepEqual(codePickerModels([smart, coder], "{size}").map(({ id }) => id), ["catalogue-only-coder"]);
+});
+
+test("provider CLI models spend no Tomverse credits, so the picker shows no usage for them", () => {
+  const smart = { id: SMART_ADAPTIVE_MODEL_ID, name: "Smart Adaptive", provider: "tomverse", efforts: [] };
+  const cli = (["openai", "anthropic", "zai"] as const).map((provider) => ({ id: liveCliModelId(provider), name: provider, provider, efforts: [] }));
+  assert.deepEqual(creditFreeModelIds([smart, coder, ...cli]), ["provider-cli:openai", "provider-cli:anthropic", "provider-cli:zai"]);
+  assert.deepEqual(creditFreeModelIds([smart, coder]), []);
 });
 
 test("every language says how large the context window is", () => {

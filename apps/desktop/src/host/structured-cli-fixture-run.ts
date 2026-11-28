@@ -1,15 +1,14 @@
 import { existsSync } from "node:fs";
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { killTree } from "../../../tomverse-cli/src/commands.js";
 import { same } from "../../../tomverse-cli/src/workspace.js";
-import { cliFixtureInput, qwenFixtureInput, qwenSubscriptionBaseUrl, qwenSubscriptionFixtureToken, zCodeFixtureInput,
+import { cliFixtureInput, qwenFixtureInput, qwenSubscriptionBaseUrl, qwenSubscriptionFixtureToken,
   type CliFixtureInput, type QwenFixtureInput } from "./cli-fixture-input";
 import { isolatedCliEnvironment, stageQwenRelease, unpackCliArchive, vibeProbeSettings } from "./cli-protocol";
 import { antigravityLaunch } from "./antigravity-fixture";
-import { deepSeekLaunch, deepSeekStartupDirectory } from "./deepseek-fixture";
 import { grokLaunch } from "./grok-fixture";
 import { miniMaxLaunch } from "./minimax-fixture";
 import { assertProjectRoot } from "./project-root";
@@ -18,9 +17,6 @@ import { nativePatchName } from "./native-patches";
 import { stageCliExecutable } from "./provider-cli-path";
 import { spawnNativeFixture } from "./spawn-native-fixture";
 import { nativeReadName } from "./native-mcp-server";
-import { zCodeLaunch } from "./zcode-fixture";
-import { zCodeRuntimeTemp } from "./zcode-runtime";
-import { observeZCodeTurn } from "./zcode-turn";
 
 const rejectTools = [
   "agent", "ask_user_question", "enter_plan_mode", "enter_worktree", "exit_plan_mode", "exit_worktree",
@@ -32,8 +28,6 @@ function assertDisposableProject(temp: string, project: string, configurationDir
   if (!child || child.startsWith("..") || isAbsolute(child)) throw new Error("ACP requires a temporary fixture folder.");
   const extraConfiguration = {
     ".vibe": [".agents", "cordis.yml", "cordis.patch.yml"],
-    ".dsh": [".agents", "cordis.yml", "cordis.patch.yml"],
-    ".zcode": [".claude", ".agents", "zcode.json", ".zcode-plugin"],
     ".minimax": [".claude", ".agents", ".mcode", "mcode.yaml", "mcode.json"],
     ".grok": [".claude", ".claude.json", ".cursor", ".agents", ".envrc"],
     ".gemini": [".agents", ".antigravity", ".claude", "mcp_config.json", "hooks.json", ".envrc"],
@@ -49,26 +43,22 @@ function assertDisposableProject(temp: string, project: string, configurationDir
 
 export async function runStructuredCliFixture(fixtureInput: CliFixtureInput,
   input: Omit<Parameters<typeof observeAcpTurn>[1], "origin" | "version" | "model" | "provider" | "qwenSubscription"> & {
-    provider: Parameters<typeof observeAcpTurn>[1]["provider"] | "zhipu";
-    deepSeekStartupParent?: string;
+    provider: Parameters<typeof observeAcpTurn>[1]["provider"];
     retainedProfile?: string; beforeStart?: (signal: AbortSignal) => Promise<void>;
   },
   publish: Parameters<typeof observeAcpTurn>[2],
   registerFollowUp?: Parameters<typeof observeAcpTurn>[3],
 ) {
-  const zCodeFixture = input.provider === "zhipu" ? zCodeFixtureInput.parse(fixtureInput) : undefined;
   const qwenFixture = input.provider === "qwen" ? qwenFixtureInput.parse(fixtureInput) : undefined;
-  const fixture = zCodeFixture ?? qwenFixture ?? cliFixtureInput.parse(fixtureInput);
+  const fixture = qwenFixture ?? cliFixtureInput.parse(fixtureInput);
   const qwenSubscription = !!qwenFixture?.subscriptionCa;
   const agent = input.mode === "agent";
   const kimi = input.provider === "moonshot";
   const vibe = input.provider === "mistral";
-  const deepSeek = input.provider === "deepseek";
-  const zcode = !!zCodeFixture;
   const minimax = input.provider === "minimax";
   const grok = input.provider === "xai";
   const antigravity = input.provider === "google";
-  const configurationDirectory = antigravity ? ".gemini" : grok ? ".grok" : minimax ? ".minimax" : zcode ? ".zcode" : deepSeek ? ".dsh" : vibe ? ".vibe" : kimi ? ".kimi-code" : ".qwen";
+  const configurationDirectory = antigravity ? ".gemini" : grok ? ".grok" : minimax ? ".minimax" : vibe ? ".vibe" : kimi ? ".kimi-code" : ".qwen";
   if ((agent && (!fixture.allowFileEdits || !input.patchTool || !input.retainedProfile)) ||
       (qwenSubscription && (input.mode !== "ask" || input.previous)) ||
       (!agent && input.patchTool) || (input.retainedProfile && !fixture.allowSavedHistory) || /^[\/!]/.test(input.prompt.trimStart())) {
@@ -78,11 +68,9 @@ export async function runStructuredCliFixture(fixtureInput: CliFixtureInput,
   const temp = await realpath(tmpdir());
   assertProjectRoot(input.project);
   assertDisposableProject(temp, input.project.path, configurationDirectory);
-  const runtimeTemp = zcode ? await zCodeRuntimeTemp(temp) : temp;
-  const directory = await mkdtemp(join(runtimeTemp, "tomverse-acp-release-"));
+  const directory = await mkdtemp(join(temp, "tomverse-acp-release-"));
   const retainedProfile = qwenSubscription ? undefined : input.retainedProfile;
   const profile = retainedProfile ?? join(directory, "profile");
-  let startupDirectory: string | undefined;
   let child: ReturnType<typeof spawnNativeFixture> | undefined;
   let closed: Promise<number | null> | undefined;
   let force: Promise<unknown> | undefined;
@@ -102,24 +90,19 @@ export async function runStructuredCliFixture(fixtureInput: CliFixtureInput,
     const environment = { ...isolatedCliEnvironment(process.env, directory),
       HTTP_PROXY: fixture.origin, HTTPS_PROXY: fixture.origin, ALL_PROXY: fixture.origin, NO_PROXY: "127.0.0.1", NODE_USE_ENV_PROXY: "1",
     };
-    const zCodeRuntime = zCodeFixture ? await zCodeLaunch(zCodeFixture, directory, profile, !!input.previous, signal) : undefined;
-    const { executable, args, env } = zCodeRuntime ?? (antigravity ? await antigravityLaunch(fixture, directory, profile, !!input.previous, signal) :
+    const { executable, args, env } = (antigravity ? await antigravityLaunch(fixture, directory, profile, !!input.previous, signal) :
       grok ? await grokLaunch(fixture, directory, profile, !!input.previous, signal) :
       minimax ? await miniMaxLaunch(fixture, directory, profile, !!input.previous, signal) :
-      deepSeek ? await deepSeekLaunch(fixture, directory, profile, !!input.previous, signal) :
       vibe ? await vibeLaunch(fixture, directory, profile, agent, !!input.previous, signal) :
       kimi ? await kimiLaunch(fixture, directory, profile, agent, signal) :
         await qwenLaunch(fixture, directory, profile, temp, agent, signal));
     await input.beforeStart?.(signal);
-    startupDirectory = deepSeek ? await deepSeekStartupDirectory(input.project.path, input.deepSeekStartupParent) : undefined;
     signal.throwIfAborted();
     assertProjectRoot(input.project);
     assertDisposableProject(temp, input.project.path, configurationDirectory);
-    const launch = (proxy?: string) => {
-      const override = proxy ? { HTTP_PROXY: proxy, HTTPS_PROXY: proxy, ALL_PROXY: proxy, ZCODE_HTTP_PROXY: proxy,
-        ZCODE_NO_PROXY: "127.0.0.1", ZCODE_HTTP_TIMEOUT: "4500" } : {};
+    const launch = () => {
       const launched = spawnNativeFixture(executable, args, {
-        cwd: startupDirectory ?? input.project.path, env: { ...environment, ...env, ...override },
+        cwd: input.project.path, env: { ...environment, ...env },
       });
       child = launched;
       closed = new Promise((resolve) => launched.once("close", resolve));
@@ -129,11 +112,9 @@ export async function runStructuredCliFixture(fixtureInput: CliFixtureInput,
       return launched;
     };
     const turn = { ...input,
-      protectedRoots: [...input.protectedRoots, directory, profile, join(input.project.path, configurationDirectory),
-        ...(startupDirectory ? [startupDirectory] : [])],
+      protectedRoots: [...input.protectedRoots, directory, profile, join(input.project.path, configurationDirectory)],
       model: fixture.model, origin: fixture.origin, version: fixture.version, signal };
-    const outcome = input.provider === "zhipu" ? await observeZCodeTurn(launch, { ...turn, codingPlanRevision: zCodeRuntime?.codingPlanRevision }, publish, registerFollowUp) :
-      await observeAcpTurn(launch(), { ...turn, provider: input.provider, qwenSubscription }, publish, registerFollowUp);
+    const outcome = await observeAcpTurn(launch(), { ...turn, provider: input.provider, qwenSubscription }, publish, registerFollowUp);
     if (!child || !closed) throw new Error("The CLI fixture did not launch.");
     child.stdout.resume();
     if (kimi) {
@@ -158,7 +139,6 @@ export async function runStructuredCliFixture(fixtureInput: CliFixtureInput,
     await forceClose();
     if (!closed || await Promise.race([closed.then(() => true), delay(5_000, false, { ref: false })])) {
       await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
-      if (startupDirectory) await rmdir(startupDirectory).catch(() => undefined);
     } else {
       child?.stdin.destroy();
       child?.stdout.destroy();

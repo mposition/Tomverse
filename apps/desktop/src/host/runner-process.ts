@@ -13,7 +13,7 @@ import type { TerminalReadReply, TerminalReadRequest } from "../../../tomverse-c
 import { discoverForRuntime, slashPromptFor } from "./code-extensions";
 import { asProposedCodePlan, sessionId as taskIdSchema, type QueueOperation, type ApprovalRequest, type ChangeInspection, type CodeNativeRecoverySummary,
   type CodeNativeUsage, type Decision, type Task } from "../contract";
-import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
+import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, codeRouteFor, kimiFixtureExecution, qwenFixtureExecution, tomverseApiExecution, vibeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution } from "../code-execution";
 import { canAnswerClarification, canContinueApiQuota, canRewindJournal, markTurns, canResumeJournal, canResumeQuotaJournal, cleanPlanAnalysis, cleanText, hasCredential, journalChanges,
   journalChecks, journalCommand, journalApiUsage, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalStatus } from "./journal-view";
 import type { Connection, RecordedSession, WorkerCommand, WorkerEvent } from "./messages";
@@ -412,7 +412,7 @@ async function followUp(data: Extract<WorkerCommand, { type: "follow-up" }>) {
 async function executeStructuredFixture(command: Extract<WorkerCommand, { type: "start-claude-fixture" | "start-structured-cli-fixture" }>) {
   if (active) return;
   const cliTask = command.type === "start-structured-cli-fixture";
-  const execution = cliTask ? (command.provider === "google" ? antigravityFixtureExecution : command.provider === "xai" ? grokFixtureExecution : command.provider === "minimax" ? miniMaxFixtureExecution : command.provider === "zhipu" ? zCodeFixtureExecution : command.provider === "deepseek" ? deepSeekFixtureExecution : command.provider === "mistral" ? vibeFixtureExecution : command.provider === "moonshot" ? kimiFixtureExecution : qwenFixtureExecution) : claudeFixtureExecution;
+  const execution = cliTask ? (command.provider === "google" ? antigravityFixtureExecution : command.provider === "xai" ? grokFixtureExecution : command.provider === "minimax" ? miniMaxFixtureExecution : command.provider === "mistral" ? vibeFixtureExecution : command.provider === "moonshot" ? kimiFixtureExecution : qwenFixtureExecution) : claudeFixtureExecution;
   const prompt = cleanText(command.prompt);
   const previous = command.history?.previous;
   const entries: Task["entries"] = previous
@@ -499,7 +499,6 @@ async function executeStructuredFixture(command: Extract<WorkerCommand, { type: 
     const result = cliTask
       ? await import("./structured-cli-fixture-run").then(({ runStructuredCliFixture }) => runStructuredCliFixture(command.fixture, {
         ...input, retainedProfile: profile, previous: prior, beforeStart, clientVersion: command.clientVersion,
-        deepSeekStartupParent: projectLocks && dirname(projectLocks),
         protectedRoots: protectedRoots(command.protectedRoot), connectionKey: command.connectionKey, provider: command.provider,
         beforeFollowUp: () => {
           if (patches) verifiedContinuationEdits(patches.journal);

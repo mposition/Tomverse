@@ -1,5 +1,6 @@
 import { AVAILABLE_MODELS, type AiModel, type AiProvider } from "../../../lib/models";
 import type { Model } from "./contract";
+import { liveCliProviderForModel } from "./provider-cli-exec-contract";
 
 export const SMART_ADAPTIVE_MODEL_ID = "smart-adaptive";
 
@@ -22,6 +23,14 @@ export function codePickerModel(model: Model, contextCopy: string): AiModel {
     reasoning: model.reasoning || model.efforts.length ? "medium" : "none", contextWindowTokens: model.contextWindowTokens,
     inputCapabilities: { image: model.vision === true, nativePdf: false }, webSearchOverride: "off",
   };
+}
+
+/**
+ * The models that run on the person's own provider CLI subscription and spend no Tomverse credits. The picker shows no
+ * usage meter or credit estimate for them.
+ */
+export function creditFreeModelIds(models: readonly Model[]) {
+  return models.filter(({ id }) => liveCliProviderForModel(id) !== null).map(({ id }) => id);
 }
 
 /** The models the picker lists: every catalogue entry but Smart Adaptive, which is the picker's switch. */

@@ -85,6 +85,8 @@ type ModelCatalogueProps = {
   isKeyboardCompact?: boolean;
   /** The list has no Chat use cases to filter by (the coding catalogue). */
   hideTaskFilter?: boolean;
+  /** Models that do not spend the viewer's credits (a provider CLI on their own subscription): no usage meter on their rows. */
+  creditFreeModelIds?: readonly string[];
   modelStatuses: Record<string, ModelCatalogueStatusRecord>;
   hasImageAttachments: boolean;
   favoriteModelIds: string[];
@@ -119,6 +121,7 @@ export function ModelCatalogue({
   isMobileShell,
   isKeyboardCompact = false,
   hideTaskFilter = false,
+  creditFreeModelIds = [],
   modelStatuses,
   hasImageAttachments,
   favoriteModelIds,
@@ -541,7 +544,9 @@ export function ModelCatalogue({
                           )}
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-2">
-                        <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" />
+                        {!creditFreeModelIds.includes(model.id) && (
+                          <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" />
+                        )}
                         <ModelSelectionBadge
                           isSelected={isSelected}
                           isLocked={isPlanLocked}

@@ -108,7 +108,7 @@ test("The CLI scan finds a wrapper's program, offers it once, trusts an exact fi
     await expect(found("Antigravity")).toContainText("Not found on this computer");
     // Release archives and installation folders are chosen by hand, so they are not scanned.
     await expect(page.getByRole("group", { name: /Qwen Code · Found/ })).toHaveCount(0);
-    await expect(page.locator(".provider-cli-list li")).toHaveCount(10);
+    await expect(page.locator(".provider-cli-list li")).toHaveCount(8);
     // A found box spans its row but does not size the row's columns: a long path would squeeze the name and status
     // to a letter a line and pull that row's button left. Every row keeps its button in the same column.
     const buttonsAt = await page.locator(".provider-cli-list li > button").evaluateAll((buttons) =>
