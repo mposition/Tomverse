@@ -1828,6 +1828,8 @@ export const zh = {
         pageTitle: "下载你的账户数据",
         pageDescription: "一个文件，包含 Tomverse 保存的与你账户有关的全部内容。文件会说明它包含什么、不包含什么，以及原因。",
         dataTabTitle: "你的账户数据",
+        trainingNoticeBody: "回答聊天的 AI 提供方会接收聊天内容。隐私政策按提供方列出该内容的存储地和处理地、是否用于模型训练，以及保留多久。",
+        trainingNoticeLink: "查看隐私政策中的提供方表格",
         dataTabDescription: "将 Tomverse 保存的与你账户有关的全部内容——对话、记忆、导入、付款与用量——作为单个文件下载。",
         dataTabOpen: "下载你的数据",
         prepareDownload: "准备下载",

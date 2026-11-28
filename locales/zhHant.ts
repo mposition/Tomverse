@@ -1823,6 +1823,8 @@ export const zhHant = {
         pageTitle: "下載你的帳戶資料",
         pageDescription: "一個檔案，包含 Tomverse 儲存的與你帳戶有關的全部內容。檔案會說明它包含什麼、不包含什麼，以及原因。",
         dataTabTitle: "你的帳戶資料",
+        trainingNoticeBody: "回答聊天的 AI 提供方會接收聊天內容。隱私權政策依提供方列出該內容的儲存地與處理地、是否用於模型訓練，以及保留多久。",
+        trainingNoticeLink: "查看隱私權政策中的提供方表格",
         dataTabDescription: "將 Tomverse 儲存的與你帳戶有關的全部內容——對話、記憶、匯入、付款與用量——作為單一檔案下載。",
         dataTabOpen: "下載你的資料",
         prepareDownload: "準備下載",

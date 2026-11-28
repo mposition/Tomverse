@@ -1829,6 +1829,8 @@ export const ko = {
     // 무관하게 항상 접근 가능하고, 검토·작성 동작만 rollout flag를 따릅니다.
     accountDataExport: {
         dataTabTitle: "내 계정 데이터",
+        trainingNoticeBody: "채팅에 답하는 AI 공급자는 그 채팅 내용을 받습니다. 개인정보 처리방침은 공급자마다 그 내용을 어디에 저장하고 처리하는지, 모델 학습에 쓰는지, 얼마나 보관하는지를 적어 둡니다.",
+        trainingNoticeLink: "개인정보 처리방침의 공급자 표 보기",
         dataTabDescription:
             "내보내기 가능한 계정 데이터 — 대화, 메모리, 가져온 기록, 결제, 사용량 — 를 파일 하나로 내려받습니다. 운영자 기록 등 사용자 데이터가 아닌 항목은 제외됩니다.",
         dataTabOpen: "내 데이터 내려받기",

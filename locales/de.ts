@@ -1839,6 +1839,8 @@ export const de = {
         pageTitle: "Kontodaten herunterladen",
         pageDescription: "Eine Datei mit allem, was Tomverse zu Ihrem Konto gespeichert hat. Sie benennt, was sie enthält und was sie auslässt, und begründet es.",
         dataTabTitle: "Ihre Kontodaten",
+        trainingNoticeBody: "Der KI-Anbieter, der einen Chat beantwortet, erhält dessen Inhalt. Die Datenschutzerklärung nennt für jeden Anbieter, wo dieser Inhalt gespeichert und verarbeitet wird, ob er zum Trainieren von Modellen dient und wie lange er aufbewahrt wird.",
+        trainingNoticeLink: "Anbietertabelle in der Datenschutzerklärung ansehen",
         dataTabDescription: "Laden Sie alles herunter, was Tomverse zu Ihrem Konto gespeichert hat -- Unterhaltungen, Erinnerungen, Importe, Zahlungen und Nutzung -- als eine einzige Datei.",
         dataTabOpen: "Daten herunterladen",
         prepareDownload: "Download vorbereiten",

@@ -1836,6 +1836,8 @@ export const fr = {
         pageTitle: "Télécharger les données de votre compte",
         pageDescription: "Un fichier unique contenant tout ce que Tomverse conserve sur votre compte. Il indique ce qu'il contient et ce qu'il laisse de côté, et explique pourquoi.",
         dataTabTitle: "Les données de votre compte",
+        trainingNoticeBody: "Le fournisseur d'IA qui répond à un chat en reçoit le contenu. La politique de confidentialité indique, pour chaque fournisseur, où ce contenu est stocké et traité, s'il sert à entraîner des modèles et combien de temps il est conservé.",
+        trainingNoticeLink: "Voir le tableau des fournisseurs dans la politique de confidentialité",
         dataTabDescription: "Téléchargez en un seul fichier tout ce que Tomverse conserve sur votre compte : conversations, mémoires, imports, paiements et utilisation.",
         dataTabOpen: "Télécharger vos données",
         prepareDownload: "Préparer un téléchargement",

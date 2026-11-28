@@ -1836,6 +1836,8 @@ export const pt = {
         pageTitle: "Baixe os dados da sua conta",
         pageDescription: "Um único arquivo com tudo o que o Tomverse guarda sobre sua conta. Ele indica o que contém e o que deixa de fora, e explica por quê.",
         dataTabTitle: "Os dados da sua conta",
+        trainingNoticeBody: "O fornecedor de IA que responde a um chat recebe o conteúdo dele. A política de privacidade indica, para cada fornecedor, onde esse conteúdo é armazenado e processado, se é usado para treinar modelos e por quanto tempo é guardado.",
+        trainingNoticeLink: "Ver a tabela de fornecedores na política de privacidade",
         dataTabDescription: "Baixe em um único arquivo tudo o que o Tomverse guarda sobre sua conta: conversas, memórias, importações, pagamentos e uso.",
         dataTabOpen: "Baixar seus dados",
         prepareDownload: "Preparar um download",

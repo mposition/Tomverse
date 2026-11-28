@@ -142,3 +142,14 @@ test("reading the history needs a session and a rate limit, but not a step-up", 
   assert.equal(stepUps.length, 1, "expected exactly one step-up call in this route");
   assert.ok(stepUps[0].index > postAt, "the history read is behind a step-up");
 });
+
+test("the data page points at the privacy policy's provider table for model-training facts and offers no switch of its own", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../components/privacy/AccountDataDownload.tsx", import.meta.url), "utf8");
+  assert.match(source, /href="\/privacy#providers"/);
+  assert.match(source, /t\("privacyPolicy\.providerTableTitle"\)/);
+  assert.match(source, /t\("accountDataExport\.trainingNoticeBody"\)/);
+  const { en } = await import("../locales/en.ts");
+  assert.match(en.accountDataExport.trainingNoticeBody, /whether it is used to train models/);
+  assert.doesNotMatch(en.accountDataExport.trainingNoticeBody, /\bdo(es)? not\b|\bnever\b|\bwill not\b/i, "no promise beyond what the policy table says");
+});
