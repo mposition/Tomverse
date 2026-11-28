@@ -326,6 +326,35 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
 
 const unique = (values: readonly string[]) => [...new Set(values)];
 
+/** The places a request's arguments name as the file it works on (not the other path-like fields, which stay on the card). */
+function primaryPaths(raw: Json): string[] {
+  const list = field(raw, ["paths", "files", "file_paths"]);
+  const one = stringField(raw, pathNames);
+  return [...(one !== undefined ? [one] : []), ...(Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [])];
+}
+
+/**
+ * Whether the diff the card shows is the same edit as the arguments the CLI will run with. A diff cannot show every field of the
+ * arguments, so where they speak of the same thing they must agree: the file (compared by where it really is) and the new and old
+ * text. A diff with nothing to correspond to in the arguments, or arguments that name another file or other text, are not the
+ * same edit, and the request is refused rather than shown as only the diff.
+ */
+function diffMatchesRaw(diffs: readonly Diff[], raw: Json | undefined, cwd: string): boolean {
+  if (!raw || diffs.length === 0) return true;
+  const where = (path: string) => realPathOf(path, cwd) ?? resolve(cwd, path);
+  const fromDiffs = new Set(diffs.map(({ path }) => fold(where(path))));
+  const named = primaryPaths(raw);
+  if (named.length > 0) {
+    const fromRaw = new Set(named.map((path) => fold(where(path))));
+    if (fromRaw.size !== fromDiffs.size || [...fromRaw].some((path) => !fromDiffs.has(path))) return false;
+  }
+  const after = stringField(raw, afterNames);
+  const before = stringField(raw, beforeNames);
+  if (after !== undefined && (diffs.length !== 1 || diffs[0]!.newText !== after)) return false;
+  if (before !== undefined && (diffs.length !== 1 || diffs[0]!.oldText !== before)) return false;
+  return true;
+}
+
 export type AcpPermission = {
   /** "allow": answered yes with no card. "deny": answered no with no card. "ask": the person's card. "refuse": no card, and the person is told. */
   verdict: "allow" | "deny" | "ask" | "refuse";
@@ -374,8 +403,8 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const commands = [own.command, earlier?.command].filter((value): value is string => value !== undefined);
   const commandMissing = kind === "execute" && command === undefined;
   const blank = !own.named && !earlier?.named;
-  // More than is looked at in part is not judged in part: it is refused.
-  const limited = own.limited || earlier?.limited === true;
+  // More than is looked at in part is not judged in part, and a diff that is not the edit the arguments describe is not shown as if it were: both are refused.
+  const limited = own.limited || earlier?.limited === true || !diffMatchesRaw(diffs, raw, context.cwd);
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
   const known = new Set([...commandNames, ...afterNames, ...beforeNames, ...pathNames]);
@@ -392,7 +421,7 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
       ? { id, tool: "Write", input: { file_path: diff.path, content: diff.newText, ...extras } }
       : { id, tool: "Edit", input: { file_path: diff.path, old_string: diff.oldText, new_string: diff.newText, ...extras } };
   } else if (kind === "edit" && diffs.length > 1) {
-    approval = { id, tool: "MultiEdit", input: { file_path: diffs[0]!.path, edits: diffs.map(({ path, oldText, newText }) => ({ path, old_string: oldText ?? "", new_string: newText })) } };
+    approval = { id, tool: "MultiEdit", input: { file_path: diffs[0]!.path, edits: diffs.map(({ path, oldText, newText }) => ({ path, old_string: oldText ?? "", new_string: newText })), ...extras } };
   } else if (kind === "edit" && rawPath && after !== undefined) {
     approval = before === undefined ? { id, tool: "Write", input: { file_path: rawPath, content: after, ...extras } }
       : { id, tool: "Edit", input: { file_path: rawPath, old_string: before, new_string: after, ...extras } };

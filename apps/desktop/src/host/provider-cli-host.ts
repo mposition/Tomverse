@@ -56,8 +56,13 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
    */
   async function trustTarget(provider: CliProvider, path: string): Promise<string | null> {
     if (provider !== "minimax") return path;
-    try { if (!(await lstat(await realpath(path))).isDirectory()) return path; } catch { return path; }
+    // Only an install folder is trusted: a launcher or entry file picked directly would be trusted but could not be started.
+    try { if (!(await lstat(await realpath(path))).isDirectory()) return null; } catch { return null; }
     return (await resolveMiniMaxInstall(path))?.entry ?? null;
+  }
+
+  async function isInstallFolder(path: string) {
+    try { return (await lstat(await realpath(path))).isDirectory(); } catch { return false; }
   }
 
   async function trustedWith(trust: CliTrustFile, provider: CliProvider, path: string, signal?: AbortSignal) {
@@ -97,6 +102,8 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       if (inspection.status === "pathVerified") return "verified";
       if (inspection.status !== "versionUnverified") return inspection;
       const target = await trustTarget(provider, path);
+      // A MiniMax Code file (mcode.cmd, mcode, cli.js) is not an install: the person is told to choose the installation folder.
+      if (!target && provider === "minimax" && !(await isInstallFolder(path))) return { status: "wrongFile" };
       const hashed = target ? await trustRecordFor(target) : null;
       if (!hashed) return { status: "checkFailed" };
       storeTrust(withTrust(readTrust(), provider, hashed.record));

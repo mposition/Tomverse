@@ -111,6 +111,15 @@ test("The scan offers the install folder, trusting it records its entry file, an
     assert.equal(offered.trusted, false);
     assert.equal(await host.resolveSaved("minimax", { path: root, status: "userTrusted" }), null, "a folder nobody trusted does not run");
 
+    // A launcher or the entry file picked directly is not an install: it is refused, so it never reaches the model list.
+    for (const file of [join(root, "mcode.cmd"), join(root, "mcode"), entry, join(w.base, "missing")]) {
+      // A Windows launcher is refused as a shim before it is looked at; the others as a file that is not an install folder.
+      const refused = await host.trust("minimax", file);
+      assert.ok(typeof refused === "object" && (refused.status === "wrongFile" || refused.status === "windowsShim" || refused.status === "fileMissing"), `${file}: ${JSON.stringify(refused)}`);
+      assert.equal(await host.trustedFile("minimax", file), null, file);
+      assert.equal(await host.resolveSaved("minimax", { path: file, status: "userTrusted" }), null, file);
+    }
+
     // Trusting is by the entry file; an empty folder cannot be trusted.
     assert.equal(await host.trust("minimax", root), "stored");
     assert.deepEqual(await host.trust("minimax", w.bin), { status: "checkFailed" });

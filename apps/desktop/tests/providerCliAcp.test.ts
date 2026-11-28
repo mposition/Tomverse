@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes } from "../src/permission-contract";
 import { acpArguments, acpSafety, acpSecretPath, classifyAcpPermission, commandNamesCredential, insideProject, namesCredential, realPathOf, trackToolCall, type TrackedCall } from "../src/host/provider-cli-acp";
+import { approvalRequestFor } from "../src/host/provider-cli-transcript";
 import { cliExecEnvironment, runProviderCli, type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
 import { desktopNativeCopy } from "../../../locales/desktopNative";
 import { acpOwnRules, CLI_READ_ONLY_REFUSAL, cliReadOnlyRefused, cliRunsOwnRules, cliPermissionPlan, liveAcpProviders, liveCliFile, liveCliNames, liveCliProviderForModel, liveCliProviders, liveCliRunnable, providerConfigFolders,
@@ -928,5 +929,59 @@ test("A request that holds more than is looked at in part is refused, not judged
     assert.equal(classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "text" } }, { cwd, plan: cliPermissionPlan("moonshot", "ask"), tracked: calls.get("text") }).verdict, "refuse");
     trackToolCall(calls, "manyLocations", { title: "Edit", kind: "edit", locations: places(65) });
     assert.equal(calls.get("manyLocations")?.limited, true);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("A diff and the arguments of the same edit must agree: they are shown together, or the request is refused", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-diff-"));
+  try {
+    await writeFile(join(cwd, "hello.txt"), "old");
+    const diff = (path: string, newText: string, oldText?: string) => ({ type: "diff", path, newText, ...(oldText !== undefined ? { oldText } : {}) });
+    const ask = (toolCall: object, mode: "ask" | "allow_all" | "read_only" = "ask") => classifyAcpPermission(request({ kind: "edit", title: "Edit", ...toolCall }), { cwd, plan: cliPermissionPlan("mistral", mode) });
+    const clean = (value: string) => value;
+
+    // The same file (written two ways) and the same text: the diff is the card, and every other field of the arguments is on it too.
+    const same = ask({ content: [diff("hello.txt", "hi")], rawInput: { filePath: join(cwd, "hello.txt"), content: "hi", mode: "0644", createDirs: true } });
+    assert.equal(same.verdict, "ask");
+    assert.deepEqual([same.approval.tool, same.approval.input], ["Write", { file_path: "hello.txt", content: "hi", mode: "0644", createDirs: true }]);
+    const card = approvalRequestFor(same.approval, cwd, clean);
+    assert.ok(card);
+    assert.deepEqual(JSON.parse(card.explanation ?? "{}"), { mode: "0644", createDirs: true });
+    assert.deepEqual(card.files?.map((file) => [file.path, file.after]), [["hello.txt", "hi"]]);
+    // More than the card can show in full is refused by the card, as for Claude Code.
+    const long = ask({ content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", content: "hi", note: "n".repeat(5_000) } });
+    assert.equal(long.verdict, "ask");
+    assert.equal(approvalRequestFor(long.approval, cwd, clean), null);
+    // An edit with an old text: the Edit card, with the extras.
+    const edit = ask({ content: [diff("hello.txt", "new", "old")], rawInput: { path: "hello.txt", old_string: "old", new_string: "new", replace_all: true } });
+    assert.deepEqual([edit.verdict, edit.approval.tool, edit.approval.input], ["ask", "Edit", { file_path: "hello.txt", old_string: "old", new_string: "new", replace_all: true }]);
+    assert.equal(ask({ content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", content: "hi" } }, "allow_all").verdict, "allow");
+
+    // Not the same edit: another file, other text, an old text the diff does not have, or arguments with nothing in the diff.
+    for (const [name, toolCall] of [
+      ["another file", { content: [diff("hello.txt", "hi")], rawInput: { filePath: "other.txt", content: "hi" } }],
+      ["another file, outside the project", { content: [diff("hello.txt", "hi")], rawInput: { filePath: join(cwd, "..", "hello.txt"), content: "hi" } }],
+      ["other new text", { content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", content: "something else" } }],
+      ["other new text by its other name", { content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", newText: "HI" } }],
+      ["an old text the diff lacks", { content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", oldText: "x", newText: "hi" } }],
+      ["another old text", { content: [diff("hello.txt", "hi", "old")], rawInput: { filePath: "hello.txt", old_string: "other", new_string: "hi" } }],
+      ["two diffs and one text", { content: [diff("a.txt", "1"), diff("b.txt", "2")], rawInput: { content: "1" } }],
+      ["a path the diffs do not have", { content: [diff("a.txt", "1"), diff("b.txt", "2")], rawInput: { paths: ["a.txt", "b.txt", "c.txt"] } }],
+      ["a diff the paths do not have", { content: [diff("a.txt", "1"), diff("b.txt", "2")], rawInput: { paths: ["a.txt"] } }],
+    ] as const) {
+      for (const mode of ["ask", "allow_all"] as const) {
+        const decision = ask(toolCall, mode);
+        assert.deepEqual([decision.verdict, decision.approval.refused], ["refuse", true], `${name} ${mode}`);
+      }
+      assert.equal(ask(toolCall, "read_only").verdict, "deny", name);
+    }
+    // Several diffs that the arguments list the same files for, and arguments that say nothing about the files, are fine.
+    const two = ask({ content: [diff("a.txt", "1"), diff("b.txt", "2")], rawInput: { paths: ["b.txt", "a.txt"], dryRun: false } });
+    assert.deepEqual([two.verdict, two.approval.tool, two.approval.input.dryRun], ["ask", "MultiEdit", false]);
+    assert.equal(ask({ content: [diff("hello.txt", "hi")], rawInput: { dryRun: false } }).verdict, "ask");
+    // What the agent said before the request counts the same way.
+    const calls = new Map<string, TrackedCall>();
+    trackToolCall(calls, "t", { title: "Writing", kind: "edit", content: [diff("hello.txt", "hi")], rawInput: { filePath: "other.txt", content: "hi" } });
+    assert.equal(classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "t" } }, { cwd, plan: cliPermissionPlan("mistral", "ask"), tracked: calls.get("t") }).verdict, "refuse");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
