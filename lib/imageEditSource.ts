@@ -9,6 +9,11 @@ import {
   imageEditOutputSize,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
+import {
+  IMAGE_EDIT_SOURCE_TOO_LARGE,
+  IMAGE_EDIT_SOURCE_UNSUPPORTED,
+  type ImageEditSourceRefusalCode,
+} from "@/lib/chatImageTurnCore";
 import type { ImageEditInput } from "@/lib/imageProviderAdapter";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
@@ -42,30 +47,56 @@ export const findChatImageEditSource = async (input: {
       unavailableAt: null,
     },
     orderBy: { ordinal: "asc" },
-    select: { id: true, objectKey: true },
+    select: { id: true, objectKey: true, size: true },
   });
   if (!attachment) return null;
+  // A chat attachment may be 50 MB; an edit reads 10. Said now, by name,
+  // while nothing is reserved -- found out at execution it was a generic
+  // failure after the credits had been taken and given back.
+  if (attachment.size > IMAGE_EDIT_SOURCE_MAX_BYTES) {
+    throw new ImageEditSourceError(
+      "The photo is too large to edit.",
+      IMAGE_EDIT_SOURCE_TOO_LARGE
+    );
+  }
   // The edit keeps the photo's shape: a landscape photo edited into a square
-  // would come back cropped or stretched. Unreadable is square, and the
-  // executor then fails it before the provider is called.
+  // would come back cropped or stretched. A photo storage cannot be read for
+  // right now is square, and the executor fails it before the provider is
+  // called if it is still unreadable; one that is read but cannot be decoded
+  // is refused here, since the executor would only fail it later.
   let size: ImageSize = "1024x1024";
+  let bytes: Buffer | null = null;
   try {
-    const bytes = await readOwnR2ObjectBytes(attachment.objectKey, {
+    bytes = await readOwnR2ObjectBytes(attachment.objectKey, {
       maxBytes: IMAGE_EDIT_SOURCE_MAX_BYTES,
     });
-    const sharp = (await import("sharp")).default;
-    const { width, height, orientation } = await sharp(bytes, { animated: false }).metadata();
-    size = imageEditOutputSize(width ?? 0, height ?? 0, orientation);
   } catch {
-    size = "1024x1024";
+    bytes = null;
+  }
+  if (bytes) {
+    try {
+      const sharp = (await import("sharp")).default;
+      const { width, height, orientation } = await sharp(bytes, { animated: false }).metadata();
+      if (!width || !height) throw new Error("no dimensions");
+      size = imageEditOutputSize(width, height, orientation);
+    } catch {
+      throw new ImageEditSourceError(
+        "The photo cannot be edited: its format is not supported.",
+        IMAGE_EDIT_SOURCE_UNSUPPORTED
+      );
+    }
   }
   return { attachmentId: attachment.id, size };
 };
 
 export class ImageEditSourceError extends Error {
-  constructor(message: string) {
+  /** Set when the cause is known before anything is reserved. */
+  readonly code?: ImageEditSourceRefusalCode;
+
+  constructor(message: string, code?: ImageEditSourceRefusalCode) {
     super(message);
     this.name = "ImageEditSourceError";
+    this.code = code;
   }
 }
 

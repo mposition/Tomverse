@@ -1377,6 +1377,13 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.
+      **예약 전에 거를 수 있는 것은 거른다**(2026-11-28): 채팅 첨부는 50 MB까지지만 편집이 읽는
+      사진은 `IMAGE_EDIT_SOURCE_MAX_BYTES`(10 MB)까지다. 첨부 행의 크기가 이를 넘거나
+      (`IMAGE_EDIT_SOURCE_TOO_LARGE`, 413) 읽은 파일을 디코딩할 수 없으면
+      (`IMAGE_EDIT_SOURCE_UNSUPPORTED`, 400) `findChatImageEditSource`가 크레딧을 예약하기 전에
+      그 코드로 거절하고, 패널은 `chat.imageEditSourceTooLarge`·`chat.imageEditSourceUnsupported`의
+      현지화된 문구를 보인다. 저장소를 지금 읽지 못한 것은 사진의 문제가 아니므로 이 거절이 아니라
+      위의 `edit_source_unavailable` 경로에 남는다.
   - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
     제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
     `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧

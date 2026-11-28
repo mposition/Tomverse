@@ -502,6 +502,8 @@ export const zh = {
         attachmentModelImageUnsupported: "该模型无法处理此文件中包含的图片。",
         attachmentModelUnsupported: "该模型无法读取所附图片。请选择支持图片的模型，或移除该附件。",
         attachmentOcrUnavailable: "目前无法读取此 PDF 的文字。请稍后再试，或选择可直接读取 PDF 的模型。",
+        imageEditSourceTooLarge: "这张照片太大，无法编辑。请附上较小的版本（例如缩小后的副本）后重试。未使用任何积分。",
+        imageEditSourceUnsupported: "这张照片的格式不受支持，无法编辑。请以 PNG、JPEG、WebP 或 GIF 格式重新附上后重试。未使用任何积分。",
         archiveCorrupt: "ZIP 文件已损坏。",
         archiveEncrypted: "不支持加密的 ZIP 文件。",
         archiveZip64: "暂不支持 ZIP64 格式。",
