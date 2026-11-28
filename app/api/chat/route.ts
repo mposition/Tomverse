@@ -510,6 +510,7 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { readPersonalizationTurnBlock } from "@/lib/chatPersonalization";
 import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
@@ -4099,6 +4100,25 @@ async function handleChatPost(
                 verifiedContext.preferenceTokens;
             estimatedInputTokens += quotedContextTokens;
             inputEstimate.addTokens(quotedContextTokens);
+        } else if (
+            session?.user?.id && !contextBundle && !isResearchPreview &&
+            (conversationProductKey === "chat" || conversationProductKey === "review")
+        ) {
+            // The client sends without a bundle when preparing one failed ("Failure degrades open").
+            // Memory is dropped then, by design; the account's own personal instructions must not be:
+            // they are stored, cheap to read, and independent of retrieval. Same builder, same
+            // rendered block and hash as the bundle path, priced here like the bundle's share.
+            try {
+                const personal = await readPersonalizationTurnBlock(session.user.id);
+                if (personal.prompt) {
+                    contextSystemPrompt = personal.prompt;
+                    estimatedInputTokens += personal.tokens;
+                    inputEstimate.addTokens(personal.tokens);
+                    console.info(JSON.stringify({ event: "chat_personalization_without_bundle", traceId, preferencesHash: personal.hash, tokens: personal.tokens }));
+                }
+            } catch (error) {
+                console.warn(JSON.stringify({ event: "chat_personalization_without_bundle_failed", traceId, error: error instanceof Error ? error.name : "unknown" }));
+            }
         }
 
         /*

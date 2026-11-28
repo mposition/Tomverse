@@ -174,3 +174,17 @@ test("the SDK still refuses system messages inside the messages array", () => {
     "ai's allowSystemInMessages default changed -- re-read its prompt contract"
   );
 });
+
+test("a send without a prepared context bundle still carries the stored personal instructions", () => {
+  const source = read(ROUTE);
+  // The client sends without a bundle when preparation failed (lib/chatContextBundleClient.ts).
+  // Memory is dropped then, but the personal instructions are read from the account directly,
+  // through the same builder the bundle path uses, and priced like the bundle's share.
+  const branch = source.match(/\} else if \(\s*session\?\.user\?\.id && !contextBundle[\s\S]*?chat_personalization_without_bundle"/)?.[0] ?? "";
+  assert.ok(branch, "the no-bundle personalization branch exists");
+  assert.match(branch, /readPersonalizationTurnBlock\(session\.user\.id\)/);
+  assert.match(branch, /contextSystemPrompt = personal\.prompt;/);
+  assert.match(branch, /estimatedInputTokens \+= personal\.tokens;/);
+  assert.match(branch, /inputEstimate\.addTokens\(personal\.tokens\);/);
+  assert.doesNotMatch(branch, /memoryData\s*=/, "memory is not rebuilt here");
+});
