@@ -876,7 +876,10 @@ Profile instructions·knowledge의 기존 역할은 유지합니다. Memory data
 system 블록에 두되, 앞에 규칙(정책·안전 지침을 대신하지 않고, profile·프로젝트 지침과
 충돌하면 그쪽이 우선)을 먼저 적고 marker로 구획합니다. 로그인한 Chat·Review 턴에만
 붙고 외부 API에는 붙지 않으며, 토큰은 `preferenceTokens`로 따로 가격을 매기고 해시는
-context bundle에 결속합니다(편집하면 bundle이 stale이 됩니다).
+context bundle에 결속합니다(편집하면 bundle이 stale이 됩니다). bundle 준비가 실패해
+bundle 없이 전송되는 로그인 Chat·Review 턴에서는 memory만 빠지고, 서버가 같은 builder로
+저장된 맞춤 지침만 직접 읽어 붙이며 토큰도 같은 방식으로 가격에 더합니다
+(`chat_personalization_without_bundle` 로그에 해시를 남깁니다).
 
 프로젝트 항목은 각 항목에 명시된 프로젝트의 사실로 구분합니다. 기존 답변 모델은 현재
 질문과 대화의 최신 명시적 전환·정정을 기준으로 프로젝트를 해석하고 다른 프로젝트의
