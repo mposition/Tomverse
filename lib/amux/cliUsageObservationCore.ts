@@ -15,7 +15,7 @@ export type AmuxCliTokenCounts = {
 
 export type AmuxCliUsageObservation = {
   version: 1;
-  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity" | "kimi" | "qwen";
+  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity" | "kimi" | "qwen" | "zai";
   completeness: AmuxCliUsageCompleteness;
   /** Null means no trustworthy numeric report, never zero spend. */
   observed: AmuxCliTokenCounts | null;

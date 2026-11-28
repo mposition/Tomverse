@@ -77,6 +77,12 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
   // is allowed in headless mode no permission check is left (v22ChannelRun.mjs).
   qwen: Object.freeze({ providerClass: "qwen", cli: "qwen",
     model: ANY_MODEL, implement: false }),
+  // Owner decision 2026-11-28: the GLM Coding Plan through Claude Code (Z.ai
+  // documents Claude Code as a supported tool). The CLI, its tool list and
+  // its jailed shell are Claude's, so it implements as a Claude worker does;
+  // only the endpoint, the key and the model (GLM) differ.
+  zai: Object.freeze({ providerClass: "zai", cli: "zai",
+    model: /^glm-[A-Za-z0-9._-]{1,100}$/, implement: true }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
 export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {

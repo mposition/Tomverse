@@ -3,35 +3,38 @@
 -- Coding Plan) are the sixth and seventh worker classes. Both are unverified
 -- at implementation like Cursor and take v22 read roles only: their headless
 -- runs approve tool calls with no jail for a shell or a write (Kimi's file
--- tools also read any absolute path).
+-- tools also read any absolute path). Owner decision the same day: `zai`,
+-- Claude Code against Z.ai's Anthropic-compatible endpoint on the owner's
+-- GLM Coding Plan, is the eighth; it implements as a Claude worker does.
 -- Each change below is the latest definition (20261110200000) with only
--- `kimi` and `qwen` added:
+-- `kimi`, `qwen` and `zai` added:
 -- * the registry's provider classes and the CLI model tables' CLIs;
 -- * the CLI usage ledger's CLI/provider pairs, the sources `kimi_wire` (the
 --   session wire.jsonl's StatusUpdate token_usage; Kimi's stream reports
 --   none) and `qwen_stream` (the stream's result usage), and their token
 --   semantics as documented: Kimi's input_other excludes input_cache_read,
 --   Qwen's input_tokens is the provider's prompt count with cache reads in
---   it (as Copilot's), and neither says whether output includes thinking.
+--   it (as Copilot's), and neither says whether output includes thinking;
+--   `zai_claude_result` is Claude Code's result JSON, read as Claude's.
 -- The capability guard needs no change: only Claude's model and Cursor's
--- implement are held by class there, and the v22 provider table keeps both
--- new classes from implement.
+-- implement are held by class there, and the v22 provider table keeps Kimi
+-- and Qwen from implement.
 BEGIN;
 
 ALTER TABLE "AmuxWorkerRegistryEvent"
   DROP CONSTRAINT "AmuxWorkerRegistryEvent_provider_class_check",
   ADD CONSTRAINT "AmuxWorkerRegistryEvent_provider_class_check"
-      CHECK ("providerClass" IN ('claude', 'codex', 'cursor', 'copilot', 'antigravity', 'kimi', 'qwen'));
+      CHECK ("providerClass" IN ('claude', 'codex', 'cursor', 'copilot', 'antigravity', 'kimi', 'qwen', 'zai'));
 
 ALTER TABLE "AmuxCliModel"
   DROP CONSTRAINT "AmuxCliModel_cli_check",
   ADD CONSTRAINT "AmuxCliModel_cli_check"
-      CHECK ("cli" IN ('claude', 'codex', 'cursor', 'copilot', 'antigravity', 'kimi', 'qwen'));
+      CHECK ("cli" IN ('claude', 'codex', 'cursor', 'copilot', 'antigravity', 'kimi', 'qwen', 'zai'));
 
 ALTER TABLE "AmuxCliModelLinkEvent"
   DROP CONSTRAINT "AmuxCliModelLinkEvent_cli_check",
   ADD CONSTRAINT "AmuxCliModelLinkEvent_cli_check"
-      CHECK ("cli" IN ('claude', 'codex', 'cursor', 'copilot', 'antigravity', 'kimi', 'qwen'));
+      CHECK ("cli" IN ('claude', 'codex', 'cursor', 'copilot', 'antigravity', 'kimi', 'qwen', 'zai'));
 
 ALTER TABLE "AmuxCliUsageEvent"
   DROP CONSTRAINT "AmuxCliUsageEvent_source_check",
@@ -43,6 +46,7 @@ ALTER TABLE "AmuxCliUsageEvent"
     ("cli" = 'antigravity' AND "provider" = 'antigravity') OR
     ("cli" = 'kimi' AND "provider" = 'kimi') OR
     ("cli" = 'qwen' AND "provider" = 'qwen') OR
+    ("cli" = 'zai' AND "provider" = 'zai') OR
     ("cli" = 'anthropic_api' AND "provider" = 'anthropic')),
   DROP CONSTRAINT "AmuxCliUsageEvent_shape_check",
   ADD CONSTRAINT "AmuxCliUsageEvent_shape_check" CHECK (
@@ -65,6 +69,8 @@ ALTER TABLE "AmuxCliUsageEvent"
         "reasoningOutputIncludedInOutput" IS NULL)
       OR ("cli" = 'qwen' AND "inputTokensIncludeCacheRead" AND
         "reasoningOutputIncludedInOutput" IS NULL)
+      OR ("cli" = 'zai' AND NOT "inputTokensIncludeCacheRead" AND
+        "inputTokensIncludeCacheWrite" IS FALSE)
       OR ("cli" = 'anthropic_api' AND "authentication" = 'api_key' AND
         "completeness" = 'reported_complete' AND "cliVersion" IS NULL AND
         NOT "inputTokensIncludeCacheRead" AND
@@ -86,6 +92,7 @@ ALTER TABLE "AmuxCliUsageEvent"
           ("cli" = 'antigravity' AND "source" = 'antigravity_stream') OR
           ("cli" = 'kimi' AND "source" = 'kimi_wire') OR
           ("cli" = 'qwen' AND "source" = 'qwen_stream') OR
+          ("cli" = 'zai' AND "source" = 'zai_claude_result') OR
           ("cli" = 'anthropic_api' AND
             "source" = 'anthropic_messages_api')) AND
         "inputTokens" IS NOT NULL AND "outputTokens" IS NOT NULL AND

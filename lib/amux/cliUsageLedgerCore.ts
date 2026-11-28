@@ -31,8 +31,10 @@ export const amuxUsageLedgerReceiptSchema = z.object({
     z.object({ kind: z.literal("idea_analysis"), holdId: id }).strict(),
   ]),
   worker: id,
-  cli: z.enum(["codex", "claude", "copilot", "cursor", "antigravity", "kimi", "qwen", "anthropic_api"]),
-  provider: z.enum(["openai", "anthropic", "github-copilot", "cursor", "antigravity", "kimi", "qwen"]),
+  cli: z.enum(["codex", "claude", "copilot", "cursor", "antigravity", "kimi", "qwen", "zai",
+    "anthropic_api"]),
+  provider: z.enum(["openai", "anthropic", "github-copilot", "cursor", "antigravity", "kimi", "qwen",
+    "zai"]),
   selectedModelId: model,
   actualModelId: model.nullable(),
   cliVersion: z.string().regex(/^[A-Za-z0-9._+-]{1,80}$/).nullable(),
@@ -42,7 +44,8 @@ export const amuxUsageLedgerReceiptSchema = z.object({
   status: z.enum(["succeeded", "failed", "interrupted", "outcome_unknown"]),
   completeness: z.enum(["reported_complete", "reported_partial", "unknown"]),
   source: z.enum(["codex_jsonl", "claude_result", "copilot_json",
-    "cursor_stream", "antigravity_stream", "kimi_wire", "qwen_stream", "anthropic_messages_api", "unreported"]),
+    "cursor_stream", "antigravity_stream", "kimi_wire", "qwen_stream", "zai_claude_result",
+    "anthropic_messages_api", "unreported"]),
   observed: counts.nullable(),
   inputTokensIncludeCacheRead: z.boolean(),
   inputTokensIncludeCacheWrite: z.boolean().nullable(),
@@ -61,6 +64,7 @@ export const amuxUsageLedgerReceiptSchema = z.object({
       value.cli === "antigravity" && value.provider !== "antigravity" ||
       value.cli === "kimi" && value.provider !== "kimi" ||
       value.cli === "qwen" && value.provider !== "qwen" ||
+      value.cli === "zai" && value.provider !== "zai" ||
       Date.parse(value.endedAt) < Date.parse(value.startedAt) ||
       (value.completeness === "unknown") !== (value.observed === null) ||
       (value.source === "unreported") !== (value.observed === null) ||
@@ -71,6 +75,7 @@ export const amuxUsageLedgerReceiptSchema = z.object({
       (value.source === "antigravity_stream" && value.cli !== "antigravity") ||
       (value.source === "kimi_wire" && value.cli !== "kimi") ||
       (value.source === "qwen_stream" && value.cli !== "qwen") ||
+      (value.source === "zai_claude_result" && value.cli !== "zai") ||
       (value.source === "anthropic_messages_api" &&
         value.cli !== "anthropic_api") ||
       (value.cli === "codex" &&
@@ -100,6 +105,10 @@ export const amuxUsageLedgerReceiptSchema = z.object({
       // so it is read as Copilot's is; reasoning is not reported apart.
       (value.cli === "qwen" && (!value.inputTokensIncludeCacheRead ||
         value.reasoningOutputIncludedInOutput !== null)) ||
+      // Z.ai's runs are Claude Code's result JSON, read as Claude's.
+      (value.cli === "zai" &&
+        (value.inputTokensIncludeCacheRead ||
+          value.inputTokensIncludeCacheWrite !== false)) ||
       (value.cli === "anthropic_api" &&
         (value.authentication !== "api_key" || value.cliVersion !== null ||
           value.completeness !== "reported_complete" ||
@@ -142,17 +151,18 @@ export const amuxCliUsageReceiptSchema = amuxUsageLedgerReceiptSchema
 export type AmuxUsageLedgerReceipt =
   z.infer<typeof amuxUsageLedgerReceiptSchema>;
 export type AmuxCliUsageReceipt = AmuxUsageLedgerReceipt & {
-  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity" | "kimi" | "qwen";
+  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity" | "kimi" | "qwen" | "zai";
   source: "codex_jsonl" | "claude_result" | "copilot_json" | "cursor_stream" |
-    "antigravity_stream" | "kimi_wire" | "qwen_stream" | "unreported";
+    "antigravity_stream" | "kimi_wire" | "qwen_stream" | "zai_claude_result" | "unreported";
 };
 
 const CLI_PROVIDER = { codex: "openai", claude: "anthropic",
   copilot: "github-copilot", cursor: "cursor", antigravity: "antigravity",
-  kimi: "kimi", qwen: "qwen" } as const;
+  kimi: "kimi", qwen: "qwen", zai: "zai" } as const;
 const CLI_SOURCE = { codex: "codex_jsonl", claude: "claude_result",
   copilot: "copilot_json", cursor: "cursor_stream",
-  antigravity: "antigravity_stream", kimi: "kimi_wire", qwen: "qwen_stream" } as const;
+  antigravity: "antigravity_stream", kimi: "kimi_wire", qwen: "qwen_stream",
+  zai: "zai_claude_result" } as const;
 
 /** v22 accepts no silent CLI model fallback. A different served model has a
  * different approved route and price and therefore cannot settle this Task. */
@@ -211,13 +221,13 @@ export type AmuxCliApiPrice = {
   reasoningOutputMicroUsdPerMillion: number | null;
 };
 
-/** The model a receipt is priced as. Codex, Cursor, Antigravity, Kimi and Qwen
- * never name the model that answered, so theirs is the selected one (the same rule v22 settlement
+/** The model a receipt is priced as. Codex, Cursor, Antigravity, Kimi, Qwen and
+ * Z.ai never name the model that answered, so theirs is the selected one (the same rule v22 settlement
  * uses, lib/amux/v22TaskExecutionCore.ts); any other CLI must name it. */
 export function amuxCliPricedModelId(receipt: AmuxUsageLedgerReceipt): string | null {
   const modelId = receipt.actualModelId ??
     (receipt.cli === "codex" || receipt.cli === "cursor" || receipt.cli === "antigravity" ||
-      receipt.cli === "kimi" || receipt.cli === "qwen" ?
+      receipt.cli === "kimi" || receipt.cli === "qwen" || receipt.cli === "zai" ?
       receipt.selectedModelId : null);
   return modelId === "multi_model" ? null : modelId;
 }

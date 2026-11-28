@@ -418,15 +418,19 @@ test("a checkout that links outside itself is found before a Kimi run starts", a
     await symlink(join(root, "outside"), join(checkout, "lib", "deep", "escape"), "junction");
     assert.equal(amuxV22CheckoutSymlinkOutside(checkout), "lib/deep/escape");
   }
-  // A fake tree: a dangling link is refused; .git is not walked; an unreadable checkout is "?".
+  // A fake tree: a dangling link is refused, inside .git too; an unreadable checkout is "?".
   const dirent = (name, kind) => ({ name, isSymbolicLink: () => kind === "link",
     isDirectory: () => kind === "dir" });
   const tree = { "/w": [dirent(".git", "dir"), dirent("src", "dir")],
-    "/w/src": [dirent("gone", "link")] };
+    "/w/src": [dirent("gone", "link")], "/w/.git": [dirent("hooks", "dir")],
+    "/w/.git/hooks": [dirent("escape", "link")] };
   const fsOps = { readdirSync: (dir) => tree[dir.replaceAll("\\", "/")] ?? [],
     realpathSync: (path) => { const p = path.replaceAll("\\", "/");
       if (p === "/w") return p; throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); } };
   assert.equal(amuxV22CheckoutSymlinkOutside("/w", { fsOps }), "src/gone");
+  assert.equal(amuxV22CheckoutSymlinkOutside("/w", { fsOps: { ...fsOps,
+    readdirSync: (dir) => dir.replaceAll("\\", "/") === "/w/src" ? [] : fsOps.readdirSync(dir) } }),
+  ".git/hooks/escape");
   assert.equal(amuxV22CheckoutSymlinkOutside("/w", { fsOps: { ...fsOps,
     readdirSync: () => { throw new Error("EACCES"); } } }), "?");
 });

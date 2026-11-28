@@ -40,7 +40,7 @@ const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/workerRegistryStore.ts";
 const MIGRATION = "prisma/migrations/20261012100000_amux_worker_registry/migration.sql";
 const CLASS_MIGRATION = "prisma/migrations/20261110200000_amux_antigravity_worker_class/migration.sql";
-const KIMI_CLASS_MIGRATION = "prisma/migrations/20261128120000_amux_kimi_qwen_worker_classes/migration.sql";
+const KIMI_CLASS_MIGRATION = "prisma/migrations/20261128120000_amux_kimi_qwen_zai_worker_classes/migration.sql";
 // The guard's current body: the operator's 2026-10-20 direct activation.
 const GUARD_MIGRATION = "prisma/migrations/20261020200000_amux_worker_registry_direct_activation/migration.sql";
 const GUARD_HEAD = 'CREATE OR REPLACE FUNCTION "amux_worker_registry_event_guard"()';
@@ -64,14 +64,14 @@ const checkList = (sql, name) => {
 
 test("the migration's CHECKs hold exactly the core's vocabularies", () => {
   const sql = withoutSqlComments(read(MIGRATION));
-  // The class CHECK's newest definition is the kimi and qwen migration's
+  // The class CHECK's newest definition is the kimi, qwen and zai migration's
   // (owner request 2026-11-28); the antigravity one (2026-11-10) held five classes
   // and the first one the four before it.
   assert.deepEqual(checkList(sql, "AmuxWorkerRegistryEvent_provider_class_check"),
-    AMUX_WORKER_PROVIDER_CLASSES.filter((name) => !["antigravity", "kimi", "qwen"].includes(name)));
+    AMUX_WORKER_PROVIDER_CLASSES.filter((name) => !["antigravity", "kimi", "qwen", "zai"].includes(name)));
   assert.deepEqual(checkList(withoutSqlComments(read(CLASS_MIGRATION)),
     "AmuxWorkerRegistryEvent_provider_class_check"),
-  AMUX_WORKER_PROVIDER_CLASSES.filter((name) => name !== "kimi" && name !== "qwen"));
+  AMUX_WORKER_PROVIDER_CLASSES.filter((name) => !["kimi", "qwen", "zai"].includes(name)));
   assert.deepEqual(checkList(withoutSqlComments(read(KIMI_CLASS_MIGRATION)),
     "AmuxWorkerRegistryEvent_provider_class_check"), [...AMUX_WORKER_PROVIDER_CLASSES]);
   assert.deepEqual(checkList(sql, "AmuxWorkerRegistryEvent_role_ceiling_check"), [...AMUX_WORKER_ROLE_CEILINGS]);

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "migrationSqlSha256": "345e7ae270cacb529c84604abc8913e1a669eef0072287c92dfa16362903dae4",
+  "migrationSqlSha256": "6339661217dc9e8976b74ab8e257325cf55d5d7d2f6ede80ab64e3c21518a771",
   "replacedChecks": [
     {
       "table": "AmuxWorkerRegistryEvent",

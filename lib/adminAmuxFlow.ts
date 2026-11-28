@@ -47,7 +47,7 @@ export function amuxIdeaFlowSteps(
 /** Every class a worker can be registered with is a channel, so no registered worker goes undrawn. */
 export type AmuxWorkerChannel = AmuxWorkerProviderClass;
 export const AMUX_WORKER_CHANNELS: readonly AmuxWorkerChannel[] = ["claude", "codex", "copilot", "cursor", "antigravity", "kimi",
-  "qwen"];
+  "qwen", "zai"];
 
 /**
  * Each registered worker's channel (the CLI it runs), from the class it was

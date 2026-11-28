@@ -790,9 +790,10 @@ test("the AMUX room sits under the teams, with an island for each CLI channel th
     ["anthropic", "cursor", "antigravity", "devin"].map(agentOfficeQuotaChannel),
     ["claude", "cursor", "antigravity", null]
   );
-  assert.deepEqual(AGENT_OFFICE_QUOTA_CHANNELS, ["claude", "codex", "copilot", "cursor", "antigravity", "kimi", "qwen"]);
-  // Kimi and Qwen (owner request 2026-11-28) have no island either, and their own rows.
-  for (const provider of ["kimi", "qwen"]) {
+  assert.deepEqual(AGENT_OFFICE_QUOTA_CHANNELS, ["claude", "codex", "copilot", "cursor", "antigravity", "kimi", "qwen",
+    "zai"]);
+  // Kimi, Qwen and Z.ai (2026-11-28) have no island either, and their own rows.
+  for (const provider of ["kimi", "qwen", "zai"]) {
     assert.equal(agentOfficeChannel(provider), null);
     assert.equal(agentOfficeQuotaChannel(provider), provider);
   }

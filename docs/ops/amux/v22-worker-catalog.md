@@ -154,7 +154,7 @@ fixed directories included) and logs each decision; a run with more tool
 calls than logged decisions is refused. The
 parser refuses any other tool, any undocumented argument and any path or path
 pattern that is absolute outside the checkout, has `..`, `~` or a
-backslash. A checkout with `.kimi/`, or with any symlink (outside `.git`)
+backslash. A checkout with `.kimi/`, or with any symlink (`.git` included)
 that is dangling or resolves outside the checkout, is refused before the CLI
 starts, and again after the base sync. Kimi's stream-json carries no
 usage, so the sidecar reads the session's `wire.jsonl` in the run home
@@ -181,6 +181,34 @@ tool, a subagent's message and any path outside the checkout. A checkout with
 `.qwen/` is refused. Usage is the stream's `result.usage`; its input
 includes cache reads, so cache reads are priced as input (Copilot's rule).
 Qwen has no headless quota or model-list command yet.
+
+Z.ai (`zai`, owner decision 2026-11-28) runs Claude Code against Z.ai's
+Anthropic-compatible endpoint on the owner's GLM Coding Plan, which Z.ai
+documents as a supported tool. It is off unless its unit sets
+`TOMVERSE_AMUX_V22_ZAI=enabled`.
+
+The run is a Claude run (Claude's arguments, tools, jailed shell and result),
+so it implements as a Claude worker does. Its environment adds:
+
+- `ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, the global endpoint
+  (open.bigmodel.cn is out of scope);
+- `ANTHROPIC_AUTH_TOKEN` and `API_TIMEOUT_MS=3000000`;
+- every model alias set to the route's GLM model;
+- Claude Code's non-essential traffic and updater turned off.
+
+The key is not staged from the operator's home. The operator puts it in
+`<worker>/cli/zai/coding-plan-key`, owned by root and group-readable by the
+worker. The sidecar refuses a link, any other owner or mode, and a malformed
+key. As with a Claude worker's OAuth token, the CLI itself can read that file,
+but the jailed shell never gets the key.
+
+A checkout that contains `.claude/settings.json` or
+`.claude/settings.local.json` is refused, because either file could point the
+endpoint elsewhere.
+
+Receipts are Claude Code's result counts recorded under `zai` (source
+`zai_claude_result`) and settled as the selected model. Z.ai documents no
+quota endpoint, so its quota stays unknown.
 
 The Antigravity sidecar runs agy (a single Go binary) from a root-owned copy
 under `/opt/tomverse-amux-v22/`, with `AGY_CLI_DISABLE_AUTO_UPDATE=true` (agy
