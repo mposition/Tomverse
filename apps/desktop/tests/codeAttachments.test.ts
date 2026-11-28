@@ -103,3 +103,27 @@ test("A link to a credential file and a folder Git would not ignore are refused"
     await rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("A failed carry into a worktree takes out only what it wrote, never what the branch had", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "code-attach-carry-"));
+  try {
+    const source = join(tmp, "project");
+    const checkout = join(tmp, "checkout");
+    await mkdir(join(source, CODE_ATTACHMENT_FOLDER), { recursive: true });
+    await mkdir(join(checkout, CODE_ATTACHMENT_FOLDER), { recursive: true });
+    await writeFile(join(source, CODE_ATTACHMENT_FOLDER, ".gitignore"), "*\n");
+    await writeFile(join(source, CODE_ATTACHMENT_FOLDER, "a.png"), "a");
+    // The branch already tracks a file there, and one of the copies is gone: nothing of the branch's is removed.
+    await writeFile(join(checkout, CODE_ATTACHMENT_FOLDER, "tracked.txt"), "tracked");
+    const workspace = new Workspace(source, [join(tmp, "app-data")]);
+    await assert.rejects(carryAttachmentCopies(workspace, checkout, [`${CODE_ATTACHMENT_FOLDER}/a.png`, `${CODE_ATTACHMENT_FOLDER}/missing.png`]));
+    assert.deepEqual(await readdir(join(checkout, CODE_ATTACHMENT_FOLDER)), ["tracked.txt"]);
+    // With no folder of its own the branch is left without one.
+    const fresh = join(tmp, "fresh");
+    await mkdir(fresh);
+    await assert.rejects(carryAttachmentCopies(workspace, fresh, [`${CODE_ATTACHMENT_FOLDER}/missing.png`]));
+    assert.deepEqual(await readdir(fresh), []);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});

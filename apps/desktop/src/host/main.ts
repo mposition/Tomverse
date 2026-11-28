@@ -53,7 +53,7 @@ import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, ty
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
-import { carryAttachmentCopies, copyOutsideFile, discardAttachmentCopy, removeCarriedCopies, savePastedImage } from "./code-attachments";
+import { carryAttachmentCopies, copyOutsideFile, discardAttachmentCopy, savePastedImage } from "./code-attachments";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { z } from "zod";
@@ -1965,22 +1965,30 @@ async function pasteCodeImage(input: z.infer<typeof codePastedImage>) {
   const root = state.root;
   const project = projectRoot;
   const connection = codeConnection();
-  if (!root || !project || project.remote || !workspaceNamespace() || state.busy || signingOut || closing) {
+  const namespace = workspaceNamespace();
+  const session = chatSession.signal;
+  if (!root || !project || project.remote || !namespace || state.busy || signingOut || closing) {
     throw new Error("Open a Code project of this computer to attach an image.");
   }
   if (codeReferences.size >= MAX_CODE_REFERENCES) return { references: [...codeReferences.values()], rejected: 1 };
   assertProjectRoot(project);
+  // The draft this image was pasted into: a sign-out, another account or another project meanwhile gets nothing of it.
+  const stillDraft = () => projectRoot === project && state.root === root && workspaceNamespace() === namespace && codeConnection() === connection &&
+    !session.aborted && !signingOut && !closing;
+  const workspace = new Workspace(root, [app.getPath("userData")]);
+  let saved: string | undefined;
   let rejected = 0;
   try {
-    const workspace = new Workspace(root, [app.getPath("userData")]);
-    const reference = workspace.reference(await savePastedImage(root, input));
-    if (projectRoot !== project || state.root !== root || (connection && cleanText(reference.path, connection.key) !== reference.path)) {
-      await discardAttachmentCopy(workspace, reference.path).catch(() => {});
-      if (projectRoot !== project || state.root !== root) throw new Error("The Code project changed.");
-      rejected++;
-    } else { const id = randomUUID(); codeReferences.set(id, { id, ...reference }); ownedCopies.add(id); }
+    saved = relative(root, await savePastedImage(root, input)).split(sep).join("/");
+    const reference = workspace.reference(saved);
+    if (!stillDraft()) throw new Error("The Code project changed.");
+    if (connection && cleanText(reference.path, connection.key) !== reference.path) throw new Error("The image cannot be attached.");
+    const id = randomUUID();
+    codeReferences.set(id, { id, ...reference });
+    ownedCopies.add(id);
   } catch (error) {
-    if (projectRoot !== project) throw error;
+    if (saved) await discardAttachmentCopy(workspace, saved).catch(() => {});
+    if (!stillDraft()) throw error;
     rejected++;
   }
   return { references: [...codeReferences.values()], rejected };
@@ -2037,7 +2045,10 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
             rejected++;
             continue;
           }
-          if ([...codeReferences.values()].some((item) => item.path === reference.path)) continue;
+          if ([...codeReferences.values()].some((item) => item.path === reference.path)) {
+            if (copiedPath) await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
+            continue;
+          }
           const id = randomUUID();
           codeReferences.set(id, { id, ...reference });
           if (copied) ownedCopies.add(id);
@@ -4656,10 +4667,10 @@ function registerIpc() {
               if (checkout.reference(reference.path).kind !== reference.kind) throw new Error("A selected reference is unavailable in this branch.");
             }
           },
-          // The copies come from the project before the worktree is recorded; a failed copy leaves no worktree behind.
+          // The copies come from the project before the worktree is recorded; a failed copy takes out only what it put in,
+          // so the unchanged checkout is discarded.
           ...(copiedPaths.size ? {
             prepare: (project: ProjectRoot) => carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), project.path, [...copiedPaths]),
-            unprepare: (project: ProjectRoot) => removeCarriedCopies(project.path),
           } : {}),
         });
       } catch {

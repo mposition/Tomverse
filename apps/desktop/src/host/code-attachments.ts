@@ -1,4 +1,4 @@
-import { lstat, mkdir, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, rm, rmdir, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { IMAGE_MAX_BYTES, isSecretPath, type Workspace } from "../../../tomverse-cli/src/runtime.js";
 
@@ -114,17 +114,29 @@ export async function discardAttachmentCopy(workspace: Workspace, path: string) 
   await rm(file);
 }
 
-/** Takes carried copies back out of a worktree that did not start, so it can be discarded as unchanged. */
-export async function removeCarriedCopies(targetRoot: string) {
-  await rm(join(targetRoot, CODE_ATTACHMENT_FOLDER), { recursive: true, force: true });
-}
-
-/** Puts the copies a task names into a new worktree of the project, at the same paths: Git does not carry them. */
+/**
+ * Puts the copies a task names into a new worktree of the project, at the same paths: Git does not carry them. If any copy
+ * fails, what this call wrote is taken out again (never a file the branch already had), and the error is thrown.
+ */
 export async function carryAttachmentCopies(source: Workspace, targetRoot: string, paths: readonly string[]) {
-  const folder = paths.length ? await attachmentFolder(targetRoot) : "";
-  for (const path of paths) {
-    if (!isCopyPath(path)) throw new CodeAttachmentRefused("Only attachment copies are carried.");
-    const bytes = await readFile(source.resolve(path, "read").absolute);
-    await writeFile(join(folder, path.split("/")[1]!), bytes, { flag: "wx" });
+  if (!paths.length) return;
+  if (paths.some((path) => !isCopyPath(path))) throw new CodeAttachmentRefused("Only attachment copies are carried.");
+  const folder = join(targetRoot, CODE_ATTACHMENT_FOLDER);
+  const ignore = join(folder, ".gitignore");
+  const hadFolder = await lstat(folder).then(() => true, () => false);
+  const hadIgnore = await lstat(ignore).then(() => true, () => false);
+  const written: string[] = [];
+  try {
+    await attachmentFolder(targetRoot);
+    for (const path of paths) {
+      const target = join(folder, path.split("/")[1]!);
+      await writeFile(target, await readFile(source.resolve(path, "read").absolute), { flag: "wx" });
+      written.push(target);
+    }
+  } catch (error) {
+    for (const file of written) await rm(file, { force: true }).catch(() => {});
+    if (!hadIgnore) await rm(ignore, { force: true }).catch(() => {});
+    if (!hadFolder) await rmdir(folder).catch(() => {});
+    throw error;
   }
 }
