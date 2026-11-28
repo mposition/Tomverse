@@ -43,6 +43,10 @@ const BEARER_FILES = [
     "app/api/code/v1/web-search/route.ts",
     "lib/codeWebSearch.ts",
     "lib/codeWebSearchCore.ts",
+    // The coding API's route-only choice: the same condition.
+    "app/api/code/v1/route/route.ts",
+    "lib/externalApiRouteOnly.ts",
+    "lib/externalApiRouteOnlyCore.ts",
 ];
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -62,7 +66,7 @@ test("a Desktop session is a verified bearer on exact coding paths, never a cook
     assert.ok(caller.includes("desktopCodeSessionRoute(new URL(request.url).pathname, request.method)"));
     assert.ok(caller.includes(`if (request.headers.has("cookie")) throw refused();`));
     // Every coding route that takes it resolves its caller there, not by a key-only path of its own.
-    for (const file of ["lib/externalApiInference.ts", "lib/codeWebSearch.ts", "lib/externalApiRoutes.ts"]) {
+    for (const file of ["lib/externalApiInference.ts", "lib/codeWebSearch.ts", "lib/externalApiRoutes.ts", "lib/externalApiRouteOnly.ts"]) {
         const source = read(file);
         assert.ok(source.includes("authenticateExternalApiCaller(request)"), file);
         assert.ok(!source.includes("authenticateExternalApiKey("), file);
@@ -82,7 +86,7 @@ test("only the exact completion path skips the Origin check", () => {
     }
     assert.equal(requiresMutationOriginCheck("POST", "/api/anthropic/v1/other"), true);
     // The coding API's generation routes, on the same exact-path condition.
-    for (const exact of ["/api/code/v1/chat/completions", "/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens", "/api/code/v1/web-search"]) {
+    for (const exact of ["/api/code/v1/chat/completions", "/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens", "/api/code/v1/web-search", "/api/code/v1/route"]) {
         assert.equal(requiresMutationOriginCheck("POST", exact), false, exact);
         assert.equal(requiresMutationOriginCheck("POST", `${exact}/x`), true, `${exact}/x`);
     }
