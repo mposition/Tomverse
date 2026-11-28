@@ -163,6 +163,103 @@ test("an answer's Markdown becomes headings, lists, quotes, code and a table", (
   ]);
 });
 
+/* ---- nothing is cut: each block limit is met by a block that holds it all */
+
+const LONG = 21_000; // over the writer's 20,000-character text limit
+
+test("a list item longer than the list writer holds is printed whole, with its marker", () => {
+  const item = `${"가".repeat(LONG)}LIST_TAIL`;
+  const blocks = markdownToDocumentBlocks(`- 짧은 항목\n- ${item}\n- 마지막`);
+  assert.ok(blocks.every((block) => block.type === "paragraph"), JSON.stringify(blocks.map((block) => block.type)));
+  const text = blocks.map((block) => block.text).join("\n");
+  assert.ok(text.startsWith("• 짧은 항목"));
+  assert.ok(text.includes("LIST_TAIL"));
+  assert.ok(text.endsWith("• 마지막"));
+  assert.equal(text.replace(/\n/g, "").length, `• 짧은 항목• ${item}• 마지막`.length);
+});
+
+test("a numbered list keeps its own numbers, its task boxes and its nested lists", () => {
+  const blocks = markdownToDocumentBlocks("3. 셋\n4. 넷\n   1. 안쪽\n\n- [x] 끝냄\n- [ ] 남음");
+  assert.deepEqual(blocks, [
+    { type: "paragraph", text: "3. 셋" },
+    { type: "paragraph", text: "4. 넷\n  1. 안쪽" },
+    { type: "bullets", items: ["[x] 끝냄", "[ ] 남음"] },
+  ]);
+});
+
+test("a table cell too long for the table writer, or a table too wide, becomes column: value lines", () => {
+  const cell = `${"나".repeat(LONG)}CELL_TAIL`;
+  const long = markdownToDocumentBlocks(`| 항목 | 설명 |\n| --- | --- |\n| A | ${cell} |`);
+  assert.ok(long.every((block) => block.type === "paragraph"));
+  const longText = long.map((block) => block.text).join("\n");
+  assert.ok(longText.startsWith("항목: A\n설명: 나"));
+  assert.ok(longText.includes("CELL_TAIL"));
+
+  const columns = Array.from({ length: 25 }, (_, index) => `C${index + 1}`);
+  const wide = markdownToDocumentBlocks(
+    [`| ${columns.join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`, `| ${columns.map((name) => `v${name}`).join(" | ")} |`].join("\n")
+  );
+  assert.deepEqual(wide, [{ type: "paragraph", text: columns.map((name) => `${name}: v${name}`).join("\n") }]);
+});
+
+test("a heading too long for a heading, an image's address and a reference definition are all kept", () => {
+  const heading = `${"제".repeat(400)}HEAD_TAIL`;
+  const blocks = markdownToDocumentBlocks(
+    `# ${heading}\n\n![도표](https://example.com/a.png)\n\n[가이드][1]\n\n[1]: https://example.com/guide "Guide"`
+  );
+  assert.deepEqual(blocks, [
+    { type: "paragraph", text: heading },
+    { type: "paragraph", text: "도표 (https://example.com/a.png)" },
+    { type: "paragraph", text: "가이드" },
+    { type: "paragraph", text: '[1]: https://example.com/guide "Guide"' },
+  ]);
+});
+
+test("a quote keeps the list and code inside it as their own blocks", () => {
+  const blocks = markdownToDocumentBlocks("> 인용 문단\n>\n> - 하나\n> - 둘\n>\n> ```\n> code()\n> ```");
+  assert.deepEqual(blocks, [
+    { type: "quote", text: "인용 문단" },
+    { type: "bullets", items: ["하나", "둘"] },
+    { type: "code", text: "code()" },
+  ]);
+});
+
+test("the PDF carries the ends of a long item, a long cell, a wide table, a long heading and a long title", async () => {
+  const columns = Array.from({ length: 25 }, (_, index) => `C${index + 1}`);
+  const spec = conversationPdfSpec({
+    title: `${"대화".repeat(200)}TITLE_TAIL`,
+    headerLines: [],
+    messages: [
+      {
+        role: "assistant",
+        content: [
+          `# ${"머".repeat(400)}HEAD_TAIL`,
+          "",
+          `- 짧음\n- ${"가 ".repeat(LONG / 2)}LIST_TAIL`,
+          "",
+          `| 항목 | 설명 |\n| --- | --- |\n| A | ${"나 ".repeat(LONG / 2)}CELL_TAIL |`,
+          "",
+          [`| ${columns.join(" | ")} |`, `| ${columns.map(() => "---").join(" | ")} |`, `| ${columns.map(() => "x").join(" | ")}WIDE_TAIL |`].join("\n"),
+        ].join("\n"),
+      },
+    ],
+  });
+  const rendered = renderConversationPdf(spec);
+  assert.equal(rendered.ok, true);
+  const text = (await pdfText(rendered.bytes)).replace(/\s+/g, "");
+  for (const tail of ["TITLE_TAIL", "HEAD_TAIL", "LIST_TAIL", "CELL_TAIL", "C25:xWIDE_TAIL"]) {
+    assert.ok(text.includes(tail), `missing: ${tail}`);
+  }
+});
+
+test("characters the PDF font cannot draw are reported, not passed off as a complete copy", () => {
+  const spec = conversationPdfSpec({ title: "t", headerLines: [], messages: [{ role: "user", content: "좋아요 👍 고마워요" }] });
+  const rendered = renderConversationPdf(spec);
+  assert.equal(rendered.ok, true);
+  assert.equal(rendered.charactersReplaced, true);
+  assert.equal(renderConversationPdf(conversationPdfSpec({ title: "t", headerLines: [], messages: [{ role: "user", content: "좋아요" }] })).charactersReplaced, false);
+});
+
 test("a conversation too long for a PDF is refused, not cut", () => {
   const message = { role: "user", content: "x" };
   assert.throws(
@@ -180,7 +277,7 @@ test("a conversation too long for a PDF is refused, not cut", () => {
   );
 });
 
-const pdfText = async (bytes) => {
+async function pdfText(bytes) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const document = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false, isEvalSupported: false }).promise;
   let text = "";

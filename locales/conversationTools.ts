@@ -36,6 +36,7 @@ export type ConversationToolsCopy = {
   pdfUnsupportedCharacters: string;
   pdfTooLarge: string;
   deleteLimitReached: string;
+  pdfCharactersReplaced: string;
 };
 
 export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
@@ -66,6 +67,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "Some characters in this conversation can't be drawn in a PDF. Download it as Markdown instead.",
     pdfTooLarge: "This conversation is too long for a PDF. Download it as Markdown instead.",
     deleteLimitReached: "You've reached the limit for deleting many conversations at once (it is shared with Delete all). Try again later, or delete them one at a time.",
+    pdfCharactersReplaced: "Downloaded. A few characters (such as emoji) can't be drawn in a PDF and appear as boxes; the Markdown download has them all.",
   },
   ko: {
     archive: "보관",
@@ -94,6 +96,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "이 대화의 일부 글자는 PDF로 그릴 수 없습니다. Markdown으로 내려받아 주세요.",
     pdfTooLarge: "이 대화는 PDF로 만들기에 너무 깁니다. Markdown으로 내려받아 주세요.",
     deleteLimitReached: "여러 대화를 한꺼번에 지우는 횟수가 한도에 닿았습니다(전체 삭제와 함께 셉니다). 잠시 뒤 다시 하거나 한 건씩 지워 주세요.",
+    pdfCharactersReplaced: "내려받았습니다. 이모지 같은 일부 글자는 PDF에 그릴 수 없어 네모로 표시됩니다. Markdown 파일에는 모두 들어 있습니다.",
   },
   zh: {
     archive: "归档",
@@ -122,6 +125,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "此对话中的部分字符无法在 PDF 中显示，请改为下载 Markdown。",
     pdfTooLarge: "此对话太长，无法生成 PDF，请改为下载 Markdown。",
     deleteLimitReached: "一次删除多个对话的次数已达上限（与“全部删除”共用）。请稍后再试，或逐个删除。",
+    pdfCharactersReplaced: "已下载。部分字符（如表情符号）无法在 PDF 中显示，会显示为方框；Markdown 文件中保留了全部内容。",
   },
   "zh-Hant": {
     archive: "封存",
@@ -150,6 +154,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "此對話中的部分字元無法在 PDF 中顯示，請改為下載 Markdown。",
     pdfTooLarge: "此對話太長，無法產生 PDF，請改為下載 Markdown。",
     deleteLimitReached: "一次刪除多個對話的次數已達上限（與「全部刪除」共用）。請稍後再試，或逐一刪除。",
+    pdfCharactersReplaced: "已下載。部分字元（如表情符號）無法在 PDF 中顯示，會顯示為方框；Markdown 檔案中保留了全部內容。",
   },
   fr: {
     archive: "Archiver",
@@ -178,6 +183,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "Certains caractères de cette conversation ne peuvent pas être affichés dans un PDF. Téléchargez-la plutôt en Markdown.",
     pdfTooLarge: "Cette conversation est trop longue pour un PDF. Téléchargez-la plutôt en Markdown.",
     deleteLimitReached: "Vous avez atteint la limite de suppression de plusieurs conversations à la fois (partagée avec Tout supprimer). Réessayez plus tard ou supprimez-les une par une.",
+    pdfCharactersReplaced: "Téléchargé. Certains caractères (comme les emoji) ne peuvent pas être affichés dans un PDF et apparaissent sous forme de carrés ; le fichier Markdown les contient tous.",
   },
   de: {
     archive: "Archivieren",
@@ -206,6 +212,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "Einige Zeichen dieser Unterhaltung lassen sich im PDF nicht darstellen. Lade sie stattdessen als Markdown herunter.",
     pdfTooLarge: "Diese Unterhaltung ist für ein PDF zu lang. Lade sie stattdessen als Markdown herunter.",
     deleteLimitReached: "Du hast das Limit für das gleichzeitige Löschen mehrerer Unterhaltungen erreicht (es wird mit „Alle löschen“ geteilt). Versuche es später erneut oder lösche sie einzeln.",
+    pdfCharactersReplaced: "Heruntergeladen. Einige Zeichen (etwa Emoji) lassen sich im PDF nicht darstellen und erscheinen als Kästchen; die Markdown-Datei enthält alle.",
   },
   es: {
     archive: "Archivar",
@@ -234,6 +241,7 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "Algunos caracteres de esta conversación no se pueden mostrar en un PDF. Descárgala en Markdown.",
     pdfTooLarge: "Esta conversación es demasiado larga para un PDF. Descárgala en Markdown.",
     deleteLimitReached: "Has alcanzado el límite para eliminar varias conversaciones a la vez (se comparte con Eliminar todo). Inténtalo más tarde o elimínalas de una en una.",
+    pdfCharactersReplaced: "Descargado. Algunos caracteres (como los emoji) no se pueden mostrar en un PDF y aparecen como cuadros; el archivo Markdown los incluye todos.",
   },
   pt: {
     archive: "Arquivar",
@@ -262,5 +270,6 @@ export const conversationToolsCopy: Record<Language, ConversationToolsCopy> = {
     pdfUnsupportedCharacters: "Alguns caracteres desta conversa não podem ser exibidos em PDF. Baixe-a em Markdown.",
     pdfTooLarge: "Esta conversa é longa demais para um PDF. Baixe-a em Markdown.",
     deleteLimitReached: "Você atingiu o limite para excluir várias conversas de uma vez (compartilhado com Excluir tudo). Tente mais tarde ou exclua uma por vez.",
+    pdfCharactersReplaced: "Baixado. Alguns caracteres (como emoji) não podem ser exibidos em PDF e aparecem como quadrados; o arquivo Markdown contém todos.",
   },
 };

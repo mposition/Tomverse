@@ -116,6 +116,15 @@ test("?format=pdf returns the same conversation as a PDF, read in the export's o
   assert.equal(new TextDecoder().decode(bytes.slice(0, 5)), "%PDF-");
   // The lock is read again after rendering, before any byte is released.
   assert.equal(reads.length, 2);
+  assert.equal(response.headers.get("x-export-characters-replaced"), null);
+});
+
+test("a PDF with a few characters drawn as boxes says so in the response", async () => {
+  reset();
+  storedMessages = [{ id: "m1", role: "user", content: "고마워요 오늘도 좋은 하루 👍", modelId: null, createdAt: new Date() }];
+  const response = await call("?format=pdf");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-export-characters-replaced"), "1");
 });
 
 test("a PDF the font cannot draw, or one too long, is refused with a reason the menu can explain", async () => {

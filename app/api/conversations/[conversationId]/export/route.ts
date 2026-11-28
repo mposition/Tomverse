@@ -324,6 +324,8 @@ export async function GET(
                     "Content-Disposition": conversationExportContentDisposition(displayTitle, ".pdf"),
                     "Cache-Control": "no-store",
                     "X-Content-Type-Options": "nosniff",
+                    // Some characters were drawn as boxes; the menu says so.
+                    ...(rendered.charactersReplaced ? { "X-Export-Characters-Replaced": "1" } : {}),
                 },
             });
         }

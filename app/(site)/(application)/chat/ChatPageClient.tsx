@@ -9635,10 +9635,14 @@ export function ChatPageClient({
                 }
                 return;
             }
+            const charactersReplaced =
+                options.format === "pdf" && response.headers.get("X-Export-Characters-Replaced") === "1";
             await saveResponseAsFile(
                 response,
                 options.format === "markdown" ? "conversation.md" : options.format === "pdf" ? "conversation.pdf" : "conversation.txt"
             );
+            // The file is made, but not exactly as written: said, not left to be found.
+            if (charactersReplaced) showToast(conversationToolsCopy[lang].pdfCharactersReplaced, "info");
         } catch {
             showToast(t("sidebar.downloadFailed"), "error");
         }
