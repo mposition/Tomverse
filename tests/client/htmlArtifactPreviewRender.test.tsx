@@ -35,7 +35,11 @@ const card = (value: ReturnType<typeof artifact>) =>
   );
 
 test("the frame is a sandboxed srcdoc with scripts and no app origin, no navigation, no src", () => {
-  const html = renderToStaticMarkup(<HtmlArtifactPreviewFrame html="<h1>hi</h1><script>1+1</script>" title="Preview of chart.html" />);
+  const html = renderToStaticMarkup(
+    <LanguageProvider initialLang="en">
+      <HtmlArtifactPreviewFrame html="<h1>hi</h1><script>1+1</script>" title="Preview of chart.html" />
+    </LanguageProvider>
+  );
   const sandbox = /sandbox="([^"]*)"/.exec(html)?.[1];
   assert.equal(sandbox, "allow-scripts");
   assert.doesNotMatch(html, /allow-same-origin|allow-top-navigation|allow-popups|allow-forms|allow-modals|allow-downloads/);
@@ -46,6 +50,17 @@ test("the frame is a sandboxed srcdoc with scripts and no app origin, no navigat
   assert.ok(html.includes("connect-src &#x27;none&#x27;"), "the connect-src 'none' policy travels in the document");
   assert.ok(HTML_PREVIEW_CSP.includes("connect-src 'none'"));
   assert.match(html, /title="Preview of chart.html"/);
+});
+
+test("a page that names shadowrootmode is not drawn until its template scan has loaded", () => {
+  // The scan (parse5) is loaded in an effect, which a server render never runs: no frame, only the empty placeholder.
+  const html = renderToStaticMarkup(
+    <LanguageProvider initialLang="en">
+      <HtmlArtifactPreviewFrame html='<div><template shadowrootmode="closed"><p>x</p></template></div>' title="Preview" />
+    </LanguageProvider>
+  );
+  assert.match(html, /data-testid="html-artifact-preview-loading"/);
+  assert.doesNotMatch(html, /<iframe|srcdoc/i);
 });
 
 test("a ready HTML file gets a preview button next to download; no other file and no unfinished file does", () => {

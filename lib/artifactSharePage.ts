@@ -25,7 +25,8 @@
 
 import { ARTIFACT_SHARE_OVERRIDE_HEADERS } from "@/lib/artifactSharePageHeaders";
 import { buildCodePreviewDocument, type CodePreviewKind, type PreviewDocumentLabels } from "@/lib/chatArtifactPreview";
-import { HTML_PREVIEW_SANDBOX, buildHtmlPreviewSrcdoc, htmlPreviewCsp } from "@/lib/htmlArtifactPreview";
+import { HTML_PREVIEW_SANDBOX, HtmlPreviewUnavailableError, buildHtmlPreviewSrcdoc, htmlPreviewCsp } from "@/lib/htmlArtifactPreview";
+import { findTemplateStartTags } from "@/lib/htmlPreviewTemplateStarts";
 
 /** The frame's sandbox on the public page: the preview's, scripts and nothing else. */
 export const ARTIFACT_SHARE_FRAME_SANDBOX = HTML_PREVIEW_SANDBOX;
@@ -113,7 +114,9 @@ const head = (lang: string, title: string) =>
 
 /**
  * The share page, or null when the stored page cannot be built (empty, or
- * over the preview's size limit -- the table's CHECK already refuses both).
+ * over the preview's size limit -- the table's CHECK already refuses both --
+ * or its declarative shadow roots could not be opened; the route then answers
+ * its "not available" page, never the page with those roots left closed).
  */
 export function buildArtifactSharePage(input: {
   share: { previewKind: CodePreviewKind; language: string; title: string | null; content: string };
@@ -129,7 +132,13 @@ export function buildArtifactSharePage(input: {
     assetOrigin: input.assetOrigin,
   });
   if (!built.ok) return null;
-  const frame = buildHtmlPreviewSrcdoc(built.html, input.assetOrigin);
+  let frame: string;
+  try {
+    frame = buildHtmlPreviewSrcdoc(built.html, input.assetOrigin, { findTemplates: findTemplateStartTags });
+  } catch (error) {
+    if (error instanceof HtmlPreviewUnavailableError) return null;
+    throw error;
+  }
   const file = share.title ? `<span class="file">${escapeHtml(share.title)}</span>` : "";
   return (
     head(copy.lang, share.title ? `${share.title} · ${copy.title}` : copy.title) +

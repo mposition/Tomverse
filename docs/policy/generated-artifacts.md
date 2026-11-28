@@ -512,11 +512,11 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     파싱하거나 고쳐 쓰지 않습니다**(`DOMParser`로 지우는 시도는 신뢰할 수 없는 HTML을 부모 문서가 다루게 해 철회했고, 정규식은 우회됩니다).
     남는 방어는 안쪽 문서의 CSP(`connect-src 'none'`을 브라우저가 이 hint에 적용하는 만큼)와 그 다음에 둔
     `x-dns-prefetch-control: off` meta뿐이며 Browser 창에서는 관찰하지 못했습니다. 부모 문서가 page를 파싱하는 곳은 앱 문서에 nonce가 있을 때
-    nonce를 붙이는 `withEmbedderNonce` 하나뿐이고, 이는 이번 변경 전부터 있던 것입니다(위 설명). page를 고쳐 쓰는 곳은 이것과
-    closed 선언형 shadow root 앞에 ` shadowrootmode=open `을 끼우는 `openDeclarativeShadowRoots`(§19.7) 둘입니다. 정규식이
-    우회된다는 위 판단은 쓰는 방법이 여러 가지인 resource hint를 지우는 일에 대한 것입니다. 이 변환은 아무것도 지우지 않고 글자를
-    끼우기만 하며, 글 안의 모든 `<template` 시작 태그를 tokenizer 방식으로 하나씩 읽으므로 브라우저가 파싱하는 태그를 빠뜨리지
-    않습니다(측정: 대문자·`/`·따옴표 안 `>`·문자 참조·script나 comment 뒤에 숨긴 경우 포함 UDP 0).
+    nonce를 붙이는 `withEmbedderNonce`와, `shadowrootmode` 낱말이 있는 page에서 template 시작 태그의 위치를 찾는 parse5(명세
+    tokenizer, §19.7) 둘입니다. page를 고쳐 쓰는 곳은 nonce 붙이기와, 실제 closed template 시작 태그에 ` shadowrootmode=open `
+    하나를 끼우는 `openDeclarativeShadowRoots`(§19.7) 둘입니다. 정규식이 우회된다는 위 판단은 쓰는 방법이 여러 가지인 resource hint를
+    지우는 일에 대한 것입니다. 이 변환은 아무것도 지우지 않고, 바꿀 자리를 정규식이 아니라 브라우저와 같은 명세 파서로 찾습니다(측정:
+    대문자·`/`·따옴표 안 `>`·문자 참조·script나 comment 뒤에 숨긴 경우 포함 UDP 0, 스크립트·CSS·주석 속 같은 글자는 원문 그대로).
   - 미리보기는 **frame 안의 frame**입니다. 안쪽이 모델의 page(위 sandbox·CSP)이고 바깥쪽은 우리 문서로
     `frame-src 'none'`**만** 갖습니다(`srcdoc` 자식은 부모의 모든 정책을 상속하므로 다른 지시문을 더하면 page에
     닿습니다). script가 `location`을 바꿔 자기 frame을 임의 주소로 보내는 것은 page 정책으로 막을 수 없는
@@ -1378,7 +1378,9 @@ plan 두 번)와 Research(run·revision 최대 두 번) 조회이고, 이 모두
 
 rate limit: 만들기 분당 10·하루 100, 상태 조회 60·2,000, 중지 20·200, 공개 읽기 토큰당 120·5,000(IP 버킷 포함, 대화
 공유와 같음). 만들기·중지는 `logSecurityAuditEvent("artifact.share.create" | "artifact.share.revoke")`로 남긴다.
-소유자는 패널의 공유 버튼에서 링크·만료일·복사·중지를 본다(사이드바 목록은 없다, §12).
+소유자는 패널의 공유 버튼에서 링크·만료일·복사·중지를 본다(사이드바 목록은 없다, §12). 만료 시각은 소유자 카드와 공개 페이지가
+같은 형식으로 보인다: UTC 날짜·시각에 시간대 이름을 붙인다(`formatArtifactShareExpiry`, 공개 페이지는 세션이 없어 읽는 사람의
+시간대를 모른다).
 
 ### 19.4 공개 페이지의 격리
 
@@ -1435,7 +1437,7 @@ localStorage·부모와 최상위 DOM 접근(SecurityError). 공지 막대는 fr
 `tests/artifactShare.test.mjs`(스위치 조합, 거절 순서와 코드, 공유 가능 언어, 답변 포함 검사, 공개 페이지 CSP가 미리보기
 정책과 지시문별로 같고 `sandbox`·`frame-ancestors`만 더함, frame sandbox, 공유 코드가 우리 문서에 없음, React 문서, 크기,
 헤더, 확인 화면과 `<template>`, 가드가 frame 문서 맨 앞), `tests/htmlArtifactPreview.test.mjs`(`webrtc 'block'`, 가드 위치와
-nonce, 가드가 잠그는 이름, open root 추적, open으로 만드는 `attachShadow` wrapper와 파서 잠금, closed 선언형 root를 여는 변환의 태그 안·밖·따옴표 안 `>`·대소문자·선형 시간과 그리는 순간에만 적용), `tests/robotsRoute.test.mjs`(광고 크롤러), `tests/integration/artifact-share.db.test.ts`(migration
+nonce, 가드가 잠그는 이름, open root 추적, prototype 없는 옵션으로 open을 강제하는 `attachShadow` wrapper, 설정 실패 시 `window.stop()`, 파서 잠금, parse5가 찾은 실제 template에만 끼우기 — script·style·comment·textarea·title·noscript·속성값·svg는 그대로, `<!-->`·double-escaped script·template 안 template·`<math><mi>`·CR LF, 실패·시간 초과·finder 없음은 거절, 1MB 시간, 그리는 순간에만 적용), `tests/client/htmlArtifactPreviewRender.test.tsx`(낱말이 있는 page는 parse5를 불러오기 전에 그리지 않음), `tests/robotsRoute.test.mjs`(광고 크롤러), `tests/integration/artifact-share.db.test.ts`(migration
 스키마: 생성·재사용·만료·중지·남의 것 거절·잠금 경합·cascade·계정 삭제와 내보내기·CHECK·같은 블록 동시 공유가 링크 하나를 남김·closed 선언형 root가 든 스냅샷이 원문 그대로),
 `tests/server-contract/artifact-share-page-route.test.ts`(세션 미사용, 헤더, 같은 404, proxy 예외, 확인 화면이 먼저).
 
@@ -1496,73 +1498,102 @@ nonce, 가드가 잠그는 이름, open root 추적, open으로 만드는 `attac
 - 채팅 미리보기(Next dev 서버, `CSP_MODE=enforce`): 가드가 nonce를 달고 실행됐고(`typeof RTCPeerConnection === "undefined"`),
   정상 HTML이 그려졌으며 STUN 시도의 UDP 패킷은 0개였다.
 
-**그림자 DOM 보강**(검토 반영 2026-11-28, 5차 검토로 다시 고침). observer는 document의 tree만 보는데 shadow root는 그 tree에
-속하지 않아, shadow root 안에 넣은 frame은 지워지지 않고 새 realm에서 STUN을 보냈다(보강 전 측정: 16개 경로에서 패킷). 처음에는
-선언형 shadow DOM을 꺼 버렸으나(속성 이름 바꾸기) 그러면 스크립트·CSS의 낱말까지 바뀌고 정상 web component가 내용을 잃었다.
-지금의 원칙은 **frame 안의 shadow root를 모두 open으로 두고 가드가 따라 들어간다**이다.
+**그림자 DOM 보강**(검토 반영 2026-11-28, 5·6차 검토로 다시 고침). observer는 document의 tree만 보는데 shadow root는 그
+tree에 속하지 않아, shadow root 안에 넣은 frame은 지워지지 않고 새 realm에서 STUN을 보냈다(보강 전 측정: 16개 경로에서 패킷).
+처음에는 선언형 shadow DOM을 꺼 버렸으나(속성 이름 바꾸기) 스크립트·CSS의 낱말까지 바뀌고 정상 web component가 내용을 잃었다.
+다음에는 손으로 짠 스캐너로 모든 `<template`를 읽었으나 스크립트 문자열 속 글자에도 끼워 넣었다. 지금의 원칙은 **frame 안의
+shadow root를 모두 open으로 두고 가드가 따라 들어간다**이다.
 - observer는 추가된 요소와 그 하위 요소 가운데 `shadowRoot`가 있는 것을 찾아, 그 root를 같은 observer로 보고 안의 frame을 지운 뒤
   root 안의 요소에도 같은 일을 한다. 중첩 root와, 처음 파싱 때 parser가 만든 root(host 요소가 추가되는 것을 보고 처리)가 여기서
   잡힌다. `shadowRoot` getter와 순회 함수는 page보다 먼저 잡아 둔다(page가 getter를 바꿔도 측정상 0).
-- `Element.prototype.attachShadow`는 바꿀 수 없는(non-configurable) wrapper다. 옵션을 한 번만 읽어(`Object.assign`) mode를 open으로
-  바꾸고, 만든 root를 바로 따라간다(이미 문서에 있는 host에 붙이면 mutation이 생기지 않으므로). open으로 바꾸는 이유: clonable closed
-  root를 `cloneNode`·`importNode`로 복제하면 복제본의 closed root는 `attachShadow` 없이 생겨 닿을 수 없었다(측정: 바꾸기 전 가드
-  4, 바꾼 뒤 0). closed로 만든 컴포넌트도 받은 root 참조로 그대로 동작하고(측정), 달라지는 것은 `host.shadowRoot`가 null이 아니게
-  되는 것뿐이다.
+- `Element.prototype.attachShadow`는 바꿀 수 없는(non-configurable) wrapper다. page가 넘긴 옵션(`delegatesFocus`·`slotAssignment`·
+  `clonable`·`serializable`·`customElementRegistry`·`referenceTarget`)을 하나씩 한 번만 읽어 **prototype이 없는 객체**에 own data
+  property로 옮기고, `mode`는 마지막에 `"open"`으로 쓴다. 객체를 만들고 쓰는 함수(`Object.create`·`defineProperty`)는 page보다 먼저
+  잡아 두고, 배열 메서드는 쓰지 않는다. 그래서 page가 `Object.prototype`이나 `Array.prototype`에 getter·setter를 심어도 mode를
+  closed로 만들 수 없다(측정). open으로 만드는 이유: clonable closed root를 `cloneNode`·`importNode`로 복제하면 복제본의 closed root는
+  `attachShadow` 없이 생겨 닿을 수 없다(측정). 복제본은 원본의 mode를 따르므로 open root의 복제본은 open이고 observer가 따라간다.
+  `clonable`은 page가 준 대로 둔다(복제를 쓰는 page가 그대로 동작하고, 복제 경로는 위 이유로 닫혀 있다). closed로 만든 컴포넌트도
+  받은 root 참조로 그대로 동작하고, 달라지는 것은 `host.shadowRoot`가 null이 아니게 되는 것뿐이다.
+- observer에 넘기는 옵션(`childList`·`subtree`)도 같은 방식의 prototype 없는 객체다. 보통 객체였다면 page가 `Object.prototype`에
+  `attributes: false`·`attributeOldValue: true`를 심어 `observe()`를 실패시킬 수 있었다(측정 0).
+- 가드 설정이 하나라도 실패하면(예: wrapper를 정의하지 못함) `window.stop()`으로 문서를 멈추고 오류를 던진다. page는 파싱되지 않고
+  실행되지 않는다(fail closed, 측정: 가드보다 먼저 `attachShadow`를 고정해 둔 문서에서 page 실행 없음, UDP 0).
 - page 자신의 markup은 어떤 script보다 먼저 파싱되므로, closed 선언형 root는 frame을 만들 때 글에서 open으로 바꾼다
-  (`openDeclarativeShadowRoots`). 글 안의 모든 `<template` 시작 태그를 하나씩, HTML tokenizer가 시작 태그를 읽는 방식(따옴표 안의
-  `>`는 태그를 끝내지 않음, 이름은 ASCII 대소문자 무시)으로 첫 `shadowrootmode` 속성까지 읽는다. 그 값이 `closed`이거나 `closed`를
-  쓸 수 있는 문자 참조(`&`)를 담으면 태그 이름 바로 뒤에 ` shadowrootmode=open `을 끼운다. 같은 이름의 속성은 첫 번째가 이기므로
-  root는 open이 되고 내용·스타일·다른 옵션은 그대로다. 지우거나 바꾸는 글자 없이 따옴표 없는 글자만 끼우므로 script 문법을 깨지
-  않는다. open root, 속성이 없는 template, 다른 태그, 스크립트·문자열·CSS 속의 낱말은 그대로다.
-  - script·comment 안의 `<template`도 읽는다. 그 구간을 건너뛰려면 브라우저가 그 구간을 어디서 끝내는지 알아야 하는데 그 판단은
-    어긋나게 만들 수 있다(`<!-->`는 그 자리에서 끝나는 comment이고, 문자열 안의 `<template title='`은 뒤의 진짜 태그를 값으로
-    삼키게 할 수 있다 — 둘 다 측정 0). 대가: 스크립트 문자열 안에 글자 그대로 쓴 closed template 태그에는 같은 글자가 끼워진다
-    (측정, 문법은 유지).
-  - 모든 읽기가 끝까지 가게 만든 page도 선형 시간에 끝난다. page 길이에 비례하는 예산을 넘기면 그 뒤로는 낱말이 뒤에 나오는
-    태그를 closed로 본다(1MB 병적 입력에서 62ms).
+  (`openDeclarativeShadowRoots`). 위치는 **HTML 명세를 그대로 구현한 parse5**(직접 의존성 8.1.1, `lib/htmlPreviewTemplateStarts.ts`)가
+  찾는다. frame이 page보다 먼저 파싱하는 우리 head(정책 meta·prefetch meta·가드)를 앞에 붙인 문서 전체를 parse5가 tokenizer와 tree
+  construction으로 읽고, HTML namespace의 `<template>` 요소마다 시작 태그 위치와 첫 `shadowrootmode` 값(문자 참조는 풀린 값, 같은
+  이름의 두 번째 속성은 버려진 값)을 돌려준다. 그 값이 `closed`인 태그 이름 바로 뒤에만 ` shadowrootmode=open `을 끼운다. 같은
+  이름의 속성은 첫 번째가 이기므로 root는 open이 되고 내용·스타일·다른 옵션은 그대로다.
+  - parse5가 태그로 보지 않는 글자는 건드리지 않는다: script·style·comment·textarea·title·noscript 안, 속성값 안, double-escaped
+    script 안, svg 안의 template. `<!-->` 뒤나 스크립트 문자열 뒤에 둔 진짜 태그, template 안의 template, `<math><mi>` 안의 template,
+    CR LF가 섞인 page도 브라우저와 같게 처리한다(단위 테스트와 측정).
+  - parse5는 위치만 알려 주고, 트리에서 아무것도 만들거나 직렬화하지 않는다. 부모가 고치는 것은 실제 closed template 시작 태그에
+    속성 하나를 끼우는 것뿐이다.
+  - `shadowrootmode` 낱말(대소문자 무시)이 없는 page는 선언형 root를 만들 수 없으므로 읽지 않는다(속성 이름은 문자 참조로 쓸 수
+    없다). 그 낱말이 있는 page에서 parse5가 없거나, 예외를 내거나, 2초(`TEMPLATE_SCAN_TIME_LIMIT_MS`)를 넘기거나, 알려 준 위치가
+    page의 `<template` 태그 이름이 아니면 미리보기를 그리지 않는다(`HtmlPreviewUnavailableError`). 채팅은 "미리보기를 실행하지
+    못했습니다"(parse5를 불러오지 못하면 "미리보기에 필요한 도구를 불러오지 못했습니다")를 보이고, 공유 페이지는 "열 수 없음" 404다.
+    root를 closed로 남긴 채 그리는 경우는 없다. 1MB page(closed template 1.6만 개)는 334ms, 낱말만 있는 1MB page는 191ms였다.
+  - 번들: 공유 페이지(서버)는 parse5를 정적으로 쓴다. 채팅 미리보기(클라이언트)는 낱말이 있는 page를 열 때만 지연 로딩한다
+    (`import("@/lib/htmlPreviewTemplateStarts")`). 지연 chunk는 esbuild minify 기준 173,664바이트(gzip 43,930)다. 미리보기 lib
+    (`lib/htmlArtifactPreview.ts`)는 8,562바이트(gzip 3,495)이고 parse5를 담지 않는다. 지금까지 채팅 클라이언트 번들에는 parse5가 없었다
+    (`rehype-katex`의 `hast-util-from-html-isomorphic`는 브라우저에서 DOMParser 판을 쓴다).
   - 옛 이름 `shadowroot`는 다루지 않는다(Chromium 159는 이 이름으로 root를 만들지 않음, 측정).
   - 저장된 스냅샷과 공개 읽기 응답은 원문 그대로이고(DB 테스트), 그리는 순간에만 바뀐다.
 - 실행 중에 문자열에서 root를 만드는 파서는 계속 `undefined`로 고정한다: `Element`·`ShadowRoot`의 `setHTMLUnsafe`·`setHTML`,
   `Document.parseHTMLUnsafe`·`parseHTML`, `document.write`·`writeln`. 이들은 script가 만든 문자열로 closed 선언형 root를 만들 수
-  있고(측정), 그 문자열은 위의 글 변환이 보지 못한다(write는 속성 이름을 두 번에 나눠 넣을 수도 있다). open root를 따라가는
-  것으로는 closed root에 닿지 못하므로 잠금이 필요하다. 이 API를 부르는 page는 TypeError가 난다.
+  있고(측정), 그 문자열은 위의 변환이 보지 못한다(write는 속성 이름을 두 번에 나눠 넣을 수도 있다). open root를 따라가는 것으로는
+  closed root에 닿지 못하므로 잠금이 필요하다. 이 API를 부르는 page는 TypeError가 난다.
 - `MediaDevices.prototype`의 `getUserMedia`·`getDisplayMedia`·`enumerateDevices` 등도 같은 방식으로 고정한다.
 
-**부모가 model HTML을 고치지 않는다는 원칙의 두 번째 예외.** 부모는 model HTML을 해석하거나 다시 쓰지 않는다. 예외는 둘이다:
-채팅에서 앱 nonce를 다는 `withEmbedderNonce`(브라우저 파서 사용)와, closed 선언형 root 앞에 ` shadowrootmode=open `을 끼우는
-`openDeclarativeShadowRoots`다. 다른 방법이 없었다: 파서는 `attachShadow`를 부르지 않고 선언형 root를 붙이고, closed root는
-script로 닿을 수 없으며, 선언형 shadow DOM의 mode를 바꾸거나 끄는 CSP·Document-Policy 지시문이 없다(Chromium 159).
+**부모가 model HTML을 고치지 않는다는 원칙의 두 번째 예외.** 부모는 model HTML을 고쳐 쓰지 않는다. 예외는 둘이다: 채팅에서 앱
+nonce를 다는 `withEmbedderNonce`(브라우저의 DOMParser)와, closed 선언형 root의 시작 태그에 ` shadowrootmode=open `을 끼우는
+`openDeclarativeShadowRoots`다. 뒤의 것은 명세 tokenizer(parse5)로 위치만 찾고, 바꾸는 것은 실제 template 시작 태그에 속성 하나를
+끼우는 것뿐이다. 다른 방법이 없었다: 파서는 `attachShadow`를 부르지 않고 선언형 root를 붙이고, closed root는 script로 닿을 수 없으며,
+선언형 shadow DOM의 mode를 바꾸거나 끄는 CSP·Document-Policy 지시문이 없다(Chromium 159).
 
 | 시도 (Chromium 159.0.8154.6, 시도마다 다른 UDP 포트) | 대조군(가드·변환 없음) | 가드 |
 |---|---|---|
-| markup의 closed 선언형 root + iframe: `closed`, 대문자와 `/`, 따옴표 안 `>`, `&#99;losed`, closed가 첫 번째인 중복 속성 | 각 4 | 0 |
-| markup의 closed root를 script 문자열 뒤나 빈 comment(`<!-->`) 뒤에 둠 | 각 4 | 0 |
+| markup의 closed 선언형 root + iframe: `closed`, 대문자와 `/`, 따옴표 안 `>`, `&#99;losed`, closed가 첫 번째인 중복 속성, CR LF | 각 4 | 0 |
+| markup의 closed root를 script 문자열 뒤, 빈 comment(`<!-->`) 뒤, double-escaped script 뒤에 둠 | 각 4 | 0 |
 | markup의 closed root 안 이미지 `onerror`가 root에 iframe 추가 | 4 | 0 |
-| markup의 closed clonable root를 `cloneNode` | 8 | 0 |
+| markup의 closed clonable root를 `cloneNode`, template 내용 안의 closed clonable root를 복제 | 8, 4 | 0 |
 | markup의 open root + iframe, open root에 나중 script가 iframe 추가, page가 `shadowRoot` getter를 null로 바꿈 | 각 4 | 0 |
 | 중첩: closed 안 closed, open 안 closed 안 open | 각 4 | 0 |
+| `<math><mi>` 안의 closed template | 0(`mi`는 shadow host가 될 수 없음) | 0 |
 | `attachShadow` open·closed·중첩 closed, custom element 생성자 안 closed | 각 4 | 0 |
 | `attachShadow` closed clonable 후 `cloneNode` / `importNode` / 읽을 때마다 바뀌는 mode getter | 8 / 4 / 8 | 0 |
+| `Object.prototype`에 `mode` getter(`"closed"`)·setter를 심은 뒤 clonable root + 복제 | 8 | 0 |
+| `Object.prototype`의 `mode`·`clonable`·`serializable`·`delegatesFocus`·`slotAssignment`와 `Array.prototype` 인덱스 getter·setter를 모두 심은 뒤 복제 | 8 | 0 |
+| `Object.prototype`에 `attributes: false`·`attributeOldValue: true`를 심어 observer 옵션을 깨려는 시도(script root, markup root) | 각 4 | 0 |
+| 가드보다 먼저 `attachShadow`를 고정해 둔 문서(fail closed) | 4, page 실행됨 | 0, page 실행 안 됨 |
 | `setHTMLUnsafe`·`Document.parseHTMLUnsafe`·`document.write`로 closed 선언형 root | 각 4 | 0 |
 | `insertAdjacentHTML`, template을 closed root에 복제 | 각 4 | 0 |
 | 옛 이름 `shadowroot` | 0(지원 안 함) | 0 |
 | `DOMParser`·`createContextualFragment`·`innerHTML`로 선언형 root(지난 측정) | 0(이 파서들은 root를 만들지 않음) | 0 |
 | 새 frame의 window를 같은 task 안에서 `window[0]`·`frames[0]`로(지난 측정) | 0(SecurityError) | 0 |
-| 기존 가드 시도 19개(직접 생성, 이름 조합, 중첩 frame, `location` 이동, Worker 등) | 4 | 0 |
+| 기존 가드 시도 19개(직접 생성, 이름 조합, 중첩 frame, `location` 이동, Worker 등) | 4 | 0, 공격자 HTTP 0 |
 
 | 정상 내용 | 대조군 | 가드 |
 |---|---|---|
 | script `const shadowroot = 1`, 문자열 `"shadowrootmode closed"`, CSS `.shadowrootmode` | `1\|shadowrootmode closed`, rgb(1, 2, 3) | 같음 |
+| JS 문자열 `'<template shadowrootmode=closed>'`의 값 | 원문 | 같음(원문) |
+| CSS 주석·`content` 문자열과 HTML 주석 안의 `<template shadowrootmode=closed>` | 원문 | 같음(원문) |
 | `<template shadowrootmode="open">` 컴포넌트(내용과 `<style>`) | `dsd-open-ok`, rgb(10, 20, 30) | 같음 |
 | `<template shadowrootmode="closed">` 컴포넌트 | 그려짐(높이 18), closed라 밖에서 읽히지 않음 | `dsd-closed-ok`, rgb(40, 50, 60), 높이 18 |
 | closed 선언형 root + custom element의 `attachInternals().shadowRoot` | `ce-closed` | `ce-closed`, rgb(5, 6, 7) |
 | `attachShadow` open·closed 컴포넌트 | 그려짐, closed는 자기 root 참조로 동작 | 같음(closed도 동작, 밖에서 open으로 보임) |
 | 속성 없는 `<template>` | template과 content `tpl` 유지 | 같음 |
-| 스크립트 문자열의 글자 그대로 closed template 태그 | 원문 | ` shadowrootmode=open `이 끼워짐(알려진 대가) |
 | 공유 HTML·SVG·React | — | `html-ok`·`svg-ok`·`react-ok`(React는 파일별 vendored 허용) |
 
 **남는 위험.**
 - 브라우저가 `webrtc 'block'`을 집행하지 않는 동안은 2번 가드가 WebRTC를 막는 유일한 수단이다.
 - 가드는 같은 realm 안의 JavaScript 방어라서, 측정하지 않은 새 realm 경로(브라우저에 새로 생기는 frame 종류, 아직 없는 API)가
   생기면 뚫릴 수 있다. 그래서 전역 이름은 RTC 접두어로 넓게 잠그고, frame은 종류를 나열해 지우며, shadow root는 모두 open으로 두고 따라가고 문자열에서 root를 만드는 파서는 잠근다.
+- **수용한 잔여 위험(운영자 결정 2026-11-28).** parse5는 page script를 실행하지 않으므로 파싱 중 script가 바꾼 DOM을 보지 못한다.
+  예: MathML `annotation-xml`의 `encoding`을 그 안의 SVG script가 파싱 도중 `text/html`로 바꾸면 뒤따르는 closed `<template>`이
+  브라우저에서는 HTML 선언형 root가 되지만 parse5는 외국 내용으로 보고 건너뛴다(독립 검토 r-20261128-100430-dcae0a). 그 root 안의
+  frame은 가드가 따라가지 못해 WebRTC를 쓸 수 있다. 정적 사전 처리로는 원리상 닫을 수 없고, 닫으려면 사용자 콘텐츠 전용 origin이
+  필요하다. frame은 opaque origin이라 Tomverse 쿠키·세션에는 닿지 않으며, 공유 페이지는 `feature.artifactSharingEnabled`(기본 꺼짐)
+  뒤에 있다. 같은 이유로 이 경로의 검토를 반복하지 않는다.
 - DNS prefetch(`<link rel=dns-prefetch>`)와 CDN 로그 경로는 §19.5 그대로다.
