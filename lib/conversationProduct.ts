@@ -79,15 +79,6 @@ export const STUDIO_PRODUCT_KEY: ConversationProductKey = "studio";
 export const STUDIO_RUN_CONVERSATION = { kind: "image", messages: { some: {} } } as const;
 
 /**
- * The conversations a person can see in their list, as a filter (the owner's id is added by the caller).
- * Neither a Studio tool run nor a temporary Chat is listed (lib/temporaryChatAccess.ts), so neither is
- * something the person can count, open or tidy up. The list route and the conversation-count quota
- * (`assertConversationCapacity`) read this one definition: a quota that counted rows the list hides would
- * report "full" to a person looking at a list with room in it.
- */
-export const LISTED_CONVERSATION_WHERE = { NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null } as const;
-
-/**
  * The modality each product runs in.
  *
  * Image generation is Studio; Chat and Review are both `kind: "chat"`. Held

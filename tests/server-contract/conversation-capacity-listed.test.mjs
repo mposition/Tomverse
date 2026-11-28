@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { LISTED_CONVERSATION_WHERE, STUDIO_RUN_CONVERSATION } from "../../lib/conversationProduct.ts";
+import { STUDIO_RUN_CONVERSATION } from "../../lib/conversationProduct.ts";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
-const { ApiSecurityError, assertConversationCapacity, STORAGE_LIMITS } = await import("../../lib/apiSecurity.ts");
+const { ApiSecurityError, assertConversationCapacity, LISTED_CONVERSATION_WHERE, STORAGE_LIMITS } = await import("../../lib/apiSecurity.ts");
 
 const fakeTx = (count) => {
   const calls = { locked: 0, where: null };
@@ -34,9 +34,11 @@ test("the quota is exceeded exactly at the limit, with the existing code", async
     error instanceof ApiSecurityError && error.status === 409 && error.code === "CONVERSATION_STORAGE_QUOTA_EXCEEDED");
 });
 
-test("the list route and the quota read one definition of 'listed'", () => {
+test("the quota's 'listed' condition is the list route's, so the two cannot drift", () => {
+  // apiSecurity.ts cannot import lib/conversationProduct.ts (Prompt Refiner runtime source closure),
+  // so it spells the condition out; this pins it to the list route's own filter.
   const list = readFileSync("app/api/conversations/route.ts", "utf8");
-  assert.match(list, /where: \{ userId, \.\.\.LISTED_CONVERSATION_WHERE \}/);
+  assert.match(list, /where: \{ userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null \}/);
   assert.match(readFileSync("lib/apiSecurity.ts", "utf8"), /where: \{ userId, \.\.\.LISTED_CONVERSATION_WHERE \}/);
 });
 

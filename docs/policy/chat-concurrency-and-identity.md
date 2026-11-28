@@ -138,7 +138,7 @@ rate는 preflight에서 읽기만 하고 실제 증가는 모델 요청마다** 
 
 `consumeApiRateLimit`(`lib/apiSecurity.ts`)은 주체 bucket(계정 id 또는 guest/익명 키)에
 IP bucket을 하나 더 겁니다. 이 IP leg는 책임 단위가 아니라 집계 천장이므로 §2의
-원칙을 그대로 따릅니다(`lib/apiRateLimitIpPolicy.ts`).
+원칙을 그대로 따릅니다(`lib/apiSecurity.ts`의 `ipBucketLimit`).
 
 - **로그인 사용자(cuid 사용자 id, `user:` 사용 키):** 분당 IP 천장은 주체 한도의 **8배**
   (chat IP 동시 실행 천장과 같은 배수)이고, **일 단위 IP bucket은 두지 않습니다.**
@@ -152,7 +152,7 @@ IP bucket을 하나 더 겁니다. 이 IP leg는 책임 단위가 아니라 집�
   값은 엄격한 쪽(3배)으로 떨어집니다. IP를 해석할 수 없을 때 IP leg를 건너뛰는
   기존 동작과 `skipIpBucket`은 그대로입니다.
 - 로그인 IP 보호를 없앤 것이 아닙니다. 분당 천장은 남아 있고, 바뀐 것은 배수와 일 단위
-  bucket뿐입니다. 테스트: `tests/apiRateLimitIpPolicy.test.mjs`.
+  bucket뿐입니다. 테스트: `tests/server-contract/api-rate-limit-ip-policy.test.mjs`.
 
 ## 4. lease 수명
 
@@ -183,8 +183,8 @@ IP bucket을 하나 더 겁니다. 이 IP leg는 책임 단위가 아니라 집�
   요청에는 클라이언트 주소가 없어 모든 계정의 모든 회차가 "주소 없음" 지문 하나를
   공유했고, 그 bucket(`CHAT_IP_PER_MINUTE`)이 같은 분에 도는 서로 다른 계정의 회차를
   거절했습니다. 면제의 근거는 헤더가 아니라 프로세스 안의 실행 scope
-  (`lib/scheduledTaskRunContext.ts`, `runAsScheduledTask`가 연 계정과 같은 로그인
-  사용자)입니다. 계정의 분당 주체 한도와 동시 요청 한도는 그대로 적용됩니다. 회차가
+  (`lib/scheduledTaskRunContext.ts`)에서 Chat route가 채우는 `subjectSlotsKeptFree`(로그인 사용자의
+  예약 회차에서만 0보다 큼)입니다. 계정의 분당 주체 한도와 동시 요청 한도는 그대로 적용됩니다. 회차가
   `CHAT_RATE_LIMITED`나 `DATABASE_TEMPORARILY_UNAVAILABLE`로 거절되면 플랫폼 사정으로
   건너뛰고(`PLATFORM_CODES`) 연속 실패 3회에 세지 않습니다.
 

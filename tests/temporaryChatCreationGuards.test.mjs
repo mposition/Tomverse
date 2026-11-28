@@ -22,12 +22,13 @@ test("image generation refuses an expired temporary Chat as the chat route does"
 
 test("a scheduled run leaves the per-IP minute bucket on the in-process proof, never a header", () => {
   const source = readFileSync("lib/chatSecurity.ts", "utf8");
-  const start = source.indexOf("const scheduledRunScope = currentScheduledTaskRun();");
+  const start = source.indexOf("const isScheduledRun =");
   assert.ok(start > 0);
   const block = source.slice(start, source.indexOf("const ipMinuteStart", start));
-  // Bound to the account the run belongs to, and to a signed-in caller.
-  assert.match(block, /access\.kind === "user"/);
-  assert.match(block, /scheduledRunScope\?\.userId === access\.userId/);
+  // The in-process signal the route derives from the run scope, for a signed-in caller only.
+  assert.match(block, /access\.kind === "user" && subjectSlotsKeptFree > 0/);
+  // No new file in the Prompt Refiner runtime source closure.
+  assert.doesNotMatch(source, /scheduledTaskRunContext"/);
   assert.match(block, /!claimedAdmissionSlot && !guestAutoPrehold && !isScheduledRun/);
   // Nothing on the request decides it.
   assert.doesNotMatch(block, /headers|x-scheduled|internal/i);

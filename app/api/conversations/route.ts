@@ -25,7 +25,7 @@ import {
 } from "@/lib/conversationLock";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
-import { LISTED_CONVERSATION_WHERE, REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
+import { REVIEW_PRODUCT_KEY, STUDIO_RUN_CONVERSATION } from "@/lib/conversationProduct";
 
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -81,7 +81,7 @@ export async function GET(req: Request) {
     const conversations = await prisma.conversation.findMany({
       // A Studio tool run is a one-off shown in the tool, not a conversation to
       // come back to. A temporary Chat is never listed (lib/temporaryChatAccess.ts).
-      where: { userId, ...LISTED_CONVERSATION_WHERE },
+      where: { userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,

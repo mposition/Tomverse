@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
-import {
+import test, { mock } from "node:test";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+
+const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
+mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
+const {
   ANONYMOUS_IP_LIMIT_MULTIPLIER,
   SIGNED_IN_IP_MINUTE_LIMIT_MULTIPLIER,
   ipBucketLimit,
   isSignedInRateLimitSubject,
-} from "../lib/apiRateLimitIpPolicy.ts";
+} = await import("../../lib/apiSecurity.ts");
 
 const USER_ID = "cm0abcdefghijklmnopqrstuv";
 const USAGE_KEY = `user:${"a".repeat(64)}`;
@@ -17,7 +22,6 @@ test("a signed-in subject gets a wide per-minute IP ceiling and no per-day IP bu
   assert.equal(ipBucketLimit(USER_ID, "day", 100), null);
   assert.equal(ipBucketLimit(USAGE_KEY, "minute", 10), 80);
   assert.equal(ipBucketLimit(USAGE_KEY, "day", 100), null);
-  // Strictly wider than the old 3x that let one office throttle itself.
   assert.ok(SIGNED_IN_IP_MINUTE_LIMIT_MULTIPLIER >= 8);
 });
 
@@ -45,7 +49,7 @@ test("a raw client IP passed as the subject fails closed to the anonymous ceilin
 });
 
 test("consumeApiRateLimit applies the policy to its IP leg", () => {
-  const source = readFileSync(new URL("../lib/apiSecurity.ts", import.meta.url), "utf8");
+  const source = readFileSync("lib/apiSecurity.ts", "utf8");
   assert.match(source, /ipBucketLimit\(userId, period, limits\[period\]\)/);
   assert.doesNotMatch(source, /limits\[period\] \* 3/);
 });

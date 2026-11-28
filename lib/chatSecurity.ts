@@ -92,7 +92,6 @@ import {
 } from "@/lib/chatTokenQuotaCore";
 import { APP_DEFAULTS, isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
-import { currentScheduledTaskRun } from "@/lib/scheduledTaskRunContext";
 import {
     NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
     missingAuthorizationIsADefect,
@@ -3698,14 +3697,13 @@ export const acquireChatAccess = async (
         // request in this process, so its IP key is the shared fingerprint of
         // "no address" and every run of every account would spend one bucket.
         // The account's own per-minute subject limit above still applies. The
-        // proof is the in-process run scope (lib/scheduledTaskRunContext.ts),
-        // bound to this account and unreachable from a network request, never
-        // a header the caller could send.
-        const scheduledRunScope = currentScheduledTaskRun();
-        const isScheduledRun =
-            access.kind === "user" &&
-            access.userId !== undefined &&
-            scheduledRunScope?.userId === access.userId;
+        // proof is `subjectSlotsKeptFree`, which the Chat route fills only from
+        // the in-process run scope (lib/scheduledTaskReservationGuard.ts,
+        // lib/scheduledTaskRunContext.ts) -- unreachable from a network
+        // request, never a header the caller could send. Importing the run
+        // scope here instead would add a file to the Prompt Refiner runtime
+        // source closure for no gain.
+        const isScheduledRun = access.kind === "user" && subjectSlotsKeptFree > 0;
         if (!claimedAdmissionSlot && !guestAutoPrehold && !isScheduledRun) {
             const ipMinuteStart = periodStart("minute", now);
             const ipScope = ipRateScope(access.ipKey, ipPerMinute);

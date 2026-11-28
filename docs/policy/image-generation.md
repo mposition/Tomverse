@@ -1374,7 +1374,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       Studio 도구의 생성은 1회성 실행이라 대화 기록에 넣지 않는다(운영자 결정 2026-11-26). 실행마다 이미지 대화 행은
       그대로 만들되 요청 문구를 그 대화의 메시지로 남기고(`lib/studioImageReference.ts`), 대화 목록과 메시지 검색은 메시지가
       있는 이미지 대화를 제외한다(`STUDIO_RUN_CONVERSATION`, `lib/conversationProduct.ts`). 이미지 workspace의 대화는 메시지가 없으므로 목록에 남는다.
-      대화 수 한도(`API_MAX_CONVERSATIONS_PER_USER`, 기본 500)도 같은 정의(`LISTED_CONVERSATION_WHERE`)로 세므로 숨겨진
+      대화 수 한도(`API_MAX_CONVERSATIONS_PER_USER`, 기본 500)도 목록과 같은 조건(`LISTED_CONVERSATION_WHERE`, `lib/apiSecurity.ts`)으로 세므로 숨겨진
       Studio 실행 대화와 임시 Chat은 한도를 채우지 않는다. Studio 실행은 사용자가 만드는 대화가 아니라 한도 검사를 거치지 않는다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
