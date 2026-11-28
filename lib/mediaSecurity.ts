@@ -205,7 +205,40 @@ const { parentPort, workerData } = require("node:worker_threads");
             throw new Error("PDF page count is invalid.");
         }
 
+        // One page's items as lines, not as one run: a table row or a list
+        // item is a line, and folding them into one space-separated string
+        // made both unreadable. pdf.js marks the end of a line with hasEOL; a
+        // change of baseline is the other signal, since the pieces of one
+        // text run can be drawn separately without either.
+        const pageLines = (items) => {
+            const lines = [];
+            let line = "";
+            let lastY = null;
+            const flush = () => {
+                const trimmed = line.replace(/[^\\S\\n]+/g, " ").trim();
+                if (trimmed) lines.push(trimmed);
+                line = "";
+            };
+            for (const item of items) {
+                if (typeof item.str !== "string") continue;
+                const y = Array.isArray(item.transform) ? item.transform[5] : null;
+                if (line && lastY !== null && typeof y === "number") {
+                    const tolerance = Math.max(2, (Number(item.height) || 0) * 0.5);
+                    if (Math.abs(y - lastY) > tolerance) flush();
+                }
+                if (item.str) {
+                    line += (line ? " " : "") + item.str;
+                    if (typeof y === "number") lastY = y;
+                }
+                if (item.hasEOL) flush();
+            }
+            flush();
+            return lines.join("\\n");
+        };
+
         let text = "";
+        const textlessPages = [];
+        let scannedPages = 0;
         const maxCharacters = Math.max(0, Number(workerData.maxCharacters) || 0);
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
             if (text.length >= maxCharacters) break;
@@ -214,23 +247,29 @@ const { parentPort, workerData } = require("node:worker_threads");
                 includeMarkedContent: false,
                 disableNormalization: false,
             });
-            const pageText = content.items
-                .map((item) => typeof item.str === "string" ? item.str : "")
-                .filter(Boolean)
-                .join(" ")
-                .replace(/\\s+/g, " ")
-                .trim();
+            const pageText = pageLines(content.items);
+            scannedPages = pageNumber;
             if (pageText) {
                 text += (text ? "\\n\\n" : "") + "[Page " + pageNumber + "]\\n" + pageText;
                 if (text.length > maxCharacters) {
                     text = text.slice(0, maxCharacters);
                     break;
                 }
+            } else {
+                // Recorded rather than dropped: a page with no text layer is a
+                // scan or a picture, and the caller decides how it is read.
+                textlessPages.push(pageNumber);
             }
             page.cleanup();
         }
         await loadingTask.destroy();
-        parentPort.postMessage({ ok: true, text });
+        parentPort.postMessage({
+            ok: true,
+            text,
+            textlessPages,
+            pageCount: document.numPages,
+            scannedPages,
+        });
     } catch {
         if (document) {
             try {
@@ -453,14 +492,31 @@ export async function validatePdfSafely(buffer: Buffer) {
     );
 }
 
-export async function extractPdfTextSafely(
+export type PdfTextExtraction = {
+    text: string;
+    /**
+     * 1-based pages, among those scanned, that carry no text layer: scans and
+     * pictures. Pages past a truncation point were never looked at and are not
+     * listed.
+     */
+    textlessPages: number[];
+    pageCount: number;
+};
+
+/** The extracted text and the pages that gave none, from one pass over the PDF. */
+export async function extractPdfTextWithPagesSafely(
     buffer: Buffer,
     maxCharacters: number
-) {
+): Promise<PdfTextExtraction> {
     assertPdfSignature(buffer);
 
     const transferableBuffer = Uint8Array.from(buffer).buffer;
-    const result = await runWorker<{ ok: true; text: string }>(
+    const result = await runWorker<{
+        ok: true;
+        text: string;
+        textlessPages?: unknown;
+        pageCount?: unknown;
+    }>(
         pdfTextWorkerSource,
         {
             buffer: transferableBuffer,
@@ -472,7 +528,37 @@ export async function extractPdfTextSafely(
         [transferableBuffer]
     );
 
-    return result.text.trim();
+    return {
+        text: result.text.trim(),
+        textlessPages: Array.isArray(result.textlessPages)
+            ? result.textlessPages.filter(
+                  (page): page is number => Number.isInteger(page) && page >= 1
+              )
+            : [],
+        pageCount: Number.isInteger(result.pageCount) ? (result.pageCount as number) : 0,
+    };
+}
+
+/**
+ * The model-facing line for pages that were not read. Capped so a 500-page
+ * scan does not spend the prompt on a list of numbers.
+ */
+export function describeUnreadPdfPages(pages: readonly number[], limit = 40): string {
+    const shown = pages.slice(0, limit).join(", ");
+    const rest = pages.length - limit;
+    return (
+        `[This PDF has pages with no extractable text (scanned or image-only) that were not read: ` +
+        `page${pages.length === 1 ? "" : "s"} ${shown}${rest > 0 ? ` and ${rest} more` : ""}. ` +
+        `Their contents are unknown to you. Do not describe, summarise or infer anything about them; ` +
+        `say which pages could not be read.]`
+    );
+}
+
+export async function extractPdfTextSafely(
+    buffer: Buffer,
+    maxCharacters: number
+) {
+    return (await extractPdfTextWithPagesSafely(buffer, maxCharacters)).text;
 }
 
 /** Rendering is slower than reading text, and it is never on a user's turn. */

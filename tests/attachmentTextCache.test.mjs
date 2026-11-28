@@ -107,13 +107,12 @@ test("on by default, off with CHAT_ATTACHMENT_TEXT_CACHE=0", () => {
     assert.equal(attachmentTextCacheEnabled({ CHAT_ATTACHMENT_TEXT_CACHE: "0" }), false);
 });
 
-test("the route caches only an account's earlier, bound file, and never the turn's own", () => {
+test("the route caches an account's bound file -- the turn's own once read, an earlier one as before", () => {
     const route = source("app/api/chat/route.ts");
     const start = route.indexOf("const textCacheEligible =");
     assert.ok(start > 0);
     const eligibility = route.slice(start, route.indexOf(";", start));
     for (const condition of [
-        "!isLatestMessage",
         "!isGuestObject",
         "Boolean(resolved?.attachmentId)",
         "ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category)",
@@ -131,11 +130,19 @@ test("the route caches only an account's earlier, bound file, and never the turn
     assert.ok(recordingRule.includes('format.category === "audio"'));
     assert.ok(!recordingRule.includes("textCacheEligible") && !recordingRule.includes("attachmentTextCacheEnabled"));
     assert.ok(route.includes("transcriptAttachmentId: recordingAttachmentId,"));
-    assert.ok(route.includes('if (textCacheEligible && format.category !== "audio") {'));
+    assert.ok(route.includes('if (textCacheEligible && !textCacheBlocked && format.category !== "audio") {'));
+    // The turn's own file is stored after it is read (so a resend, another
+    // Review panel and the next turn do not pay for it again) -- but a
+    // recording stays on its own row, and a stored text is used for the turn's
+    // own file only when it fits whole.
+    assert.match(eligibility, /isLatestMessage\s*\?\s*format\.category !== "audio" && attachmentTextCacheEnabled\(\)/);
+    assert.match(route, /isLatestMessage &&\s*totalExtractedCharacters \+ cachedCharacters <=\s*CHAT_ATTACHMENT_PARSE_CHARACTERS/);
+    // Pages that were not read are not stored as if they were the text.
+    assert.match(route, /textCacheBlocked = true;/);
     // Review r-20261127-114544-4444fa: an earlier recording's stored transcript
     // is read with the text cache off as well -- and this read comes before the
     // file is ingested, so before the audio switch is ever consulted.
-    assert.ok(eligibility.includes('(attachmentTextCacheEnabled() || format.category === "audio")'));
+    assert.ok(eligibility.includes(': attachmentTextCacheEnabled() || format.category === "audio"'));
     // A cache hit answers to the same past-file share and parse budget.
     const hit = route.slice(start, route.indexOf("let attachmentBuffer: Buffer;", start));
     assert.match(hit, /pastAttachmentTokens \+ tokens > pastAttachmentTokenBudget/);
@@ -192,7 +199,10 @@ test("a cache hit still asks storage whether the original exists", () => {
     const route = source("app/api/chat/route.ts");
     const hit = route.slice(route.indexOf("const cached = await readAttachmentTextCache(resolved!.attachmentId!);"));
     assert.match(hit.slice(0, 900), /\(await probeR2Object\(attachment\.objectKey\)\)\.state === "missing"/);
-    assert.match(hit.slice(0, 900), /if \(cached && !originalGone\) \{/);
+    assert.match(hit.slice(0, 2600), /if \(cached && !originalGone && !isLatestMessage\) \{/);
+    // The turn's own file reads the same row, and only while storage has not
+    // reported the original gone.
+    assert.match(hit.slice(0, 2600), /cached &&\s*!originalGone &&\s*isLatestMessage &&/);
 });
 
 test("the chat page, receipt recovery and stored previews follow the account limits", () => {

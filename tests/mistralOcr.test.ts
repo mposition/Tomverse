@@ -47,6 +47,31 @@ test("OCR 4 sends a bounded text-only document request", async () => {
   });
 });
 
+test("OCR 4 reads only the pages it is asked for, counted from 0 on the wire", async () => {
+  let body: { pages?: number[] } = {};
+  const fetchMock: typeof fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ pages: [{ index: 2, markdown: "Scanned" }] });
+  };
+  const result = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: fetchMock,
+    apiKey: "test-key",
+    pages: [3],
+  });
+  assert.deepEqual(body.pages, [2]);
+  assert.equal(result?.text, "## Page 3\n\nScanned");
+  assert.equal(result?.pageCount, 1);
+
+  await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ pages: [] });
+    },
+    apiKey: "test-key",
+  });
+  assert.equal("pages" in body, false);
+});
+
 test("OCR 4 is optional when no Mistral key is configured", async () => {
   const original = process.env.MISTRAL_API_KEY;
   delete process.env.MISTRAL_API_KEY;

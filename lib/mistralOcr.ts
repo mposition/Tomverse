@@ -58,6 +58,11 @@ export async function extractPdfTextWithMistralOcr(
     fetch?: typeof fetch;
     apiKey?: string;
     signal?: AbortSignal;
+    /**
+     * 1-based pages to read; the rest of the document is neither processed nor
+     * billed. Used for a PDF whose other pages already have a text layer.
+     */
+    pages?: readonly number[];
   } = {}
 ): Promise<MistralOcrResult | null> {
   const apiKey = dependencies.apiKey ?? resolveProviderApiKey("mistral");
@@ -82,6 +87,10 @@ export async function extractPdfTextWithMistralOcr(
       include_image_base64: false,
       include_blocks: false,
       table_format: "markdown",
+      // The provider counts pages from 0.
+      ...(dependencies.pages?.length
+        ? { pages: dependencies.pages.map((page) => page - 1) }
+        : {}),
     }),
     signal: dependencies.signal ?? AbortSignal.timeout(OCR_TIMEOUT_MS),
     cache: "no-store",

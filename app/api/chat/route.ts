@@ -57,7 +57,7 @@ import {
     ChatAttachmentValidationError,
     validateChatAttachmentUpload,
 } from "@/lib/chatAttachmentValidation";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import {
@@ -270,6 +270,7 @@ import {
     CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
     PAST_ATTACHMENT_OMITTED_KIND,
     PAST_ATTACHMENT_OMITTED_TEXT,
+    PAST_IMAGE_OMITTED_TEXT,
     PAST_ATTACHMENT_UNDELIVERABLE_TEXT,
     pastTurnAttachmentTokenBudget,
 } from "@/lib/chatAttachmentLimits";
@@ -279,11 +280,18 @@ import {
     readAttachmentTextCache,
     writeAttachmentTextCache,
 } from "@/lib/attachmentTextCache";
+import {
+    base64SizeOf,
+    describeImagePayloadLimit,
+    planImageOmissions,
+    type ImageSlot,
+} from "@/lib/chatImageBudget";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
     AnimatedImageError,
-    extractPdfTextSafely,
+    describeUnreadPdfPages,
+    extractPdfTextWithPagesSafely,
     normalizeImageSafely,
     validatePdfSafely,
     type NormalizableImageMediaType,
@@ -291,6 +299,7 @@ import {
 import {
     extractPdfTextWithMistralOcr,
     MISTRAL_OCR_COST_MICRO_USD_PER_PAGE,
+    type MistralOcrResult,
 } from "@/lib/mistralOcr";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
@@ -613,6 +622,14 @@ const providerCallUsage = async (stream: {
         return undefined;
     }
 };
+
+/**
+ * Paid OCR calls under way in this process, keyed by account, file content and
+ * page selection. Review sends one request per panel with the same files; a
+ * panel that arrives while another is reading the file waits for that result
+ * instead of paying for the pages again. Never shared between accounts.
+ */
+const pdfOcrInFlight = new Map<string, Promise<MistralOcrResult | null>>();
 
 const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
 // Every request resends the full conversation history, so this bounds how many
@@ -4273,6 +4290,50 @@ async function handleChatPost(
         // User files (images, native PDFs) the provider is sent as file parts.
         let nativeFilePartCount = 0;
 
+        // Which earlier images make room for the ones being sent now. Earlier
+        // messages are read oldest first, so without this plan their images
+        // used the model's per-request image allowance before the new message's
+        // did, and the new image was the one refused. The oldest earlier images
+        // are left out instead; only the message's own overflow is an error.
+        const imageSlots: ImageSlot[] = [];
+        if (
+            modelConfig.inputCapabilities?.maxImages ||
+            modelConfig.inputCapabilities?.maxBase64ImagePayloadBytes
+        ) {
+            executionMessages.forEach((message, position) => {
+                if (message.role === "assistant" || !Array.isArray(message.attachments)) {
+                    return;
+                }
+                (message.attachments as IncomingAttachment[]).forEach((incoming, index) => {
+                    const referenceKey = attachmentReferenceKey(incoming);
+                    const known = referenceKey
+                        ? resolvedAttachments.get(referenceKey)
+                        : undefined;
+                    if (known?.unavailableAt) return;
+                    const slotName = known?.name ?? incoming?.name;
+                    const slotType = known?.mediaType ?? incoming?.mediaType;
+                    if (typeof slotName !== "string" || typeof slotType !== "string") return;
+                    const slotFormat = resolveChatAttachmentFormat({
+                        filename: slotName,
+                        declaredMediaType: slotType,
+                        audio: true,
+                    });
+                    if (slotFormat?.category !== "image") return;
+                    imageSlots.push({
+                        key: `${position}:${index}`,
+                        latest: position === executionMessages.length - 1,
+                        base64Bytes: base64SizeOf(
+                            typeof known?.size === "number" ? known.size : 0
+                        ),
+                    });
+                });
+            });
+        }
+        const imagePlan = planImageOmissions(
+            imageSlots,
+            modelConfig.inputCapabilities ?? {}
+        );
+
         for (const [messageIndex, msg] of executionMessages.entries()) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
@@ -4294,6 +4355,9 @@ async function handleChatPost(
             ) as IncomingAttachment[];
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
+            // Set by a reader whose text must not be stored for the next turn
+            // or the next panel: it stands in for pages that were not read.
+            let textCacheBlocked = false;
             // One entry per image in `fileParts`, from the bytes sent.
             const imageInputTokenEstimates: number[] = [];
             /*
@@ -4330,6 +4394,7 @@ async function handleChatPost(
                 buffer,
                 fromArchive,
                 transcriptAttachmentId = null,
+                leaveOut = false,
             }: {
                 format: ChatAttachmentFormat;
                 name: string;
@@ -4337,6 +4402,8 @@ async function handleChatPost(
                 fromArchive: boolean;
                 /** A bound recording's row: its transcript is paid for once. */
                 transcriptAttachmentId?: string | null;
+                /** An earlier image the request's image allowance has no room for. */
+                leaveOut?: boolean;
             }): Promise<"ok" | "no-text" | "unreadable"> => {
                 if (format.category === "image") {
                     if (!modelSupportsImageInput(modelConfig)) {
@@ -4345,6 +4412,27 @@ async function handleChatPost(
                             "ATTACHMENT_MODEL_UNSUPPORTED",
                             `${modelConfig.name} does not support image input. Choose an image-capable model or retry without attachments.`
                         );
+                    }
+                    const imageCapabilities = modelConfig.inputCapabilities;
+                    // Named to the model and left out; an earlier image never
+                    // fails the turn for the allowance the new one needs.
+                    const leaveOutEarlierImage = () => {
+                        textAttachments.push({
+                            name,
+                            kind: PAST_ATTACHMENT_OMITTED_KIND,
+                            text: PAST_IMAGE_OMITTED_TEXT,
+                        });
+                        return "ok" as const;
+                    };
+                    if (!isLatestMessage) {
+                        if (leaveOut) return leaveOutEarlierImage();
+                        if (
+                            imageCapabilities?.maxImages &&
+                            totalImageCount + 1 + imagePlan.reserveCount >
+                                imageCapabilities.maxImages
+                        ) {
+                            return leaveOutEarlierImage();
+                        }
                     }
                     let normalized: Buffer;
                     try {
@@ -4370,9 +4458,19 @@ async function handleChatPost(
                     }
 
                     const encoded = normalized.toString("base64");
+                    const encodedBytes = Buffer.byteLength(encoded, "utf8");
+                    if (
+                        !isLatestMessage &&
+                        imageCapabilities?.maxBase64ImagePayloadBytes &&
+                        totalBase64ImagePayloadBytes +
+                            encodedBytes +
+                            imagePlan.reserveBase64Bytes >
+                            imageCapabilities.maxBase64ImagePayloadBytes
+                    ) {
+                        return leaveOutEarlierImage();
+                    }
                     totalImageCount += 1;
-                    totalBase64ImagePayloadBytes += Buffer.byteLength(encoded, "utf8");
-                    const imageCapabilities = modelConfig.inputCapabilities;
+                    totalBase64ImagePayloadBytes += encodedBytes;
                     if (
                         imageCapabilities?.maxImages &&
                         totalImageCount > imageCapabilities.maxImages
@@ -4391,7 +4489,9 @@ async function handleChatPost(
                         throw new ChatAccessError(
                             413,
                             "ATTACHMENT_MODEL_IMAGE_PAYLOAD_TOO_LARGE",
-                            `${modelConfig.name} accepts up to 4 MB of base64 image data per request. Use a smaller image.`
+                            `${modelConfig.name} accepts up to ${describeImagePayloadLimit(
+                                imageCapabilities.maxBase64ImagePayloadBytes
+                            )} of base64 image data per request. Use a smaller image.`
                         );
                     }
 
@@ -4440,12 +4540,14 @@ async function handleChatPost(
                     );
                 }
 
-                const addExtractedText = (kind: string, text: string) => {
+                // False when an earlier file's text did not fit its share and
+                // was named as omitted instead.
+                const addExtractedText = (kind: string, text: string): boolean => {
                     if (!isLatestMessage) {
                         const tokens = estimatePromptTokens(text);
                         if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
                             omitPastAttachment();
-                            return;
+                            return false;
                         }
                         pastAttachmentTokens += tokens;
                     }
@@ -4460,6 +4562,7 @@ async function handleChatPost(
                         );
                     }
                     textAttachments.push({ name, kind, text });
+                    return true;
                 };
 
                 if (format.category === "audio") {
@@ -4528,12 +4631,16 @@ async function handleChatPost(
 
                 if (format.category === "pdf") {
                     let extractedPdfText = "";
+                    // Pages the text layer gave nothing for: scans and pictures.
+                    let textlessPdfPages: number[] = [];
                     let pdfValidated = false;
                     try {
-                        extractedPdfText = await extractPdfTextSafely(
+                        const extraction = await extractPdfTextWithPagesSafely(
                             buffer,
                             remainingCharacters - 64
                         );
+                        extractedPdfText = extraction.text;
+                        textlessPdfPages = extraction.textlessPages;
                     } catch (error) {
                         logRequestError(
                             "pdf_text_extraction_failed",
@@ -4553,6 +4660,81 @@ async function handleChatPost(
                             );
                         }
                     }
+
+                    // One paid OCR read of this file, or of some of its pages.
+                    // The usage is recorded by the request that pays; a request
+                    // that arrives while the same account is reading the same
+                    // file and pages shares that result (`pdfOcrInFlight`).
+                    const runPdfOcr = async (
+                        maxCharacters: number,
+                        pages?: number[]
+                    ): Promise<MistralOcrResult | null> => {
+                        paidExternalWorkStarted = true;
+                        const flightKey = access.userId
+                            ? `${access.userId}:${createHash("sha256").update(buffer).digest("hex")}:${pages?.join(",") ?? "all"}`
+                            : null;
+                        const shared = flightKey ? pdfOcrInFlight.get(flightKey) : undefined;
+                        if (shared) {
+                            const result = await shared;
+                            return result
+                                ? { ...result, text: result.text.slice(0, maxCharacters) }
+                                : null;
+                        }
+                        const call = (async () => {
+                            const ocrResult = await extractPdfTextWithMistralOcr(
+                                buffer,
+                                maxCharacters,
+                                { pages }
+                            );
+                            if (ocrResult) {
+                                const ocrCostMicroUsd =
+                                    ocrResult.pageCount *
+                                    MISTRAL_OCR_COST_MICRO_USD_PER_PAGE;
+                                await recordInternalProviderUsage({
+                                    provider: "mistral",
+                                    modelId: ocrResult.modelId,
+                                    inputTokens: 0,
+                                    cachedInputTokens: 0,
+                                    outputTokens: 0,
+                                    estimatedCostMicroUsd: ocrCostMicroUsd,
+                                    uncachedInputCostMicroUsd: ocrCostMicroUsd,
+                                    cachedInputCostMicroUsd: 0,
+                                    outputCostMicroUsd: 0,
+                                    source: "ocr",
+                                }).catch((error) => {
+                                    logRequestError(
+                                        "mistral_ocr_usage_record_failed",
+                                        traceId,
+                                        error,
+                                        requestedModelId
+                                    );
+                                });
+                                console.info(
+                                    JSON.stringify({
+                                        event: "mistral_ocr_completed",
+                                        traceId,
+                                        backendModelId: ocrResult.modelId,
+                                        pageCount: ocrResult.pageCount,
+                                        partial: Boolean(pages),
+                                        attachmentBytes: buffer.byteLength,
+                                        fromArchive,
+                                        timestamp: new Date().toISOString(),
+                                    })
+                                );
+                            }
+                            return ocrResult;
+                        })();
+                        if (flightKey) {
+                            pdfOcrInFlight.set(flightKey, call);
+                            const release = () => {
+                                if (pdfOcrInFlight.get(flightKey) === call) {
+                                    pdfOcrInFlight.delete(flightKey);
+                                }
+                            };
+                            call.then(release, release);
+                        }
+                        return call;
+                    };
 
                     // Scanned or image-only PDFs have no local text layer.
                     // Validate them before leaving the process, then use OCR 4
@@ -4586,51 +4768,13 @@ async function handleChatPost(
                         if (!ocrAllowance) return "no-text";
                         if (fromArchive) archiveOcrUsed += 1;
 
-                        // Paid per page, and a scanned file on the message being
-                        // sent is not cached: a resend would be billed again.
-                        paidExternalWorkStarted = true;
+                        // Paid per page; the result is stored with the file's
+                        // other text once the file is bound to a message, so a
+                        // resend, another panel or the next turn reads it.
                         try {
-                            const ocrResult = await extractPdfTextWithMistralOcr(
-                                buffer,
-                                remainingCharacters - 64
-                            );
+                            const ocrResult = await runPdfOcr(remainingCharacters - 64);
                             if (ocrResult?.text) {
                                 extractedPdfText = ocrResult.text;
-                            }
-                            if (ocrResult) {
-                                const ocrCostMicroUsd =
-                                    ocrResult.pageCount *
-                                    MISTRAL_OCR_COST_MICRO_USD_PER_PAGE;
-                                await recordInternalProviderUsage({
-                                    provider: "mistral",
-                                    modelId: ocrResult.modelId,
-                                    inputTokens: 0,
-                                    cachedInputTokens: 0,
-                                    outputTokens: 0,
-                                    estimatedCostMicroUsd: ocrCostMicroUsd,
-                                    uncachedInputCostMicroUsd: ocrCostMicroUsd,
-                                    cachedInputCostMicroUsd: 0,
-                                    outputCostMicroUsd: 0,
-                                    source: "ocr",
-                                }).catch((error) => {
-                                    logRequestError(
-                                        "mistral_ocr_usage_record_failed",
-                                        traceId,
-                                        error,
-                                        requestedModelId
-                                    );
-                                });
-                                console.info(
-                                    JSON.stringify({
-                                        event: "mistral_ocr_completed",
-                                        traceId,
-                                        backendModelId: ocrResult.modelId,
-                                        pageCount: ocrResult.pageCount,
-                                        attachmentBytes: buffer.byteLength,
-                                        fromArchive,
-                                        timestamp: new Date().toISOString(),
-                                    })
-                                );
                             }
                         } catch (error) {
                             logRequestError(
@@ -4648,6 +4792,74 @@ async function handleChatPost(
                                 );
                             }
                         }
+                    } else if (textlessPdfPages.length > 0) {
+                        /*
+                          Text on some pages and none on others: a report with
+                          a scanned appendix, a form with a pasted screenshot.
+                          The text layer used to stand for the whole file and
+                          the other pages went missing without a word. They are
+                          read here, or the model is told they were not:
+                          - a model that reads PDFs natively gets the original
+                            beside the text (the turn's own file only -- an
+                            earlier one is not sent again on every turn);
+                          - otherwise the pages are read by OCR, under the same
+                            allowance and ledger as a wholly scanned file;
+                          - otherwise the pages are named as unread.
+                        */
+                        if (!addExtractedText(format.promptKind, extractedPdfText)) {
+                            return "ok";
+                        }
+                        if (
+                            isLatestMessage &&
+                            !fromArchive &&
+                            modelSupportsNativePdfInput(modelConfig)
+                        ) {
+                            fileParts.push({
+                                type: "file",
+                                data: { type: "data", data: new Uint8Array(buffer) },
+                                mediaType: format.mediaType,
+                                filename: name,
+                            });
+                            return "ok";
+                        }
+                        let scannedText = "";
+                        const ocrRoom =
+                            CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters - 64;
+                        const ocrAllowance =
+                            ocrRoom > 0 &&
+                            (fromArchive ? archiveOcrBudget > archiveOcrUsed : true);
+                        if (ocrAllowance) {
+                            try {
+                                if (!pdfValidated) {
+                                    await validatePdfSafely(buffer);
+                                    pdfValidated = true;
+                                }
+                                if (fromArchive) archiveOcrUsed += 1;
+                                scannedText =
+                                    (await runPdfOcr(ocrRoom, textlessPdfPages))?.text ?? "";
+                            } catch (error) {
+                                logRequestError(
+                                    "mistral_ocr_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId
+                                );
+                            }
+                        }
+                        if (
+                            scannedText &&
+                            addExtractedText(`${format.promptKind} (scanned pages)`, scannedText)
+                        ) {
+                            return "ok";
+                        }
+                        // The pages stay unread, so a later turn must read the
+                        // file afresh rather than take this notice as its text.
+                        textCacheBlocked = true;
+                        addExtractedText(
+                            "PDF page notice",
+                            describeUnreadPdfPages(textlessPdfPages)
+                        );
+                        return "ok";
                     }
 
                     if (extractedPdfText) {
@@ -5019,12 +5231,17 @@ async function handleChatPost(
                   transcription waits on the audio switch (the audio branch).
                 */
                 const textCacheEligible =
-                    !isLatestMessage &&
                     !isGuestObject &&
                     Boolean(resolved?.attachmentId) &&
                     ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
                     !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
-                    (attachmentTextCacheEnabled() || format.category === "audio");
+                    // The message being sent is stored too, once its text is
+                    // read: a scanned PDF went through paid OCR again for the
+                    // next turn, the resend and every Review panel. Its
+                    // recording is claimed on its own row, not here.
+                    (isLatestMessage
+                        ? format.category !== "audio" && attachmentTextCacheEnabled()
+                        : attachmentTextCacheEnabled() || format.category === "audio");
                 if (textCacheEligible) {
                     const cached = await readAttachmentTextCache(resolved!.attachmentId!);
                     // The cache stands in for reading the file, not for
@@ -5036,7 +5253,29 @@ async function handleChatPost(
                     const originalGone =
                         cached !== null &&
                         (await probeR2Object(attachment.objectKey)).state === "missing";
-                    if (cached && !originalGone) {
+                    const cachedCharacters = cached
+                        ? cached.reduce((sum, entry) => sum + entry.text.length, 0)
+                        : 0;
+                    if (
+                        cached &&
+                        !originalGone &&
+                        isLatestMessage &&
+                        totalExtractedCharacters + cachedCharacters <=
+                            CHAT_ATTACHMENT_PARSE_CHARACTERS
+                    ) {
+                        // The turn's own file is never left out; a stored text
+                        // that does not fit is read from the file as before.
+                        totalExtractedCharacters += cachedCharacters;
+                        for (const entry of cached) {
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: entry.kind,
+                                text: entry.text,
+                            });
+                        }
+                        continue;
+                    }
+                    if (cached && !originalGone && !isLatestMessage) {
                         for (const entry of cached) {
                             const tokens = estimatePromptTokens(entry.text);
                             if (
@@ -5302,6 +5541,7 @@ async function handleChatPost(
                                   objectKey: attachment.objectKey,
                               })
                             : null;
+                    textCacheBlocked = false;
                     await deliverAttachment(attachmentName, () =>
                         ingestAttachmentFile({
                             format,
@@ -5309,9 +5549,10 @@ async function handleChatPost(
                             buffer: attachmentBuffer,
                             fromArchive: false,
                             transcriptAttachmentId: recordingAttachmentId,
+                            leaveOut: imagePlan.omitted.has(`${messageIndex}:${attachmentIndex}`),
                         })
                     );
-                    if (textCacheEligible && format.category !== "audio") {
+                    if (textCacheEligible && !textCacheBlocked && format.category !== "audio") {
                         // Stored only when the extraction is whole: text and
                         // nothing else, not omitted, and not stopped by the
                         // parse budget (the extractors stop 64 short of it).

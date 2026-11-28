@@ -52,6 +52,16 @@ export const PAST_ATTACHMENT_OMITTED_TEXT =
   "If the answer needs it, say so and ask the user to attach it again.";
 
 /**
+ * Same kind, for an earlier image left out so the images of the message being
+ * sent fit the model's per-request image allowance (lib/chatImageBudget.ts).
+ */
+export const PAST_IMAGE_OMITTED_TEXT =
+  "This image was attached to an earlier message and is not included in this turn: " +
+  "the model accepts only so many images per request, and the newest images take priority. " +
+  "Its contents are unknown to you. Do not describe, summarise, or infer anything about it. " +
+  "If the answer needs it, say so and ask the user to attach it again.";
+
+/**
  * Same kind as above, for an earlier file that could not be delivered to *this*
  * model (a model without image input, a parser that failed or timed out, an
  * archive or OCR step that refused it). The message being sent is refused for
