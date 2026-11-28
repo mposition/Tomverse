@@ -207,9 +207,12 @@ checkout is inside it) and `/proc` (the CLI's environment holds the key);
 Claude Code applies them before a file tool runs, and the jailed shell never
 gets the key.
 
-A checkout that contains `.claude/settings.json` or
-`.claude/settings.local.json` is refused, because either file could point the
-endpoint elsewhere.
+Each run gets a fresh `HOME` with an empty `CLAUDE_CONFIG_DIR` (removed after
+the run), so no profile setting, hook or plugin of the worker's own applies to
+a run that holds the key. A host with Claude Code managed settings
+(`/etc/claude-code/managed-settings.json`) is refused. A checkout that
+contains `.claude/settings.json` or `.claude/settings.local.json` is refused
+too, because either file could point the endpoint elsewhere or add a hook.
 
 Receipts are Claude Code's result counts recorded under `zai` (source
 `zai_claude_result`) and settled as the selected model. Z.ai documents no

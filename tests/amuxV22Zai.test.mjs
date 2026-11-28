@@ -14,7 +14,11 @@ import { amuxCliPricedModelId, amuxCliUsageReceiptSchema, makeAmuxCliUsageReceip
   "../lib/amux/cliUsageLedgerCore.ts";
 import { inspectClaudeCliResultUsage } from "../lib/amux/cliUsageObservationCore.ts";
 import { amuxV22ChannelPreflight } from "../lib/amux/v22ChannelRun.mjs";
+import { mkdtemp, readdir, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AMUX_V22_ZAI_BASE_URL, amuxV22ClaudeArgs, amuxV22CliEnv, amuxV22ZaiDisallowedTools,
+  createAmuxV22ZaiRunHome,
   amuxV22ZaiEnv, parseAmuxV22OneShotRequest, readAmuxV22ZaiCodingPlanKey, runAmuxV22OneShot } from
   "../lib/amux/v22OneShotSidecar.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
@@ -54,10 +58,13 @@ test("Z.ai is an eighth worker class that implements as a Claude worker does, un
 
 test("the run is Claude Code's environment with Z.ai's endpoint, key and model, and nothing else changes", () => {
   const jail = { prefixPath: "/run/jail/prefix", binPath: "/run/jail/bin" };
-  const env = amuxV22CliEnv("zai", config, null, { shellJail: jail, worktreeTmp: "/w/tmp",
+  // HOME and the Claude profile are the run's own fresh ones, never the worker's.
+  const runHome = { config: { ...config, homePath: `${config.homePath}/run-1`,
+    claudeConfigDir: `${config.homePath}/run-1/.claude` } };
+  const env = amuxV22CliEnv("zai", config, runHome, { shellJail: jail, worktreeTmp: "/w/tmp",
     zaiKey: KEY, modelId: MODEL });
-  assert.deepEqual(env, { HOME: config.homePath, PATH: "/usr/bin:/bin", LANG: "C.UTF-8",
-    CLAUDE_CONFIG_DIR: config.claudeConfigDir, CLAUDE_CODE_SHELL_PREFIX: jail.prefixPath,
+  assert.deepEqual(env, { HOME: runHome.config.homePath, PATH: "/usr/bin:/bin", LANG: "C.UTF-8",
+    CLAUDE_CONFIG_DIR: runHome.config.claudeConfigDir, CLAUDE_CODE_SHELL_PREFIX: jail.prefixPath,
     CLAUDE_CODE_TMPDIR: "/w/tmp", ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
     ANTHROPIC_AUTH_TOKEN: KEY, API_TIMEOUT_MS: "3000000", ANTHROPIC_DEFAULT_OPUS_MODEL: MODEL,
     ANTHROPIC_DEFAULT_SONNET_MODEL: MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL: MODEL,
@@ -177,7 +184,11 @@ test("a Z.ai run is Claude Code with its deny rules, its jail and Z.ai's environ
     ensureDependencies: async () => ({ ok: true, installed: false }),
     createShellJail: async () => ({ binPath: "/jail/bin", prefixPath: "/jail/prefix",
       cleanup: async () => {} }),
+    zaiManagedSettingsPresent: () => false,
+    createZaiRunHome: async (value) => ({ config: { ...value, homePath: "/run-home",
+      claudeConfigDir: "/run-home/.claude" }, copilotToken: null, cleanup: async () => { cleaned += 1; } }),
     readZaiKey: async (value) => { keys.push(value.claudeConfigDir); return KEY; } };
+  let cleaned = 0;
   const outcome = await runAmuxV22OneShot(request, { ...config, binaryPath: "/opt/claude/bin/claude" },
     options);
   assert.deepEqual(keys, [config.claudeConfigDir]);
@@ -189,6 +200,9 @@ test("a Z.ai run is Claude Code with its deny rules, its jail and Z.ai's environ
   assert.equal(spawnOptions.env.ANTHROPIC_AUTH_TOKEN, KEY);
   assert.equal(spawnOptions.env.ANTHROPIC_BASE_URL, AMUX_V22_ZAI_BASE_URL);
   assert.equal(spawnOptions.env.CLAUDE_CODE_SHELL_PREFIX, "/jail/prefix");
+  assert.equal(spawnOptions.env.HOME, "/run-home");
+  assert.equal(spawnOptions.env.CLAUDE_CONFIG_DIR, "/run-home/.claude");
+  assert.equal(cleaned, 1);
   assert.equal(outcome.kind, "succeeded");
   assert.equal(outcome.usageReceipt.cli, "zai");
   assert.equal(outcome.usageReceipt.actualModelId, null);
@@ -199,7 +213,24 @@ test("a Z.ai run is Claude Code with its deny rules, its jail and Z.ai's environ
   assert.deepEqual([refused.kind, refused.cliStarted, refused.failure],
     ["failed", false, "channel_auth_refused"]);
   assert.equal(none.calls.length, 0);
+  // Claude Code's managed settings on the host: no run either.
+  const managed = await runAmuxV22OneShot(request, { ...config, binaryPath: "/opt/claude/bin/claude" },
+    { ...options, spawnChild: none.spawnChild, zaiManagedSettingsPresent: () => true });
+  assert.deepEqual([managed.kind, managed.cliStarted, managed.failure],
+    ["failed", false, "project_cli_config_present"]);
+  assert.equal(none.calls.length, 0);
   // A Claude worker's arguments carry no Z.ai rule.
   assert.ok(!amuxV22ClaudeArgs({ ...request, modelId: "claude-opus-5-5" }, { flow: true })
     .includes("--disallowedTools"));
+});
+
+test("a Z.ai run home is fresh and empty, and goes away after the run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-zai-"));
+  const run = await createAmuxV22ZaiRunHome({ ...config, homePath: root });
+  assert.ok(run.config.homePath.startsWith(join(root, "run-")));
+  assert.equal(run.config.claudeConfigDir, join(run.config.homePath, ".claude"));
+  assert.deepEqual(await readdir(run.config.homePath), [".claude"]);
+  assert.deepEqual(await readdir(run.config.claudeConfigDir), []);
+  await run.cleanup();
+  await assert.rejects(stat(run.config.homePath));
 });
