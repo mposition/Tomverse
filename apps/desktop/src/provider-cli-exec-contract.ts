@@ -45,8 +45,7 @@ export function liveCliRunnable(provider: LiveCliProvider, saved: Pick<SavedCliP
  * under one is refused in every permission mode and never shown on an approval card. Names are matched as whole path
  * segments, lower case, in any position (so a project's own `.qwen` folder counts too).
  */
-export const providerConfigFolders = [".qwen", ".vibe", ".grok", ".kimi-code", ".kimi", ".minimax", ".mcode", ".minimax-code", ".mistral", ".codex", ".claude", ".gemini",
-  ".antigravity"] as const;
+export const providerConfigFolders = [".qwen", ".vibe", ".grok", ".kimi-code", ".kimi", ".minimax", ".minimax-code", ".codex", ".claude", ".gemini"] as const;
 /** Z.ai's Anthropic-compatible endpoint for the Coding Plan (docs.z.ai, Claude Code). */
 export const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 

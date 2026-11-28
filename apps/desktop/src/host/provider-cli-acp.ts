@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { commandNamesSecretPath, isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
 import { LIVE_CLI_LIMITS, providerConfigFolders, type CliPermissionPlan, type LiveAcpProvider } from "../provider-cli-exec-contract";
@@ -13,44 +13,89 @@ import type { CliApproval, ExecEvent, ExecFile } from "./provider-cli-exec";
  * Desktop is a deliberately small client. It advertises no file-system and no terminal capability, so the agent uses its own
  * tools; the one request it serves is `session/request_permission`, answered from the permission plan below. Every other
  * request from the agent is refused. Nothing here reads or writes a project file.
+ *
+ * The run fails closed on the CLI's own permission mode: each CLI starts in a mode of its own choosing (Vibe in "accept-edits",
+ * MiniMax Code with permissionMode "auto"), so the mode is forced on the command line where the CLI has an option for it,
+ * set over the protocol where it has modes, and read back; a mode that is not on the table of known ones, or that cannot be
+ * confirmed as one that asks, ends the run before the task is sent.
  */
 
 type Json = Record<string, unknown>;
 const isRecord = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown, max = 4_000) => (typeof value === "string" ? value.slice(0, max) : undefined);
+const hasControl = (value: string) => [...value].some((char) => char.charCodeAt(0) < 32);
 
 // ----------------------------------------------------------------- arguments
 
 /**
- * The arguments that start each CLI as an ACP agent. Qwen Code, Kimi Code, Mistral Vibe, Grok Build and MiniMax Code are the
- * same ones the fixture routes start (structured-cli-fixture-run.ts, cli-protocol.ts); the live run drops the fixture's
- * isolation flags (agent profiles, bare mode, loopback providers). Not confirmed against the current releases: Qwen Code
- * 1.0.0-preview.2 (the fixture pins 0.28.4) and Grok Build's agent flags are the ones to check first.
- * - Qwen Code: `--acp`; `--approval-mode default` keeps its own approvals on so they reach the client.
- * - Kimi Code: the `acp` subcommand. MiniMax Code: the `acp` subcommand of `mcode`.
+ * The arguments that start each CLI as an ACP agent, with the permission mode the CLI is forced into where it has an option.
+ * Probed on the owner's computer (initialize and session/new only): Qwen Code 1.0.0-preview.2 rejects `--approval-mode` and takes
+ * `--permission-mode`; Grok Build 1.0.92 offers no modes in the session, so its top-level `--permission-mode` (placed before
+ * `agent`) is the only guarantee; Kimi Code 2.8.1, Mistral Vibe 3.1.5, Antigravity 1.5.19 and MiniMax Code 0.8.0 are set over the
+ * protocol (see acpSafety). Read only starts Qwen Code and Grok Build in "dontAsk" (they refuse instead of asking); the adapter
+ * denies every write and command request in that mode as well.
+ * - Kimi Code: the `acp` subcommand. MiniMax Code: the `acp` subcommand of its entry file (started by Node, see minimax-install.ts).
  * - Mistral Vibe: `vibe-acp` takes no arguments.
  * - Antigravity (`agy`): the `acp` subcommand with telemetry off; the fixture's profile, log and endpoint flags are left out so it uses its own
  *   sign-in under ~/.gemini.
- * - Grok Build: `--no-auto-update` keeps the run from replacing the person's file; `agent stdio` is its ACP server.
+ * - Grok Build: `--no-auto-update` keeps the run from replacing the person's file.
  */
-export const acpCommandLine: Record<LiveAcpProvider, readonly string[]> = {
-  qwen: ["--acp", "--approval-mode", "default"],
-  xai: ["--no-auto-update", "agent", "--no-leader", "stdio"],
-  moonshot: ["acp"],
-  mistral: [],
-  minimax: ["acp"],
-  google: ["acp", "--disable-telemetry"],
-};
-export const acpArguments = (provider: LiveAcpProvider): string[] => [...acpCommandLine[provider]];
+export function acpArguments(provider: LiveAcpProvider, grants: PermissionModeId = "ask"): string[] {
+  const readOnly = grants === "read_only";
+  switch (provider) {
+    case "qwen": return ["--acp", "--permission-mode", readOnly ? "dontAsk" : "default"];
+    case "xai": return ["--permission-mode", readOnly ? "dontAsk" : "default", "--no-auto-update", "agent", "--no-leader", "stdio"];
+    case "moonshot": return ["acp"];
+    case "mistral": return [];
+    case "minimax": return ["acp"];
+    case "google": return ["acp", "--disable-telemetry"];
+  }
+}
 
-/** How long the CLI has to answer `initialize` and `session/new`, and how long it has to exit after the turn before it is ended. */
+/** How long the CLI has to answer `initialize` and `session/new`, how long a mode change has to be confirmed, and how long it has to exit after the turn before it is ended. */
 export const ACP_HANDSHAKE_MS = 60_000;
+export const ACP_MODE_CONFIRM_MS = 5_000;
 export const ACP_EXIT_GRACE_MS = 1_500;
+
+// ------------------------------------------------------------ permission modes
+
+type ConfigRule = {
+  /** The configuration option's id in the session's `configOptions`. */
+  id: string;
+  /** Every value the CLI is known to have. */
+  known: readonly string[];
+  /** The values that still ask; the first is the one set. */
+  accepted: readonly string[];
+};
+type Safety = {
+  /** Every mode id the CLI is known to have. A current mode outside it ends the run. Empty: the CLI shows no modes. */
+  known: readonly string[];
+  /** The modes that route each request to the client (or refuse it), by what the run was granted; the first is the one set. */
+  readOnly: readonly string[];
+  interactive: readonly string[];
+  config?: readonly ConfigRule[];
+};
+
+/** The known permission modes of each CLI, from the owner's computer (Qwen Code 1.0.0-preview.2, Kimi Code 2.8.1, Mistral Vibe 3.1.5, Antigravity 1.5.19, MiniMax Code 0.8.0, Grok Build 1.0.92). */
+export const acpSafety: Record<LiveAcpProvider, Safety> = {
+  qwen: { known: ["default", "acceptEdits", "auto", "dontAsk", "yolo"], readOnly: ["dontAsk", "default"], interactive: ["default"] },
+  // Grok Build reports no modes: the `--permission-mode` argument is what holds, and a mode it does report must be a known one.
+  xai: { known: [], readOnly: [], interactive: [] },
+  moonshot: { known: ["default", "plan", "auto", "yolo"], readOnly: ["plan", "default"], interactive: ["default"] },
+  mistral: { known: ["ask", "accept-edits", "smart-approve", "auto-approve"], readOnly: ["ask"], interactive: ["ask"] },
+  minimax: { known: ["default", "plan"], readOnly: ["plan", "default"], interactive: ["default"],
+    config: [{ id: "permissionMode", known: ["default", "auto", "bypassPermissions"], accepted: ["default"] }] },
+  // Antigravity's plan mode cannot read files at all (checked 2026-11-28), so Read only runs in default, where every write and
+  // command comes as a permission request that Read only refuses.
+  google: { known: ["default", "accept-edits", "plan"], readOnly: ["default", "plan"], interactive: ["default"] },
+};
 
 // ------------------------------------------------------------ credential paths
 
 const configFolders = new Set<string>(providerConfigFolders);
-const invisible = /[­؜᠎​-‏‪-‮⁠-⁯﻿]/g;
+// Invisible and direction-control characters, built from code points so the source holds no escape text.
+const invisibleRanges: Array<[number, number]> = [[0xad, 0xad], [0x61c, 0x61c], [0x180e, 0x180e], [0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x206f], [0xfeff, 0xfeff]];
+const invisible = new RegExp(`[${invisibleRanges.map(([from, to]) => String.fromCodePoint(from) + (to > from ? `-${String.fromCodePoint(to)}` : "")).join("")}]`, "g");
 const credentialName = /credential|oauth|(^|[-_.])auth\.json$|api[-_]?key|(access|refresh|id)[-_]?token/i;
 
 /**
@@ -67,30 +112,60 @@ export function acpSecretPath(path: string): boolean {
 const commandWords = (command: string) => command.split(/[\s"'=,;<>|&()`]+/).filter(Boolean);
 const commandNamesCredential = (command: string) => commandNamesSecretPath(command, { everyWord: true }) || commandWords(command).some(acpSecretPath);
 
+const windows = process.platform === "win32";
+const fold = (value: string) => (windows ? value.toLowerCase() : value);
+const within = (child: string, parent: string) => {
+  const rel = relative(fold(parent), fold(child));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+
+/**
+ * The path with every link of its nearest existing folder resolved: the real path of that folder plus the part that does not
+ * exist yet. A link in the project that leads to a credential file resolves to the credential file. Null when it cannot be read.
+ */
+export function realPathOf(path: string, cwd: string): string | null {
+  if (hasControl(path)) return null;
+  let existing = resolve(cwd, path);
+  const rest: string[] = [];
+  for (;;) {
+    try { return join(realpathSync.native(existing), ...[...rest].reverse()); } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+      const parent = dirname(existing);
+      if (parent === existing) return null;
+      rest.push(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+const projectRoot = (cwd: string) => { try { return realpathSync.native(cwd); } catch { return null; } };
+
 /** Whether the path lies inside the project, after the links of the nearest existing folder are resolved. */
 export function insideProject(path: string, cwd: string): boolean {
-  if (/[\u0000-\u001f]/.test(path)) return false;
-  const windows = process.platform === "win32";
-  const fold = (value: string) => (windows ? value.toLowerCase() : value);
-  const within = (child: string, parent: string) => {
-    const rel = relative(fold(parent), fold(child));
-    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-  };
+  const root = projectRoot(cwd);
+  if (!root || hasControl(path)) return false;
   const target = resolve(cwd, path);
-  try {
-    const root = realpathSync.native(cwd);
-    // The path may be written with the project's real path or with the path the person opened.
-    if (!within(target, cwd) && !within(target, root)) return false;
-    let existing = target;
-    for (;;) {
-      try { return within(realpathSync.native(existing), root); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as NodeJS.ErrnoException).code !== "ENOTDIR") return false;
-        const parent = dirname(existing);
-        if (parent === existing) return false;
-        existing = parent;
-      }
-    }
-  } catch { return false; }
+  // The path may be written with the project's real path or with the path the person opened.
+  if (!within(target, cwd) && !within(target, root)) return false;
+  const real = realPathOf(path, cwd);
+  return real !== null && within(real, root);
+}
+
+/**
+ * Whether a requested path names a credential store: by the name as written and by where it really leads (a link in the project
+ * to `~/.qwen/...` resolves outside it). A path inside the project is judged by its part under the project, so a project that
+ * itself lives under a folder such as `.claude` is not refused as a whole. A path that cannot be resolved counts as one.
+ */
+export function namesCredential(path: string, cwd: string): boolean {
+  const root = projectRoot(cwd);
+  const real = realPathOf(path, cwd);
+  if (real === null) return true;
+  const judged = (value: string) => {
+    for (const base of [root, cwd]) if (base && within(value, base)) return acpSecretPath(relative(base, value) || ".");
+    return acpSecretPath(value);
+  };
+  return judged(resolve(cwd, path)) || judged(real);
 }
 
 // ---------------------------------------------------------------- permissions
@@ -98,7 +173,8 @@ export function insideProject(path: string, cwd: string): boolean {
 const pathKeys = new Set(["path", "file_path", "filepath", "absolute_path", "absolutepath", "file", "filename", "notebook_path", "target", "source",
   "destination", "dest", "old_path", "new_path", "directory", "dir", "cwd"]);
 const listKeys = new Set(["paths", "files", "file_paths"]);
-const readKinds = new Set(["read", "search", "think"]);
+/** A request to read or search is allowed in Read only when it names where, and every place is inside the project. */
+const readKinds = new Set(["read", "search"]);
 
 function parsedInput(value: unknown): Json | undefined {
   if (isRecord(value)) return value;
@@ -133,9 +209,10 @@ export type AcpPermission = {
 
 /**
  * Reads one `session/request_permission` and decides what Desktop does with it, by the permission plan:
- * - Read only (no approvals): a read or search inside the project is allowed; every write, command or other request is denied.
+ * - Read only (no approvals): a read or search that names its places, all inside the project, is allowed; every write, command
+ *   or other request is denied, and so is a read or search that names no place.
  * - Ask and Auto review: everything goes to the person's card, except a request naming a credential file or a provider CLI's
- *   settings folder, which is refused and never shown.
+ *   settings folder (also through a link), or a command request that carries no command text, which is refused and never shown.
  * - Allow all: a file edit whose every path is inside the project is allowed; commands, network and anything outside the
  *   project still go to the card, as with Claude Code.
  * "Allow always" is never chosen: only `allow_once` is ever selected.
@@ -164,9 +241,11 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
     diffs.push({ path: entry.path, oldText: typeof entry.oldText === "string" ? entry.oldText : null, newText: typeof entry.newText === "string" ? entry.newText : "" });
   }
   collectPaths(raw, paths);
+  // The command is the one the CLI will run, from its own arguments; the title is a description and is never taken for it.
   const rawCommand = raw?.command ?? raw?.cmd;
-  const command = typeof rawCommand === "string" ? rawCommand : Array.isArray(rawCommand) && rawCommand.every((word) => typeof word === "string") ? rawCommand.join(" ")
-    : kind === "execute" ? title : undefined;
+  const command = typeof rawCommand === "string" && rawCommand.trim() ? rawCommand
+    : Array.isArray(rawCommand) && rawCommand.length > 0 && rawCommand.every((word) => typeof word === "string") ? rawCommand.join(" ") : undefined;
+  const commandMissing = kind === "execute" && command === undefined;
 
   let approval: CliApproval;
   if (kind === "execute" && command) {
@@ -182,23 +261,24 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
     approval = { id, tool: title ?? kind, input: { kind, ...(title ? { title } : {}), ...(paths.length ? { paths } : {}), ...(raw ? { rawInput: raw } : {}) } };
   }
 
-  const secret = paths.some(acpSecretPath) || (command !== undefined && commandNamesCredential(command));
+  const secret = paths.some((path) => namesCredential(path, context.cwd)) || (command !== undefined && commandNamesCredential(command));
   const inside = paths.every((path) => insideProject(path, context.cwd));
   const result = (verdict: AcpPermission["verdict"], marked = approval): AcpPermission => ({ verdict, approval: marked, allowOption, rejectOption });
-  if (context.plan.approvals === "none") return result(!secret && inside && readKinds.has(kind) && !command && allowOption ? "allow" : "deny");
-  if (secret) return result("refuse", { ...approval, refused: true });
+  if (context.plan.approvals === "none") {
+    return result(!secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && !command && allowOption ? "allow" : "deny");
+  }
+  if (secret || commandMissing) return result("refuse", { ...approval, refused: true });
   if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && !command && allowOption) return result("allow");
   return result("ask");
 }
 
 // --------------------------------------------------------------------- client
 
-const unsafeMode = /auto|yolo|bypass|accept|dont.?ask|full|allow/i;
-const safeModes = ["default", "ask", "normal"];
 const fileKinds: Record<string, ExecFile["kind"]> = { edit: "update", move: "update", delete: "delete" };
 const toolStates: Record<string, "running" | "done" | "failed"> = { pending: "running", in_progress: "running", completed: "done", failed: "failed" };
 
 export type AcpClientOptions = {
+  provider: LiveAcpProvider;
   cwd: string;
   prompt: string;
   mode: PermissionModeId;
@@ -211,6 +291,7 @@ export type AcpClientOptions = {
   signal: AbortSignal;
   clientVersion?: string;
   handshakeMs?: number;
+  confirmMs?: number;
 };
 
 type Tool = { kind: string; title: string; files: ExecFile[]; command?: string };
@@ -220,6 +301,8 @@ export function createAcpClient(options: AcpClientOptions) {
   const waiting = new Map<number, (frame: Json) => void>();
   const tools = new Map<string, Tool>();
   const pendingApprovals = new Set<AbortController>();
+  const early: Json[] = [];
+  const watchers = new Set<() => void>();
   let approvals: Promise<void> = Promise.resolve();
   let sessionId = "";
   let prompted = false;
@@ -227,13 +310,27 @@ export function createAcpClient(options: AcpClientOptions) {
   let reply = "";
   let messages = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** What the CLI last reported of its modes and options, from the session, its answers and its notifications. */
+  const observed: { mode?: string; modeOption?: string; config: Map<string, string> } = { config: new Map() };
+  let enforced = false;
+  const rule = acpSafety[options.provider];
+  const accepted = options.plan.grants === "read_only" ? rule.readOnly : rule.interactive;
+
   const frame = (body: Json) => options.send({ jsonrpc: "2.0", ...body });
   const request = (method: string, params: Json) => new Promise<Json>((resolvePromise) => {
     const id = nextId++;
     waiting.set(id, resolvePromise);
     frame({ id, method, params });
   });
-  const errorText = (reply: Json) => isRecord(reply.error) ? text(reply.error.message, 600) ?? "The CLI reported an error." : "The CLI reported an error.";
+  // The CLI's own reason when it gives one (Grok Build answers "Internal error" with the provider's refusal, such as a spent usage
+  // balance, in error.data), so the task says why rather than only that it failed.
+  const errorText = (answer: Json) => {
+    if (!isRecord(answer.error)) return "The CLI reported an error.";
+    const message = text(answer.error.message, 300) ?? "The CLI reported an error.";
+    const data = answer.error.data;
+    const detail = typeof data === "string" ? data : isRecord(data) ? text(data.message, 400) ?? text(data.details, 400) : undefined;
+    return detail && !message.includes(detail) ? `${message}: ${detail.slice(0, 400)}` : message;
+  };
 
   const turn = (state: "completed" | "failed", error?: string) => {
     if (finished) return;
@@ -246,6 +343,74 @@ export function createAcpClient(options: AcpClientOptions) {
     options.emit({ type: "message", id: `acp-message-${messages++}`, text: reply.slice(0, LIVE_CLI_LIMITS.message) });
     reply = "";
   };
+
+  /** Reads what a result or a notification says about the current mode and options. */
+  function observe(source: unknown) {
+    if (!isRecord(source)) return;
+    const modes = isRecord(source.modes) ? source.modes : undefined;
+    const mode = text(source.currentModeId, 80) ?? text(modes?.currentModeId, 80);
+    // The mode option of the session repeats the mode: a new mode makes the old option stale until the CLI reports it again.
+    if (mode !== undefined && mode !== observed.mode) observed.modeOption = undefined;
+    if (mode !== undefined) observed.mode = mode;
+    for (const option of Array.isArray(source.configOptions) ? source.configOptions.slice(0, 64) : []) {
+      if (!isRecord(option) || typeof option.id !== "string" || typeof option.currentValue !== "string") continue;
+      if (option.id === "mode") observed.modeOption = option.currentValue;
+      else observed.config.set(option.id.slice(0, 80), option.currentValue.slice(0, 80));
+    }
+    for (const watcher of [...watchers]) watcher();
+  }
+  const modeOk = () => (observed.mode === undefined ? rule.known.length === 0 : accepted.includes(observed.mode)) &&
+    (observed.modeOption === undefined || accepted.includes(observed.modeOption));
+  const configOk = () => (rule.config ?? []).every(({ id, accepted: values }) => { const value = observed.config.get(id); return value !== undefined && values.includes(value); });
+  /** Waits until the check holds on what the CLI reports, or the time is up. */
+  const confirmed = (check: () => boolean) => new Promise<boolean>((done) => {
+    if (check()) { done(true); return; }
+    const end = (value: boolean) => { clearTimeout(wait); watchers.delete(watcher); done(value); };
+    const watcher = () => { if (check()) end(true); };
+    const wait = setTimeout(() => end(false), options.confirmMs ?? ACP_MODE_CONFIRM_MS);
+    watchers.add(watcher);
+  });
+
+  /**
+   * The session's permission mode must be one that asks (or, in Read only, one that refuses). A mode outside the table of the
+   * CLI's known ones, or one that cannot be confirmed after it is set, fails the run before the task is sent.
+   */
+  async function enforceMode(session: Json) {
+    observed.mode = undefined;
+    observed.modeOption = undefined;
+    observed.config.clear();
+    observe(session);
+    const modes = isRecord(session.modes) ? session.modes : undefined;
+    const available = Array.isArray(modes?.availableModes) ? modes.availableModes.flatMap((mode) => (isRecord(mode) && typeof mode.id === "string" ? [mode.id] : [])) : [];
+    const fail = (why: string) => new Error(`${why} Tomverse Desktop does not start a task in a mode it cannot confirm asks first.`);
+    for (const value of [observed.mode, observed.modeOption] as Array<string | undefined>) {
+      if (value !== undefined && !rule.known.includes(value)) throw fail(`The CLI is in permission mode "${value.slice(0, 40)}", which is not one Desktop knows.`);
+    }
+    if (rule.known.length > 0 && observed.mode === undefined) throw fail("The CLI did not report its permission mode.");
+    if (!modeOk()) {
+      const target = accepted[0]!;
+      if (!available.includes(target)) throw fail(`The CLI is in permission mode "${observed.mode}" and cannot switch to "${target}".`);
+      const switched = await request("session/set_mode", { sessionId, modeId: target });
+      if (switched.error) throw fail(`The CLI refused to switch to permission mode "${target}".`);
+      // ACP's set_mode answer is empty by definition: a success is the switch (Vibe, Kimi and Antigravity answer `{}`, checked
+      // against the real CLIs 2026-11-28). A mode the answer or a later notification reports still wins over it.
+      if (observed.mode !== target) { observed.mode = target; observed.modeOption = undefined; }
+      observe(switched.result);
+      if (!await confirmed(modeOk)) throw fail(`The CLI did not confirm permission mode "${target}".`);
+    }
+    for (const { id, known, accepted: values } of rule.config ?? []) {
+      const current = observed.config.get(id);
+      if (current === undefined) throw fail(`The CLI did not report its "${id}" option.`);
+      if (!known.includes(current)) throw fail(`The CLI's "${id}" option is "${current.slice(0, 40)}", which is not one Desktop knows.`);
+      if (!values.includes(current)) {
+        const switched = await request("session/set_config_option", { sessionId, configId: id, value: values[0] });
+        if (switched.error) throw fail(`The CLI refused to set its "${id}" option to "${values[0]}".`);
+        observe(switched.result);
+        if (!await confirmed(configOk)) throw fail(`The CLI did not confirm its "${id}" option as "${values[0]}".`);
+      }
+    }
+    enforced = true;
+  }
 
   function toolEvents(id: string, update: Json): ExecEvent[] {
     const known = tools.get(id);
@@ -282,6 +447,12 @@ export function createAcpClient(options: AcpClientOptions) {
 
   function onUpdate(update: Json) {
     const kind = text(update.sessionUpdate, 60);
+    if (kind === "current_mode_update" || kind === "config_option_update") {
+      observe(update);
+      // A CLI that changes its own mode during the task, to one that does not ask, ends the task at once.
+      if (enforced && !finished && (!modeOk() || !configOk())) turn("failed", "The CLI changed its permission mode during the task, and Tomverse Desktop ended it.");
+      return;
+    }
     if (kind === "agent_message_chunk") {
       const content = update.content;
       if (isRecord(content) && content.type === "text" && typeof content.text === "string" && reply.length < LIVE_CLI_LIMITS.message) {
@@ -308,24 +479,13 @@ export function createAcpClient(options: AcpClientOptions) {
       }
       pendingApprovals.delete(controller);
       if (controller.signal.aborted && !options.signal.aborted) return;
-      const chosen = allowed ? decision.allowOption : decision.rejectOption;
+      const chosen = allowed && !finished ? decision.allowOption : decision.rejectOption;
       frame({ id, result: { outcome: chosen ? { outcome: "selected", optionId: chosen } : { outcome: "cancelled" } } });
     });
   }
 
-  async function selectMode(created: Json) {
-    const modes = isRecord(created.modes) ? created.modes : undefined;
-    const current = text(modes?.currentModeId, 80);
-    const available = Array.isArray(modes?.availableModes)
-      ? modes.availableModes.flatMap((mode) => (isRecord(mode) && typeof mode.id === "string" ? [mode.id] : [])) : [];
-    const unsafe = current !== undefined && unsafeMode.test(current);
-    // Read only prefers the CLI's own plan mode; a mode that approves on its own is never kept.
-    const target = options.plan.grants === "read_only" && available.includes("plan") ? "plan" : unsafe ? safeModes.find((id) => available.includes(id)) : undefined;
-    const refusal = new Error(`The CLI started in "${current}" mode, which approves actions on its own, and Tomverse Desktop could not switch it off.`);
-    if (unsafe && !target) throw refusal;
-    if (!target || target === current) return;
-    const switched = await request("session/set_mode", { sessionId, modeId: target });
-    if (switched.error && unsafe) throw refusal;
+  function handleUpdate(message: Json) {
+    if (isRecord(message.params) && isRecord(message.params.update) && !finished) onUpdate(message.params.update);
   }
 
   async function drive() {
@@ -340,12 +500,16 @@ export function createAcpClient(options: AcpClientOptions) {
       throw new Error(code === -32000 ? "The CLI is not signed in. Sign in with the CLI itself, then try again." : created.error ? errorText(created) : "The CLI did not start a session.");
     }
     sessionId = session.sessionId.slice(0, 200);
+    await enforceMode(session);
+    // Notifications that arrived in the same read as the session's answer count for what they say about the mode.
+    for (const update of early.splice(0)) if (isRecord(update.params) && update.params.sessionId === sessionId) handleUpdate(update);
+    if (finished) return;
     options.emit({ type: "session", id: sessionId });
-    await selectMode(session);
     clearTimeout(timer);
     prompted = true;
     const done = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: options.prompt }] });
     flush();
+    if (finished) return;
     if (done.error) return turn("failed", errorText(done));
     const stop = isRecord(done.result) ? text(done.result.stopReason, 40) : undefined;
     if (stop === "end_turn") return turn("completed");
@@ -370,7 +534,8 @@ export function createAcpClient(options: AcpClientOptions) {
         return;
       }
       if (!hasId) {
-        if (method === "session/update" && isRecord(message.params) && message.params.sessionId === sessionId && isRecord(message.params.update) && !finished) onUpdate(message.params.update);
+        if (method !== "session/update" || !isRecord(message.params)) return;
+        if (sessionId === "") { if (early.length < 64) early.push(message); } else if (message.params.sessionId === sessionId) handleUpdate(message);
         return;
       }
       if (method === "session/request_permission" && isRecord(message.params) && message.params.sessionId === sessionId) answer(message.id, message.params);

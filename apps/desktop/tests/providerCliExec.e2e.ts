@@ -250,7 +250,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await expect(vibeDeny.getByRole("button", { name: "Allow always" })).toHaveCount(0);
     await decide(vibeDeny, "Deny");
     await expect(page.getByText("I will work. denied it", { exact: true })).toBeVisible({ timeout: 30_000 });
-    let vibeRun = await outcomes();
+    const vibeRun = await outcomes();
     assert.equal(vibeRun.outcomes[0]!.outcome.optionId, "reject");
     assert.deepEqual(vibeRun.args, []);
     assert.ok(vibeRun.env.every((name) => !/^TOMVERSE_|^ELECTRON|TOKEN|KEY/i.test(name)), "no Tomverse or secret variable reaches the CLI");

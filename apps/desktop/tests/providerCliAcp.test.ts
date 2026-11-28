@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes } from "../src/permission-contract";
-import { acpArguments, acpCommandLine, acpSecretPath, classifyAcpPermission, insideProject } from "../src/host/provider-cli-acp";
+import { acpArguments, acpSafety, acpSecretPath, classifyAcpPermission, insideProject, namesCredential, realPathOf } from "../src/host/provider-cli-acp";
 import { cliExecEnvironment, runProviderCli, type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
 import { cliPermissionPlan, liveAcpProviders, liveCliFile, liveCliNames, liveCliProviderForModel, liveCliProviders, liveCliRunnable, providerConfigFolders,
   type LiveAcpProvider } from "../src/provider-cli-exec-contract";
@@ -38,18 +38,33 @@ test("A saved file is runnable when it is the executable itself, never a release
   assert.equal(liveCliRunnable("qwen", undefined), false);
 });
 
-test("Each CLI starts as an ACP agent with its own arguments and no approval-skipping flag", () => {
-  assert.deepEqual(acpArguments("qwen"), ["--acp", "--approval-mode", "default"]);
-  assert.deepEqual(acpArguments("moonshot"), ["acp"]);
-  assert.deepEqual(acpArguments("mistral"), []);
-  assert.deepEqual(acpArguments("xai"), ["--no-auto-update", "agent", "--no-leader", "stdio"]);
-  assert.deepEqual(acpArguments("minimax"), ["acp"]);
-  assert.deepEqual(acpArguments("google"), ["acp", "--disable-telemetry"]);
+test("Each CLI starts as an ACP agent with its permission mode forced on the command line where it has an option", () => {
+  assert.deepEqual(acpArguments("qwen", "ask"), ["--acp", "--permission-mode", "default"]);
+  assert.deepEqual(acpArguments("qwen", "read_only"), ["--acp", "--permission-mode", "dontAsk"]);
+  assert.deepEqual(acpArguments("xai", "allow_all"), ["--permission-mode", "default", "--no-auto-update", "agent", "--no-leader", "stdio"]);
+  assert.deepEqual(acpArguments("xai", "read_only"), ["--permission-mode", "dontAsk", "--no-auto-update", "agent", "--no-leader", "stdio"]);
+  assert.deepEqual(acpArguments("moonshot", "ask"), ["acp"]);
+  assert.deepEqual(acpArguments("mistral", "ask"), []);
+  assert.deepEqual(acpArguments("minimax", "ask"), ["acp"]);
+  assert.deepEqual(acpArguments("google", "ask"), ["acp", "--disable-telemetry"]);
+  for (const provider of liveAcpProviders) for (const mode of permissionModes) {
+    const args = acpArguments(provider, mode);
+    assert.ok(!args.some((arg) => /yolo|auto-approve|bypass|skip-permissions|always-approve|dangerous|trust|--api-key|--gemini-dir|--agent-profile|approval-mode/i.test(arg)), `${provider} ${mode}`);
+    // The list handed out is a copy, and Qwen Code's rejected option is never used.
+    args.push("x");
+    assert.ok(!acpArguments(provider, mode).includes("x"));
+  }
+});
+
+test("The table of known permission modes names, for each CLI, the modes that ask and the ones that do not", () => {
+  assert.deepEqual(acpSafety.mistral.known, ["ask", "accept-edits", "smart-approve", "auto-approve"]);
+  assert.deepEqual(acpSafety.mistral.interactive, ["ask"]);
+  assert.deepEqual(acpSafety.xai.known, []);
+  assert.deepEqual(acpSafety.minimax.config, [{ id: "permissionMode", known: ["default", "auto", "bypassPermissions"], accepted: ["default"] }]);
   for (const provider of liveAcpProviders) {
-    assert.ok(!acpCommandLine[provider].some((arg) => /yolo|auto-approve|dangerous|bypass|skip-permissions|trust|--api-key|--gemini-dir|--agent-profile/i.test(arg)), provider);
-    // The list handed out is a copy.
-    acpArguments(provider).push("x");
-    assert.ok(!acpCommandLine[provider].includes("x"));
+    const rule = acpSafety[provider];
+    for (const mode of [...rule.readOnly, ...rule.interactive]) assert.ok(rule.known.includes(mode), `${provider} ${mode}`);
+    for (const mode of rule.interactive) assert.ok(!/yolo|auto|accept|bypass/i.test(mode) || mode === "default", `${provider} ${mode}`);
   }
 });
 
@@ -73,7 +88,7 @@ test("The CLI gets its own home and sign-in and no Tomverse or provider key", ()
 // ------------------------------------------------------------ credential paths
 
 test("A provider CLI's settings and sign-in files are always refused, wherever they are written", () => {
-  for (const folder of [".qwen", ".vibe", ".grok", ".kimi-code", ".gemini", ".codex", ".claude"]) assert.ok(providerConfigFolders.includes(folder as never), folder);
+  for (const folder of [".qwen", ".vibe", ".grok", ".kimi-code", ".minimax", ".minimax-code", ".gemini", ".codex", ".claude"]) assert.ok(providerConfigFolders.includes(folder as never), folder);
   const refused = [
     "C:\\Users\\p\\.qwen\\subscription_credentials.json", "C:\\Users\\p\\.qwen\\settings.json", "/home/p/.vibe/.env", "~/.vibe/config.toml", "/home/p/.grok/auth.json",
     "C:\\Users\\p\\.kimi-code\\credentials\\token.json", "/home/p/.gemini/antigravity-cli/state", "/home/p/.gemini/config", "/home/p/.codex/auth.json",
@@ -116,7 +131,12 @@ test("Read only denies every write and command request without a card, and allow
     assert.equal(verdict({ kind: "fetch", title: "Fetch https://example.com" }), "deny");
     assert.equal(verdict({ kind: "other", title: "mcp tool" }), "deny");
     assert.equal(verdict({ kind: "read", title: "Read a.ts", locations: [{ path: join(cwd, "a.ts") }] }), "allow");
-    assert.equal(verdict({ kind: "search", title: "Search", rawInput: { pattern: "x" } }), "allow");
+    assert.equal(verdict({ kind: "search", title: "Search", rawInput: { pattern: "x", path: cwd } }), "allow");
+    // A read or search that names no place is not allowed on its own.
+    assert.equal(verdict({ kind: "search", title: "Search", rawInput: { pattern: "x" } }), "deny");
+    assert.equal(verdict({ kind: "read", title: "Read" }), "deny");
+    assert.equal(verdict({ kind: "think", title: "Think" }), "deny");
+    assert.equal(verdict({ kind: "execute", title: "ls", rawInput: {} }), "deny");
     assert.equal(verdict({ kind: "read", title: "Read outside", locations: [{ path: join(cwd, "..", "x.txt") }] }), "deny");
     assert.equal(verdict({ kind: "read", title: "Read login", locations: [{ path: "/home/p/.qwen/subscription_credentials.json" }] }), "deny");
     // Only "allow once" is ever chosen.
@@ -192,6 +212,92 @@ test("Allow all approves only a file edit inside the project; commands, network 
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
+test("A command request without command text is refused unseen: the title is never taken for the command", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-perm-"));
+  try {
+    for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+      const plan = cliPermissionPlan("qwen", mode);
+      for (const toolCall of [{ kind: "execute", title: "rm -rf build" }, { kind: "execute", title: "rm -rf build", rawInput: {} }, { kind: "execute", title: "ls", rawInput: { command: "  " } },
+        { kind: "execute", title: "ls", rawInput: { command: 7 } }, { kind: "execute", title: "ls", rawInput: "not json" }]) {
+        const decision = classifyAcpPermission(request(toolCall), { cwd, plan });
+        assert.equal(decision.verdict, "refuse", `${mode} ${JSON.stringify(toolCall)}`);
+        assert.equal(decision.approval.refused, true);
+      }
+      const words = classifyAcpPermission(request({ kind: "execute", title: "List", rawInput: { command: ["ls", "-la"] } }), { cwd, plan });
+      assert.equal(words.verdict, "ask");
+      assert.equal(words.approval.input.command, "ls -la");
+    }
+    // The credential check reads the command itself, not its description.
+    const plan = cliPermissionPlan("qwen", "ask");
+    assert.equal(classifyAcpPermission(request({ kind: "execute", title: "Show the build log", rawInput: { command: "type %USERPROFILE%\\.qwen\\settings.json" } }), { cwd, plan }).verdict, "refuse");
+    assert.equal(classifyAcpPermission(request({ kind: "execute", title: "cat ~/.vibe/.env", rawInput: { command: "ls" } }), { cwd, plan }).verdict, "ask");
+    assert.equal(classifyAcpPermission(request({ kind: "execute", title: "x" }), { cwd, plan: cliPermissionPlan("qwen", "read_only") }).verdict, "deny");
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("A read or search that names no place is denied in Read only and goes to the card, whole, in Ask", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-perm-"));
+  try {
+    const bare = { kind: "search", title: "Search the project", rawInput: { pattern: "TODO", glob: "**/*.ts" } };
+    assert.equal(classifyAcpPermission(request(bare), { cwd, plan: cliPermissionPlan("moonshot", "read_only") }).verdict, "deny");
+    for (const mode of ["ask", "auto_review", "allow_all"] as const) {
+      const decision = classifyAcpPermission(request(bare), { cwd, plan: cliPermissionPlan("moonshot", mode) });
+      assert.equal(decision.verdict, "ask", mode);
+      assert.deepEqual(decision.approval.input, { kind: "search", title: "Search the project", rawInput: { pattern: "TODO", glob: "**/*.ts" } });
+    }
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("A link in the project that leads to a credential file is refused whatever it is called, and one that leads outside is not inside", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "tomverse-acp-link-"));
+  try {
+    const cwd = join(root, "project");
+    const home = join(root, "home");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await mkdir(join(home, ".qwen"), { recursive: true });
+    await writeFile(join(home, ".qwen", "subscription_credentials.json"), "{}");
+    await writeFile(join(cwd, "notes.txt"), "n");
+    const { symlink } = await import("node:fs/promises");
+    const made: string[] = [];
+    // A folder link (a junction on Windows) needs no privilege; a file link may not be allowed here.
+    try { await symlink(join(home, ".qwen"), join(cwd, "docs", "settings"), process.platform === "win32" ? "junction" : "dir"); made.push("folder"); } catch { /* not supported here */ }
+    try { await symlink(join(home, ".qwen", "subscription_credentials.json"), join(cwd, "readme-copy.txt"), "file"); made.push("file"); } catch { /* not supported here */ }
+    if (made.length === 0) { t.skip("This system does not allow links."); return; }
+    const plans = { ask: cliPermissionPlan("moonshot", "ask"), read_only: cliPermissionPlan("moonshot", "read_only"), allow_all: cliPermissionPlan("moonshot", "allow_all") };
+    const targets = [...(made.includes("folder") ? ["docs/settings/anything.json", "docs/settings"] : []), ...(made.includes("file") ? ["readme-copy.txt"] : [])];
+    for (const target of targets) {
+      assert.ok(namesCredential(target, cwd), target);
+      assert.ok(!insideProject(target, cwd), target);
+      for (const toolCall of [{ kind: "read", locations: [{ path: target }] }, { kind: "edit", title: "Edit", locations: [{ path: join(cwd, target) }] }, { kind: "search", rawInput: { path: target } }]) {
+        assert.equal(classifyAcpPermission(request(toolCall), { cwd, plan: plans.ask }).verdict, "refuse", `${target} ask`);
+        assert.equal(classifyAcpPermission(request(toolCall), { cwd, plan: plans.allow_all }).verdict, "refuse", `${target} allow_all`);
+        assert.equal(classifyAcpPermission(request(toolCall), { cwd, plan: plans.read_only }).verdict, "deny", `${target} read_only`);
+      }
+    }
+    // An ordinary path next to them is not.
+    assert.ok(!namesCredential("notes.txt", cwd));
+    assert.ok(!namesCredential("docs/new.md", cwd));
+    assert.ok(insideProject("docs/new.md", cwd));
+    assert.equal(classifyAcpPermission(request({ kind: "edit", locations: [{ path: "docs/new.md" }] }), { cwd, plan: plans.allow_all }).verdict, "allow");
+    // The real path keeps the part that does not exist yet.
+    const real = realPathOf("docs/not/yet.md", cwd);
+    assert.ok(real?.endsWith(join("docs", "not", "yet.md")));
+    assert.equal(realPathOf(`a${String.fromCharCode(1)}b`, cwd), null);
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("A project that lives under a provider settings folder name is not refused as a whole", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tomverse-acp-home-"));
+  try {
+    const cwd = join(root, ".claude", "worktrees", "app");
+    await mkdir(join(cwd, "src"), { recursive: true });
+    assert.ok(!namesCredential("src/a.ts", cwd));
+    assert.ok(!namesCredential(join(cwd, "src", "a.ts"), cwd));
+    assert.ok(namesCredential(join(cwd, ".claude", "settings.json"), cwd));
+    assert.equal(classifyAcpPermission(request({ kind: "edit", locations: [{ path: join(cwd, "src", "a.ts") }] }), { cwd, plan: cliPermissionPlan("qwen", "allow_all") }).verdict, "allow");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 // ----------------------------------------------------------------- the process
 
 async function withProject<T>(body: (directory: string) => Promise<T>) {
@@ -203,13 +309,26 @@ async function withProject<T>(body: (directory: string) => Promise<T>) {
   } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
 
+type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string };
+const modesOf = (provider: LiveAcpProvider, current: string) => ({ current, available: [...acpSafety[provider].known] });
+/** What each CLI reports when it starts in a mode that asks, and in the mode it really starts in (Vibe: accept-edits; MiniMax Code: permissionMode auto). */
+const safeSession: Record<LiveAcpProvider, Session> = {
+  qwen: { modes: modesOf("qwen", "default"), modeOption: false }, xai: { modes: null }, moonshot: { modes: modesOf("moonshot", "default") },
+  mistral: { modes: modesOf("mistral", "ask") }, minimax: { modes: modesOf("minimax", "default"), config: { permissionMode: "default" } }, google: { modes: modesOf("google", "default") },
+};
+const unsafeSession: Record<LiveAcpProvider, Session> = {
+  qwen: { modes: modesOf("qwen", "yolo"), modeOption: false }, xai: { modes: null }, moonshot: { modes: modesOf("moonshot", "yolo") },
+  mistral: { modes: modesOf("mistral", "accept-edits") }, minimax: { modes: modesOf("minimax", "default"), config: { permissionMode: "auto" } }, google: { modes: modesOf("google", "accept-edits") },
+};
+
 function acpRun(directory: string, scenario: object, overrides: Partial<ExecRun> = {}): ExecRun & { events: ExecEvent[] } {
   const events: ExecEvent[] = [];
-  return { provider: "mistral", file: process.execPath, argsPrefix: [fakeAgent, JSON.stringify(scenario)], cwd: directory, prompt: "Fix the bug", mode: "read_only",
+  const provider = (overrides.provider ?? "mistral") as LiveAcpProvider;
+  return { provider: "mistral", file: process.execPath, argsPrefix: [fakeAgent, JSON.stringify({ session: safeSession[provider], ...scenario })], cwd: directory, prompt: "Fix the bug", mode: "read_only",
     env: { ...process.env, TOMVERSE_CODE_KEY: "tvk_must_not_pass", OPENAI_API_KEY: "sk-must-not-pass", MISTRAL_API_KEY: "mk-must-not-pass", KIMI_CODE_HOME: "/must/not/pass", NODE_OPTIONS: "" },
     signal: new AbortController().signal, onEvent: (event) => events.push(event), events, ...overrides };
 }
-type Seen = { args: string[]; env: string[]; cwd: string; prompt: string; modeSet?: string; fsError?: number; terminalError?: number;
+type Seen = { args: string[]; env: string[]; cwd: string; prompt?: string; modeSets: string[]; configSets: Array<{ configId: string; value: string }>; fsError?: number; terminalError?: number;
   initialize: { protocolVersion: number; clientCapabilities: { fs: { readTextFile: boolean; writeTextFile: boolean }; terminal: boolean } };
   sessionNew: { cwd: string; mcpServers: unknown[] };
   outcomes: Array<{ name: string; outcome: { outcome: string; optionId?: string } }> };
@@ -235,12 +354,12 @@ test("A Read only run advertises no file system or terminal, runs in the project
     assert.equal(result.status, "completed");
     assert.equal(result.exitCode, 0);
     assert.deepEqual(approvals, [], "Read only never asks the person");
-    assert.deepEqual(seen.args, ["--acp", "--approval-mode", "default"]);
+    assert.deepEqual(seen.args, ["--acp", "--permission-mode", "dontAsk"]);
     assert.deepEqual(seen.initialize.clientCapabilities, { fs: { readTextFile: false, writeTextFile: false }, terminal: false });
     assert.equal(seen.initialize.protocolVersion, 1);
     assert.deepEqual(seen.sessionNew.mcpServers, []);
     assert.equal(seen.prompt, "Fix the bug");
-    assert.equal(seen.modeSet, "plan");
+    assert.deepEqual(seen.modeSets, [], "Qwen Code is already in a mode that refuses");
     for (const name of ["TOMVERSE_CODE_KEY", "OPENAI_API_KEY", "MISTRAL_API_KEY", "KIMI_CODE_HOME", "NODE_OPTIONS"]) assert.ok(!seen.env.includes(name), name);
     assert.deepEqual(seen.env.filter((name) => /tomverse/i.test(name)), []);
     for (const name of ["run-echo", "edit-project", "edit-outside", "edit-credential", "command-credential", "read-grok-auth"]) assert.ok(rejected(outcomeOf(seen, name)), name);
@@ -283,7 +402,7 @@ test("Ask puts the requests on the card one at a time, refuses credential reques
     for (const name of ["run-echo", "edit-project", "edit-outside", "read-project"]) assert.ok(allowed(outcomeOf(seen, name)), name);
     for (const name of ["edit-credential", "command-credential", "read-grok-auth"]) assert.ok(rejected(outcomeOf(seen, name)), name);
     assert.ok(seen.outcomes.every(({ outcome }) => outcome.optionId !== "always"));
-    assert.equal(seen.modeSet, undefined, "Ask keeps the CLI's own mode");
+    assert.deepEqual(seen.modeSets, [], "a mode that asks is kept");
     assert.ok(run.events.some((event) => event.type === "command" && event.state === "done" && event.output === "hi\n"));
     assert.ok(run.events.some((event) => event.type === "command" && event.state === "failed"));
   });
@@ -311,7 +430,7 @@ test("Allow all approves an edit inside the project without a card; commands and
     const seen = await seenIn(record);
     await rm(record, { force: true });
     assert.equal(result.status, "completed");
-    assert.deepEqual(seen.args, ["--no-auto-update", "agent", "--no-leader", "stdio"]);
+    assert.deepEqual(seen.args, ["--permission-mode", "default", "--no-auto-update", "agent", "--no-leader", "stdio"]);
     assert.deepEqual(approvals.map(({ id }) => id), ["t-echo", "t-out", "t-cred", "t-cmd", "t-read", "t-auth"]);
     assert.ok(allowed(outcomeOf(seen, "edit-project")));
     assert.ok(allowed(outcomeOf(seen, "run-echo")));
@@ -319,16 +438,86 @@ test("Allow all approves an edit inside the project without a card; commands and
   });
 });
 
-test("An agent that starts in a mode that approves on its own is switched back, or the run does not go on", async () => {
+test("Every CLI that starts in a mode that approves on its own is put in one that asks, and the task is sent only after that is confirmed", async () => {
   await withProject(async (directory) => {
-    const record = join(directory, "..", `acp-record-${Date.now()}-mode.json`);
-    const switched = await runProviderCli(acpRun(directory, { scenario: "unsafe", record }, { mode: "ask", approve: async () => false }));
-    assert.equal(switched.status, "completed");
-    assert.equal((await seenIn(record)).modeSet, "default");
-    await rm(record, { force: true });
-    const stuck = await runProviderCli(acpRun(directory, { scenario: "unsafe-stuck", record }, { mode: "ask", approve: async () => false }));
-    assert.equal(stuck.status, "failed");
-    assert.match(stuck.error ?? "", /approves actions on its own/);
+    type Expected = { modes: string[]; configs: Array<{ configId: string; value: string }> };
+    const none: Expected = { modes: [], configs: [] };
+    const permission: Expected = { modes: [], configs: [{ configId: "permissionMode", value: "default" }] };
+    const expected: Record<LiveAcpProvider, Record<"read_only" | "ask", Expected>> = {
+      qwen: { read_only: { modes: ["dontAsk"], configs: [] }, ask: { modes: ["default"], configs: [] } },
+      xai: { read_only: none, ask: none },
+      moonshot: { read_only: { modes: ["plan"], configs: [] }, ask: { modes: ["default"], configs: [] } },
+      mistral: { read_only: { modes: ["ask"], configs: [] }, ask: { modes: ["ask"], configs: [] } },
+      minimax: { read_only: permission, ask: permission },
+      google: { read_only: { modes: ["default"], configs: [] }, ask: { modes: ["default"], configs: [] } },
+    };
+    for (const provider of liveAcpProviders) for (const mode of ["read_only", "ask"] as const) {
+      const record = join(directory, "..", `acp-record-${provider}-${mode}-${Date.now()}.json`);
+      const result = await runProviderCli(acpRun(directory, { scenario: "simple", record, session: unsafeSession[provider] }, { provider, mode, approve: async () => false }));
+      const seen = await seenIn(record);
+      await rm(record, { force: true });
+      assert.equal(result.status, "completed", `${provider} ${mode}: ${result.error}`);
+      assert.deepEqual(seen.modeSets, expected[provider][mode].modes, `${provider} ${mode}`);
+      assert.deepEqual(seen.configSets, expected[provider][mode].configs, `${provider} ${mode}`);
+      assert.equal(seen.prompt, "Fix the bug");
+    }
+  });
+});
+
+test("A mode that cannot be confirmed as one that asks ends the run before any task is sent", async () => {
+  await withProject(async (directory) => {
+    const attempt = async (session: Session, provider: LiveAcpProvider, mode: "read_only" | "ask" = "ask") => {
+      const record = join(directory, "..", `acp-record-mode-${Date.now()}-${Math.random()}.json`);
+      const result = await runProviderCli(acpRun(directory, { scenario: "simple", record, session }, { provider, mode, approve: async () => false, limits: { confirm: 400 } }));
+      const seen = await seenIn(record);
+      await rm(record, { force: true });
+      return { result, seen };
+    };
+    const fails = async (session: Session, provider: LiveAcpProvider, pattern: RegExp, mode?: "read_only" | "ask") => {
+      const { result, seen } = await attempt(session, provider, mode);
+      assert.equal(result.status, "failed", JSON.stringify(session));
+      assert.match(result.error ?? "", pattern);
+      assert.equal(seen.prompt, undefined, "the task was not sent");
+    };
+    // A mode outside the table of the CLI's known ones, wherever it is reported.
+    await fails({ modes: modesOf("mistral", "turbo") }, "mistral", /not one Desktop knows/);
+    await fails({ modes: { current: "default", available: ["default"] } }, "mistral", /not one Desktop knows/);
+    await fails({ modes: { current: "turbo", available: ["turbo", "default"] }, modeOption: false }, "google", /not one Desktop knows/);
+    // A CLI that shows no modes where it has them, or modes where it has none.
+    await fails({ modes: null }, "mistral", /did not report its permission mode/);
+    await fails({ modes: { current: "default", available: ["default"] } }, "xai", /not one Desktop knows/);
+    // Cannot switch: the safe mode is not on offer, the switch is refused, or nothing confirms it.
+    await fails({ modes: { current: "accept-edits", available: ["accept-edits", "auto-approve"] } }, "mistral", /cannot switch to "ask"/);
+    await fails({ ...unsafeSession.mistral, setMode: "error" }, "mistral", /refused to switch/);
+    // A set_mode success with an empty answer is the switch, as ACP defines it (the real Vibe, Kimi and Antigravity answer {}).
+    for (const [session, provider, mode, target] of [[unsafeSession.mistral, "mistral", "ask", "ask"], [unsafeSession.google, "google", "read_only", "default"]] as const) {
+      const quiet = await attempt({ ...session, setMode: "silent" }, provider, mode);
+      assert.equal(quiet.result.status, "completed", provider);
+      assert.deepEqual(quiet.seen.modeSets, [target], provider);
+    }
+    // MiniMax Code's own option: missing, unknown, refused, or unconfirmed.
+    await fails({ modes: modesOf("minimax", "default") }, "minimax", /did not report its "permissionMode" option/);
+    await fails({ modes: modesOf("minimax", "default"), config: { permissionMode: "turbo" } }, "minimax", /not one Desktop knows/);
+    await fails({ ...unsafeSession.minimax, setConfig: "error" }, "minimax", /refused to set its "permissionMode"/);
+    await fails({ ...unsafeSession.minimax, setConfig: "silent" }, "minimax", /did not confirm its "permissionMode"/);
+    // A switch the CLI answers in its result, or by a notification, is confirmed.
+    for (const how of ["result", "notify"]) {
+      const mode = await attempt({ ...unsafeSession.mistral, setMode: how }, "mistral");
+      assert.equal(mode.result.status, "completed", how);
+      assert.deepEqual(mode.seen.modeSets, ["ask"]);
+      const config = await attempt({ ...unsafeSession.minimax, setConfig: how }, "minimax");
+      assert.equal(config.result.status, "completed", how);
+    }
+  });
+});
+
+test("A CLI that moves itself to a mode that does not ask during the task is ended", async () => {
+  await withProject(async (directory) => {
+    for (const [provider, flipTo] of [["mistral", "auto-approve"], ["qwen", "yolo"]] as const) {
+      const result = await runProviderCli(acpRun(directory, { scenario: "flip", session: { ...safeSession[provider], flipTo } }, { provider, mode: "ask", approve: async () => true }));
+      assert.equal(result.status, "failed", provider);
+      assert.match(result.error ?? "", /changed its permission mode/);
+    }
   });
 });
 
@@ -424,7 +613,7 @@ test("Each ACP provider runs through the same adapter", async () => {
       const seen = await seenIn(record);
       await rm(record, { force: true });
       assert.equal(result.status, "completed", provider);
-      assert.deepEqual(seen.args, [...acpArguments(provider)], provider);
+      assert.deepEqual(seen.args, acpArguments(provider, "read_only"), provider);
     }
   });
 });

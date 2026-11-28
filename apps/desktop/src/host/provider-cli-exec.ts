@@ -333,7 +333,7 @@ export type ExecRun = {
   approve?: (request: CliApproval, signal: AbortSignal) => Promise<boolean>;
   platform?: NodeJS.Platform;
   /** Lower limits for a test. */
-  limits?: Partial<{ stream: number; line: number; handshake: number }>;
+  limits?: Partial<{ stream: number; line: number; handshake: number; confirm: number }>;
 };
 export type ExecResult = {
   status: "completed" | "stopped" | "failed" | "unknown";
@@ -393,7 +393,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   const acp = isLiveAcpProvider(run.provider);
   const args = [...(run.argsPrefix ?? []),
     ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths })
-      : isLiveAcpProvider(run.provider) ? acpArguments(run.provider) : claudeArguments({ plan, sessionId, platform: run.platform }))];
+      : isLiveAcpProvider(run.provider) ? acpArguments(run.provider, plan.grants) : claudeArguments({ plan, sessionId, platform: run.platform }))];
   if (run.provider === "zai" && !run.zai?.key) return result("failed", null, { error: "Add the Z.ai Coding Plan key in Settings > Development CLIs." });
   if (run.signal.aborted) return result("stopped", null);
 
@@ -427,12 +427,12 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     if (event.type === "turn") {
       turn = event.state; error = event.error ?? error;
       // An ACP agent does not always leave when its input ends: after the turn it is given a moment, then ended with its tree.
-      if (acp) { stdin.end(); exitTimer ??= setTimeout(() => { void kill(); }, ACP_EXIT_GRACE_MS); }
+      if (acp) { stdin.end(); exitTimer ??= setTimeout(() => { void kill(); }, event.state === "failed" ? 0 : ACP_EXIT_GRACE_MS); }
     }
     run.onEvent(event);
   };
-  const client = acp ? createAcpClient({ cwd: run.cwd, prompt: run.prompt, mode: run.mode, plan, send, emit, approve: run.approve, signal: run.signal,
-    handshakeMs: run.limits?.handshake }) : undefined;
+  const client = isLiveAcpProvider(run.provider) ? createAcpClient({ provider: run.provider, cwd: run.cwd, prompt: run.prompt, mode: run.mode, plan, send, emit, approve: run.approve, signal: run.signal,
+    handshakeMs: run.limits?.handshake, confirmMs: run.limits?.confirm }) : undefined;
 
   const answer = (requestId: string, request: Json) => {
     const input = isRecord(request.input) ? request.input : {};

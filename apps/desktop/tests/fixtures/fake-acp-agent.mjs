@@ -22,7 +22,16 @@ let counter = 100;
 const ask = (method, params) => new Promise((resolve) => { const id = counter++; pending.set(id, resolve); out({ id, method, params }); });
 
 const scenario = options.scenario ?? "auto";
-const mode = (current, available) => ({ currentModeId: current, availableModes: available.map((id) => ({ id, name: id })) });
+// The session's modes and options: `session.modes` is { current, available } or null for an agent that shows none; `session.config` maps option ids to values;
+// `session.setMode` and `session.setConfig` say how a change is answered: "notify" (default), "result", "silent" (nothing changes) or "error".
+const session = options.session ?? {};
+const modes = session.modes === undefined ? { current: "ask", available: ["ask", "accept-edits", "smart-approve", "auto-approve"] } : session.modes;
+state.mode = modes?.current;
+state.config = { ...(session.config ?? {}) };
+state.modeSets = [];
+state.configSets = [];
+const configOptions = () => [...(modes && session.modeOption !== false ? [{ id: "mode", name: "Mode", currentValue: state.mode, options: [] }] : []),
+  ...Object.entries(state.config).map(([id, value]) => ({ id, name: id, currentValue: value, options: [] }))];
 const permission = (sessionId, toolCall) => ask("session/request_permission", { sessionId, toolCall: { status: "pending", ...toolCall }, options: [
   { optionId: "allow", name: "Allow once", kind: "allow_once" }, { optionId: "always", name: "Always allow", kind: "allow_always" },
   { optionId: "reject", name: "Reject", kind: "reject_once" }] });
@@ -60,10 +69,11 @@ async function prompt(id, params) {
   const sessionId = params.sessionId;
   const text = params.prompt.map((part) => part.text).join("");
   state.prompt = text;
-  const tag = scenario !== "auto" ? scenario : ["hang", "fail", "quiet", "flood", "linger", "simple"].find((name) => text.includes(`[${name}]`)) ?? "script";
+  const tag = scenario !== "auto" ? scenario : ["hang", "fail", "quiet", "flood", "linger", "simple", "flip"].find((name) => text.includes(`[${name}]`)) ?? "script";
   notify(sessionId, { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking" } });
   notify(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "I will " } });
   notify(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "work. " } });
+  if (tag === "flip") notify(sessionId, { sessionUpdate: "current_mode_update", currentModeId: session.flipTo ?? "auto-approve" });
   if (tag === "quiet") { save(); process.exit(0); }
   if (tag === "fail") { out({ id, error: { code: -32603, message: "The model is unavailable." } }); return; }
   if (tag === "refusal") { out({ id, result: { stopReason: "refusal" } }); return; }
@@ -101,6 +111,7 @@ const lines = readline.createInterface({ input: process.stdin });
 lines.on("close", () => { if (scenario !== "linger" && !String(state.prompt).includes("[linger]")) process.exit(0); });
 lines.on("line", (line) => {
   const message = JSON.parse(line);
+  queueMicrotask(save);
   if (message.method === undefined) { pending.get(message.id)?.(message); pending.delete(message.id); return; }
   if (message.method === "initialize") {
     state.initialize = message.params;
@@ -108,12 +119,29 @@ lines.on("line", (line) => {
     out({ id: message.id, result: { protocolVersion: scenario === "badversion" ? 2 : 1, agentInfo: { name: "fake-acp", version: "0" }, agentCapabilities: {}, authMethods: [] } });
   } else if (message.method === "session/new") {
     state.sessionNew = message.params;
-    if (scenario === "auth") { out({ id: message.id, error: { code: -32000, message: "Authentication required" } }); return; }
-    const modes = scenario === "unsafe-stuck" ? mode("yolo", ["yolo"]) : scenario === "unsafe" ? mode("auto-approve", ["default", "plan", "auto-approve"]) : mode("default", ["default", "plan", "yolo"]);
-    out({ id: message.id, result: { sessionId: "session-1", modes } });
+    if (scenario === "auth") { out({ id: message.id, error: { code: -32000, message: "Authentication required" } }); save(); return; }
+    out({ id: message.id, result: { sessionId: "session-1", ...(modes ? { modes: { currentModeId: state.mode, availableModes: modes.available.map((id) => ({ id, name: id })) } } : {}),
+      configOptions: configOptions() } });
   } else if (message.method === "session/set_mode") {
-    state.modeSet = message.params.modeId;
-    out({ id: message.id, result: {} });
+    const id = message.params.modeId;
+    state.modeSets.push(id);
+    const how = session.setMode ?? "notify";
+    if (how === "error") out({ id: message.id, error: { code: -32602, message: "No such mode." } });
+    else {
+      out({ id: message.id, result: how === "result" ? { modes: { currentModeId: id } } : {} });
+      if (how !== "silent") state.mode = id;
+      if (how === "notify") notify("session-1", { sessionUpdate: "current_mode_update", currentModeId: id });
+    }
+  } else if (message.method === "session/set_config_option") {
+    const { configId, value } = message.params;
+    state.configSets.push({ configId, value });
+    const how = session.setConfig ?? "notify";
+    if (how === "error") out({ id: message.id, error: { code: -32602, message: "No such option." } });
+    else {
+      if (how !== "silent") state.config[configId] = value;
+      out({ id: message.id, result: how === "result" ? { configOptions: configOptions() } : {} });
+      if (how === "notify") notify("session-1", { sessionUpdate: "config_option_update", configOptions: configOptions() });
+    }
   } else if (message.method === "session/prompt") {
     void prompt(message.id, message.params);
   }

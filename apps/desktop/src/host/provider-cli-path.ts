@@ -4,6 +4,7 @@ import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { CliProvider } from "../code-execution";
+import { resolveMiniMaxInstall } from "./minimax-install";
 import { miniMaxRuntimeSupported, miniMaxVersion, verifyMiniMaxRuntime } from "./minimax-runtime";
 
 const executableNames = {
@@ -178,7 +179,9 @@ export async function inspectCliPath(provider: CliProvider, selectedPath: string
 export async function cliPathStillMatches(provider: CliProvider, selected: string, checked: { file: string; fileStamp?: string; version?: string }, signal?: AbortSignal) {
   try {
     if (checked.fileStamp !== undefined) {
-      return await realpath(selected) === checked.file && fileStamp(await lstat(checked.file)) === checked.fileStamp;
+      // A MiniMax Code install is chosen as a folder; what was checked is its entry file.
+      const current = provider === "minimax" ? (await resolveMiniMaxInstall(selected))?.entry : await realpath(selected);
+      return current === checked.file && fileStamp(await lstat(checked.file)) === checked.fileStamp;
     }
     // Verify a multi-file installation once more with its watcher already active.
     const current = await inspectCliPath(provider, selected, signal);

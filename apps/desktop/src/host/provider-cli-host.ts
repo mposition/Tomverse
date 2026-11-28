@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { lstat, realpath } from "node:fs/promises";
 import { cliLoginArguments, isCliScanProvider, type CliLoginOpen, type CliPathCheck, type CliProvider, type CliScan, type SavedCliPath } from "../code-execution";
 import { cliLoginCommandLine, readCliLogin, type CliRunner, type LoginShell } from "./provider-cli-login";
+import { nodeExecutable, resolveMiniMaxInstall } from "./minimax-install";
 import { cliPathStillMatches, inspectCliPath } from "./provider-cli-path";
-import { scanCliProviders, type ScanOptions } from "./provider-cli-scan";
+import { cliScanDirectories, expandScanDirectories, scanCliProviders, scanHome, type ScanOptions } from "./provider-cli-scan";
 import { cliTrustFile, trustRecordFor, trustedCliFile, withTrust, type CliTrustFile } from "./provider-cli-trust";
 
 export type ProviderCliHostOptions = {
@@ -48,13 +50,29 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
     return result;
   }
 
+  /**
+   * The file whose bytes the person trusts: the file itself, or for a MiniMax Code install folder its entry file (the package's
+   * `cli.js`, found inside the folder without leaving it). Null when a folder is no install.
+   */
+  async function trustTarget(provider: CliProvider, path: string): Promise<string | null> {
+    if (provider !== "minimax") return path;
+    try { if (!(await lstat(await realpath(path))).isDirectory()) return path; } catch { return path; }
+    return (await resolveMiniMaxInstall(path))?.entry ?? null;
+  }
+
+  async function trustedWith(trust: CliTrustFile, provider: CliProvider, path: string, signal?: AbortSignal) {
+    if (!isCliScanProvider(provider)) return null;
+    const target = await trustTarget(provider, path);
+    return target ? trustedCliFile(target, trust.trusted?.[provider], signal) : null;
+  }
+
   async function scan(): Promise<CliScan> {
     const signal = controller.current.signal;
     const trust = readTrust();
     const providers = await scanCliProviders({
       ...options.scan, signal, inspect,
       readLogin: (provider, file, aborted) => readCliLogin(provider, file, aborted, options.run),
-      isTrusted: async (provider, file, aborted) => (await trustedCliFile(file, trust.trusted?.[provider], aborted)) !== null,
+      isTrusted: async (provider, file, aborted) => (await trustedWith(trust, provider, file, aborted)) !== null,
     });
     const found = providers.some(({ candidates }) => candidates.some(({ status }) => status === "pathVerified"));
     return { providers, offer: found && !options.hasSaved() && trust.offered !== true };
@@ -69,7 +87,7 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
 
     /** The saved file's trust, for the check that saves a path. */
     async trustedFile(provider: CliProvider, path: string, signal?: AbortSignal) {
-      return isCliScanProvider(provider) ? trustedCliFile(path, readTrust().trusted?.[provider], signal) : null;
+      return trustedWith(readTrust(), provider, path, signal);
     },
 
     /** Records that the person trusts this exact file. Returns "verified" when the file needs no trust. */
@@ -78,7 +96,8 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       const inspection = await inspectCliPath(provider, path);
       if (inspection.status === "pathVerified") return "verified";
       if (inspection.status !== "versionUnverified") return inspection;
-      const hashed = await trustRecordFor(path);
+      const target = await trustTarget(provider, path);
+      const hashed = target ? await trustRecordFor(target) : null;
       if (!hashed) return { status: "checkFailed" };
       storeTrust(withTrust(readTrust(), provider, hashed.record));
       return "stored";
@@ -102,7 +121,7 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
      * The saved file as a task may start it, checked again now: a verified file against its pinned release, a file the
      * person trusted against its record. Null when the saved file is gone, changed or was never checked.
      */
-    async resolveSaved(provider: CliProvider, saved: SavedCliPath | undefined, signal?: AbortSignal): Promise<{ file: string; version: string | null; basis: "release" | "person" } | null> {
+    async resolveSaved(provider: CliProvider, saved: SavedCliPath | undefined, signal?: AbortSignal): Promise<{ file: string; version: string | null; basis: "release" | "person"; args?: string[] } | null> {
       if (!saved) return null;
       if (saved.status === "pathVerified") {
         const inspection = await inspect(provider, saved.path, signal);
@@ -110,7 +129,16 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       }
       if (saved.status === "userTrusted") {
         const trusted = await this.trustedFile(provider, saved.path, signal);
-        return trusted ? { file: trusted.file, version: null, basis: "person" } : null;
+        if (!trusted) return null;
+        if (provider !== "minimax") return { file: trusted.file, version: null, basis: "person" };
+        // MiniMax Code is a Node program: the person's own Node runs the trusted entry file (Electron cannot stand in for it in a release build).
+        const install = await resolveMiniMaxInstall(saved.path);
+        if (!install || install.entry !== trusted.file) return null;
+        const platform = options.scan?.platform ?? process.platform;
+        const env = options.scan?.env ?? process.env;
+        const directories = await expandScanDirectories(cliScanDirectories(platform, env, options.scan?.home ?? scanHome(env, platform)), platform);
+        const node = await nodeExecutable(directories, install.root, platform);
+        return node ? { file: node, version: null, basis: "person", args: [trusted.file] } : null;
       }
       return null;
     },

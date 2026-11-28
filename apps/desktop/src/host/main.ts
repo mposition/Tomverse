@@ -1251,7 +1251,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
       protectedRoot: app.getPath("userData"), references, ...(home && id ? { history: { id, directory: nativeSessionDirectory(home, id) } } : {}),
-      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}), ...(zai ? { zai } : {}) });
+      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : resolved.args ? { argsPrefix: resolved.args } : {}), ...(zai ? { zai } : {}) });
   } catch {
     runId = null;
     state.busy = false;
