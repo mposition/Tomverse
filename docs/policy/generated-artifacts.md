@@ -1590,4 +1590,10 @@ nonce를 다는 `withEmbedderNonce`(브라우저의 DOMParser)와, closed 선언
 - 브라우저가 `webrtc 'block'`을 집행하지 않는 동안은 2번 가드가 WebRTC를 막는 유일한 수단이다.
 - 가드는 같은 realm 안의 JavaScript 방어라서, 측정하지 않은 새 realm 경로(브라우저에 새로 생기는 frame 종류, 아직 없는 API)가
   생기면 뚫릴 수 있다. 그래서 전역 이름은 RTC 접두어로 넓게 잠그고, frame은 종류를 나열해 지우며, shadow root는 모두 open으로 두고 따라가고 문자열에서 root를 만드는 파서는 잠근다.
+- **수용한 잔여 위험(운영자 결정 2026-11-28).** parse5는 page script를 실행하지 않으므로 파싱 중 script가 바꾼 DOM을 보지 못한다.
+  예: MathML `annotation-xml`의 `encoding`을 그 안의 SVG script가 파싱 도중 `text/html`로 바꾸면 뒤따르는 closed `<template>`이
+  브라우저에서는 HTML 선언형 root가 되지만 parse5는 외국 내용으로 보고 건너뛴다(독립 검토 r-20261128-100430-dcae0a). 그 root 안의
+  frame은 가드가 따라가지 못해 WebRTC를 쓸 수 있다. 정적 사전 처리로는 원리상 닫을 수 없고, 닫으려면 사용자 콘텐츠 전용 origin이
+  필요하다. frame은 opaque origin이라 Tomverse 쿠키·세션에는 닿지 않으며, 공유 페이지는 `feature.artifactSharingEnabled`(기본 꺼짐)
+  뒤에 있다. 같은 이유로 이 경로의 검토를 반복하지 않는다.
 - DNS prefetch(`<link rel=dns-prefetch>`)와 CDN 로그 경로는 §19.5 그대로다.
