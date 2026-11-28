@@ -154,9 +154,14 @@ test("a Chat refusal names why and pauses only for what the person must fix", ()
   assert.deepEqual(classifyChatRefusal(402, SCHEDULED_TASK_CREDIT_CAP_CODE), { status: "skipped", outcome: SCHEDULED_TASK_CREDIT_CAP_CODE, pause: "cost_changed" });
   assert.equal(classifyChatRefusal(400, "MODEL_NOT_AVAILABLE").pause, "model_unavailable");
   assert.equal(classifyChatRefusal(423, "CONVERSATION_LOCKED").pause, "conversation_locked");
-  for (const code of ["CHAT_CONCURRENCY_EXCEEDED", "PROVIDER_BUDGET_EXHAUSTED", "AI_CHAT_DISABLED_BY_ADMIN"]) {
+  for (const code of [
+    "CHAT_CONCURRENCY_EXCEEDED", "PROVIDER_BUDGET_EXHAUSTED", "AI_CHAT_DISABLED_BY_ADMIN",
+    // A passing refusal never counts toward the failure streak that stops a task after three.
+    "CHAT_RATE_LIMITED", "DATABASE_TEMPORARILY_UNAVAILABLE",
+  ]) {
     assert.deepEqual(classifyChatRefusal(503, code), { status: "skipped", outcome: code, pause: null }, code);
   }
+  assert.deepEqual(classifyChatRefusal(429, "CHAT_RATE_LIMITED"), { status: "skipped", outcome: "CHAT_RATE_LIMITED", pause: null });
   assert.deepEqual(classifyChatRefusal(500, "SOMETHING_ELSE"), { status: "failed", outcome: "SOMETHING_ELSE", pause: null });
   // Provider or exception text never becomes an outcome.
   assert.equal(classifyChatRefusal(500, "boom: <html>").outcome, "http_500");
@@ -232,7 +237,7 @@ test("a one-time task refused by the platform or stopped by the operator is due 
   const interval = SCHEDULED_TASK_LIMITS.minRunIntervalMs;
 
   // The operator's stop and the platform's refusals: nothing was spent, the task did nothing wrong.
-  for (const outcome of ["feature_disabled", "CHAT_CONCURRENCY_EXCEEDED", "AI_CHAT_DISABLED_BY_ADMIN", "PROVIDER_BUDGET_EXHAUSTED", "API_RATE_LIMITED", "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"]) {
+  for (const outcome of ["feature_disabled", "CHAT_CONCURRENCY_EXCEEDED", "AI_CHAT_DISABLED_BY_ADMIN", "PROVIDER_BUDGET_EXHAUSTED", "API_RATE_LIMITED", "CHAT_RATE_LIMITED", "DATABASE_TEMPORARILY_UNAVAILABLE", "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"]) {
     const at = retry({ status: "skipped", outcome, pause: null });
     assert.equal(at?.getTime(), now.getTime() + interval, outcome);
   }

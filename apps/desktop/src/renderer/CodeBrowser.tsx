@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ArrowLeft, ArrowRight, Crosshair, MousePointer2, Plus, RotateCw, Square, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Crosshair, MousePointer2, Plus, RotateCw, Square, Trash2, Wrench, X } from "lucide-react";
 import type { Language } from "../../../../lib/language";
 import { desktopCodeBrowserCopy } from "../../../../locales/desktopCodeBrowser";
-import { desktopWebCopy } from "../../../../locales/desktopWeb";
 import { mobileCopy } from "../../../../locales/mobile";
 import { classifyBrowserAddress, MAX_CODE_BROWSER_TABS, type BrowserCommand, type BrowserState } from "../browser-contract";
 import { MAX_ELEMENT_COMMENTS } from "../element-comment";
 import { ElementComments, type Pin } from "./ElementComments";
 
 const copy: Record<Language, readonly [string, string, string, string, string, string, string, string]> = {
-  en: ["Browser", "Address", "Back", "Forward", "Reload", "Stop loading", "Enter an https address or a local HTTP address with a port.", "The page could not load."],
-  ko: ["브라우저", "주소", "뒤로", "앞으로", "새로고침", "로딩 중지", "https 주소나 포트가 포함된 로컬 HTTP 주소를 입력하세요.", "페이지를 불러오지 못했습니다."],
-  zh: ["浏览器", "地址", "后退", "前进", "刷新", "停止加载", "请输入 https 地址，或包含端口的本地 HTTP 地址。", "无法加载页面。"],
-  "zh-Hant": ["瀏覽器", "網址", "返回", "前進", "重新整理", "停止載入", "請輸入 https 位址，或包含連接埠的本機 HTTP 位址。", "無法載入頁面。"],
-  fr: ["Navigateur", "Adresse", "Précédent", "Suivant", "Actualiser", "Arrêter le chargement", "Saisissez une adresse https ou une adresse HTTP locale avec un port.", "La page n’a pas pu être chargée."],
-  de: ["Browser", "Adresse", "Zurück", "Vor", "Neu laden", "Laden stoppen", "Eine https-Adresse oder eine lokale HTTP-Adresse mit Port eingeben.", "Die Seite konnte nicht geladen werden."],
-  es: ["Navegador", "Dirección", "Atrás", "Adelante", "Recargar", "Detener carga", "Introduce una dirección https o una dirección HTTP local con puerto.", "La página no se pudo cargar."],
-  pt: ["Navegador", "Endereço", "Voltar", "Avançar", "Recarregar", "Parar carregamento", "Insira um endereço https ou um endereço HTTP local com porta.", "A página não pôde ser carregada."],
+  en: ["Browser", "Address", "Back", "Forward", "Reload", "Stop loading", "Enter a public https address, or an address on this computer or your network.", "The page could not load."],
+  ko: ["브라우저", "주소", "뒤로", "앞으로", "새로고침", "로딩 중지", "공개 https 주소나 이 컴퓨터·내 네트워크의 주소를 입력하세요.", "페이지를 불러오지 못했습니다."],
+  zh: ["浏览器", "地址", "后退", "前进", "刷新", "停止加载", "请输入公开的 https 地址，或本机、本地网络上的地址。", "无法加载页面。"],
+  "zh-Hant": ["瀏覽器", "網址", "返回", "前進", "重新整理", "停止載入", "請輸入公開的 https 位址，或本機、區域網路上的位址。", "無法載入頁面。"],
+  fr: ["Navigateur", "Adresse", "Précédent", "Suivant", "Actualiser", "Arrêter le chargement", "Saisissez une adresse https publique, ou une adresse de cet ordinateur ou de votre réseau.", "La page n’a pas pu être chargée."],
+  de: ["Browser", "Adresse", "Zurück", "Vor", "Neu laden", "Laden stoppen", "Eine öffentliche https-Adresse oder eine Adresse dieses Computers oder Ihres Netzwerks eingeben.", "Die Seite konnte nicht geladen werden."],
+  es: ["Navegador", "Dirección", "Atrás", "Adelante", "Recargar", "Detener carga", "Introduce una dirección https pública o una dirección de este equipo o de tu red.", "La página no se pudo cargar."],
+  pt: ["Navegador", "Endereço", "Voltar", "Avançar", "Recarregar", "Parar carregamento", "Insira um endereço https público ou um endereço deste computador ou da sua rede.", "A página não pôde ser carregada."],
 };
 const tabControls: Record<Language, readonly [string, string, string, string]> = {
   en: ["Tabs", "New tab", "Close tab", "Focus web page"], ko: ["탭", "새 탭", "탭 닫기", "웹페이지에 포커스"],
@@ -40,7 +39,6 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
   onClose: () => void;
 }) {
   const pickCopy = desktopCodeBrowserCopy[language];
-  const webCopy = desktopWebCopy[language];
   const [pins, setPins] = useState<Pin[]>([]);
   const [label, address, back, forward, reload, stop, invalid, failed] = copy[language];
   const common = mobileCopy[language];
@@ -51,6 +49,7 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [states, setStates] = useState<Record<string, BrowserState>>({});
   const [invalidTab, setInvalidTab] = useState<string>();
+  const statesRef = useRef<Record<string, BrowserState>>({});
   const [width, setWidth] = useState(46);
   const [shared, setShared] = useState<{ tab: string; url: string }>();
   const draft = drafts[tab] ?? "";
@@ -62,6 +61,7 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
   const [tabsLabel, addTab, closeTab, focusPage] = tabControls[language];
   function changeAddress(value: string) { setDrafts((previous) => ({ ...previous, [tab]: value })); }
   function send(command: BrowserCommand) { void window.desktop.codeBrowser(command).catch(() => setInvalidTab(tab)); }
+  useEffect(() => { statesRef.current = states; }, [states]);
   useEffect(() => {
     const addresses = new Map<string, string>();
     const adopted = new Set<string>();
@@ -80,10 +80,19 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
         setShared((previous) => previous?.tab === next.tab ? undefined : previous);
         return;
       }
-      // A tab the agent opened is new to this panel: show it, once, and bring it forward.
-      if (next.agent && !adopted.has(next.tab)) {
+      // A tab the agent opened, or a page opened from a link or window.open, is new to this panel: show it, once, and bring it forward.
+      if ((next.agent || next.opener) && !adopted.has(next.tab)) {
         adopted.add(next.tab);
-        setTabList((previous) => previous.includes(next.tab) ? previous : [...previous, next.tab].slice(-MAX_CODE_BROWSER_TABS));
+        setTabList((previous) => {
+          if (previous.includes(next.tab)) return previous;
+          const list = [...previous, next.tab];
+          // A full list gives up a tab that holds no page before one that does.
+          while (list.length > MAX_CODE_BROWSER_TABS) {
+            const blank = list.findIndex((id) => id !== next.tab && !statesRef.current[id]);
+            list.splice(blank >= 0 ? blank : 0, 1);
+          }
+          return list;
+        });
         setSelected(next.tab);
       }
       setStates((previous) => ({ ...previous, [next.tab]: next }));
@@ -126,6 +135,8 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
       }} />
     <div className="code-browser-heading">
       <strong>{label}</strong>
+      <button type="button" className="icon" aria-label={pickCopy.clearData} title={pickCopy.clearData}
+        onClick={() => void window.desktop.codeBrowser({ type: "clear-data", tab }).catch(() => {})}><Trash2 size={14} /></button>
       <button type="button" className="soft" onClick={onClose}>{common.close}</button>
     </div>
     <div className="code-browser-tabs">
@@ -174,19 +185,30 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
           const { url, kind } = address;
           changeAddress(url.href);
           setStates((previous) => ({ ...previous, [tab]: { tab, kind, url: url.href, loading: true, failed: false, back: false, forward: false } }));
-          send({ type: "open", url: url.href, tab });
+          // A refused address (a name that is not on this computer or network, a public name over http) ends the loading it showed.
+          void window.desktop.codeBrowser({ type: "open", url: url.href, tab }).catch(() => {
+            setInvalidTab(tab);
+            setStates((previous) => previous[tab] ? { ...previous, [tab]: { ...previous[tab], loading: false, failed: false } } : previous);
+          });
         }
       }}>
-        <input type="text" inputMode="url" autoCapitalize="off" autoComplete="off" spellCheck={false} aria-label={address} placeholder="https://example.com, localhost:3000" value={draft}
+        <input type="text" inputMode="url" autoCapitalize="off" autoComplete="off" spellCheck={false} aria-label={address} placeholder="https://example.com, localhost:3000, 192.168.0.5:8080" value={draft}
           aria-invalid={invalidUrl || undefined} onChange={(event) => { changeAddress(event.currentTarget.value); setInvalidTab(undefined); }} />
       </form>
       <button type="button" className="icon" aria-label={focusPage} disabled={!state?.url || state?.failed}
         onClick={() => send({ type: "focus", tab })}><MousePointer2 size={14} /></button>
+      <button type="button" className="icon" aria-label={pickCopy.devtools} title={pickCopy.devtools} disabled={!state?.url}
+        onClick={() => send({ type: "devtools", tab })}><Wrench size={14} /></button>
       {onAttachComments && <button type="button" className="icon" aria-label={state?.picking ? pickCopy.pickCancel : pickCopy.pick} aria-pressed={Boolean(state?.picking)}
         disabled={!state?.url || state.failed || state.loading || pins.length >= MAX_ELEMENT_COMMENTS}
         onClick={() => void window.desktop.codeBrowser({ type: "pick", tab, enabled: !state?.picking }).catch(() => {})}><Crosshair size={14} /></button>}
     </div>
-    {state?.kind === "web" && <p className="code-browser-note">{webCopy.externalNotice}</p>}
+    {state?.tomverse && <p className="code-browser-note" data-testid="code-browser-account-notice">{pickCopy.accountNotice}</p>}
+    {state?.download && <p className="code-browser-note code-browser-download" role="status" data-state={state.download.state}>
+      {(state.download.state === "progressing" ? pickCopy.downloading : state.download.state === "completed" ? pickCopy.downloaded
+        : state.download.state === "cancelled" ? pickCopy.downloadCancelled : pickCopy.downloadFailed).replace("{name}", state.download.name)}
+      {state.download.state === "progressing" && state.download.total > 0 ? " " + Math.min(100, Math.floor(state.download.received * 100 / state.download.total)) + "%" : ""}
+    </p>}
     {agentLive && state?.agent && <p className="code-browser-agent" role="status" data-state={state.agent}>
       <span>{state.agent === "stopped" ? pickCopy.agentStopped : pickCopy.agentUsing}{state.kind === "web" && state.agent !== "stopped" ? " " + pickCopy.webLoginNote : ""}</span>
       <button type="button" className="soft" onClick={() => send({ type: state.agent === "stopped" ? "agent-resume" : "agent-stop", tab })}>
@@ -194,7 +216,7 @@ export function CodeBrowser({ language, hidden, occluded, canShare, agentLive = 
     </p>}
     {state?.picking && <p className="code-browser-hint" role="status">{pickCopy.pickHint}</p>}
     <ElementComments language={language} pins={pins} picture={agentTools} onChange={setPins} onAttach={(block) => onAttachComments?.(block)} />
-    {canShare && state?.kind !== "web" && <button type="button" className="soft" aria-pressed={Boolean(sharing)}
+    {canShare && (!state?.kind || state.kind === "local") && <button type="button" className="soft" aria-pressed={Boolean(sharing)}
       disabled={!state?.url || state.loading || state.failed} onClick={() => {
         void window.desktop.codeBrowser({ type: sharing ? "unshare" : "share", tab }).then((allowed) => {
           setShared(allowed && state ? { tab, url: state.url } : undefined);

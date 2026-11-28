@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, GatewayError, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   startLocalExtensions, IMAGE_MAX_BYTES, MAX_PERSON_PICTURES, type ApprovalView, type CatalogModel, type ImageAttachment, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
@@ -37,6 +37,7 @@ import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace
 import { RemoteError } from "../../../tomverse-cli/src/remote-target.js";
 import { setRemoteShadowBase } from "./remote-project";
 import { inspectRemoteChange, openRemoteWorkspace, RemoteRunError, undoRemoteChange } from "./remote-worker";
+import { createCodeSessionTokens } from "./code-session";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -103,9 +104,12 @@ function nativeReferencePrompt(command: Extract<WorkerCommand, { type: "start-co
   return withWorkspaceReferences(command.prompt, task.references);
 }
 
+/** The Desktop session's access token, as the app last sent it (host/code-session.ts). Memory only. */
+const codeSessionTokens = createCodeSessionTokens();
+
 const gatewayFor = (connection: Connection, signal?: AbortSignal, maximumKeyCreditCap?: number) => new Gateway(
   resolveEndpoint({ endpoint: connection.endpoint, allowInsecureLocalhost: true }, {}),
-  connection.key,
+  connection.session ? codeSessionTokens.credential(connection) : connection.key,
   (input, init) => fetch(input, { ...init, signal: AbortSignal.any([...(signal ? [signal] : []), ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(90_000)]) }),
   "tomverse-desktop",
   maximumKeyCreditCap,
@@ -1761,12 +1765,16 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send(deleteRecordedHistory(data));
   } else if (data.type === "discard-transient") {
     if (transient?.journal.state.id === data.sessionId) transient = undefined;
+  } else if (data.type === "desktop-session") {
+    codeSessionTokens.set(data.identity, data.token);
   } else if (data.type === "catalog") {
     void gatewayFor(data.connection).models().then((catalog) => {
       send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts, creditsPerRequest, vision, reasoning, contextWindowTokens }) => ({
         id, name, provider, efforts: reasoningEfforts ?? [], credits: creditsPerRequest, vision, reasoning, contextWindowTokens,
       })) });
-    }).catch(() => send({ type: "catalog-failed", requestId: data.requestId }));
+    }).catch((error) => send({ type: "catalog-failed", requestId: data.requestId,
+      // The server's own refusal of the account's plan (lib/externalApiAccess.ts): Code is Pro and above, with a key or a session.
+      ...(error instanceof GatewayError && error.extra.status === 403 && error.extra.code === "plan_not_eligible" ? { reason: "plan" as const } : {}) }));
   } else if (data.type === "start" || data.type === "resume") {
     void execute(data);
   } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "start-codex-fixture") {

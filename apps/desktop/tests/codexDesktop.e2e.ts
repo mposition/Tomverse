@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode, startPlanOnly } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { nativeHistoryHome, nativeSessionDirectory } from "../src/host/native-history";
@@ -149,15 +150,17 @@ test("Code steers, resumes and checks saved Codex work without replaying uncerta
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
     assert.equal((await state()).codexFixtureModel, model);
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Desktop settings" }).click();
     await page.getByRole("button", { name: "Execution and limits", exact: true }).click();
     await page.getByLabel("Preferred execution mode").selectOption("provider_cli");
     await page.getByRole("button", { name: "Code", exact: true }).click();
     await expect(page.getByText("Codex · Local test", { exact: true })).toBeVisible();
-    const mode = page.getByLabel("Code mode");
-    await expect(mode).toHaveValue("ask");
-    assert.equal(await mode.locator('option[value="agent"]').isDisabled(), true);
+    // Codex here reads only: Read only is the mode that holds, and the others are listed switched off.
+    await expect(page.getByTestId("permission-picker")).toHaveAttribute("data-mode", "read_only");
+    await page.getByTestId("permission-picker").click();
+    await expect(page.getByTestId("permission-item-ask")).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Escape");
     const retention = page.getByRole("checkbox", { name: "Save to local history" });
     await expect(retention).toBeEnabled();
     await expect(retention).not.toBeChecked();
@@ -168,9 +171,7 @@ test("Code steers, resumes and checks saved Codex work without replaying uncerta
     const send = page.getByRole("button", { name: "Send Code request", exact: true });
     const steer = page.getByRole("button", { name: "Send follow-up instruction", exact: true });
     const request = page.getByRole("textbox", { name: "Code request", exact: true });
-    await mode.selectOption("plan");
-    await request.fill("Inspect the search plan only");
-    await send.click();
+    await startPlanOnly(page, "Inspect the search plan only");
     await expect.poll(() => waitingToRevise, { timeout: 30_000 }).toBe(true);
     await expect(page.locator('.code-task-list [data-status="pending"]')).toHaveCount(2);
     const inFlight = (await state()).task?.nativeSession;
@@ -218,7 +219,7 @@ test("Code steers, resumes and checks saved Codex work without replaying uncerta
       await list.screenshot({ path: join(artifact, "codex-task-list-light.png") });
     }
 
-    await mode.selectOption("ask");
+    await selectCodeMode(page, "ask");
     await request.fill("Stop the next Codex plan");
     await send.click();
     await expect.poll(() => held.has(6), { timeout: 30_000 }).toBe(true);
@@ -278,7 +279,7 @@ test("Code steers, resumes and checks saved Codex work without replaying uncerta
     assert.deepEqual(restored.history, []);
     assert.equal(requests.length, 12);
 
-    await reopened.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(reopened);
     const savedInput = reopened.getByRole("textbox", { name: "Code request", exact: true });
     await reopened.getByRole("checkbox", { name: "Save to local history" }).check();
     await savedInput.fill(savedPrompt);
@@ -301,7 +302,7 @@ test("Code steers, resumes and checks saved Codex work without replaying uncerta
     app = await launchNativeFixture(descriptor);
     const restoredApp = await app.firstWindow();
     const restoredState = () => restoredApp.evaluate(() => window.desktop.state());
-    await restoredApp.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restoredApp);
     await expect(restoredApp.getByRole("checkbox", { name: "Save to local history" })).not.toBeChecked();
     assert.equal(await restoredApp.evaluate((id) => window.desktop.resume(id), savedId), false);
     const history = restoredApp.getByRole("complementary", { name: "History" });
@@ -353,7 +354,7 @@ test("Code steers, resumes and checks saved Codex work without replaying uncerta
     app = undefined;
     app = await launchNativeFixture(descriptor);
     const recoveryApp = await app.firstWindow();
-    await recoveryApp.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(recoveryApp);
     await recoveryApp.getByRole("complementary", { name: "History" }).getByRole("button", { name: crashPrompt, exact: true }).click();
     const recoveredState = () => recoveryApp.evaluate(() => window.desktop.state());
     const recovered = (await recoveredState()).task;

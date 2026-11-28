@@ -28,6 +28,9 @@
  *   response that never reached its headers. Those have no attempt to read,
  *   or none this panel may claim.
  *
+ * A turn handed over is not ended because the user left the conversation: the
+ * record waits on its runtime key for the next panel (see the hand-off below).
+ *
  * Pure, so the decision can be tested without mounting the panel.
  */
 
@@ -147,18 +150,17 @@ export type InterruptedChatAttempt = {
 const pendingByKey = new Map<string, Map<string, InterruptedChatAttempt>>();
 const watchersByKey = new Map<string, Set<() => void>>();
 
-const finishAll = (runtimeKey: string) => {
-  const pending = pendingByKey.get(runtimeKey);
-  if (!pending) return;
-  pendingByKey.delete(runtimeKey);
-  for (const attempt of pending.values()) attempt.finish(null);
-};
-
 /**
  * A panel showing `runtimeKey` that can poll attempts. Returns the
- * unsubscribe. When the last watcher of a key leaves and none has taken its
- * place by the end of the current task -- a remount unsubscribes and
- * resubscribes in one commit -- whatever was still pending is finished.
+ * unsubscribe.
+ *
+ * Leaving the conversation does not end what was handed over. The server may
+ * well finish the answer after the user has walked away, and ending the turn
+ * as an error when the last panel unmounts froze that into the transcript
+ * (the runtime outlives the panel, so coming back showed the error, not the
+ * answer). The record stays on its key instead: the next panel mounted on the
+ * key adopts it and polls, and a history read of the conversation settles it
+ * the same way.
  */
 export const watchInterruptedChatAttempts = (
   runtimeKey: string,
@@ -171,26 +173,24 @@ export const watchInterruptedChatAttempts = (
     watchers.delete(onHandOff);
     if (watchers.size > 0) return;
     if (watchersByKey.get(runtimeKey) === watchers) watchersByKey.delete(runtimeKey);
-    queueMicrotask(() => {
-      if (!watchersByKey.get(runtimeKey)?.size) finishAll(runtimeKey);
-    });
   };
 };
 
 /**
- * Hands a broken stream to whichever panel is polling its key. `false` when
- * none is: the caller then ends the turn exactly as it did before.
+ * Hands a broken stream to the key's attempt poller. Always accepted: with a
+ * panel on the key it is told at once, and with none -- the user left the
+ * conversation before the stream broke -- the record waits for the next panel
+ * that mounts on the key. The caller's `finish` runs only when polling shows
+ * the server ended the turn without an answer.
  */
 export const handOffInterruptedChatAttempt = (
   runtimeKey: string,
   attempt: InterruptedChatAttempt
 ): boolean => {
-  const watchers = watchersByKey.get(runtimeKey);
-  if (!watchers?.size) return false;
   const pending = pendingByKey.get(runtimeKey) ?? new Map();
   pending.set(attempt.assistantMessageId, attempt);
   pendingByKey.set(runtimeKey, pending);
-  for (const watcher of [...watchers]) watcher();
+  for (const watcher of [...(watchersByKey.get(runtimeKey) ?? [])]) watcher();
   return true;
 };
 
@@ -214,6 +214,24 @@ export const settleInterruptedChatAttempt = (
   pending!.delete(assistantMessageId);
   if (pending!.size === 0) pendingByKey.delete(runtimeKey);
   return attempt;
+};
+
+/**
+ * Forgets the hand-offs of every identity but the one now in force. A record
+ * can outlive its panel, so it must not outlive its account: nothing in this
+ * tab may finish or poll another account's turn
+ * (lib/chatStreamRuntime.ts `releaseChatRuntimeForOtherIdentities`).
+ */
+export const releaseInterruptedChatAttemptsForOtherIdentities = (
+  identityKey: string
+): void => {
+  const identityOf = (key: string) => {
+    const separator = key.indexOf("|");
+    return separator === -1 ? key : key.slice(0, separator);
+  };
+  for (const key of [...pendingByKey.keys()]) {
+    if (identityOf(key) !== identityKey) pendingByKey.delete(key);
+  }
 };
 
 /** Tests only. */

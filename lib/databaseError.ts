@@ -238,6 +238,60 @@ export const isUniqueConstraintDatabaseError = (error: unknown) => {
 };
 
 /**
+ * Whether a unique-constraint error names `needle` as one of the constrained columns or as the index.
+ *
+ * Prisma reports the violated constraint in `meta.target` (the column list, or the index name), and a driver
+ * adapter in `meta.driverAdapterError.cause.constraint` (`fields` or `index`). Walked structurally, like
+ * hasDatabaseSqlstate, because how deep the adapter wraps it varies. A unique violation that does not say
+ * which constraint it was never matches: the caller must not treat an unknown conflict as a known one.
+ */
+export const uniqueConstraintNames = (error: unknown): string[] => {
+  const names: string[] = [];
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  const take = (value: unknown) => {
+    if (typeof value === "string") names.push(value);
+    else if (Array.isArray(value)) for (const entry of value) if (typeof entry === "string") names.push(entry);
+  };
+  while (queue.length > 0 && seen.size < 16) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    take(record.target);
+    take(record.fields);
+    take(record.index);
+    queue.push(record.cause, record.meta, record.driverAdapterError, record.constraint);
+  }
+  return names;
+};
+
+/** A unique violation of a constraint that involves `needle` (a column name or the index name). */
+export const isUniqueConstraintOn = (error: unknown, needle: string): boolean =>
+  isUniqueConstraintDatabaseError(error) &&
+  uniqueConstraintNames(error).some((name) => name.includes(needle));
+
+/**
+ * Runs an idempotent write and, if it loses a unique-constraint race, runs it
+ * once more.
+ *
+ * Prisma's `upsert` is a read followed by a create, not an atomic statement:
+ * two requests that both find no row both try to create it, and the second
+ * raises P2002. By the time it does, the winner's row exists, so the same
+ * upsert now takes its update branch. Only for a write whose repeat is
+ * harmless (the same values, last writer wins); never for one that spends,
+ * counts or sends.
+ */
+export async function retryOnceOnUniqueConstraint<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isUniqueConstraintDatabaseError(error)) throw error;
+    return write();
+  }
+}
+
+/**
  * Whether a database error carries this SQLSTATE, wherever Prisma put it.
  *
  * `databaseErrorMetadata` reads `error.cause`, which is not enough: for a code

@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
@@ -37,7 +38,7 @@ async function launch(gateway: FakeGateway) {
     env: { ...process.env, CLAUDE_CONFIG_DIR: home, TOMVERSE_HOME: tomverse },
   });
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "Open local folder" }).click();
+  await openCodeProject(page);
   return { directory, tomverse, app, page };
 }
 
@@ -45,7 +46,7 @@ test("Code lists a project's skills and commands after /, runs them with their a
   const gateway = await new FakeGateway({ script: () => ({ text: "Understood." }) }).start();
   const { directory, tomverse, app, page } = await launch(gateway);
   try {
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     const composer = page.getByRole("textbox", { name: "Code request" });
 
     // The / list offers the skill and the command with their hints, and picking one fills the draft.
@@ -69,7 +70,7 @@ test("Code lists a project's skills and commands after /, runs them with their a
 
     // A skill: its text arrives as the person's request, with a note that it grants nothing; the model also sees it listed.
     await page.getByRole("button", { name: "New task", exact: true }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await composer.fill("/ship staging");
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect.poll(() => gateway.completions.length).toBe(2);

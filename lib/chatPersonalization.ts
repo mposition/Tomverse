@@ -9,6 +9,7 @@ import {
     personalizationFromRow,
     type UserPersonalizationValue,
 } from "@/lib/chatPersonalizationCore";
+import { retryOnceOnUniqueConstraint } from "@/lib/databaseError";
 import { prisma } from "@/lib/prisma";
 
 /** What the turn context builder adds for one account (lib/chatTurnContext.ts). */
@@ -44,12 +45,14 @@ export async function saveUserPersonalization(
     userId: string,
     value: UserPersonalizationValue
 ): Promise<UserPersonalizationValue> {
-    const row = await prisma.userPersonalization.upsert({
+    // Two tabs saving a first-time profile at once both see no row; the
+    // second create trips the unique key, and the retry takes the update branch.
+    const row = await retryOnceOnUniqueConstraint(() => prisma.userPersonalization.upsert({
         where: { userId },
         create: { userId, ...value },
         update: value,
         select: { aboutMe: true, responsePreferences: true, responseStyle: true },
-    });
+    }));
     return personalizationFromRow(row);
 }
 

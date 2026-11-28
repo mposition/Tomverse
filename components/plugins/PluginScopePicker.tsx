@@ -1,5 +1,6 @@
 "use client";
-import { PLUGIN_SCOPE_LIMITS, type PluginServer } from "@/lib/mcpConnectorClientContract";
+import { PLUGIN_SCOPE_LIMITS } from "@/lib/pluginScopeLimits";
+import type { PluginServer } from "@/lib/mcpConnectorClientContract";
 
 /** Initial choice: the server's default request scope; nothing when it has none, so the user picks. */
 export function initialPluginScopes(server: PluginServer | undefined) {

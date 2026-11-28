@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { receiptOwner } from "@/lib/externalApiCaller";
 import { externalApiRequestStatus, type ExternalApiRequestSelector } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
 import { externalApiErrorResponse } from "@/lib/externalApiInference";
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
             // neither stored nor logged.
             selector = { kind: "idempotency_key", idempotencyKeyDigest: sha256Hex(idempotencyKey!) };
         }
-        const receipt = await externalApiRequestStatus(key.keyId, selector);
+        const receipt = await externalApiRequestStatus(receiptOwner(key), selector);
         if (!receipt) {
             return externalApiErrorResponse(
                 404,

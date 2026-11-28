@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -45,7 +46,7 @@ test("the Git panel drafts a commit message and a pull request with a model afte
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY }));
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Git and pull request", exact: true }).click();
     const panel = page.getByRole("dialog", { name: "Git", exact: true });
     await expect(panel.getByRole("checkbox", { name: "feature.txt" })).toBeChecked();

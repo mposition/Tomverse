@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -106,8 +107,8 @@ test("A link in a Code answer opens in the link view instead of doing nothing", 
   try {
     const page = await application.firstWindow();
     page.setDefaultTimeout(10_000);
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await openCodeProject(page);
+    await selectCodeMode(page, "ask");
     await page.getByRole("textbox", { name: "Code request" }).fill("Where are the docs?");
     await page.getByRole("button", { name: "Send Code request" }).click();
     const answer = page.getByRole("group", { name: "Model response" });

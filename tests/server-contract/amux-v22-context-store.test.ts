@@ -123,8 +123,12 @@ test("with the conclusion switch off the delivery carries none, so the route rea
   reset();
   priorRows = { taskId, self: {}, rows: [] };
   priorEntries = [{ label: "T-1", findings: "ok", note: null }];
+  process.env.TOMVERSE_AMUX_V22_CONCLUSION = "off";
   assert.deepEqual(await read("prior-conclusions.md"), { kind: "absent" });
   assert.deepEqual(log, ["binding:inside"]);
+  // Unset is on (owner decision 2026-11-28), as is auto.
+  delete process.env.TOMVERSE_AMUX_V22_CONCLUSION;
+  assert.equal((await read("prior-conclusions.md")).kind, "text");
   process.env.TOMVERSE_AMUX_V22_CONCLUSION = "auto";
   assert.equal((await read("prior-conclusions.md")).kind, "text");
 });

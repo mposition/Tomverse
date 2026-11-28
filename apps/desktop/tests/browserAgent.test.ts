@@ -192,6 +192,34 @@ test("the bridge refuses an address outside loopback without opening anything", 
   assert.equal(h.tabs.size, 0);
 });
 
+test("the agent never opens, reads or acts on a page on the person's own network, and the bridge says which tab it holds", async () => {
+  const h = harness({ web: true });
+  // The agent's own addresses: a loopback page, and (with the second switch) a public site. Never an address on the person's network.
+  for (const url of ["http://192.168.0.5:3000/", "https://192.168.0.5:3000/", "http://10.0.0.2/", "http://myapp.test:3000/", "https://nas/", "http://printer.local/", "http://[fd00::5]:3000/",
+    "https://localhost:3443/", "http://100.64.1.2:3000/"]) {
+    assert.equal((await h.ask({ tool: "navigate", url }))?.status, "error", url);
+    assert.ok("error" in agentNavigateTarget(url, { web: true }), url);
+  }
+  assert.deepEqual(h.calls, []);
+  await h.ask({ tool: "navigate", url: "http://localhost:3000/" });
+  const [tab] = [...h.tabs.keys()] as string[];
+  assert.equal(h.bridge.holds(tab!), true);
+  assert.equal(h.bridge.holds("another-tab"), false);
+  // The person types a private address into the agent's tab: the tab shows their page now, and no tool of the agent works on it.
+  h.tabs.get(tab!)!.kind = "private";
+  for (const request of [{ tool: "read", mode: "text" }, { tool: "click", selector: "#a", origin: "http://192.168.0.5:3000" }, { tool: "console", clear: false }, { tool: "screenshot" }]) {
+    assert.match(((await h.ask(request)) as { message: string }).message, /own network/, JSON.stringify(request));
+  }
+  h.calls.length = 0;
+  assert.equal((await h.ask({ tool: "navigate", url: "http://localhost:3000/b" }))?.status, "ok", "a new page of its own is still possible");
+  await h.bridge.command({ type: "agent-stop", tab: tab! });
+  assert.equal(h.bridge.holds(tab!), false, "a tab the person took back is not held");
+  await h.bridge.command({ type: "agent-resume", tab: tab! });
+  assert.equal(h.bridge.holds(tab!), true);
+  h.bridge.reset();
+  assert.equal(h.bridge.holds(tab!), false);
+});
+
 test("the bridge never reaches a tab of another task, a stale run, or a request that is not valid", async () => {
   const h = harness();
   await h.ask({ tool: "navigate", url: "http://localhost:3000/" });
@@ -384,7 +412,7 @@ test("typing into a password, one-time-code or card field is refused by the page
 
 // ---- public sites ---------------------------------------------------------------------------------
 
-test("the box takes a loopback page or a public https site, and nothing else", () => {
+test("the box takes a loopback page, a public https site or an address on the person's own network, and nothing else", () => {
   const kinds = (text: string) => classifyBrowserAddress(text)?.kind ?? null;
   assert.equal(kinds("localhost:3000"), "local");
   assert.equal(kinds("http://127.0.0.1:5173/app?x=1"), "local");
@@ -392,8 +420,18 @@ test("the box takes a loopback page or a public https site, and nothing else", (
   assert.equal(kinds("https://example.com/a?b=1#c"), "web");
   assert.equal(kinds("https://shop.example.co.uk:8443/x"), "web");
   assert.equal(classifyBrowserAddress("example.com")!.url.href, "https://example.com/");
-  for (const bad of ["", "http://example.com/", "https://localhost/", "https://localhost:3000/", "http://localhost/", "https://192.168.0.1/", "https://[::1]/", "https://10.0.0.1:8443/",
-    "https://u:p@example.com/", "https://intranet/", "https://printer.local/", "file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "ftp://example.com/",
+  // The person's own network: LAN and CGNAT addresses, private names, loopback over https, and a name over plain http (its lookup decides).
+  for (const [text, href] of [["http://192.168.0.5:3000/", "http://192.168.0.5:3000/"], ["192.168.0.5:3000", "http://192.168.0.5:3000/"],
+    ["https://10.0.0.1:8443/", "https://10.0.0.1:8443/"], ["http://100.64.1.2:3000/", "http://100.64.1.2:3000/"], ["http://[fd00::5]:3000/", "http://[fd00::5]:3000/"],
+    ["https://[::1]:3000/", "https://[::1]:3000/"], ["https://localhost:3443/", "https://localhost:3443/"], ["http://127.0.0.2:3000/", "http://127.0.0.2:3000/"],
+    ["myapp.test:3000", "http://myapp.test:3000/"], ["nas:8080", "http://nas:8080/"], ["https://printer.local/", "https://printer.local/"],
+    ["https://intranet/", "https://intranet/"], ["http://wiki.corp.example.com/", "http://wiki.corp.example.com/"]]) {
+    const typed = classifyBrowserAddress(text);
+    assert.equal(typed?.kind, "private", text);
+    assert.equal(typed?.url.href, href, text);
+  }
+  for (const bad of ["", "http://localhost/", "https://localhost/", "https://[::1]/", "https://8.8.8.8/", "http://0.0.0.0:3000/", "http://224.0.0.1/", "http://169.254.169.254.example.com@evil.test/",
+    "https://u:p@example.com/", "https://u:p@192.168.0.1/", "file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "ftp://example.com/",
     "about:blank", "blob:https://example.com/x", "ws://example.com/", "wss://example.com/", "https://exa mple.com/", "http://localhost:3000@example.com/", "x".repeat(2100)]) {
     assert.equal(classifyBrowserAddress(bad), null, bad);
   }

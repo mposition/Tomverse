@@ -22,6 +22,7 @@ const EXEMPT = [
   "/api/auth/desktop/refresh",
   "/api/auth/desktop/logout",
   "/api/auth/desktop/code-key",
+  "/api/auth/desktop/code-token",
   "/api/auth/desktop/email",
 ];
 
@@ -34,6 +35,7 @@ const HANDLERS = {
   "/api/auth/desktop/refresh": "app/api/auth/desktop/refresh/route.ts",
   "/api/auth/desktop/logout": "app/api/auth/desktop/logout/route.ts",
   "/api/auth/desktop/code-key": "app/api/auth/desktop/code-key/route.ts",
+  "/api/auth/desktop/code-token": "app/api/auth/desktop/code-token/route.ts",
   "/api/auth/desktop/email": "app/api/auth/desktop/email/route.ts",
 };
 
