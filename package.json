@@ -489,6 +489,7 @@
     "vite": "^8.3.8"
   },
   "overrides": {
+    "katex": "$katex",
     "@eslint/config-array": {
       "brace-expansion": "^1.1.17"
     },

@@ -109,6 +109,7 @@ test("only the opted-in mode is verified, and only it may carry the original", (
     // The ordinary path still streams, and still says the original is separate.
     assert.match(route, /new ReadableStream<Uint8Array>/);
     const client = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
-    assert.match(client, /options\.includeSource \? "\?include=source" : options\.format === "markdown" \? "\?format=md" : ""/);
+    // The original rides only on its own item; Markdown and PDF never carry it.
+    assert.match(client, /options\.includeSource \? "\?include=source" : options\.format === "markdown" \? "\?format=md" : options\.format === "pdf" \? "\?format=pdf" : ""/);
     assert.match(client, /saveVerifiedResponseAsFile\(response, "conversation\.txt"\)/);
 });

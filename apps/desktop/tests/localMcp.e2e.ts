@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -45,7 +46,7 @@ test("a project's .mcp.json server waits for approval, and once approved the mod
   });
   try {
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Desktop settings" }).click();
     await page.getByRole("button", { name: "Execution and limits", exact: true }).click();
 

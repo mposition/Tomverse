@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, rename, rmdir } from "node:fs/promises";
 import { expect, type BrowserContext, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { lastUserText, TEST_KEY, type FakeGateway } from "../../tomverse-cli/tests/fakeGateway.js";
 
 export const codeExcerpt = "Code result excerpt to discuss";
@@ -121,7 +123,7 @@ export async function verifyHandoff(app: ElectronApplication, page: Page, contex
       await assert.rejects(page.evaluate((handoffId) => window.desktop.start({
         prompt: "", handoffId, model: "fake-coder", mode: "ask", effort: "default",
       }), approved.id));
-      await page.getByRole("button", { name: "Open local folder" }).click();
+      await openCodeProject(page);
       await expect(page.getByText("Excerpt from Chat", { exact: true })).toHaveCount(0);
       assert.equal((await page.evaluate(() => window.desktop.state())).handoff, null);
       await assert.rejects(page.evaluate((handoffId) => window.desktop.start({
@@ -132,7 +134,7 @@ export async function verifyHandoff(app: ElectronApplication, page: Page, contex
       await rmdir(project);
       await rename(moved, project);
     }
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const chatToCode = async () => {
       await page.getByRole("button", { name: "Chat", exact: true }).click();
       await page.getByRole("button", { name: title, exact: true }).click();
@@ -142,10 +144,8 @@ export async function verifyHandoff(app: ElectronApplication, page: Page, contex
     };
     await chatToCode();
 
-    await page.getByLabel("Code mode").selectOption("ask");
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Model", { exact: true }).selectOption("fake-coder");
-    await page.getByLabel("Model and reasoning effort").click();
+    await selectCodeMode(page, "ask");
+    await chooseCodeModel(page, { model: "fake-coder" });
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect(page.getByText(codeAnswer, { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "New task", exact: true })).toBeEnabled();

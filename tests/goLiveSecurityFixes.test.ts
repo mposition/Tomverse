@@ -603,7 +603,10 @@ test("the response lifecycle is announced without streaming into a live region",
 
 test("the conversation list is reachable and operable by keyboard", () => {
   const source = readRepoFile("components/chat/ChatSidebar.tsx");
-  assert.match(source, /role="button"\s*\n\s*tabIndex=\{0\}/);
+  // A button that opens, or in selection mode a checkbox that toggles; a tab
+  // stop either way.
+  assert.match(source, /role=\{selectionMode \? "checkbox" : "button"\}/);
+  assert.match(source, /aria-checked=\{selectionMode \? isSelected : undefined\}[\s\S]{0,120}tabIndex=\{0\}/);
   assert.match(source, /event\.key === "Enter" \|\| event\.key === " "/);
 });
 
@@ -626,21 +629,30 @@ test("a baseline focus indicator and reduced-motion policy exist globally", () =
 
 test("assistant markdown restores block-level typography reset by preflight", () => {
   const source = readRepoFile("components/chat/ChatMessageList.tsx");
-  for (const tag of ["h1", "h2", "h3", "h4", "blockquote", "table", "th", "td"]) {
+  for (const tag of ["h1", "h2", "h3", "h4", "blockquote", "th", "td"]) {
     assert.ok(
       new RegExp(`\\b${tag}: \\(`).test(source),
       `markdown ${tag} needs an explicit override under Tailwind preflight`
     );
   }
+  // The answer's component map is a module constant (an inline one is a new
+  // element type on every render and remounts the answer), so the table entry
+  // names a module-level component rather than an inline arrow.
+  assert.match(
+    source,
+    /\btable: AnswerTable\b/,
+    "markdown table needs an explicit override under Tailwind preflight"
+  );
   // The table renderer wraps the table in its own horizontal scroller, so a
   // wide table scrolls inside the message rather than dragging the whole
   // message list sideways. Matched by structure rather than by how close the
   // two lines happen to sit: UX-031 added `tabIndex`, `role` and `aria-label`
   // to that wrapper, which a distance-based pattern read as the wrapper
   // disappearing.
+  const tableStart = source.indexOf("function AnswerTable(");
   const tableRenderer = source.slice(
-    source.indexOf("table: ("),
-    source.indexOf("th: (")
+    tableStart,
+    source.indexOf("\nfunction ", tableStart + 1)
   );
   assert.ok(tableRenderer.length > 0, "the markdown table renderer must exist");
   assert.match(
@@ -982,8 +994,15 @@ test("Stripe key mode parsing fails closed and webhook checks before DB writes",
 
 test("assistant markdown never assigns model-controlled image URLs to src", () => {
   const source = readRepoCode("components/chat/ChatMessageList.tsx");
-  const start = source.indexOf("img: (");
-  const imageRenderer = source.slice(start, source.indexOf("}}", start));
+  // The override is a module-level component wired into the module-level map.
+  assert.match(
+    source,
+    /\bimg: AnswerBlockedImage\b/,
+    "assistant markdown needs an image override"
+  );
+  const start = source.indexOf("function AnswerBlockedImage(");
+  assert.ok(start >= 0, "assistant markdown needs an image override");
+  const imageRenderer = source.slice(start, source.indexOf("\nfunction ", start + 1));
   assert.ok(imageRenderer.length > 0, "assistant markdown needs an image override");
   assert.doesNotMatch(
     imageRenderer,

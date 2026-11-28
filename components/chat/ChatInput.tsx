@@ -4,6 +4,7 @@ import { isGooglePickerConfig, loadGoogleDrivePicker } from "@/lib/googleDrivePi
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
 import type { ResearchPreviewControls } from "./useResearchPreview";
 import { DeepResearchEngineRow, DeepResearchEngineSheet, useDeepResearchEngineOffer } from "./DeepResearchEngine";
+import { SavedPromptsTool } from "./SavedPromptsTool";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
@@ -68,6 +69,8 @@ import {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import { chatStudyCopy } from "@/locales/chatStudy";
+import { StudyModeChip, StudyModeRow } from "@/components/chat/StudyModeControls";
 import type {
   ChatAssistantProfile,
   ChatAssistantProfileOption,
@@ -89,6 +92,7 @@ import {
   chatAttachmentExtensionsByGroup,
   resolveChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
+import { useChatAudioAttachmentsEnabled } from "@/components/chat/ChatAudioAttachmentContext";
 import { isReattachableDocument } from "@/lib/chatReviewHandoff";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
@@ -390,6 +394,7 @@ export function ChatInputAutoCapabilityPendingNotice({
  * server was ever asked, which is a rejection the server would not have made.
  */
 const ACCEPTED_FILE_TYPES = chatAttachmentAcceptAttribute();
+const ACCEPTED_FILE_TYPES_WITH_AUDIO = chatAttachmentAcceptAttribute({ audio: true });
 
 const GUEST_ACCEPT_ATTRIBUTE = chatAttachmentAcceptAttribute({ guest: true });
 
@@ -412,10 +417,11 @@ const DEFAULT_ATTACHMENT_CAPABILITIES: ChatAttachmentCapabilities = {
  * the same function decides in both places, so the client can pre-empt a
  * rejection without being able to invent one.
  */
-const getFileFormat = (file: File) =>
+const getFileFormat = (file: File, audio = false) =>
   resolveChatAttachmentFormat({
     filename: file.name,
     declaredMediaType: file.type,
+    audio,
   });
 
 const fileToDataUrl = (file: File) =>
@@ -859,6 +865,12 @@ type ChatInputProps = {
   onOpenDeepResearchSetup?: () => void;
   researchPreview?: ResearchPreviewControls;
   /**
+   * Study mode for this conversation and its switch. Passed only by a Chat
+   * surface; absent for Review, so the row and the chip do not exist there.
+   */
+  studyMode?: boolean;
+  onStudyModeChange?: (on: boolean) => void;
+  /**
    * Picks an image model from the catalogue's image tab. The composer stays
    * where it is and the next send answers with an image in this conversation;
    * there is no separate image mode. Absent when the image feature is off.
@@ -992,6 +1004,8 @@ export function ChatInput({
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
   researchPreview,
+  studyMode = false,
+  onStudyModeChange,
   onSelectImageModel,
   composerImageMode = null,
   voiceInputEnabled = false,
@@ -1113,9 +1127,14 @@ export function ChatInput({
     const maxAttachmentBytes = attachmentCapabilities.maxAttachmentBytes;
     const isEphemeralAttachment =
       attachmentCapabilities.attachmentPersistence === "ephemeral";
+    // Recordings are never offered to an ephemeral (guest) composer.
+    const audioAttachmentsEnabled =
+      useChatAudioAttachmentsEnabled() && !isEphemeralAttachment;
     const acceptedFileTypes = isEphemeralAttachment
       ? GUEST_ACCEPT_ATTRIBUTE
-      : ACCEPTED_FILE_TYPES;
+      : audioAttachmentsEnabled
+        ? ACCEPTED_FILE_TYPES_WITH_AUDIO
+        : ACCEPTED_FILE_TYPES;
     const { requestToken: requestGuestVerificationToken } = useGuestVerification();
     /**
      * Every upload rejection the server can produce, mapped to the one
@@ -1188,6 +1207,7 @@ export function ChatInput({
     const supportedFormatGroups = useMemo(() => {
       const groups = chatAttachmentExtensionsByGroup({
         guest: isEphemeralAttachment,
+        audio: audioAttachmentsEnabled,
       });
       const labels: Record<string, string> = {
         image: t("chat.attachFormatGroupImage"),
@@ -1196,6 +1216,7 @@ export function ChatInput({
         markup: t("chat.attachFormatGroupMarkup"),
         code: t("chat.attachFormatGroupCode"),
         archive: t("chat.attachFormatGroupArchive"),
+        audio: t("chat.attachFormatGroupAudio"),
       };
       const VISIBLE = 10;
       return Object.entries(groups)
@@ -1207,7 +1228,7 @@ export function ChatInput({
           overflow: Math.max(0, extensions.length - VISIBLE),
           all: extensions.join(", "),
         }));
-    }, [isEphemeralAttachment, t]);
+    }, [audioAttachmentsEnabled, isEphemeralAttachment, t]);
   const maxSelectableModels = singleModelSelection ? 1 : isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
@@ -2360,7 +2381,7 @@ export function ChatInput({
    */
   const uploadOneFile = useCallback(
     async (file: File, trackingId: string, scopeId: string) => {
-      const format = getFileFormat(file);
+      const format = getFileFormat(file, audioAttachmentsEnabled);
       const mediaType = format?.mediaType || file.type || "application/octet-stream";
       const fail = (reason: string) => {
         setPendingAttachments((current) =>
@@ -2611,6 +2632,7 @@ export function ChatInput({
     },
     [
       attachmentErrorMessage,
+      audioAttachmentsEnabled,
       guestAttachmentErrorMessage,
       isEphemeralAttachment,
       maxAttachmentBytes,
@@ -2934,8 +2956,19 @@ export function ChatInput({
     (webSearchState.hasException || webSearchState.allUnsupported);
   const showWebSearchInFooter =
     webSearchState.isVisible && !webSearchNeedsStatusRow;
+  // Study mode is a Chat answer's own instruction: Review, an image answer and
+  // a research preview have no use for it, so the row and the chip are absent
+  // there rather than shown inert.
+  const studyModeAvailable =
+    Boolean(onStudyModeChange) &&
+    currentProduct === "chat" &&
+    !review &&
+    !composerImageMode &&
+    !researchPreview?.selected;
+  const studyCopy = chatStudyCopy[lang];
+  const showStudyModeChip = studyModeAvailable && studyMode;
   const hasToolStatusChips =
-    webSearchNeedsStatusRow || isDeepResearchPending;
+    webSearchNeedsStatusRow || isDeepResearchPending || showStudyModeChip;
   const webSearchChip = webSearchState.isVisible ? (
     <ChatInputWebSearchChipView
       state={webSearchState}
@@ -2971,6 +3004,9 @@ export function ChatInput({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
+    )}
+    {showStudyModeChip && (
+      <StudyModeChip copy={studyCopy} compact={isMobileShell} onRemove={() => onStudyModeChange?.(false)} />
     )}
     </>
   ) : null;
@@ -4093,6 +4129,19 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                  {/* Saved prompts: the whole feature is its own file; picking one
+                      fills this composer and sends nothing. */}
+                  <SavedPromptsTool
+                    language={lang}
+                    value={value}
+                    isGuestMode={Boolean(isGuestMode)}
+                    disabled={isDraftMutationDisabled}
+                    onInsert={(text) => {
+                      onChange(text);
+                      requestAnimationFrame(() => textareaRef.current?.focus());
+                    }}
+                    onDone={() => closeMenu(false)}
+                  />
                   {/*
                     One switch, flipped in place -- not a row that opens a
                     screen of choices. Web search is a single yes/no decision,
@@ -4249,6 +4298,12 @@ export function ChatInput({
                         </span>
                       </span>
                     </button>
+                  )}
+                  {/* A switch like web search: one yes/no for this conversation,
+                      flipped in place. Absent outside Chat answers (Review, an
+                      image answer, a research preview), not shown inert. */}
+                  {studyModeAvailable && (
+                    <StudyModeRow copy={studyCopy} on={studyMode} onToggle={() => onStudyModeChange?.(!studyMode)} />
                   )}
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   {researchPreview?.offered && (

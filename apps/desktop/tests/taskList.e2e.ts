@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode, startPlanOnly } from "./code-project-fixture";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { expect, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { Journal } from "../../tomverse-cli/src/session.js";
 import { DEFAULT_MODELS, FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { launchNativeFixture } from "./launch-native-fixture";
@@ -100,7 +102,7 @@ if (first) setInterval(() => {}, 1000);
   const application = await launchNativeFixture(descriptor, launchWait);
   const page = await application.firstWindow();
   try {
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const send = async (prompt: string) => {
       await page.getByRole("textbox", { name: "Code request" }).fill(prompt);
       await page.getByRole("button", { name: "Send Code request" }).click();
@@ -109,9 +111,7 @@ if (first) setInterval(() => {}, 1000);
       try { await approval.getByRole("button", { name, exact: true }).click(); }
       catch (error) { if (!approval.isClosed()) throw error; }
     };
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Model", { exact: true }).selectOption("smart-adaptive");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { model: "smart-adaptive" });
     const approvalWindow = application.waitForEvent("window", { predicate: (candidate) => candidate !== page, timeout: approvalWait });
     void approvalWindow.catch(() => undefined);
     await send("Verify the search task list");
@@ -186,8 +186,7 @@ if (first) setInterval(() => {}, 1000);
     assert.deepEqual((await page.evaluate(() => window.desktop.state())).task?.plan, state.task?.plan);
 
     await page.getByRole("button", { name: "New task", exact: true }).click();
-    await page.getByLabel("Code mode").selectOption("plan");
-    await send("Plan a read-only change");
+    await startPlanOnly(page, "Plan a read-only change", "tomverse_api");
     await expect(page.getByText("Here is the proposed work.")).toBeVisible();
     await expect(analysis).toContainText(fixtureWorkAnalysis.objective);
     await expect(list.getByText("0/3 complete")).toBeVisible();
@@ -202,10 +201,8 @@ if (first) setInterval(() => {}, 1000);
     assert.equal(application.windows().length, 1);
 
     await page.getByRole("button", { name: "New task", exact: true }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Task reasoning effort").selectOption("high");
-    await page.getByLabel("Model and reasoning effort").click();
+    await selectCodeMode(page, "agent");
+    await chooseCodeModel(page, { effort: "high" });
     const [beforeStop] = await Promise.all([application.waitForEvent("window", { timeout: approvalWait }), send("Resume the recorded work")]);
     await answer(beforeStop, "Allow for this run");
     const starts = join(root, "resume-starts.txt");
@@ -345,8 +342,8 @@ test("Code waits for a clarification and keeps the answer in the saved conversat
     }));
     application = await launchNativeFixture(descriptor, launchWait);
     let page = await application.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await openCodeProject(page);
+    await selectCodeMode(page, "agent");
     await page.getByRole("textbox", { name: "Code request" }).fill(original);
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).task?.status).toBe("clarification");
@@ -369,7 +366,7 @@ test("Code waits for a clarification and keeps the answer in the saved conversat
     await application.close();
     application = await launchNativeFixture(descriptor, launchWait);
     page = await application.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const showHistory = page.getByRole("button", { name: "Show history", exact: true });
     if (await showHistory.isVisible()) await showHistory.click();
     await page.getByRole("button", { name: original, exact: true }).click();

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -9,6 +10,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { _electron as electron, expect, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 
 const executablePath: string = createRequire(import.meta.url)("electron");
@@ -32,12 +34,9 @@ test("Code retains one run across view changes and recovers evidence after suspe
   const launch = () => electron.launch({ executablePath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 25_000 });
   let application: Awaited<ReturnType<typeof launch>> | undefined = await launch();
   const open = async (page: Page) => {
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
-    const models = page.getByLabel("Model and reasoning effort");
-    await models.click();
-    await page.getByLabel("Model", { exact: true }).selectOption("fake-coder");
-    await models.click();
+    await openCodeProject(page);
+    await selectCodeMode(page, "ask");
+    await chooseCodeModel(page, { model: "fake-coder" });
   };
   const start = async (page: Page, prompt: string, expectedCount: number) => {
     await page.getByRole("textbox", { name: "Code request" }).fill(prompt);

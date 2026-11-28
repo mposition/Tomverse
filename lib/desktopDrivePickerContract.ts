@@ -19,6 +19,24 @@ export const desktopDriveLink = z.object({
   slots: z.coerce.number().int().min(1).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE),
 }).strict();
 
+/** The Desktop loopback callback for one picker request. With nothing but the state it means "no files chosen". */
+export function driveCallbackUrl(target: { port: number; state: string }) {
+  const url = new URL(DESKTOP_DRIVE_CALLBACK, "http://127.0.0.1:" + target.port);
+  url.searchParams.set("state", target.state);
+  return url;
+}
+
+/**
+ * The best-effort message the picker page sends when its window goes away without a choice, so Desktop can stop waiting.
+ * It is the same state-only callback the page's own Cancel button opens; Desktop applies its usual state check to it.
+ */
+export function driveAbandonRequest(target: { port: number; state: string }) {
+  return {
+    url: driveCallbackUrl(target).href,
+    init: { method: "GET", mode: "no-cors", keepalive: true, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" },
+  } as const satisfies { url: string; init: RequestInit };
+}
+
 const driveFile = z.object({
   id: z.string().min(1).max(256).regex(base64url),
   name: z.string().trim().min(1).max(120),

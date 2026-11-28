@@ -5,6 +5,7 @@ import { readLimitedJson } from "@/lib/apiSecurity";
 import { DESKTOP_AUTH_CLIENT, DESKTOP_AUTH_VALUE, isDesktopRedirect } from "@/lib/desktopAuthContract";
 import { mobileAuthReady } from "@/lib/mobileAccessToken";
 import { enforceMobileAuthAdmission, requireMobileBearer } from "@/lib/mobileAuthRoute";
+import { desktopCodeSessionEnabled } from "@/lib/nativeBearerGate";
 
 export const desktopAuthEnabled = () => process.env.TOMVERSE_DESKTOP_AUTH_ENABLED === "true" && mobileAuthReady();
 
@@ -34,6 +35,17 @@ export async function readDesktopRefreshToken(request: Request): Promise<string>
 export async function requireDesktopBearer(request: Request) {
   if (!desktopAuthEnabled()) return { ok: false as const, response: desktopAuthUnavailable() };
   const result = await requireMobileBearer(request, "desktop");
+  if (!result.ok) desktopAuthNoStore(result.response);
+  return result;
+}
+
+/**
+ * The short token Desktop Code's runtimes carry (docs/policy/external-api.md section 11.2): accepted only on the
+ * coding API calls the agent engine makes, and only while Code on the Desktop session is switched on.
+ */
+export async function requireDesktopCodeBearer(request: Request) {
+  if (!desktopAuthEnabled() || !desktopCodeSessionEnabled()) return { ok: false as const, response: desktopAuthUnavailable() };
+  const result = await requireMobileBearer(request, "desktop-code");
   if (!result.ok) desktopAuthNoStore(result.response);
   return result;
 }

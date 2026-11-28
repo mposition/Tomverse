@@ -27,6 +27,8 @@ let groupQueries = 0;
 let reused = false;
 let replayStatus = "pending";
 let mocksInstalled = false;
+// What the photo lookup answers with: null is the default landscape photo.
+let editSourceRefusal: { code: string } | null = null;
 
 const prismaMock = {
   conversation: {
@@ -59,7 +61,10 @@ async function load() {
     mock.module(mod("lib/imageEditSource.ts"), {
       namedExports: {
         // A landscape photo on the question.
-        findChatImageEditSource: async () => ({ attachmentId: "att-1", size: "1536x1024" }),
+        findChatImageEditSource: async () => {
+          if (editSourceRefusal) throw Object.assign(new Error("refused"), editSourceRefusal);
+          return { attachmentId: "att-1", size: "1536x1024" };
+        },
       },
     });
     mock.module(mod("lib/imageGenerationService.ts"), {
@@ -88,6 +93,7 @@ async function load() {
 }
 
 const reset = () => {
+  editSourceRefusal = null;
   triageOn = true;
   conversation = { kind: "chat", productKey: "chat", continuationBridge: null };
   source = { content: "  간단한 고양이 아이콘 그려줘 " };
@@ -314,4 +320,29 @@ test("an edit keeps the photo's shape only where every model sells that size", a
     edit: true,
   });
   assert.equal(requests[0].size, "1024x1024");
+});
+
+test("a photo too large or undecodable is refused by name before anything is reserved", async () => {
+  const { turn } = await load();
+  for (const [code, status] of [
+    ["IMAGE_EDIT_SOURCE_TOO_LARGE", 413],
+    ["IMAGE_EDIT_SOURCE_UNSUPPORTED", 400],
+  ] as const) {
+    reset();
+    editSourceRefusal = { code };
+    await assert.rejects(
+      () => turn.startChatImageTurn({ ...input, edit: true }),
+      (error: unknown) =>
+        (error as { code?: string }).code === code && (error as { status?: number }).status === status
+    );
+    assert.equal(requests.length, 0);
+    assert.equal(created.length, 0);
+  }
+  // Any other failure of the lookup is not turned into a photo refusal.
+  reset();
+  editSourceRefusal = { code: "SOMETHING_ELSE" };
+  await assert.rejects(
+    () => turn.startChatImageTurn({ ...input, edit: true }),
+    (error: unknown) => (error as { code?: string }).code === "SOMETHING_ELSE"
+  );
 });

@@ -20,6 +20,8 @@ const capabilities = z.object({
   desktopGoogleDrive: z.boolean().optional(),
   desktopDeepResearch: z.boolean().optional(),
   desktopPlugins: z.boolean().optional(),
+  // The Plugins screen lists the web's platform catalogue read from the server; an older server names none and the screen lists its own servers only.
+  desktopPluginCatalog: z.boolean().optional(),
   // Plugins from a zip file, an npm package or a private repository, and the marketplace Desktop carries. An older server names none of it.
   desktopPluginSources: z.boolean().optional(),
   desktopCodeMcp: z.boolean().optional(),
@@ -27,6 +29,8 @@ const capabilities = z.object({
   desktopManagedCode: z.boolean().optional(),
   // The Code agent's web_search (the coding API's paid search). An older server does not name it, and runs then have no such tool.
   desktopCodeWebSearch: z.boolean().optional(),
+  // Code on the signed-in Desktop session, no Code key. An older server does not name it, and Code then asks for a key as before.
+  desktopCodeSession: z.boolean().optional(),
   desktopCloudExecution: z.boolean().optional(),
   // What this server accepts in a Desktop turn. An older server names none of them, and the app then offers none.
   desktopTurnLocation: z.boolean().optional(),
@@ -41,6 +45,8 @@ const capabilities = z.object({
   // An older server names none, and Settings then offers no Google or Microsoft connection.
   desktopSocialLink: z.array(z.enum(["google", "azure-ad"])).max(2).optional().catch(undefined),
   desktopRemotePreview: z.boolean().optional(),
+  // A Code task run by the person's own Codex or Claude Code (no Tomverse API, no credits). An older server names none, and Code then keeps its API route.
+  desktopProviderCliExec: z.boolean().optional(),
   voiceConversation: z.object({ enabled: z.boolean(), maxSeconds: z.number().int().positive(), continuous: z.boolean().optional() }).optional().catch(undefined),
 });
 
@@ -64,9 +70,10 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     chatImport: data.desktopImport === true, chatStarters: data.desktopStarters ?? [],
     review: data.desktopReview ?? null, images: data.desktopImages ?? null, attachments: data.desktopAttachments === true,
     googleDrive: data.desktopGoogleDrive === true, deepResearch: data.desktopDeepResearch === true,
-    plugins: data.desktopPlugins === true, pluginSources: data.desktopPluginSources === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
+    plugins: data.desktopPlugins === true, pluginCatalog: data.desktopPluginCatalog === true && data.desktopPlugins === true, pluginSources: data.desktopPluginSources === true, codeMcp: data.desktopCodeMcp === true, billing: data.desktopBilling === true,
     managedCode: data.desktopManagedCode === true,
     codeWebSearch: data.desktopCodeWebSearch === true,
+    codeSession: data.desktopCodeSession === true,
     cloudExecution: data.desktopCloudExecution === true,
     turnLocation: data.desktopTurnLocation === true, chatPlugin: data.desktopChatPlugin === true,
     reviewContext: data.desktopReviewContext === true,
@@ -78,6 +85,7 @@ export async function readDesktopCapabilities(accessToken: string, signal: Abort
     promptRefiner: data.desktopPromptRefiner === true && data.desktopWrite === true,
     socialLink: data.desktopSocialLink ?? [],
     remotePreview: data.desktopRemotePreview === true,
+    providerCliExec: data.desktopProviderCliExec === true,
     // The conversation is offered only where Desktop's own switch and the server's voice switch are both on.
     voiceConversation: data.desktopVoiceConversation === true && data.voiceConversation?.enabled
       ? { continuous: data.voiceConversation.continuous === true, maxSeconds: data.voiceConversation.maxSeconds } : null };

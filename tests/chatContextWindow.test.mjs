@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fitChatOutputToContextWindow } from "../lib/chatContextWindow.ts";
+import { CHAT_MIN_OUTPUT_TOKENS, fitChatOutputToContextWindow } from "../lib/chatContextWindow.ts";
 import { AVAILABLE_MODELS, resolveModelRequestPricing } from "../lib/models.ts";
 
 /**
@@ -18,42 +18,51 @@ import { AVAILABLE_MODELS, resolveModelRequestPricing } from "../lib/models.ts";
 
 const fit = (overrides = {}) =>
     fitChatOutputToContextWindow({
-        contextWindowTokens: 1_000,
-        reservedInputTokens: 400,
-        requestOutputCapTokens: 200,
+        contextWindowTokens: 100_000,
+        reservedInputTokens: 40_000,
+        requestOutputCapTokens: 20_000,
         ...overrides,
     });
 
 test("a request that fits keeps the whole cap it asked for", () => {
     const budget = fit();
     assert.equal(budget.kind, "fitted");
-    assert.equal(budget.outputTokens, 200);
-    assert.equal(budget.limitTokens, 1_000);
+    assert.equal(budget.outputTokens, 20_000);
+    assert.equal(budget.limitTokens, 100_000);
 });
 
 test("the cap is lowered to the room the window has left, not refused", () => {
-    // 900 in, 1,000 window: 100 tokens of answer is a short answer, not an
-    // impossible request. Refusing here is what made Kimi K3 unusable.
-    const budget = fit({ reservedInputTokens: 900, requestOutputCapTokens: 200 });
+    // 98,000 in, 100,000 window: 2,000 tokens of answer is a short answer, not
+    // an impossible request. Refusing here is what made Kimi K3 unusable.
+    const budget = fit({ reservedInputTokens: 98_000, requestOutputCapTokens: 20_000 });
     assert.equal(budget.kind, "fitted");
-    assert.equal(budget.outputTokens, 100);
+    assert.equal(budget.outputTokens, 2_000);
 });
 
 test("input that exactly fills the window leaves nothing to answer in", () => {
-    const budget = fit({ reservedInputTokens: 1_000 });
+    const budget = fit({ reservedInputTokens: 100_000 });
     assert.equal(budget.kind, "exceeded");
-    assert.equal(budget.limitTokens, 1_000);
-    assert.equal(budget.reservedInputTokens, 1_000);
+    assert.equal(budget.limitTokens, 100_000);
+    assert.equal(budget.reservedInputTokens, 100_000);
 });
 
-test("one token of room is enough to proceed", () => {
-    const budget = fit({ reservedInputTokens: 999 });
-    assert.equal(budget.kind, "fitted");
-    assert.equal(budget.outputTokens, 1);
+test("the least answer room is a floor: at it the request proceeds, one token under it is refused", () => {
+    const atFloor = fit({ reservedInputTokens: 100_000 - CHAT_MIN_OUTPUT_TOKENS });
+    assert.equal(atFloor.kind, "fitted");
+    assert.equal(atFloor.outputTokens, CHAT_MIN_OUTPUT_TOKENS);
+    const underFloor = fit({ reservedInputTokens: 100_000 - CHAT_MIN_OUTPUT_TOKENS + 1 });
+    assert.equal(underFloor.kind, "exceeded");
+    // The same refusal as a window that is full, so the route's existing code answers it.
+    assert.equal(underFloor.limitTokens, 100_000);
+});
+
+test("a request that asks for less than the floor is held to what it asked for", () => {
+    assert.equal(fit({ requestOutputCapTokens: 200, reservedInputTokens: 99_800 }).kind, "fitted");
+    assert.equal(fit({ requestOutputCapTokens: 200, reservedInputTokens: 99_801 }).kind, "exceeded");
 });
 
 test("one token past the window is refused", () => {
-    assert.equal(fit({ reservedInputTokens: 1_001 }).kind, "exceeded");
+    assert.equal(fit({ reservedInputTokens: 100_001 }).kind, "exceeded");
 });
 
 test("the provider's ceiling lowers the request cap and never raises it", () => {
@@ -85,7 +94,7 @@ test("a model with no declared window reports that nothing was checked", () => {
     // the request was bounded when it was not, and the fail-closed stage of
     // the rollout changes exactly this case.
     for (const contextWindowTokens of [null, undefined, 0, -1]) {
-        const budget = fit({ contextWindowTokens, reservedInputTokens: 10_000_000 });
+        const budget = fit({ contextWindowTokens, reservedInputTokens: 10_000_000, requestOutputCapTokens: 200 });
         assert.equal(budget.kind, "unbounded");
         assert.equal(budget.outputTokens, 200);
     }

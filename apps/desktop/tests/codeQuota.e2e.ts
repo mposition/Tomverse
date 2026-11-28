@@ -6,8 +6,10 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type ElectronApplication } from "@playwright/test";
+import { codeModelControl } from "./code-model-picker";
 import { claimLock, Journal } from "../../tomverse-cli/src/session.js";
 import { FakeGateway, TEST_KEY, type ScriptedReply } from "../../tomverse-cli/tests/fakeGateway.js";
 import { codeHistoryScope } from "../src/host/history-scope";
@@ -54,7 +56,7 @@ test("Code persists verified API credit limits and does not misclassify ambiguou
     app = await launch(descriptor);
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const pause = page.getByRole("region", { name: "Code paused at a usage limit" });
     for (const [index, trial] of cases.entries()) {
       failureCase = trial.prompt;
@@ -91,7 +93,7 @@ test("Code persists verified API credit limits and does not misclassify ambiguou
     await app.close();
     app = await launch(descriptor);
     const reopened = await app.firstWindow();
-    await reopened.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(reopened);
     await reopened.getByRole("button", { name: cases[0].prompt }).click();
     await expect(reopened.getByRole("region", { name: "Code paused at a usage limit" })).toBeVisible();
     assert.equal(gateway.completions.length, cases.length);
@@ -210,7 +212,7 @@ test("A confirmed Codex limit continues the saved read-only task on the capped C
     app = await launch(descriptor);
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(async () => {
       const scope = (await window.desktop.state()).codeFallback!.scope;
       await window.desktop.setCodeExecutionPreference("provider_cli");
@@ -226,7 +228,7 @@ test("A confirmed Codex limit continues the saved read-only task on the capped C
     await request(firstPrompt, "plan");
     const started = (await state()).task;
     assert.ok(started?.id);
-    await expect(page.getByLabel("Model and reasoning effort")).toContainText("Fake Coder", { timeout: 20_000 });
+    await expect(codeModelControl(page)).toContainText("Fake Coder", { timeout: 20_000 });
     releaseFirstApiReply();
     await expect.poll(async () => (await state()).busy, { timeout: 25_000 }).toBe(false);
     assert.ifError(nativeFailure);
@@ -324,7 +326,7 @@ test("A confirmed Codex limit continues the saved read-only task on the capped C
     await app.close();
     app = await launch(descriptor);
     const reopened = await app.firstWindow();
-    await reopened.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(reopened);
     await reopened.getByRole("button", { name: bothBlockedTitle, exact: true }).click();
     await expect(reopened.getByRole("region", { name: "Code paused at a usage limit" })).toBeVisible();
     const reopenedPause = await reopened.evaluate(() => window.desktop.state().then(({ task }) => task));
@@ -445,7 +447,7 @@ test("Code pauses on the official Codex usage-limit terminal event and leaves ge
     app = await launch(descriptor);
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
     const request = (prompt: string) => page.evaluate(({ prompt, model }) => window.desktop.start({
       model, mode: "ask", effort: "default", executionMode: "provider_cli", prompt, saveHistory: true,

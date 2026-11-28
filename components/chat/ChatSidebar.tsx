@@ -33,7 +33,14 @@ import Link from "next/link";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { useHelpGuideEnabledFlagKeys } from "@/components/chat/HelpGuideAccess";
 import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
-import { AlertTriangle, ChevronDown, CircleHelp, Compass, Crown, Download, Folder, FolderOpen, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Check, ChevronDown, CircleHelp, Compass, Crown, Download, Folder, FolderOpen, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
+import { conversationToolsCopy } from "@/locales/conversationTools";
+import {
+    CONVERSATION_SELECTION_LIMIT,
+    announceConversationsChanged,
+    requestConversationSelection,
+} from "@/lib/conversationBulkActions";
+import { SidebarSelectionBar } from "@/components/chat/SidebarSelectionBar";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { HelpGuideDialog } from "@/components/chat/HelpGuideDialog";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
@@ -115,7 +122,7 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
+    onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" | "pdf" }) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
@@ -142,6 +149,9 @@ type ConversationFilter =
     // drops, so the fact has to be findable somewhere that does not depend on
     // how wide the sidebar is.
     | "comparison"
+    // The only view that lists archived conversations, and lists nothing else
+    // (lib/conversationArchive.ts).
+    | "archived"
     | `project:${string}`
     // One model id. "Runs this model", present tense: the conversation's
     // current selection is what the repository stores, and which model answered
@@ -268,6 +278,12 @@ export function ChatSidebar({
     activeProjectWorkspaceId = null,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    // Selection mode (components/chat/SidebarSelectionBar.tsx). The ids are
+    // kept across filter changes, but only the ones the current view shows are
+    // counted or acted on.
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [bulkBusy, setBulkBusy] = useState(false);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     // Read for one thing: turning a model id in a filter chip into the name
@@ -397,6 +413,8 @@ export function ChatSidebar({
          * without the imported half it continues.
          */
         surface?: ConversationSurface;
+        /** The conversation is archived: still the account's, marked as such. */
+        archived?: boolean;
     } & Partial<ContinuationRowNaming>>>([]);
     /** Whether the answer is incomplete, and whether the imported half timed out. */
     const [messageSearchMeta, setMessageSearchMeta] = useState<{
@@ -522,6 +540,7 @@ export function ChatSidebar({
     }, []);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
+    const toolsCopy = conversationToolsCopy[lang];
     const tooltipIdPrefix = useId();
     // UX-032. Ids so each trigger's `aria-controls` resolves to the popup it
     // actually opens.
@@ -594,13 +613,25 @@ export function ChatSidebar({
         Object.prototype.hasOwnProperty.call(conversationProjectOverrides, conversation.id)
             ? conversationProjectOverrides[conversation.id]
             : conversation.projectId || null;
-    const filteredConversations = conversations.filter((conversation) => {
+    /*
+      Archived conversations are listed under their own filter and nowhere else
+      in the list: not in the default view, the date groups, the pinned section
+      or any other filter. Their pin is kept, so one restored comes back pinned.
+    */
+    const showingArchived = conversationFilter === "archived";
+    const liveConversations = conversations.filter((conversation) => conversation.archived !== true);
+    const archivedCount = conversations.length - liveConversations.length;
+    const filteredConversations = (showingArchived
+        ? conversations.filter((conversation) => conversation.archived === true)
+        : liveConversations
+    ).filter((conversation) => {
         const matchesSearch =
             !normalizedSearch ||
             conversation.title.toLowerCase().includes(normalizedSearch) ||
             messageMatchedIds.has(conversation.id);
         const matchesFilter =
             conversationFilter === "all" ||
+            showingArchived ||
             (conversationFilter === "locked" && conversation.isLocked) ||
             (conversationFilter === "shared" && conversation.shareEnabled) ||
             (conversationFilter === "comparison" && conversationModelCount(conversation) > 1) ||
@@ -618,8 +649,10 @@ export function ChatSidebar({
         // Favourites used to be a second key here, doing pinning's job under a
         // second name with no filter of its own, so nobody could tell the two
         // apart. Removed rather than kept as a quieter duplicate.
-        Number(pinnedConversationIds.includes(b.id)) -
-        Number(pinnedConversationIds.includes(a.id))
+        showingArchived
+            ? 0
+            : Number(pinnedConversationIds.includes(b.id)) -
+              Number(pinnedConversationIds.includes(a.id))
     );
 
     useEffect(() => {
@@ -866,6 +899,28 @@ export function ChatSidebar({
         await discardResponseBody(response);
         // A 4xx was refused before any write. A 5xx is an answer about nothing.
         return response.status >= 500 ? { kind: "failed" } : { kind: "refused" };
+    };
+
+    /*
+      Archive or restore, through the request a selection uses
+      (POST /api/conversations/bulk). Not optimistic: the row moves when the
+      page's refreshed list arrives, so the list only ever shows what the server
+      holds. The pin columns are not written, so the pin store is not involved.
+    */
+    const changeArchived = async (ids: string[], archived: boolean) => {
+        const answer = await requestConversationSelection(archived ? "archive" : "unarchive", ids);
+        if (!answer.ok) {
+            dispatchAppToast(toolsCopy.archiveFailed, "error");
+            return null;
+        }
+        announceConversationsChanged();
+        return answer.result;
+    };
+    const archiveOne = async (id: string, archived: boolean) => {
+        const result = await changeArchived([id], archived);
+        if (result && result.done.length > 0) {
+            dispatchAppToast(archived ? toolsCopy.archivedToast : toolsCopy.unarchivedToast, "success");
+        }
     };
 
     const togglePinned = (id: string) => {
@@ -1140,7 +1195,7 @@ export function ChatSidebar({
     */
     const modelFilterOptions = (() => {
         const counts = new Map<string, number>();
-        for (const conversation of conversations) {
+        for (const conversation of liveConversations) {
             if (conversation.kind === "image") continue;
             for (const modelId of conversation.selectedModels ?? []) {
                 counts.set(modelId, (counts.get(modelId) ?? 0) + 1);
@@ -1170,12 +1225,108 @@ export function ChatSidebar({
             conversation,
             id: conversation.id,
             updatedAt: conversation.updatedAt ?? conversation.createdAt ?? null,
-            pinned: pinnedConversationIds.includes(conversation.id),
+            // An archived conversation keeps its pin but is not drawn as pinned.
+            pinned: !showingArchived && pinnedConversationIds.includes(conversation.id),
         }))
         // No `now` argument: the clock is read inside the grouping rather than
         // in this render, which has to stay pure. `dayTick` is what brings the
         // component back at midnight so that read happens again.
     );
+    /*
+      What selection mode acts on: the rows drawn right now. A collapsed pinned
+      section draws none, so "select all shown" leaves those alone.
+    */
+    const selectableIds = [
+        ...(isPinnedCollapsed ? [] : groupedConversations.pinned.map((row) => row.id)),
+        ...groupedConversations.groups.flatMap((group) => group.conversations.map((row) => row.id)),
+    ];
+    const selectedVisibleIds = selectedIds.filter((id) => selectableIds.includes(id));
+    const endSelection = () => {
+        setSelectionMode(false);
+        setSelectedIds([]);
+    };
+    const toggleSelected = (id: string) => {
+        if (selectedVisibleIds.includes(id)) {
+            setSelectedIds(selectedVisibleIds.filter((selected) => selected !== id));
+            return;
+        }
+        if (selectedVisibleIds.length >= CONVERSATION_SELECTION_LIMIT) {
+            dispatchAppToast(interpolateSidebarCopy(toolsCopy.selectionLimit, { limit: CONVERSATION_SELECTION_LIMIT }), "info");
+            return;
+        }
+        setSelectedIds([...selectedVisibleIds, id]);
+    };
+    const selectAllShown = () => {
+        const next = [...new Set([...selectedVisibleIds, ...selectableIds])];
+        if (next.length > CONVERSATION_SELECTION_LIMIT) {
+            dispatchAppToast(interpolateSidebarCopy(toolsCopy.selectionLimit, { limit: CONVERSATION_SELECTION_LIMIT }), "info");
+        }
+        setSelectedIds(next.slice(0, CONVERSATION_SELECTION_LIMIT));
+    };
+    const archiveSelection = async () => {
+        const ids = selectedVisibleIds;
+        if (ids.length === 0 || bulkBusy) return;
+        setBulkBusy(true);
+        const result = await changeArchived(ids, !showingArchived);
+        setBulkBusy(false);
+        if (!result) return;
+        dispatchAppToast(
+            interpolateSidebarCopy(showingArchived ? toolsCopy.unarchivedManyToast : toolsCopy.archivedManyToast, {
+                count: result.done.length,
+            }),
+            "success"
+        );
+        endSelection();
+    };
+    /*
+      One request for the whole selection, which the server answers with what
+      it deleted and what it left -- a locked conversation this browser has not
+      unlocked is skipped, never deleted unseen. The skipped rows stay selected
+      so the reader can see which they were.
+    */
+    const deleteSelection = async () => {
+        const ids = selectedVisibleIds;
+        if (ids.length === 0 || bulkBusy) return;
+        setBulkBusy(true);
+        const answer = await requestConversationSelection("delete", ids);
+        setBulkBusy(false);
+        if (!answer.ok) {
+            // A 429 is the bulk-delete budget it shares with delete-all, not a
+            // failure a retry right now would fix.
+            dispatchAppToast(answer.status === 429 ? toolsCopy.deleteLimitReached : toolsCopy.bulkFailed, "error");
+            return;
+        }
+        const deleted = answer.result.done;
+        const locked = answer.result.skipped.filter((entry) => entry.reason === "locked").map((entry) => entry.id);
+        if (deleted.length > 0) announceConversationsChanged({ deletedIds: deleted });
+        dispatchAppToast(
+            [
+                deleted.length > 0 ? interpolateSidebarCopy(toolsCopy.deletedToast, { count: deleted.length }) : "",
+                locked.length > 0 ? interpolateSidebarCopy(toolsCopy.skippedLocked, { count: locked.length }) : "",
+            ]
+                .filter(Boolean)
+                .join(" ") || toolsCopy.bulkFailed,
+            locked.length > 0 || deleted.length === 0 ? "info" : "success"
+        );
+        if (locked.length > 0) setSelectedIds(locked);
+        else endSelection();
+    };
+    useEffect(() => {
+        if (!selectionMode) return;
+        // Escape ends selection, and only that: caught before the drawer's own
+        // Escape so the drawer stays open. The delete confirmation owns its keys.
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== "Escape" || event.defaultPrevented) return;
+            if (document.querySelector('[data-testid="sidebar-bulk-delete-dialog"]')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setSelectionMode(false);
+            setSelectedIds([]);
+        };
+        document.addEventListener("keydown", onKeyDown, true);
+        return () => document.removeEventListener("keydown", onKeyDown, true);
+    }, [selectionMode]);
+
     const dateBucketLabel = (bucket: ConversationDateBucket) =>
         bucket === "today"
             ? t("sidebar.dateToday")
@@ -1189,6 +1340,7 @@ export function ChatSidebar({
         if (conversationFilter === "locked") return helpCopy.lockedFilter;
         if (conversationFilter === "shared") return helpCopy.sharedFilter;
         if (conversationFilter === "comparison") return t("sidebar.comparisonFilter");
+        if (conversationFilter === "archived") return toolsCopy.archived;
         if (conversationFilter.startsWith("model:")) {
             return modelFilterLabel(conversationFilter.slice("model:".length));
         }
@@ -1651,10 +1803,15 @@ export function ChatSidebar({
                             ["locked", helpCopy.lockedFilter],
                             ["shared", isMobileDrawer ? helpCopy.sharedBadge : helpCopy.sharedFilter],
                             ["comparison", t("sidebar.comparisonFilter")],
+                            // Offered once there is something archived, and kept
+                            // while it is the view, so emptying it is not a
+                            // control vanishing under the pointer.
+                            ...(archivedCount > 0 || showingArchived ? [["archived", toolsCopy.archived]] : []),
                         ].map(([value, label]) => (
                             <button
                                 key={value}
                                 type="button"
+                                data-testid={value === "archived" ? "sidebar-archived-filter" : undefined}
                                 onClick={() =>
                                     setConversationFilter((current) =>
                                         current === value ? "all" : (value as ConversationFilter)
@@ -1970,6 +2127,27 @@ export function ChatSidebar({
                 </div>
             </div>
 
+            {!isGuestMode && (
+                <SidebarSelectionBar
+                    copy={toolsCopy}
+                    active={selectionMode}
+                    onStart={() => {
+                        closeConversationMenu();
+                        setSelectionMode(true);
+                        setSelectedIds([]);
+                    }}
+                    onEnd={endSelection}
+                    selectedCount={selectedVisibleIds.length}
+                    visibleCount={selectableIds.length}
+                    limit={CONVERSATION_SELECTION_LIMIT}
+                    onSelectAll={selectAllShown}
+                    archivedView={showingArchived}
+                    busy={bulkBusy}
+                    onArchive={() => void archiveSelection()}
+                    onDelete={deleteSelection}
+                    touch={isMobileDrawer}
+                />
+            )}
             <div
                 data-testid="sidebar-conversation-list"
                 // SHORT-VIEWPORT-001. Two heights, one scroll owner each:
@@ -2076,6 +2254,15 @@ export function ChatSidebar({
                                         continuationTitleCopy(t)
                                     )}
                                 </span>
+                                {result.archived && (
+                                    <span
+                                        data-testid="message-search-archived-badge"
+                                        className="mr-1 mt-0.5 inline-flex items-center gap-1 rounded-full bg-zinc-200/70 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                                    >
+                                        <Archive className="h-3 w-3" aria-hidden="true" />
+                                        {toolsCopy.archived}
+                                    </span>
+                                )}
                                 {result.kind === "imported" && result.sourceProvider && (
                                     <span
                                         data-testid="message-search-imported-badge"
@@ -2190,6 +2377,11 @@ export function ChatSidebar({
                         {section.rows.map((conv) => {
                     const isActive = currentChatId === conv.id;
                     const isMenuOpen = openMenuId === conv.id;
+                    const isSelected = selectionMode && selectedVisibleIds.includes(conv.id);
+                    // In selection mode the row is a checkbox: a tap or Space
+                    // toggles it, and nothing opens.
+                    const activateRow = () =>
+                        selectionMode ? toggleSelected(conv.id) : onSelectConversation(conv.id);
 
                     return (
                         <div
@@ -2203,29 +2395,48 @@ export function ChatSidebar({
                             // contains its own actions button, so it stays a div
                             // with an explicit button role rather than a <button>
                             // (nested interactive elements are invalid).
-                            role="button"
+                            role={selectionMode ? "checkbox" : "button"}
+                            aria-checked={selectionMode ? isSelected : undefined}
+                            data-selected={isSelected ? "true" : undefined}
                             tabIndex={0}
                             aria-current={isActive ? "true" : undefined}
                             onKeyDown={(event) => {
                                 if (event.target !== event.currentTarget) return;
                                 if (event.key === "Enter" || event.key === " ") {
                                     event.preventDefault();
-                                    onSelectConversation(conv.id);
+                                    activateRow();
                                 }
                             }}
-                            onClick={() => onSelectConversation(conv.id)}
+                            onClick={activateRow}
                             // A minimum, never a fixed height: at 200% text the
                             // row has to grow with its title. 48px on the drawer
                             // keeps the 44px touch target with room for the
                             // focus ring; the desktop row has a pointer and
                             // takes 40.
-                            className={`relative group flex items-center justify-between rounded-xl px-2.5 py-1.5 text-xs cursor-pointer transition-all border ${isMobileDrawer ? "min-h-12" : "min-h-10"} ${isMenuOpen ? "z-20" : "z-10"} ${isActive
+                            className={`relative group flex items-center justify-between rounded-xl px-2.5 py-1.5 text-xs cursor-pointer transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${isMobileDrawer ? "min-h-12" : "min-h-10"} ${isMenuOpen ? "z-20" : "z-10"} ${isSelected
+                                    ? "bg-blue-50 border-blue-300 text-zinc-900 dark:bg-blue-950/40 dark:border-blue-800 dark:text-zinc-100"
+                                    : isActive
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
                             title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
-                            <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2 ${isMobileDrawer ? "pr-11" : "pr-7"}`}>
+                            <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2 ${selectionMode ? "" : isMobileDrawer ? "pr-11" : "pr-7"}`}>
+                                {selectionMode && (
+                                    // The box is the picture of `aria-checked`, which already
+                                    // carries the state, so it is hidden from assistive tech.
+                                    <span
+                                        aria-hidden="true"
+                                        data-testid="sidebar-selection-box"
+                                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                            isSelected
+                                                ? "border-blue-600 bg-blue-600 text-white"
+                                                : "border-zinc-400 bg-white dark:border-zinc-600 dark:bg-zinc-900"
+                                        }`}
+                                    >
+                                        {isSelected && <Check className="h-3 w-3" />}
+                                    </span>
+                                )}
                                 {(() => {
                                     /*
                                       A glyph only where it says something.
@@ -2377,7 +2588,7 @@ export function ChatSidebar({
                                       row by a line each; these do not grow it
                                       at all.
                                     */}
-                                    {pinnedConversationIds.includes(conv.id) && (
+                                    {!showingArchived && pinnedConversationIds.includes(conv.id) && (
                                         <span className="shrink-0 text-blue-500">
                                             <Pin className="h-3.5 w-3.5" aria-hidden="true" />
                                             <span className="sr-only">{t("sidebar.pinnedBadge")}</span>
@@ -2392,6 +2603,9 @@ export function ChatSidebar({
                                 </span>
                             </div>
 
+                            {/* No row menu while selecting: the row is a checkbox, and a
+                                control inside a checkbox is a nested interactive element. */}
+                            {!selectionMode && (
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center context-menu-wrapper">
                                 <button
                                     type="button"
@@ -2456,6 +2670,7 @@ export function ChatSidebar({
                                             </span>
                                         </button>
 
+                                        {conv.archived !== true && (
                                         <button
                                             type="button"
                                             onClick={(e) => {
@@ -2470,6 +2685,32 @@ export function ChatSidebar({
                                                 <span>{pinnedConversationIds.includes(conv.id) ? t("sidebar.unpinChat") : t("sidebar.pinChat")}</span>
                                             </span>
                                         </button>
+                                        )}
+
+                                        {/* An account's list only: a guest's conversations
+                                            live in this browser and a temporary Chat is never
+                                            listed, so neither reaches this item. */}
+                                        {!isGuestMode && (
+                                            <button
+                                                type="button"
+                                                data-testid={conv.archived ? "conversation-unarchive" : "conversation-archive"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setOpenMenuId(null);
+                                                    void archiveOne(conv.id, conv.archived !== true);
+                                                }}
+                                                className={`${menuItemBase} ${menuItemEnabled}`}
+                                            >
+                                                <span className="flex min-w-0 items-start gap-2">
+                                                    {conv.archived ? (
+                                                        <ArchiveRestore className={menuIconClass} />
+                                                    ) : (
+                                                        <Archive className={menuIconClass} />
+                                                    )}
+                                                    <span>{conv.archived ? toolsCopy.unarchive : toolsCopy.archive}</span>
+                                                </span>
+                                            </button>
+                                        )}
 
                                         <div className="my-1 border-t border-zinc-800" />
                                         <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
@@ -2666,6 +2907,27 @@ export function ChatSidebar({
                                             </span>
                                             {!canDownload && <Crown className={crownClass} />}
                                         </button>
+                                        {/* The same route and checks again, rendered as a PDF. */}
+                                        <button
+                                            type="button"
+                                            data-testid="conversation-download-pdf"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (canDownload) {
+                                                    onDownload(conv.id, conv.title, { format: "pdf" });
+                                                    setOpenMenuId(null);
+                                                }
+                                            }}
+                                            disabled={!canDownload}
+                                            className={`${menuItemBase} ${!canDownload ? menuItemDisabled : menuItemEnabled}`}
+                                            title={isGuestMode ? t("sidebar.loginRequired") : !canDownload ? t("modelStatusReasons.upgradeRequired") : ""}
+                                        >
+                                            <span className="flex min-w-0 items-start gap-2">
+                                                <Download className={menuIconClass} />
+                                                <span>{toolsCopy.downloadPdf}</span>
+                                            </span>
+                                            {!canDownload && <Crown className={crownClass} />}
+                                        </button>
                                         </>)}
 
 
@@ -2737,6 +2999,7 @@ export function ChatSidebar({
                                      document.body
                                  ) : null}
                              </div>
+                            )}
                         </div>
                     );
                 })}

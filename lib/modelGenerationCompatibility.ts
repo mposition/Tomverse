@@ -103,9 +103,52 @@ export const mergeProviderOptions = (
   return merged;
 };
 
+/**
+ * The request option that asks a provider for a summary of the reasoning it
+ * already does, so Chat can show it (lib/chatReasoningDisplay.ts).
+ *
+ * It adds nothing to a model that is not reasoning and changes neither whether
+ * nor how much a model reasons: each option below only decides whether the
+ * summary is sent back. Anthropic bills the full thinking whatever `display`
+ * says and charges nothing for the summary; OpenAI's usage reports reasoning
+ * tokens the same with or without a summary; Google bills thinking tokens the
+ * same with `includeThoughts`. A provider not listed here either already
+ * returns its reasoning (Moonshot) or has no summary option this adapter can
+ * send (the OpenAI-compatible chat adapter drops `reasoning_content`).
+ *
+ * `reasoning === "none"` is left alone on purpose: that is a model told not to
+ * think, and there is nothing to summarise.
+ */
+export const getReasoningSummaryProviderOptions = (
+  model: GenerationModel
+): ProviderOptions | undefined => {
+  if (model.reasoning === "none") return undefined;
+  if (model.provider === "anthropic" && model.reasoning !== undefined) {
+    // `display: "summarized"` returns the thinking text the SDK then streams as
+    // reasoning parts. Newer Claude models default to "omitted" (an empty
+    // thinking block), which still tells Chat the model is thinking.
+    return { anthropic: { thinking: { type: "adaptive", display: "summarized" } } };
+  }
+  if (model.provider === "openai" && model.reasoning !== undefined) {
+    // Responses API `reasoning.summary`. "auto" is the most detailed summary
+    // the model supports. OpenAI may require organization verification.
+    return { openai: { reasoningSummary: "auto" } };
+  }
+  if (model.provider === "google") {
+    // Gemini thinks by default; this only returns the thought summary.
+    return { google: { thinkingConfig: { includeThoughts: true } } };
+  }
+  return undefined;
+};
+
 export const getModelGenerationSettings = (
   model: GenerationModel,
   options?: {
+    /**
+     * Ask the provider for a summary of the reasoning it is already doing.
+     * Off unless the caller turns it on (CHAT_REASONING_DISPLAY_ENABLED).
+     */
+    reasoningSummary?: boolean;
     temperature?: number;
     /**
      * OpenAI's `max_tool_calls` for this request, when the turn is dispatching
@@ -135,7 +178,10 @@ export const getModelGenerationSettings = (
 ) => {
   const providerOptions = mergeProviderOptions(
     mergeProviderOptions(
-      getModelProviderOptions(model),
+      mergeProviderOptions(
+        getModelProviderOptions(model),
+        options?.reasoningSummary ? getReasoningSummaryProviderOptions(model) : undefined
+      ),
       // Merged rather than assigned: a reasoning OpenAI model already has an
       // `openai` namespace holding `reasoningEffort`, and this has to land
       // beside it. It also has to be reachable on a model with no reasoning

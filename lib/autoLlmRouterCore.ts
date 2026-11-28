@@ -267,6 +267,14 @@ export const autoLlmRouterCandidates = (
 export const previousAnswerExcerpt = (
     messages: readonly { role: string; content: unknown }[]
 ): string | null => {
+    const text = previousAnswerText(messages);
+    return text ? boundedRouterText(text, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS) : null;
+};
+
+/** The whole assistant answer just before the latest user message, trimmed, or null. */
+const previousAnswerText = (
+    messages: readonly { role: string; content: unknown }[]
+): string | null => {
     let index = messages.length - 1;
     while (index >= 0 && messages[index]?.role !== "user") index -= 1;
     for (index -= 1; index >= 0; index -= 1) {
@@ -274,11 +282,20 @@ export const previousAnswerExcerpt = (
         if (message?.role === "user") return null;
         if (message?.role !== "assistant") continue;
         if (typeof message.content !== "string") return null;
-        const text = message.content.trim();
-        return text ? boundedRouterText(text, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS) : null;
+        return message.content.trim() || null;
     }
     return null;
 };
+
+/**
+ * Whether the router read only part of the previous answer. The short follow-up
+ * it is asked to rewrite ("fix the code above") points into that answer, and a
+ * router that saw its first 600 characters cannot be trusted to have resolved
+ * what it points at, so such a turn is not offered for rewriting.
+ */
+export const previousAnswerWasCut = (
+    messages: readonly { role: string; content: unknown }[]
+): boolean => (previousAnswerText(messages)?.length ?? 0) > AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS;
 
 /**
  * The router's instructions, in three parts. The head and tail are fixed:
@@ -464,9 +481,16 @@ export const admitRouterRewrite = (raw: unknown, prompt: string): string | null 
     return text;
 };
 
+/** The label that sets the router's reading apart from what the user wrote. */
+export const ROUTER_INTERPRETATION_LABEL = "Router interpretation:";
+
 /**
- * The execution view with the latest user message's text replaced by the
- * rewrite. Only a plain-text conversation is rewritten: if any message carries
+ * The execution view with the rewrite added after the latest user message's
+ * own text, under `ROUTER_INTERPRETATION_LABEL`. The user's words stay: the
+ * router saw a bounded prompt and a 600-character excerpt of the last answer,
+ * and a rewrite that replaced the message outright let a wrong guess erase a
+ * detail only the original carried. Only a plain-text conversation is
+ * rewritten: if any message carries
  * attachments (Chat sends them beside a string `content`) or the latest user
  * content is structured, the router never saw what "this file" or "the code"
  * may refer to, so the original view is kept. Returns the same array when
@@ -484,7 +508,9 @@ export const withRouterRewrite = <
     while (index >= 0 && messages[index]?.role !== "user") index -= 1;
     if (index < 0 || typeof messages[index].content !== "string") return messages;
     return messages.map((message, position) =>
-        position === index ? { ...message, content: rewrite } : message
+        position === index
+            ? { ...message, content: `${message.content}\n\n${ROUTER_INTERPRETATION_LABEL} ${rewrite}` }
+            : message
     );
 };
 

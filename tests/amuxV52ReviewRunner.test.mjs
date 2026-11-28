@@ -195,3 +195,22 @@ test("review findings cap the number of remote report reads", () => {
       /review findings unavailable/);
   } finally { cleanup(); }
 });
+
+// Owner decision 2026-11-28: the runner keeps no scope length of its own; the
+// app holds the scope inside the review request's transport.
+test("a scope past the old 20,000 characters is submitted whole", () => {
+  const scope = `${input.scope}\n\n## AMUX-PUBLIC-002\n${"| pricing.copy.x | 문구 |\n".repeat(2_000)}`;
+  assert.ok(scope.length > 20_000);
+  let sent = null;
+  const { options, cleanup } = fixture((_program, args) => {
+    if (args.includes("submit")) {
+      sent = args[args.indexOf("--scope") + 1];
+      return { code: 3, stdout: JSON.stringify({ jobId: "r-20261128-010000-abcdef" }) };
+    }
+    return { code: 3, stdout: "{}" };
+  });
+  try {
+    assert.equal(reviewStep({ ...input, scope }, options).kind, "pending");
+    assert.equal(sent, scope);
+  } finally { cleanup(); }
+});

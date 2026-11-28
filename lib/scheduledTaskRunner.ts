@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { ApiSecurityError, assertMessageCapacity } from "@/lib/apiSecurity";
+import { ApiSecurityError, assertConversationCapacity, assertMessageCapacity } from "@/lib/apiSecurity";
 import { resolveChatConcurrencyPlan } from "@/lib/chatConcurrencyCore";
 import { identifyChatCaller } from "@/lib/chatSecurity";
 import { createConversation } from "@/lib/conversationCreation";
@@ -27,6 +27,7 @@ import {
   type ScheduledTaskSchedule,
 } from "@/lib/scheduledTaskCore";
 import { runAsScheduledTask } from "@/lib/scheduledTaskRunContext";
+import { restoreArchivedConversationOnMessage } from "@/lib/conversationArchive";
 import { isScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { quoteScheduledRunCredits, ScheduledTaskError } from "@/lib/scheduledTaskService";
@@ -484,6 +485,9 @@ async function prepareConversation(
         }
       }
       if (!conversationId) {
+        // The task's dedicated conversation is listed like any other, so a full
+        // account is skipped with storage_full instead of growing past its quota.
+        await assertConversationCapacity(tx, run.userId);
         const created = await createConversation(tx, {
           userId: run.userId,
           title: task.title,
@@ -500,6 +504,9 @@ async function prepareConversation(
         data: [{ id: userMessageId, conversationId, role: "user", content: task.prompt, status: "normal" }],
         skipDuplicates: true,
       });
+      // The run's answer is how the account is told; an archived conversation
+      // would hide it, so a new question brings it back (lib/conversationArchive.ts).
+      await restoreArchivedConversationOnMessage(tx, conversationId);
       await tx.scheduledTaskRun.updateMany({
         where: { id: run.id, status: "running" },
         // The lease restarts as the dispatch begins, so it covers the dispatch.

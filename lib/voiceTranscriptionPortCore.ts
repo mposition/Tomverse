@@ -58,6 +58,12 @@ export type VoiceTranscriptionRequest = {
    * detected.
    */
   languageHint: string | null;
+  /**
+   * How long to wait, when the default is not enough. Voice clips are at most
+   * two minutes and keep the default; a chat attachment may be ten
+   * (`lib/chatAudioAttachmentCore.ts`).
+   */
+  timeoutMs?: number;
 };
 
 /**
@@ -352,72 +358,106 @@ export const transcribeWithOpenAi = async (
   form.append("response_format", "json");
   if (request.languageHint) form.append("language", request.languageHint);
 
+  /*
+    One deadline for the whole call, the body included.
+
+    The timer used to be cleared as soon as `fetch` resolved, which is when
+    the headers arrive; a provider that sent headers and then a slow body was
+    waited on without limit. The chat attachment path claims a recording for
+    a fixed time on the strength of this deadline, so a call that outlived it
+    let a second request transcribe and book the same recording while the
+    first was still running (review r-20261127-110354-67c5f8). The timer now
+    stands until the body has been read, and the read itself races it -- an
+    injected `fetchImpl` whose body ignores the signal is still cut off. A
+    body cut off this way is `provider_response_unreadable`: indeterminate,
+    since the provider may have done the work.
+  */
   const controller = new AbortController();
+  const deadline = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener(
+      "abort",
+      () => reject(new Error("transcription deadline")),
+      { once: true }
+    );
+  });
+  deadline.catch(() => undefined);
+  const withinDeadline = <T>(work: Promise<T>) => Promise.race([work, deadline]);
   const timeout = setTimeout(
     () => controller.abort(),
-    config.timeoutMs ?? VOICE_TRANSCRIPTION_TIMEOUT_MS
+    request.timeoutMs ?? config.timeoutMs ?? VOICE_TRANSCRIPTION_TIMEOUT_MS
   );
 
-  let response: Response;
   try {
-    response = await config.fetchImpl(
-      voiceTranscriptionEndpoint(
-        config.baseUrl ?? VOICE_TRANSCRIPTION_OPENAI_BASE_URL
-      ),
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${config.apiKey}` },
-        body: form,
-        signal: controller.signal,
-      }
-    );
-  } catch {
-    // The thrown error is deliberately not inspected, not re-thrown and not
-    // logged. `fetch` failures carry the request in their message on some
-    // runtimes, and the request is the audio.
-    return {
-      ok: false,
-      code: "provider_unreachable",
-      status: null,
-      disposition: "indeterminate",
-    };
+    let response: Response;
+    try {
+      response = await withinDeadline(
+        config.fetchImpl(
+          voiceTranscriptionEndpoint(
+            config.baseUrl ?? VOICE_TRANSCRIPTION_OPENAI_BASE_URL
+          ),
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.apiKey}` },
+            body: form,
+            signal: controller.signal,
+          }
+        )
+      );
+    } catch {
+      // The thrown error is deliberately not inspected, not re-thrown and not
+      // logged. `fetch` failures carry the request in their message on some
+      // runtimes, and the request is the audio.
+      return {
+        ok: false,
+        code: "provider_unreachable",
+        status: null,
+        disposition: "indeterminate",
+      };
+    }
+
+    if (!response.ok) {
+      // The body is consumed and discarded rather than left unread: an
+      // unconsumed body holds the connection open (npm run
+      // report:unconsumed-response-bodies). It is never read into a variable
+      // that could reach a log.
+      await withinDeadline(response.arrayBuffer()).catch(() => undefined);
+      const code = classifyStatus(response.status);
+      return {
+        ok: false,
+        code,
+        status: response.status,
+        disposition: dispositionFor(code),
+      };
+    }
+
+    let payload: unknown;
+    try {
+      payload = await withinDeadline(response.json());
+    } catch {
+      return {
+        ok: false,
+        code: "provider_response_unreadable",
+        status: response.status,
+        disposition: "indeterminate",
+      };
+    }
+    return readTranscriptionPayload(payload, response.status);
   } finally {
     clearTimeout(timeout);
   }
+};
 
-  if (!response.ok) {
-    // The body is consumed and discarded rather than left unread: an
-    // unconsumed body holds the connection open (npm run
-    // report:unconsumed-response-bodies). It is never read into a variable
-    // that could reach a log.
-    await response.arrayBuffer().catch(() => undefined);
-    const code = classifyStatus(response.status);
-    return {
-      ok: false,
-      code,
-      status: response.status,
-      disposition: dispositionFor(code),
-    };
-  }
-
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    return {
-      ok: false,
-      code: "provider_response_unreadable",
-      status: response.status,
-      disposition: "indeterminate",
-    };
-  }
-
+/** A 2xx body, read once the deadline has let it through. */
+const readTranscriptionPayload = (
+  payload: unknown,
+  status: number
+): VoiceTranscriptionResult => {
   const body = payload as Record<string, unknown> | null;
   if (!body || typeof body.text !== "string") {
     return {
       ok: false,
       code: "provider_response_unreadable",
-      status: response.status,
+      status,
       disposition: "indeterminate",
     };
   }

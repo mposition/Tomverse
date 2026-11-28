@@ -145,6 +145,8 @@ export type DesktopChatShellProps = {
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
+  /** Chat: new conversation from an answer; the page leaves on success. */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -298,7 +300,7 @@ export type DesktopChatShellProps = {
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" | "pdf" }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */
@@ -330,6 +332,9 @@ export type DesktopChatShellProps = {
   accountMemoryMasterEnabled?: boolean | null;
   onMemorySettingsRefresh?: () => void;
   researchPreview?: ResearchPreviewControls;
+  /** Study mode for this conversation (Chat only), and its switch. */
+  studyMode?: boolean;
+  onStudyModeChange?: (on: boolean) => void;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -454,6 +459,15 @@ export type DesktopChatShellProps = {
   }) => Promise<string | null>;
 };
 
+/** A function with a fixed identity that always runs the latest closure given to it. */
+function useLatestCallback<Args extends unknown[], Result>(callback: (...args: Args) => Result) {
+  const latest = useRef(callback);
+  useEffect(() => {
+    latest.current = callback;
+  });
+  return useCallback((...args: Args) => latest.current(...args), []);
+}
+
 export function DesktopChatShell({
   workspaceNotice,
   continuationNotice,
@@ -469,6 +483,7 @@ export function DesktopChatShell({
   onRetryPrompt,
   onCompareInReview,
   onCompareContinuationInReview,
+  onBranchFromAnswer,
   conversations,
   currentChatId,
   selectedModels,
@@ -549,6 +564,8 @@ export function DesktopChatShell({
   accountMemoryMasterEnabled,
   onMemorySettingsRefresh,
   researchPreview,
+  studyMode,
+  onStudyModeChange,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -636,6 +653,21 @@ export function DesktopChatShell({
     }
     return entries;
   }, [conversationStateKey, selectedModels, singleTranscript, studio, studioPanelOrder]);
+  // A panel's close/choose-model handler is created once per panel, not once
+  // per render: an inline arrow here is a new prop every keystroke (the
+  // composer text is a prop of this shell), which defeats the memo on ChatApp
+  // and re-renders every transcript. The current props are read at click time.
+  const closeModel = useLatestCallback((panelModelId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    if (singleTranscript) openChatModelPicker(event.currentTarget);
+    else onToggleModel(panelModelId);
+  });
+  const closeModelHandlers = useMemo(() => {
+    const handlers = new Map<string, React.MouseEventHandler<HTMLButtonElement>>();
+    for (const { modelId: panelModelId } of panelEntries) {
+      handlers.set(panelModelId, (event) => closeModel(panelModelId, event));
+    }
+    return handlers;
+  }, [panelEntries, closeModel]);
   const [modelContentStates, setModelContentStates] = useState<
     Record<string, ChatContentState>
   >({});
@@ -1478,6 +1510,7 @@ export function DesktopChatShell({
                   onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
                   onCompareContinuationInReview={onCompareContinuationInReview}
+                  onBranchFromAnswer={onBranchFromAnswer}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
@@ -1503,9 +1536,7 @@ export function DesktopChatShell({
                   useCenteredWelcome
                   onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
-                  onRequestCloseModel={(event) => singleTranscript
-                    ? openChatModelPicker(event.currentTarget)
-                    : onToggleModel(modelId)}
+                  onRequestCloseModel={closeModelHandlers.get(modelId)}
                   hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}
                 />
@@ -1667,6 +1698,8 @@ export function DesktopChatShell({
               accountMemoryMasterEnabled={accountMemoryMasterEnabled}
               onMemorySettingsRefresh={onMemorySettingsRefresh}
               researchPreview={researchPreview}
+              studyMode={studyMode}
+              onStudyModeChange={onStudyModeChange}
               onOpenDeepResearchSetup={onOpenDeepResearchSetup}
               isDeepResearchPending={isDeepResearchPending}
               onDismissDeepResearchChip={onDismissDeepResearchChip}

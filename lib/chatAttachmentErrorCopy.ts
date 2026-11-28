@@ -52,11 +52,19 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     ATTACHMENT_MODEL_UNSUPPORTED: "chat.attachmentModelUnsupported",
     // Scanned PDF, OCR service down, and a model that cannot read the PDF itself.
     PDF_OCR_UNAVAILABLE: "chat.attachmentOcrUnavailable",
+    // A photo an image edit refuses before it reserves anything (lib/imageEditSource.ts).
+    IMAGE_EDIT_SOURCE_TOO_LARGE: "chat.imageEditSourceTooLarge",
+    IMAGE_EDIT_SOURCE_UNSUPPORTED: "chat.imageEditSourceUnsupported",
 
     // -- Type and size ------------------------------------------------------
     UNSUPPORTED_ATTACHMENT_TYPE: "chat.attachmentTypeError",
     GUEST_ATTACHMENT_UNSUPPORTED_TYPE: "chat.guestAttachmentUnsupported",
     ATTACHMENT_TOO_LARGE: "chat.attachmentSizeError",
+
+    // -- Recordings (docs/policy/chat-attachment-formats.md 2.4) ------------
+    ATTACHMENT_AUDIO_TOO_LONG: "chat.attachmentAudioTooLong",
+    AUDIO_TRANSCRIPTION_UNAVAILABLE: "chat.audioTranscriptionUnavailable",
+    AUDIO_TRANSCRIPTION_LIMIT_REACHED: "chat.audioTranscriptionLimitReached",
 
     // -- Archives -----------------------------------------------------------
     ARCHIVE_CORRUPT: "chat.archiveCorrupt",

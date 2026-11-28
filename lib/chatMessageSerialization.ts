@@ -1,4 +1,5 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import { withoutStoredReasoning } from "@/lib/chatReasoningDisplay";
 
 /**
  * Purpose-built message serializers for everything that leaves client
@@ -62,7 +63,9 @@ const pickTransportFields = (message: Message): Message => ({
     ? { pendingJobId: message.pendingJobId }
     : {}),
   ...(message.searchMetadata !== undefined
-    ? { searchMetadata: message.searchMetadata }
+    ? // The saved reasoning summary is for the person reading the answer;
+      // it is not part of the conversation sent back to the model.
+      { searchMetadata: withoutStoredReasoning(message.searchMetadata) }
     : {}),
 });
 

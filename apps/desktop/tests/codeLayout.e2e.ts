@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
+import { codeModelControl } from "./code-model-picker";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { launchNativeFixture } from "./launch-native-fixture";
 
@@ -92,14 +94,14 @@ test("Code keeps the conversation and composer reachable when drafts and zoom ch
     }
 
     await size(1440, 960, 1);
-    await page.getByRole("button", { name: "Open local folder", exact: true }).click();
+    await openCodeProject(page);
     const field = page.getByRole("textbox", { name: "Code request", exact: true });
     const ready = page.getByRole("button", { name: "Send Code request", exact: true });
     assert.deepEqual(await page.getByRole("navigation", { name: "Workspaces" }).locator(".rail-tools button, .rail-settings").allTextContents(),
       ["Chat", "Review", "Code", "Plugins", "Settings"]);
     await expect(page.getByRole("form")).toHaveCount(1);
     await expect(page.getByRole("form", { name: "Code composer" })).toBeVisible();
-    await expect(page.getByLabel("Model and reasoning effort")).toBeVisible();
+    await expect(codeModelControl(page)).toBeVisible();
     const initial = await measure();
     await field.fill(title);
     await ready.click();

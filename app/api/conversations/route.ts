@@ -3,6 +3,7 @@ import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 
 import { NextResponse } from "next/server";
 import { deleteOwnedConversations } from "@/lib/conversationDeletion";
+import { deleteConversationsInBatches } from "@/lib/conversationDeletionBatches";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { readableContinuationSourceTitle } from "@/lib/continuationDisplayTitle";
 import {
@@ -25,6 +26,8 @@ import {
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
 import { REVIEW_PRODUCT_KEY, STUDIO_RUN_CONVERSATION } from "@/lib/conversationProduct";
+import { archivedListWhere } from "@/lib/conversationArchive";
+import { BULK_CONVERSATION_DELETE_RATE_LIMIT } from "@/lib/conversationBulkActions";
 
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -80,11 +83,12 @@ export async function GET(req: Request) {
     const conversations = await prisma.conversation.findMany({
       // A Studio tool run is a one-off shown in the tool, not a conversation to
       // come back to. A temporary Chat is never listed (lib/temporaryChatAccess.ts).
-      where: { userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null },
+      where: { userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null, ...archivedListWhere(req) },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
         title: true,
+        archivedAt: true,
         // Returned because the sidebar groups by it. The list was already
         // ordered by this column and withheld it, so the client could order
         // rows it could not date -- and a date header cannot be derived from a
@@ -186,6 +190,7 @@ export async function GET(req: Request) {
         updatedAt: conv.updatedAt.toISOString(),
         pinned: conv.pinnedAt !== null,
         pinSeq: conv.pinSeq,
+        archived: conv.archivedAt !== null,
         kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
         productKey: conv.productKey,
         projectId: conv.projectId || null,
@@ -267,10 +272,13 @@ export async function DELETE(req: Request) {
     }
 
     const userId = session.user.id;
-    await consumeApiRateLimit(req, userId, "conversation-delete-all", {
-      minute: 2,
-      day: 5,
-    });
+    // Shared with deleting a selection (lib/conversationBulkActions.ts).
+    await consumeApiRateLimit(
+      req,
+      userId,
+      BULK_CONVERSATION_DELETE_RATE_LIMIT.scope,
+      BULK_CONVERSATION_DELETE_RATE_LIMIT.limits
+    );
 
     const conversations = await prisma.conversation.findMany({
       where: { userId },
@@ -295,15 +303,37 @@ export async function DELETE(req: Request) {
 
     // The single-conversation delete's path and order (lib/conversationDeletion.ts):
     // object keys are queued before the rows disappear, never deleted ahead
-    // of the database.
-    const result = await prisma.$transaction((tx) =>
-      deleteOwnedConversations(tx, {
-        userId,
-        conversationIds: conversations.map((conversation) => conversation.id),
-      })
+    // of the database. One transaction per batch of fifty (not one for the
+    // whole account, which outgrew Prisma's five-second default): a batch is
+    // committed with its own cleanup tombstones or not at all.
+    const outcome = await deleteConversationsInBatches(
+      conversations.map((conversation) => conversation.id),
+      (batch) =>
+        prisma.$transaction(
+          (tx) => deleteOwnedConversations(tx, { userId, conversationIds: batch }),
+          { maxWait: 5_000, timeout: 20_000 }
+        )
     );
+    if (outcome.failure !== null) {
+      console.error("Failed to delete all conversations:", outcome.failure);
+      // Nothing committed: the same answer as before this was batched. Some
+      // batches committed: say how far it got, so the screen can refresh the
+      // list instead of showing rows that are already gone.
+      if (outcome.deleted === 0 && outcome.processed === 0) {
+        return NextResponse.json({ error: "Failed to delete conversations." }, { status: 500 });
+      }
+      return NextResponse.json(
+        {
+          error: "Some conversations could not be deleted.",
+          code: "CONVERSATION_DELETE_PARTIAL",
+          deleted: outcome.deleted,
+          remaining: outcome.remaining,
+        },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json({ success: true, deleted: result.count });
+    return NextResponse.json({ success: true, deleted: outcome.deleted });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

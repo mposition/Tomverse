@@ -457,6 +457,11 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **저장 경로는 `GET /api/images/generations/{generationId}/download` 하나다.**
   소유권은 조회 자체를 `userId`로 범위 잡아 정하고, 성공하지 않은 generation·
   스윕된 원본·남의 행은 모두 404다 — 구분할 분기가 존재하지 않는다.
+- **잠긴 대화의 이미지는 웹에서도 잠금을 따른다**(2026-11-28). 다운로드와 이미지 그룹·generation
+  읽기(서명 URL을 주는 세 route)는 대화에 비밀번호가 있으면 해당 잠금 해제 grant
+  (`hasConversationUnlockGrant`, 첨부 미리보기·생성 파일 route와 같은 검사)가 있어야 하고 없으면 423
+  `CONVERSATION_LOCKED`다. 데스크톱은 잠긴 대화를 grant와 무관하게 읽지 못한다(그대로).
+  비밀번호가 없는 대화(이미지 workspace, Studio)는 지금처럼 읽는다.
 - **파일 이름은 저장된 `mimeType`에서 만든다.** `imageAssetR2Key()`는 원본을
   언제나 `original.png`로 이름 짓지만 provider가 전부 PNG를 주는 것은 아니다
   (adapter는 `image/jpeg`·`image/webp`도 파싱한다). key는 저장 경로라 고정
@@ -1374,9 +1379,18 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
       Studio 도구의 생성은 1회성 실행이라 대화 기록에 넣지 않는다(운영자 결정 2026-11-26). 실행마다 이미지 대화 행은
       그대로 만들되 요청 문구를 그 대화의 메시지로 남기고(`lib/studioImageReference.ts`), 대화 목록과 메시지 검색은 메시지가
       있는 이미지 대화를 제외한다(`STUDIO_RUN_CONVERSATION`, `lib/conversationProduct.ts`). 이미지 workspace의 대화는 메시지가 없으므로 목록에 남는다.
+      대화 수 한도(`API_MAX_CONVERSATIONS_PER_USER`, 기본 500)도 목록과 같은 조건(`LISTED_CONVERSATION_WHERE`, `lib/apiSecurity.ts`)으로 세므로 숨겨진
+      Studio 실행 대화와 임시 Chat은 한도를 채우지 않는다. 이미지 workspace 대화를 새로 만드는 요청(대화 id 없는 `/api/images/generations`)은 목록에 보이는 대화를 만들므로 같은 한도 검사를 거친다(`lib/imageGenerationService.ts`). Studio 실행은 같은 트랜잭션에서 요청 메시지를 남겨 목록에서 숨는 행이라 이 검사를 거치지 않는다.
     - 토큰 과금이 아닌 사진은 snapshot의 사진 예산으로 정산한다. 사진이 없거나 읽을 수
       없으면 provider를 부르기 전에 `edit_source_unavailable`로 실패하고 전부 반납한다.
       재시도는 같은 사진의 편집으로 남는다. Review는 편집하지 않는다.
+      **예약 전에 거를 수 있는 것은 거른다**(2026-11-28): 채팅 첨부는 50 MB까지지만 편집이 읽는
+      사진은 `IMAGE_EDIT_SOURCE_MAX_BYTES`(10 MB)까지다. 첨부 행의 크기가 이를 넘거나
+      (`IMAGE_EDIT_SOURCE_TOO_LARGE`, 413) 읽은 파일을 디코딩할 수 없으면
+      (`IMAGE_EDIT_SOURCE_UNSUPPORTED`, 400) `findChatImageEditSource`가 크레딧을 예약하기 전에
+      그 코드로 거절하고, 패널은 `chat.imageEditSourceTooLarge`·`chat.imageEditSourceUnsupported`의
+      현지화된 문구를 보인다. 저장소를 지금 읽지 못한 것은 사진의 문제가 아니므로 이 거절이 아니라
+      위의 `edit_source_unavailable` 경로에 남는다.
   - **확인 없는 과금은 운영자 결정이다**(2026-10-20). Chat의 텍스트 턴처럼
     제출 즉시 생성하며, 위 §3·§11의 "제출 전 가격 표시"와 ⑤의
     `imageHandoffAutoGenerate` 조건은 이 경로에 적용하지 않는다. 크레딧

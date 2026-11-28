@@ -14,6 +14,8 @@ import {
     SEARCH_CANDIDATE_ROW_LIMIT,
     SEARCH_CANDIDATES_PER_GROUP,
     escapeLikePattern,
+    snippetNeedle,
+    splitSearchWords,
     isStatementTimeout,
     rankSearchHits,
     type RankedSearchHit,
@@ -75,6 +77,12 @@ type NamedHitBase = {
     surface: ConversationSurface;
     snippet: string;
     snippetHighlight: { start: number; end: number } | null;
+    /**
+     * The conversation is archived (lib/conversationArchive.ts). Its hits are
+     * still the account's own history, so they are returned and marked; the
+     * model's search never sees them.
+     */
+    archived: boolean;
 } & ContinuationRowNaming;
 
 export type NativeSearchResult = NamedHitBase & {
@@ -120,6 +128,7 @@ const TARGET_SELECT = {
     id: true,
     title: true,
     productKey: true,
+    archivedAt: true,
     continuationBridge: {
         select: {
             ...CONTINUATION_NAMING_BRIDGE_SELECT,
@@ -191,7 +200,10 @@ export async function searchConversationMessages(input: {
     const modelReference = Boolean(input.modelReference);
     const memoryDefaultOff = input.modelReference?.accountMemoryDefaultOff ?? false;
     const sourceTimeoutMs = input.sourceTimeoutMs ?? SOURCE_SEARCH_TIMEOUT_MS;
-    const pattern = escapeLikePattern(query);
+    // The user's search box matches the query as one phrase. The model's search matches its words
+    // anywhere in a message (AND), because a model writes keywords, not the exact sentence.
+    const words = modelReference ? splitSearchWords(query) : [query];
+    const patterns = words.map((word) => `%${escapeLikePattern(word)}%`);
 
     const read = await readOnlySnapshotTransaction(
         async (tx) => {
@@ -326,10 +338,11 @@ export async function searchConversationMessages(input: {
                       AND c."temporaryExpiresAt" IS NULL
                       AND (${projectScope}::text IS NULL OR c."projectId" = ${projectScope})
                       AND c.id <> ${excluded}
-                      -- The model's search: never a locked conversation, a project's, or one whose
-                      -- memory is off (an unrecognised mode follows the account default).
+                      -- The model's search: never a locked conversation, a project's, an archived
+                      -- one, or one whose memory is off (an unrecognised mode follows the
+                      -- account default).
                       AND (NOT ${modelReference}::boolean OR (
-                           c.password IS NULL AND c."projectId" IS NULL
+                           c.password IS NULL AND c."projectId" IS NULL AND c."archivedAt" IS NULL
                            AND NOT (c."memoryMode" = 'off' OR (c."memoryMode" <> 'on' AND ${memoryDefaultOff}::boolean))))
                       AND NOT (c.id = ANY(${deniedConversationIds}::text[]))
                       -- A conversation whose bridge or source is not this
@@ -338,7 +351,8 @@ export async function searchConversationMessages(input: {
                       -- authorised hit needed.
                       AND (b.id IS NULL OR (b."userId" = ${userId}
                            AND (b."externalConversationId" IS NULL OR e."userId" = ${userId})))
-                      AND m.content ILIKE ${`%${pattern}%`}
+                      AND m.content ILIKE ${patterns[0]}
+                      AND m.content ILIKE ALL(${patterns}::text[])
                 ) ranked
                 WHERE ranked.rn <= ${SEARCH_CANDIDATES_PER_GROUP}
                 ORDER BY ranked."conversationUpdatedAt" DESC, ranked."conversationId" COLLATE "C" ASC, ranked.rn ASC
@@ -392,7 +406,8 @@ export async function searchConversationMessages(input: {
                             FROM "ExternalMessage" m
                             WHERE m."userId" = ${userId}
                               AND m."externalConversationId" = ANY(${authorizedSnapshotIds}::text[])
-                              AND m.content ILIKE ${`%${pattern}%`}
+                              AND m.content ILIKE ${patterns[0]}
+                      AND m.content ILIKE ALL(${patterns}::text[])
                         ) ranked
                         WHERE ranked.rn <= ${SEARCH_CANDIDATES_PER_GROUP}
                         ORDER BY array_position(${authorizedSnapshotIds}::text[], ranked."externalConversationId"),
@@ -535,7 +550,7 @@ export async function searchConversationMessages(input: {
         results: results.map((pending) => {
             const conversationId =
                 pending.kind === "native" ? pending.message.conversationId : pending.conversationId;
-            return toResult(pending, targets.get(conversationId) as Target, query, displayTimeZone);
+            return toResult(pending, targets.get(conversationId) as Target, query, words, displayTimeZone);
         }),
         truncated,
         sourceSearch: read.imported.status,
@@ -546,9 +561,10 @@ function toResult(
     pending: Pending,
     target: Target,
     query: string,
+    words: readonly string[],
     displayTimeZone: string
 ): ConversationSearchResult {
-    const snippet = searchSnippet(pending.message.content, query);
+    const snippet = searchSnippet(pending.message.content, snippetNeedle(pending.message.content, query, words));
     const base = {
         conversationTitle: target.title,
         ...continuationRowNaming(target.continuationBridge, displayTimeZone),
@@ -558,6 +574,7 @@ function toResult(
         }),
         snippet: snippet.text,
         snippetHighlight: snippet.highlight,
+        archived: target.archivedAt !== null,
     };
     if (pending.kind === "native") {
         return {

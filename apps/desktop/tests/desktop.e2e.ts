@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { DEFAULT_MODELS, FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { cancelWindowsDialog, expectWindowsAccessibleNames } from "./windows-accessibility";
 
@@ -74,20 +76,14 @@ test("Code shows only its task receipts and preserves Smart Adaptive pin and app
     const notifications = () => application.evaluate(() =>
       (globalThis as typeof globalThis & { notificationBodies: Array<{ title: string; body: string }> }).notificationBodies);
     await setNotificationFocus(false);
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await openCodeProject(page);
+    await selectCodeMode(page, "ask");
     const composing = page.getByRole("textbox", { name: "Code request" });
     await composing.fill("조합 중");
     await composing.dispatchEvent("keydown", { key: "Enter", isComposing: true, bubbles: true });
     await expect(composing).toHaveValue("조합 중");
     assert.equal(gateway.completions.length, 0);
-    const select = async (model: string, effort: string) => {
-      const menu = page.getByLabel("Model and reasoning effort");
-      await menu.click();
-      await page.getByLabel("Model", { exact: true }).selectOption(model);
-      await page.getByLabel("Task reasoning effort").selectOption(effort);
-      await menu.click();
-    };
+    const select = (model: string, effort: string) => chooseCodeModel(page, { model, effort });
     const run = async (prompt: string) => {
       const view = () => page.evaluate(() => window.desktop.state());
       const previous = gateway.completions.length;
@@ -284,7 +280,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     const send = page.getByRole("button", { name: "Send Code request" });
     const composer = page.getByRole("textbox", { name: "Code request" });
     await expect(page.getByRole("heading", { name: "What shall we build?" })).toBeVisible();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect(page.getByText("sample-project", { exact: true }).first()).toBeVisible();
     assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.approvalHost]), ["undefined", "undefined"]);
     const originalRoot = join(tmp, "original-project");
@@ -329,9 +325,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     await page.getByRole("button", { name: "Code", exact: true }).click();
     await expect(page.getByRole("button", { name: "New task" })).toBeEnabled();
 
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Task reasoning effort").selectOption("high");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { effort: "high" });
     await composer.fill("Apply the patch and run its check");
     const patchWindow = application.waitForEvent("window");
     await send.click();
@@ -377,7 +371,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     await page.getByRole("button", { name: "sum.mjs", exact: true }).click();
     await expect(page.getByLabel("Recorded file diff")).toContainText("a + b");
 
-    await page.getByLabel("Code mode").selectOption("ask");
+    await selectCodeMode(page, "ask");
     await application.evaluate(({ dialog }, { root, outsidePath, file, hidden, duplicate, folder }) => {
       dialog.showOpenDialog = async (_window: unknown, options?: Electron.OpenDialogOptions) => {
         if (options?.defaultPath !== root) throw new Error("Unexpected project picker root.");
@@ -402,7 +396,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     await expect(draftReferences.getByRole("listitem")).toHaveCount(2);
     await expect(attach).toBeFocused();
     await expect(draftReferences).toContainText("fixtures");
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect(draftReferences.getByRole("listitem")).toHaveCount(2);
     assert.equal(gateway.completions.length, requestsBeforeAttach);
 
@@ -448,9 +442,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     await page.getByRole("button", { name: "Copy diagnostics" }).click();
     await expect(page.getByText("Diagnostics copied.", { exact: true })).toBeVisible();
     assert.deepEqual(await copied(), [diagnostics]);
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Model", { exact: true }).selectOption("fake-coder");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { model: "fake-coder" });
     await composer.fill("Cancel this request");
     await send.click();
     await expect.poll(() => gateway.completions.some((request) => JSON.stringify(request.body).includes("Cancel this request"))).toBe(true);
@@ -494,7 +486,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     await expect(page.getByRole("button", { name: "Check for updates" })).toBeDisabled();
 
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByLabel("Code mode").selectOption("agent");
+    await selectCodeMode(page, "agent");
     await composer.fill("Apply the reversible file batch");
     await expect(send).toBeEnabled();
     const [batchApproval] = await Promise.all([application.waitForEvent("window", { timeout: 10_000 }), send.click()]);
@@ -575,7 +567,7 @@ setTimeout(() => process.exit(0), 35000).unref();
     await expect(fileDiff).toContainText("\\u{202e}");
     await expect(undoEdit).toHaveCount(0);
 
-    await page.getByLabel("Code mode").selectOption("agent");
+    await selectCodeMode(page, "agent");
     await composer.fill("Refuse hidden credential");
     await send.click();
     await expect(page.getByText("The protected edit was declined.", { exact: true })).toBeVisible();

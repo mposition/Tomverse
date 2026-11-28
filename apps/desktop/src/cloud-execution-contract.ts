@@ -31,7 +31,7 @@ export type DesktopCloudExecutionInput = z.infer<typeof desktopCloudExecutionInp
 
 /** Why Desktop or the server did not do what was asked. Each has its own sentence in the person's language. */
 export const cloudRefusal = z.enum([
-  "disabled", "noProject", "remoteProject", "notGit", "otherProject", "noCommit", "tooLarge", "snapshotFailed", "concurrency", "conflict",
+  "disabled", "noProject", "remoteProject", "notGit", "otherProject", "originUnknown", "noCommit", "tooLarge", "snapshotFailed", "concurrency", "conflict",
   "notFound", "account", "unreachable", "patchUnavailable", "applyConflict", "applyFailed", "unavailable",
 ]);
 export type CloudRefusal = z.infer<typeof cloudRefusal>;

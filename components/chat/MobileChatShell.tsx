@@ -185,6 +185,8 @@ type MobileChatShellProps = {
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
+  /** Chat: new conversation from an answer; the page leaves on success. */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -331,7 +333,7 @@ type MobileChatShellProps = {
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" | "pdf" }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */
@@ -363,6 +365,9 @@ type MobileChatShellProps = {
   accountMemoryMasterEnabled?: boolean | null;
   onMemorySettingsRefresh?: () => void;
   researchPreview?: ResearchPreviewControls;
+  /** Study mode for this conversation (Chat only), and its switch. */
+  studyMode?: boolean;
+  onStudyModeChange?: (on: boolean) => void;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -502,6 +507,7 @@ export function MobileChatShell({
   onRetryPrompt,
   onCompareInReview,
   onCompareContinuationInReview,
+  onBranchFromAnswer,
   conversations,
   currentChatId,
   selectedModels,
@@ -583,6 +589,8 @@ export function MobileChatShell({
   accountMemoryMasterEnabled,
   onMemorySettingsRefresh,
   researchPreview,
+  studyMode,
+  onStudyModeChange,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -693,7 +701,7 @@ export function MobileChatShell({
         // keeping the recent-chats row on screen for someone with no history.
         .filter(
           (conversation) =>
-            !conversation.isLocked && conversation.id !== currentChatId
+            !conversation.isLocked && !conversation.archived && conversation.id !== currentChatId
         )
         .slice(0, 3)
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
@@ -1787,6 +1795,7 @@ export function MobileChatShell({
                   onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
                   onCompareContinuationInReview={onCompareContinuationInReview}
+                  onBranchFromAnswer={onBranchFromAnswer}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
@@ -1999,6 +2008,8 @@ export function MobileChatShell({
             accountMemoryMasterEnabled={accountMemoryMasterEnabled}
             onMemorySettingsRefresh={onMemorySettingsRefresh}
             researchPreview={researchPreview}
+            studyMode={studyMode}
+            onStudyModeChange={onStudyModeChange}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}

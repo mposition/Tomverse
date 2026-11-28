@@ -1,6 +1,6 @@
 import { GitBranch } from "lucide-react";
 import type { Language } from "../../../../lib/language";
-import type { CodeGitWorkspace, CodeWorktree, CodeWorktreeChoice } from "../contract";
+import type { CodeWorktree } from "../contract";
 
 const strings = {
   en: ["Code workspace", "New worktree", "Current folder", "Starting branch", "Working branch", "Working folder", "Choose the current folder or open a Git project with a starting commit.", "Reconnect this worktree on its original branch to continue."],
@@ -14,48 +14,6 @@ const strings = {
 } as const;
 
 const labelFor = (ref: string) => ref.replace(/^refs\/heads\//, "");
-
-export function CodeWorkspacePicker({ git, choice, select, root, language, disabled }: {
-  git: CodeGitWorkspace;
-  choice: CodeWorktreeChoice | undefined;
-  select: (choice: CodeWorktreeChoice) => void;
-  root: string;
-  language: Language;
-  disabled: boolean;
-}) {
-  const [label, isolated, local, startingBranch, workingBranch, workingFolder, unavailable] = strings[language];
-  const base = choice?.kind === "worktree" && git.kind === "git" ? choice.base : null;
-  const mode = choice?.kind ?? "worktree";
-  return <details className="model-menu code-worktree">
-    <summary aria-label={label} title={base && git.kind === "git" ? git.branch + "\n" + git.path : root}>
-      <GitBranch size={15} /><span>{base ? isolated + " · " + labelFor(base.ref) : mode === "local" ? local : label}</span>
-    </summary>
-    <div className="model-popover">
-      <label>{label}
-        <select aria-label={label} value={mode} disabled={disabled} onChange={(event) => {
-          if (event.currentTarget.value === "local") select({ kind: "local" });
-          else if (git.kind === "git") select({ kind: "worktree", id: git.id, base: git.bases[0]! });
-        }}>
-          <option value="worktree" disabled={git.kind !== "git"}>{isolated}</option>
-          <option value="local">{local}</option>
-        </select>
-      </label>
-      {git.kind === "git" && base && <>
-        <label>{startingBranch}
-          <select aria-label={startingBranch} value={base.ref} disabled={disabled} onChange={(event) => {
-            const next = git.bases.find(item => item.ref === event.currentTarget.value);
-            if (next) select({ kind: "worktree", id: git.id, base: next });
-          }}>
-            {git.bases.map(item => <option key={item.ref} value={item.ref}>{labelFor(item.ref)} · {item.commit.slice(0, 8)}</option>)}
-          </select>
-        </label>
-        <dl><dt>{workingBranch}</dt><dd>{git.branch}</dd><dt>{workingFolder}</dt><dd>{git.path}</dd></dl>
-      </>}
-      {mode === "local" && <dl><dt>{workingFolder}</dt><dd>{root}</dd></dl>}
-      {git.kind === "unavailable" && mode !== "local" && <small>{unavailable}</small>}
-    </div>
-  </details>;
-}
 
 export function CodeWorkspaceDetails({ worktree, language }: { worktree: CodeWorktree; language: Language }) {
   const [, , , startingBranch, workingBranch, workingFolder, , unavailable] = strings[language];

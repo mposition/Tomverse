@@ -10,9 +10,11 @@ import { MEMORY_EXTRACTION_EVAL_REGISTER, type MemoryExtractionEvalEntry } from 
 import type { ExtractionSourceConversationInput } from "@/lib/memoryExtractionPrompt";
 import { createNativeMemoryExtractionRun } from "@/lib/memoryExtractionService";
 import { getMemorySettings } from "@/lib/memoryService";
-import { nativeMessageDigest } from "@/lib/nativeMemoryEvidence";
+import { nativeMessageDigest, readChatExtractionGate } from "@/lib/nativeMemoryEvidence";
 import { prisma } from "@/lib/prisma";
 import {
+    chatAutoMemoryOperatorEnabled,
+    chatExtractionPaced,
     isNativeExtractionSelection,
     nativeExtractionAllowed,
     nativeExtractionSourceKey,
@@ -33,6 +35,14 @@ import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
  * The provider spend is new, so the operator switch
  * `TOMVERSE_PROJECT_AUTO_MEMORY_ENABLED` is off by default; with it off every
  * enqueue is a recorded skip and nothing is called.
+ *
+ * The same path serves ordinary (non-project) Chat conversations behind its own
+ * switch, `TOMVERSE_CHAT_AUTO_MEMORY_ENABLED` (off by default). A Chat run has
+ * no project, stores personal memory, and is paced more tightly than a project
+ * one: a window needs at least two new user messages, a conversation is cut at
+ * most every 15 minutes, and an account at most 10 times in 24 hours
+ * (`CHAT_AUTO_MEMORY_LIMITS`). The cost is the same internal provider cost as
+ * any native or import run (zero user credits); no user credit ledger is touched.
  */
 
 export const projectAutoMemoryOperatorEnabled = (environment: Record<string, string | undefined> = process.env) =>
@@ -56,7 +66,7 @@ async function lastSnapshot(userId: string, conversationId: string) {
     return runs;
 }
 
-export async function enqueueNativeProjectExtraction(input: {
+type NativeEnqueueInput = {
     userId: string;
     conversationId: string;
     now?: Date;
@@ -64,8 +74,28 @@ export async function enqueueNativeProjectExtraction(input: {
     environment?: Record<string, string | undefined>;
     /** Tests inject this; production kicks the existing worker. */
     kick?: (runId: string) => Promise<void> | void;
-}): Promise<NativeExtractionEnqueue> {
-    const now = input.now ?? new Date();
+};
+
+/**
+ * An ordinary Chat conversation's new messages, queued as one extraction run.
+ * The operator switch and the extraction feature flag run before any read of
+ * the conversation, and every "do nothing" check runs before a run row exists.
+ */
+export async function enqueueNativeChatExtraction(input: NativeEnqueueInput): Promise<NativeExtractionEnqueue> {
+    const environment = input.environment ?? process.env;
+    if (!chatAutoMemoryOperatorEnabled(environment)) return { outcome: "skipped", reason: "operator_off" };
+    if (!(await isMemoryExtractionEnabled())) return { outcome: "skipped", reason: "feature_off" };
+    const gate = await readChatExtractionGate(prisma, {
+        userId: input.userId,
+        conversationId: input.conversationId,
+        operatorEnabled: true,
+    });
+    if (!gate.allowed) return { outcome: "skipped", reason: gate.reason };
+    return enqueueNativeSnapshot(input, { projectId: null, paced: true });
+}
+
+/** A project conversation's new messages, queued as one extraction run. */
+export async function enqueueNativeProjectExtraction(input: NativeEnqueueInput): Promise<NativeExtractionEnqueue> {
     const environment = input.environment ?? process.env;
     const project = await resolveConversationProjectScope(input.userId, input.conversationId);
     const [settings, conversation, featureEnabled] = await Promise.all([
@@ -85,7 +115,15 @@ export async function enqueueNativeProjectExtraction(input: {
         conversationLocked: conversation.password !== null,
     });
     if (!gate.allowed) return { outcome: "skipped", reason: gate.reason };
+    return enqueueNativeSnapshot(input, { projectId: project!.projectId, paced: false });
+}
 
+async function enqueueNativeSnapshot(
+    input: NativeEnqueueInput,
+    scope: { projectId: string | null; paced: boolean }
+): Promise<NativeExtractionEnqueue> {
+    const now = input.now ?? new Date();
+    const environment = input.environment ?? process.env;
     const runs = await lastSnapshot(input.userId, input.conversationId);
     if (runs.some((run) => run.status === "pending" || run.status === "running")) {
         return { outcome: "skipped", reason: "snapshot_in_progress" };
@@ -124,10 +162,28 @@ export async function enqueueNativeProjectExtraction(input: {
     if (!window.some((message) => message.role === "user")) {
         return { outcome: "skipped", reason: "nothing_new" };
     }
+    if (scope.paced) {
+        const snapshotsLast24h = await prisma.memoryExtractionRun.count({
+            where: {
+                userId: input.userId,
+                sourceKind: "native",
+                projectId: null,
+                status: { not: "cancelled" },
+                createdAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+            },
+        });
+        const pacing = chatExtractionPaced({
+            now,
+            newUserMessages: window.filter((message) => message.role === "user").length,
+            lastSnapshotAt: runs[0]?.createdAt ?? null,
+            snapshotsLast24h,
+        });
+        if (!pacing.allowed) return { outcome: "skipped", reason: pacing.reason };
+    }
     const through = window[window.length - 1];
     const selection: NativeExtractionSelection = {
         kind: "native",
-        projectId: project!.projectId,
+        projectId: scope.projectId,
         conversationId: input.conversationId,
         afterMessageCreatedAt: cursor?.throughMessageCreatedAt ?? null,
         afterMessageId: cursor?.throughMessageId ?? null,
@@ -140,7 +196,7 @@ export async function enqueueNativeProjectExtraction(input: {
     try {
         const run = await createNativeMemoryExtractionRun({
             userId: input.userId,
-            projectId: project!.projectId,
+            projectId: scope.projectId,
             conversationId: input.conversationId,
             sourceKey: nativeExtractionSourceKey(input.conversationId, through.id) +
                 (recentFailures.length ? `:retry${recentFailures.length}` : ""),
@@ -176,12 +232,24 @@ export async function loadNativeChunkConversation(input: {
     projectId: string | null;
     selection: unknown;
 }): Promise<{ conversations: ExtractionSourceConversationInput[]; contentBytes: number }> {
-    if (!input.projectId || !isNativeExtractionSelection(input.selection) || input.selection.projectId !== input.projectId) {
+    // The run's project (null for an ordinary Chat run) must be the one its
+    // selection names: a run whose project was deleted reads nothing.
+    if (!isNativeExtractionSelection(input.selection) || input.selection.projectId !== input.projectId) {
         return { conversations: [], contentBytes: 0 };
     }
     const selection = input.selection;
+    if (input.projectId === null) {
+        // Re-checked at read time like the project path: memory switched off,
+        // locked, or turned into a project conversation since the snapshot.
+        const gate = await readChatExtractionGate(prisma, {
+            userId: input.userId,
+            conversationId: selection.conversationId,
+            operatorEnabled: true,
+        });
+        if (!gate.allowed) return { conversations: [], contentBytes: 0 };
+    }
     const conversation = await prisma.conversation.findFirst({
-        where: { id: selection.conversationId, userId: input.userId, projectId: input.projectId, password: null },
+        where: { id: selection.conversationId, userId: input.userId, projectId: input.projectId, password: null, temporaryExpiresAt: null },
         select: { id: true, title: true },
     });
     if (!conversation) return { conversations: [], contentBytes: 0 };
@@ -225,9 +293,16 @@ export async function loadNativeChunkConversation(input: {
 
 /** The last-moment lock and membership check before a native call leaves. */
 export async function nativeSourceStillReadable(input: { userId: string; projectId: string | null; conversationIds: readonly string[] }) {
-    if (!input.projectId) return false;
+    const ids = [...input.conversationIds];
     const readable = await prisma.conversation.count({
-        where: { id: { in: [...input.conversationIds] }, userId: input.userId, projectId: input.projectId, password: null },
+        where: { id: { in: ids }, userId: input.userId, projectId: input.projectId, password: null, temporaryExpiresAt: null },
     });
-    return readable === input.conversationIds.length;
+    if (readable !== ids.length) return false;
+    if (input.projectId !== null) return true;
+    // An ordinary Chat run: the same state check as at enqueue, for each source.
+    for (const conversationId of ids) {
+        const gate = await readChatExtractionGate(prisma, { userId: input.userId, conversationId, operatorEnabled: true });
+        if (!gate.allowed) return false;
+    }
+    return true;
 }

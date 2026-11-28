@@ -5,7 +5,9 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
+import { codeModelControl } from "./code-model-picker";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { codexFixtureAnswer, codexFixtureCall, flattenCodexTools, writeCodexResponse, type CodexRequest } from "./codex-response-fixture";
 
@@ -135,7 +137,7 @@ test("Agent continuation verifies prior API edits and requires fresh approval fo
     app = await launch();
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(async (model) => {
       const scope = (await window.desktop.state()).codeFallback!.scope;
       await window.desktop.updateCodeFallback({ scope, field: "destination", engine: "openai" });
@@ -166,7 +168,7 @@ test("Agent continuation verifies prior API edits and requires fresh approval fo
     assert.deepEqual(paused.nativeRuns?.[0]?.usage, { source: "codex_thread", totalTokens: 144 });
     assert.deepEqual(paused.nativeRuns?.[0]?.quota, paused.quota);
     assert.equal(paused.effort, "high");
-    await expect(page.getByLabel("Model and reasoning effort")).toContainText(`${model} · High`);
+    await expect(codeModelControl(page)).toContainText(`${model} · High`);
     assert.equal(await readFile(join(root, "cli-destination.txt"), "utf8"), destinationBytes);
     scenario = "resume";
     await page.getByRole("textbox", { name: "Code request" }).fill("Continue from the verified edit and add the remaining file.");
@@ -240,7 +242,7 @@ test("Agent continuation verifies prior API edits and requires fresh approval fo
     await app.close();
     app = await launch();
     const reopened = await app.firstWindow();
-    await reopened.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(reopened);
     await reopened.getByRole("complementary", { name: "History" }).getByRole("button", { name: new RegExp(taskTitle) }).click();
     await expect(reopened.getByText(answer, { exact: true })).toBeVisible();
     const saved = await reopened.evaluate(() => window.desktop.state().then(({ task }) => task));

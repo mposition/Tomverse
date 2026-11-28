@@ -37,6 +37,7 @@ import { sanitizeWebSearchCitations, type WebSearchCitation } from "@/lib/webSea
  *     the user said "do not use this one";
  *   * conversations inside a project stay inside it (project_search is the
  *     tool there), and imported transcripts are never searched;
+ *   * an archived conversation is not referenced (lib/conversationArchive.ts);
  *   * counts and excerpt length are capped; the cap is the reserved allowance.
  *
  * Everything the tool returns is quoted history, framed as untrusted data
@@ -86,6 +87,8 @@ export const referenceableConversationWhere = (input: {
     kind: { not: "image" },
     // A project's conversations are reached through project_search.
     projectId: null,
+    // Archiving puts a conversation away; the model does not go looking in it.
+    archivedAt: null,
 });
 
 /** The tool is offered only while this conversation's memory is on. */
@@ -119,7 +122,7 @@ export type ChatHistorySearch = (input: {
     query: string;
     currentConversationId: string;
 }) => Promise<{
-    conversations: Array<{ id: string; title: string; productKey: string | null; excerpts: Array<{ role: string; excerpt: string }> }>;
+    conversations: Array<{ id: string; title: string; productKey: string | null; /** Last activity, `YYYY-MM-DD` (UTC). */ updatedAt?: string; excerpts: Array<{ role: string; excerpt: string }> }>;
     incomplete: boolean;
 }>;
 
@@ -141,7 +144,7 @@ export const searchPastChats: ChatHistorySearch = async ({ userId, query, curren
     if (!ids.length) return { conversations: [], incomplete: answer.truncated };
     const eligible = await prisma.conversation.findMany({
         where: { AND: [referenceableConversationWhere({ userId, currentConversationId }), { id: { in: ids } }] },
-        select: { id: true, title: true, productKey: true, memoryMode: true },
+        select: { id: true, title: true, productKey: true, memoryMode: true, updatedAt: true },
     });
     const usable = new Map(
         eligible
@@ -158,11 +161,31 @@ export const searchPastChats: ChatHistorySearch = async ({ userId, query, curren
     return {
         conversations: [...byConversation].map(([id, excerpts]) => {
             const row = usable.get(id)!;
-            return { id, title: row.title, productKey: row.productKey, excerpts };
+            return { id, title: row.title, productKey: row.productKey, updatedAt: row.updatedAt.toISOString().slice(0, 10), excerpts };
         }),
         incomplete: answer.truncated,
     };
 };
+
+/**
+ * The citations to show once the answer is written: every source the tools
+ * returned, except a past conversation the answer does not name. The tool
+ * returns up to five conversations and the model may rely on one, so listing
+ * all of them put conversations in the source list that the answer never used.
+ * A past chat counts as used when its title appears in the answer, which the
+ * tool rules ask the model to do ("Name the conversation you relied on").
+ */
+export function pastChatCitationsUsed<C extends { title?: string; sourceProvider?: string }>(
+    citations: readonly C[],
+    answer: string | null | undefined
+): C[] {
+    const text = (answer ?? "").toLowerCase();
+    return citations.filter((citation) => {
+        if (citation.sourceProvider !== "past_chat") return true;
+        const title = (citation.title ?? "").replace(/…$/u, "").trim().toLowerCase();
+        return title.length > 0 && text.includes(title);
+    });
+}
 
 export function buildChatHistoryReferencePart(input: {
     userId: string;
@@ -234,7 +257,7 @@ export function buildChatHistoryReferencePart(input: {
                     input.onState?.("done");
                     return { status: "unavailable", reason: "search_failed", note: "Say that past conversations could not be checked." };
                 }
-                const merged = new Map<string, { id: string; title: string; productKey: string | null; excerpts: Array<{ role: string; excerpt: string }> }>();
+                const merged = new Map<string, { id: string; title: string; productKey: string | null; updatedAt?: string; excerpts: Array<{ role: string; excerpt: string }> }>();
                 for (const answer of answers) {
                     for (const conversation of answer.conversations) {
                         const existing = merged.get(conversation.id);
@@ -245,6 +268,8 @@ export function buildChatHistoryReferencePart(input: {
                 const conversations = [...merged.values()].slice(0, CHAT_HISTORY_LIMITS.conversations);
                 const results = conversations.map((conversation) => ({
                     conversation: inertToolLabel(conversation.title, 120),
+                    // So "last week" and "back in October" can be checked against when it was said.
+                    ...(conversation.updatedAt ? { updated: conversation.updatedAt } : {}),
                     excerpts: conversation.excerpts.slice(0, CHAT_HISTORY_LIMITS.excerptsPerConversation).map((excerpt) => ({
                         role: excerpt.role,
                         text: inertToolLabel(excerpt.excerpt, CHAT_HISTORY_LIMITS.excerptCharacters),

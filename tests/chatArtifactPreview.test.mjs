@@ -17,6 +17,7 @@ import {
   HTML_PREVIEW_CDN_HOSTS,
   HTML_PREVIEW_CSP,
   HTML_PREVIEW_MAX_BYTES,
+  HTML_PREVIEW_VENDOR_FILES,
   HTML_PREVIEW_VENDOR_PATH,
   buildHtmlPreviewSrcdoc,
   htmlPreviewCsp,
@@ -104,11 +105,26 @@ test("the React document names every script it loads, and nothing else loads fro
   assert.doesNotMatch(html, /<(iframe|object|embed|form|base|link)\b/i);
 });
 
-test("with this application's origin the frame policy admits the vendored path on it and nothing else of it", () => {
+test("with this application's origin the frame policy admits the three vendored files, by exact URL, and nothing else of it", () => {
   const withOrigin = htmlPreviewCsp(ORIGIN);
-  assert.equal(withOrigin.replace(` ${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`, ""), HTML_PREVIEW_CSP);
+  const files = reactPreviewScriptUrls(ORIGIN).map((script) => ` ${script.src}`).join("");
+  assert.equal(withOrigin.replace(files, ""), HTML_PREVIEW_CSP);
   const scriptSrc = withOrigin.split("; ").find((part) => part.startsWith("script-src "));
-  assert.ok(scriptSrc.endsWith(` ${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`), scriptSrc);
+  assert.ok(scriptSrc.endsWith(files), scriptSrc);
+  // Not the directory: a file added under /vendor/artifact-preview/ later is not reachable from a page.
+  assert.ok(!scriptSrc.split(" ").includes(`${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`), "no directory source");
+  assert.deepEqual(
+    scriptSrc.split(" ").filter((source) => URL.canParse(source) && new URL(source).origin === ORIGIN),
+    HTML_PREVIEW_VENDOR_FILES.map((file) => `${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}${file}`)
+  );
+  // The frame policy and the React page's own policy name the same files, and every one exists.
+  assert.deepEqual(
+    REACT_PREVIEW_SCRIPTS.map((script) => script.path.slice(HTML_PREVIEW_VENDOR_PATH.length)),
+    [...HTML_PREVIEW_VENDOR_FILES]
+  );
+  // No hash source: it would make the browser ignore 'unsafe-inline', which a page's own inline script needs.
+  assert.doesNotMatch(scriptSrc, /'sha(256|384|512)-/);
+  assert.ok(scriptSrc.includes("'unsafe-inline'"));
   for (const bad of ["", null, undefined, "null", "https://a.test/x", "https://a.test; script-src *", "data:"]) {
     assert.equal(htmlPreviewCsp(bad), HTML_PREVIEW_CSP, String(bad));
   }

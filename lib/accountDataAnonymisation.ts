@@ -108,6 +108,11 @@ export const ACCOUNT_ANONYMISATIONS: AccountAnonymisation[] = [
       // and nothing lost by clearing the snapshot of what it would have been.
       reservationPayload: { kind: "emptyJson" },
       providerUsageSnapshot: { kind: "null" },
+      // The answer this charge was for. The message cascades away with the
+      // account; the id is a per-turn identifier the person's own client
+      // minted, so like traceId it goes, and the credits, model and timings
+      // stay as the transaction record without it.
+      assistantMessageId: { kind: "null" },
     },
   },
   {

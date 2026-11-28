@@ -31,13 +31,14 @@ export const AMUX_V22_PRIOR_CONCLUSION_MIN_ENTRY_BYTES = 256;
 /**
  * off: nothing changes. prompt: investigate runs are asked for a conclusion
  * and dependents read the prior conclusions; settlement is unchanged.
- * auto: the verdict also decides where the Task goes. Default off; any other
- * value reads as off.
+ * auto: the verdict also decides where the Task goes. Default auto (owner
+ * decision 2026-11-28; production already ran auto): only `off` turns it
+ * off, and any other value reads as auto.
  */
 export type AmuxV22ConclusionMode = "off" | "prompt" | "auto";
 export const amuxV22ConclusionMode = (
   value: string | undefined): AmuxV22ConclusionMode =>
-  value === "auto" ? "auto" : value === "prompt" ? "prompt" : "off";
+  value === "off" ? "off" : value === "prompt" ? "prompt" : "auto";
 
 export type AmuxV22Conclusion = {
   verdict: AmuxV22ConclusionVerdict;
@@ -198,6 +199,12 @@ export type AmuxV22PriorConclusionEntry = {
   /** `result`: the prerequisite's newest result has no conclusion line, so its
    * text stands in, cut to the entry's share like any other. Default conclusion. */
   source?: "conclusion" | "result";
+  /** A `conclusion` entry's whole result text, carried after the findings in
+   * the local CLI flow's file (owner decision 2026-11-28): AMUX-PUBLIC-002's
+   * conclusion summed up its audit, and the table of what to fix was only in
+   * the report, so AMUX-PUBLIC-004 ran without it. The budgeted inline
+   * section does not carry it. */
+  report?: string | null;
 };
 
 /**
@@ -219,7 +226,8 @@ export function buildAmuxV22PriorConclusionSection(input: {
         "Result (this Task recorded no conclusion line; its final report follows):",
         entry.findings].join("\n") :
       [`From ${entry.label}:`, `Findings: ${entry.findings}`,
-        ...(entry.note ? [`Note for this Task: ${entry.note}`] : [])].join("\n")), ""].join("\n");
+        ...(entry.note ? [`Note for this Task: ${entry.note}`] : []),
+        ...(entry.report?.trim() ? ["Its final report, whole:", entry.report] : [])].join("\n")), ""].join("\n");
     return { section, digest: createHash("sha256").update(section, "utf8").digest("hex"),
       included: input.entries.length };
   }

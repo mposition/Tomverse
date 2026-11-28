@@ -17,6 +17,7 @@ mock.module(mod("lib/r2.ts"), { namedExports: {
   writeR2Object: async (key: string, bytes: Buffer) => { objects.set(key, Buffer.from(bytes)); },
   deleteR2Object: async (key: string) => { objects.delete(key); },
   listExpiredR2Objects: async () => [],
+  listR2ObjectsPage: async () => ({ objects: [], nextStartAfter: null }),
 } });
 
 let prisma: typeof import("@/lib/prisma").prisma;

@@ -75,6 +75,73 @@ test("a mermaid block is shown as its code until a diagram is drawn", () => {
   assert.ok(!html.includes("chat-mermaid-diagram"));
 });
 
+/* ---------------------------------------------------------------- chart */
+
+const chartBlock = (spec: object) => ["```chart", JSON.stringify(spec), "```"].join("\n");
+const figureOf = (html: string) => html.match(/<figure[\s\S]*?<\/figure>/)?.[0] ?? "";
+const barSpec = { type: "bar", title: "Revenue", labels: ["Q1", "Q2"], series: [{ name: "2026", values: [120, 150] }] };
+
+test("a finished answer's chart block is drawn with its data as a table", () => {
+  const html = render([question, answerWith(chartBlock(barSpec))]);
+  assert.match(html, /data-testid="chat-chart"/);
+  assert.equal(count(figureOf(html), /<rect /g), 2);
+  assert.match(html, /<figcaption[^>]*>Revenue<\/figcaption>/);
+  assert.match(html, /role="img" aria-label="Bar chart: Revenue"/);
+  assert.match(html, /<table[^>]*data-testid="chat-chart-data"/);
+  assert.ok(!html.includes("chat-code-copy-button"));
+});
+
+test("each chart kind draws, in Korean too", () => {
+  const kinds = [
+    { type: "line", labels: ["a", "b", "c"], series: [{ name: "x", values: [1, 3, 2] }, { name: "y", values: [2, 2, 4] }] },
+    { type: "area", labels: ["a", "b"], series: [{ values: [1, 3] }] },
+    { type: "pie", labels: ["a", "b", "c"], series: [{ values: [1, 2, 3] }] },
+    { type: "scatter", series: [{ name: "g", points: [[1, 2], [2, 5], [3, 4]] }] },
+  ];
+  for (const spec of kinds) {
+    const html = render([question, answerWith(chartBlock(spec))], {}, "ko");
+    assert.match(html, new RegExp(`data-chart-type="${spec.type}"`));
+    assert.ok(!html.includes("NaN"), spec.type);
+  }
+  assert.match(render([question, answerWith(chartBlock(kinds[2]))], {}, "ko"), /원형 차트/);
+  assert.equal(count(figureOf(render([question, answerWith(chartBlock(kinds[3]))])), /<circle /g), 3);
+});
+
+test("a chart is code while the answer streams, and when its spec is invalid", () => {
+  const streaming = render([question, answerWith(chartBlock(barSpec))], { isSending: true });
+  assert.ok(!streaming.includes("chat-chart"));
+  assert.match(streaming, /data-testid="chat-code-copy-button"/);
+  const invalid = render([question, answerWith(chartBlock({ type: "bar", labels: ["a"], series: [{ values: [1, 2] }] }))]);
+  assert.ok(!invalid.includes("data-testid=\"chat-chart\""));
+  assert.match(invalid, /data-testid="chat-code-copy-button"/);
+});
+
+/* --------------------------------------------------------------- branch */
+
+test("every finished answer offers a branch when Chat wires it, and nothing else does", () => {
+  const messages: Message[] = [
+    { id: "u0", role: "user", content: "Older" },
+    answerWith("Older answer", { id: "a0" }),
+    question,
+    answerWith("Newest answer"),
+  ];
+  const html = render(messages, { onBranchFromAnswer: async () => {} });
+  assert.equal(count(html, /data-testid="chat-branch-answer"/g), 2);
+  assert.match(html, /Branch to a new chat/);
+  assert.match(render(messages, { onBranchFromAnswer: async () => {} }, "ko"), /여기서 새 대화로/);
+  // Review and the model panels never pass it.
+  assert.ok(!render(messages).includes("chat-branch-answer"));
+  // A stopped answer and an imported transcript are not branch points.
+  assert.ok(!render([question, answerWith("Half", { status: "incomplete" })], { onBranchFromAnswer: async () => {} }).includes("chat-branch-answer"));
+});
+
+test("a branch is not offered while an answer is streaming, and is disabled while sending", () => {
+  const messages: Message[] = [question, answerWith("Done"), { id: "u2", role: "user", content: "Next" }, answerWith("Partial", { id: "a2" })];
+  const streaming = render(messages, { onBranchFromAnswer: async () => {}, isSending: true });
+  assert.equal(count(streaming, /data-testid="chat-branch-answer"/g), 1, "only the finished answer");
+  assert.match(streaming, /data-testid="chat-branch-answer"[^>]*disabled=""/);
+});
+
 /* --------------------------------------------- regenerate, edit, quote */
 
 test("the newest finished answer offers regenerate and another model; older ones do not", () => {
@@ -130,4 +197,44 @@ test("the Korean labels are Korean", () => {
   const html = render([question, answerWith("답변")], { onRegenerateAnswer: () => {}, onChooseAnotherModel: () => {} }, "ko");
   assert.match(html, /다시 생성/);
   assert.match(html, /다른 모델로 다시/);
+});
+
+/* -------------------------------------------------------------- credits */
+
+test("a settled Chat answer shows what it was charged, and Review shows nothing", () => {
+  const messages: Message[] = [question, answerWith("Done", { settledCredits: 3 })];
+  const html = render(messages, { showAnswerCredits: true });
+  assert.equal(count(html, /data-testid="chat-answer-credits"/g), 1);
+  assert.match(html, /3 credits/);
+  assert.match(html, /title="Credits charged for this answer"/);
+  assert.ok(html.indexOf("Done") < html.indexOf("chat-answer-credits"));
+  assert.match(render([question, answerWith("Done", { settledCredits: 1 })], { showAnswerCredits: true }), /1 credit</);
+  assert.match(render(messages, { showAnswerCredits: true }, "ko"), /3크레딧/);
+  // Review and the model panels never turn it on, whatever the message carries.
+  assert.ok(!render(messages).includes("chat-answer-credits"));
+});
+
+test("no figure while streaming, for nothing charged, or without a settled value", () => {
+  const streaming = render([question, answerWith("Partial", { settledCredits: 3 })], {
+    showAnswerCredits: true,
+    isSending: true,
+  });
+  assert.ok(!streaming.includes("chat-answer-credits"));
+  for (const extra of [{ settledCredits: 0 }, {}, { settledCredits: Number.NaN }]) {
+    const html = render([question, answerWith("Done", extra)], { showAnswerCredits: true });
+    assert.ok(!html.includes("chat-answer-credits"), JSON.stringify(extra));
+  }
+  // The user's own question never carries one.
+  const asked = render([{ ...question, settledCredits: 4 } as Message], { showAnswerCredits: true });
+  assert.ok(!asked.includes("chat-answer-credits"));
+});
+
+test("a stopped answer that was charged shows its figure without the tools row", () => {
+  const html = render([question, answerWith("Half an answer", { status: "cancelled", settledCredits: 2 })], {
+    showAnswerCredits: true,
+    onBranchFromAnswer: async () => {},
+  });
+  assert.equal(count(html, /data-testid="chat-answer-credits"/g), 1);
+  assert.match(html, /2 credits/);
+  assert.ok(!html.includes("chat-branch-answer"));
 });

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, u
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import {
-  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
+  ApprovalMemory, GOAL_MAX_CONTINUATIONS, Gateway, GatewayError, normalizeOrchestration, Journal, PermissionGate, PermissionRuleStore, checkBoundaries, RewindError, Runner, UndoError, Workspace, canUndoChange, createSession, deleteSession, forkSession,
   planRewind, readProjectInstructions, reconcile, renderChange, rewindSession, resolveEndpoint, resolveLimits, same, sessionCost, sha256, undoChange, validateSession, viewChange, withWorkspaceReferences,
   startLocalExtensions, IMAGE_MAX_BYTES, MAX_PERSON_PICTURES, type ApprovalView, type CatalogModel, type ImageAttachment, type LocalExtensionSetup, type Output, type WorkspaceReference,
 } from "../../../tomverse-cli/src/runtime.js";
@@ -31,12 +31,16 @@ import type { BrowserAgentRequest } from "../../../tomverse-cli/src/browser-tool
 import type { ComputerAgentRequest } from "../../../tomverse-cli/src/computer-tools";
 import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
+import { runProviderCli } from "./provider-cli-exec";
+import { approvalRequestFor, createTranscript, holdsText, withoutKey } from "./provider-cli-transcript";
+import { cliPermissionPlan, liveCliExecution } from "../provider-cli-exec-contract";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
 import { RemoteError } from "../../../tomverse-cli/src/remote-target.js";
 import { setRemoteShadowBase } from "./remote-project";
 import { inspectRemoteChange, openRemoteWorkspace, RemoteRunError, undoRemoteChange } from "./remote-worker";
+import { createCodeSessionTokens } from "./code-session";
 
 const parent = process.parentPort;
 declare const DESKTOP_FIXTURE_ALLOWED: boolean;
@@ -103,9 +107,12 @@ function nativeReferencePrompt(command: Extract<WorkerCommand, { type: "start-co
   return withWorkspaceReferences(command.prompt, task.references);
 }
 
+/** The Desktop session's access token, as the app last sent it (host/code-session.ts). Memory only. */
+const codeSessionTokens = createCodeSessionTokens();
+
 const gatewayFor = (connection: Connection, signal?: AbortSignal, maximumKeyCreditCap?: number) => new Gateway(
   resolveEndpoint({ endpoint: connection.endpoint, allowInsecureLocalhost: true }, {}),
-  connection.key,
+  connection.session ? codeSessionTokens.credential(connection) : connection.key,
   (input, init) => fetch(input, { ...init, signal: AbortSignal.any([...(signal ? [signal] : []), ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(90_000)]) }),
   "tomverse-desktop",
   maximumKeyCreditCap,
@@ -539,6 +546,124 @@ async function executeStructuredFixture(command: Extract<WorkerCommand, { type: 
     task.canResume = task.savedLocally && task.status === "stopped" && !!task.nativeSession;
     task.canResumeAfterQuota = canResumeNativeQuota(task);
     task.canCheckRecovery = !cliTask && task.savedLocally && task.status === "unknown" && !!task.nativeSession;
+    if (task.status === "unknown") task.entries.push(desktopCodeNotice("runUnknown"));
+    if (task.status === "failed" && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
+      task.entries.push(desktopCodeNotice("runtimeFailed"));
+    }
+    active = undefined;
+    send({ type: "finished", runId: command.runId, task });
+  }
+}
+
+/** A reference check needs a key to look for; a provider CLI run has no Tomverse connection, so this value never occurs in text. */
+const noConnectionKey = " no-tomverse-connection";
+const liveCliPublishMs = 120;
+
+/**
+ * One task run by the person's own provider CLI. The CLI does the work inside the permission it was started with; this only
+ * reads what it reports, shows it as the task, asks the person where the CLI asks (Claude Code), and stops the whole process
+ * tree on request. It sends nothing to a Tomverse API and uses no Tomverse credit.
+ */
+async function executeProviderCli(command: Extract<WorkerCommand, { type: "start-provider-cli" }>) {
+  if (active) return;
+  // The Z.ai key is the one provider key a run holds: it never appears in what the task shows or saves.
+  const zaiKey = command.zai?.key;
+  const clean = (text: string) => withoutKey(cleanText(text, noConnectionKey), zaiKey);
+  const prompt = clean(command.prompt);
+  const plan = cliPermissionPlan(command.provider, command.permission);
+  const task: Task = {
+    id: command.history?.id ?? null, root: command.project.path, title: prompt.slice(0, 80), status: "starting",
+    entries: [{ role: "user", text: prompt }], effort: "default",
+    execution: liveCliExecution(command.provider),
+    readOnly: plan.grants === "read_only", savedLocally: !!command.history, references: command.references, liveCli: true,
+    changes: [], checks: [], transmission: [],
+  };
+  if (recovery) {
+    task.status = "failed";
+    task.entries.push(desktopCodeNotice("recoveryRunning"));
+    send({ type: "finished", runId: command.runId, task });
+    return;
+  }
+  const control: ActiveRun = { runId: command.runId, cancelled: false, abort: new AbortController() };
+  active = control;
+  transient = undefined;
+  let unlockProject: (() => void) | undefined;
+  let lock: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const transcript = createTranscript(clean);
+  const leading: Task["entries"] = [...task.entries];
+  const refresh = () => {
+    timer = undefined;
+    task.entries = [...leading, ...transcript.entries];
+    task.changes = transcript.changes;
+    // The answer being written is cleaned whole on every update, so a key split across stream pieces is caught too.
+    task.streamingAnswer = transcript.streaming ? clean(transcript.streaming) : undefined;
+    task.status = control.cancelled ? "stopping" : control.approval ? "approval" : "running";
+    send({ type: "task", runId: command.runId, task });
+  };
+  // The CLI can print faster than the window can draw: updates are sent at most this often.
+  const refreshSoon = () => { timer ??= setTimeout(refresh, liveCliPublishMs); };
+  try {
+    unlockProject = lockProject(command.project);
+    lock = claimNativeHistory(command.history);
+    assertProjectRoot(command.project);
+    let text = command.prompt;
+    if (task.references?.length) {
+      const workspace = new Workspace(command.project.path, protectedRoots(command.protectedRoot));
+      task.references = validateReferences(workspace, task.references, noConnectionKey);
+      text = withWorkspaceReferences(text, task.references);
+    }
+    if (plan.notice) leading.push(desktopCodeNotice(plan.notice));
+    task.status = "running";
+    refresh();
+    const result = await runProviderCli({
+      provider: command.provider, file: command.file, argsPrefix: command.argsPrefix, cwd: command.project.path, prompt: text, zai: command.zai,
+      mode: command.permission, env: process.env, signal: control.abort.signal,
+      onEvent: (event) => { transcript.apply(event); refreshSoon(); },
+      approve: async (approval, signal) => {
+        signal.throwIfAborted();
+        // A request holding the Z.ai key is refused too: the card would show it removed, so the person could not see what they approve.
+        const holdsKey = !!zaiKey && holdsText({ tool: approval.tool, input: approval.input }, zaiKey);
+        const request = holdsKey ? null : approvalRequestFor(approval, command.project.path, clean);
+        // A request the card cannot show in full, or that names a credential file, is refused without asking.
+        if (!request) {
+          if (!leading.some((entry) => entry.role === "event" && entry.notice === "cliApprovalRefused")) leading.push(desktopCodeNotice("cliApprovalRefused"));
+          refresh();
+          return false;
+        }
+        refresh();
+        const action = await new Promise<Decision["action"]>((resolve) => {
+          const cancel = () => settle("deny");
+          const settle = (choice: Decision["action"]) => { signal.removeEventListener("abort", cancel); resolve(choice); };
+          control.approval = { id: request.id, canRemember: false, settle };
+          signal.addEventListener("abort", cancel, { once: true });
+          send({ type: "approval", runId: control.runId, request });
+        });
+        control.approval = undefined;
+        refresh();
+        return action === "once" && !signal.aborted;
+      },
+    });
+    clearTimeout(timer);
+    task.status = result.status;
+    transcript.clearStreaming();
+    task.entries = [...leading, ...transcript.entries];
+    task.changes = transcript.changes;
+    if (result.status === "failed" || result.status === "unknown") {
+      const detail = clean([result.error, result.stderr.trim()].filter(Boolean).join("\n")).slice(0, 1_500);
+      if (detail) task.entries.push({ role: "event", text: detail });
+    }
+  } catch (error) {
+    clearTimeout(timer);
+    task.status = "failed";
+    task.entries = [...leading, ...transcript.entries];
+    task.changes = transcript.changes;
+    if (error instanceof SessionLockedError) task.entries.push(desktopCodeNotice("workspaceBusy"));
+  } finally {
+    clearTimeout(timer);
+    task.streamingAnswer = undefined;
+    try { if (lock) unlinkSync(lock); } catch { /* An unavailable lock cannot authorize another run. */ }
+    unlockProject?.();
     if (task.status === "unknown") task.entries.push(desktopCodeNotice("runUnknown"));
     if (task.status === "failed" && !task.entries.some((entry) => entry.role === "event" && entry.notice === "workspaceBusy")) {
       task.entries.push(desktopCodeNotice("runtimeFailed"));
@@ -1761,14 +1886,20 @@ parent.on("message", ({ data }: { data: WorkerCommand }) => {
     send(deleteRecordedHistory(data));
   } else if (data.type === "discard-transient") {
     if (transient?.journal.state.id === data.sessionId) transient = undefined;
+  } else if (data.type === "desktop-session") {
+    codeSessionTokens.set(data.identity, data.token);
   } else if (data.type === "catalog") {
     void gatewayFor(data.connection).models().then((catalog) => {
-      send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts }) => ({
-        id, name, provider, efforts: reasoningEfforts ?? [],
+      send({ type: "catalog", requestId: data.requestId, models: catalog.filter(supportsCodeApi).map(({ id, name, provider, reasoningEfforts, creditsPerRequest, vision, reasoning, contextWindowTokens }) => ({
+        id, name, provider, efforts: reasoningEfforts ?? [], credits: creditsPerRequest, vision, reasoning, contextWindowTokens,
       })) });
-    }).catch(() => send({ type: "catalog-failed", requestId: data.requestId }));
+    }).catch((error) => send({ type: "catalog-failed", requestId: data.requestId,
+      // The server's own refusal of the account's plan (lib/externalApiAccess.ts): Code is Pro and above, with a key or a session.
+      ...(error instanceof GatewayError && error.extra.status === 403 && error.extra.code === "plan_not_eligible" ? { reason: "plan" as const } : {}) }));
   } else if (data.type === "start" || data.type === "resume") {
     void execute(data);
+  } else if (data.type === "start-provider-cli") {
+    void executeProviderCli(data);
   } else if (DESKTOP_FIXTURE_ALLOWED && data.type === "start-codex-fixture") {
     void executeCodexFixture(data);
   } else if (DESKTOP_FIXTURE_ALLOWED && (data.type === "start-claude-fixture" || data.type === "start-structured-cli-fixture")) {
