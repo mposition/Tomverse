@@ -130,7 +130,10 @@ implement shell runs in the sidecar's jail, which has no run home.
 Kimi (`kimi:<worker>`, from `~/.kimi/credentials/kimi-code.json` to
 `<worker>/cli/kimi/kimi-code.json`, owner request 2026-11-28) keeps only
 the access token: a Kimi refresh rotates the refresh token, so the copy's
-refresh token is emptied and the CLI never refreshes it. The copy is refused
+refresh token is emptied and the CLI never refreshes it. A run gets the
+access token as `KIMI_API_KEY` in its environment only (no OAuth reference in
+its configuration and no sign-in file in its run home), and its bubblewrap
+view has no `/proc` to read that environment back. The copy is refused
 once `expires_at` has passed, so how long a Kimi Code access token lasts on
 the box decides how often the stage timer must run.
 
@@ -151,7 +154,9 @@ fixed directories included) and logs each decision; a run with more tool
 calls than logged decisions is refused. The
 parser refuses any other tool, any undocumented argument and any path or path
 pattern that is absolute outside the checkout, has `..`, `~` or a
-backslash. A checkout with `.kimi/` is refused. Kimi's stream-json carries no
+backslash. A checkout with `.kimi/`, or with any symlink (outside `.git`)
+that is dangling or resolves outside the checkout, is refused before the CLI
+starts, and again after the base sync. Kimi's stream-json carries no
 usage, so the sidecar reads the session's `wire.jsonl` in the run home
 (StatusUpdate `token_usage`, one step each) before the home is removed; a
 run without exactly one readable session has unknown usage and does not

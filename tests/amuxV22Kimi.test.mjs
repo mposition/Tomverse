@@ -22,7 +22,7 @@ import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
   amuxV22KimiHookCommand, amuxV22KimiSandboxArgs, amuxV22KimiToolCallRefusal, amuxV22OutputShape,
   createAmuxV22ChannelRunHome, parseAmuxV22ChannelOutput, readAmuxV22KimiGuardDecisions,
   readAmuxV22KimiSessionUsage } from "../lib/amux/v22ChannelRun.mjs";
-import { amuxV22KimiToolCallGuard, runAmuxV22KimiToolGuardHook } from
+import { amuxV22CheckoutSymlinkOutside, amuxV22KimiToolCallGuard, runAmuxV22KimiToolGuardHook } from
   "../lib/amux/v22KimiToolGuard.mjs";
 import { parseAmuxV22OneShotRequest, runAmuxV22OneShot } from "../lib/amux/v22OneShotSidecar.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
@@ -114,9 +114,10 @@ test("a read role runs --print with its agent file, an empty skills directory an
   assert.throws(() => amuxV22KimiConfig(MODEL), /tool guard/);
   assert.deepEqual(amuxV22KimiConfig(MODEL, { hookCommand: HOOK }), {
     default_model: "kimi-code/kimi-for-coding",
-    providers: { "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1",
-      api_key: "", oauth: { storage: "file", key: "oauth/kimi-code" } } },
-    models: { "kimi-code/kimi-for-coding": { provider: "managed:kimi-code",
+    // No OAuth reference: the token is KIMI_API_KEY in the environment only.
+    providers: { "amux-kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1",
+      api_key: "" } },
+    models: { "kimi-code/kimi-for-coding": { provider: "amux-kimi-code",
       model: "kimi-for-coding", max_context_size: 262_144 } },
     hooks: [{ event: "PreToolUse", command: HOOK, timeout: 15 }] });
   // `tools` replaces the default agent's list: no Shell, no writer, no web, no subagent.
@@ -128,9 +129,13 @@ test("a read role runs --print with its agent file, an empty skills directory an
 
 test("no run starts beside the checkout's own .kimi configuration", () => {
   const config = { worktreePath: WORKTREE };
-  assert.equal(amuxV22ChannelPreflight("kimi", config, { exists: () => false }), null);
+  const clean = { exists: () => false, symlinkOutside: () => null };
+  assert.equal(amuxV22ChannelPreflight("kimi", config, clean), null);
   assert.equal(amuxV22ChannelPreflight("kimi", config,
-    { exists: (path) => path.replaceAll("\\", "/").endsWith("/.kimi") }), "project_cli_config_present");
+    { ...clean, exists: (path) => path.replaceAll("\\", "/").endsWith("/.kimi") }), "project_cli_config_present");
+  // A checkout with a symlink out of itself is never read by a Kimi run.
+  assert.equal(amuxV22ChannelPreflight("kimi", config, { ...clean, symlinkOutside: () => "escape" }),
+    "checkout_symlink_outside");
 });
 
 test("the run home holds the access token without its refresh token, the agent file and an empty skills directory", async () => {
@@ -150,24 +155,21 @@ test("the run home holds the access token without its refresh token, the agent f
     }
   };
   await walk(run.config.homePath);
+  // No sign-in file in the run home: the run's bubblewrap view shows it all.
   assert.deepEqual(entries.sort(), [".amux-v22/", ".amux-v22/kimi-guard.log",
-    ".amux-v22/kimi-read.yaml", ".amux-v22/skills/",
-    ".kimi/", ".kimi/credentials/", ".kimi/credentials/kimi-code.json"].sort());
+    ".amux-v22/kimi-read.yaml", ".amux-v22/skills/"].sort());
+  assert.equal(run.kimiAccessToken, JSON.parse(login()).access_token);
   // The guard log starts empty, so zero decisions is a reading, not a missing file.
   assert.equal(await readAmuxV22KimiGuardDecisions(run.config.homePath), 0);
-  const copy = JSON.parse(await readFile(join(run.config.homePath, ".kimi", "credentials",
-    "kimi-code.json"), "utf8"));
-  const source = JSON.parse(login());
-  assert.deepEqual(copy, { access_token: source.access_token, refresh_token: "",
-    expires_at: source.expires_at, scope: "kimi-code", token_type: "Bearer", expires_in: 900 });
   assert.equal(await readFile(join(run.config.homePath, ".amux-v22", "kimi-read.yaml"), "utf8"),
     amuxV22KimiAgent().text);
-  const env = amuxV22ChannelEnv("kimi", run.config);
+  const env = amuxV22ChannelEnv("kimi", run.config, { kimiAccessToken: run.kimiAccessToken });
   assert.equal(env.HOME, run.config.homePath);
   assert.equal(env.KIMI_SHARE_DIR, join(run.config.homePath, ".kimi"));
   assert.equal(env.KIMI_CLI_NO_AUTO_UPDATE, "1");
   assert.equal(env.PATH, "/usr/bin:/bin");
-  assert.ok(!JSON.stringify(env).includes("synthetic-kimi"));
+  assert.equal(env.KIMI_API_KEY, JSON.parse(login()).access_token);
+  assert.ok(!JSON.stringify(env).includes("synthetic-kimi-refresh"));
   await run.cleanup();
   await assert.rejects(stat(run.config.homePath));
   // An expired access token, or any other shape, makes no run home.
@@ -399,6 +401,36 @@ test("Kimi runs only inside a bubblewrap view: the checkout read-only, its run h
     binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi", ...GUARD }), /unsafe path/);
 });
 
+test("a checkout that links outside itself is found before a Kimi run starts", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "amux-v22-kimi-links-")));
+  const checkout = join(root, "checkout");
+  await mkdir(join(checkout, "lib", "deep"), { recursive: true });
+  await mkdir(join(checkout, ".git"));
+  await mkdir(join(root, "outside"));
+  await writeFile(join(checkout, "lib", "a.ts"), "x");
+  assert.equal(amuxV22CheckoutSymlinkOutside(checkout), null);
+  let linked = true;
+  try { await symlink(join(checkout, "lib"), join(checkout, "lib-link"), "junction"); }
+  catch { linked = false; }
+  if (linked) {
+    // A link that stays inside is fine.
+    assert.equal(amuxV22CheckoutSymlinkOutside(checkout), null);
+    await symlink(join(root, "outside"), join(checkout, "lib", "deep", "escape"), "junction");
+    assert.equal(amuxV22CheckoutSymlinkOutside(checkout), "lib/deep/escape");
+  }
+  // A fake tree: a dangling link is refused; .git is not walked; an unreadable checkout is "?".
+  const dirent = (name, kind) => ({ name, isSymbolicLink: () => kind === "link",
+    isDirectory: () => kind === "dir" });
+  const tree = { "/w": [dirent(".git", "dir"), dirent("src", "dir")],
+    "/w/src": [dirent("gone", "link")] };
+  const fsOps = { readdirSync: (dir) => tree[dir.replaceAll("\\", "/")] ?? [],
+    realpathSync: (path) => { const p = path.replaceAll("\\", "/");
+      if (p === "/w") return p; throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); } };
+  assert.equal(amuxV22CheckoutSymlinkOutside("/w", { fsOps }), "src/gone");
+  assert.equal(amuxV22CheckoutSymlinkOutside("/w", { fsOps: { ...fsOps,
+    readdirSync: () => { throw new Error("EACCES"); } } }), "?");
+});
+
 test("the guard log counts only the lines the guard writes", async () => {
   const root = await mkdtemp(join(tmpdir(), "amux-v22-kimi-log-"));
   await mkdir(join(root, ".amux-v22"));
@@ -543,7 +575,8 @@ test("a Kimi review run reads its prompt from stdin and its tokens from the run 
     readKimiGuardDecisions: async (home) => { read.push(home); return 1; },
     createRunHome: async (_provider, value) => ({
       config: { ...value, homePath: RUN_HOME, claudeConfigDir: `${RUN_HOME}/.config` },
-      copilotToken: null, cleanup: async () => {} }) });
+      copilotToken: null, kimiAccessToken: "synthetic-kimi-access-token-0123456789",
+      cleanup: async () => {} }) });
   assert.deepEqual(read, [RUN_HOME, RUN_HOME]);
   const { binary, args: spawned, spawnOptions } = fake.calls[0];
   // The spawn is bwrap; the CLI and its own arguments follow the view's "--".
@@ -561,6 +594,8 @@ test("a Kimi review run reads its prompt from stdin and its tokens from the run 
   assert.ok(args.includes(`${RUN_HOME}/.amux-v22/kimi-read.yaml`));
   assert.equal(spawnOptions.env.KIMI_SHARE_DIR, join(RUN_HOME, ".kimi"));
   assert.equal(spawnOptions.env.KIMI_CLI_NO_AUTO_UPDATE, "1");
+  assert.equal(spawnOptions.env.KIMI_API_KEY, "synthetic-kimi-access-token-0123456789");
+  assert.ok(!spawned.includes("synthetic-kimi-access-token-0123456789"));
   assert.equal(outcome.kind, "succeeded");
   assert.equal(outcome.usageReceipt.source, "kimi_wire");
   assert.equal(outcome.usageReceipt.completeness, "reported_complete");
