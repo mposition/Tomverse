@@ -51,6 +51,11 @@ export type MistralOcrResult = {
   truncated: boolean;
   /** The page the limit cut in the middle (only part of it is in `text`), if any. */
   truncatedPage: number | null;
+  /**
+   * The response did not number every page, so its text cannot be matched to the
+   * pages asked for: `pageNumbers` is empty and no page is reported as read.
+   */
+  unverified: boolean;
   modelId: typeof MISTRAL_OCR_MODEL_ID;
 };
 
@@ -138,15 +143,21 @@ export async function extractPdfTextWithMistralOcr(
   }
 
   const requested = dependencies.pages?.length ? new Set(dependencies.pages) : null;
-  const blocks: Array<{ pageNumber: number; block: string }> = [];
+  // A response in which any page lacks its own index cannot be matched to the
+  // pages that were asked for: guessing from the position would put the text of
+  // a page after a skipped one under the wrong number, and call it read. Its
+  // text is still returned (unnumbered), but no page is reported as read.
+  const unverified = validated.data.pages.some((page) => page.index === undefined);
+  const blocks: Array<{ pageNumber: number | null; block: string }> = [];
   validated.data.pages.forEach((page, position) => {
-    // The page's own index; without one, its place among the pages asked for.
-    const pageNumber =
-      page.index !== undefined
-        ? page.index + 1
-        : (dependencies.pages?.[position] ?? position + 1);
     const markdown = page.markdown.trim();
-    if (!markdown || (requested && !requested.has(pageNumber))) return;
+    if (!markdown) return;
+    if (unverified || page.index === undefined) {
+      blocks.push({ pageNumber: null, block: `## Scanned text ${position + 1}\n\n${markdown}` });
+      return;
+    }
+    const pageNumber = page.index + 1;
+    if (requested && !requested.has(pageNumber)) return;
     blocks.push({ pageNumber, block: `## Page ${pageNumber}\n\n${markdown}` });
   });
   const joined = blocks.map((entry) => entry.block).join("\n\n");
@@ -158,6 +169,7 @@ export async function extractPdfTextWithMistralOcr(
   let truncatedPage: number | null = null;
   let offset = 0;
   for (const entry of blocks) {
+    if (entry.pageNumber === null) break;
     if (offset >= maxCharacters) break;
     if (offset + entry.block.length > maxCharacters) {
       truncatedPage = entry.pageNumber;
@@ -173,6 +185,7 @@ export async function extractPdfTextWithMistralOcr(
     pageNumbers,
     truncated: joined.length > maxCharacters,
     truncatedPage,
+    unverified,
     modelId: MISTRAL_OCR_MODEL_ID,
   };
 }

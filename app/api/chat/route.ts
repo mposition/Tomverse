@@ -4630,7 +4630,8 @@ async function handleChatPost(
                             outcome.unreadPages.length > 0 ||
                             outcome.partialPages.length > 0 ||
                             outcome.budgetUnreadPages.length > 0 ||
-                            outcome.pageCountUnknown
+                            outcome.pageCountUnknown ||
+                            outcome.ocrUnmatched
                         ) {
                             // Not put through addExtractedText: the notice is what tells
                             // the model what the text beside it lacks, so it is never
@@ -4913,6 +4914,7 @@ async function handleChatPost(
                                 partialPages: budgetPartialPage === null ? [] : [budgetPartialPage],
                                 budgetUnreadPages,
                                 pageCountUnknown: false,
+                                ocrUnmatched: false,
                                 cacheable: false,
                             });
                             return "ok";
@@ -4935,6 +4937,7 @@ async function handleChatPost(
                                           partialPages: [],
                                           budgetUnreadPages: [],
                                           pageCountUnknown: pdfPageCount === 0,
+                                          ocrUnmatched: false,
                                           cacheable: false,
                                       }
                             );

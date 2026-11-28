@@ -146,7 +146,7 @@ test("OCR sharing is keyed by the character budget, and a cut or short result is
     assert.match(route, /expectedPages: Array\.from\(\{ length: pdfPageCount \}/);
     assert.ok(route.includes("pdfPageCount = extraction.pageCount;"));
     // An earlier file's scanned text that did not fit its share still names the pages.
-    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPages: budgetPartialPage === null \? \[\] : \[budgetPartialPage\],\s*budgetUnreadPages,\s*pageCountUnknown: false,\s*cacheable: false,/);
+    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPages: budgetPartialPage === null \? \[\] : \[budgetPartialPage\],\s*budgetUnreadPages,\s*pageCountUnknown: false,\s*ocrUnmatched: false,\s*cacheable: false,/);
     // The notice's room is set aside before the text is read: extraction, OCR and the gate use one budget function.
     assert.ok(route.includes("pdfTextCharacterBudget(remainingCharacters)"));
     assert.ok(route.includes("? pdfTextCharacterBudget(remainingCharacters) <= 0"));
@@ -233,7 +233,7 @@ test("the page count comes from the validation when the text pass failed; unknow
 test("an earlier file's OCR text left out for its share still names the pages and blocks the cache", () => {
     const route = source("app/api/chat/route.ts");
     assert.ok(!route.includes("if (added && ocrOutcome) settlePdfReading(ocrOutcome);"));
-    assert.match(route, /if \(ocrOutcome\) \{[\s\S]{0,400}settlePdfReading\(\s*added\s*\? ocrOutcome\s*: \{[\s\S]{0,300}pageCountUnknown: pdfPageCount === 0,\s*cacheable: false,/);
+    assert.match(route, /if \(ocrOutcome\) \{[\s\S]{0,400}settlePdfReading\(\s*added\s*\? ocrOutcome\s*: \{[\s\S]{0,300}pageCountUnknown: pdfPageCount === 0,\s*ocrUnmatched: false,\s*cacheable: false,/);
     // Every settle input carries the whole outcome shape.
     for (const literal of route.match(/settlePdfReading\(\{[\s\S]*?cacheable: false,/g) ?? []) {
         assert.ok(literal.includes("pageCountUnknown:"), literal);
@@ -256,4 +256,12 @@ test("an earlier image left out is counted against the earlier files' share like
     const body = route.slice(start, route.indexOf('return "ok" as const;', start));
     assert.ok(body.includes("totalExtractedCharacters += PAST_IMAGE_OMITTED_TEXT.length;"));
     assert.ok(body.includes("pastAttachmentTokens += estimatePromptTokens(PAST_IMAGE_OMITTED_TEXT);"));
+});
+
+test("an unmatched OCR result is named through the one settle path, which also keeps it out of the cache", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.ok(route.includes("outcome.ocrUnmatched"));
+    for (const literal of route.match(/settlePdfReading\(\{[\s\S]*?cacheable: false,/g) ?? []) {
+        assert.ok(literal.includes("ocrUnmatched:"), literal);
+    }
 });

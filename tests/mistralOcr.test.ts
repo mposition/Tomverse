@@ -45,6 +45,7 @@ test("OCR 4 sends a bounded text-only document request", async () => {
     pageCount: 2,
     pageNumbers: [1, 2],
     truncatedPage: null,
+    unverified: false,
     truncated: false,
     modelId: MISTRAL_OCR_MODEL_ID,
   });
@@ -130,15 +131,42 @@ test("OCR 4 reports which of the requested pages came back with text", async () 
   assert.equal(result?.pageCount, 3);
 });
 
-test("OCR 4 with no page index places each page among the ones asked for", async () => {
-  const fetchMock: typeof fetch = async () =>
-    Response.json({ pages: [{ markdown: "A" }, { markdown: "B" }] });
-  const result = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
-    fetch: fetchMock,
+// Review r-20261128-060603-66a2ae: a response that does not number its pages cannot be
+// matched to the pages asked for, whatever its length.
+const unnumbered = async (pages: unknown[], requested: number[]) =>
+  extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 1_000, {
+    fetch: (async () => Response.json({ pages })) as typeof fetch,
     apiKey: "test-key",
-    pages: [3, 7],
+    pages: requested,
   });
-  assert.deepEqual(result?.pageNumbers, [3, 7]);
+
+test("OCR 4 reads no page as read from a response without page numbers, fewer than asked", async () => {
+  // Pages 3, 5 and 7 were asked for; the provider skipped one and numbered none.
+  const result = await unnumbered([{ markdown: "A" }, { markdown: "B" }], [3, 5, 7]);
+  assert.equal(result?.unverified, true);
+  assert.deepEqual(result?.pageNumbers, []);
+  assert.equal(result?.truncatedPage, null);
+  // The text is kept, but not under page numbers it cannot vouch for.
+  assert.match(result?.text ?? "", /A/);
+  assert.match(result?.text ?? "", /B/);
+  assert.doesNotMatch(result?.text ?? "", /## Page [0-9]/);
+});
+
+test("OCR 4 reads no page as read from a response without page numbers, as many as asked", async () => {
+  const result = await unnumbered([{ markdown: "A" }, { markdown: "B" }], [3, 7]);
+  assert.equal(result?.unverified, true);
+  assert.deepEqual(result?.pageNumbers, []);
+});
+
+test("OCR 4 treats a response in which only some pages are numbered as unverified", async () => {
+  const result = await unnumbered([{ index: 2, markdown: "A" }, { markdown: "B" }], [3, 7]);
+  assert.equal(result?.unverified, true);
+  assert.deepEqual(result?.pageNumbers, []);
+  assert.doesNotMatch(result?.text ?? "", /## Page [0-9]/);
+  // Fully numbered, it is verified.
+  const numbered = await unnumbered([{ index: 2, markdown: "A" }, { index: 6, markdown: "B" }], [3, 7]);
+  assert.equal(numbered?.unverified, false);
+  assert.deepEqual(numbered?.pageNumbers, [3, 7]);
 });
 
 test("OCR 4 says when the text was cut, which page it cut, and counts only whole pages as read", async () => {

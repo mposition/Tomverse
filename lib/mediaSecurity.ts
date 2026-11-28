@@ -617,6 +617,8 @@ export function describeUnreadPdfPages(gaps: {
     budgetUnreadPages?: readonly number[];
     /** The file's page count could not be found, so skipped pages could not be detected. */
     pageCountUnknown?: boolean;
+    /** The OCR result could not be matched to page numbers. */
+    ocrUnmatched?: boolean;
 }): string {
     const unread = gaps.unreadPages ?? [];
     const partial = gaps.partialPages ?? [];
@@ -633,6 +635,12 @@ export function describeUnreadPdfPages(gaps: {
     if (budget.length > 0) {
         sentences.push(
             `Not read because the text limit for this request was reached: ${formatPdfPageRanges(budget)}.`
+        );
+    }
+    if (gaps.ocrUnmatched) {
+        sentences.push(
+            "The scanned text could not be matched to page numbers (pages could not be matched to the OCR result), " +
+                "so you cannot tell which pages it covers: do not say that a given page was read."
         );
     }
     if (gaps.pageCountUnknown) {
@@ -654,6 +662,8 @@ export type PdfReadingOutcome = {
     budgetUnreadPages: number[];
     /** OCR read a file whose page count is not known: a skipped page cannot be told. */
     pageCountUnknown: boolean;
+    /** The OCR result could not be matched to the pages asked for: none is reported read or unread. */
+    ocrUnmatched: boolean;
     /** The text taken from this file may be stored as the file's text. */
     cacheable: boolean;
 };
@@ -676,7 +686,13 @@ export type PdfReadingOutcome = {
  */
 export function pdfReadingOutcome(input: {
     expectedPages: readonly number[];
-    ocr: { pageNumbers: readonly number[]; truncated: boolean; truncatedPage: number | null } | null;
+    ocr: {
+        pageNumbers: readonly number[];
+        truncated: boolean;
+        truncatedPage: number | null;
+        /** Not every page of the response carried its own number. */
+        unverified?: boolean;
+    } | null;
     budgetUnreadPages?: readonly number[];
     budgetPartialPage?: number | null;
     /**
@@ -692,13 +708,26 @@ export function pdfReadingOutcome(input: {
     const stoppedShort = budgetUnreadPages.length > 0 || budgetPartialPage !== null;
     if (input.originalSentToModel) {
         // The model has the file; the text layer alone is still not the file.
-        return { unreadPages: [], partialPages: [], budgetUnreadPages: [], pageCountUnknown: false, cacheable: false };
+        return {
+            unreadPages: [],
+            partialPages: [],
+            budgetUnreadPages: [],
+            pageCountUnknown: false,
+            ocrUnmatched: false,
+            cacheable: false,
+        };
     }
     const ocrPartialPage = input.ocr?.truncatedPage ?? null;
     // The page that was cut is named as partly read, not as unread.
-    const unreadPages = pdfPagesNotRead(input.expectedPages, input.ocr?.pageNumbers ?? []).filter(
-        (page) => page !== ocrPartialPage
-    );
+    // A response whose pages cannot be matched to the pages asked for says
+    // nothing about any one of them: none is read, none is unread, and the text
+    // is never stored as the file's.
+    const ocrUnmatched = Boolean(input.ocr?.unverified);
+    const unreadPages = ocrUnmatched
+        ? []
+        : pdfPagesNotRead(input.expectedPages, input.ocr?.pageNumbers ?? []).filter(
+              (page) => page !== ocrPartialPage
+          );
     const partialPages = [ocrPartialPage, budgetPartialPage].filter((page): page is number => page !== null);
     const pageCountUnknown = Boolean(input.pageCountUnknown && input.ocr);
     return {
@@ -706,7 +735,9 @@ export function pdfReadingOutcome(input: {
         partialPages,
         budgetUnreadPages,
         pageCountUnknown,
+        ocrUnmatched,
         cacheable:
+            !ocrUnmatched &&
             unreadPages.length === 0 &&
             partialPages.length === 0 &&
             !stoppedShort &&

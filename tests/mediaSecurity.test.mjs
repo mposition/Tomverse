@@ -178,6 +178,7 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     partialPages: [],
     budgetUnreadPages: [],
     pageCountUnknown: false,
+    ocrUnmatched: false,
     cacheable: true,
   });
   // A page the provider skipped.
@@ -186,12 +187,13 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     partialPages: [],
     budgetUnreadPages: [],
     pageCountUnknown: false,
+    ocrUnmatched: false,
     cacheable: false,
   });
   // The OCR budget cut page 2: it is partly read, page 3 is not read.
   assert.deepEqual(
     pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
-    { unreadPages: [3], partialPages: [2], budgetUnreadPages: [], pageCountUnknown: false, cacheable: false }
+    { unreadPages: [3], partialPages: [2], budgetUnreadPages: [], pageCountUnknown: false, ocrUnmatched: false, cacheable: false }
   );
   // OCR not run: every page asked for is unread.
   assert.deepEqual(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null }), {
@@ -199,12 +201,13 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     partialPages: [],
     budgetUnreadPages: [],
     pageCountUnknown: false,
+    ocrUnmatched: false,
     cacheable: false,
   });
   // The page count is not known and the text was cut: only the cut is reported.
   assert.deepEqual(
     pdfReadingOutcome({ expectedPages: [], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
-    { unreadPages: [], partialPages: [2], budgetUnreadPages: [], pageCountUnknown: false, cacheable: false }
+    { unreadPages: [], partialPages: [2], budgetUnreadPages: [], pageCountUnknown: false, ocrUnmatched: false, cacheable: false }
   );
   // The text pass stopped at the limit: its pages are named, kept apart from the scans, and the text is not the file.
   assert.deepEqual(
@@ -214,7 +217,7 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
       budgetUnreadPages: [8, 9, 10],
       budgetPartialPage: 7,
     }),
-    { unreadPages: [], partialPages: [7], budgetUnreadPages: [8, 9, 10], pageCountUnknown: false, cacheable: false }
+    { unreadPages: [], partialPages: [7], budgetUnreadPages: [8, 9, 10], pageCountUnknown: false, ocrUnmatched: false, cacheable: false }
   );
   // Scans read whole after a text pass that stopped short: still not cacheable.
   assert.equal(
@@ -227,6 +230,7 @@ test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut, a stop 
     partialPages: [],
     budgetUnreadPages: [],
     pageCountUnknown: false,
+    ocrUnmatched: false,
     cacheable: false,
   });
 });
@@ -239,7 +243,7 @@ test("the turn after the original was sent, the earlier message reads only the t
     expectedPages: [2, 4],
     ocr: { pageNumbers: [2, 4], truncated: false, truncatedPage: null },
   });
-  assert.deepEqual(outcome, { unreadPages: [], partialPages: [], budgetUnreadPages: [], pageCountUnknown: false, cacheable: true });
+  assert.deepEqual(outcome, { unreadPages: [], partialPages: [], budgetUnreadPages: [], pageCountUnknown: false, ocrUnmatched: false, cacheable: true });
 });
 
 // Review r-20261128-054317-1a725b.
@@ -256,6 +260,7 @@ test("a scanned file read by OCR with no known page count names that, and is nev
     partialPages: [],
     budgetUnreadPages: [],
     pageCountUnknown: true,
+    ocrUnmatched: false,
     cacheable: false,
   });
   assert.match(describeUnreadPdfPages(outcome), /page count unknown/);
@@ -264,4 +269,37 @@ test("a scanned file read by OCR with no known page count names that, and is nev
   // The flag means nothing without OCR text to judge.
   assert.equal(pdfReadingOutcome({ expectedPages: [], ocr: null, pageCountUnknown: true }).pageCountUnknown, false);
   assert.ok(describeUnreadPdfPages({ ...outcome, unreadPages: [2], partialPages: [3], budgetUnreadPages: [4] }).length <= PDF_PAGE_NOTICE_MAX_CHARACTERS);
+});
+
+// Review r-20261128-060603-66a2ae: what cannot be matched to page numbers cannot be called read.
+test("pdfReadingOutcome: an OCR result that cannot be matched to pages is named, claims no page, and is never stored", () => {
+  // Fewer pages than asked, as many as asked, and partly numbered all arrive as unverified with no pages.
+  for (const pageNumbers of [[], []]) {
+    const outcome = pdfReadingOutcome({
+      expectedPages: [3, 5, 7],
+      ocr: { pageNumbers, truncated: false, truncatedPage: null, unverified: true },
+    });
+    assert.deepEqual(outcome, {
+      unreadPages: [],
+      partialPages: [],
+      budgetUnreadPages: [],
+      pageCountUnknown: false,
+      ocrUnmatched: true,
+      cacheable: false,
+    });
+    const notice = describeUnreadPdfPages(outcome);
+    assert.match(notice, /pages could not be matched to the OCR result/);
+    assert.match(notice, /do not say that a given page was read/);
+    assert.ok(notice.length <= PDF_PAGE_NOTICE_MAX_CHARACTERS);
+  }
+  // The same pages from a numbered response are judged as before.
+  assert.equal(
+    pdfReadingOutcome({ expectedPages: [3, 7], ocr: { pageNumbers: [3, 7], truncated: false, truncatedPage: null, unverified: false } }).cacheable,
+    true
+  );
+  // Even a response as long as the request and positionally "complete" is not cacheable once unverified.
+  assert.equal(
+    pdfReadingOutcome({ expectedPages: [3, 7], ocr: { pageNumbers: [3, 7], truncated: false, truncatedPage: null, unverified: true } }).cacheable,
+    false
+  );
 });
