@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
-import { artifactShareSourceKey, artifactShareTtlDays } from "@/lib/artifactShareAccess";
+import {
+  ARTIFACT_SHARE_MAX_BLOCK_INDEX,
+  artifactShareSourceKey,
+  artifactShareTtlDays,
+  shareableCodeLanguage,
+} from "@/lib/artifactShareAccess";
 import { findArtifactShare, prepareArtifactShare, publishArtifactShare, type ArtifactShareView } from "@/lib/artifactShareService";
 import { isArtifactSharingEnabled } from "@/lib/artifactShareSettings";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -22,6 +27,7 @@ import { logSecurityAuditEvent } from "@/lib/securityAudit";
  */
 
 const ID = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+const BLOCK_INDEX = z.number().int().min(0).max(ARTIFACT_SHARE_MAX_BLOCK_INDEX);
 
 const createSchema = z
   .object({
@@ -30,6 +36,8 @@ const createSchema = z
       z.object({
         kind: z.literal("code_block"),
         messageId: ID,
+        // The block's position among its answer's previewable blocks (previewableBlockIndex).
+        blockIndex: BLOCK_INDEX,
         language: z.string().trim().min(1).max(16),
         code: z.string().min(1).max(HTML_PREVIEW_MAX_BYTES),
       }).strict(),
@@ -65,11 +73,14 @@ export async function GET(req: Request) {
     const params = new URL(req.url).searchParams;
     const artifactId = ID.safeParse(params.get("artifactId") ?? "");
     const messageId = ID.safeParse(params.get("messageId") ?? "");
+    const blockIndex = BLOCK_INDEX.safeParse(/^\d{1,4}$/.test(params.get("blockIndex") ?? "") ? Number(params.get("blockIndex")) : -1);
+    const language = shareableCodeLanguage(params.get("language"))?.language;
     const contentHash = /^[0-9a-f]{64}$/.exec(params.get("contentHash") ?? "")?.[0];
+    // The same key the link was made under (lib/artifactShareService.ts prepareArtifactShare).
     const sourceKey = artifactId.success
       ? artifactShareSourceKey({ kind: "artifact", artifactId: artifactId.data })
-      : messageId.success && contentHash
-        ? artifactShareSourceKey({ kind: "code_block", messageId: messageId.data, contentHash })
+      : messageId.success && blockIndex.success && language && contentHash
+        ? artifactShareSourceKey({ kind: "code_block", messageId: messageId.data, blockIndex: blockIndex.data, language, contentHash })
         : null;
     if (!sourceKey) return NextResponse.json({ error: "Name a file or a code block.", code: "INVALID_REQUEST" }, { status: 400 });
     const enabled = await isArtifactSharingEnabled();

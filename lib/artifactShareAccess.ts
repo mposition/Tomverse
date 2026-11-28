@@ -49,10 +49,32 @@ export const shareableCodeLanguage = (
     return previewKind && isArtifactShareLanguage(normalized) ? { previewKind, language: normalized } : null;
 };
 
-/** One link per source, so pressing Share twice shows the same link. */
+/** The highest block position a share accepts: an answer with more previewable blocks than this is not a real answer. */
+export const ARTIFACT_SHARE_MAX_BLOCK_INDEX = 999;
+
+/**
+ * Where a code block sits: its answer and its position among that answer's
+ * previewable blocks (previewableBlockIndex in lib/artifactPreviewEditing.ts).
+ * Every link ever made from that block shares this prefix, whatever its text.
+ */
+export const artifactShareBlockPrefix = (block: { messageId: string; blockIndex: number }) =>
+    `code:${block.messageId}:${block.blockIndex}:`;
+
+/**
+ * One link per source, so pressing Share twice shows the same link. A code
+ * block's source is its place (answer and position), the language it renders
+ * as and its text: the same text written as HTML and as JSX is two pages and
+ * two links, and a block whose text changed is a new source at the same place
+ * (publishing it closes the old link there; lib/artifactShareService.ts).
+ */
 export const artifactShareSourceKey = (
-    source: { kind: "artifact"; artifactId: string } | { kind: "code_block"; messageId: string; contentHash: string }
-) => (source.kind === "artifact" ? `artifact:${source.artifactId}` : `code:${source.messageId}:${source.contentHash}`);
+    source:
+        | { kind: "artifact"; artifactId: string }
+        | { kind: "code_block"; messageId: string; blockIndex: number; language: ArtifactShareLanguage; contentHash: string }
+) =>
+    source.kind === "artifact"
+        ? `artifact:${source.artifactId}`
+        : `${artifactShareBlockPrefix(source)}${source.language}:${source.contentHash}`;
 
 /** How long a link lives: SHARE_LINK_TTL_DAYS, the conversation share's setting, 1..365, default 30. */
 export const artifactShareTtlDays = (env: Record<string, string | undefined>) => {

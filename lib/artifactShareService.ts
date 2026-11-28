@@ -7,6 +7,8 @@ import { Prisma } from "@prisma/client";
 import {
   ARTIFACT_SHARE_FILE_FORMATS,
   answerContainsCode,
+  ARTIFACT_SHARE_MAX_BLOCK_INDEX,
+  artifactShareBlockPrefix,
   artifactShareRefusal,
   artifactShareSourceKey,
   artifactShareTtlDays,
@@ -36,7 +38,7 @@ import { createShareToken, isStrongShareToken } from "@/lib/shareTokens";
 
 export type ArtifactShareSourceInput =
   | { kind: "artifact"; artifactId: string }
-  | { kind: "code_block"; messageId: string; language: string; code: string };
+  | { kind: "code_block"; messageId: string; blockIndex: number; language: string; code: string };
 
 export type ArtifactShareView = { id: string; token: string; createdAt: string; expiresAt: string };
 
@@ -100,6 +102,8 @@ type Prepared = {
   messageId: string;
   artifactId: string | null;
   sourceKey: string;
+  /** A code block's place (artifactShareBlockPrefix): publishing closes the owner's other links there. Null for a file. */
+  blockPrefix: string | null;
   previewKind: CodePreviewKind;
   language: ArtifactShareLanguage;
   title: string | null;
@@ -237,6 +241,7 @@ export async function prepareArtifactShare(
         messageId: artifact.messageId,
         artifactId: artifact.id,
         sourceKey: artifactShareSourceKey({ kind: "artifact", artifactId: artifact.id }),
+        blockPrefix: null,
         previewKind: "html",
         language: format,
         title: artifact.filename,
@@ -247,7 +252,8 @@ export async function prepareArtifactShare(
 
   const shareable = shareableCodeLanguage(input.language);
   const content = input.code.replace(/\r\n?/g, "\n");
-  const message = shareable
+  const placed = Number.isInteger(input.blockIndex) && input.blockIndex >= 0 && input.blockIndex <= ARTIFACT_SHARE_MAX_BLOCK_INDEX;
+  const message = shareable && placed
     ? await prisma.message.findFirst({
         where: { id: input.messageId, role: "assistant", conversation: { userId } },
         select: { id: true, content: true, conversationId: true, researchRunId: true, conversation: { select: conversationFacts } },
@@ -269,7 +275,14 @@ export async function prepareArtifactShare(
       conversationId: message.conversationId,
       messageId: message.id,
       artifactId: null,
-      sourceKey: artifactShareSourceKey({ kind: "code_block", messageId: message.id, contentHash: sha256Hex(content) }),
+      sourceKey: artifactShareSourceKey({
+        kind: "code_block",
+        messageId: message.id,
+        blockIndex: input.blockIndex,
+        language: shareable.language,
+        contentHash: sha256Hex(content),
+      }),
+      blockPrefix: artifactShareBlockPrefix({ messageId: message.id, blockIndex: input.blockIndex }),
       previewKind: shareable.previewKind,
       language: shareable.language,
       title: null,
@@ -285,18 +298,15 @@ const viewOf = (row: { id: string; token: string; createdAt: Date; expiresAt: Da
   expiresAt: row.expiresAt.toISOString(),
 });
 
-/**
- * The one way a link is removed: its owner stops sharing it, or it has
- * expired. The row and the page it held go together, and every removal is
- * recorded the same way, under `artifact.share.revoke` with its reason.
- */
-async function removeArtifactShares(
-  condition: Prisma.Sql,
-  record: { reason: "OWNER_STOPPED" | "EXPIRED"; request?: Request }
-): Promise<number> {
-  const removed = await prisma.$queryRaw<Array<{ id: string; userId: string }>>(Prisma.sql`
+type RemovedShare = { id: string; userId: string };
+type RemovalReason = "OWNER_STOPPED" | "EXPIRED" | "REPLACED";
+
+const deleteShareRows = (client: Pick<typeof prisma, "$queryRaw">, condition: Prisma.Sql) =>
+  client.$queryRaw<RemovedShare[]>(Prisma.sql`
     DELETE FROM "ArtifactShare" WHERE ${condition} RETURNING "id", "userId"
   `);
+
+const recordRemovals = (removed: RemovedShare[], record: { reason: RemovalReason; request?: Request }) => {
   for (const row of removed) {
     logSecurityAuditEvent("artifact.share.revoke", {
       userId: row.userId,
@@ -306,6 +316,20 @@ async function removeArtifactShares(
       reason: record.reason,
     });
   }
+};
+
+/**
+ * The one way a link is removed: its owner stops sharing it, it has expired,
+ * or a new link replaced it at the same code block. The row and the page it
+ * held go together, and every removal is recorded the same way, under
+ * `artifact.share.revoke` with its reason.
+ */
+async function removeArtifactShares(
+  condition: Prisma.Sql,
+  record: { reason: RemovalReason; request?: Request }
+): Promise<number> {
+  const removed = await deleteShareRows(prisma, condition);
+  recordRemovals(removed, record);
   return removed.length;
 }
 
@@ -315,10 +339,50 @@ const expiredAt = (now: Date) => Prisma.sql`"expiresAt" <= ${now.toISOString()}:
 const removeExpiredForSource = (userId: string, sourceKey: string, now: Date) =>
   removeArtifactShares(Prisma.sql`"sourceKey" = ${sourceKey} AND "userId" = ${userId} AND ${expiredAt(now)}`, { reason: "EXPIRED" });
 
+const SOURCE_KEY_CONSTRAINT = "ArtifactShare_sourceKey_key";
+
+/**
+ * Whether a failed publish is the one race it may answer for itself: another
+ * request inserting the same source key first. Recognised by that constraint
+ * alone -- through the driver adapter a raw insert reports it as P2010 with the
+ * Postgres code and the index in its cause; a typed write as P2002 -- so a
+ * token collision, a CHECK refusal or a lost connection is never taken for it.
+ */
+export const isSourceKeyConflict = (error: unknown): boolean => {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  const meta = error.meta as
+    | { target?: unknown; driverAdapterError?: { cause?: { originalCode?: unknown; constraint?: { index?: unknown } } } }
+    | undefined;
+  const cause = meta?.driverAdapterError?.cause;
+  if (error.code === "P2010") return cause?.originalCode === "23505" && cause.constraint?.index === SOURCE_KEY_CONSTRAINT;
+  if (error.code !== "P2002") return false;
+  const target = meta?.target;
+  return (
+    cause?.constraint?.index === SOURCE_KEY_CONSTRAINT ||
+    target === SOURCE_KEY_CONSTRAINT ||
+    (Array.isArray(target) && target.length === 1 && target[0] === "sourceKey")
+  );
+};
+
+/**
+ * What a failed publish answers: for a source-key race, the link the other
+ * request made (the same source, so the same text); for anything else, the
+ * failure itself.
+ */
+export async function shareAfterPublishFailure(error: unknown, userId: string, sourceKey: string, now: Date) {
+  if (!isSourceKeyConflict(error)) throw error;
+  const existing = await findArtifactShare(userId, sourceKey, now);
+  if (existing) return { share: existing, created: false };
+  throw error;
+}
+
 /**
  * Publishes the prepared page, or answers the live link this source already
  * has. An expired link for the same source is removed first, the way stopping
- * a share removes one, so a source never has two rows.
+ * a share removes one, so a source never has two rows. A code block's other
+ * links at the same place (an earlier text of the block) are closed in the
+ * same transaction as the insert, so the one link at that block is the one
+ * the panel can see and stop.
  *
  * The conversation facts the decision read from its row -- lock, temporary
  * state, kind and continuation bridge -- are checked again in the statement
@@ -334,17 +398,14 @@ export async function publishArtifactShare(
   try {
     return await publishOnce(userId, prepared, now);
   } catch (error) {
-    // Two presses at once: the second insert meets the first's unique source key. Its link is the answer.
-    const existing = await findArtifactShare(userId, prepared.sourceKey, now);
-    if (existing) return { share: existing, created: false };
-    throw error;
+    return shareAfterPublishFailure(error, userId, prepared.sourceKey, now);
   }
 }
 
 async function publishOnce(userId: string, prepared: Prepared, now: Date) {
   const expiresAt = new Date(now.getTime() + artifactShareTtlDays(process.env) * 24 * 60 * 60 * 1000);
   await removeExpiredForSource(userId, prepared.sourceKey, now);
-  return prisma.$transaction(async (tx) => {
+  const outcome = await prisma.$transaction(async (tx) => {
     const existing = await tx.artifactShare.findUnique({
       where: { sourceKey: prepared.sourceKey },
       select: { id: true, token: true, userId: true, createdAt: true, expiresAt: true },
@@ -352,7 +413,9 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
     // A source key names ids only one account holds; a row of anyone else's is never touched.
     if (existing && existing.userId !== userId) return null;
     // Live, because every row of this source expired by `now` was removed above.
-    if (existing) return existing.expiresAt > now ? { share: viewOf(existing), created: false } : null;
+    if (existing) {
+      return existing.expiresAt > now ? { share: viewOf(existing), created: false, replaced: [] as RemovedShare[] } : null;
+    }
     const token = createShareToken();
     const inserted = await tx.$queryRaw<Array<{ id: string; token: string; createdAt: Date; expiresAt: Date }>>(Prisma.sql`
       INSERT INTO "ArtifactShare" ("id", "token", "userId", "conversationId", "messageId", "artifactId", "sourceKey",
@@ -374,8 +437,19 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
       RETURNING "id", "token", "createdAt", "expiresAt"
     `);
     const row = inserted[0];
-    return row ? { share: viewOf(row), created: true } : null;
+    if (!row) return null;
+    // The block's earlier text at this place: closed together with the insert, never before it.
+    const replaced = prepared.blockPrefix
+      ? await deleteShareRows(
+          tx,
+          Prisma.sql`starts_with("sourceKey", ${prepared.blockPrefix}) AND "sourceKey" <> ${prepared.sourceKey} AND "userId" = ${userId}`
+        )
+      : [];
+    return { share: viewOf(row), created: true, replaced };
   });
+  if (!outcome) return null;
+  recordRemovals(outcome.replaced, { reason: "REPLACED" });
+  return { share: outcome.share, created: outcome.created };
 }
 
 /**

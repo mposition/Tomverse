@@ -172,6 +172,34 @@ test("an existing link is shown while sharing is off, so its owner can still sto
   assert.equal((await collection.GET(new Request("http://127.0.0.1:3100/api/artifact-shares?messageId=m1&contentHash=nothex"))).status, 400);
 });
 
+test("a code block's status is asked for by its place, language and text, all three required", async () => {
+  reset();
+  world.found = SHARE;
+  const { collection } = await load();
+  const hash = "a".repeat(64);
+  const status = (query: string) => collection.GET(new Request(`http://127.0.0.1:3100/api/artifact-shares?${query}`));
+  assert.equal((await status(`messageId=m1&blockIndex=0&language=html&contentHash=${hash}`)).status, 200);
+  for (const query of [
+    `messageId=m1&language=html&contentHash=${hash}`,
+    `messageId=m1&blockIndex=-1&language=html&contentHash=${hash}`,
+    `messageId=m1&blockIndex=1000&language=html&contentHash=${hash}`,
+    `messageId=m1&blockIndex=0&language=python&contentHash=${hash}`,
+    `messageId=m1&blockIndex=0&contentHash=${hash}`,
+  ]) {
+    assert.equal((await status(query)).status, 400, query);
+  }
+});
+
+test("making a code block's link needs its place", async () => {
+  reset();
+  const { collection } = await load();
+  const block = { kind: "code_block", messageId: "m1", language: "html", code: "<p>x</p>" };
+  assert.equal((await collection.POST(post({ source: block }))).status >= 400, true);
+  assert.equal((await collection.POST(post({ source: { ...block, blockIndex: 0.5 } }))).status >= 400, true);
+  assert.deepEqual(world.gates, []);
+  assert.equal((await collection.POST(post({ source: { ...block, blockIndex: 0 } }))).status, 200);
+});
+
 test("only the owner stops a link; anything else is the same 404", async () => {
   reset();
   const { item } = await load();

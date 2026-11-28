@@ -116,10 +116,16 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
             fillComposer={fillComposer}
             onClose={close}
             // A public link to this block's page (generated-artifacts.md section 19); the control asks the server whether it applies.
-            renderShare={opened.messageId
+            renderShare={opened.messageId && opened.blockIndex >= 0
               ? ({ edited }) => (
                   <ArtifactShareControl
-                    source={{ kind: "code_block", messageId: opened.messageId ?? "", language: opened.language, code: opened.code }}
+                    source={{
+                      kind: "code_block",
+                      messageId: opened.messageId ?? "",
+                      blockIndex: opened.blockIndex,
+                      language: opened.language,
+                      code: opened.code,
+                    }}
                     edited={edited}
                   />
                 )

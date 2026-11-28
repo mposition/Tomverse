@@ -12,6 +12,8 @@ import {
   readPublicArtifactShare,
   revokeArtifactShare,
   sha256Hex,
+  shareAfterPublishFailure,
+  isSourceKeyConflict,
 } from "@/lib/artifactShareService";
 import { isArtifactSharingEnabled } from "@/lib/artifactShareSettings";
 import { prisma } from "@/lib/prisma";
@@ -70,7 +72,13 @@ const seed = async (conversation: { password?: string | null; temporaryExpiresAt
   return { user, chat, answer };
 };
 
-const codeSource = (messageId: string, code = PAGE) => ({ kind: "code_block" as const, messageId, language: "html", code });
+const codeSource = (messageId: string, code = PAGE, place: { blockIndex?: number; language?: string } = {}) => ({
+  kind: "code_block" as const,
+  messageId,
+  blockIndex: place.blockIndex ?? 0,
+  language: place.language ?? "html",
+  code,
+});
 
 const share = async (userId: string, messageId: string) => {
   const prepared = await prepareArtifactShare(userId, codeSource(messageId), OPEN);
@@ -216,6 +224,7 @@ test("deleting the answer, the conversation, the generated file or the account t
     messageId: byFile.answer.id,
     artifactId: artifact.id,
     sourceKey: `artifact:${artifact.id}`,
+    blockPrefix: null,
     previewKind: "html",
     language: "html",
     title: "chart.html",
@@ -278,7 +287,7 @@ test("a block whose line endings differ is the same source, keyed on the hash th
   assert.ok(lf.ok && crlf.ok);
   if (!lf.ok || !crlf.ok) return;
   assert.equal(crlf.prepared.sourceKey, lf.prepared.sourceKey);
-  assert.equal(lf.prepared.sourceKey, `code:${answer.id}:${sha256Hex(PAGE)}`);
+  assert.equal(lf.prepared.sourceKey, `code:${answer.id}:0:html:${sha256Hex(PAGE)}`);
   assert.equal(crlf.prepared.content, PAGE);
 });
 
@@ -466,4 +475,104 @@ test("a continuation or a non-chat kind that lands between the check and the wri
   assert.equal(await publishArtifactShare(changedKind.user.id, beforeKind.prepared), null);
 
   assert.equal(await prisma.artifactShare.count(), 0);
+});
+
+/* ---------- one link per block: its language, a changed text, and the one race a publish answers ---------- */
+
+test("the same text written as HTML and as JSX in one answer is two links, looked up and stopped apart", async () => {
+  const { user, answer } = await seed();
+  const text = "<p>same</p>";
+  await prisma.message.update({
+    where: { id: answer.id },
+    data: { content: "```html\n" + text + "\n```\n\nAs a component:\n\n```jsx\n" + text + "\n```" },
+  });
+  const asHtml = await prepareArtifactShare(user.id, codeSource(answer.id, text, { blockIndex: 0, language: "html" }), OPEN);
+  const asJsx = await prepareArtifactShare(user.id, codeSource(answer.id, text, { blockIndex: 1, language: "jsx" }), OPEN);
+  assert.ok(asHtml.ok && asJsx.ok);
+  if (!asHtml.ok || !asJsx.ok) return;
+  assert.notEqual(asHtml.prepared.sourceKey, asJsx.prepared.sourceKey);
+
+  const htmlLink = await publishArtifactShare(user.id, asHtml.prepared);
+  const jsxLink = await publishArtifactShare(user.id, asJsx.prepared);
+  assert.ok(htmlLink?.created && jsxLink?.created);
+  assert.notEqual(htmlLink!.share.token, jsxLink!.share.token);
+  assert.equal((await readPublicArtifactShare(htmlLink!.share.token, LIVE))?.previewKind, "html");
+  assert.equal((await readPublicArtifactShare(jsxLink!.share.token, LIVE))?.previewKind, "react");
+  assert.equal((await findArtifactShare(user.id, asHtml.prepared.sourceKey))?.id, htmlLink!.share.id);
+  assert.equal((await findArtifactShare(user.id, asJsx.prepared.sourceKey))?.id, jsxLink!.share.id);
+
+  // Stopping one leaves the other as it was.
+  assert.equal(await revokeArtifactShare(user.id, htmlLink!.share.id), true);
+  assert.equal(await findArtifactShare(user.id, asHtml.prepared.sourceKey), null);
+  assert.equal((await findArtifactShare(user.id, asJsx.prepared.sourceKey))?.id, jsxLink!.share.id);
+  assert.ok(await readPublicArtifactShare(jsxLink!.share.token, LIVE));
+});
+
+test("after a block's text changes, its new link closes the old one there and no other block's", async () => {
+  const { user, answer } = await seed();
+  const old = await share(user.id, answer.id);
+  const revised = "<!doctype html>\n<h1>Revised chart</h1>";
+  // Block 0 now holds the revised page; the old page moved to block 1.
+  await prisma.message.update({
+    where: { id: answer.id },
+    data: { content: "```html\n" + revised + "\n```\n\nThe earlier one:\n\n```html\n" + PAGE + "\n```" },
+  });
+  const elsewhere = await prepareArtifactShare(user.id, codeSource(answer.id, PAGE, { blockIndex: 1 }), OPEN);
+  assert.ok(elsewhere.ok);
+  if (!elsewhere.ok) return;
+  const otherBlock = await publishArtifactShare(user.id, elsewhere.prepared);
+  assert.ok(otherBlock?.created);
+
+  const now = await prepareArtifactShare(user.id, codeSource(answer.id, revised, { blockIndex: 0 }), OPEN);
+  assert.ok(now.ok);
+  if (!now.ok) return;
+  // The panel asks about the block as it is now: there is no link for this text yet...
+  assert.equal(await findArtifactShare(user.id, now.prepared.sourceKey), null);
+  // ...and making one closes the old link at the same block, so the block never keeps a link the panel cannot see or stop.
+  const replacement = await publishArtifactShare(user.id, now.prepared);
+  assert.equal(replacement?.created, true);
+  assert.equal(await readPublicArtifactShare(old.share.token, LIVE), null);
+  assert.equal(await prisma.artifactShare.findUnique({ where: { id: old.share.id } }), null);
+  assert.equal((await readPublicArtifactShare(replacement!.share.token, LIVE))?.content, revised);
+  // The link at the other block is untouched.
+  assert.equal((await readPublicArtifactShare(otherBlock!.share.token, LIVE))?.content, PAGE);
+  assert.equal(await prisma.artifactShare.count(), 2);
+});
+
+test("only a source-key race answers with the existing link; any other failure is thrown", async () => {
+  const { user, chat, answer } = await seed();
+  const live = await share(user.id, answer.id);
+  // Real errors from this database, raised by the same raw insert the publish uses.
+  const failedInsert = async (overrides: { token?: string; sourceKey?: string; content?: string }) => {
+    try {
+      await prisma.$queryRaw`
+        INSERT INTO "ArtifactShare" ("id", "token", "userId", "conversationId", "messageId", "sourceKey", "sourceKind",
+          "previewKind", "language", "content", "createdAt", "expiresAt")
+        VALUES (${randomUUID()}, ${overrides.token ?? randomUUID()}, ${user.id}, ${chat.id}, ${answer.id},
+          ${overrides.sourceKey ?? randomUUID()}, 'code_block', 'html', 'html', ${overrides.content ?? PAGE},
+          now(), now() + interval '1 day')
+        RETURNING "id"`;
+    } catch (error) {
+      return error;
+    }
+    throw new Error("the insert was expected to fail");
+  };
+  const sourceKeyRace = await failedInsert({ sourceKey: live.prepared.sourceKey });
+  const tokenCollision = await failedInsert({ token: live.share.token });
+  const checkRefusal = await failedInsert({ content: "" });
+  const lostConnection = new Error("Connection terminated unexpectedly");
+
+  assert.equal(isSourceKeyConflict(sourceKeyRace), true);
+  for (const error of [tokenCollision, checkRefusal, lostConnection]) assert.equal(isSourceKeyConflict(error), false);
+
+  // The race is answered with the live link of that source...
+  assert.deepEqual(await shareAfterPublishFailure(sourceKeyRace, user.id, live.prepared.sourceKey, new Date()), {
+    share: live.share,
+    created: false,
+  });
+  // ...and every other failure is the failure, even with a live link for the source right there.
+  for (const error of [tokenCollision, checkRefusal, lostConnection]) {
+    await assert.rejects(shareAfterPublishFailure(error, user.id, live.prepared.sourceKey, new Date()), (thrown) => thrown === error);
+  }
+  assert.equal(await prisma.artifactShare.count(), 1);
 });

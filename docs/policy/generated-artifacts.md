@@ -1271,7 +1271,11 @@ React(`jsx`·`tsx`) 코드 블록이고, 문서 파일은 대상이 아니다(§
   공유되지 않고, 패널이 공유 카드에 그렇게 적는다.
 - 공유 시점의 내용을 `ArtifactShare` 행에 스냅샷으로 저장한다(migration `20261128150000_artifact_share`). 원본 답변을 고쳐도
   공유 페이지는 스냅샷을 보인다. 크기는 미리보기와 같은 1,000,000바이트(CHECK `ArtifactShare_content_size_check`).
-- 출처 하나에 링크 하나(`sourceKey` unique: `artifact:<id>` 또는 `code:<messageId>:<sha256>`). 다시 누르면 같은 링크를,
+- 출처 하나에 링크 하나(`sourceKey` unique: `artifact:<id>` 또는 `code:<messageId>:<블록 위치>:<language>:<sha256>`, 블록 위치는
+  답변 안 미리보기 가능한 블록 사이의 순서 `previewableBlockIndex`). 같은 글을 HTML과 JSX로 쓴 두 블록은 다른 링크다. 블록의
+  글이 바뀐 뒤 새 링크를 만들면 같은 위치의 이전 링크를 같은 트랜잭션에서 닫는다(`artifact.share.revoke`, 이유 `REPLACED`).
+  그래서 패널이 보거나 멈출 수 없는 링크가 그 블록에 남지 않는다. 동시에 두 번 누른 경합(`ArtifactShare_sourceKey_key` unique
+  위반)일 때만 먼저 만든 링크를 돌려주고, 다른 실패는 그대로 오류다(`isSourceKeyConflict`). 다시 누르면 같은 링크를,
   만료된 링크는 지우고 새 토큰으로 만든다. 토큰은 `lib/shareTokens.ts`(24바이트 난수), 수명은 대화 공유와 같은
   `SHARE_LINK_TTL_DAYS`(1~365, 기본 30일).
 - 중지하면 행을 지운다. **만료된 행도 지운다**: 소유자 상태 조회·공개 읽기·새 공유 만들기에서 만나면 그 자리에서, 나머지는

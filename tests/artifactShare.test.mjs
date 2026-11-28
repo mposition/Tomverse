@@ -6,6 +6,7 @@ import {
     ARTIFACT_SHARE_PREVIEW_KINDS,
     answerContainsCode,
     artifactShareRefusal,
+    artifactShareBlockPrefix,
     artifactShareSourceKey,
     artifactShareTtlDays,
     artifactSharingAvailable,
@@ -100,7 +101,16 @@ test("a code block must be text the stored answer contains", () => {
 
 test("one link per source and the conversation share's lifetime", () => {
     assert.equal(artifactShareSourceKey({ kind: "artifact", artifactId: "a1" }), "artifact:a1");
-    assert.equal(artifactShareSourceKey({ kind: "code_block", messageId: "m1", contentHash: "ff" }), "code:m1:ff");
+    const block = { kind: "code_block", messageId: "m1", blockIndex: 2, contentHash: "ff" };
+    assert.equal(artifactShareSourceKey({ ...block, language: "html" }), "code:m1:2:html:ff");
+    // The same text rendered as another language is another page and another link.
+    assert.notEqual(artifactShareSourceKey({ ...block, language: "jsx" }), artifactShareSourceKey({ ...block, language: "html" }));
+    assert.notEqual(artifactShareSourceKey({ ...block, language: "tsx" }), artifactShareSourceKey({ ...block, language: "jsx" }));
+    // Every key at one block starts with that block's place, whatever the language or text.
+    for (const language of ["html", "jsx"]) {
+        assert.ok(artifactShareSourceKey({ ...block, language, contentHash: "00" }).startsWith(artifactShareBlockPrefix(block)));
+    }
+    assert.ok(!artifactShareSourceKey({ ...block, blockIndex: 12, language: "html" }).startsWith(artifactShareBlockPrefix(block)));
     assert.equal(artifactShareTtlDays({}), 30);
     assert.equal(artifactShareTtlDays({ SHARE_LINK_TTL_DAYS: "7" }), 7);
     assert.equal(artifactShareTtlDays({ SHARE_LINK_TTL_DAYS: "0" }), 30);

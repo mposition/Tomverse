@@ -21,7 +21,8 @@ import { artifactWorkspaceCopy, formatArtifactWorkspaceCopy } from "@/locales/ar
 
 export type ArtifactShareSource =
   | { kind: "artifact"; artifactId: string }
-  | { kind: "code_block"; messageId: string; language: string; code: string };
+  /** `blockIndex`: the block's position among its answer's previewable blocks (previewableBlockIndex). */
+  | { kind: "code_block"; messageId: string; blockIndex: number; language: string; code: string };
 
 type ShareView = { id: string; url: string; createdAt: string; expiresAt: string };
 type Status = { enabled: boolean; ttlDays: number; share: ShareView | null };
@@ -37,7 +38,12 @@ const sha256Hex = async (text: string) => {
 const statusPath = async (source: ArtifactShareSource) =>
   source.kind === "artifact"
     ? `/api/artifact-shares?artifactId=${encodeURIComponent(source.artifactId)}`
-    : `/api/artifact-shares?messageId=${encodeURIComponent(source.messageId)}&contentHash=${await sha256Hex(source.code)}`;
+    : `/api/artifact-shares?${new URLSearchParams({
+        messageId: source.messageId,
+        blockIndex: String(source.blockIndex),
+        language: source.language,
+        contentHash: await sha256Hex(source.code),
+      }).toString()}`;
 
 const button =
   "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-generated-artifact-500 disabled:opacity-60";
@@ -45,7 +51,10 @@ const button =
 export function ArtifactShareControl({ source, edited }: { source: ArtifactShareSource; edited: boolean }) {
   const { lang } = useLanguage();
   const copy = artifactWorkspaceCopy[lang].share;
-  const sourceKey = source.kind === "artifact" ? `a:${source.artifactId}` : `c:${source.messageId}:${source.code}`;
+  const sourceKey =
+    source.kind === "artifact"
+      ? `a:${source.artifactId}`
+      : `c:${source.messageId}:${source.blockIndex}:${source.language}:${source.code}`;
   // Keyed by source, so a status read for another source is never shown for this one.
   const [loaded, setLoaded] = useState<{ key: string; status: Status } | null>(null);
   const status = loaded?.key === sourceKey ? loaded.status : null;
