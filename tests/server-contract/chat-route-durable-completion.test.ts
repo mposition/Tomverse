@@ -194,7 +194,6 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptCasError: CasError,
     ChatAttemptIdentityConflictError: class extends Error {},
     ChatAttemptScopeError: class extends Error {},
-    peekChatResponseAttempt: async () => null,
     claimChatResponseAttempt: async (input: Record<string, unknown>) => {
       row = {
         assistantMessageId: String(input.assistantMessageId),
