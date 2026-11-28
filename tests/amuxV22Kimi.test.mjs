@@ -19,7 +19,7 @@ import { amuxCliPricedModelId, amuxCliUsageReceiptSchema, makeAmuxCliUsageReceip
 import { readKimiConfigModels } from "../lib/amux/cliModelListReader.mjs";
 import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
   amuxV22ChannelPreflight, amuxV22ChannelStdin, amuxV22KimiAgent, amuxV22KimiConfig,
-  amuxV22KimiHookCommand, amuxV22KimiToolCallRefusal, amuxV22OutputShape,
+  amuxV22KimiHookCommand, amuxV22KimiSandboxArgs, amuxV22KimiToolCallRefusal, amuxV22OutputShape,
   createAmuxV22ChannelRunHome, parseAmuxV22ChannelOutput, readAmuxV22KimiGuardDecisions,
   readAmuxV22KimiSessionUsage } from "../lib/amux/v22ChannelRun.mjs";
 import { amuxV22KimiToolCallGuard, runAmuxV22KimiToolGuardHook } from
@@ -348,7 +348,13 @@ test("the guard blocks before a tool runs: any other tool, an undocumented argum
     assert.equal(guard("ReadFile", { path: "secret-link" }), "tool_path");
     assert.equal(guard("Grep", { pattern: "x", path: "escape" }), "tool_path");
     assert.equal(guard("Glob", { pattern: "*", directory: "escape" }), "tool_path");
+    // A pattern's fixed directories are resolved too.
+    assert.equal(guard("Glob", { pattern: "escape/*" }), "tool_path");
+    assert.equal(guard("Glob", { pattern: "escape/**/*.json", directory: "." }), "tool_path");
+    assert.equal(guard("Grep", { pattern: "x", glob: "escape/*.json" }), "tool_path");
   }
+  assert.equal(guard("Glob", { pattern: "lib/*.ts" }), null);
+  assert.equal(guard("Glob", { pattern: "*.ts", directory: "lib" }), null);
   // The hook: one decision line per call, exit 2 to block, and anything it
   // cannot read is blocked too.
   const log = join(root, "kimi-guard.log");
@@ -368,6 +374,29 @@ test("the guard blocks before a tool runs: any other tool, an undocumented argum
   assert.equal(runAmuxV22KimiToolGuardHook({ argv: [checkout, join(root, "missing", "log")],
     stdin: () => JSON.stringify({ tool_name: "ReadFile", tool_input: { path: "lib/a.ts" } }) }), 2);
   assert.equal(realpathSync(checkout), checkout);
+});
+
+test("Kimi runs only inside a bubblewrap view: the checkout read-only, its run home, the CLI install", () => {
+  const args = amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: RUN_HOME,
+    binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi", ...GUARD });
+  assert.equal(args.at(-1), "--");
+  const binds = [];
+  for (let i = 0; i < args.length; i += 1)
+    if (["--ro-bind", "--bind"].includes(args[i])) { binds.push([args[i], args[i + 1]]); i += 2; }
+  assert.deepEqual(binds, [["--ro-bind", "/usr"], ["--ro-bind", "/etc"],
+    ["--ro-bind", "/opt/tomverse-amux-v22"], ["--ro-bind", GUARD.nodePath],
+    ["--ro-bind", GUARD.guardPath], ["--ro-bind", WORKTREE], ["--bind", RUN_HOME]]);
+  // The network stays (the CLI calls Kimi Code); nothing else of the box is in view.
+  assert.ok(!args.includes("--unshare-net") && !args.includes("--proc") && !args.includes("--bind-try"));
+  assert.ok(args.includes("--die-with-parent") && args.includes("--unshare-user"));
+  assert.deepEqual(args.slice(args.indexOf("--chdir"), args.indexOf("--chdir") + 2), ["--chdir", WORKTREE]);
+  for (const binaryPath of ["/home/tommy/.local/bin/kimi", "/opt/tomverse-amux-v22-x/kimi"])
+    assert.throws(() => amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: RUN_HOME,
+      binaryPath, ...GUARD }), /root-owned install/);
+  assert.throws(() => amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: `${WORKTREE}/home`,
+    binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi", ...GUARD }), /overlap/);
+  assert.throws(() => amuxV22KimiSandboxArgs({ worktreePath: "/srv/a b", runHomePath: RUN_HOME,
+    binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi", ...GUARD }), /unsafe path/);
 });
 
 test("the guard log counts only the lines the guard writes", async () => {
@@ -516,11 +545,19 @@ test("a Kimi review run reads its prompt from stdin and its tokens from the run 
       config: { ...value, homePath: RUN_HOME, claudeConfigDir: `${RUN_HOME}/.config` },
       copilotToken: null, cleanup: async () => {} }) });
   assert.deepEqual(read, [RUN_HOME, RUN_HOME]);
-  const { args, spawnOptions } = fake.calls[0];
+  const { binary, args: spawned, spawnOptions } = fake.calls[0];
+  // The spawn is bwrap; the CLI and its own arguments follow the view's "--".
+  assert.equal(binary, "/usr/bin/bwrap");
+  const cut = spawned.indexOf("--");
+  assert.deepEqual(spawned.slice(0, cut + 1), amuxV22KimiSandboxArgs({ worktreePath: WORKTREE,
+    runHomePath: RUN_HOME, binaryPath: config.binaryPath, ...GUARD }));
+  assert.equal(spawned[cut + 1], config.binaryPath);
+  const args = spawned.slice(cut + 2);
   assert.equal(JSON.parse(args[args.indexOf("--config") + 1]).hooks[0].command, HOOK);
   assert.equal(Buffer.concat(fake.calls[0].stdin).toString("utf8"), "Review the change.");
   assert.ok(!args.includes("Review the change."));
   assert.deepEqual(args.slice(0, 2), ["--print", "--input-format"]);
+  assert.ok(!spawned.includes("Review the change."));
   assert.ok(args.includes(`${RUN_HOME}/.amux-v22/kimi-read.yaml`));
   assert.equal(spawnOptions.env.KIMI_SHARE_DIR, join(RUN_HOME, ".kimi"));
   assert.equal(spawnOptions.env.KIMI_CLI_NO_AUTO_UPDATE, "1");
