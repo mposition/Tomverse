@@ -715,6 +715,9 @@ test("an account at its message storage limit is refused before the turn is rese
   const prior = process.env.API_MAX_MESSAGE_BYTES_PER_USER;
   // Less than one answer's worth of room.
   process.env.API_MAX_MESSAGE_BYTES_PER_USER = "1";
+  // A fresh turn, as `start` makes one: no attempt left from the last test for
+  // the pre-Router peek to find.
+  row = null;
   terminals.length = 0;
   ledger.settlements = [];
   world.messages = [];

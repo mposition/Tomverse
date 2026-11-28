@@ -13,6 +13,11 @@ import {
   validatePromptRefinerChatExecution,
 } from "@/lib/promptRefinerChatExecutionCore";
 import { preflightInputEstimate } from "@/lib/autoDispatchPreflight";
+import {
+  chatResponseAttemptFingerprint,
+  decideAttemptClaim,
+  type ChatResponseAttemptIdentity,
+} from "@/lib/chatResponseAttemptCore";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { DispatchBoundaryError } from "@/lib/routingAttemptStore";
 
@@ -1044,9 +1049,37 @@ let durableTerminalFails = false;
 /** The conversation a pre-Router peek finds an attempt bound in; null is none. */
 let peekedAttemptConversationId: string | null = null;
 let durablePeekCalls = 0;
+/**
+ * When set, the claim decides as the real one does: the stored identity's
+ * fingerprint from lib/chatResponseAttemptCore.ts, compared by
+ * `decideAttemptClaim`. The peek then reads this store too, unless
+ * `realPeekBlind` makes it miss (two POSTs racing before either claimed).
+ */
+let realClaimStore: Map<string, ChatResponseAttemptIdentity> | null = null;
+let realPeekBlind = false;
 class DurableConflict extends Error {
   readonly code = "CHAT_ATTEMPT_ID_REUSED";
 }
+const realClaimDisposition = (input: Record<string, unknown>) => {
+  const identity: ChatResponseAttemptIdentity = {
+    assistantMessageId: String(input.assistantMessageId),
+    userId: String(input.userId),
+    conversationId: String(input.conversationId),
+    sourceUserMessageId: String(input.sourceUserMessageId),
+    requestedModelId: String(input.requestedModelId),
+    fingerprint: chatResponseAttemptFingerprint({
+      conversationId: String(input.conversationId),
+      sourceUserMessageId: String(input.sourceUserMessageId),
+      requestedModelId: String(input.requestedModelId),
+      requestPayloadDigest: String(input.requestPayloadDigest),
+    }),
+  };
+  const existing = realClaimStore!.get(identity.assistantMessageId) ?? null;
+  const decision = decideAttemptClaim(existing, identity);
+  if (decision.action === "conflict") throw new DurableConflict();
+  if (decision.action === "create") realClaimStore!.set(identity.assistantMessageId, identity);
+  return decision.action === "reattach" ? "reattach" as const : "claimed" as const;
+};
 mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
   namedExports: {
     ChatAttemptCapacityError: class extends Error {
@@ -1058,6 +1091,7 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
     peekChatResponseAttempt: async (_userId: string, assistantMessageId: string) => {
       durablePeekCalls += 1;
+      if (realClaimStore) return realPeekBlind ? null : realClaimStore.get(assistantMessageId) ?? null;
       return peekedAttemptConversationId === null
         ? null
         : { assistantMessageId, conversationId: peekedAttemptConversationId };
@@ -1065,11 +1099,12 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     claimChatResponseAttempt: async (input: Record<string, unknown>) => {
       durableClaimCalls += 1;
       lastDurableClaimInput = input;
-      if (durableClaimMode === "conflict") throw new DurableConflict();
+      const realDisposition = realClaimStore ? realClaimDisposition(input) : null;
+      if (!realDisposition && durableClaimMode === "conflict") throw new DurableConflict();
       return {
-      disposition: durableClaimMode === "reattach-completed"
+      disposition: realDisposition ?? (durableClaimMode === "reattach-completed"
         ? "reattach"
-        : durableClaimMode,
+        : durableClaimMode),
       attempt: {
         ...input,
         fingerprint: "a".repeat(64),
@@ -2359,6 +2394,70 @@ test("an exact durable replay reattaches without reservation or provider dispatc
   assert.equal("fingerprint" in payload.attempt, false);
   assert.equal("ownerId" in payload.attempt, false);
   assert.equal("leaseExpiresAt" in payload.attempt, false);
+});
+
+/*
+  Review finding (B3, 2026-11-28): the claim's request digest was taken after
+  the Router's rewrite, so a repeat that skipped the Router -- or asked it and
+  got other words -- digested different messages and a legitimate reattach was
+  refused as CHAT_ATTEMPT_ID_REUSED. The claim here decides with the real
+  fingerprint and `decideAttemptClaim`, over the digest the route computed.
+*/
+test("a repeat of a turn the Router rewrote reattaches through the real identity digest, Router asked again or not", async () => {
+  realClaimStore = new Map();
+  llmRouterRewrite = "Rewritten by the Router.";
+  try {
+    llmRouterInputs.length = 0;
+    await ask("answers", "claimed", 200, false);
+    assert.equal(llmRouterInputs.length, 1);
+    assert.ok(JSON.stringify(attempts[0].messages).includes("Rewritten by the Router."),
+      "the provider was sent the rewrite");
+    assert.equal(realClaimStore.size, 1);
+    const firstDigest = lastDurableClaimInput?.requestPayloadDigest;
+    assert.equal(typeof firstDigest, "string");
+
+    // The same POST again: bound, so no Router call, and the same identity.
+    llmRouterInputs.length = 0;
+    const repeat = await ask("answers", "claimed", 200, false);
+    assert.equal(llmRouterInputs.length, 0);
+    assert.equal(repeat.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
+    assert.equal(attempts.length, 0, "a reattach dispatches nothing");
+
+    // A duplicate that raced the claim, asked the Router and got other words.
+    realPeekBlind = true;
+    llmRouterRewrite = "Different words from a second Router call.";
+    llmRouterInputs.length = 0;
+    const raced = await ask("answers", "claimed", 200, false);
+    assert.equal(llmRouterInputs.length, 1);
+    assert.equal(raced.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
+
+    // A different request under the same id is still the generic 409.
+    realPeekBlind = false;
+    const different = await ask("answers", "claimed", 409, false, undefined, true, true, undefined, "always");
+    assert.equal((JSON.parse(different.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
+    assert.notEqual(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
+  } finally {
+    realClaimStore = null;
+    realPeekBlind = false;
+    llmRouterRewrite = null;
+  }
+});
+
+test("a turn the Router did not rewrite keeps the identity digest it always had", async () => {
+  // Without a rewrite the digest is of the execution view, as before: the
+  // durable identity of every existing non-rewritten attempt is unchanged.
+  realClaimStore = new Map();
+  try {
+    await ask("answers", "claimed", 200, false);
+    const digest = lastDurableClaimInput?.requestPayloadDigest;
+    const repeat = await ask("answers", "claimed", 200, false);
+    assert.equal(repeat.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(lastDurableClaimInput?.requestPayloadDigest, digest);
+  } finally {
+    realClaimStore = null;
+  }
 });
 
 test("a POST whose assistant id is already bound skips the paid Router and still reattaches at the claim", async () => {

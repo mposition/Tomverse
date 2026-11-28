@@ -3079,6 +3079,19 @@ async function handleChatPost(
         // never on top of a Refiner suggestion already applied, and only to the
         // execution view -- the stored user message stays as the user wrote it.
         let autoRewrite: string | null = null;
+        /*
+          The view the Router was handed, kept when it rewrites it. The durable
+          attempt's identity is digested from this, not from the rewrite: the
+          rewrite is a model's output, so a repeat of the same request -- a
+          POST reattachment, which no longer asks the Router at all when its
+          attempt is already bound, or a duplicate that does and gets other
+          words back -- must still name the same attempt rather than be refused
+          as a different request under that id
+          (docs/policy/chat-durable-draft-and-attempt-recovery.md section 3).
+          Only set when a rewrite applied, and a rewrite never applies on top
+          of a Refiner view, so nothing reassigns the messages after it.
+        */
+        let messagesBeforeRouterRewrite: typeof executionMessages | null = null;
         if (
             !guestAutoSelection?.routed &&
             autoSelection.routed &&
@@ -3087,6 +3100,7 @@ async function handleChatPost(
         ) {
             const rewritten = withRouterRewrite(executionMessages, llmPick.rewrite);
             if (rewritten !== executionMessages) {
+                messagesBeforeRouterRewrite = executionMessages;
                 executionMessages = [...rewritten];
                 autoRewrite = llmPick.rewrite;
             }
@@ -3996,7 +4010,10 @@ async function handleChatPost(
             });
             const ownerId = randomUUID();
             const requestPayloadDigest = chatResponseAttemptRequestPayloadDigest({
-                messages: executionMessages,
+                // The request as the Router received it; see
+                // `messagesBeforeRouterRewrite`. Without a rewrite this is the
+                // execution view, exactly as before.
+                messages: messagesBeforeRouterRewrite ?? executionMessages,
                 requestedModelId,
                 webSearchMode: webSearchMode ?? "off",
                 researchMode: researchMode ?? null,
