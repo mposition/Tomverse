@@ -30,8 +30,11 @@ export const base64SizeOf = (bytes: number) =>
   Number.isFinite(bytes) && bytes > 0 ? Math.ceil(bytes / 3) * 4 : 0;
 
 /**
- * The keys of the earlier images to leave out, oldest first, and what the
- * message being sent keeps for itself. `slots` are in conversation order.
+ * The keys of the earlier direct images to leave out, oldest first, so that
+ * the images left fit the limits. `slots` are in conversation order. Images the
+ * plan cannot see (inside an archive, or of a guest, whose size is not known)
+ * are handled when they are read: the message being sent is read first, so they
+ * take their share before any earlier image does.
  */
 export function planImageOmissions(slots: readonly ImageSlot[], limits: ImageLimits) {
   const maxImages = limits.maxImages && limits.maxImages > 0 ? limits.maxImages : 0;
@@ -51,14 +54,20 @@ export function planImageOmissions(slots: readonly ImageSlot[], limits: ImageLim
     keptBytes -= slot.base64Bytes;
   }
 
-  const own = slots.filter((slot) => slot.latest);
-  return {
-    omitted,
-    /** Held back from earlier messages that are read at run time. */
-    reserveCount: own.length,
-    reserveBase64Bytes: own.reduce((sum, slot) => sum + slot.base64Bytes, 0),
-  };
+  return { omitted };
 }
+
+/**
+ * The order a conversation's messages are read in: the message being sent
+ * first, then the earlier ones oldest first. Everything shared across a request
+ * -- the image allowance, the text and OCR budgets -- goes to the message being
+ * sent before any earlier message can spend it.
+ */
+export const messageReadingOrder = (count: number): number[] => {
+  const order = Array.from({ length: Math.max(0, count) }, (_, index) => index);
+  if (order.length > 1) order.unshift(order.pop() as number);
+  return order;
+};
 
 /** The limit as the person reads it, from the model's own setting. */
 export const describeImagePayloadLimit = (bytes: number) => {

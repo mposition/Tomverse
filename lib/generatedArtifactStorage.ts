@@ -504,6 +504,7 @@ export const sweepOrphanedArtifactObjects = async (
       )
       .catch(() => null);
 
+    let firstFailedKey: string | null = null;
     const page = await listR2ObjectsPage(ARTIFACT_OBJECT_PREFIX, {
       startAfter,
       maxKeys: ARTIFACT_ORPHAN_SWEEP_BATCH,
@@ -532,6 +533,7 @@ export const sweepOrphanedArtifactObjects = async (
           deleted += 1;
         } catch (error) {
           failed += 1;
+          firstFailedKey ??= key;
           console.error("Orphaned artifact cleanup failed for one object:", {
             key,
             error,
@@ -540,13 +542,23 @@ export const sweepOrphanedArtifactObjects = async (
       }
     }
 
-    // Moved on only after the page was handled, so a failure above repeats it.
+    // Where the next run continues. Past the page -- unless a delete failed:
+    // then it continues from just before the first key that failed, so that
+    // key is tried again next run rather than after a whole lap of the listing.
+    // A key that fails twice in a row, at the same place, is let go for this
+    // lap, so one object that cannot be deleted does not hold the sweep still.
+    let resumeAfter = page.nextStartAfter;
+    if (firstFailedKey) {
+      const at = page.objects.findIndex((object) => object.key === firstFailedKey);
+      const holdAt = at > 0 ? page.objects[at - 1].key : (startAfter ?? ARTIFACT_OBJECT_PREFIX);
+      if (holdAt !== startAfter) resumeAfter = holdAt;
+    }
     try {
-      if (page.nextStartAfter) {
+      if (resumeAfter) {
         await prisma.appSetting.upsert({
           where: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY },
-          create: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY, value: page.nextStartAfter },
-          update: { value: page.nextStartAfter },
+          create: { key: ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY, value: resumeAfter },
+          update: { value: resumeAfter },
         });
       } else if (startAfter) {
         await prisma.appSetting.deleteMany({

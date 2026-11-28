@@ -154,3 +154,56 @@ test("a saved position outside the prefix is ignored", async () => {
   assert.equal(listCalls[0].startAfter ?? null, null);
   assert.equal(result.deleted, 1);
 });
+
+test("a failed delete keeps the sweep's position before that key, and a second failure there lets it go", async () => {
+  reset();
+  const { sweepOrphanedArtifactObjects, ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY } = await load();
+  // a-1 and a-2 are in use, a-3 is an orphan that cannot be deleted, b-1 is fine.
+  for (const name of ["a-1", "a-2"]) {
+    bucket.push(object(name));
+    referencedKeys.add(`${PREFIX}${name}`);
+  }
+  bucket.push(object("a-3"), object("b-1"), object("b-2"), object("b-3"));
+  referencedKeys.add(`${PREFIX}b-1`);
+  referencedKeys.add(`${PREFIX}b-2`);
+  referencedKeys.add(`${PREFIX}b-3`);
+  failDeleteFor = `${PREFIX}a-3`;
+  const originalError = console.error;
+  console.error = () => undefined;
+  try {
+    // First page is a-1..a-3: the delete of a-3 fails, so the next run starts after a-2.
+    assert.equal((await sweepOrphanedArtifactObjects(NOW)).failed, 1);
+    assert.equal(settings.get(ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY), `${PREFIX}a-2`);
+    // It is tried again, first in its page, and fails again: now the sweep moves on.
+    assert.equal((await sweepOrphanedArtifactObjects(NOW)).failed, 1);
+    assert.equal(listCalls[1].startAfter, `${PREFIX}a-2`);
+    assert.equal(settings.get(ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY), `${PREFIX}b-2`);
+    // Once the delete works, the retry deletes it.
+    failDeleteFor = null;
+    settings.set(ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY, `${PREFIX}a-2`);
+    assert.deepEqual(await sweepOrphanedArtifactObjects(NOW), { examined: 3, deleted: 1, failed: 0 });
+    assert.deepEqual(deletedKeys, [`${PREFIX}a-3`]);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("a delete that fails on the very first key holds the sweep at the start of the prefix, once", async () => {
+  reset();
+  const { sweepOrphanedArtifactObjects, ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY } = await load();
+  bucket.push(object("a-1"), object("a-2"), object("a-3"), object("a-4"));
+  referencedKeys.add(`${PREFIX}a-2`);
+  referencedKeys.add(`${PREFIX}a-3`);
+  referencedKeys.add(`${PREFIX}a-4`);
+  failDeleteFor = `${PREFIX}a-1`;
+  const originalError = console.error;
+  console.error = () => undefined;
+  try {
+    await sweepOrphanedArtifactObjects(NOW);
+    assert.equal(settings.get(ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY), PREFIX);
+    await sweepOrphanedArtifactObjects(NOW);
+    assert.equal(settings.get(ARTIFACT_ORPHAN_SWEEP_CURSOR_KEY), `${PREFIX}a-3`);
+  } finally {
+    console.error = originalError;
+  }
+});

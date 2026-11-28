@@ -238,7 +238,6 @@ const { parentPort, workerData } = require("node:worker_threads");
 
         let text = "";
         const textlessPages = [];
-        let scannedPages = 0;
         const maxCharacters = Math.max(0, Number(workerData.maxCharacters) || 0);
         for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
             if (text.length >= maxCharacters) break;
@@ -248,7 +247,6 @@ const { parentPort, workerData } = require("node:worker_threads");
                 disableNormalization: false,
             });
             const pageText = pageLines(content.items);
-            scannedPages = pageNumber;
             if (pageText) {
                 text += (text ? "\\n\\n" : "") + "[Page " + pageNumber + "]\\n" + pageText;
                 if (text.length > maxCharacters) {
@@ -268,7 +266,6 @@ const { parentPort, workerData } = require("node:worker_threads");
             text,
             textlessPages,
             pageCount: document.numPages,
-            scannedPages,
         });
     } catch {
         if (document) {

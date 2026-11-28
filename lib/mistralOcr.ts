@@ -37,7 +37,17 @@ export class MistralOcrError extends Error {
 
 export type MistralOcrResult = {
   text: string;
+  /** Pages the provider returned, which is what it bills. */
   pageCount: number;
+  /**
+   * 1-based pages whose text is in `text`: returned with content, and not cut
+   * off by the character limit. A page the provider skipped or returned empty
+   * is not here, and a caller that asked for specific pages checks them against
+   * this list rather than taking any text as proof they were read.
+   */
+  pageNumbers: number[];
+  /** The text was cut at the character limit. */
+  truncated: boolean;
   modelId: typeof MISTRAL_OCR_MODEL_ID;
 };
 
@@ -124,19 +134,34 @@ export async function extractPdfTextWithMistralOcr(
     throw new MistralOcrError("Mistral OCR returned an invalid response shape.");
   }
 
-  const text = validated.data.pages
-    .map((page, position) => {
-      const pageNumber = (page.index ?? position) + 1;
-      return `## Page ${pageNumber}\n\n${page.markdown.trim()}`;
-    })
-    .filter((page) => page.length > 0)
-    .join("\n\n")
-    .trim()
-    .slice(0, maxCharacters);
+  const requested = dependencies.pages?.length ? new Set(dependencies.pages) : null;
+  const blocks: Array<{ pageNumber: number; block: string }> = [];
+  validated.data.pages.forEach((page, position) => {
+    // The page's own index; without one, its place among the pages asked for.
+    const pageNumber =
+      page.index !== undefined
+        ? page.index + 1
+        : (dependencies.pages?.[position] ?? position + 1);
+    const markdown = page.markdown.trim();
+    if (!markdown || (requested && !requested.has(pageNumber))) return;
+    blocks.push({ pageNumber, block: `## Page ${pageNumber}\n\n${markdown}` });
+  });
+  const joined = blocks.map((entry) => entry.block).join("\n\n");
+  const text = joined.slice(0, maxCharacters).trim();
+  // A page counts as read while any of its text survives the cut.
+  const pageNumbers: number[] = [];
+  let offset = 0;
+  for (const entry of blocks) {
+    if (offset >= maxCharacters) break;
+    pageNumbers.push(entry.pageNumber);
+    offset += entry.block.length + 2;
+  }
 
   return {
     text,
     pageCount: validated.data.pages.length,
+    pageNumbers,
+    truncated: joined.length > maxCharacters,
     modelId: MISTRAL_OCR_MODEL_ID,
   };
 }

@@ -5,6 +5,7 @@ import test from "node:test";
 import {
     base64SizeOf,
     describeImagePayloadLimit,
+    messageReadingOrder,
     planImageOmissions,
 } from "../lib/chatImageBudget.ts";
 import { PAST_ATTACHMENT_OMITTED_KIND, PAST_IMAGE_OMITTED_TEXT } from "../lib/chatAttachmentLimits.ts";
@@ -22,7 +23,6 @@ test("the oldest earlier images leave first, and the message being sent keeps it
         { maxImages: 4 }
     );
     assert.deepEqual([...plan.omitted], ["0:0"]);
-    assert.equal(plan.reserveCount, 2);
 
     const crowded = planImageOmissions(
         [slot("0:0"), slot("0:1"), slot("2:0"), slot("4:0", true), slot("4:1", true)],
@@ -38,7 +38,6 @@ test("nothing is left out while the images fit; an overflow made by the new mess
     // refuses the turn for them with the model's own limit.
     const plan = planImageOmissions([slot("1:0", true), slot("1:1", true), slot("1:2", true)], { maxImages: 2 });
     assert.equal(plan.omitted.size, 0);
-    assert.equal(plan.reserveCount, 3);
 });
 
 test("the byte allowance is spent newest first as well", () => {
@@ -48,8 +47,7 @@ test("the byte allowance is spent newest first as well", () => {
         { maxBase64ImagePayloadBytes: 7 * MB }
     );
     assert.deepEqual([...plan.omitted], ["0:0"]);
-    assert.equal(plan.reserveBase64Bytes, 3 * MB);
-});
+  });
 
 test("a base64 size is estimated from the stored size, and the limit is named from the model's own setting", () => {
     assert.equal(base64SizeOf(3), 4);
@@ -76,7 +74,6 @@ test("the route plans the image allowance before reading and never refuses a tur
     const image = route.slice(route.indexOf('if (format.category === "image") {'));
     const beforeNormalize = image.slice(0, image.indexOf("let normalized: Buffer;"));
     assert.match(beforeNormalize, /if \(!isLatestMessage\) \{\s*if \(leaveOut\) return leaveOutEarlierImage\(\);/);
-    assert.match(image.slice(0, 4000), /imagePlan\.reserveBase64Bytes/);
 });
 
 test("the text cache version moved with the line-preserving PDF extraction, below the audio band", () => {
@@ -96,7 +93,7 @@ test("a PDF with some text-less pages is not read as complete", () => {
     assert.match(branch, /isLatestMessage &&\s*!fromArchive &&\s*modelSupportsNativePdfInput\(modelConfig\)/);
     // ...otherwise the pages go through the same OCR path, and are named when they are not read.
     assert.match(branch, /runPdfOcr\(ocrRoom, textlessPdfPages\)/);
-    assert.match(branch, /describeUnreadPdfPages\(textlessPdfPages\)/);
+    assert.match(branch, /describeUnreadPdfPages\(unread\)/);
     // The notice is not stored as the file's text.
     assert.match(branch, /textCacheBlocked = true;/);
     // The original is part of the estimate: native file parts are priced with the flat allowance.
@@ -112,4 +109,41 @@ test("OCR runs under the archive allowance and the usage ledger, and is shared b
     // Keyed by the account and the file's content: never across accounts.
     assert.match(branch, /access\.userId\s*\? `\$\{access\.userId\}:\$\{createHash\("sha256"\)/);
     assert.match(route, /const pdfOcrInFlight = new Map</);
+});
+
+// Review r-20261128-050408-534dfc.
+test("the message being sent is read first, then the earlier ones oldest first", () => {
+    assert.deepEqual(messageReadingOrder(0), []);
+    assert.deepEqual(messageReadingOrder(1), [0]);
+    assert.deepEqual(messageReadingOrder(2), [1, 0]);
+    assert.deepEqual(messageReadingOrder(5), [4, 0, 1, 2, 3]);
+});
+
+test("the route reads the message being sent before any earlier one, and sends them in conversation order", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.match(route, /for \(const messageIndex of messageReadingOrder\(executionMessages\.length\)\) \{/);
+    assert.match(route, /const builtMessages: ModelMessage\[\]\[\] = executionMessages\.map\(\(\) => \[\]\);/);
+    assert.match(route, /for \(const built of builtMessages\) formattedMessages\.push\(\.\.\.built\);/);
+    // Nothing in the loop writes straight to the conversation any more.
+    const loop = route.slice(route.indexOf("for (const messageIndex of messageReadingOrder"), route.indexOf("for (const built of builtMessages)"));
+    assert.ok(!loop.includes("formattedMessages.push"));
+    // An earlier image is judged against totals the message being sent already holds: nothing is reserved for it.
+    assert.ok(!route.includes("imagePlan.reserveCount") && !route.includes("imagePlan.reserveBase64Bytes"));
+});
+
+test("OCR sharing is keyed by the character budget, and a cut or short result is never stored as the file's text", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.ok(route.includes('${pages?.join(",") ?? "all"}:${maxCharacters}`'));
+    assert.ok(!route.includes("result.text.slice(0, maxCharacters)"));
+    assert.match(route, /if \(ocrResult\.truncated\) textCacheBlocked = true;/);
+    // Each page asked for is checked against the pages the provider answered.
+    assert.match(route, /const answered = new Set\(scanned\?\.pageNumbers \?\? \[\]\);/);
+    assert.match(route, /textlessPdfPages\.filter\(\(page\) => !answered\.has\(page\)\)/);
+    assert.match(route, /describeUnreadPdfPages\(unread\)/);
+    assert.match(route, /if \(unread\.length === 0 && !scanned\?\.truncated\) return "ok";/);
+});
+
+test("the PDF text worker reports only what the reader uses", () => {
+    const worker = source("lib/mediaSecurity.ts");
+    assert.ok(!worker.includes("scannedPages"));
 });

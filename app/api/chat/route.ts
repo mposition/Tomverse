@@ -283,6 +283,7 @@ import {
 import {
     base64SizeOf,
     describeImagePayloadLimit,
+    messageReadingOrder,
     planImageOmissions,
     type ImageSlot,
 } from "@/lib/chatImageBudget";
@@ -4290,11 +4291,13 @@ async function handleChatPost(
         // User files (images, native PDFs) the provider is sent as file parts.
         let nativeFilePartCount = 0;
 
-        // Which earlier images make room for the ones being sent now. Earlier
-        // messages are read oldest first, so without this plan their images
-        // used the model's per-request image allowance before the new message's
-        // did, and the new image was the one refused. The oldest earlier images
-        // are left out instead; only the message's own overflow is an error.
+        // The message being sent is read FIRST, whatever its files are made of
+        // (an archive's images and a guest's unsized images included), so
+        // every allowance -- images, text, OCR -- is spent on it before any
+        // earlier message touches it; only its own overflow is an error. The
+        // earlier messages follow, oldest first, and take what is left. This
+        // plan decides which of the earlier direct images go, oldest first,
+        // so the newest earlier ones are the ones kept.
         const imageSlots: ImageSlot[] = [];
         if (
             modelConfig.inputCapabilities?.maxImages ||
@@ -4334,7 +4337,10 @@ async function handleChatPost(
             modelConfig.inputCapabilities ?? {}
         );
 
-        for (const [messageIndex, msg] of executionMessages.entries()) {
+        // Messages are built in this order but sent in conversation order.
+        const builtMessages: ModelMessage[][] = executionMessages.map(() => []);
+        for (const messageIndex of messageReadingOrder(executionMessages.length)) {
+            const msg = executionMessages[messageIndex];
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
                 const preserved = providerContextQueues.get(content)?.shift();
@@ -4342,11 +4348,11 @@ async function handleChatPost(
                     estimatedInputTokens += estimateTextTokens(
                         providerContextText(preserved)
                     );
-                    formattedMessages.push(...preserved);
+                    builtMessages[messageIndex].push(...preserved);
                     continue;
                 }
                 estimatedInputTokens += estimateTextTokens(content);
-                formattedMessages.push({ role: "assistant", content });
+                builtMessages[messageIndex].push({ role: "assistant", content });
                 continue;
             }
 
@@ -4426,10 +4432,10 @@ async function handleChatPost(
                     };
                     if (!isLatestMessage) {
                         if (leaveOut) return leaveOutEarlierImage();
+                        // The message being sent has already taken its share.
                         if (
                             imageCapabilities?.maxImages &&
-                            totalImageCount + 1 + imagePlan.reserveCount >
-                                imageCapabilities.maxImages
+                            totalImageCount + 1 > imageCapabilities.maxImages
                         ) {
                             return leaveOutEarlierImage();
                         }
@@ -4462,9 +4468,7 @@ async function handleChatPost(
                     if (
                         !isLatestMessage &&
                         imageCapabilities?.maxBase64ImagePayloadBytes &&
-                        totalBase64ImagePayloadBytes +
-                            encodedBytes +
-                            imagePlan.reserveBase64Bytes >
+                        totalBase64ImagePayloadBytes + encodedBytes >
                             imageCapabilities.maxBase64ImagePayloadBytes
                     ) {
                         return leaveOutEarlierImage();
@@ -4671,15 +4675,13 @@ async function handleChatPost(
                     ): Promise<MistralOcrResult | null> => {
                         paidExternalWorkStarted = true;
                         const flightKey = access.userId
-                            ? `${access.userId}:${createHash("sha256").update(buffer).digest("hex")}:${pages?.join(",") ?? "all"}`
+                            ? `${access.userId}:${createHash("sha256").update(buffer).digest("hex")}:${pages?.join(",") ?? "all"}:${maxCharacters}`
                             : null;
+                        // The character budget is part of the key: a result cut
+                        // for a smaller budget is not the answer for a larger
+                        // one, which runs by itself.
                         const shared = flightKey ? pdfOcrInFlight.get(flightKey) : undefined;
-                        if (shared) {
-                            const result = await shared;
-                            return result
-                                ? { ...result, text: result.text.slice(0, maxCharacters) }
-                                : null;
-                        }
+                        if (shared) return shared;
                         const call = (async () => {
                             const ocrResult = await extractPdfTextWithMistralOcr(
                                 buffer,
@@ -4775,6 +4777,8 @@ async function handleChatPost(
                             const ocrResult = await runPdfOcr(remainingCharacters - 64);
                             if (ocrResult?.text) {
                                 extractedPdfText = ocrResult.text;
+                                // Cut at the budget: never stored as the file's text.
+                                if (ocrResult.truncated) textCacheBlocked = true;
                             }
                         } catch (error) {
                             logRequestError(
@@ -4822,7 +4826,7 @@ async function handleChatPost(
                             });
                             return "ok";
                         }
-                        let scannedText = "";
+                        let scanned: MistralOcrResult | null = null;
                         const ocrRoom =
                             CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters - 64;
                         const ocrAllowance =
@@ -4835,8 +4839,7 @@ async function handleChatPost(
                                     pdfValidated = true;
                                 }
                                 if (fromArchive) archiveOcrUsed += 1;
-                                scannedText =
-                                    (await runPdfOcr(ocrRoom, textlessPdfPages))?.text ?? "";
+                                scanned = await runPdfOcr(ocrRoom, textlessPdfPages);
                             } catch (error) {
                                 logRequestError(
                                     "mistral_ocr_failed",
@@ -4846,19 +4849,24 @@ async function handleChatPost(
                                 );
                             }
                         }
+                        // Text coming back is not proof the pages were read: the
+                        // provider may skip a page or return it empty. Each page
+                        // asked for is checked against the pages it answered.
+                        const answered = new Set(scanned?.pageNumbers ?? []);
+                        const unread = textlessPdfPages.filter((page) => !answered.has(page));
                         if (
-                            scannedText &&
-                            addExtractedText(`${format.promptKind} (scanned pages)`, scannedText)
+                            scanned?.text &&
+                            !addExtractedText(`${format.promptKind} (scanned pages)`, scanned.text)
                         ) {
                             return "ok";
                         }
-                        // The pages stay unread, so a later turn must read the
-                        // file afresh rather than take this notice as its text.
+                        if (unread.length === 0 && !scanned?.truncated) return "ok";
+                        // Some pages stay unread, so a later turn must read the
+                        // file afresh rather than take this text as the whole.
                         textCacheBlocked = true;
-                        addExtractedText(
-                            "PDF page notice",
-                            describeUnreadPdfPages(textlessPdfPages)
-                        );
+                        if (unread.length > 0) {
+                            addExtractedText("PDF page notice", describeUnreadPdfPages(unread));
+                        }
                         return "ok";
                     }
 
@@ -5679,7 +5687,7 @@ async function handleChatPost(
             if (textAttachments.length === 0 && fileParts.length === 0) {
                 const content = String(msg.content ?? "");
                 estimatedInputTokens += estimateTextTokens(content);
-                formattedMessages.push({ role: "user", content });
+                builtMessages[messageIndex].push({ role: "user", content });
                 continue;
             }
 
@@ -5712,7 +5720,7 @@ async function handleChatPost(
                 estimateTextTokens(text) + nativeAttachmentTokens;
 
             nativeFilePartCount += fileParts.length;
-            formattedMessages.push({
+            builtMessages[messageIndex].push({
                 role: "user",
                 content: [
                     { type: "text", text: text || "Please analyze the attached file." },
@@ -5720,6 +5728,7 @@ async function handleChatPost(
                 ],
             });
         }
+        for (const built of builtMessages) formattedMessages.push(...built);
         if (isResearchPreview) {
             // Replace every ordinary Chat prelude with the same one-shot
             // payload the offer and reservation helpers measured.
