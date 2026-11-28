@@ -75,6 +75,47 @@ test("a mermaid block is shown as its code until a diagram is drawn", () => {
   assert.ok(!html.includes("chat-mermaid-diagram"));
 });
 
+/* ---------------------------------------------------------------- chart */
+
+const chartBlock = (spec: object) => ["```chart", JSON.stringify(spec), "```"].join("\n");
+const figureOf = (html: string) => html.match(/<figure[\s\S]*?<\/figure>/)?.[0] ?? "";
+const barSpec = { type: "bar", title: "Revenue", labels: ["Q1", "Q2"], series: [{ name: "2026", values: [120, 150] }] };
+
+test("a finished answer's chart block is drawn with its data as a table", () => {
+  const html = render([question, answerWith(chartBlock(barSpec))]);
+  assert.match(html, /data-testid="chat-chart"/);
+  assert.equal(count(figureOf(html), /<rect /g), 2);
+  assert.match(html, /<figcaption[^>]*>Revenue<\/figcaption>/);
+  assert.match(html, /role="img" aria-label="Bar chart: Revenue"/);
+  assert.match(html, /<table[^>]*data-testid="chat-chart-data"/);
+  assert.ok(!html.includes("chat-code-copy-button"));
+});
+
+test("each chart kind draws, in Korean too", () => {
+  const kinds = [
+    { type: "line", labels: ["a", "b", "c"], series: [{ name: "x", values: [1, 3, 2] }, { name: "y", values: [2, 2, 4] }] },
+    { type: "area", labels: ["a", "b"], series: [{ values: [1, 3] }] },
+    { type: "pie", labels: ["a", "b", "c"], series: [{ values: [1, 2, 3] }] },
+    { type: "scatter", series: [{ name: "g", points: [[1, 2], [2, 5], [3, 4]] }] },
+  ];
+  for (const spec of kinds) {
+    const html = render([question, answerWith(chartBlock(spec))], {}, "ko");
+    assert.match(html, new RegExp(`data-chart-type="${spec.type}"`));
+    assert.ok(!html.includes("NaN"), spec.type);
+  }
+  assert.match(render([question, answerWith(chartBlock(kinds[2]))], {}, "ko"), /원형 차트/);
+  assert.equal(count(figureOf(render([question, answerWith(chartBlock(kinds[3]))])), /<circle /g), 3);
+});
+
+test("a chart is code while the answer streams, and when its spec is invalid", () => {
+  const streaming = render([question, answerWith(chartBlock(barSpec))], { isSending: true });
+  assert.ok(!streaming.includes("chat-chart"));
+  assert.match(streaming, /data-testid="chat-code-copy-button"/);
+  const invalid = render([question, answerWith(chartBlock({ type: "bar", labels: ["a"], series: [{ values: [1, 2] }] }))]);
+  assert.ok(!invalid.includes("data-testid=\"chat-chart\""));
+  assert.match(invalid, /data-testid="chat-code-copy-button"/);
+});
+
 /* --------------------------------------------- regenerate, edit, quote */
 
 test("the newest finished answer offers regenerate and another model; older ones do not", () => {

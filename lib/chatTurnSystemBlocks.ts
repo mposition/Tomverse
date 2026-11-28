@@ -60,6 +60,7 @@ import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_
 import { buildChatCurrentDatePrompt } from "@/lib/chatCurrentDatePrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { CHAT_INLINE_CHART_PROMPT, chatInlineChartPromptEnabled } from "@/lib/chatChartPrompt";
 
 export type ChatTurnSystemBlocksInput = {
   /** The turn's clock, for the date block. Defaults to now; tests pin it. */
@@ -235,12 +236,15 @@ export const buildChatTurnSystemBlocks = (
   const webSearchCapabilityPrompt =
     buildWebSearchCapabilitySystemPrompt(webSearchTurnState);
   const currentDatePrompt = buildChatCurrentDatePrompt(input.now);
+  // Off by default: it is input tokens on every turn (lib/chatChartPrompt.ts).
+  const chartPrompt = chatInlineChartPromptEnabled() ? CHAT_INLINE_CHART_PROMPT : "";
 
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: artifactPlan.systemPrompt },
     { role: "system", content: imageCapabilityPrompt },
     { role: "system", content: locationPrompt },
     { role: "system", content: currentDatePrompt },
+    ...(chartPrompt ? [{ role: "system" as const, content: chartPrompt }] : []),
     // Only on a turn that cannot search; an empty block would be a system
     // message saying nothing, priced and sent.
     ...(webSearchCapabilityPrompt
@@ -278,6 +282,7 @@ export const buildChatTurnSystemBlocks = (
   const promptTokens =
     locationTokens +
     estimateTextTokens(currentDatePrompt) +
+    estimateTextTokens(chartPrompt) +
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +

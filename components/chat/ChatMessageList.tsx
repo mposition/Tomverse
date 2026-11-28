@@ -37,6 +37,8 @@ import { useSupersededIds } from "@/components/chat/useSupersededIds";
 import { canEditQuestion, lastReplaceableTurn } from "@/lib/chatSupersededTurns";
 import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
 import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
+import { chartSpecFromPre } from "@/lib/chatChart";
+import { ChatChart } from "@/components/chat/ChatChart";
 import {
   ArrowDown,
   Bot,
@@ -512,6 +514,9 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
       <MermaidDiagram source={mermaidSource} fallback={codeBlock} label={chatTurnToolsCopy[lang].mermaidDiagram} />
     );
   }
+  // A `chart` block whose JSON spec validates; anything else stays code.
+  const chartSpec = answerRender ? chartSpecFromPre(node) : null;
+  if (chartSpec) return <ChatChart spec={chartSpec} fallback={codeBlock} />;
   return codeBlock;
 }
 
