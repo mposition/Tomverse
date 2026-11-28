@@ -23,6 +23,11 @@ let existing: Row = null;
 let groups: Array<{ id: string; groupIdempotencyKey: string; targets: Array<{ modelId: string }> }> = [];
 const requests: Array<Record<string, unknown>> = [];
 const created: Array<Record<string, unknown>> = [];
+/** Rows written by the all-panels insert, and every id already stored. */
+const createdMany: Array<Record<string, unknown>> = [];
+const storedIds = new Set<string>();
+/** `${userId}:${groupKey}` -> the reserved group's conversation. */
+const reservedGroups = new Map<string, { conversationId: string }>();
 let groupQueries = 0;
 let reused = false;
 let replayStatus = "pending";
@@ -40,11 +45,22 @@ const prismaMock = {
       created.push(data);
       return data;
     },
+    createMany: async ({ data, skipDuplicates }: { data: Array<Record<string, unknown>>; skipDuplicates?: boolean }) => {
+      assert.equal(skipDuplicates, true, "a sibling panel may already have written its rows");
+      const fresh = data.filter((row) => !storedIds.has(String(row.id)));
+      for (const row of fresh) storedIds.add(String(row.id));
+      createdMany.push(...fresh);
+      return { count: fresh.length };
+    },
   },
   imageGenerationGroup: {
     findMany: async () => {
       groupQueries += 1;
       return groups;
+    },
+    findUnique: async ({ where }: { where: { userId_groupIdempotencyKey: { userId: string; groupIdempotencyKey: string } } }) => {
+      const key = where.userId_groupIdempotencyKey;
+      return reservedGroups.get(`${key.userId}:${key.groupIdempotencyKey}`) ?? null;
     },
   },
 };
@@ -73,9 +89,10 @@ async function load() {
             status: "pending",
             reservedCredits: 15,
             reused,
-            targets: [
-              { targetId: "t1", modelId: "gpt-image-2", provider: "openai", generationId: "gen-1", status: reused ? replayStatus : "pending", reservedCredits: 15 },
-            ],
+            // One target per requested model, as the real group has.
+            targets: ((input.modelIds as string[] | undefined) ?? ["gpt-image-2"]).map((modelId, index) => (
+              { targetId: `t${index + 1}`, modelId, provider: "openai", generationId: `gen-${index + 1}`, status: reused ? replayStatus : "pending", reservedCredits: 15 }
+            )),
           };
         },
       },
@@ -95,6 +112,9 @@ const reset = () => {
   groups = [];
   requests.length = 0;
   created.length = 0;
+  createdMany.length = 0;
+  storedIds.clear();
+  reservedGroups.clear();
   groupQueries = 0;
   reused = false;
   replayStatus = "pending";
@@ -314,4 +334,98 @@ test("an edit keeps the photo's shape only where every model sells that size", a
     edit: true,
   });
   assert.equal(requests[0].size, "1024x1024");
+});
+
+/*
+  A Review image turn: the first panel request reserves the whole group, so
+  it writes every panel's answer too. Before, each panel wrote only its own,
+  and a panel whose request was refused (the image rate limit) or never sent
+  left its image charged and absent from the conversation.
+*/
+const REVIEW_GROUP = "6f1c1d3e-2222-4a2b-9c3d-000000000002";
+const reviewPanel = (index: number, overrides: Record<string, unknown> = {}) => ({
+  ...input,
+  assistantMessageId: `${REVIEW_GROUP}_${index}`,
+  modelId: index === 0 ? "google-chat" : "openai-chat",
+  imageModelIds: [index === 0 ? "fal-ai/nano-banana-2" : "gpt-image-2"],
+  imageGroupModelIds: ["fal-ai/nano-banana-2", "gpt-image-2"],
+  imageGroupPanelModelIds: ["google-chat", "openai-chat"],
+  ...overrides,
+});
+
+test("the panel request that reserves a Review group writes every panel's answer, so every paid image is shown", async () => {
+  const { turn, read } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  const result = await turn.startChatImageTurn(reviewPanel(1));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].idempotencyKey, REVIEW_GROUP);
+  assert.deepEqual(requests[0].modelIds, ["fal-ai/nano-banana-2", "gpt-image-2"]);
+  assert.deepEqual(
+    createdMany.map((row) => [row.id, row.modelId, row.role]),
+    [[`${REVIEW_GROUP}_0`, "google-chat", "assistant"], [`${REVIEW_GROUP}_1`, "openai-chat", "assistant"]]
+  );
+  assert.equal(created.length, 0, "one statement writes them all");
+  assert.equal(result.content, createdMany[1]!.content);
+  assert.deepEqual(result.pendingGenerationIds, ["gen-1", "gen-2"]);
+
+  // The other panel's request never arrives. Both images are still in the
+  // transcript, each beside its own panel's answer.
+  groups = [{ id: "group-1", groupIdempotencyKey: REVIEW_GROUP,
+    targets: [{ modelId: "fal-ai/nano-banana-2" }, { modelId: "gpt-image-2" }] }];
+  const transcript = await read.attachChatImageTurns("user-1", "conv-1",
+    createdMany.map((row) => ({ id: String(row.id), role: "assistant", content: String(row.content) })));
+  assert.deepEqual(
+    transcript.map((message: { id: string; imageTurn?: { groupId: string; modelIds: string[] } }) =>
+      [message.id, message.imageTurn?.groupId, message.imageTurn?.modelIds]),
+    [[`${REVIEW_GROUP}_0`, "group-1", ["fal-ai/nano-banana-2"]], [`${REVIEW_GROUP}_1`, "group-1", ["gpt-image-2"]]]
+  );
+
+  // The late panel request finds its row and writes nothing new.
+  existing = { conversationId: "conv-1", role: "assistant", content: String(createdMany[0]!.content) };
+  const before = createdMany.length;
+  await turn.startChatImageTurn(reviewPanel(0));
+  assert.equal(createdMany.length, before);
+  assert.equal(created.length, 0);
+});
+
+test("a panel list that disagrees with the request is refused before anything is reserved", async () => {
+  const { turn } = await load();
+  for (const overrides of [
+    // This request's own panel is somebody else's.
+    { imageGroupPanelModelIds: ["openai-chat", "google-chat"] },
+    { imageGroupPanelModelIds: ["openai-chat", "openai-chat"] },
+    { imageGroupPanelModelIds: ["openai-chat"] },
+    { imageGroupModelIds: ["gpt-image-2", "gpt-image-2"] },
+    // A panel list with no group to belong to.
+    { imageGroupModelIds: undefined },
+  ]) {
+    reset();
+    conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+    await rejects(() => turn.startChatImageTurn(reviewPanel(1, overrides)), "IMAGE_MODEL_SELECTION_INVALID");
+    assert.equal(requests.length, 0, JSON.stringify(overrides));
+    assert.equal(createdMany.length, 0);
+  }
+});
+
+test("an older client that sends no panel list keeps one answer per request", async () => {
+  const { turn } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  await turn.startChatImageTurn(reviewPanel(1, { imageGroupPanelModelIds: undefined }));
+  assert.equal(createdMany.length, 0);
+  assert.deepEqual(created.map((row) => [row.id, row.modelId]), [[`${REVIEW_GROUP}_1`, "openai-chat"]]);
+});
+
+test("a group counts as reserved only for a Review panel id in its own conversation", async () => {
+  const { turn } = await load();
+  reset();
+  reservedGroups.set(`user-1:${REVIEW_GROUP}`, { conversationId: "conv-1" });
+  const reserved = (assistantMessageId: string, conversationId = "conv-1") =>
+    turn.chatImageTurnGroupReserved({ userId: "user-1", conversationId, assistantMessageId });
+  assert.equal(await reserved(`${REVIEW_GROUP}_1`), true);
+  assert.equal(await reserved(`${REVIEW_GROUP}_1`, "conv-other"), false);
+  // A plain Chat answer id is never a later panel of anything.
+  assert.equal(await reserved(REVIEW_GROUP), false);
+  assert.equal(await reserved("6f1c1d3e-3333-4a2b-9c3d-000000000003_0"), false);
 });

@@ -16,7 +16,7 @@ import {
 } from "@/lib/apiSecurity";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
-import { startChatImageTurn } from "@/lib/chatImageTurn";
+import { chatImageTurnGroupReserved, startChatImageTurn } from "@/lib/chatImageTurn";
 import { processImageGenerationGroup } from "@/lib/imageGenerationService";
 import { IMAGE_ROUTING_DECISION_ID_PATTERN, linkImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 
@@ -33,6 +33,9 @@ const imageTurnSchema = z
     modelId: z.string().trim().min(1).max(120),
     imageModelIds: z.array(z.string().trim().min(1).max(120)).max(8),
     imageGroupModelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
+    // Each Review panel's chat model, in imageGroupModelIds order: the
+    // request that reserves the group writes every panel's answer with it.
+    imageGroupPanelModelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
     preset: z.enum(["draft", "standard", "final"]).nullable(),
     // A follow-up's prompt, rewritten by the image-intent call from the
     // previous image ("make it bluer"). The user's own text either way --
@@ -59,14 +62,24 @@ export async function POST(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
     }
     const userId = session.user.id;
-    // The same allowance as the image workspace's own submit.
-    await consumeApiRateLimit(req, userId, "image-generation", {
-      minute: 6,
-      day: 500,
-    });
     // Room for a follow-up prompt of 4,000 characters in any script.
     const body = await readLimitedJson(req, 16 * 1024, imageTurnSchema);
     const { conversationId } = await params;
+    // The same allowance as the image workspace's own submit -- which is one
+    // submit per group. A later Review panel of a group another panel already
+    // reserved buys nothing (requestImageGeneration replays the group) and
+    // only binds its answer to it, so it is not counted: refusing it left an
+    // image that was paid for with no answer to show it.
+    if (!(body.imageGroupModelIds && await chatImageTurnGroupReserved({
+      userId,
+      conversationId,
+      assistantMessageId: body.assistantMessageId,
+    }))) {
+      await consumeApiRateLimit(req, userId, "image-generation", {
+        minute: 6,
+        day: 500,
+      });
+    }
 
     const turn = await startChatImageTurn({
       userId,
@@ -76,6 +89,7 @@ export async function POST(req: Request, { params }: Params) {
       modelId: body.modelId,
       imageModelIds: body.imageModelIds,
       ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
+      ...(body.imageGroupPanelModelIds ? { imageGroupPanelModelIds: body.imageGroupPanelModelIds } : {}),
       preset: body.preset,
       prompt: body.prompt,
       ...(body.edit ? { edit: true } : {}),

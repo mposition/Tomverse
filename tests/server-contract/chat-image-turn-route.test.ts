@@ -23,6 +23,12 @@ let refusal: { status: number; code: string } | null = null;
 const turns: Array<Record<string, unknown>> = [];
 let mocksInstalled = false;
 let cookieReads = 0;
+/** Image allowance consumptions, and whether the next one is refused. */
+let rateLimitCalls = 0;
+let rateLimitRefused = false;
+/** Whether the panel's group is already reserved, and who asked. */
+let groupReserved = false;
+const groupChecks: Array<Record<string, unknown>> = [];
 
 async function loadRoute() {
   if (!mocksInstalled) {
@@ -44,11 +50,21 @@ async function loadRoute() {
         { ok: true, identity: { userId: "native-owner" } } :
         { ok: false, response: Response.json({ code: "MOBILE_TOKEN_INVALID" }, { status: 401 }) },
     } });
+    const { ApiSecurityError } = realApiSecurity as {
+      ApiSecurityError: new (status: number, code: string, message: string) => Error;
+    };
     mock.module(mod("lib/apiSecurity.ts"), {
-      namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => undefined },
+      namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => {
+        rateLimitCalls += 1;
+        if (rateLimitRefused) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
+      } },
     });
     mock.module(mod("lib/chatImageTurn.ts"), {
       namedExports: {
+        chatImageTurnGroupReserved: async (input: Record<string, unknown>) => {
+          groupChecks.push(input);
+          return groupReserved;
+        },
         startChatImageTurn: async (input: Record<string, unknown>) => {
           turns.push(input);
           if (refusal) throw new ChatAccessError(refusal.status, refusal.code, "refused");
@@ -95,7 +111,50 @@ const reset = () => {
   sessionOverride = { user: { id: "user-1" } };
   refusal = null;
   turns.length = 0;
+  rateLimitCalls = 0;
+  rateLimitRefused = false;
+  groupReserved = false;
+  groupChecks.length = 0;
 };
+
+const reviewPanel = {
+  ...body,
+  assistantMessageId: "6f1c1d3e-2222-4a2b-9c3d-000000000002_1",
+  imageGroupModelIds: ["fal-ai/nano-banana-2", "gpt-image-2"],
+  imageGroupPanelModelIds: ["google-chat", "gpt-6-luna"],
+};
+
+test("a later Review panel of a reserved group binds without spending the image allowance", async () => {
+  reset();
+  groupReserved = true;
+  const { status } = await post(reviewPanel);
+  assert.equal(status, 202);
+  assert.equal(rateLimitCalls, 0, "binding to a reserved group buys nothing, so it is not counted");
+  assert.deepEqual(groupChecks, [{ userId: "user-1", conversationId: "conv-1",
+    assistantMessageId: reviewPanel.assistantMessageId }]);
+  assert.deepEqual(turns[0].imageGroupPanelModelIds, reviewPanel.imageGroupPanelModelIds);
+
+  // Even with the allowance spent, it still binds: its image is paid for.
+  reset();
+  groupReserved = true;
+  rateLimitRefused = true;
+  assert.equal((await post(reviewPanel)).status, 202);
+});
+
+test("the panel that reserves a group, and every plain turn, still spend the image allowance", async () => {
+  reset();
+  assert.equal((await post(reviewPanel)).status, 202);
+  assert.equal(rateLimitCalls, 1);
+  reset();
+  assert.equal((await post(body)).status, 202);
+  assert.equal(rateLimitCalls, 1);
+  assert.equal(groupChecks.length, 0, "a plain Chat image turn is never a later panel");
+  reset();
+  rateLimitRefused = true;
+  const refused = await post(reviewPanel);
+  assert.equal(refused.status, 429);
+  assert.equal(turns.length, 0, "nothing was reserved");
+});
 
 test("no session is rejected before anything else", async () => {
   reset();

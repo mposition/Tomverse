@@ -46,8 +46,12 @@ export type ChatImageTurnRequest = {
      * instead of reserving a second one.
      */
     assistantMessageId?: string;
-    /** Review panels share one priced image group, with distinct answer ids. */
-    comparison?: { id: string; index: number; modelIds: string[] };
+    /**
+     * Review panels share one priced image group, with distinct answer ids.
+     * `panelModelIds` is each panel's chat model in `modelIds` order, so the
+     * request that reserves the group writes every panel's answer.
+     */
+    comparison?: { id: string; index: number; modelIds: string[]; panelModelIds?: string[] };
     /** The routing decision this turn answers, linked to its group by the server. */
     routingDecisionId?: string;
 };

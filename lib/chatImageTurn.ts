@@ -39,6 +39,14 @@ export type ChatImageTurnInput = {
     modelId: string;
     imageModelIds: string[];
     imageGroupModelIds?: string[];
+    /**
+     * Each Review panel's chat model, in `imageGroupModelIds` order. With it,
+     * the request that reserves the group writes every panel's answer
+     * (`<group>_<i>`), so an image that was paid for is in the conversation
+     * whether or not that panel's own request ever lands. An older client
+     * that does not send it keeps the one-answer-per-request behaviour.
+     */
+    imageGroupPanelModelIds?: string[];
     preset: ImagePreset | null;
     /** A follow-up's rewritten prompt; the saved question otherwise. */
     prompt?: string;
@@ -64,6 +72,32 @@ export type ChatImageTurnResult = {
      */
     pendingGenerationIds: string[];
 };
+
+/**
+ * Whether a Review panel's image group is already reserved in this
+ * conversation, read before the image-turn route's rate limit: a panel that
+ * only binds its answer to a group another panel reserved buys nothing, so it
+ * is not counted against the submit allowance. Not a panel id (no `_<i>`
+ * suffix), or another conversation's group, is not this case.
+ */
+export async function chatImageTurnGroupReserved(input: {
+    userId: string;
+    conversationId: string;
+    assistantMessageId: string;
+}): Promise<boolean> {
+    const groupKey = chatImageTurnGroupKey(input.assistantMessageId);
+    if (groupKey === input.assistantMessageId) return false;
+    const group = await prisma.imageGenerationGroup.findUnique({
+        where: {
+            userId_groupIdempotencyKey: {
+                userId: input.userId,
+                groupIdempotencyKey: groupKey,
+            },
+        },
+        select: { conversationId: true },
+    });
+    return group?.conversationId === input.conversationId;
+}
 
 /** What the answer's text says: read by later turns and by exports. */
 export const chatImageTurnContent = (prompt: string) =>
@@ -142,6 +176,24 @@ export async function startChatImageTurn(
         chatImageTurnGroupKey(input.assistantMessageId) === input.assistantMessageId)) {
         throw new ChatAccessError(400, "IMAGE_MODEL_SELECTION_INVALID", "Invalid comparison image selection.");
     }
+    // Every panel's answer, named by its index in the sorted group and owned
+    // by that panel's chat model. Checked whole: one image model per panel,
+    // one panel per image model, and this request's own panel where it says.
+    const groupKey = chatImageTurnGroupKey(input.assistantMessageId);
+    const sortedGroup = input.imageGroupModelIds ? [...input.imageGroupModelIds].sort() : null;
+    const panelAnswers = input.imageGroupModelIds && input.imageGroupPanelModelIds
+        ? input.imageGroupModelIds.map((imageModelId, position) => ({
+              id: `${groupKey}_${sortedGroup!.indexOf(imageModelId)}`,
+              modelId: input.imageGroupPanelModelIds![position],
+          }))
+        : null;
+    if (input.imageGroupPanelModelIds && (!panelAnswers ||
+        input.imageGroupPanelModelIds.length !== input.imageGroupModelIds!.length ||
+        new Set(input.imageGroupModelIds).size !== input.imageGroupModelIds!.length ||
+        new Set(input.imageGroupPanelModelIds).size !== input.imageGroupPanelModelIds!.length ||
+        panelAnswers.find((answer) => answer.id === input.assistantMessageId)?.modelId !== input.modelId)) {
+        throw new ChatAccessError(400, "IMAGE_MODEL_SELECTION_INVALID", "Invalid comparison image selection.");
+    }
     // An edit starts from the question's own photo, looked up from the saved
     // message so a request can never point an edit at another file.
     let editSource: { attachmentId: string } | undefined;
@@ -188,7 +240,33 @@ export async function startChatImageTurn(
         throw new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That image request belongs to another turn.");
     }
     const content = existing?.content ?? chatImageTurnContent(prompt);
-    if (!existing) {
+    if (panelAnswers) {
+        /*
+          The group is reserved for every panel at once, so every panel's
+          answer is written at once too -- by whichever panel's request gets
+          here first; the rest find their rows and write nothing. Before this,
+          each panel wrote only its own answer, and a panel whose request was
+          refused (a rate limit) or never sent left its image charged and
+          nowhere in the conversation (lib/chatImageTurnRead.ts shows a
+          group's image only beside its `<group>_<i>` answer).
+        */
+        const created = await prisma.message.createMany({
+            data: panelAnswers.map((answer) => ({
+                id: answer.id,
+                conversationId: input.conversationId,
+                role: "assistant",
+                content: chatImageTurnContent(prompt),
+                modelId: answer.modelId,
+            })),
+            skipDuplicates: true,
+        });
+        if (created.count > 0) {
+            await prisma.conversation.update({
+                where: { id: input.conversationId },
+                data: { updatedAt: new Date() },
+            });
+        }
+    } else if (!existing) {
         try {
             await prisma.message.create({
                 data: {
