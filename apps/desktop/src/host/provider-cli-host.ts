@@ -78,11 +78,11 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
    * also the Node that would run it now (`node`): a different Node, from another folder after the PATH changed or with other
    * bytes, is not the one the person trusted, and the install must be trusted again.
    */
-  /** Whether Node would look for modules above this MiniMax Code release: any `node_modules` in a folder above it, and the user module folders of the home folder. */
-  async function modulesAboveRelease(release: string) {
+  /** Whether Node would look for modules above this MiniMax Code release: any `node_modules` in a folder above it, the user module folders of the home folder, and the global folder of the Node that runs it. */
+  async function modulesAboveRelease(release: string, node?: string) {
     const platform = options.scan?.platform ?? process.platform;
     const env = options.scan?.env ?? process.env;
-    return modulesAbove(release, options.scan?.home ?? scanHome(env, platform));
+    return modulesAbove(release, options.scan?.home ?? scanHome(env, platform), node, platform);
   }
 
   async function trustedWith(trust: CliTrustFile, provider: CliProvider, path: string, signal?: AbortSignal): Promise<{ file: string; fileStamp: string; node?: string } | null> {
@@ -94,10 +94,11 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
     if (!trusted || provider !== "minimax") return trusted;
     const install = await resolveMiniMaxInstall(path);
     if (!install || install.entry !== trusted.file || !record?.node) return null;
-    // Checked before every task: a folder of modules above the release is code the digest below does not cover.
-    if (await modulesAboveRelease(install.release)) return null;
     const node = await miniMaxNode(install.root);
     if (!node || !await trustedCliFile(node, record.node, signal)) return null;
+    // Checked before every task: a folder of modules above the release, or in the Node's global folder, is code the digest below
+    // does not cover.
+    if (await modulesAboveRelease(install.release, node)) return null;
     // Every file of the release folder, read again now: a changed, added, removed or linked file is not what was trusted.
     const manifest = record.install ? await installManifest(install.release, { signal }) : null;
     return manifest && manifest.sha256 === record.install?.sha256 ? { ...trusted, node } : null;
@@ -142,8 +143,8 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       if (provider === "minimax") {
         // The Node that runs the entry file is trusted with it; with no Node to run it there is nothing to trust.
         const install = await resolveMiniMaxInstall(path);
-        if (install && await modulesAboveRelease(install.release)) return { status: "modulesAbove" };
         const node = install ? await miniMaxNode(install.root) : null;
+        if (install && await modulesAboveRelease(install.release, node ?? undefined)) return { status: "modulesAbove" };
         const nodeRecord = node ? await trustRecordFor(node) : null;
         // The release folder as a whole is trusted with them; a folder that cannot be read whole (a link, too many files) is not.
         const manifest = install ? await installManifest(install.release) : null;

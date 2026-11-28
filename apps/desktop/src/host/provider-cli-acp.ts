@@ -320,7 +320,7 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   if (args && raw && raw !== args && !Object.entries(args).every(([key, value]) => Object.hasOwn(raw, key) && sameValue(raw[key], value))) limited = true;
   if (call.args !== undefined && call.args !== null && !args) limited = true;
   // `rawInput` that is there but cannot be read is not replaced by `args` or the streamed arguments: what the CLI runs is unknown.
-  if (call.rawInput !== undefined && call.rawInput !== null && call.rawInput !== "" && !parsedInput(call.rawInput)) limited = true;
+  if (call.rawInput !== undefined && !parsedInput(call.rawInput)) limited = true;
   if (raw && JSON.stringify(raw).length > MAX_INPUT) limited = true;
   const locations = Array.isArray(call.locations) ? call.locations : [];
   const content = Array.isArray(call.content) ? call.content : [];

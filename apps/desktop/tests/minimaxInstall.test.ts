@@ -360,6 +360,15 @@ test("A node_modules above the release folder, of any kind, is found; so are the
       assert.equal(await modulesAbove(release), null);
       await rm(join(w.home, name), { recursive: true });
     }
+    // The global folder of the Node that runs it: lib/node beside node.exe on Windows, one folder up elsewhere.
+    for (const [platform, node, global] of [["win32", join(w.base, "nodejs", "node.exe"), join(w.base, "nodejs", "lib", "node")],
+      ["linux", join(w.base, "usr", "bin", "node"), join(w.base, "usr", "lib", "node")]] as const) {
+      assert.equal(await modulesAbove(release, w.home, node, platform), null, platform);
+      await mkdir(global, { recursive: true });
+      assert.equal(await modulesAbove(release, w.home, node, platform), global, platform);
+      assert.equal(await modulesAbove(release, w.home), null, platform);
+      await rm(global, { recursive: true });
+    }
   } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 

@@ -169,10 +169,11 @@ export async function miniMaxInstallAt(folder: string) {
 /**
  * A `node_modules` folder (or file, or link) in any folder above the release folder, or one of the per-user module folders of
  * the home folder: Node looks for the modules the entry file asks for in every folder up to the root, so one of them would run
- * code that the digest of the release folder does not cover. Returns the first one found (a folder that cannot be asked about
- * counts as one), or null when there is none.
+ * code that the digest of the release folder does not cover. With the Node that runs it, also that Node's global folder
+ * (`lib/node` beside `node.exe` on Windows, one folder up elsewhere), which Node searches last. Returns the first one found (a
+ * folder that cannot be asked about counts as one), or null when there is none. `NODE_PATH` is not passed to the CLI at all.
  */
-export async function modulesAbove(release: string, home?: string): Promise<string | null> {
+export async function modulesAbove(release: string, home?: string, node?: string, platform: NodeJS.Platform = process.platform): Promise<string | null> {
   const present = async (path: string) => {
     try { await lstat(path); return true; } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -188,5 +189,9 @@ export async function modulesAbove(release: string, home?: string): Promise<stri
     folder = parent;
   }
   if (home) for (const name of [".node_modules", ".node_libraries"]) if (await present(join(home, name))) return join(home, name);
+  if (node) {
+    const prefix = platform === "win32" ? dirname(node) : dirname(dirname(node));
+    if (await present(join(prefix, "lib", "node"))) return join(prefix, "lib", "node");
+  }
   return null;
 }
