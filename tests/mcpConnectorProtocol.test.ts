@@ -28,7 +28,9 @@ test("unsafe addresses and production loopback are refused", () => {
   for (const ip of ["127.0.0.1", "169.254.169.254", "10.1.2.3", "::1", "::ffff:127.0.0.1", "fd00::1", "2001:db8::1", "100.64.0.1"]) assert.equal(publicMcpAddress(ip), false, ip);
   assert.equal(publicMcpAddress("8.8.8.8"), true);
   assert.throws(() => validateMcpEndpoint({ ...mcpServer("synthetic"), id: "arbitrary" }));
-  assert.deepEqual(mcpServers({ NODE_ENV: "production", MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_SYNTHETIC_PORT: String(server.port) }), []);
+  // Catalog presets stay offered in production; the loopback synthetic server never is.
+  assert.equal(mcpServers({ NODE_ENV: "production", MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_SYNTHETIC_PORT: String(server.port) })
+    .some(candidate => candidate.id === "synthetic" || candidate.url.includes("127.0.0.1")), false);
 });
 test("response byte ceiling, remote errors and cancellation survive the protocol boundary", async () => {
   await assert.rejects(() => withMcpClient({ server: mcpServer("synthetic"), token: "expired" }, async () => {}));

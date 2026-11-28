@@ -19,5 +19,5 @@ const rows = providers.map(provider => ({ id: provider.id, name: provider.name, 
 if (process.argv.includes("--json")) process.stdout.write(JSON.stringify(rows, null, 2) + "\n");
 else for (const row of rows) {
   process.stdout.write(`${row.id}\t${row.kind}\t${row.profiles.map(profile => `${profile.id}:${profile.auth}${profile.configured ? ":configured" : ""}`).join(",")}\n`);
-  if (requested) process.stdout.write(`Setup: ${row.docs}\nSelect fixed profiles with MCP_CONNECTOR_PROVIDERS. No profile is enabled by this command.\n`);
+  if (requested) process.stdout.write(`Setup: ${row.docs}\nEvery catalog profile that can connect is offered; switch one off with MCP_CONNECTOR_PROVIDERS_DISABLED. This command changes nothing.\n`);
 }

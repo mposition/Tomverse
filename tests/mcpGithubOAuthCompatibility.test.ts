@@ -14,8 +14,8 @@ test("the pinned AI SDK exposes complete tool schemas to the budget serializer",
 });
 
 test("the pinned SDK exchanges a confidential GitHub App code and refreshes an empty-scope response", async () => {
-  const [server] = mcpServers({ NODE_ENV: "test", MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_GITHUB_OAUTH_CLIENT_ID: "synthetic-client",
-    MCP_GITHUB_OAUTH_CLIENT_SECRET: "synthetic-client-secret", MCP_GITHUB_REPOSITORY: "mposition/TomverseCode", MCP_GITHUB_REPOSITORY_ID: "1309523852" });
+  const server = mcpServers({ NODE_ENV: "test", MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_GITHUB_OAUTH_CLIENT_ID: "synthetic-client",
+    MCP_GITHUB_OAUTH_CLIENT_SECRET: "synthetic-client-secret", MCP_GITHUB_REPOSITORY: "mposition/TomverseCode", MCP_GITHUB_REPOSITORY_ID: "1309523852" }).find(candidate => candidate.id === "github")!;
   let tokens: OAuthTokens | undefined;
   const grants: string[] = [];
   const provider: OAuthClientProvider = {

@@ -89,7 +89,8 @@ export function mcpCustomServersEnabled(env: Record<string, string | undefined> 
 
 export function mcpServers(env: Record<string, string | undefined> = process.env): McpServerPolicy[] {
   if (!mcpPreviewEnabled(env)) return [];
-  const configured = z.array(mcpServerSchema).max(256).parse(JSON.parse(env.MCP_CONNECTOR_SERVERS || "[]"));
+  // The catalog (config/mcp/provider-presets.json) is the only source of fixed servers; no server list variable is read.
+  const configured: McpServerPolicy[] = [];
   configured.push(...selectedMcpProviderPolicies(env).map(server => mcpServerSchema.parse(server)));
   if (env.MCP_GITHUB_OAUTH_CLIENT_ID && env.MCP_GITHUB_OAUTH_CLIENT_SECRET) {
     configured.push(mcpServerSchema.parse({ id: "github", name: `GitHub · ${env.MCP_GITHUB_REPOSITORY}`,

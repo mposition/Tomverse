@@ -5,52 +5,54 @@ import { MCP_PROVIDER_PRESETS } from "@/lib/mcpProviderPresets";
 import { MCP_SCOPE_LIMITS, mcpScopedServer, mcpServerSchema, mcpServers } from "@/lib/mcpConnectorPolicy";
 import { mcpPolicyDigest } from "@/lib/mcpConnectorStore";
 
-const env = (providers: string, extra: Record<string, string> = {}) => ({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", MCP_CONNECTOR_PROVIDERS: providers, ...extra });
+// The catalog is the only selection source: pick the named presets out of everything the policy offers.
+const pick = (providers: string, extra: Record<string, string> = {}) =>
+  mcpServers({ MCP_CONNECTOR_PREVIEW_ENABLED: "true", ...extra }).filter(server => providers.split(",").includes(server.id));
 const preset = (id: string) => MCP_PROVIDER_PRESETS.find(profile => profile.id === id)!;
 
 test("published scope lists make providers connectable without an operator scope", () => {
-  const [supabase] = mcpServers(env("supabase"));
+  const [supabase] = pick("supabase");
   assert.equal(supabase.id, "supabase"); assert.equal(supabase.oauth?.scope, "");
   assert.deepEqual(supabase.oauth?.selectableScopes, preset("supabase").oauth!.allowedScopes);
   // Providers without a published list stay closed ("server configuration required").
-  assert.deepEqual(mcpServers(env("codspeed,gc-ai,incident-io,monday,postman")), []);
+  assert.deepEqual(pick("codspeed,gc-ai,incident-io,monday,postman"), []);
   // Lists published only in protected-resource metadata (RFC 9728) are the bound too.
-  const opened = mcpServers(env("atlassian,atlassian-2,canva,hostinger,mercadopago,pendo,wix"));
-  assert.deepEqual(opened.map(server => server.id), ["atlassian", "atlassian-2", "canva", "hostinger", "mercadopago", "pendo", "wix"]);
+  const opened = pick("atlassian,atlassian-2,canva,hostinger,mercadopago,pendo,wix");
+  assert.deepEqual(opened.map(server => server.id).sort(), ["atlassian", "atlassian-2", "canva", "hostinger", "mercadopago", "pendo", "wix"]);
   for (const server of opened) assert.deepEqual(server.oauth?.selectableScopes, preset(server.id).oauth!.allowedScopes, server.id);
   // The largest published list still validates as policy.
-  const [cloudflare] = mcpServers(env("cloudflare"));
+  const [cloudflare] = pick("cloudflare");
   assert.equal(cloudflare.oauth?.selectableScopes?.length, preset("cloudflare").oauth!.allowedScopes.length);
 });
 
 test("user scope choices must be a subset of the bound", () => {
-  const [linear] = mcpServers(env("linear"));
+  const [linear] = pick("linear");
   assert.deepEqual(linear.oauth?.selectableScopes, ["read", "write", "openid", "email"]);
   assert.equal(mcpScopedServer(linear, ["email", "read"]).oauth?.scope, "read email");
   assert.equal(mcpScopedServer(linear, ["write", "read"]).oauth?.scope, "read write");
   assert.equal(mcpScopedServer(linear, ["read"]).oauth?.selectableScopes, undefined);
   for (const bad of [[], ["read", "admin"], ["read", "read"], ["read write"]])
     assert.throws(() => mcpScopedServer(linear, bad), { code: "oauth_scope_not_allowed" }, JSON.stringify(bad));
-  const [cloudflare] = mcpServers(env("cloudflare"));
+  const [cloudflare] = pick("cloudflare");
   const many = cloudflare.oauth!.selectableScopes!.slice(0, MCP_SCOPE_LIMITS.chosen + 1);
   assert.throws(() => mcpScopedServer(cloudflare, many), { code: "oauth_scope_not_allowed" });
 });
 
 test("an operator scope is the upper bound for the user's choice", () => {
-  const [linear] = mcpServers(env("linear", { MCP_PROVIDER_LINEAR_SCOPE: "read" }));
+  const [linear] = pick("linear", { MCP_PROVIDER_LINEAR_SCOPE: "read" });
   assert.deepEqual(linear.oauth?.selectableScopes, ["read"]);
   assert.doesNotThrow(() => mcpScopedServer(linear, ["read"]));
   assert.throws(() => mcpScopedServer(linear, ["write"]), { code: "oauth_scope_not_allowed" });
   // An operator scope outside the published list still closes the provider.
-  assert.deepEqual(mcpServers(env("linear", { MCP_PROVIDER_LINEAR_SCOPE: "admin" })), []);
+  assert.deepEqual(pick("linear", { MCP_PROVIDER_LINEAR_SCOPE: "admin" }), []);
   // A fixed token bound (no request scope) offers no choice.
-  const [dropbox] = mcpServers(env("dropbox", { MCP_PROVIDER_DROPBOX_TOKEN_SCOPE: "files.metadata.read" }));
+  const [dropbox] = pick("dropbox", { MCP_PROVIDER_DROPBOX_TOKEN_SCOPE: "files.metadata.read" });
   assert.equal(dropbox.oauth?.selectableScopes, undefined);
   assert.throws(() => mcpScopedServer(dropbox, ["files.metadata.read"]), { code: "oauth_scope_not_allowed" });
 });
 
 test("policy digests stay compatible with default-scope connections and bind each choice", () => {
-  const [linear] = mcpServers(env("linear"));
+  const [linear] = pick("linear");
   // A pre-scope-choice policy: the same OAuth object without the selectable bound.
   const legacyPolicy = JSON.parse(JSON.stringify(linear)) as typeof linear;
   delete legacyPolicy.oauth!.selectableScopes;
