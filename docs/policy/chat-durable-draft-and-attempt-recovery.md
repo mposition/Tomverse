@@ -162,12 +162,6 @@ account-wide advisory lock before the conversation lock. An exact existing
 identity may still reattach at capacity, but a different new identity is
 refused with `409 CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED`. These caps are a hard
 storage bound, not a retention promise or permission to remove audit rows.
-An attempt refused before it reached a provider or a reservation -- terminal
-`failed / request_refused` with an empty `partialContent`, the same rows the
-conversation-detail list leaves out -- is not counted toward either cap
-(2026-11-28), so an account refused for an exhausted balance or a full message
-store is not then refused for the refusals. Those rows are still bounded by the
-durable admission bucket every claim passes.
 
 The paid Auto Router call runs before the claim (its pick decides the model the
 turn is reserved for). So that a duplicate POST does not pay for it again, the

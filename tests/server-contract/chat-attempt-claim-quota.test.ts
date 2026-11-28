@@ -5,15 +5,14 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 /**
- * The attempt creation caps count turns, not refusals
- * (docs/policy/chat-durable-draft-and-attempt-recovery.md section 3).
- *
- * An attempt refused before it reached a provider or a reservation -- an
- * exhausted balance, a full message store, a context-bundle collision -- is
- * terminal, empty and `failed / request_refused`. Counting those let a person
- * who had been refused often enough be refused for that alone, after the cause
- * was gone. The real lib/chatResponseAttemptPersistence.ts runs against a fake
- * transaction that records what the caps were asked.
+ * The attempt creation caps are a hard storage bound, and every row counts
+ * toward them (docs/policy/chat-durable-draft-and-attempt-recovery.md
+ * section 3) -- an attempt refused before dispatch (`failed / request_refused`,
+ * empty) included. Those rows are never deleted, so leaving them out of the
+ * count would let storage grow without bound (B3 review, 2026-11-28: the
+ * change that excluded them was reverted). The real
+ * lib/chatResponseAttemptPersistence.ts runs against a fake transaction that
+ * records what the caps were asked.
  */
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -73,18 +72,16 @@ const claim = () => persistence.claimChatResponseAttempt({
   leaseExpiresAt: new Date(Date.now() + 60_000),
 });
 
-const REFUSED = { status: "failed", failureCode: "request_refused", partialContent: "" };
-
-test("both creation caps leave out attempts refused before dispatch", async () => {
+test("both creation caps count every attempt row, refused ones included", async () => {
   counts.length = 0;
   counted = 0;
   assert.equal((await claim()).disposition, "claimed");
   assert.equal(counts.length, 2);
-  assert.deepEqual(counts[0].where, { userId: "user-quota", conversationId: "conv-quota", NOT: REFUSED });
-  assert.deepEqual(counts[1].where, { userId: "user-quota", NOT: REFUSED });
+  assert.deepEqual(counts[0].where, { userId: "user-quota", conversationId: "conv-quota" });
+  assert.deepEqual(counts[1].where, { userId: "user-quota" });
 });
 
-test("every other attempt still counts toward the cap", async () => {
+test("a full conversation is refused a new identity", async () => {
   counts.length = 0;
   counted = 2_000;
   await assert.rejects(claim(), (error) => error instanceof persistence.ChatAttemptCapacityError);

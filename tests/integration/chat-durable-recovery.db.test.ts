@@ -192,52 +192,6 @@ test("attempt storage caps new identities but always permit an exact reattach", 
   }
 });
 
-test("an attempt refused before dispatch does not use up the creation caps", async () => {
-  const priorConversationLimit = process.env.CHAT_RESPONSE_ATTEMPTS_PER_CONVERSATION;
-  const priorUserLimit = process.env.CHAT_RESPONSE_ATTEMPTS_PER_USER;
-  process.env.CHAT_RESPONSE_ATTEMPTS_PER_CONVERSATION = "1";
-  process.env.CHAT_RESPONSE_ATTEMPTS_PER_USER = "1";
-  try {
-    const chat = await seedChat("refused-capacity");
-    // Refused after its claim (an exhausted balance, a full message store):
-    // empty, terminal, never a turn.
-    const refused = claimInput(chat, { ownerId: "worker-refused" });
-    await claimChatResponseAttempt(refused);
-    await terminalChatResponseAttempt({
-      userId: chat.userId,
-      assistantMessageId: refused.assistantMessageId,
-      ownerId: refused.ownerId,
-      expectedRevision: 0,
-      status: "failed",
-      finalContent: "",
-      finishReason: "error",
-      failureCode: "request_refused",
-    });
-
-    const next = await claimChatResponseAttempt(claimInput(chat, { ownerId: "worker-next" }));
-    assert.equal(next.disposition, "claimed", "the refusal did not take the only slot");
-
-    // A real turn does count.
-    await assert.rejects(
-      claimChatResponseAttempt(claimInput(chat, { ownerId: "worker-over-cap" })),
-      (error) =>
-        error instanceof ChatAttemptCapacityError &&
-        error.code === "CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED"
-    );
-  } finally {
-    if (priorConversationLimit === undefined) {
-      delete process.env.CHAT_RESPONSE_ATTEMPTS_PER_CONVERSATION;
-    } else {
-      process.env.CHAT_RESPONSE_ATTEMPTS_PER_CONVERSATION = priorConversationLimit;
-    }
-    if (priorUserLimit === undefined) {
-      delete process.env.CHAT_RESPONSE_ATTEMPTS_PER_USER;
-    } else {
-      process.env.CHAT_RESPONSE_ATTEMPTS_PER_USER = priorUserLimit;
-    }
-  }
-});
-
 test("same-id mismatches converge on the identity conflict without exposing another account", async () => {
   const owner = await seedChat("owner");
   const other = await seedChat("other");
