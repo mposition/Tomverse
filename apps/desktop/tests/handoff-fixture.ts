@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { mkdir, rename, rmdir } from "node:fs/promises";
 import { expect, type BrowserContext, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import { chooseCodeModel } from "./code-model-picker";
 import { lastUserText, TEST_KEY, type FakeGateway } from "../../tomverse-cli/tests/fakeGateway.js";
 
 export const codeExcerpt = "Code result excerpt to discuss";
@@ -144,9 +145,7 @@ export async function verifyHandoff(app: ElectronApplication, page: Page, contex
     await chatToCode();
 
     await selectCodeMode(page, "ask");
-    await page.getByLabel("Model and reasoning effort").click();
-    await page.getByLabel("Model", { exact: true }).selectOption("fake-coder");
-    await page.getByLabel("Model and reasoning effort").click();
+    await chooseCodeModel(page, { model: "fake-coder" });
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect(page.getByText(codeAnswer, { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "New task", exact: true })).toBeEnabled();

@@ -7,6 +7,7 @@ import {
 import type { ManagedCatalogSnapshot, ManagedCodeModel } from "../managed-code-contract";
 import { applyPatch, createSnapshotBundle, patchApplies, type GitContext } from "./cloud-bundle";
 import type { CloudExecutionClient, CloudOutcome } from "./cloud-execution-client";
+import { projectOrigin, type CloudOriginStore } from "./cloud-origins";
 import { MAX_REVIEW_FILES, parseUnifiedDiff } from "./review-diff";
 
 export type CloudProject = { name: string; git: GitContext } | { unavailable: "noProject" | "remoteProject" | "notGit" };
@@ -48,22 +49,25 @@ const item = (job: CodeCloudJobView): CloudJobItem => ({
 
 /**
  * Cloud jobs of the signed-in account, kept in the main process. Starting one snapshots the open project's tracked files
- * (cloud-bundle.ts), creates the job and uploads the bundle; reading follows the server's state and progress lines;
- * reviewing downloads the patch and shows its files; applying writes it to the same folder, only after a review of
- * that patch and only when `git apply --check` accepts it on the folder as it is now.
+ * (cloud-bundle.ts), records the folder it came from, creates the job and uploads the bundle; reading follows the
+ * server's state and progress lines; reviewing downloads the patch and shows its files; applying writes it to the same
+ * folder, only after a review of that patch in that folder and only when `git apply --check` accepts it on the folder as
+ * it is now. The folder is checked against the recorded origin (cloud-origins.ts), which outlives a restart or a new
+ * sign-in; a task with no recorded origin is neither reviewed nor applied here.
  */
 export function createCloudExecutionHost(deps: {
   client: CloudExecutionClient;
   catalog: () => Promise<CloudOutcome<ManagedCatalogSnapshot> | { kind: "refused"; reason?: unknown }>;
   project: () => Promise<CloudProject>;
+  origins: CloudOriginStore;
   signal: AbortSignal;
 }) {
   const jobs = new Map<string, CodeCloudJobView>();
-  /** The folder each job started from, for this run of the app. A job from before a restart applies to the open folder. */
-  const origins = new Map<string, string>();
   const patches = new Map<string, Buffer>();
   let catalog: { version: number; contentHash: string; models: ManagedCodeModel[] } | null = null;
   let review: CloudReview | null = null;
+  /** The folder the shown review was made in: the patch is applied only there. */
+  let reviewedOrigin: { jobId: string; origin: string } | null = null;
   let notice: CloudExecutionView["notice"] = null;
   let starting = false;
   /** Finished jobs whose last lines have been read; they are not asked about again. */
@@ -117,6 +121,8 @@ export function createCloudExecutionHost(deps: {
     if (!catalog) return refuse("unavailable");
     const names = new Set(catalog.models.map((model) => model.id));
     if (!names.has(input.executorModelId) || !names.has(input.reviewerModelId)) return refuse("unavailable");
+    const origin = projectOrigin(project.git.root);
+    if (!origin) return refuse("unavailable");
     starting = true;
     try {
       const snapshot = await createSnapshotBundle(project.git, CODE_CLOUD_LIMITS.bundleMaxBytes);
@@ -125,11 +131,17 @@ export function createCloudExecutionHost(deps: {
       const body = { taskId: randomUUID(), instruction: input.instruction, catalogVersion: catalog.version, contentHash: catalog.contentHash,
         executorModelId: input.executorModelId, reviewerModelId: input.reviewerModelId, approvedCredits: input.approvedCredits,
         bundleBytes: snapshot.bytes.byteLength, bundleSha256: snapshot.sha256, baseCommit: snapshot.baseCommit };
+      // Recorded before the task exists: every task started here has its folder on record, and one whose folder could not
+      // be recorded is not started.
+      try {
+        await deps.origins.record(body.taskId, origin);
+      } catch {
+        return refuse("unavailable");
+      }
       // Both requests are idempotent (the same task id and body, the same bundle), so one more try after no answer is safe.
       let created = await deps.client.create(body);
       if (created.kind === "unreachable") created = await deps.client.create(body);
       if (created.kind !== "ok") return refuse(created.kind === "unreachable" ? "unreachable" : cloudRefusalFor(created.code));
-      origins.set(created.value.jobId, project.git.root);
       remember(created.value);
       let uploaded = await deps.client.upload(created.value.jobId, snapshot.bytes);
       if (uploaded.kind === "unreachable") uploaded = await deps.client.upload(created.value.jobId, snapshot.bytes);
@@ -141,18 +153,24 @@ export function createCloudExecutionHost(deps: {
     }
   }
 
-  async function projectFor(jobId: string): Promise<{ refusal: CloudRefusal } | { refusal: null; project: Extract<CloudProject, { name: string }> }> {
+  /**
+   * The open project, when it is the folder the job came from. Matching file content is not enough (`git apply --check`
+   * would accept another clone), so a job whose origin this computer has no record of is refused, not let through.
+   */
+  async function projectFor(job: CodeCloudJobView): Promise<{ refusal: CloudRefusal } | { refusal: null; project: Extract<CloudProject, { name: string }>; origin: string }> {
     const project = await deps.project();
     if (!("name" in project)) return { refusal: project.unavailable };
-    const origin = origins.get(jobId);
-    if (origin && origin !== project.git.root) return { refusal: "otherProject" };
-    return { refusal: null, project };
+    const recorded = await deps.origins.read(job.taskId).catch(() => null);
+    if (!recorded) return { refusal: "originUnknown" };
+    const origin = projectOrigin(project.git.root);
+    if (origin !== recorded) return { refusal: "otherProject" };
+    return { refusal: null, project, origin };
   }
 
   async function showReview(jobId: string) {
     const job = jobs.get(jobId);
     if (!job || job.status !== "completed" || !job.patch) return refuse("patchUnavailable");
-    const target = await projectFor(jobId);
+    const target = await projectFor(job);
     if (target.refusal !== null) return refuse(target.refusal);
     const patch = await deps.client.patch(job);
     if (patch.kind !== "ok") return refuse(patch.kind === "unreachable" ? "unreachable" : "patchUnavailable");
@@ -167,18 +185,24 @@ export function createCloudExecutionHost(deps: {
       files.length !== headers || patchPaths(text).length !== headers || !headersShown(text);
     review = { jobId, files: files.slice(0, MAX_REVIEW_FILES), truncated: files.length > MAX_REVIEW_FILES, hidden,
       applies: hidden ? false : await patchApplies(target.project.git, patch.value).catch(() => null) };
+    reviewedOrigin = { jobId, origin: target.origin };
     notice = null;
   }
 
   async function apply(jobId: string) {
     const patch = patches.get(jobId);
+    const job = jobs.get(jobId);
+    const reviewed = reviewedOrigin;
     // Only the patch the person was shown, on the folder it was checked against, when every file of it was shown.
-    if (!patch || review?.jobId !== jobId || review.applies !== true) return refuse("patchUnavailable");
-    const target = await projectFor(jobId);
+    if (!patch || !job || review?.jobId !== jobId || review.applies !== true || reviewed?.jobId !== jobId) return refuse("patchUnavailable");
+    const target = await projectFor(job);
     if (target.refusal !== null) return refuse(target.refusal);
+    // The folder written to is the one the review was made in, not only one the job came from.
+    if (target.origin !== reviewed.origin) return refuse("otherProject");
     const result = await applyPatch(target.project.git, patch);
     if (result !== "applied") return refuse(result === "conflict" ? "applyConflict" : "applyFailed");
     review = null;
+    reviewedOrigin = null;
     patches.delete(jobId);
     notice = { kind: "applied", jobId };
   }
@@ -192,7 +216,7 @@ export function createCloudExecutionHost(deps: {
       else refuse(answer.kind === "unreachable" ? "unreachable" : cloudRefusalFor(answer.code));
     } else if (input.action === "review") await showReview(input.jobId);
     else if (input.action === "apply") await apply(input.jobId);
-    else { review = null; notice = null; }
+    else { review = null; reviewedOrigin = null; notice = null; }
     deps.signal.throwIfAborted();
     return view();
   }

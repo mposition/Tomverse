@@ -1,7 +1,7 @@
 import { ValidationError } from "./errors.js";
 
 let counter = 0;
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const EMAIL = /^[^@\s]+@[^@\s][^.@\s]*\.[^@\s]+$/;
 
 export function createOrder(input) {
     const email = String(input?.email ?? "").trim().toLowerCase();

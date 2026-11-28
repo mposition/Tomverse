@@ -1,6 +1,6 @@
 import { ValidationError } from "./errors.js";
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const EMAIL = /^[^@\s]+@[^@\s][^.@\s]*\.[^@\s]+$/;
 
 export function validateEmail(value) {
     const email = String(value ?? "").trim().toLowerCase();

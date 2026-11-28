@@ -4,6 +4,9 @@
  * returns plain data. They are source text because a bundled function would not survive being serialised.
  */
 
+/** A value as a JavaScript literal for the source text below. JSON.stringify leaves U+2028 and U+2029 as they are, so they are escaped too. */
+const jsLiteral = (value: unknown) => JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+
 const HELPERS = String.raw`
 const clip = (value, max) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const isVisible = (el) => {
@@ -68,9 +71,9 @@ export const readTextScript = `(() => { ${HELPERS}
 /** Finds the element, scrolls it to the middle of the tab and says where its centre is and whether something covers it. */
 export const locateScript = (selector: string, forTyping: boolean) => `(() => { ${HELPERS}
   let el;
-  try { el = document.querySelector(${JSON.stringify(selector)}); } catch { return { error: "The selector is not valid CSS." }; }
+  try { el = document.querySelector(${jsLiteral(selector)}); } catch { return { error: "The selector is not valid CSS." }; }
   if (!el) return { error: "No element matches the selector. Read the page again for its current controls." };
-  const matches = document.querySelectorAll(${JSON.stringify(selector)}).length;
+  const matches = document.querySelectorAll(${jsLiteral(selector)}).length;
   el.scrollIntoView({ block: "center", inline: "center" });
   const r = el.getBoundingClientRect();
   if (r.width < 1 || r.height < 1) return { error: "The element has no visible area." };
@@ -90,7 +93,7 @@ export const locateScript = (selector: string, forTyping: boolean) => `(() => { 
 
 /** Focuses the element found by locateScript and puts the caret at its end, or selects what it holds to be replaced. */
 export const focusScript = (selector: string, clear: boolean) => `(() => {
-  const el = document.querySelector(${JSON.stringify(selector)});
+  const el = document.querySelector(${jsLiteral(selector)});
   if (!el) return false;
   el.focus();
   if (el.isContentEditable) {
@@ -108,7 +111,7 @@ export const focusScript = (selector: string, clear: boolean) => `(() => {
 
 /** Where the element is (for a picture) and what it looks like; used on a picked element and on an element named by a selector. */
 export const elementBoxScript = (selector: string) => `(() => {
-  const el = document.querySelector(${JSON.stringify(selector)});
+  const el = document.querySelector(${jsLiteral(selector)});
   if (!el) return { error: "No element matches the selector." };
   el.scrollIntoView({ block: "center", inline: "center" });
   const r = el.getBoundingClientRect();
