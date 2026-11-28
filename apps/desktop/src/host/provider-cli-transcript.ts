@@ -4,6 +4,30 @@ import type { ApprovalRequest, Change, Entry } from "../contract";
 import { LIVE_CLI_LIMITS } from "../provider-cli-exec-contract";
 import type { CliApproval, ExecEvent } from "./provider-cli-exec";
 
+/**
+ * Text with a provider key taken out: every whole copy, and a piece of it (four characters or more) at either end, which is
+ * where a key cut by the stream's window or still being written sits.
+ */
+export function withoutKey(text: string, key: string | undefined) {
+  if (!key) return text;
+  let result = text.replaceAll(key, "[removed]");
+  for (let size = Math.min(key.length - 1, result.length); size >= 4; size -= 1) {
+    if (result.endsWith(key.slice(0, size))) { result = result.slice(0, -size) + "[removed]"; break; }
+  }
+  for (let size = Math.min(key.length - 1, result.length); size >= 4; size -= 1) {
+    if (result.startsWith(key.slice(-size))) { result = "[removed]" + result.slice(size); break; }
+  }
+  return result;
+}
+
+/** Whether any string in a value (a field name too), at any depth, contains the text: read as it is, never as escaped JSON. */
+export function holdsText(value: unknown, text: string): boolean {
+  if (typeof value === "string") return value.includes(text);
+  if (Array.isArray(value)) return value.some((item) => holdsText(item, text));
+  if (value && typeof value === "object") return Object.entries(value).some(([name, item]) => name.includes(text) || holdsText(item, text));
+  return false;
+}
+
 const mark = { running: "…", done: "✓", failed: "✗", declined: "⊘" } as const;
 const oneLine = (value: string, max: number) => {
   const flat = value.replace(/\s+/g, " ").trim();
@@ -59,15 +83,17 @@ export function createTranscript(clean: (text: string) => string) {
         const before = at === undefined ? undefined : entries[at];
         // The start names the command; the end (Claude Code) may not, so the start's text is kept.
         const command = event.command || (before?.role === "event" ? before.text.split("\n")[0]!.replace(/^\$ /, "").replace(/\s[…✓✗⊘]$/, "") : "");
-        const head = `$ ${clean(oneLine(command, 200))} ${mark[event.state]}${event.exitCode ? ` ${event.exitCode}` : ""}`;
+        // Cleaned before it is cut, so a key at the cut is removed whole rather than left as a piece inside the line.
+        const head = `$ ${oneLine(clean(command), 200)} ${mark[event.state]}${event.exitCode ? ` ${event.exitCode}` : ""}`;
         const body = event.output ? `\n${clean(event.output.slice(-LIVE_CLI_LIMITS.commandOutput))}` : "";
         place(key, { role: "event", text: head + body });
       } else if (event.type === "tool") {
-        place(`tool:${event.id}`, { role: "event", text: `⚙ ${clean(oneLine(`${event.name}${event.detail ? ` ${event.detail}` : ""}`, 200))} ${mark[event.state]}` });
+        place(`tool:${event.id}`, { role: "event", text: `⚙ ${oneLine(clean(`${event.name}${event.detail ? ` ${event.detail}` : ""}`), 200)} ${mark[event.state]}` });
       } else if (event.type === "files") {
         for (const file of event.files) {
           if (event.state === "running") continue;
-          track(file.path, file.kind, event.state === "done" ? "applied" : "failed");
+          // A path is text the CLI reports, cleaned like every other line before it is shown or saved.
+          track(clean(file.path), file.kind, event.state === "done" ? "applied" : "failed");
         }
       } else if (event.type === "notice" && event.text.trim()) {
         place(`notice:${entries.length}`, { role: "event", text: clean(event.text) });
