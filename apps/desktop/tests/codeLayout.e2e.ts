@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { openCodeProject } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
+import { codeModelControl } from "./code-model-picker";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { launchNativeFixture } from "./launch-native-fixture";
 
@@ -100,7 +101,7 @@ test("Code keeps the conversation and composer reachable when drafts and zoom ch
       ["Chat", "Review", "Code", "Plugins", "Settings"]);
     await expect(page.getByRole("form")).toHaveCount(1);
     await expect(page.getByRole("form", { name: "Code composer" })).toBeVisible();
-    await expect(page.getByLabel("Model and reasoning effort")).toBeVisible();
+    await expect(codeModelControl(page)).toBeVisible();
     const initial = await measure();
     await field.fill(title);
     await ready.click();

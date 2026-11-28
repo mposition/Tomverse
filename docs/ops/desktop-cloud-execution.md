@@ -27,7 +27,12 @@ as not offered.
    CLI engine (`apps/tomverse-cli/src/runtime.ts`) in a sandbox. The engine's model endpoint is a local socket: each of
    its Chat Completions requests becomes one managed `complete` call (a structured "assistant turn": text and tool
    calls), sent to `POST /api/code/cloud/runner` `model`. The server forwards it with the job owner's id, the job's
-   reservation and the reservation's executor model; the runner can name none of them.
+   reservation and the reservation's executor model; the runner can name none of them. The socket treats an
+   `Idempotency-Key` as the coding API does (`services/code-runner/model-adapter.mjs`): one key is one managed call with
+   one call id. Another request with the key makes no second call while the first is in flight or its outcome is
+   unknown (409 `idempotent_request_in_progress`), gets the stored answer once it completed, and with another body is
+   refused (422 `idempotency_key_reused`). Only a refusal before dispatch frees the key, and the retry keeps the call id,
+   so the managed path refuses it as already dispatched if that call was recorded after all.
 5. **Report.** Every 15 seconds the runner sends new progress lines (`heartbeat`); the server extends the claim, keeps
    the reservation alive (managed `heartbeat`) and answers whether the person asked to stop, whether the reservation
    ended and whether the hour is up.
@@ -40,6 +45,12 @@ as not offered.
    A patch with any change the panel cannot show (a binary or too large file, a name it cannot read, more files than
    it lists, or a header such as a mode change, a symbolic link or a rename) is not offered for applying.
    It becomes uncommitted changes, which the review panel shows and can revert. Nothing is pushed from the cloud.
+   Desktop records the folder a task started from before creating it (`apps/desktop/src/host/cloud-origins.ts`: a hash
+   of the folder's real path and file-system identity, by task id, in the app's data folder), so the check survives a
+   restart or a new sign-in. Reviewing and applying both need the open folder to be that origin, and applying also
+   needs it to be the folder the review was made in. A task this computer has no origin for (started on another
+   computer or before origins were recorded) is neither reviewed nor applied: `git apply --check` only shows the
+   content fits, not that the folder is the one the task came from.
 
 States: `uploading`, `queued`, `starting` (claimed, reserving), `running`, `completed`, `failed`, `cancelled`. Desktop
 reads them by polling every three seconds while a task is active.

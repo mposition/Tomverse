@@ -44,6 +44,7 @@ import { desktopManagedCodeInput } from "../managed-code-contract";
 import { desktopCloudExecutionInput } from "../cloud-execution-contract";
 import { createCloudExecutionClient } from "./cloud-execution-client";
 import { createCloudExecutionHost, type CloudExecutionHost, type CloudProject } from "./cloud-execution-host";
+import { createCloudOriginStore, type CloudOriginStore } from "./cloud-origins";
 import { createBillingWindowHost } from "./billing-window";
 import { desktopBillingInput, isTomverseUrl, type BillingState } from "../billing-contract";
 import { desktopBillingCopy } from "../../../../locales/desktopBilling";
@@ -3397,6 +3398,9 @@ async function managedCode(value: unknown) {
 // Cloud Code tasks share the account session too; the host keeps the jobs of the signed-in window. The project is the
 // one open now: its tracked files are the snapshot, and the patch is applied back only to that same folder.
 let cloudExecutionHost: { signal: AbortSignal; host: CloudExecutionHost } | undefined;
+// One record of where each task started, shared by every host: it outlives a new sign-in and a restart.
+let cloudOrigins: CloudOriginStore | undefined;
+const cloudOriginStore = () => cloudOrigins ??= createCloudOriginStore(join(app.getPath("userData"), "cloud-task-origins.json"));
 async function cloudProject(): Promise<CloudProject> {
   const project = projectRoot;
   if (!project || !state.root) return { unavailable: "noProject" };
@@ -3413,7 +3417,7 @@ async function cloudExecution(value: unknown) {
   if (cloudExecutionHost?.signal !== signal) {
     const managed = createManagedCodeClient({ send: settings.send, signal });
     cloudExecutionHost = { signal, host: createCloudExecutionHost({ client: createCloudExecutionClient({ send: settings.send, signal }),
-      catalog: () => managed.catalog(), project: cloudProject, signal }) };
+      catalog: () => managed.catalog(), project: cloudProject, origins: cloudOriginStore(), signal }) };
   }
   return cloudExecutionHost.host.run(input);
 }

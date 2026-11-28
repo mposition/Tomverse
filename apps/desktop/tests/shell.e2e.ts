@@ -103,10 +103,11 @@ test("Desktop settings follow the account tab order and return to the workspace 
     await code.getByRole("button", { name: "Task permissions", exact: true }).click();
     await expect(page.getByRole("main").getByText("Manual", { exact: true })).toBeVisible();
     await code.getByRole("button", { name: "Local task history", exact: true }).click();
-    const retention = page.getByRole("checkbox", { name: "Save to local history", exact: true });
-    await retention.uncheck();
+    // Code tasks are always saved, so this view manages the history and offers no switch.
+    await expect(page.getByRole("button", { name: "Manage history", exact: true })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "Save to local history", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(retention).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Save to local history", exact: true })).toHaveCount(0);
   } finally {
     await application?.close();
     await rm(profile, { recursive: true, force: true, maxRetries: 5 });
@@ -855,15 +856,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await plugins.getByRole("listitem").filter({ hasText: "Linear" }).getByRole("button", { name: "Connect", exact: true }).click();
     await plugins.getByTestId("desktop-connector-submit").click();
     const signIn = () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
-      .filter((window) => window.getTitle().startsWith("provider.org")).length);
+      .filter((window) => /^provider\.org(?![\w.-])/.test(window.getTitle())).length);
     await expect.poll(signIn).toBe(1);
     assert.deepEqual(await application.evaluate(async ({ BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      const window = BrowserWindow.getAllWindows().find((item) => /^provider\.org(?![\w.-])/.test(item.getTitle()))!;
       return { cookies: (await window.webContents.session.cookies.get({})).length, title: window.getTitle(), modal: window.isModal() };
     }), { cookies: 0, title: "provider.org · Tomverse connection", modal: true });
     // Tomverse's callback is answered by the app, not loaded in the window.
     await application.evaluate(async ({ BrowserWindow }, callback) => {
-      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      const window = BrowserWindow.getAllWindows().find((item) => /^provider\.org(?![\w.-])/.test(item.getTitle()))!;
       await window.webContents.loadURL(callback).catch(() => {});
     }, authOrigin + "/api/mcp/oauth/callback?state=" + "S".repeat(43) + "&code=provider-code");
     await expect.poll(signIn).toBe(0);

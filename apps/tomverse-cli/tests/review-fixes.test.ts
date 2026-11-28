@@ -335,11 +335,11 @@ test("cancel also ends a descendant that moved to its own session (setsid)", { s
     const dir = tempDir("tree");
     const marker = join(dir, "survived.txt");
     const grandchild = join(dir, "gc.cjs");
-    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(marker)}, "x"), 3000); setInterval(() => {}, 1000);\n`);
+    writeFileSync(grandchild, `setTimeout(() => require("fs").writeFileSync(process.argv[2], "x"), 3000); setInterval(() => {}, 1000);\n`);
     const parent = join(dir, "p.cjs");
-    writeFileSync(parent, `require("child_process").spawn(process.execPath, [${JSON.stringify(grandchild)}], { detached: true, stdio: "ignore" }).unref(); setInterval(() => {}, 1000);\n`);
+    writeFileSync(parent, `require("child_process").spawn(process.execPath, [process.argv[2], process.argv[3]], { detached: true, stdio: "ignore" }).unref(); setInterval(() => {}, 1000);\n`);
     const controller = new AbortController();
-    const running = runCommand(planCommand({ argv: [process.execPath, parent] }, dir, 60_000), controller.signal);
+    const running = runCommand(planCommand({ argv: [process.execPath, parent, grandchild, marker] }, dir, 60_000), controller.signal);
     setTimeout(() => controller.abort(), 800);
     const result = await running;
     assert.equal(result.cancelled, true);

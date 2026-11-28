@@ -304,6 +304,16 @@ const decodeEntities = (text: string) =>
         return ENTITIES[name.toLowerCase()] ?? whole;
     });
 
+/** Removes every tag, repeating until none is left so that a tag split by another one cannot reassemble after a single pass. */
+const stripTags = (html: string) => {
+    let text = html;
+    for (let previous = ""; previous !== text; ) {
+        previous = text;
+        text = text.replace(/<[^>]*>/g, "");
+    }
+    return text;
+};
+
 /** The visible text of an HTML page, with its links, as plain lines. A mechanical reduction: nothing of the page is run or interpreted. */
 export const htmlToText = (html: string, base?: URL): { text: string; title?: string } => {
     const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
@@ -311,7 +321,7 @@ export const htmlToText = (html: string, base?: URL): { text: string; title?: st
         .replace(/<!--[\s\S]*?-->/g, " ")
         .replace(/<(script|style|noscript|template|svg|head|iframe|object|canvas)\b[\s\S]*?<\/\1\s*>/gi, " ");
     text = text.replace(/<a\b[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a\s*>/gi, (_whole, a: string | undefined, b: string | undefined, inner: string) => {
-        const label = inner.replace(/<[^>]*>/g, "").trim();
+        const label = stripTags(inner).trim();
         const href = (a ?? b ?? "").trim();
         let resolved = "";
         try {
@@ -326,16 +336,15 @@ export const htmlToText = (html: string, base?: URL): { text: string; title?: st
         .replace(/<li\b[^>]*>/gi, "\n- ")
         .replace(/<(br|hr)\b[^>]*>/gi, "\n")
         .replace(/<\/(p|div|section|article|header|footer|main|nav|ul|ol|table|tr|h[1-6]|pre|blockquote|form|dl|dt|dd)\s*>/gi, "\n")
-        .replace(/<(p|div|section|article|h[1-6]|pre|blockquote|tr)\b[^>]*>/gi, "\n")
-        .replace(/<[^>]*>/g, "");
-    text = decodeEntities(text)
+        .replace(/<(p|div|section|article|h[1-6]|pre|blockquote|tr)\b[^>]*>/gi, "\n");
+    text = decodeEntities(stripTags(text))
         .replace(/[ \t\f\v ]+/g, " ")
         .split("\n")
         .map((line) => line.trim())
         .join("\n")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-    return { text, ...(title ? { title: decodeEntities(title.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim().slice(0, 300) } : {}) };
+    return { text, ...(title ? { title: decodeEntities(stripTags(title)).replace(/\s+/g, " ").trim().slice(0, 300) } : {}) };
 };
 
 export const UNTRUSTED_WEB_NOTE =

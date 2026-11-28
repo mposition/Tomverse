@@ -95,6 +95,12 @@ const FEATURE_ICONS = {
 
 export type ModelPickerPanelProps = {
   singleModelSelection?: boolean;
+  /**
+   * The list is a catalogue with no use-case recommendations of its own (the
+   * coding catalogue in Code): the picker opens on the full list, and Back and
+   * Escape leave the picker instead of stepping to a recommended screen.
+   */
+  catalogueOnly?: boolean;
   models: readonly AiModel[];
   selectedModelIds: string[];
   maxSelectableModels: number;
@@ -172,6 +178,7 @@ export type ModelPickerPanelProps = {
 
 export function ModelPickerPanel({
   singleModelSelection = false,
+  catalogueOnly = false,
   models,
   selectedModelIds,
   maxSelectableModels,
@@ -222,7 +229,7 @@ export function ModelPickerPanel({
   const featureLabels = modelPickerFeatureLabels[language];
 
   const useIdSafe = useId();
-  const [step, setStep] = useState<"recommended" | "all">("recommended");
+  const [step, setStep] = useState<"recommended" | "all">(catalogueOnly ? "all" : "recommended");
   // Chat models and image *generation* models are two catalogues, not one list
   // with a filter: in the chat catalogue "image" already means image INPUT
   // (policy v2 section 13). The tab is the separation.
@@ -309,7 +316,7 @@ export function ModelPickerPanel({
         setIsFilterSheetOpen(false);
         return true;
       }
-      if (showCatalogue) {
+      if (showCatalogue && !catalogueOnly) {
         goBackToRecommended();
         return true;
       }
@@ -326,6 +333,7 @@ export function ModelPickerPanel({
       escapeHandlerRef.current = null;
     };
   }, [
+    catalogueOnly,
     escapeHandlerRef,
     goBackToRecommended,
     isFilterSheetOpen,
@@ -529,7 +537,7 @@ export function ModelPickerPanel({
           type="button"
           data-testid="model-picker-back"
           onClick={
-            showCatalogue
+            showCatalogue && !catalogueOnly
               ? goBackToRecommended
               : isImageTab
                 ? () => moveTab("chat")
@@ -537,7 +545,7 @@ export function ModelPickerPanel({
           }
           className={`flex shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${touchTarget ? "h-11 w-11" : "h-9 w-9"}`}
           aria-label={
-            showCatalogue
+            showCatalogue && !catalogueOnly
               ? stepCopy.backToRecommended
               : isImageTab
                 ? t("chat.modelPickerTabChat")
@@ -833,7 +841,7 @@ export function ModelPickerPanel({
         reachable -- announced once on reaching the cap, and referenced by every
         model whose activation would require a swap -- without costing a row.
       */}
-      {singleModelSelection && (
+      {singleModelSelection && !catalogueOnly && (
         <p className="px-1 py-2 text-xs text-zinc-600 dark:text-zinc-300">{t("chat.singleModelRequired")}</p>
       )}
       {!singleModelSelection && selectionLimit.limitReached && (
@@ -867,6 +875,7 @@ export function ModelPickerPanel({
           isGuestMode={isGuestMode}
           isMobileShell={isMobileShell}
           isKeyboardCompact={isKeyboardCompact}
+          hideTaskFilter={catalogueOnly}
           modelStatuses={modelStatuses}
           hasImageAttachments={hasImageAttachments}
           favoriteModelIds={favoriteModelIds}
