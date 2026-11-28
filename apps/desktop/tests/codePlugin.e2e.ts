@@ -124,7 +124,8 @@ test("Code scopes MCP to the selected task and aborts a dispatched read on Stop"
       const picker = page.getByRole("combobox", { name: "Plugin for this task" });
       if (!await picker.isVisible()) await page.locator("summary").filter({ has: page.locator("svg.lucide-puzzle") }).click();
       await picker.selectOption("account-mcp");
-      await expect(page.getByRole("checkbox", { name: "Save to local history" })).not.toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Save to local history" })).toHaveCount(0);
+      await expect(page.getByText("This run is not saved to history.", { exact: true })).toBeVisible();
     };
     const calls = () => app!.evaluate(() =>
       (globalThis as typeof globalThis & { scopedCalls?: string[] }).scopedCalls);

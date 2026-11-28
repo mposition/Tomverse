@@ -5,6 +5,7 @@ import {
   Search, ShieldCheck, SlidersHorizontal, Sparkles, Square, SquareTerminal, Sun, X,
 } from "lucide-react";
 import "@tomverse/ui-tokens/tokens.css";
+import "./select.css";
 import "@tomverse/ui-tokens/wordmark.css";
 import logo from "../../../../public/tomverse-logo.png";
 import { usagePercent } from "../../../../components/chat/UsagePercentGauge";
@@ -67,6 +68,8 @@ import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
 import { PermissionModeBadge, PermissionSettings } from "./PermissionSettings";
+import { CodeModelPicker } from "./CodeModelPicker";
+import { SMART_ADAPTIVE_MODEL_ID } from "../code-model-catalog";
 import { CodePluginPicker } from "./CodePluginPicker";
 import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
 import { ConnectorWorkspace } from "./ConnectorWorkspace";
@@ -319,7 +322,6 @@ function Desktop() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [saveHistory, setSaveHistory] = useState(true);
   const [codePlugin, setCodePlugin] = useState<{ id: string; namespace: string }>();
   const [workspaceSelection, setWorkspaceSelection] = useState<{ key: string; choice: CodeWorktreeChoice }>();
   const [saveNativeHistory, setSaveNativeHistory] = useState(false);
@@ -459,7 +461,6 @@ function Desktop() {
     if (namespace !== previousNamespace.current) {
       previousNamespace.current = namespace;
       setPrompt(namespace ? readCodeDraft(codeDraft, namespace) : "");
-      setSaveHistory(true);
       setCodeReferences([]);
       setHistoryDraft(false);
     }
@@ -499,7 +500,7 @@ function Desktop() {
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
     ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.zCodeFixtureModel ?? snapshot.deepSeekFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
   const models: Model[] = cliFixtureModel ? [{ id: cliFixtureModel, name: cliFixtureModel, provider: cliFixture.provider, efforts: [] }] : snapshot?.models ?? [];
-  const selectedModel = models.find((item) => item.id === modelId) ?? models.find((item) => item.id === "smart-adaptive") ?? models[0];
+  const selectedModel = models.find((item) => item.id === modelId) ?? models.find((item) => item.id === SMART_ADAPTIVE_MODEL_ID) ?? models[0];
   const codeRoute = codeRouteFor(snapshot?.codeExecutionPreference ?? "tomverse_api", selectedModel);
   const waitingForAnswer = task?.status === "clarification";
   const codeMode = waitingForAnswer ? task.plan?.proposalOnly ? "plan" : "agent"
@@ -601,7 +602,8 @@ function Desktop() {
   const pausedForInput = pausedByQuota || waitingForAnswer;
   const taskSelectionLocked = !!task && (snapshot?.busy || pausedForInput);
   const composerModelId = (taskSelectionLocked && task.model) || selectedModel?.id || "";
-  const composerModelName = models.find(({ id }) => id === composerModelId)?.name || composerModelId || copy.modelsUnavailable;
+  const composerModelName = models.find(({ id }) => id === composerModelId)?.name || composerModelId ||
+    (snapshot?.codeCatalog === "loading" ? copy.loadingCodeModels : copy.modelsUnavailable);
   const composerEffort = taskSelectionLocked ? task.effort ?? "default" : cliFixtureModel ? "default" : effort;
   const followUpTarget = !pausedByQuota && nativeTask ? { threadId: nativeTask.threadId, turnId: nativeTask.turnId } : task?.id;
   const canFollowUp = followUpTarget && (snapshot?.busy ? task?.status === "running" :
@@ -701,7 +703,7 @@ function Desktop() {
 
   function changeDraft(value: string) {
     setPrompt(value);
-    if (saveHistory && !cliFixtureModel && snapshot?.draftNamespace && !(snapshot.busy && task?.savedLocally === false)) {
+    if (!cliFixtureModel && snapshot?.draftNamespace && !(snapshot.busy && task?.savedLocally === false)) {
       writeDesktopDraft(codeDraft, `code:${snapshot.draftNamespace}`, value);
     }
   }
@@ -711,11 +713,6 @@ function Desktop() {
     name: "review", kind: "builtin", argumentHint: "[turn|branch]", description: desktopCodeExtensionsCopy[language].slashReviewDescription,
   }] : [], [task, language, snapshot?.remote]);
   const slashMenu = useSlashMenu({ draft: prompt, setDraft: changeDraft, focus: () => composer.current?.focus(), builtins: slashBuiltins });
-
-  function changeSaveHistory(value: boolean) {
-    setSaveHistory(value);
-    if (snapshot?.draftNamespace) writeDesktopDraft(codeDraft, `code:${snapshot.draftNamespace}`, value ? prompt : "");
-  }
 
   async function deleteLocalTask(id: string, menu: HTMLDetailsElement | null) {
     setRequesting(true);
@@ -809,7 +806,8 @@ ${text}` : text;
     nearBottom.current = true;
     await act(async () => {
       await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
-        saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory,
+        // A Code task is always saved. The two that are not: a plugin run, which the host refuses to save, and the CLI fixture's own opt-in.
+        saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : true,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
         ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
@@ -818,7 +816,6 @@ ${text}` : text;
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       clearPromptAttachments(attachmentScope);
-      setSaveHistory(true);
       setCodePlugin(undefined);
       setWorkspaceSelection(undefined);
       setCodeReferences([]);
@@ -841,12 +838,14 @@ ${text}` : text;
     target.addEventListener("lostpointercapture", clear);
   }
 
-  const codeHistoryControl = <label className="code-retention">
-    <input type="checkbox" checked={!pluginConnectionId && (cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : saveHistory)}
-      disabled={!!pluginConnectionId || busy || pausedForInput || (!!cliFixtureModel && !snapshot?.cliFixtureHistory)}
-      onChange={(event) => (cliFixtureModel ? setSaveNativeHistory : changeSaveHistory)(event.currentTarget.checked)} />
+  // The CLI fixture (development builds only) keeps its own opt-in to saved history; no other run has a choice to make.
+  const fixtureHistoryControl = cliFixtureModel && <label className="code-retention">
+    <input type="checkbox" checked={!pluginConnectionId && !!snapshot?.cliFixtureHistory && saveNativeHistory}
+      disabled={!!pluginConnectionId || busy || pausedForInput || !snapshot?.cliFixtureHistory}
+      onChange={(event) => setSaveNativeHistory(event.currentTarget.checked)} />
     {copy.saveHistory}
   </label>;
+  const codeHistoryControl = pluginConnectionId ? <span className="code-retention">{copy.pluginRunNotSaved}</span> : fixtureHistoryControl;
   const openCodeHistory = () => { select("code"); setHistoryOpen(true); };
   const alertText = notice ? copy[notice].replace("{limit}", MAX_CODE_REFERENCES.toLocaleString(language)) : "";
   return <div className="desktop" style={{ "--history-width": `${historyWidth}px` } as React.CSSProperties}
@@ -1135,26 +1134,18 @@ ${text}` : text;
               {pluginNamespace && <CodePluginPicker key={pluginNamespace} language={language} value={pluginConnectionId ?? ""}
                 disabled={Boolean(busy || pausedForInput || canFollowUp)} select={(id) => setCodePlugin(id ? { id, namespace: pluginNamespace } : undefined)} />}
               <div className="spacer" />
-              {(composerModelId || !catalogUnavailable) && <details className="model-menu">
-                <summary aria-label={copy.modelEffort}><Sparkles size={15} />
-                  <span>{composerModelName}
-                    {composerEffort !== "default" && ` · ${effortLabel(language, composerEffort)}`}</span><ChevronDown size={14} />
-                </summary>
-                <div className="model-popover">
-                  <label>{copy.model}<select aria-label={copy.model} value={composerModelId} disabled={busy || pausedForInput || !models.length}
-                    onChange={(event) => setModelId(event.currentTarget.value)}>
-                    {!models.length && !composerModelId && <option value="">{copy.noConnectedModels}</option>}
-                    {composerModelId && !models.some(({ id }) => id === composerModelId) && <option value={composerModelId}>{composerModelName}</option>}
-                    {models.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
-                  </select></label>
-                  <label>{copy.reasoningEffort}<select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
+              {(composerModelId || !catalogUnavailable) && <CodeModelPicker account={accountDraft} language={language} label={copy.modelEffort}
+                models={models} selectedId={composerModelId} name={composerModelName}
+                detail={composerEffort !== "default" ? ` · ${effortLabel(language, composerEffort)}` : undefined}
+                disabled={Boolean(busy || pausedForInput)} onSelect={setModelId}
+                effort={<>
+                  <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
                     onChange={(event) => setEffort(event.currentTarget.value as StartInput["effort"])}>
                     {effortOptions(selectedModel?.efforts, composerEffort).map((value) => <option value={value} key={value}>{effortLabel(language, value)}</option>)}
                   </select></label>
-                  {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== "smart-adaptive" && !selectedModel.efforts.includes(effort) &&
+                  {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== SMART_ADAPTIVE_MODEL_ID && !selectedModel.efforts.includes(effort) &&
                     <small>{copy.effortFallback}</small>}
-                </div>
-              </details>}
+                </>} />}
               {snapshot?.dictationAvailable && snapshot.draftNamespace && <DraftDictation language={language} disabled={busy}
                 maxLength={MAX_CODE_PROMPT_CHARACTERS} scope={snapshot.draftNamespace + ":" + (task?.id ?? "new")} draft={prompt} setDraft={changeDraft} />}
               {codeMode === "ask" && snapshot?.draftNamespace && <ChatDraftPlace language={language}
@@ -1221,7 +1212,7 @@ ${text}` : text;
             <PermissionSettings view={snapshot?.permissions} language={language} act={act} />
           </div>}
           {settingsView === "local-history" && <div className="execution-setting-row">
-            <div>{codeHistoryControl}<small>{privacyCopy.historyDetail}</small></div>
+            <div>{fixtureHistoryControl}<small>{privacyCopy.historyDetail}</small></div>
             <button className="soft" type="button" onClick={openCodeHistory}>{privacyCopy.manageHistory}</button>
           </div>}
           {settingsView === "account" && <section className="desktop-setting-section">

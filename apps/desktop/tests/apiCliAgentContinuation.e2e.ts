@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
+import { codeModelControl } from "./code-model-picker";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { codexFixtureAnswer, codexFixtureCall, flattenCodexTools, writeCodexResponse, type CodexRequest } from "./codex-response-fixture";
 
@@ -166,7 +167,7 @@ test("Agent continuation verifies prior API edits and requires fresh approval fo
     assert.deepEqual(paused.nativeRuns?.[0]?.usage, { source: "codex_thread", totalTokens: 144 });
     assert.deepEqual(paused.nativeRuns?.[0]?.quota, paused.quota);
     assert.equal(paused.effort, "high");
-    await expect(page.getByLabel("Model and reasoning effort")).toContainText(`${model} · High`);
+    await expect(codeModelControl(page)).toContainText(`${model} · High`);
     assert.equal(await readFile(join(root, "cli-destination.txt"), "utf8"), destinationBytes);
     scenario = "resume";
     await page.getByRole("textbox", { name: "Code request" }).fill("Continue from the verified edit and add the remaining file.");
