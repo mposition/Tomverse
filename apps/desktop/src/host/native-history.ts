@@ -4,20 +4,20 @@ import { z } from "zod";
 import { same, sha256, writeFileAtomic, type SessionState } from "../../../tomverse-cli/src/runtime.js";
 import { taskAnalysisSchema } from "../../../tomverse-cli/src/task-plan.js";
 import { acpUsageSources, asProposedCodePlan, codeNativeAssignment as assignment, codeNativeQuota, codeNativeRunEvidence, codeReferenceKind, codeReferencePath,
-  kimiNativeSessionId, zCodeNativeSessionId, miniMaxNativeSessionId, MAX_CODE_NATIVE_RUNS, MAX_CODE_REFERENCES, sessionId, startInput,
+  kimiNativeSessionId, miniMaxNativeSessionId, MAX_CODE_NATIVE_RUNS, MAX_CODE_REFERENCES, sessionId, startInput,
   type CodeNativeRunEvidence, type CodeNativeUsage, type Task } from "../contract";
-import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, kimiFixtureExecution, nativeFixtureProvider, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type NativeFixtureProvider } from "../code-execution";
+import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, kimiFixtureExecution, nativeFixtureProvider, qwenFixtureExecution, vibeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type NativeFixtureProvider } from "../code-execution";
 import { codeCliContinuation, codeContinuation, type CodeCliContinuation, type CodeContinuation } from "../code-fallback";
 import type { CliFixtureInput } from "./cli-fixture-input";
 import { desktopCodeNotice } from "./desktop-notice";
 
 const nativeId = z.string().regex(/^[\w.:-]{1,160}$/);
 type Provider = NativeFixtureProvider;
-const fixtureExecutions = { openai: codexFixtureExecution, anthropic: claudeFixtureExecution, qwen: qwenFixtureExecution, moonshot: kimiFixtureExecution, mistral: vibeFixtureExecution, deepseek: deepSeekFixtureExecution, zhipu: zCodeFixtureExecution, minimax: miniMaxFixtureExecution, xai: grokFixtureExecution, google: antigravityFixtureExecution };
-const historyPrefixes = { openai: "codex", anthropic: "claude", qwen: "qwen", moonshot: "kimi", mistral: "vibe", deepseek: "deepseek", zhipu: "zcode", minimax: "minimax", xai: "grok", google: "antigravity" };
-const quotaProviders = { codex: "openai", claude_code: "anthropic", grok_build: "xai", qwen_code: "qwen", zcode: "zhipu" } as const;
+const fixtureExecutions = { openai: codexFixtureExecution, anthropic: claudeFixtureExecution, qwen: qwenFixtureExecution, moonshot: kimiFixtureExecution, mistral: vibeFixtureExecution, minimax: miniMaxFixtureExecution, xai: grokFixtureExecution, google: antigravityFixtureExecution };
+const historyPrefixes = { openai: "codex", anthropic: "claude", qwen: "qwen", moonshot: "kimi", mistral: "vibe", minimax: "minimax", xai: "grok", google: "antigravity" };
+const quotaProviders = { codex: "openai", claude_code: "anthropic", grok_build: "xai", qwen_code: "qwen" } as const;
 const usageSources: Partial<Record<Provider, CodeNativeUsage["source"]>> = {
-  ...acpUsageSources, openai: "codex_thread", anthropic: "claude_turn", qwen: "qwen_requests", zhipu: "zcode_turn",
+  ...acpUsageSources, openai: "codex_thread", anthropic: "claude_turn", qwen: "qwen_requests",
 };
 const plan = z.object({ activeId: z.null(), analysis: taskAnalysisSchema.optional(), items: z.array(z.object({
   id: nativeId, segmentId: nativeId.optional(), title: z.string().max(1600), complete: z.boolean(), cancelled: z.boolean(),
@@ -48,7 +48,7 @@ const checkpoint = z.object({
 }).refine(({ provider, mode, nativeSession, nativeRuns, plan, status, quota, continuation, apiSource, changes }) => {
   const session = nativeSession ?? nativeRuns?.at(-1)?.session;
   const modelSource = provider === "openai" ? "codex_reroute" : provider === "anthropic" ? "claude_assistant" : undefined;
-  const threadId = provider === "moonshot" ? kimiNativeSessionId : provider === "openai" ? nativeId : provider === "mistral" ? z.guid() : provider === "zhipu" ? zCodeNativeSessionId : provider === "minimax" ? miniMaxNativeSessionId : z.uuid();
+  const threadId = provider === "moonshot" ? kimiNativeSessionId : provider === "openai" ? nativeId : provider === "mistral" ? z.guid() : provider === "minimax" ? miniMaxNativeSessionId : z.uuid();
   const matches = (item: z.infer<typeof assignment>) =>
     item.threadId === session?.threadId && item.model === session.model && (item.provider ?? "openai") === provider &&
     (!item.reportedModel || item.reportedModel.source === modelSource);
@@ -77,10 +77,9 @@ const checkpoint = z.object({
 });
 
 export function nativeHistoryHome(apiHistoryHome: string, fixture: CliFixtureInput, provider: Provider) {
-  const codingPlan = provider === "zhipu" && "codingPlan" in fixture && fixture.codingPlan === true;
   const subscription = provider === "qwen" && "subscriptionCa" in fixture && typeof fixture.subscriptionCa === "string";
   const scope = sha256(JSON.stringify([apiHistoryHome, fixture.executable, fixture.version, fixture.model, fixture.origin,
-    ...(codingPlan ? ["coding-plan"] : []), ...(subscription ? ["qwen-subscription"] : [])]));
+    ...(subscription ? ["qwen-subscription"] : [])]));
   // MiniMax adds long SQLite backup filenames inside the session profile on Windows.
   if (provider === "minimax") return join(dirname(apiHistoryHome), "m-" + Buffer.from(scope, "hex").toString("base64url"));
   return join(dirname(apiHistoryHome), `${historyPrefixes[provider]}-${scope}`);

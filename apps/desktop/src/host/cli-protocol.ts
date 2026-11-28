@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
@@ -12,7 +12,6 @@ import { unknownCliAccount, type CliAccount, type CliProtocolCheck, type CliProt
   type IsolatedAcpAccountProvider } from "../code-execution";
 import { releaseArchiveName, stageCliArchive, stageCliExecutable } from "./provider-cli-path";
 import { miniMaxRegion, stageMiniMaxRuntime } from "./minimax-runtime";
-import { stageZCodeRuntime, zCodeRuntimeTemp } from "./zcode-runtime";
 
 const maxOutputBytes = 256 * 1024;
 export const vibeProbeSettings = [
@@ -28,7 +27,7 @@ type ProtocolIo = {
 };
 type VerifiedProtocol = Extract<CliProtocolCheck, { status: "verified" }>;
 type Versions = { client: string; executable: string };
-type AcpProvider = Exclude<CliProtocolProvider, "openai" | "anthropic" | "zhipu">;
+type AcpProvider = Exclude<CliProtocolProvider, "openai" | "anthropic">;
 
 const frameSchema = z.record(z.string(), z.unknown());
 const id = z.string().min(1).max(160).regex(/^[\w.:/[\]-]+$/);
@@ -61,14 +60,9 @@ const grokMcpUpdate = z.object({
   jsonrpc: z.literal("2.0"), method: z.literal("_x.ai/mcp/servers_updated"),
   params: z.object({ mcpServers: z.tuple([]) }),
 }).strict();
-const zCodeStorageUpdate = z.object({ method: z.literal("startup/storageState"), params: z.object({
-  schemaVersion: z.literal(1), databaseKind: z.literal("session"),
-  phase: z.enum(["checking", "waiting_for_lock", "migrating", "committing", "ready"]),
-}) }).strict();
-const zCodeSessionList = z.object({ id: z.string(), result: z.object({ sessions: z.tuple([]) }).strict() }).strict();
 const acpAgentNames = {
   google: "Antigravity ACP Server", qwen: "qwen-code", moonshot: "Kimi Code CLI", mistral: "@mistralai/mistral-vibe",
-  minimax: "minimax-code", deepseek: "deepseek-harness-acp",
+  minimax: "minimax-code",
 } as const;
 
 export async function* readCliFrames(stream: Readable, outputLimit = maxOutputBytes, options?: { destroyOnReturn: boolean }) {
@@ -169,12 +163,10 @@ export async function initializeAcp(io: ProtocolIo, provider: AcpProvider, versi
     protocolVersion: 1, clientCapabilities, clientInfo: { name: "tomverse-desktop", title: "Tomverse Desktop", version: versions.client },
   } });
   const { result } = acpInit.parse(await io.read((message) => message.id === 1));
-  // The pinned DeepSeek release reports the bridge version in its handshake.
-  const agentVersion = provider === "deepseek" ? "0.0.1" : versions.executable;
   const expectedAgent = provider === "xai"
     ? result.authMethods?.some((method) => method.id === "grok.com") &&
       (!result.agentInfo || result.agentInfo.version === versions.executable)
-    : result.agentInfo?.name === acpAgentNames[provider] && result.agentInfo.version === agentVersion;
+    : result.agentInfo?.name === acpAgentNames[provider] && result.agentInfo.version === versions.executable;
   if (!expectedAgent) {
     throw new Error("The ACP agent identity did not match the verified CLI.");
   }
@@ -216,13 +208,6 @@ export async function inspectIsolatedAcpAccount(io: ProtocolIo, provider: Isolat
     : unknownCliAccount;
 }
 
-async function inspectZCode(io: ProtocolIo): Promise<VerifiedProtocol> {
-  const requestId = randomUUID();
-  io.send({ method: "session/list", id: requestId, params: { limit: 1 } });
-  zCodeSessionList.parse(await io.read((message) => message.id === requestId));
-  return { status: "verified", protocol: "zcode_protocol", protocolVersion: 1, models: null };
-}
-
 function uniqueModels(models: CliProtocolModel[]) {
   if (new Set(models.map(({ id }) => id)).size !== models.length) throw new Error("The CLI advertised a duplicate model ID.");
   return models;
@@ -231,8 +216,7 @@ function uniqueModels(models: CliProtocolModel[]) {
 export function inspectCliProcess(child: ChildProcessByStdio<Writable, Readable, null>, provider: CliProtocolProvider,
     profile: string, versions: Versions, signal: AbortSignal): Promise<VerifiedProtocol> {
   return observeCliProcess(child, provider, signal, (io) => provider === "openai" ? inspectCodex(io, profile, versions.client)
-    : provider === "anthropic" ? inspectClaude(io)
-      : provider === "zhipu" ? inspectZCode(io) : inspectAcp(io, provider, versions));
+    : provider === "anthropic" ? inspectClaude(io) : inspectAcp(io, provider, versions));
 }
 
 async function observeCliProcess<T>(child: ChildProcessByStdio<Writable, Readable, null>, provider: CliProtocolProvider,
@@ -244,18 +228,9 @@ async function observeCliProcess<T>(child: ChildProcessByStdio<Writable, Readabl
   child.stdin.on("error", fail);
   const restrictedNotifications = provider !== "openai" && provider !== "anthropic";
   let sawGrokMcpUpdate = false;
-  let sawZCodeReady = false;
   function isGrokStartupUpdate(message: Frame) {
     if (provider !== "xai" || sawGrokMcpUpdate || !grokMcpUpdate.safeParse(message).success) return false;
     sawGrokMcpUpdate = true;
-    return true;
-  }
-  function isStartupUpdate(message: Frame) {
-    if (isGrokStartupUpdate(message)) return true;
-    if (provider !== "zhipu" || sawZCodeReady) return false;
-    const storage = zCodeStorageUpdate.safeParse(message);
-    if (!storage.success) return false;
-    sawZCodeReady = storage.data.params.phase === "ready";
     return true;
   }
   const incoming = readCliFrames(child.stdout);
@@ -274,13 +249,12 @@ async function observeCliProcess<T>(child: ChildProcessByStdio<Writable, Readabl
           return message;
         }
         if (Object.hasOwn(message, "id") || message.type === "control_response") throw new Error("The CLI returned an unexpected response.");
-        if (restrictedNotifications && !isStartupUpdate(message)) throw new Error("The CLI returned an unexpected message during initialization.");
+        if (restrictedNotifications && !isGrokStartupUpdate(message)) throw new Error("The CLI returned an unexpected message during initialization.");
       }
     },
   };
   try {
     const result = await inspect(io);
-    if (provider === "zhipu" && !sawZCodeReady) throw new Error("ZCode did not confirm isolated storage initialization.");
     child.stdin.end();
     for await (const message of incoming) {
       if (isGrokStartupUpdate(message)) continue;
@@ -338,19 +312,6 @@ export async function stageQwenRelease(file: string, directory: string, version:
     entry: join(root, "lib", "cli-entry.js") };
 }
 
-export async function stageDeepSeekRelease(file: string, directory: string, version: string, signal: AbortSignal) {
-  const distribution = await unpackCliArchive("deepseek", file, directory, version, signal);
-  const mac = process.platform === "darwin";
-  const target = mac ? `macos-${process.arch}` : process.platform === "linux" ? "linux-x64" : "win-x64.exe";
-  const executable = join(distribution, "deepseek_harness_runtime", "runtime", `deepseek-harness-sdk-runtime-${target}`);
-  if (process.platform !== "win32") {
-    const executables = [executable, `${executable}-rg`];
-    if (mac) executables.push(`${executable}-spawn-helper`);
-    await Promise.all(executables.map((path) => chmod(path, 0o700)));
-  }
-  return executable;
-}
-
 async function protocolLaunch(provider: CliProtocolProvider, file: string, profile: string, base: string,
     version: string, signal: AbortSignal) {
   const env = isolatedCliEnvironment(commandEnv(), profile);
@@ -406,21 +367,6 @@ async function protocolLaunch(provider: CliProtocolProvider, file: string, profi
         MINIMAX_DATA_DIR: profile, MAVIS_REGION: miniMaxRegion, DO_NOT_TRACK: "1",
       } };
     }
-    case "deepseek": {
-      const executable = await stageDeepSeekRelease(file, profile, version, signal);
-      return { executable, args: ["--profile", "acp"], env: { ...env,
-        DSH_HOME: profile, DSH_TELEMETRY_DISABLED: "1",
-      } };
-    }
-    case "zhipu": {
-      const { executable, entry, config } = await stageZCodeRuntime(file, join(profile, "distribution"), signal);
-      return { executable, args: ["--no-global-search-paths", entry, "app-server", "--stdio"], env: {
-        ...env, ELECTRON_RUN_AS_NODE: "1", ZCODE_RUNTIME_ENV: "production",
-        ZCODE_MODEL_TELEMETRY_ENABLED: "false", ZCODE_HOME: profile, ZCODE_STORAGE_DIR: join(profile, "storage"),
-        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: config, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: join(profile, "provider_config.json"),
-        ZCODE_HTTP_PROXY: base, NODE_USE_ENV_PROXY: "1",
-      } };
-    }
   }
 }
 
@@ -450,8 +396,7 @@ async function runIsolatedProbe<T>(provider: CliProtocolProvider, file: string, 
     inspect: (child: ChildProcessByStdio<Writable, Readable, null>, profile: string, signal: AbortSignal) => Promise<T>,
     failure: (networkBlocked: boolean) => T, interceptAccountTraffic = false): Promise<T> {
   if (cancel.aborted) return failure(false);
-  const temp = provider === "zhipu" ? await zCodeRuntimeTemp(tmpdir()) : tmpdir();
-  const directory = await mkdtemp(join(temp, "tomverse-cli-protocol-"));
+  const directory = await mkdtemp(join(tmpdir(), "tomverse-cli-protocol-"));
   let networkBlocked = false;
   // Give each provider a closed local API destination during the handshake.
   const endpoint = createServer((request, response) => {

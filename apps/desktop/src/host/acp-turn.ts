@@ -22,7 +22,7 @@ import type { NativePatchTool } from "./native-patches";
 import { assertProjectRoot, type ProjectRoot } from "./project-root";
 import { QwenUsage } from "./qwen-usage";
 import { acpEdits, acpRpcId, kimiWriteInput } from "./acp-edits";
-import { deepSeekPatchFunction, deepSeekReadFunction, nativeReadInput, nativeReadName, nativeTaskListInput, nativeTaskListName, startNativeMcpServer,
+import { directMcpPatchFunction, directMcpReadFunction, nativeReadInput, nativeReadName, nativeTaskListInput, nativeTaskListName, startNativeMcpServer,
   vibePatchFunction, vibeReadFunction } from "./native-mcp-server";
 
 import { completedNativeRow, maxNativePlanItems as maxPlanItems, nativeAnalysisInstruction, nativePlanPhase as phase,
@@ -62,17 +62,13 @@ const vibeRetryNotice = z.object({
   category: z.enum(["rate_limited", "server_error", "timed_out", "connection", "unknown"]),
   detail: z.string(),
 });
-const deepSeekSession = mcpOptions.extend({ sessionId: z.uuid().optional(), modes: z.never().optional() });
-const deepSeekEffect = callUpdate.pick({ toolCallId: true, status: true }).extend({
+const mcpEffect = callUpdate.pick({ toolCallId: true, status: true }).extend({
   title: z.string().max(160).optional(), rawInput: z.unknown().optional(),
 });
-const deepSeekTodoInput = z.object({ todos: z.array(z.object({
-  content: z.string().trim().min(1).max(1600), status: phase,
-})).max(maxPlanItems) });
 const miniMaxSession = mcpOptions.extend({ sessionId: miniMaxNativeSessionId.optional(), modes: z.object({
   currentModeId: z.literal("default"),
 }) });
-const miniMaxTool = deepSeekEffect.extend({ rawOutput: z.unknown().optional() });
+const miniMaxTool = mcpEffect.extend({ rawOutput: z.unknown().optional() });
 const miniMaxTodos = z.object({ todos: z.array(z.object({ content: z.string().trim().min(1).max(1600),
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]), priority: z.enum(["low", "medium", "high"]),
 })).max(maxPlanItems) });
@@ -110,14 +106,14 @@ type AcpTurnProgress = { session: CodeNativeAssignment; plan?: CodeTaskPlan; ans
   messages: Array<{ role: "user" | "assistant"; text: string }>; pendingFollowUp?: string; usage?: CodeNativeUsage };
 export type AcpTurn = AcpTurnProgress & (
   { status?: "stopped" | "completed" | "failed" | "unknown"; quota?: never } |
-  { status: "blocked"; quota: Extract<CodeQuotaEvidence, { source: "grok_build" | "qwen_code" | "zcode" }> }
+  { status: "blocked"; quota: Extract<CodeQuotaEvidence, { source: "grok_build" | "qwen_code" }> }
 );
 type QueueFollowUp = (text: string) => Promise<boolean>;
 type TurnInput = { project: ProjectRoot; protectedRoots: string[]; connectionKey: string; version: string; clientVersion: string;
   model: string; origin: string; prompt: string; mode: "ask" | "plan" | "agent"; signal: AbortSignal;
   previous?: { session: CodeNativeAssignment; plan?: CodeTaskPlan }; patchTool?: NativePatchTool;
   qwenSubscription?: boolean;
-  beforeFollowUp?: () => void; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "minimax" | "xai" | "google" };
+  beforeFollowUp?: () => void; provider: "qwen" | "moonshot" | "mistral" | "minimax" | "xai" | "google" };
 
 export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable }, input: TurnInput,
   publish: (turn: AcpTurn) => void, registerFollowUp?: (queue: QueueFollowUp) => void
@@ -128,7 +124,6 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
   const workspace = new Workspace(input.project.path, input.protectedRoots);
   const kimi = input.provider === "moonshot";
   const vibe = input.provider === "mistral";
-  const deepSeek = input.provider === "deepseek";
   const miniMax = input.provider === "minimax";
   const grok = input.provider === "xai";
   const antigravity = input.provider === "google";
@@ -137,10 +132,10 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
   const planOnly = input.mode === "plan";
   const qwenSubscription = input.provider === "qwen" && input.qwenSubscription === true;
   const qwenUsage = input.provider === "qwen" ? new QwenUsage() : undefined;
-  const usesMcp = vibe || deepSeek || miniMax || grok || antigravity;
+  const usesMcp = vibe || miniMax || grok || antigravity;
   const requiresMcpGrant = grok || antigravity;
-  const mcpReadName = antigravity ? antigravityReadFunction : grok ? grokReadFunction : vibe ? vibeReadFunction : deepSeekReadFunction;
-  const mcpPatchName = antigravity ? antigravityPatchFunction : grok ? grokPatchFunction : vibe ? vibePatchFunction : deepSeekPatchFunction;
+  const mcpReadName = antigravity ? antigravityReadFunction : grok ? grokReadFunction : vibe ? vibeReadFunction : directMcpReadFunction;
+  const mcpPatchName = antigravity ? antigravityPatchFunction : grok ? grokPatchFunction : vibe ? vibePatchFunction : directMcpPatchFunction;
   const samePath = (first: string, second: string) => same(normalize(first), normalize(second));
   const send = (frame: Frame) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`);
   const request = (id: number, method: string, params: Frame) => send({ id, method, params });
@@ -148,7 +143,6 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
   const calls = new Map<string, Call>();
   const mcpCalls = new EventEmitter();
   const todoIds = new Set<string>();
-  const deepSeekTodos = new Map<string, PlanItem[]>();
   const miniMaxNames = new Map<string, string>();
   const miniMaxTodoDigests = new Map<string, string>();
   const grokTodoRequests = new Map<string, z.infer<typeof grokTodoInput>>();
@@ -185,10 +179,8 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
   }
   function checkMcpModel(options: z.infer<typeof mcpOptions>["configOptions"]) {
     const models = options.filter(({ id }) => id === "model");
-    const expected = miniMax ? miniMaxFixtureModelSelection(input.model) :
-      deepSeek ? JSON.stringify(["deepseek-official", input.model]) : input.model;
+    const expected = miniMax ? miniMaxFixtureModelSelection(input.model) : input.model;
     return models.length === 1 && models[0]?.currentValue === expected &&
-      (!deepSeek || options.length === 2 && options.find(({ id }) => id === "reasoning_effort")?.currentValue === "off") &&
       (!miniMax || options.find(({ id }) => id === "permissionMode")?.currentValue === "default");
   }
   const activeRow = () => {
@@ -203,7 +195,7 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
     plan: snapshotNativePlan(rows, { activeId: streaming ? activeRow()?.id ?? null : null,
       analysis, streaming, stopped: cancelled, planOnly }),
   });
-  const hasInFlightTools = () => edits.pending() || deepSeekTodos.size > 0 || miniMaxTodoDigests.size > 0 || grokTodoRequests.size > 0 ||
+  const hasInFlightTools = () => edits.pending() || miniMaxTodoDigests.size > 0 || grokTodoRequests.size > 0 ||
     antigravityLists.size > 0 ||
     [...calls.values()].some(({ evidence }) => evidence.state === "running");
   const onCancel = () => {
@@ -222,8 +214,8 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
     publish(snapshot());
   };
   const updatePlan = (entries: PlanItem[]) => {
-    const prefix = antigravity ? "antigravity" : grok ? "grok" : miniMax ? "minimax" : deepSeek ? "deepseek" : kimi ? "kimi" : vibe ? "vibe" : "qwen";
-    const next = reconcileNativeRows(rows, entries, session, { prefix, titleKey: kimi || deepSeek || miniMax, planOnly });
+    const prefix = antigravity ? "antigravity" : grok ? "grok" : miniMax ? "minimax" : kimi ? "kimi" : vibe ? "vibe" : "qwen";
+    const next = reconcileNativeRows(rows, entries, session, { prefix, titleKey: kimi || miniMax, planOnly });
     if (!next) {
       rejectPlan();
       return;
@@ -238,7 +230,7 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
     }
     publish(snapshot());
   };
-  const observeMcpFile = ({ toolCallId, status, rawInput }: z.infer<typeof deepSeekEffect>, name?: string) => {
+  const observeMcpFile = ({ toolCallId, status, rawInput }: z.infer<typeof mcpEffect>, name?: string) => {
     const call = calls.get(toolCallId);
     const read = name === mcpReadName;
     if (!call && !read && name !== mcpPatchName) return;
@@ -365,26 +357,6 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
           updatePlan(output.data.details.todos.flatMap(({ content, status }) => status === "cancelled" ? [] : [{ content, status }]));
         } else rejectPlan();
       }
-      return;
-    }
-    if (deepSeek) {
-      const parsed = deepSeekEffect.safeParse(update);
-      if (!parsed.success || previousCallIds.has(parsed.data.toolCallId)) return;
-      const item = parsed.data;
-      const entries = deepSeekTodos.get(item.toolCallId);
-      if (entries && (item.status === "completed" || item.status === "failed")) {
-        deepSeekTodos.delete(item.toolCallId);
-        if (item.status === "completed" && !followUp && !signal.aborted) updatePlan(entries);
-        return;
-      }
-      if (item.title === "todo_write" && item.status === "in_progress" && !todoIds.has(item.toolCallId)) {
-        markTodo(item.toolCallId);
-        const plan = deepSeekTodoInput.safeParse(item.rawInput);
-        if (plan.success) deepSeekTodos.set(item.toolCallId, plan.data.todos);
-        else rejectPlan();
-        return;
-      }
-      observeMcpFile(item, item.title);
       return;
     }
     const parsed = vibeEffect.safeParse(update);
@@ -592,10 +564,6 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
     if (vibe && (initialize.authMethods?.length !== 0 || input.previous && initialize.agentCapabilities?.loadSession !== true)) {
       throw new Error("Vibe changed its isolated session capabilities.");
     }
-    if (deepSeek && (initialize.authMethods?.length !== 0 || initialize.agentCapabilities?.mcpCapabilities?.http !== true ||
-        !initialize.agentCapabilities.sessionCapabilities?.close || !initialize.agentCapabilities.sessionCapabilities.resume)) {
-      throw new Error("DeepSeek Harness changed its isolated session capabilities.");
-    }
     if (miniMax && ((initialize.authMethods?.length ?? 0) !== 0 || initialize.agentCapabilities?.mcpCapabilities?.http !== true ||
         !initialize.agentCapabilities.sessionCapabilities?.close || input.previous && initialize.agentCapabilities.loadSession !== true)) {
       throw new Error("MiniMax Code changed its isolated session capabilities.");
@@ -626,7 +594,7 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
     signal.throwIfAborted();
     const previous = input.previous;
     if (previous) session = { ...previous.session, turnId: randomUUID() };
-    request(3, previous ? (kimi || deepSeek || antigravity ? "session/resume" : "session/load") : "session/new", {
+    request(3, previous ? (kimi || antigravity ? "session/resume" : "session/load") : "session/new", {
       cwd: input.project.path, mcpServers: mcpServer ? [mcpServer.descriptor] : [],
       ...(previous && { sessionId: previous.session.threadId }) });
     let ready: unknown;
@@ -676,10 +644,6 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
           startupThreadId && startupThreadId !== threadId) {
         throw new Error("Grok Build did not confirm the scoped model and workspace.");
       }
-    } else if (deepSeek) {
-      const state = deepSeekSession.parse(ready);
-      threadId = z.uuid().parse(state.sessionId ?? previous?.session.threadId);
-      if (!checkMcpModel(state.configOptions)) throw new Error("DeepSeek Harness did not confirm the scoped model.");
     } else if (kimi) {
       const state = kimiSession.parse(ready);
       threadId = kimiNativeSessionId.parse(state.sessionId ?? previous?.session.threadId);
@@ -726,7 +690,7 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
         (input.mode === "agent" ? `Submit file edits only through ${antigravityPatchFunction} after confirming a workspace read. ` : "") :
         grok ? grokWorkspaceInstruction(input.mode === "agent") :
         usesMcp ? `Use ${vibe ? nativeReadName : mcpReadName} to inspect files in this workspace. ` +
-        `Use the ${miniMax ? "todowrite" : deepSeek ? "todo_write" : "todo"} tool for task updates. ` +
+        `Use the ${miniMax ? "todowrite" : "todo"} tool for task updates. ` +
         (input.mode === "agent" ? `Submit file edits only through ${vibe ? "desktop_apply_patch" : mcpPatchName} after confirming a workspace read. ` : "") : "";
       const prompt = instruction || workspaceInstruction ? `${text}\n\nDesktop instructions:\n${workspaceInstruction}${instruction ?? ""}` : text;
       streaming = true;
@@ -777,7 +741,7 @@ export async function observeAcpTurn(child: { stdout: Readable; stdin: Writable 
         if (hasInFlightTools()) {
           throw new Error("The ACP agent stopped before confirming the outcome of its tools.");
         }
-        const unconfirmedTurn = (kimi || miniMax || vibe || deepSeek) && stopReason === "end_turn" &&
+        const unconfirmedTurn = (kimi || miniMax || vibe) && stopReason === "end_turn" &&
           (!answer.trim() || kimi && answer === kimiFailedCompaction) &&
           !(planAccepted && rows.size) && ![...calls.values()].some(({ evidence }) => evidence.state === "succeeded");
         const exhaustedPrompt = grok && !signal.aborted && !followUp && grokLimitedPrompt &&

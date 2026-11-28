@@ -53,7 +53,7 @@ export type WorkerCommand =
     argsPrefix?: string[];
     /** The Z.ai route only: its key and Claude Code settings folder, held in memory for this run. */
     zai?: { key: string; configDir: string } }
-  | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
+  | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
     browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean; webSearch?: boolean;
     afterClarification?: { requestId: string; text: string };

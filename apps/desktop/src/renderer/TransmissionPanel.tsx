@@ -80,9 +80,6 @@ export function NativeUsagePanel({ runs, taskId, segmentId, language }: {
           input: usage.requests.reduce((total, request) => total + request.inputTokens, 0),
           output: usage.requests.reduce((total, request) => total + request.outputTokens, 0),
         })
-        : usage?.source === "zcode_turn" ? formatEvidence(copy.reportedRequests, language, {
-          reported: usage.reportedRequests, input: usage.inputTokens, output: usage.outputTokens,
-        })
         : usage ? <>
           {formatEvidence(usage.source === "vibe_session" ? copy.sessionTokens : copy.turnTokens, language, {
             input: usage.inputTokens, output: usage.outputTokens,

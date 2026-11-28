@@ -26,7 +26,7 @@ function readIds(key: string): string[] {
 
 export function DesktopModelPicker({ account, language, label, children, models, choices, limit, plan, disabled,
   mode, autoOffered, onModeChange, onChoose, effort, hasImageAttachments, imageCapability, onImage, searchReadiness, singleModel = false,
-  catalogueOnly = false, scope = "" }: {
+  catalogueOnly = false, scope = "", creditFreeModelIds }: {
   account?: string; language: Language; label: string; children: ReactNode;
   models: AiModel[]; choices: string[]; limit: number; plan: ModelTier; disabled: boolean;
   mode?: Mode; autoOffered?: boolean; onModeChange?(mode: Mode): void; onChoose(ids: string[]): void;
@@ -35,6 +35,8 @@ export function DesktopModelPicker({ account, language, label, children, models,
   searchReadiness?: { brave: boolean }; singleModel?: boolean;
   /** The models are a catalogue of their own (Code): no Chat recommendations, and its own favourites. */
   catalogueOnly?: boolean; scope?: string;
+  /** Models that spend none of the person's Tomverse credits: the picker shows no usage meter or credit estimate for them. */
+  creditFreeModelIds?: readonly string[];
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -107,7 +109,7 @@ export function DesktopModelPicker({ account, language, label, children, models,
             <AvailableCreditsProvider value={credits}>
               <ImageModelCatalogProvider models={imageModels}>
                 <WebSearchBackendReadinessProvider readiness={searchReadiness}>
-                <ModelPickerPanel models={models} singleModelSelection={singleModel} catalogueOnly={catalogueOnly} selectedModelIds={choices}
+                <ModelPickerPanel models={models} singleModelSelection={singleModel} catalogueOnly={catalogueOnly} creditFreeModelIds={creditFreeModelIds} selectedModelIds={choices}
                   maxSelectableModels={limit} currentPlan={plan} isGuestMode={false} isMobileShell={false}
                   isCompactLayout={false} isKeyboardCompact={false} modelStatuses={emptyStatuses}
                   hasImageAttachments={hasImageAttachments ?? false} favoriteModelIds={favorites} recentModelIds={recent}

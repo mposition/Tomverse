@@ -5,11 +5,10 @@ import { basename, dirname, extname, isAbsolute, join, normalize } from "node:pa
 import { pipeline } from "node:stream/promises";
 import type { CliProvider } from "../code-execution";
 import { miniMaxRuntimeSupported, miniMaxVersion, verifyMiniMaxRuntime } from "./minimax-runtime";
-import { zCodeRuntimeSupported, zCodeVersion, verifyZCodeRuntime } from "./zcode-runtime";
 
 const executableNames = {
   openai: "codex", anthropic: "claude", google: "agy", xai: "grok", qwen: "qwen", moonshot: "kimi",
-  mistral: "vibe-acp", minimax: "mcode", deepseek: "dsh", zhipu: "zcode",
+  mistral: "vibe-acp", minimax: "mcode",
 } satisfies Record<CliProvider, string>;
 
 type CliRelease = { version: string; bytes: number; sha256: string; archive?: string; aliases?: readonly string[] };
@@ -23,8 +22,6 @@ const x64Releases: Partial<Record<NodeJS.Platform, Partial<Record<CliProvider, C
     qwen: { version: "0.28.4", bytes: 75594158, sha256: "81234b13006160d5bd6b9ab2d5a072964d38796c83e23ee3395c626cb141458a", archive: "qwen-code-win-x64.zip" },
     moonshot: { version: "2.7.2", bytes: 162408736, sha256: "d976d17f1ef722fb7cc04532a4ec32dd26eabce1cc27cc77900d783312ed8a04" },
     mistral: { version: "3.1.4", bytes: 95639517, sha256: "4f8681d6e0496a258ba62acf57188961ebdfdc5799f26fe218adb43c637c7b79", archive: "vibe-acp-windows-x86_64-3.1.4.zip" },
-    deepseek: { version: "0.2.2-rc.2", bytes: 86959936, sha256: "a791af95a97be205a73354c6819e95b5fe2ff40a57ef8a78d53c188ee33e9aea",
-      archive: "deepseek_harness_runtime_bin-0.2.2rc2-py3-none-win_amd64.whl" },
   },
   linux: {
     openai: { version: "0.171.0-alpha.13", bytes: 315250104, sha256: "63279cf1860a285495fa0bad3c40f5eb38c3487f7425adb603bcbd49175fcaf8" },
@@ -35,8 +32,6 @@ const x64Releases: Partial<Record<NodeJS.Platform, Partial<Record<CliProvider, C
     qwen: { version: "0.28.4", bytes: 94092856, sha256: "15d471ca7f08eed7898ec9c3dcf2e66dc8c29b61a943d0daece6cb19f48da3e7", archive: "qwen-code-linux-x64.tar.gz" },
     moonshot: { version: "2.7.2", bytes: 193596608, sha256: "7f82148d26467874400d19ee8d23ead13cece9cd0c17648a5622cae480a5a596" },
     mistral: { version: "3.1.4", bytes: 143787163, sha256: "934a79356755821a31e6ce1aee7f7f1eacb6b1e6c78901acf1eb7fc4650aece7", archive: "vibe-acp-linux-x86_64-3.1.4.tar.gz" },
-    deepseek: { version: "0.2.2-rc.2", bytes: 97364370, sha256: "3c8f15a7a92b12857032995ec5dbcc105f192c36218e9b6bb2c5b54b4ee7db17",
-      archive: "deepseek_harness_runtime_bin-0.2.2rc2-py3-none-manylinux_2_28_x86_64.whl" },
   },
   darwin: {
     openai: { version: "0.171.0-alpha.13", bytes: 321344960, sha256: "1f038c1894253c1f6683151ff90cce6cae598660ab97ccd7cefbb7e2ef13ddde" },
@@ -47,8 +42,6 @@ const x64Releases: Partial<Record<NodeJS.Platform, Partial<Record<CliProvider, C
     qwen: { version: "0.28.4", bytes: 88262161, sha256: "153a84eb5d2b00fa17725845f092cf59823f4baa0db3dfa9bc0dcff91caabcf6", archive: "qwen-code-darwin-x64.tar.gz" },
     moonshot: { version: "2.7.2", bytes: 193337344, sha256: "b69233ea5ab212dd0ef9e8253dc665736b6b8f8915a0da753cb110bd4304ff45" },
     mistral: { version: "3.1.4", bytes: 97780703, sha256: "a5e2fac0ec4ea09c7c8fd218ae2acbb9b830ecd071668fe7f4293e793a104940", archive: "vibe-acp-darwin-x86_64-3.1.4.tar.gz" },
-    deepseek: { version: "0.2.2-rc.2", bytes: 94953513, sha256: "3abb396390e34fc699119060302531d71ec0df6a79adf070572d77715ba1f395",
-      archive: "deepseek_harness_runtime_bin-0.2.2rc2-py3-none-macosx_14_0_x86_64.whl" },
   },
 };
 const appleSiliconReleases: Partial<Record<CliProvider, CliRelease>> = {
@@ -60,8 +53,6 @@ const appleSiliconReleases: Partial<Record<CliProvider, CliRelease>> = {
   qwen: { version: "0.28.4", bytes: 86969906, sha256: "993c10208cca5f3018f14b19d6791b88fa4f5f3f401388217a1cbf517d028f55", archive: "qwen-code-darwin-arm64.tar.gz" },
   moonshot: { version: "2.7.2", bytes: 190995520, sha256: "f97206f936eda7d446fcb4fb67d8029da0efe7f8b5f2bee404ed6577eaac604c" },
   mistral: { version: "3.1.4", bytes: 94170394, sha256: "4492735d66b615cb321e19e762199df957744ff9f8e7cccaf39fbebd55cad8a0", archive: "vibe-acp-darwin-aarch64-3.1.4.tar.gz" },
-  deepseek: { version: "0.2.2-rc.2", bytes: 91559131, sha256: "76ac8fe84e6999e14a2229e20cbcaa819dc22b5bfaa40abb0fe810db8a31abc7",
-    archive: "deepseek_harness_runtime_bin-0.2.2rc2-py3-none-macosx_14_0_arm64.whl" },
 };
 
 type VerifiedCliPathInspection = { status: "pathVerified"; version: string; file: string; fileStamp?: string };
@@ -82,7 +73,6 @@ export function applyCliReleaseFixture(fixture: Partial<Record<CliProvider, { ve
 
 export function supportsCliPath(provider: CliProvider): boolean {
   if (provider === "minimax") return miniMaxRuntimeSupported;
-  if (provider === "zhipu") return zCodeRuntimeSupported;
   return Boolean(releases?.[provider]);
 }
 
@@ -95,11 +85,10 @@ export function fileStamp({ dev, ino, size, mode, mtimeMs, ctimeMs }: Stats) {
   return JSON.stringify([dev, ino, size, mode, mtimeMs, ctimeMs]);
 }
 
-async function matchesFileFormat(file: FileHandle, size: number, nodeBundle: boolean, archive?: string) {
+async function matchesFileFormat(file: FileHandle, size: number, archive?: string) {
   const header = Buffer.alloc(64);
   const { bytesRead } = await file.read(header, 0, header.length, 0);
   if (archive) return archive.endsWith(".tar.gz") ? header.toString("hex", 0, 2) === "1f8b" : header.toString("hex", 0, 4) === "504b0304";
-  if (nodeBundle) return /^#![^\r\n]*\bnode\b/.test(header.toString("utf8"));
   if (windows) {
     if (bytesRead < header.length || header.toString("ascii", 0, 2) !== "MZ") return false;
     const offset = header.readUInt32LE(60);
@@ -123,16 +112,14 @@ export async function inspectCliPath(provider: CliProvider, selectedPath: string
   if (!isLocalPath(selectedPath)) return { status: "invalidPath" };
   if (!supportsCliPath(provider)) return { status: "unsupportedPlatform" };
   if (windows && windowsShim.test(selectedPath)) return { status: "windowsShim" };
-  const zcodeBundle = provider === "zhipu" && basename(selectedPath).toLowerCase() === "zcode.cjs";
-  if (provider === "minimax" || (provider === "zhipu" && !zcodeBundle)) {
+  if (provider === "minimax") {
     try {
       const root = await realpath(selectedPath);
       if (!isLocalPath(root)) return { status: "invalidPath" };
       if (!(await lstat(root)).isDirectory()) return { status: "wrongFile" };
       try {
-        if (provider === "minimax") await verifyMiniMaxRuntime(root, { signal });
-        else await verifyZCodeRuntime(root, { signal });
-        return { status: "pathVerified", version: provider === "minimax" ? miniMaxVersion : zCodeVersion, file: root };
+        await verifyMiniMaxRuntime(root, { signal });
+        return { status: "pathVerified", version: miniMaxVersion, file: root };
       } catch {
         return { status: "versionUnverified" };
       }
@@ -147,7 +134,7 @@ export async function inspectCliPath(provider: CliProvider, selectedPath: string
   const archive = filename.toLowerCase() === release?.archive ? release.archive : undefined;
   const codexReleaseName = provider === "openai" && /^codex-(?:x86_64|aarch64)-(?:pc-windows-msvc|apple-darwin|unknown-linux-(?:gnu|musl))$/.test(name);
   const executableName = name === executableNames[provider] || codexReleaseName || release?.aliases?.includes(name);
-  if (!zcodeBundle && !archive && (!executableName || (windows && extname(filename).toLowerCase() !== ".exe"))) {
+  if (!archive && (!executableName || (windows && extname(filename).toLowerCase() !== ".exe"))) {
     return { status: "wrongFile" };
   }
   try {
@@ -155,11 +142,11 @@ export async function inspectCliPath(provider: CliProvider, selectedPath: string
     if (!isLocalPath(target)) return { status: "invalidPath" };
     if (windows && extname(target).toLowerCase() !== extname(filename).toLowerCase()) return { status: "windowsShim" };
     const before = await lstat(target);
-    if (!before.isFile() || (!windows && !zcodeBundle && !archive && !(before.mode & 0o111))) return { status: "wrongFile" };
+    if (!before.isFile() || (!windows && !archive && !(before.mode & 0o111))) return { status: "wrongFile" };
     const file = await open(target, localReadFlags);
     try {
       const opened = await file.stat();
-      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || !await matchesFileFormat(file, opened.size, zcodeBundle, archive)) {
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || !await matchesFileFormat(file, opened.size, archive)) {
         return { status: "wrongFile" };
       }
       if (!release || (release.archive && !archive) || opened.size !== release.bytes) return { status: "versionUnverified" };
@@ -218,9 +205,7 @@ export function watchVerifiedCliPath(provider: CliProvider, selected: string, ta
     // The parent reports replacements even when an update swaps the file's inode.
     attach(dirname(target), false, basename(target));
     if (key(selected) !== key(target)) attach(dirname(selected), false, basename(selected));
-    if (provider === "minimax" || (provider === "zhipu" && basename(selected).toLowerCase() !== "zcode.cjs")) {
-      attach(target, true);
-    }
+    if (provider === "minimax") attach(target, true);
     return close;
   } catch {
     // Re-checking an installation before using it is still required if the filesystem cannot watch it.
