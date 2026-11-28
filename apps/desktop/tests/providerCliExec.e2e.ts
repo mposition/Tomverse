@@ -9,6 +9,7 @@ import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { openCodeProject } from "./code-project-fixture";
 import { launchNativeFixture } from "./launch-native-fixture";
 import type { Page } from "@playwright/test";
+import { chooseCodeModel, codeModelControl } from "./code-model-picker";
 
 /**
  * Code runs a task with the person's own Codex and Claude Code (the server's desktopProviderCliExec route). The CLIs are a
@@ -106,10 +107,8 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
       await expect(picker).toHaveAttribute("data-mode", mode);
     };
     const chooseCli = async (name: "Codex" | "Claude Code") => {
-      const model = page.getByRole("combobox", { name: "Model" });
-      if (!await model.isVisible()) await page.locator("summary").filter({ hasText: /Codex|Claude Code/ }).first().click();
-      await model.selectOption({ label: name });
-      await expect(model).toHaveValue(name === "Codex" ? "provider-cli:openai" : "provider-cli:anthropic");
+      await chooseCodeModel(page, { model: name === "Codex" ? "provider-cli:openai" : "provider-cli:anthropic" });
+      await expect(codeModelControl(page)).toContainText(name);
     };
     const send = async (prompt: string) => {
       await page.getByRole("textbox", { name: "Code request" }).fill(prompt);
@@ -131,7 +130,8 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     assert.equal(sandbox(run.args), "read-only");
     assert.equal(run.prompt, "Read the project");
     assert.ok(run.env.every((name) => !/^TOMVERSE_|^ELECTRON|TOKEN|KEY/i.test(name)), "no Tomverse or secret variable reaches the CLI");
-    await expect.poll(async () => (await state()).history.map(({ title }) => title)).toContain("Read the project");
+    // The task is saved when the run has ended, which includes the wait for the CLI's process tree to be gone.
+    await expect.poll(async () => (await state()).history.map(({ title }) => title), { timeout: 30_000 }).toContain("Read the project");
     assert.equal((await state()).task?.liveCli, true);
 
     // Codex cannot ask, so Ask runs read-only and the task says so; Auto review is the CLI's own reviewer.
@@ -144,7 +144,8 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await send("Change the project with review");
     await expect(page.getByText("done: Change the project with review", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.locator("summary", { hasText: "Auto review runs in Codex's project sandbox" })).toBeAttached();
-    assert.equal(sandbox((await seen()).args), "workspace-write");
+    // The write modes run in a permission profile (the project writable, its credential files read-only), not --sandbox.
+    assert.ok(!(await seen()).args.includes("--sandbox") && (await seen()).args.includes('default_permissions="tomverse"'));
     assert.ok(!(await seen()).args.includes("--approve-for-me"), "Codex's own reviewer is never used");
 
     // A saved task reopens from history with its messages, and reads as a provider CLI task.
@@ -185,7 +186,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     assert.equal(readOnly.response?.response.response.behavior, "deny");
 
     // Stop ends the CLI and its child.
-    await expect.poll(async () => (await state()).busy).toBe(false);
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
     await chooseCli("Codex");
     await send("Wait for a long time [hang]");
     await expect.poll(async () => { try { return JSON.parse(await readFile(pidFile, "utf8")).child as number; } catch { return 0; } }, { timeout: 30_000 }).toBeGreaterThan(0);
@@ -198,7 +199,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     await rm(pidFile);
 
     // Closing the app while a task runs ends the CLI tree too.
-    await expect.poll(async () => (await state()).busy).toBe(false);
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
     await send("Wait again [hang]");
     await expect.poll(async () => { try { return JSON.parse(await readFile(pidFile, "utf8")).child as number; } catch { return 0; } }, { timeout: 30_000 }).toBeGreaterThan(0);
     const open = JSON.parse(await readFile(pidFile, "utf8")) as { parent: number; child: number };
