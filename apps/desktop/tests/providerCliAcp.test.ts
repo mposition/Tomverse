@@ -1045,3 +1045,78 @@ test("A request whose kind differs from the announced call, or whose command fie
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("Arguments the request and the earlier call both carry must be the same arguments, whole", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-same-"));
+  try {
+    const decide = (toolCall: object, earlier: object | undefined, mode: "ask" | "read_only" = "ask") => {
+      const calls = new Map<string, TrackedCall>();
+      if (earlier) trackToolCall(calls, "t", { title: "Run", kind: "execute", ...earlier });
+      return classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "t", title: "Run", kind: "execute", ...toolCall } }, { cwd, plan: cliPermissionPlan("mistral", mode), tracked: calls.get("t") });
+    };
+    // The same arguments, in another order of keys, are the same.
+    assert.equal(decide({ rawInput: { command: "ls", cwd: "/work", timeout: 5 } }, { rawInput: { timeout: 5, cwd: "/work", command: "ls" } }).verdict, "ask");
+    // An earlier call that carries a field the request lacks (a cwd, an option), or the other way round, is another action.
+    for (const [name, request, earlier] of [
+      ["earlier has a cwd", { command: "ls" }, { command: "ls", cwd: "/elsewhere" }],
+      ["request has a cwd", { command: "ls", cwd: "/elsewhere" }, { command: "ls" }],
+      ["another command", { command: "echo hi" }, { command: "git push" }],
+      ["another value", { command: "ls", timeout: 5 }, { command: "ls", timeout: "5" }],
+      ["a nested value", { command: "ls", env: { A: "1" } }, { command: "ls", env: { A: "2" } }],
+      ["a list", { command: "ls", args: ["a", "b"] }, { command: "ls", args: ["b", "a"] }],
+    ] as const) {
+      for (const mode of ["ask", "read_only"] as const) {
+        const decision = decide({ rawInput: request }, { rawInput: earlier }, mode);
+        assert.equal(decision.verdict, mode === "ask" ? "refuse" : "deny", `${name} ${mode}`);
+      }
+    }
+    // Only one of them has arguments: those are the card.
+    assert.equal(decide({ rawInput: { command: "ls -la", cwd: "/work" } }, undefined).approval.input.command, "ls -la");
+    const onlyEarlier = decide({}, { rawInput: { command: "ls -la", cwd: "/work" } });
+    assert.deepEqual([onlyEarlier.verdict, onlyEarlier.approval.input.command, onlyEarlier.approval.input.cwd], ["ask", "ls -la", "/work"]);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("Names for one thing in a request's arguments must agree, with or without a diff, and every other field is on the card", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-alias-"));
+  try {
+    const ask = (rawInput: unknown, kind = "edit", mode: "ask" | "allow_all" | "read_only" = "ask") =>
+      classifyAcpPermission(request({ kind, title: "Work", rawInput }), { cwd, plan: cliPermissionPlan("moonshot", mode) });
+    // Names that disagree, or hold anything but a string, are no arguments the card can show.
+    for (const [name, rawInput] of [
+      ["path and filePath differ", { path: "a.md", filePath: "b.md", content: "x" }],
+      ["a file and a file_path differ", { Path: "a.md", file_path: "../a.md", content: "x" }],
+      ["content and newText differ", { path: "a.md", content: "x", newText: "y" }],
+      ["old text under two names differs", { path: "a.md", old_string: "a", oldText: "b", new_string: "c" }],
+      ["a path that is not text", { path: 7, content: "x" }],
+      ["a path that is a list", { path: ["a.md"], content: "x" }],
+      ["a content that is not text", { path: "a.md", content: { text: "x" } }],
+      ["a list of files that is not all text", { path: "a.md", paths: ["a.md", 3], content: "x" }],
+      ["a list that holds another file than path", { path: "a.md", paths: ["a.md", "b.md"], content: "x" }],
+    ] as const) {
+      for (const mode of ["ask", "allow_all"] as const) {
+        const decision = ask(rawInput, "edit", mode);
+        assert.deepEqual([decision.verdict, decision.approval.refused], ["refuse", true], `${name} ${mode}`);
+      }
+      assert.equal(ask(rawInput, "edit", "read_only").verdict, "deny", name);
+    }
+    // The same value under two names is one: shown once, the other name left off the card.
+    const same = ask({ path: "a.md", FilePath: "a.md", content: "x", newText: "x", paths: ["a.md"] });
+    assert.deepEqual([same.verdict, same.approval.tool, same.approval.input], ["ask", "Write", { file_path: "a.md", content: "x" }]);
+    const edit = ask({ path: "a.md", old_string: "a", oldText: "a", new_string: "b", newText: "b" });
+    assert.deepEqual([edit.approval.tool, edit.approval.input], ["Edit", { file_path: "a.md", old_string: "a", new_string: "b" }]);
+    // Every other field is on the card: here as the card's own explanation.
+    const rest = ask({ path: "a.md", content: "x", cwd: "/work", runInBackground: true, Mode: "0600" });
+    assert.deepEqual(rest.approval.input, { file_path: "a.md", content: "x", cwd: "/work", runInBackground: true, Mode: "0600" });
+    const card = approvalRequestFor(rest.approval, cwd, (value) => value);
+    assert.deepEqual(JSON.parse(card?.explanation ?? "{}"), { cwd: "/work", runInBackground: true, Mode: "0600" });
+    assert.equal(approvalRequestFor(ask({ path: "a.md", content: "x", note: "n".repeat(5_000) }).approval, cwd, (value) => value), null);
+    // A list of files alone stays on the card, with the other files; so does a list that is not the one file.
+    const many = ask({ paths: ["a.md", "b.md"], content: "x" }, "other");
+    assert.deepEqual(many.approval.input.rawInput, { paths: ["a.md", "b.md"], content: "x" });
+    // Commands: the same command under two names is one; two commands are none.
+    const command = ask({ command: "ls", Cmd: "ls", cwd: "/work" }, "execute");
+    assert.deepEqual([command.verdict, command.approval.input], ["ask", { command: "ls", description: "Work", cwd: "/work" }]);
+    assert.equal(ask({ command: "ls", CommandLine: "pwd" }, "execute").verdict, "refuse");
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});

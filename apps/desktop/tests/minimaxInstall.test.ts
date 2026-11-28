@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
 import { nodeExecutable, resolveMiniMaxInstall } from "../src/host/minimax-install";
 import { createProviderCliHost } from "../src/host/provider-cli-host";
@@ -148,7 +148,9 @@ test("A trusted MiniMax Code install with no Node to run it does not start", { t
       typeIntoTerminal: () => "opened", shell: () => "posix", scan: { env: { PATH: w.bin, HOME: w.home, USERPROFILE: w.home }, home: w.home },
       run: async () => ({ code: 1, output: "", timedOut: false }),
     });
-    assert.equal(await host.trust("minimax", root), "stored");
+    // With no Node to run it there is nothing to trust: the install is not trusted, and it does not start.
+    assert.deepEqual(await host.trust("minimax", root), { status: "checkFailed" });
+    assert.equal(await host.trustedFile("minimax", root), null);
     assert.equal(await host.resolveSaved("minimax", { path: root, status: "userTrusted" }), null);
   } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
@@ -166,4 +168,56 @@ test("A Node installed as a link (Homebrew) is found through the link and run as
   } finally {
     await rm(base, { recursive: true, force: true });
   }
+});
+
+test("The Node that runs a MiniMax Code install is trusted with it: another Node, or the same one changed, does not run", { timeout: 90_000, skip: !supportsCliPath("minimax") }, async () => {
+  const w = await world();
+  try {
+    const { root, entry } = await install(w.root);
+    const node = await copyNode(w.bin);
+    const trustPath = join(w.base, "trust.json");
+    const hostFor = (path: string) => createProviderCliHost({
+      trustPath: () => trustPath, writeTrust: (file, text) => writeFileSync(file, text), hasSaved: () => true, typeIntoTerminal: () => "opened",
+      shell: () => (windows ? "powershell" : "posix"), scan: { env: { PATH: path, HOME: w.home, USERPROFILE: w.home, SystemRoot: process.env.SystemRoot }, home: w.home },
+      run: async () => ({ code: 1, output: "", timedOut: false }),
+    });
+    const saved = { path: root, status: "userTrusted" } as const;
+    const host = hostFor(w.bin);
+    assert.equal(await host.trust("minimax", root), "stored");
+    const record = JSON.parse(readFileSync(trustPath, "utf8")).trusted.minimax as { path: string; node?: { path: string; size: number; sha256: string } };
+    assert.equal(record.path, await realpath(entry));
+    assert.equal(record.node?.path, await realpath(node));
+    assert.match(record.node?.sha256 ?? "", /^[0-9a-f]{64}$/);
+    const runs = async (h: typeof host) => (await h.resolveSaved("minimax", saved))?.file ?? null;
+    assert.equal(await runs(host), await realpath(node));
+
+    // Another Node first in the folders that are looked in (the PATH changed): not the one that was trusted.
+    const other = await copyNode(join(w.base, "other-bin"));
+    const reordered = hostFor([join(w.base, "other-bin"), w.bin].join(delimiter));
+    assert.equal(await runs(reordered), null);
+    assert.equal(await reordered.trustedFile("minimax", root), null);
+    assert.equal((await reordered.scan()).providers.find(({ provider }) => provider === "minimax")?.candidates[0]?.trusted, false);
+    // Trusting again binds the new one; the first is then the one that is refused.
+    assert.equal(await reordered.trust("minimax", root), "stored");
+    assert.equal(await runs(reordered), await realpath(other));
+    assert.equal(await runs(host), null);
+    assert.equal(await host.trust("minimax", root), "stored");
+    assert.equal(await runs(host), await realpath(node));
+
+    // The same Node with other bytes is not the one that was trusted either.
+    await appendFile(node, "x");
+    assert.equal(await runs(host), null);
+    assert.equal((await host.scan()).providers.find(({ provider }) => provider === "minimax")?.candidates[0]?.trusted, false);
+
+    // A Node inside the install folder comes first, and is bound the same way.
+    const own = await copyNode(root);
+    assert.equal(await host.trust("minimax", root), "stored");
+    assert.equal(await runs(host), await realpath(own));
+    await appendFile(own, "y");
+    assert.equal(await runs(host), null);
+    // A record from before (the entry file only, no Node) does not run.
+    const { path, size, sha256 } = JSON.parse(readFileSync(trustPath, "utf8")).trusted.minimax as { path: string; size: number; sha256: string };
+    writeFileSync(trustPath, JSON.stringify({ trusted: { minimax: { path, size, sha256 } } }));
+    assert.equal(await runs(host), null);
+  } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

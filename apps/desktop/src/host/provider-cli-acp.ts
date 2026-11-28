@@ -207,14 +207,6 @@ function parsedInput(value: unknown): Json | undefined {
   try { const parsed: unknown = JSON.parse(value); return isRecord(parsed) ? parsed : undefined; } catch { return undefined; }
 }
 
-/** The value of the first of these keys the object has, compared without case. */
-function field(source: Json | undefined, names: readonly string[]): unknown {
-  if (!source) return undefined;
-  const lower = new Map(Object.keys(source).map((key) => [key.toLowerCase(), key]));
-  for (const name of names) { const key = lower.get(name); if (key !== undefined) return source[key]; }
-  return undefined;
-}
-const stringField = (source: Json | undefined, names: readonly string[]) => { const value = field(source, names); return typeof value === "string" ? value : undefined; };
 /** Every value of the fields with these names, whatever their case: a request may carry two names for one thing (path and filePath). */
 function allFields(source: Json | undefined, names: readonly string[]): unknown[] {
   if (!source) return [];
@@ -373,19 +365,55 @@ function sameDiffs(a: readonly Diff[], b: readonly Diff[], cwd: string): boolean
   return left.size === right.size && [...left].every((entry) => right.has(entry));
 }
 
-/** Whether two argument objects name the same files and the same new and old text, where both name them. */
-function diffMatchesRawPaths(a: Json, b: Json, cwd: string): boolean {
-  const where = (paths: string[] | null) => paths === null ? null : new Set(paths.map((path) => fold(realPathOf(path, cwd) ?? resolve(cwd, path))));
-  const left = where(primaryPaths(a));
-  const right = where(primaryPaths(b));
-  if (left === null || right === null) return false;
-  if (left.size > 0 && right.size > 0 && (left.size !== right.size || [...left].some((path) => !right.has(path)))) return false;
-  for (const names of [afterNames, beforeNames]) {
-    const one = allFields(a, names);
-    const other = allFields(b, names);
-    if (one.length > 0 && other.length > 0 && [...one, ...other].some((value) => value !== one[0])) return false;
+/** Whether two values are the same, whatever the order of an object's keys: values are compared as they are, nothing is normalised. */
+function sameValue(a: unknown, b: unknown, depth = 0): boolean {
+  if (depth > 32) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => sameValue(item, b[index], depth + 1));
   }
-  return true;
+  if (isRecord(a) || isRecord(b)) {
+    if (!isRecord(a) || !isRecord(b)) return false;
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameValue(a[key], b[key], depth + 1));
+  }
+  return a === b;
+}
+
+const listNames = ["paths", "files", "file_paths"];
+/**
+ * What the arguments say once each group of names for one thing is read as one: the file (`path`, `filePath`, `Path` ...), the new
+ * text, the old text. Every value in a group must be a string and all must be the same string; a group that disagrees, or holds
+ * something else, makes the arguments unreadable (`ok: false`) and the request is refused. The keys of a group that is read as
+ * one are `consumed`: the card shows its value once, and every other field of the arguments goes on the card as it is.
+ * A list of files (`paths`) next to a file must hold just that file (and is then folded into it); on its own it stays on the card.
+ */
+function aliasGroups(raw: Json | undefined): { ok: boolean; path?: string; after?: string; before?: string; consumed: Set<string> } {
+  const consumed = new Set<string>();
+  if (!raw) return { ok: true, consumed };
+  let ok = true;
+  const keysOf = (names: readonly string[]) => Object.keys(raw).filter((key) => names.includes(key.toLowerCase()));
+  const group = (names: readonly string[]) => {
+    const keys = keysOf(names);
+    for (const key of keys) consumed.add(key);
+    if (keys.length === 0) return undefined;
+    const values = keys.map((key) => raw[key]);
+    if (!values.every((value) => typeof value === "string") || new Set(values).size !== 1) { ok = false; return undefined; }
+    return values[0] as string;
+  };
+  for (const key of keysOf(commandNames)) consumed.add(key);
+  const path = group(pathNames);
+  const after = group(afterNames);
+  const before = group(beforeNames);
+  const lists = keysOf(listNames);
+  if (lists.length > 0) {
+    const entries = lists.flatMap((key) => (Array.isArray(raw[key]) ? raw[key] as unknown[] : [raw[key]]));
+    if (!entries.every((entry) => typeof entry === "string")) ok = false;
+    else if (path !== undefined) {
+      // A file and a list of files that is not that one file name two things: neither can stand for the other.
+      if (entries.every((entry) => entry === path)) for (const key of lists) consumed.add(key); else ok = false;
+    }
+  }
+  return { ok, path, after, before, consumed };
 }
 
 export type AcpPermission = {
@@ -440,18 +468,17 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   // The request and what the agent said of the same call before must describe one action: a command, diff or file the request
   // shows that differs from the earlier one (an earlier `git push`, a request for `echo hi`) would let the card approve what it
   // does not show, so the two are compared where both speak, and a difference refuses the request.
+  // Arguments the request and the earlier call both carry must be the same arguments, whole: any other field either has (a cwd, an
+  // option) that the other lacks would let the card show one action and the CLI run another. Only one of them: that one is used.
   const sameAction = (own.kind === undefined || earlier?.kind === undefined || own.kind === earlier.kind) &&
-    (own.command === undefined || earlier?.command === undefined || own.command === earlier.command) &&
     (own.diffs.length === 0 || (earlier?.diffs.length ?? 0) === 0 || sameDiffs(own.diffs, earlier!.diffs, context.cwd)) &&
-    (own.raw === undefined || earlier?.raw === undefined || diffMatchesRawPaths(own.raw, earlier.raw, context.cwd));
-  const limited = own.limited || earlier?.limited === true || !sameAction || !diffMatchesRaw(diffs, raw, context.cwd);
+    (own.raw === undefined || earlier?.raw === undefined || sameValue(own.raw, earlier.raw));
+  const aliases = aliasGroups(raw);
+  const limited = own.limited || earlier?.limited === true || !sameAction || !aliases.ok || !diffMatchesRaw(diffs, raw, context.cwd);
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
-  const known = new Set([...commandNames, ...afterNames, ...beforeNames, ...pathNames]);
-  const extras = Object.fromEntries(Object.entries(raw ?? {}).filter(([key]) => !known.has(key.toLowerCase())));
-  const rawPath = stringField(raw, pathNames);
-  const after = stringField(raw, afterNames);
-  const before = stringField(raw, beforeNames);
+  const extras = Object.fromEntries(Object.entries(raw ?? {}).filter(([key]) => !aliases.consumed.has(key)));
+  const { path: rawPath, after, before } = aliases;
   let approval: CliApproval;
   if (kind === "execute" && command) {
     approval = { id, tool: "Bash", input: { command, ...(title && title !== command ? { description: title } : {}), ...extras } };

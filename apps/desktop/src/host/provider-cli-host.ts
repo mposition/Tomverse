@@ -65,10 +65,30 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
     try { return (await lstat(await realpath(path))).isDirectory(); } catch { return false; }
   }
 
-  async function trustedWith(trust: CliTrustFile, provider: CliProvider, path: string, signal?: AbortSignal) {
+  /** The Node that would run a MiniMax Code install now: the one in the install folder, else the first real one in the scan's folders. */
+  async function miniMaxNode(root: string) {
+    const platform = options.scan?.platform ?? process.platform;
+    const env = options.scan?.env ?? process.env;
+    const directories = await expandScanDirectories(cliScanDirectories(platform, env, options.scan?.home ?? scanHome(env, platform)), platform);
+    return nodeExecutable(directories, root, platform);
+  }
+
+  /**
+   * The trusted file when it is still exactly the one that was trusted. For a MiniMax Code install that is its entry file and
+   * also the Node that would run it now (`node`): a different Node, from another folder after the PATH changed or with other
+   * bytes, is not the one the person trusted, and the install must be trusted again.
+   */
+  async function trustedWith(trust: CliTrustFile, provider: CliProvider, path: string, signal?: AbortSignal): Promise<{ file: string; fileStamp: string; node?: string } | null> {
     if (!isCliScanProvider(provider)) return null;
     const target = await trustTarget(provider, path);
-    return target ? trustedCliFile(target, trust.trusted?.[provider], signal) : null;
+    if (!target) return null;
+    const record = trust.trusted?.[provider];
+    const trusted = await trustedCliFile(target, record, signal);
+    if (!trusted || provider !== "minimax") return trusted;
+    const install = await resolveMiniMaxInstall(path);
+    if (!install || install.entry !== trusted.file || !record?.node) return null;
+    const node = await miniMaxNode(install.root);
+    return node && await trustedCliFile(node, record.node, signal) ? { ...trusted, node } : null;
   }
 
   async function scan(): Promise<CliScan> {
@@ -106,7 +126,16 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       if (!target && provider === "minimax" && !(await isInstallFolder(path))) return { status: "wrongFile" };
       const hashed = target ? await trustRecordFor(target) : null;
       if (!hashed) return { status: "checkFailed" };
-      storeTrust(withTrust(readTrust(), provider, hashed.record));
+      let record = hashed.record;
+      if (provider === "minimax") {
+        // The Node that runs the entry file is trusted with it; with no Node to run it there is nothing to trust.
+        const install = await resolveMiniMaxInstall(path);
+        const node = install ? await miniMaxNode(install.root) : null;
+        const nodeRecord = node ? await trustRecordFor(node) : null;
+        if (!nodeRecord) return { status: "checkFailed" };
+        record = { ...record, node: nodeRecord.record };
+      }
+      storeTrust(withTrust(readTrust(), provider, record));
       return "stored";
     },
 
@@ -138,14 +167,9 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
         const trusted = await this.trustedFile(provider, saved.path, signal);
         if (!trusted) return null;
         if (provider !== "minimax") return { file: trusted.file, version: null, basis: "person" };
-        // MiniMax Code is a Node program: the person's own Node runs the trusted entry file (Electron cannot stand in for it in a release build).
-        const install = await resolveMiniMaxInstall(saved.path);
-        if (!install || install.entry !== trusted.file) return null;
-        const platform = options.scan?.platform ?? process.platform;
-        const env = options.scan?.env ?? process.env;
-        const directories = await expandScanDirectories(cliScanDirectories(platform, env, options.scan?.home ?? scanHome(env, platform)), platform);
-        const node = await nodeExecutable(directories, install.root, platform);
-        return node ? { file: node, version: null, basis: "person", args: [trusted.file] } : null;
+        // MiniMax Code is a Node program: the person's own Node, the one trusted with the install, runs its trusted entry file
+        // (Electron cannot stand in for it in a release build).
+        return trusted.node ? { file: trusted.node, version: null, basis: "person", args: [trusted.file] } : null;
       }
       return null;
     },
