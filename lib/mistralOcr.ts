@@ -40,14 +40,17 @@ export type MistralOcrResult = {
   /** Pages the provider returned, which is what it bills. */
   pageCount: number;
   /**
-   * 1-based pages whose text is in `text`: returned with content, and not cut
-   * off by the character limit. A page the provider skipped or returned empty
-   * is not here, and a caller that asked for specific pages checks them against
-   * this list rather than taking any text as proof they were read.
+   * 1-based pages whose whole text is in `text`: returned with content and not
+   * cut off by the character limit. A page the provider skipped or returned
+   * empty is not here, nor is the page the limit cut or any page after it, and
+   * a caller that asked for specific pages checks them against this list
+   * rather than taking any text as proof they were read.
    */
   pageNumbers: number[];
   /** The text was cut at the character limit. */
   truncated: boolean;
+  /** The page the limit cut in the middle (only part of it is in `text`), if any. */
+  truncatedPage: number | null;
   modelId: typeof MISTRAL_OCR_MODEL_ID;
 };
 
@@ -148,11 +151,18 @@ export async function extractPdfTextWithMistralOcr(
   });
   const joined = blocks.map((entry) => entry.block).join("\n\n");
   const text = joined.slice(0, maxCharacters).trim();
-  // A page counts as read while any of its text survives the cut.
+  // A page counts as read only when all of it survives the cut; the page the
+  // limit lands in is reported on its own, and the pages after it are simply
+  // not here.
   const pageNumbers: number[] = [];
+  let truncatedPage: number | null = null;
   let offset = 0;
   for (const entry of blocks) {
     if (offset >= maxCharacters) break;
+    if (offset + entry.block.length > maxCharacters) {
+      truncatedPage = entry.pageNumber;
+      break;
+    }
     pageNumbers.push(entry.pageNumber);
     offset += entry.block.length + 2;
   }
@@ -162,6 +172,7 @@ export async function extractPdfTextWithMistralOcr(
     pageCount: validated.data.pages.length,
     pageNumbers,
     truncated: joined.length > maxCharacters,
+    truncatedPage,
     modelId: MISTRAL_OCR_MODEL_ID,
   };
 }

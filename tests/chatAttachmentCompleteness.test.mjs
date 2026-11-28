@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+    claimInConversationOrder,
     describeImagePayloadLimit,
     messageReadingOrder,
     oldestAttachmentSlots,
@@ -107,9 +108,9 @@ test("a PDF with some text-less pages is not read as complete", () => {
     assert.match(branch, /isLatestMessage &&\s*!fromArchive &&\s*modelSupportsNativePdfInput\(modelConfig\)/);
     // ...otherwise the pages go through the same OCR path, and are named when they are not read.
     assert.match(branch, /runPdfOcr\(ocrRoom, textlessPdfPages\)/);
-    assert.match(branch, /describeUnreadPdfPages\(unread\)/);
-    // The notice is not stored as the file's text.
-    assert.match(branch, /textCacheBlocked = true;/);
+    // What is not read is named, and not stored as the file's text, by the one settle function.
+    assert.match(branch, /describeUnreadPdfPages\(outcome\.unreadPages, 40, outcome\.partialPage\)/);
+    assert.match(branch, /if \(!outcome\.cacheable\) textCacheBlocked = true;/);
     // The original is part of the estimate: native file parts are priced with the flat allowance.
     assert.match(route, /estimateNativeAttachmentTokens\(\s*fileParts\.length - imageInputTokenEstimates\.length/);
 });
@@ -141,25 +142,56 @@ test("OCR sharing is keyed by the character budget, and a cut or short result is
     const route = source("app/api/chat/route.ts");
     assert.ok(route.includes('${pages?.join(",") ?? "all"}:${maxCharacters}`'));
     assert.ok(!route.includes("result.text.slice(0, maxCharacters)"));
-    assert.match(route, /if \(ocrResult\.truncated\) textCacheBlocked = true;/);
-    // Each page asked for is checked against the pages the provider answered.
-    assert.match(route, /const unread = pdfPagesNotRead\(\s*textlessPdfPages,\s*scanned\?\.pageNumbers \?\? \[\]\s*\);/);
-    assert.match(route, /describeUnreadPdfPages\(unread\)/);
-    assert.match(route, /if \(unread\.length === 0 && !scanned\?\.truncated\) return "ok";/);
-});
-
-// Review r-20261128-051641-d94ab6: a wholly scanned file is judged by the same rule.
-test("a wholly scanned PDF's OCR is checked page by page by the same function, and a gap is named and not stored", () => {
-    const route = source("app/api/chat/route.ts");
-    assert.match(route, /ocrUnreadPages = pdfPagesNotRead\(\s*Array\.from\(\{ length: pdfPageCount \}/);
-    assert.match(route, /pdfPageCount = extraction\.pageCount;/);
-    const tail = route.slice(route.indexOf("if (added && ocrUnreadPages.length > 0) {"));
-    assert.match(tail.slice(0, 400), /textCacheBlocked = true;[\s\S]*describeUnreadPdfPages\(ocrUnreadPages\)/);
+    // A wholly scanned file is judged against every page of the file.
+    assert.match(route, /expectedPages: Array\.from\(\{ length: pdfPageCount \}/);
+    assert.ok(route.includes("pdfPageCount = extraction.pageCount;"));
     // An earlier file's scanned text that did not fit its share still names the pages.
-    assert.match(route, /kind: "PDF page notice",\s*text: describeUnreadPdfPages\(textlessPdfPages\)/);
+    assert.match(route, /settlePdfReading\(\{\s*unreadPages: textlessPdfPages,\s*partialPage: null,\s*cacheable: false,/);
 });
 
 test("the PDF text worker reports only what the reader uses", () => {
     const worker = source("lib/mediaSecurity.ts");
     assert.ok(!worker.includes("scannedPages"));
+});
+
+// Review r-20261128-052701-5bbed8: the messages are read newest first, but a stored
+// answer's reasoning and tool context belongs to the n-th answer with that text.
+test("two answers with the same text keep their own stored context, whatever order the messages are read in", () => {
+    const queues = new Map([["Sure.", ["first-context", "second-context"]], ["Other.", ["other-context"]]]);
+    // user, assistant "Sure.", user, assistant "Sure.", user, assistant "Other."
+    const keys = [null, "Sure.", null, "Sure.", null, "Other."];
+    const claimed = claimInConversationOrder(keys, queues);
+    assert.equal(claimed.get(1), "first-context");
+    assert.equal(claimed.get(3), "second-context");
+    assert.equal(claimed.get(5), "other-context");
+    assert.equal(claimed.size, 3);
+    // An answer with no stored context gets none, and does not take another's.
+    const lonely = claimInConversationOrder(["Sure.", "Sure."], new Map([["Sure.", ["only"]]]));
+    assert.equal(lonely.get(0), "only");
+    assert.equal(lonely.has(1), false);
+});
+
+test("the route claims stored context before the loop, and an answer reads its own", () => {
+    const route = source("app/api/chat/route.ts");
+    assert.ok(route.includes("const preservedContexts = claimInConversationOrder("));
+    assert.ok(route.includes("const preserved = preservedContexts.get(messageIndex);"));
+    assert.ok(!route.includes("providerContextQueues.get(content)?.shift()"));
+    assert.ok(route.indexOf("const preservedContexts") < route.indexOf("for (const messageIndex of messageReadingOrder"));
+});
+
+test("every way a scanned PDF is read settles through one decision: the notice and the cache block", () => {
+    const route = source("app/api/chat/route.ts");
+    const pdf = route.slice(route.indexOf('if (format.category === "pdf") {'), route.indexOf('if (format.category === "iwork") {'));
+    // The one place that turns an outcome into a notice and a cache block.
+    assert.match(pdf, /const settlePdfReading = \(outcome: PdfReadingOutcome\) => \{\s*if \(!outcome\.cacheable\) textCacheBlocked = true;/);
+    // The original sent beside the text layer is never stored as the file's text.
+    assert.match(pdf, /originalSentToModel: true,\s*\}\)\s*\);\s*return "ok";/);
+    // The wholly scanned file and the partly scanned one use the same function.
+    assert.ok(pdf.includes("ocrOutcome = pdfReadingOutcome({"));
+    assert.match(pdf, /const outcome = pdfReadingOutcome\(\{\s*expectedPages: textlessPdfPages,/);
+    assert.ok(pdf.includes("if (added && ocrOutcome) settlePdfReading(ocrOutcome);"));
+    // No other place decides a cache block for a PDF.
+    assert.equal((pdf.match(/textCacheBlocked = true/g) ?? []).length, 1);
+    // And the cache write is still refused when a file part was sent.
+    assert.ok(route.includes("fileParts.length === filePartsBefore"));
 });

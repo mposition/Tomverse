@@ -47,3 +47,24 @@ export const describeImagePayloadLimit = (bytes: number) => {
   const megabytes = bytes / (1024 * 1024);
   return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
 };
+
+/**
+ * What belongs to the n-th message with a given key, handed out in conversation
+ * order whatever order the messages are later read in. A stored answer carries
+ * its model's reasoning and tool context, kept in a queue per answer text in
+ * the order they were written; two answers with the same text must get the
+ * first and the second of them, not the other way round. `keys` has one entry
+ * per message (null for a message that takes none); the queues are consumed.
+ */
+export function claimInConversationOrder<T>(
+  keys: ReadonlyArray<string | null>,
+  queues: Map<string, T[]>
+): Map<number, T> {
+  const claimed = new Map<number, T>();
+  keys.forEach((key, index) => {
+    if (key === null) return;
+    const item = queues.get(key)?.shift();
+    if (item !== undefined) claimed.set(index, item);
+  });
+  return claimed;
+}

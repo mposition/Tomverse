@@ -44,6 +44,7 @@ test("OCR 4 sends a bounded text-only document request", async () => {
     text: "## Page 1\n\n# First\n\n## Page 2\n\nSecond page",
     pageCount: 2,
     pageNumbers: [1, 2],
+    truncatedPage: null,
     truncated: false,
     modelId: MISTRAL_OCR_MODEL_ID,
   });
@@ -140,7 +141,7 @@ test("OCR 4 with no page index places each page among the ones asked for", async
   assert.deepEqual(result?.pageNumbers, [3, 7]);
 });
 
-test("OCR 4 says when the text was cut, and which pages survive the cut", async () => {
+test("OCR 4 says when the text was cut, which page it cut, and counts only whole pages as read", async () => {
   const fetchMock: typeof fetch = async () =>
     Response.json({
       pages: [
@@ -155,13 +156,16 @@ test("OCR 4 says when the text was cut, and which pages survive the cut", async 
   });
   assert.equal(result?.truncated, true);
   assert.equal(result?.text.length <= 60, true);
-  assert.deepEqual(result?.pageNumbers, [1, 2]);
+  // Page 1 is whole; page 2 is cut in the middle and page 3 never reached.
+  assert.deepEqual(result?.pageNumbers, [1]);
+  assert.equal(result?.truncatedPage, 2);
   const whole = await extractPdfTextWithMistralOcr(Buffer.from("%PDF"), 10_000, {
     fetch: fetchMock,
     apiKey: "test-key",
   });
   assert.equal(whole?.truncated, false);
   assert.deepEqual(whole?.pageNumbers, [1, 2, 3]);
+  assert.equal(whole?.truncatedPage, null);
 });
 
 test("OCR 4 gives no text for a document of empty pages", async () => {

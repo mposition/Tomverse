@@ -540,15 +540,69 @@ export async function extractPdfTextWithPagesSafely(
  * The model-facing line for pages that were not read. Capped so a 500-page
  * scan does not spend the prompt on a list of numbers.
  */
-export function describeUnreadPdfPages(pages: readonly number[], limit = 40): string {
+export function describeUnreadPdfPages(
+    pages: readonly number[],
+    limit = 40,
+    partialPage: number | null = null
+): string {
     const shown = pages.slice(0, limit).join(", ");
     const rest = pages.length - limit;
+    const unread =
+        pages.length > 0
+            ? `This PDF has pages with no extractable text (scanned or image-only) that were not read: ` +
+              `page${pages.length === 1 ? "" : "s"} ${shown}${rest > 0 ? ` and ${rest} more` : ""}. `
+            : "";
+    const partial =
+        partialPage !== null
+            ? `${pages.length > 0 ? "Also, p" : "This PDF's scanned pages were cut off: p"}age ${partialPage} was read only in part, ` +
+              `and any page after it was not read. `
+            : "";
     return (
-        `[This PDF has pages with no extractable text (scanned or image-only) that were not read: ` +
-        `page${pages.length === 1 ? "" : "s"} ${shown}${rest > 0 ? ` and ${rest} more` : ""}. ` +
+        `[${unread}${partial}` +
         `Their contents are unknown to you. Do not describe, summarise or infer anything about them; ` +
         `say which pages could not be read.]`
     );
+}
+
+export type PdfReadingOutcome = {
+    /** Pages the model got nothing of. */
+    unreadPages: number[];
+    /** The page OCR read only in part, if any. */
+    partialPage: number | null;
+    /** The text taken from this file may be stored as the file's text. */
+    cacheable: boolean;
+};
+
+/**
+ * What came of reading a PDF's scanned pages: which pages the model did not
+ * get, which it got in part, and whether the text may be stored as the file's
+ * text for the next turn. The one place that is decided, for a wholly scanned
+ * file, a partly scanned one, and one whose original was sent as a file.
+ *
+ * - `expectedPages` is every page OCR was meant to read (empty when the page
+ *   count is not known, so only a cut or an original can be reported).
+ * - `ocr` is what came back, null when OCR was not run or failed.
+ * - `originalSentToModel`: the model has the PDF itself, so no page is
+ *   "unread", but its text alone is not the file -- never stored.
+ */
+export function pdfReadingOutcome(input: {
+    expectedPages: readonly number[];
+    ocr: { pageNumbers: readonly number[]; truncated: boolean; truncatedPage: number | null } | null;
+    originalSentToModel?: boolean;
+}): PdfReadingOutcome {
+    if (input.originalSentToModel) {
+        return { unreadPages: [], partialPage: null, cacheable: false };
+    }
+    const partialPage = input.ocr?.truncatedPage ?? null;
+    // The page that was cut is named as partly read, not as unread.
+    const unreadPages = pdfPagesNotRead(input.expectedPages, input.ocr?.pageNumbers ?? []).filter(
+        (page) => page !== partialPage
+    );
+    return {
+        unreadPages,
+        partialPage,
+        cacheable: unreadPages.length === 0 && partialPage === null && !input.ocr?.truncated,
+    };
 }
 
 export async function extractPdfTextSafely(

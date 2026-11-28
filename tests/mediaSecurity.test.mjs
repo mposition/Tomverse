@@ -4,6 +4,7 @@ import {
   describeUnreadPdfPages,
   extractPdfTextSafely,
   extractPdfTextWithPagesSafely,
+  pdfReadingOutcome,
   validatePdfSafely,
 } from "../lib/mediaSecurity.ts";
 import { createQaPdfBuffer } from "./e2e/support/app-fixtures.ts";
@@ -98,4 +99,64 @@ test("describeUnreadPdfPages names the pages and caps a long list", () => {
   const many = describeUnreadPdfPages(Array.from({ length: 100 }, (_, i) => i + 1));
   assert.match(many, /and 60 more/);
   assert.ok(many.length < 600);
+});
+
+test("describeUnreadPdfPages names a page read only in part, with or without unread pages", () => {
+  const both = describeUnreadPdfPages([4, 5], 40, 3);
+  assert.match(both, /pages 4, 5\./);
+  assert.match(both, /page 3 was read only in part, and any page after it was not read/);
+  const partialOnly = describeUnreadPdfPages([], 40, 7);
+  assert.match(partialOnly, /scanned pages were cut off: page 7 was read only in part/);
+  assert.doesNotMatch(partialOnly, /no extractable text/);
+  assert.match(partialOnly, /Do not describe/);
+});
+
+// Review r-20261128-052701-5bbed8: what the model got of a scanned PDF, and
+// whether its text may be stored, is decided in one place.
+test("pdfReadingOutcome: everything answered is cacheable; a gap, a cut or an original sent is not", () => {
+  const whole = { pageNumbers: [1, 2, 3], truncated: false, truncatedPage: null };
+  assert.deepEqual(pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: whole }), {
+    unreadPages: [],
+    partialPage: null,
+    cacheable: true,
+  });
+  // A page the provider skipped.
+  assert.deepEqual(pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: { ...whole, pageNumbers: [1] } }), {
+    unreadPages: [2, 3],
+    partialPage: null,
+    cacheable: false,
+  });
+  // The budget cut page 2: it is partly read, page 3 is not read, neither is cacheable.
+  assert.deepEqual(
+    pdfReadingOutcome({ expectedPages: [1, 2, 3], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
+    { unreadPages: [3], partialPage: 2, cacheable: false }
+  );
+  // OCR not run: every page asked for is unread.
+  assert.deepEqual(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null }), {
+    unreadPages: [2, 4],
+    partialPage: null,
+    cacheable: false,
+  });
+  // The page count is not known and the text was cut: only the cut is reported.
+  assert.deepEqual(
+    pdfReadingOutcome({ expectedPages: [], ocr: { pageNumbers: [1], truncated: true, truncatedPage: 2 } }),
+    { unreadPages: [], partialPage: 2, cacheable: false }
+  );
+  // The model has the file itself: nothing is unread, and the text alone is never stored.
+  assert.deepEqual(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null, originalSentToModel: true }), {
+    unreadPages: [],
+    partialPage: null,
+    cacheable: false,
+  });
+});
+
+test("the turn after the original was sent, the earlier message reads only the text-less pages and may then be stored", () => {
+  // Turn 1: the model got the original; the text layer is not stored as the file.
+  assert.equal(pdfReadingOutcome({ expectedPages: [2, 4], ocr: null, originalSentToModel: true }).cacheable, false);
+  // Turn 2: the file is an earlier message's, so OCR reads pages 2 and 4 and both come back whole.
+  const outcome = pdfReadingOutcome({
+    expectedPages: [2, 4],
+    ocr: { pageNumbers: [2, 4], truncated: false, truncatedPage: null },
+  });
+  assert.deepEqual(outcome, { unreadPages: [], partialPage: null, cacheable: true });
 });

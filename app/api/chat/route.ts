@@ -282,6 +282,7 @@ import {
 } from "@/lib/attachmentTextCache";
 import {
     describeImagePayloadLimit,
+    claimInConversationOrder,
     messageReadingOrder,
     oldestAttachmentSlots,
 } from "@/lib/chatImageBudget";
@@ -290,7 +291,8 @@ import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
     AnimatedImageError,
     describeUnreadPdfPages,
-    pdfPagesNotRead,
+    pdfReadingOutcome,
+    type PdfReadingOutcome,
     extractPdfTextWithPagesSafely,
     normalizeImageSafely,
     validatePdfSafely,
@@ -4300,13 +4302,22 @@ async function handleChatPost(
         // allowance -- images, text, OCR -- is spent in that order, so what is
         // left out is the oldest, and only the message's own overflow is an
         // error (lib/chatImageBudget.ts).
+        // The stored reasoning and tool context of an answer belongs to the n-th
+        // answer with that text, in conversation order -- claimed here, not in the
+        // loop below, which reads the messages in another order.
+        const preservedContexts = claimInConversationOrder(
+            executionMessages.map((message) =>
+                message.role === "assistant" ? String(message.content ?? "") : null
+            ),
+            providerContextQueues
+        );
         // Messages are built in that order but sent in conversation order.
         const builtMessages: ModelMessage[][] = executionMessages.map(() => []);
         for (const messageIndex of messageReadingOrder(executionMessages.length)) {
             const msg = executionMessages[messageIndex];
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
-                const preserved = providerContextQueues.get(content)?.shift();
+                const preserved = preservedContexts.get(messageIndex);
                 if (preserved) {
                     estimatedInputTokens += estimateTextTokens(
                         providerContextText(preserved)
@@ -4599,8 +4610,20 @@ async function handleChatPost(
                     let textlessPdfPages: number[] = [];
                     // 0 when the text pass failed and the count is not known.
                     let pdfPageCount = 0;
-                    // Pages OCR was asked for and did not answer with text.
-                    let ocrUnreadPages: number[] = [];
+                    // What came of OCR for a wholly scanned file (pdfReadingOutcome).
+                    let ocrOutcome: PdfReadingOutcome | null = null;
+                    // One place decides what the model did not get of this file and
+                    // whether its text may be stored: the notice for the pages not
+                    // read (or read in part) and the cache block follow from it.
+                    const settlePdfReading = (outcome: PdfReadingOutcome) => {
+                        if (!outcome.cacheable) textCacheBlocked = true;
+                        if (outcome.unreadPages.length > 0 || outcome.partialPage !== null) {
+                            addExtractedText(
+                                "PDF page notice",
+                                describeUnreadPdfPages(outcome.unreadPages, 40, outcome.partialPage)
+                            );
+                        }
+                    };
                     let pdfValidated = false;
                     try {
                         const extraction = await extractPdfTextWithPagesSafely(
@@ -4742,15 +4765,14 @@ async function handleChatPost(
                             const ocrResult = await runPdfOcr(remainingCharacters - 64);
                             if (ocrResult?.text) {
                                 extractedPdfText = ocrResult.text;
-                                // Cut at the budget: never stored as the file's text.
-                                if (ocrResult.truncated) textCacheBlocked = true;
                                 // Text for some pages is not text for all: every page
-                                // of the file is checked against the ones answered, by
-                                // the same rule as the partly scanned file below.
-                                ocrUnreadPages = pdfPagesNotRead(
-                                    Array.from({ length: pdfPageCount }, (_, index) => index + 1),
-                                    ocrResult.pageNumbers
-                                );
+                                // of the file is checked against the ones answered, and
+                                // a cut at the budget is named, by the one rule the
+                                // partly scanned file below uses too.
+                                ocrOutcome = pdfReadingOutcome({
+                                    expectedPages: Array.from({ length: pdfPageCount }, (_, index) => index + 1),
+                                    ocr: ocrResult,
+                                });
                             }
                         } catch (error) {
                             logRequestError(
@@ -4796,6 +4818,14 @@ async function handleChatPost(
                                 mediaType: format.mediaType,
                                 filename: name,
                             });
+                            // The text layer alone is not this file: never stored as it.
+                            settlePdfReading(
+                                pdfReadingOutcome({
+                                    expectedPages: textlessPdfPages,
+                                    ocr: null,
+                                    originalSentToModel: true,
+                                })
+                            );
                             return "ok";
                         }
                         let scanned: MistralOcrResult | null = null;
@@ -4822,12 +4852,13 @@ async function handleChatPost(
                             }
                         }
                         // Text coming back is not proof the pages were read: the
-                        // provider may skip a page or return it empty. Each page
-                        // asked for is checked against the pages it answered.
-                        const unread = pdfPagesNotRead(
-                            textlessPdfPages,
-                            scanned?.pageNumbers ?? []
-                        );
+                        // provider may skip a page, return it empty, or be cut by
+                        // the budget. Each page asked for is checked against the
+                        // pages it answered.
+                        const outcome = pdfReadingOutcome({
+                            expectedPages: textlessPdfPages,
+                            ocr: scanned,
+                        });
                         if (
                             scanned?.text &&
                             !addExtractedText(`${format.promptKind} (scanned pages)`, scanned.text)
@@ -4835,34 +4866,20 @@ async function handleChatPost(
                             // An earlier file's scanned text did not fit its share
                             // and was named as left out: say which pages, too, and
                             // do not store the file's text as if it were whole.
-                            textCacheBlocked = true;
-                            textAttachments.push({
-                                name,
-                                kind: "PDF page notice",
-                                text: describeUnreadPdfPages(textlessPdfPages),
+                            settlePdfReading({
+                                unreadPages: textlessPdfPages,
+                                partialPage: null,
+                                cacheable: false,
                             });
                             return "ok";
                         }
-                        if (unread.length === 0 && !scanned?.truncated) return "ok";
-                        // Some pages stay unread, so a later turn must read the
-                        // file afresh rather than take this text as the whole.
-                        textCacheBlocked = true;
-                        if (unread.length > 0) {
-                            addExtractedText("PDF page notice", describeUnreadPdfPages(unread));
-                        }
+                        settlePdfReading(outcome);
                         return "ok";
                     }
 
                     if (extractedPdfText) {
                         const added = addExtractedText(format.promptKind, extractedPdfText);
-                        if (added && ocrUnreadPages.length > 0) {
-                            // Named, and never stored as the whole file's text.
-                            textCacheBlocked = true;
-                            addExtractedText(
-                                "PDF page notice",
-                                describeUnreadPdfPages(ocrUnreadPages)
-                            );
-                        }
+                        if (added && ocrOutcome) settlePdfReading(ocrOutcome);
                         return "ok";
                     }
                     if (fromArchive) return "no-text";
