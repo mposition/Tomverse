@@ -30,7 +30,7 @@ import { reviewHandoffCopy } from "../../../../locales/reviewHandoff";
 import type { AccountPreferences, AccountTheme } from "../account-settings-contract";
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
-import { liveCliModelId } from "../provider-cli-exec-contract";
+import { liveCliFile, liveCliModelId, liveCliNames } from "../provider-cli-exec-contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { ChatDraftPlace } from "./ChatDraftLocation";
@@ -503,7 +503,7 @@ function Desktop() {
     ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.zCodeFixtureModel ?? snapshot.deepSeekFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
   // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted): each runs with its own default model.
   const liveCliModels: Model[] = !cliFixtureModel && snapshot?.codeExecutionPreference === "provider_cli"
-    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: providerClis[provider], provider, efforts: [] })) : [];
+    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: liveCliNames[provider], provider: liveCliFile[provider], efforts: [] })) : [];
   const liveCli = liveCliModels.length > 0;
   const cliRoute = Boolean(cliFixtureModel) || liveCli;
   // The route is on but no Codex or Claude Code file is saved and trusted yet: the API models cannot run here, and the status says what to do.
@@ -1229,7 +1229,8 @@ ${text}` : text;
         {settingsView ? cliSettingsOpen && cliSettingsEnabled && snapshot
           ? <ProviderCliSettings language={language} paths={snapshot.cliPaths} supportedPaths={snapshot.supportedCliPaths}
             provider={cliSettingsProvider}
-            goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable} />
+            goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable}
+            zai={snapshot.capabilities?.providerCliExec ? { key: snapshot.zaiKey } : undefined} />
           : settingsView === "execution" ? <CodeExecutionSettings key={snapshot?.codeFallback?.scope ?? "disconnected"}
             snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act}
             engine={engine} changeEngine={changeEngine} />

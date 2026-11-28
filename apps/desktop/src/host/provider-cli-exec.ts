@@ -6,7 +6,7 @@ import { StringDecoder } from "node:string_decoder";
 import { killTree, killTreeSync } from "../../../tomverse-cli/src/commands.js";
 import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
-import { cliPermissionPlan, LIVE_CLI_LIMITS, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { cliPermissionPlan, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { codeProcessLaunch } from "./code-process-launch";
 
 /**
@@ -145,9 +145,11 @@ const inherited = ["SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "OS", "PROCESSO
 /**
  * What the CLI is started with: the system and user-profile variables it needs to find its own sign-in, the PATH its tools run
  * with, and proxy settings. No Tomverse variable, no session or Code token, and no provider API key (the run uses the CLI's saved
- * sign-in, so the subscription is what is used) is passed on.
+ * sign-in, so the subscription is what is used) is passed on. The one key is the Z.ai route's own: the person's Coding Plan key,
+ * with Z.ai's endpoint and a settings folder of its own, so Claude Code neither uses nor changes the person's Claude sign-in.
  */
-export function cliExecEnvironment(env: NodeJS.ProcessEnv, provider: LiveCliProvider, platform: NodeJS.Platform = process.platform): Record<string, string> {
+export function cliExecEnvironment(env: NodeJS.ProcessEnv, provider: LiveCliProvider, platform: NodeJS.Platform = process.platform,
+    zai?: ZaiRun): Record<string, string> {
   const result: Record<string, string> = {};
   const lower = new Map(Object.keys(env).map((key) => [key.toLowerCase(), key]));
   for (const name of inherited) {
@@ -156,9 +158,17 @@ export function cliExecEnvironment(env: NodeJS.ProcessEnv, provider: LiveCliProv
     if (value) result[platform === "win32" && name.toLowerCase() === "path" ? "PATH" : name] = value;
   }
   result.NO_COLOR = "1";
-  if (provider === "anthropic") {
+  if (provider !== "openai") {
     result.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
     result.DISABLE_AUTOUPDATER = "1";
+  }
+  if (provider === "zai" && zai) {
+    result.CLAUDE_CONFIG_DIR = zai.configDir;
+    result.ANTHROPIC_BASE_URL = ZAI_ANTHROPIC_BASE_URL;
+    result.ANTHROPIC_AUTH_TOKEN = zai.key;
+    // Z.ai's documented timeout for the Coding Plan: its long answers outlast Claude Code's default.
+    result.API_TIMEOUT_MS = "3000000";
+    result.DISABLE_TELEMETRY = "1";
   }
   return result;
 }
@@ -296,8 +306,13 @@ export function claudeParser() {
 
 // ------------------------------------------------------------------ runner
 
+/** The Z.ai route's key and Claude Code settings folder, from the main process for this run only. */
+export type ZaiRun = { key: string; configDir: string };
+
 export type ExecRun = {
   provider: LiveCliProvider;
+  /** The Z.ai route only. */
+  zai?: ZaiRun;
   /** The saved, verified executable. */
   file: string;
   /** Arguments placed before the CLI's own (a test runs a stand-in script through the Node binary this way). */
@@ -371,13 +386,14 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   }
   const args = [...(run.argsPrefix ?? []),
     ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
+  if (run.provider === "zai" && !run.zai?.key) return result("failed", null, { error: "Add the Z.ai Coding Plan key in Settings > Development CLIs." });
   if (run.signal.aborted) return result("stopped", null);
 
   const launch = codeProcessLaunch(run.file, args);
   let child: ChildProcess;
   try {
     child = spawn(launch.file, launch.args, {
-      cwd: run.cwd, env: cliExecEnvironment(run.env, run.provider, run.platform), shell: false, windowsHide: true,
+      cwd: run.cwd, env: cliExecEnvironment(run.env, run.provider, run.platform, run.zai), shell: false, windowsHide: true,
       detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
     });
   } catch {
@@ -425,7 +441,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     let frame: unknown;
     try { frame = JSON.parse(line); } catch { skipped += 1; return; }
     if (!isRecord(frame)) { skipped += 1; return; }
-    if (run.provider === "anthropic") {
+    if (run.provider !== "openai") {
       if (frame.type === "control_request" && isRecord(frame.request) && frame.request.subtype === "can_use_tool" && typeof frame.request_id === "string") {
         answer(frame.request_id, frame.request);
         return;
@@ -442,7 +458,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     }
     for (const event of parse(frame)) {
       emit(event);
-      if (event.type === "turn" && run.provider === "anthropic") stdin.end();
+      if (event.type === "turn" && run.provider !== "openai") stdin.end();
     }
   };
 

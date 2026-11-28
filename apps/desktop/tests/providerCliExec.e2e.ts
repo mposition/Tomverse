@@ -11,6 +11,9 @@ import { launchNativeFixture } from "./launch-native-fixture";
 import type { Page } from "@playwright/test";
 import { chooseCodeModel, codeModelControl } from "./code-model-picker";
 
+// A made-up Z.ai key, put together at run time so no credential-shaped literal sits in the source.
+const sampleZai = ["zai", "e2e", "key", "0123456789"].join("-");
+
 /**
  * Code runs a task with the person's own Codex and Claude Code (the server's desktopProviderCliExec route). The CLIs are a
  * stand-in script run through a copy of the Node binary saved and trusted as the CLI file; the fake Tomverse coding API is a
@@ -184,6 +187,32 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     assert.equal(readOnly.args[readOnly.args.indexOf("--permission-prompts") + 1], "none");
     // The fake still asks; with no approver and no prompts allowed, the answer is a denial.
     assert.equal(readOnly.response?.response.response.behavior, "deny");
+
+    // Claude Code (Z.ai): offered once the Coding Plan key is saved in Settings. It runs the same Claude Code file with Z.ai's
+    // endpoint, the key and a settings folder of its own in its environment; the key is never shown again or on the command line.
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+    await rail.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Development CLIs", exact: true }).click();
+    const zaiSection = page.getByRole("region", { name: "Claude Code (Z.ai)" });
+    await zaiSection.getByLabel("Z.ai API key").fill(sampleZai);
+    await zaiSection.getByRole("button", { name: "Save key" }).click();
+    await expect(zaiSection.getByRole("status")).toHaveText(/Key saved on this device, encrypted\.|Key kept for this session only/);
+    await expect(zaiSection.getByLabel("Z.ai API key")).toHaveValue("");
+    await expect.poll(async () => (await state()).providerCliExec).toEqual(["openai", "anthropic", "zai"]);
+    assert.ok(!JSON.stringify(await state()).includes(sampleZai), "the window never holds the key");
+    await rail.getByRole("button", { name: "Code", exact: true }).click();
+    await chooseCodeModel(page, { model: "provider-cli:zai" });
+    await expect(codeModelControl(page)).toContainText("Claude Code (Z.ai)");
+    await rm(record, { force: true });
+    await send("Read the project on Z.ai");
+    await expect.poll(async () => { try { return (await seen()).prompt; } catch { return ""; } }, { timeout: 30_000 }).toBe("Read the project on Z.ai");
+    const zaiRun = await seen();
+    for (const name of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR"]) assert.ok(zaiRun.env.includes(name), name);
+    assert.ok(!zaiRun.args.some((arg) => arg.includes(sampleZai)));
+    assert.equal(zaiRun.args[zaiRun.args.indexOf("--tools") + 1], "Read,Glob");
+    await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
+    await page.evaluate(() => window.desktop.removeZaiKey());
+    await expect.poll(async () => (await state()).providerCliExec).toEqual(["openai", "anthropic"]);
 
     // Stop ends the CLI and its child.
     await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);

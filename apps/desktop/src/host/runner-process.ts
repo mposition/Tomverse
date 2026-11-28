@@ -32,8 +32,8 @@ import type { ComputerAgentRequest } from "../../../tomverse-cli/src/computer-to
 import { createReviewWorker } from "./review-worker";
 import { createGitDraftWorker } from "./git-draft-worker";
 import { runProviderCli } from "./provider-cli-exec";
-import { approvalRequestFor, createTranscript } from "./provider-cli-transcript";
-import { cliPermissionPlan } from "../provider-cli-exec-contract";
+import { approvalRequestFor, createTranscript, holdsText, withoutKey } from "./provider-cli-transcript";
+import { cliPermissionPlan, liveCliExecution } from "../provider-cli-exec-contract";
 import { startCodeSandbox } from "./code-sandbox";
 import { composeLaunch, type SandboxRuntime } from "../../../tomverse-cli/src/sandbox.js";
 import type { RemoteWorkspace } from "../../../tomverse-cli/src/remote-workspace.js";
@@ -566,13 +566,15 @@ const liveCliPublishMs = 120;
  */
 async function executeProviderCli(command: Extract<WorkerCommand, { type: "start-provider-cli" }>) {
   if (active) return;
-  const clean = (text: string) => cleanText(text, noConnectionKey);
+  // The Z.ai key is the one provider key a run holds: it never appears in what the task shows or saves.
+  const zaiKey = command.zai?.key;
+  const clean = (text: string) => withoutKey(cleanText(text, noConnectionKey), zaiKey);
   const prompt = clean(command.prompt);
   const plan = cliPermissionPlan(command.provider, command.permission);
   const task: Task = {
     id: command.history?.id ?? null, root: command.project.path, title: prompt.slice(0, 80), status: "starting",
     entries: [{ role: "user", text: prompt }], effort: "default",
-    execution: command.provider === "openai" ? codexFixtureExecution : claudeFixtureExecution,
+    execution: liveCliExecution(command.provider),
     readOnly: plan.grants === "read_only", savedLocally: !!command.history, references: command.references, liveCli: true,
     changes: [], checks: [], transmission: [],
   };
@@ -594,7 +596,8 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     timer = undefined;
     task.entries = [...leading, ...transcript.entries];
     task.changes = transcript.changes;
-    task.streamingAnswer = transcript.streaming || undefined;
+    // The answer being written is cleaned whole on every update, so a key split across stream pieces is caught too.
+    task.streamingAnswer = transcript.streaming ? clean(transcript.streaming) : undefined;
     task.status = control.cancelled ? "stopping" : control.approval ? "approval" : "running";
     send({ type: "task", runId: command.runId, task });
   };
@@ -614,12 +617,14 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
     task.status = "running";
     refresh();
     const result = await runProviderCli({
-      provider: command.provider, file: command.file, argsPrefix: command.argsPrefix, cwd: command.project.path, prompt: text,
+      provider: command.provider, file: command.file, argsPrefix: command.argsPrefix, cwd: command.project.path, prompt: text, zai: command.zai,
       mode: command.permission, env: process.env, signal: control.abort.signal,
       onEvent: (event) => { transcript.apply(event); refreshSoon(); },
       approve: async (approval, signal) => {
         signal.throwIfAborted();
-        const request = approvalRequestFor(approval, command.project.path, clean);
+        // A request holding the Z.ai key is refused too: the card would show it removed, so the person could not see what they approve.
+        const holdsKey = !!zaiKey && holdsText({ tool: approval.tool, input: approval.input }, zaiKey);
+        const request = holdsKey ? null : approvalRequestFor(approval, command.project.path, clean);
         // A request the card cannot show in full, or that names a credential file, is refused without asking.
         if (!request) {
           if (!leading.some((entry) => entry.role === "event" && entry.notice === "cliApprovalRefused")) leading.push(desktopCodeNotice("cliApprovalRefused"));
