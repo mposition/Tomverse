@@ -24,7 +24,7 @@ export const cliPathInput = z.object({ provider: cliProvider, path: cliFilePath 
 
 export type CliPathCheck =
   | { status: "pathVerified"; version: string }
-  | { status: "versionUnverified" | "userTrusted" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "checkFailed" | "unsupportedPlatform" };
+  | { status: "versionUnverified" | "userTrusted" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "modulesAbove" | "checkFailed" | "unsupportedPlatform" };
 export type SavedCliPath = { path: string } & (
   { status: "pathVerified"; version: string } | { status: "checkRequired" | "versionUnverified" | "userTrusted" }
 );

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, win32, posix } from "node:path";
+import { dirname, isAbsolute, join, relative, win32, posix } from "node:path";
 import { isLocalPath, localReadFlags } from "./provider-cli-path";
 
 /**
@@ -164,4 +164,29 @@ export async function nodeExecutable(directories: readonly string[], root: strin
 export async function miniMaxInstallAt(folder: string) {
   try { await readdir(folder); } catch { return null; }
   return (await resolveMiniMaxInstall(folder)) ? folder : null;
+}
+
+/**
+ * A `node_modules` folder (or file, or link) in any folder above the release folder, or one of the per-user module folders of
+ * the home folder: Node looks for the modules the entry file asks for in every folder up to the root, so one of them would run
+ * code that the digest of the release folder does not cover. Returns the first one found (a folder that cannot be asked about
+ * counts as one), or null when there is none.
+ */
+export async function modulesAbove(release: string, home?: string): Promise<string | null> {
+  const present = async (path: string) => {
+    try { await lstat(path); return true; } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return code !== "ENOENT" && code !== "ENOTDIR";
+    }
+  };
+  let folder = dirname(release);
+  for (;;) {
+    const candidate = join(folder, "node_modules");
+    if (await present(candidate)) return candidate;
+    const parent = dirname(folder);
+    if (parent === folder) break;
+    folder = parent;
+  }
+  if (home) for (const name of [".node_modules", ".node_libraries"]) if (await present(join(home, name))) return join(home, name);
+  return null;
 }

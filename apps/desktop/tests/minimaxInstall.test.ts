@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
-import { installManifest, nodeExecutable, resolveMiniMaxInstall } from "../src/host/minimax-install";
+import { installManifest, modulesAbove, nodeExecutable, resolveMiniMaxInstall } from "../src/host/minimax-install";
 import { createProviderCliHost } from "../src/host/provider-cli-host";
 import { cliPathStillMatches, supportsCliPath } from "../src/host/provider-cli-path";
 
@@ -321,5 +321,82 @@ test("A MiniMax Code install is trusted as a whole: a change anywhere in its rel
     assert.ok(digest);
     writeFileSync(trustPath, JSON.stringify({ trusted: { minimax: withoutDigest } }));
     assert.equal(await host.resolveSaved("minimax", saved), null);
+  } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("A node_modules above the release folder, of any kind, is found; so are the user module folders of the home folder", async (t) => {
+  const w = await world();
+  try {
+    const { root } = await install(w.root);
+    const release = (await resolveMiniMaxInstall(root))!.release;
+    assert.equal(await modulesAbove(release), null);
+    assert.equal(await modulesAbove(release, w.home), null);
+    // A folder, a file and a link at each level between the release and the root of the drive count.
+    const levels = [join(root, "releases"), root, w.home, w.base];
+    for (const level of levels) {
+      const folder = join(level, "node_modules");
+      await mkdir(folder);
+      assert.equal(await modulesAbove(release), folder, level);
+      await rm(folder, { recursive: true });
+      await writeFile(folder, "not a folder");
+      assert.equal(await modulesAbove(release), folder, level);
+      await rm(folder);
+      assert.equal(await modulesAbove(release), null, level);
+    }
+    const target = join(w.base, "somewhere");
+    await mkdir(target);
+    try {
+      await symlink(target, join(root, "node_modules"), windows ? "junction" : "dir");
+      assert.equal(await modulesAbove(release), join(root, "node_modules"));
+      await rm(join(root, "node_modules"), { recursive: false, force: true });
+    } catch { t.diagnostic("This system does not allow links."); }
+    // Inside the release folder is covered by its digest, not a reason of its own.
+    await mkdir(join(release, "node_modules", "x"), { recursive: true });
+    assert.equal(await modulesAbove(release), null);
+    // The per-user module folders of the home folder, when the home folder is given.
+    for (const name of [".node_modules", ".node_libraries"]) {
+      await mkdir(join(w.home, name));
+      assert.equal(await modulesAbove(release, w.home), join(w.home, name));
+      assert.equal(await modulesAbove(release), null);
+      await rm(join(w.home, name), { recursive: true });
+    }
+  } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+});
+
+test("A MiniMax Code install with modules above its release folder is not trusted, and one trusted before stops running", { timeout: 90_000, skip: !supportsCliPath("minimax") }, async () => {
+  const w = await world();
+  try {
+    const { root } = await install(w.root);
+    await copyNode(w.bin);
+    const trustPath = join(w.base, "trust.json");
+    const host = createProviderCliHost({
+      trustPath: () => trustPath, writeTrust: (file, text) => writeFileSync(file, text), hasSaved: () => true, typeIntoTerminal: () => "opened",
+      shell: () => (windows ? "powershell" : "posix"), scan: { env: { PATH: w.bin, HOME: w.home, USERPROFILE: w.home, SystemRoot: process.env.SystemRoot }, home: w.home },
+      run: async () => ({ code: 1, output: "", timedOut: false }),
+    });
+    const saved = { path: root, status: "userTrusted" } as const;
+    const candidate = async () => (await host.scan()).providers.find(({ provider }) => provider === "minimax")?.candidates[0];
+    // Not trusted while a node_modules is above the release: the person is told why, and nothing is recorded.
+    for (const above of [join(root, "releases", "node_modules"), join(w.home, "node_modules"), join(w.base, "node_modules")]) {
+      await mkdir(above);
+      assert.deepEqual(await host.trust("minimax", root), { status: "modulesAbove" }, above);
+      assert.equal(await host.trustedFile("minimax", root), null);
+      await rm(above, { recursive: true });
+    }
+    await mkdir(join(w.home, ".node_modules"));
+    assert.deepEqual(await host.trust("minimax", root), { status: "modulesAbove" });
+    await rm(join(w.home, ".node_modules"), { recursive: true });
+    assert.throws(() => readFileSync(trustPath, "utf8"), { code: "ENOENT" });
+
+    // Trusted when there is none; one that appears later stops the install from running, and trust is offered again when it is gone.
+    assert.equal(await host.trust("minimax", root), "stored");
+    assert.ok(await host.resolveSaved("minimax", saved));
+    assert.equal((await candidate())?.trusted, true);
+    await mkdir(join(w.home, "node_modules"));
+    assert.equal(await host.resolveSaved("minimax", saved), null);
+    assert.equal(await host.trustedFile("minimax", root), null);
+    assert.equal((await candidate())?.trusted, false);
+    await rm(join(w.home, "node_modules"), { recursive: true });
+    assert.ok(await host.resolveSaved("minimax", saved));
   } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

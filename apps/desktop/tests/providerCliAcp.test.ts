@@ -420,10 +420,10 @@ test("MiniMax Code reports a call's arguments in an update after the call, and t
     assert.equal(ask({ kind: "execute", rawInput: { command: "pwd" } }, "ask", "m4").approval.input.command, "pwd");
     assert.equal(ask({ kind: "execute", rawInput: { command: "pwd" } }, "ask", "m3").verdict, "refuse");
     assert.equal(ask({ kind: "execute", rawInput: { command: "cat ~/.minimax-code/x" } }, "ask", "m4").verdict, "refuse");
-    // A request that names a different place than the call did is judged by both: outside the project asks even in Allow all.
+    // A request that names a different place than the card shows for the call (here the call announced hello.txt) is refused.
     const moved = classifyAcpPermission({ sessionId: "s", options: vibeOptions, toolCall: { toolCallId: "m1", kind: "edit", locations: [{ path: join(cwd, "..", "elsewhere.txt") }] } },
       { cwd, plan: cliPermissionPlan("minimax", "allow_all"), tracked: calls.get("m1") });
-    assert.equal(moved.verdict, "ask");
+    assert.equal(moved.verdict, "refuse");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -1153,4 +1153,60 @@ test("The card reads only the groups it shows: every other field of the argument
     const other = decide("fetch", { url: "https://example.com", command: "x", path: "a.md", content: "y" });
     assert.deepEqual([other.verdict, other.approval.input.rawInput], ["ask", { url: "https://example.com", command: "x", path: "a.md", content: "y" }]);
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("An edit card shows the files it edits: a location of the request anywhere else refuses the request", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tomverse-acp-places-"));
+  try {
+    const cwd = join(root, "project");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(root, "outside.txt"), "o");
+    await writeFile(join(cwd, "hello.txt"), "h");
+    const diff = (path: string) => ({ type: "diff", path, newText: "hi" });
+    const decide = (toolCall: object, mode: "ask" | "allow_all" | "read_only" = "ask") => classifyAcpPermission(request({ kind: "edit", title: "Edit", ...toolCall }), { cwd, plan: cliPermissionPlan("mistral", mode) });
+    const outside = join(root, "outside.txt");
+    for (const [name, toolCall] of [
+      ["a diff and a location outside the project", { content: [diff("hello.txt")], locations: [{ path: outside }] }],
+      ["a diff and a second location", { content: [diff("hello.txt")], locations: [{ path: join(cwd, "hello.txt") }, { path: join(cwd, "docs", "other.md") }] }],
+      ["arguments and a location outside", { rawInput: { path: "hello.txt", content: "hi" }, locations: [{ path: outside }] }],
+      ["two diffs and a third place", { content: [diff("a.md"), diff("b.md")], locations: [{ path: join(cwd, "a.md") }, { path: join(cwd, "c.md") }] }],
+    ] as const) {
+      for (const mode of ["ask", "allow_all"] as const) {
+        const decision = decide(toolCall, mode);
+        assert.deepEqual([decision.verdict, decision.approval.refused], ["refuse", true], `${name} ${mode}`);
+      }
+      assert.equal(decide(toolCall, "read_only").verdict, "deny", name);
+    }
+    // The same file written another way, and the files of several diffs, are the card's places.
+    assert.equal(decide({ content: [diff("hello.txt")], locations: [{ path: join(cwd, "hello.txt") }] }, "allow_all").verdict, "allow");
+    assert.equal(decide({ content: [diff("a.md"), diff("b.md")], locations: [{ path: join(cwd, "b.md") }, { path: "a.md" }] }).verdict, "ask");
+    assert.equal(decide({ rawInput: { path: join(cwd, "hello.txt"), content: "hi" }, locations: [{ path: "hello.txt" }] }, "allow_all").verdict, "allow");
+    // A location the earlier call announced counts the same way.
+    const calls = new Map<string, TrackedCall>();
+    trackToolCall(calls, "t", { title: "Writing", kind: "edit", content: [diff("hello.txt")], locations: [{ path: outside }] });
+    assert.equal(classifyAcpPermission({ sessionId: "s", options, toolCall: { toolCallId: "t" } }, { cwd, plan: cliPermissionPlan("mistral", "ask"), tracked: calls.get("t") }).verdict, "refuse");
+    // Cards that show no file of an edit show the locations as they are: a command card in its explanation, any other card in its paths.
+    const run = classifyAcpPermission(request({ kind: "execute", title: "Run", rawInput: { command: "ls" }, locations: [{ path: join(cwd, "docs") }, { path: outside }] }), { cwd, plan: cliPermissionPlan("mistral", "ask") });
+    assert.deepEqual([run.verdict, run.approval.input.locationPaths], ["ask", [join(cwd, "docs"), outside]]);
+    const shown = approvalRequestFor(run.approval, cwd, (value) => value);
+    assert.deepEqual(JSON.parse(shown?.explanation ?? "{}").locationPaths, [join(cwd, "docs"), outside]);
+    const fetched = classifyAcpPermission(request({ kind: "fetch", title: "Fetch", locations: [{ path: outside }] }), { cwd, plan: cliPermissionPlan("mistral", "ask") });
+    assert.deepEqual([fetched.verdict, fetched.approval.input.paths], ["ask", [outside]]);
+    // A location that names a credential store is refused on any card.
+    assert.equal(classifyAcpPermission(request({ kind: "execute", title: "Run", rawInput: { command: "ls" }, locations: [{ path: "/home/p/.qwen/settings.json" }] }), { cwd, plan: cliPermissionPlan("mistral", "ask") }).verdict, "refuse");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("A Node run by a provider CLI is not told where to look for modules", () => {
+  const env = { HOME: "/home/p", PATH: "/usr/bin", NODE_PATH: "/evil/modules", NODE_OPTIONS: "--require /evil/hook.js", NODE_PRESERVE_SYMLINKS: "1", NODE_PRESERVE_SYMLINKS_MAIN: "1",
+    NODE_REPL_EXTERNAL_MODULE: "/evil/repl.js", NODE_TLS_REJECT_UNAUTHORIZED: "0", NODE_DEBUG: "module", NODE_V8_COVERAGE: "/tmp/c", ELECTRON_RUN_AS_NODE: "1", NPM_CONFIG_PREFIX: "/evil",
+    npm_config_prefix: "/evil", PREFIX: "/evil", NODE_EXTRA_CA_CERTS: "/certs/ca.pem" };
+  for (const provider of liveCliProviders) {
+    const result = cliExecEnvironment(env, provider, "linux");
+    for (const name of Object.keys(result)) {
+      // Only the system and profile variables, the PATH, proxy and certificate settings are passed on; no Node setting except the certificate file.
+      assert.ok(!/^NODE_(?!EXTRA_CA_CERTS$)|^ELECTRON|^npm_|^NPM_|^PREFIX$/i.test(name), `${provider} ${name}`);
+    }
+    assert.equal(result.NODE_EXTRA_CA_CERTS, "/certs/ca.pem");
+  }
 });

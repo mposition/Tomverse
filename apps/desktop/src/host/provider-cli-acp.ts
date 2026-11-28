@@ -296,11 +296,12 @@ function streamedInput(tracked: TrackedCall | undefined): Json | undefined {
   return undefined;
 }
 
-type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; diffs: Diff[]; command?: string; commandValues: string[]; named: boolean; limited: boolean };
+type Facts = { kind?: string; title?: string; raw?: Json; paths: string[]; locations: string[]; diffs: Diff[]; command?: string; commandValues: string[]; named: boolean; limited: boolean };
 
 /** What one description of a tool call (the request's own, or the tracked one) says. `limited`: it holds more than is looked at in part. */
 function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const paths: string[] = [];
+  const places: string[] = [];
   const diffs: Diff[] = [];
   let limited = tracked?.limited === true;
   const oversized = (value: unknown) => typeof value === "string" && value.length > MAX_INPUT;
@@ -312,7 +313,7 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   if (locations.length > MAX_PLACES || content.length > MAX_PLACES) limited = true;
   for (const location of locations.slice(0, MAX_PLACES)) {
     const path = isRecord(location) ? location.path : undefined;
-    if (typeof path === "string") { if (path.length > 4_096) limited = true; paths.push(path); }
+    if (typeof path === "string") { if (path.length > 4_096) limited = true; paths.push(path); places.push(path); }
   }
   for (const entry of content.slice(0, MAX_PLACES)) {
     if (!isRecord(entry) || entry.type !== "diff" || typeof entry.path !== "string") continue;
@@ -326,7 +327,7 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const command = commandOf(raw);
   const commandValues = commandValuesOf(raw);
   if (commandValues.some((value) => commandWords(value).length > MAX_WORDS)) limited = true;
-  return { kind, title, raw, paths, diffs, command, commandValues, named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0, limited };
+  return { kind, title, raw, paths, locations: places, diffs, command, commandValues, named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0, limited };
 }
 
 const unique = (values: readonly string[]) => [...new Set(values)];
@@ -469,6 +470,7 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const raw = own.raw ?? earlier?.raw;
   const diffs = own.diffs.length > 0 ? own.diffs : earlier?.diffs ?? [];
   const paths = unique([...own.paths, ...(earlier?.paths ?? [])]);
+  const locations = unique([...own.locations, ...(earlier?.locations ?? [])]);
   const command = own.command ?? earlier?.command;
   // Every command text either description holds is checked, whether or not the card shows it as the command.
   const commands = unique([...own.commandValues, ...(earlier?.commandValues ?? [])]);
@@ -487,14 +489,19 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   // arguments, a group the card does not show among them, stays on it under its own name (and a group not shown is not checked: it is seen as it is).
   const groups = new Set<Group>(kind === "execute" ? ["command"] : kind === "edit" ? ["path", "after", "before"] : []);
   const aliases = aliasGroups(raw, groups);
-  const limited = own.limited || earlier?.limited === true || !sameAction || !aliases.ok || !diffMatchesRaw(diffs, raw, context.cwd);
+  // The places an edit card shows are its diffs' files, or the file of its arguments. A location of the request that is anywhere else
+  // (a file outside the project) is a place the card does not show, so the request is refused rather than shown without it.
+  const showsEdit = kind === "edit" && (diffs.length > 0 || (aliases.path !== undefined && aliases.after !== undefined));
+  const shown = new Set((diffs.length > 0 ? diffs.map((diff) => diff.path) : aliases.path !== undefined ? [aliases.path] : []).map((path) => fold(realPathOf(path, context.cwd) ?? "")));
+  const strayLocation = showsEdit && locations.some((path) => { const real = realPathOf(path, context.cwd); return real === null || !shown.has(fold(real)); });
+  const limited = own.limited || earlier?.limited === true || !sameAction || !aliases.ok || strayLocation || !diffMatchesRaw(diffs, raw, context.cwd);
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
   const extras = Object.fromEntries(Object.entries(raw ?? {}).filter(([key]) => !aliases.consumed.has(key)));
   const { path: rawPath, after, before } = aliases;
   let approval: CliApproval;
   if (kind === "execute" && command) {
-    approval = { id, tool: "Bash", input: { command, ...(title && title !== command ? { description: title } : {}), ...extras } };
+    approval = { id, tool: "Bash", input: { command, ...(title && title !== command ? { description: title } : {}), ...(locations.length > 0 ? { locationPaths: locations } : {}), ...extras } };
   } else if (kind === "edit" && diffs.length === 1) {
     const [diff] = diffs;
     approval = diff.oldText === null || diff.oldText === undefined

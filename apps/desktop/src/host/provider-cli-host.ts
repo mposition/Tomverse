@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { cliLoginArguments, isCliScanProvider, type CliLoginOpen, type CliPathCheck, type CliProvider, type CliScan, type SavedCliPath } from "../code-execution";
 import { cliLoginCommandLine, readCliLogin, type CliRunner, type LoginShell } from "./provider-cli-login";
-import { installManifest, nodeExecutable, resolveMiniMaxInstall } from "./minimax-install";
+import { installManifest, modulesAbove, nodeExecutable, resolveMiniMaxInstall } from "./minimax-install";
 import { cliPathStillMatches, inspectCliPath } from "./provider-cli-path";
 import { cliScanDirectories, expandScanDirectories, scanCliProviders, scanHome, type ScanOptions } from "./provider-cli-scan";
 import { cliTrustFile, trustRecordFor, trustedCliFile, withTrust, type CliTrustFile } from "./provider-cli-trust";
@@ -78,6 +78,13 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
    * also the Node that would run it now (`node`): a different Node, from another folder after the PATH changed or with other
    * bytes, is not the one the person trusted, and the install must be trusted again.
    */
+  /** Whether Node would look for modules above this MiniMax Code release: any `node_modules` in a folder above it, and the user module folders of the home folder. */
+  async function modulesAboveRelease(release: string) {
+    const platform = options.scan?.platform ?? process.platform;
+    const env = options.scan?.env ?? process.env;
+    return modulesAbove(release, options.scan?.home ?? scanHome(env, platform));
+  }
+
   async function trustedWith(trust: CliTrustFile, provider: CliProvider, path: string, signal?: AbortSignal): Promise<{ file: string; fileStamp: string; node?: string } | null> {
     if (!isCliScanProvider(provider)) return null;
     const target = await trustTarget(provider, path);
@@ -87,6 +94,8 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
     if (!trusted || provider !== "minimax") return trusted;
     const install = await resolveMiniMaxInstall(path);
     if (!install || install.entry !== trusted.file || !record?.node) return null;
+    // Checked before every task: a folder of modules above the release is code the digest below does not cover.
+    if (await modulesAboveRelease(install.release)) return null;
     const node = await miniMaxNode(install.root);
     if (!node || !await trustedCliFile(node, record.node, signal)) return null;
     // Every file of the release folder, read again now: a changed, added, removed or linked file is not what was trusted.
@@ -133,6 +142,7 @@ export function createProviderCliHost(options: ProviderCliHostOptions) {
       if (provider === "minimax") {
         // The Node that runs the entry file is trusted with it; with no Node to run it there is nothing to trust.
         const install = await resolveMiniMaxInstall(path);
+        if (install && await modulesAboveRelease(install.release)) return { status: "modulesAbove" };
         const node = install ? await miniMaxNode(install.root) : null;
         const nodeRecord = node ? await trustRecordFor(node) : null;
         // The release folder as a whole is trusted with them; a folder that cannot be read whole (a link, too many files) is not.
