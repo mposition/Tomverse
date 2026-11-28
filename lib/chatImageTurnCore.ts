@@ -59,19 +59,6 @@ export type ChatImageTurnRequest = {
 export const chatImageTurnGroupKey = (answerId: string) =>
     /^[0-9a-f-]{36}_[0-9]+$/.test(answerId) ? answerId.slice(0, answerId.lastIndexOf("_")) : answerId;
 
-/**
- * A Review panel's index in its group, from its answer id: `<group>_<i>`,
- * written exactly as `String(i)` (no sign, no leading zero) and below the
- * group's panel count. Null for anything else -- a plain Chat answer id, an
- * index past the last panel, or a spelling of one that names no answer row.
- */
-export const reviewPanelIndex = (answerId: string, panelCount: number): number | null => {
-    const match = /^[0-9a-f-]{36}_([0-9]+)$/.exec(answerId);
-    if (!match || !Number.isSafeInteger(panelCount) || panelCount < 1) return null;
-    const index = Number(match[1]);
-    return String(index) === match[1] && index < panelCount ? index : null;
-};
-
 const TURN_PRESETS = ["draft", "standard", "final"] as const;
 
 /**

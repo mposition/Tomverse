@@ -23,17 +23,9 @@ let refusal: { status: number; code: string } | null = null;
 const turns: Array<Record<string, unknown>> = [];
 let mocksInstalled = false;
 let cookieReads = 0;
-/** Image allowance consumptions, and whether the next one is refused. */
+/** The image allowance: how often it was asked, and whether it refuses. */
 let rateLimitCalls = 0;
 let rateLimitRefused = false;
-/** Panel ids whose one bind has been spent (`image-turn-panel-bind`), and every try. */
-const boundPanels = new Set<string>();
-const bindTries: string[] = [];
-/** Rate-limit units given back, as `scope:period:subject`. */
-const releases: string[] = [];
-/** Whether the panel's group is already reserved, and who asked. */
-let groupReserved = false;
-const groupChecks: Array<Record<string, unknown>> = [];
 /** What the turn leaves pending, and how often work was queued after the response. */
 let pendingIds: string[] = [];
 let afterCalls = 0;
@@ -62,29 +54,10 @@ async function loadRoute() {
       ApiSecurityError: new (status: number, code: string, message: string) => Error;
     };
     mock.module(mod("lib/apiSecurity.ts"), {
-      namedExports: { ...realApiSecurity, consumeApiRateLimit: async (
-        _request: Request,
-        subject: string,
-        scope: string,
-        limits: { minute: number; day: number },
-        options?: { skipIpBucket?: boolean },
-      ) => {
-        if (scope === "image-turn-panel-bind") {
-          // A bucket of one per panel id, never on the caller's IP.
-          assert.deepEqual(limits, { minute: 1, day: 1 });
-          assert.equal(options?.skipIpBucket, true);
-          bindTries.push(subject);
-          if (boundPanels.has(subject)) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
-          boundPanels.add(subject);
-          return;
-        }
-        assert.equal(scope, "image-generation");
+      namedExports: { ...realApiSecurity, consumeApiRateLimit: async (_request: Request, _subject: string, scope: string) => {
+        assert.equal(scope, "image-generation", "one allowance for every image turn, Review panels included");
         rateLimitCalls += 1;
         if (rateLimitRefused) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
-      },
-      releaseApiRateLimit: async (subject: string, scope: string, period: string) => {
-        releases.push(`${scope}:${period}:${subject}`);
-        if (scope === "image-turn-panel-bind") boundPanels.delete(subject);
       } },
     });
     const realNextServer = require("next/server") as Record<string, unknown>;
@@ -93,10 +66,6 @@ async function loadRoute() {
     });
     mock.module(mod("lib/chatImageTurn.ts"), {
       namedExports: {
-        chatImageTurnGroupReserved: async (input: Record<string, unknown>) => {
-          groupChecks.push(input);
-          return groupReserved;
-        },
         startChatImageTurn: async (input: Record<string, unknown>) => {
           turns.push(input);
           if (refusal) throw new ChatAccessError(refusal.status, refusal.code, "refused");
@@ -145,11 +114,6 @@ const reset = () => {
   turns.length = 0;
   rateLimitCalls = 0;
   rateLimitRefused = false;
-  boundPanels.clear();
-  bindTries.length = 0;
-  releases.length = 0;
-  groupReserved = false;
-  groupChecks.length = 0;
   pendingIds = [];
   afterCalls = 0;
 };
@@ -161,115 +125,35 @@ const reviewPanel = {
   imageGroupPanelModelIds: ["google-chat", "gpt-6-luna"],
 };
 
-test("a later Review panel's first bind to a reserved group spends no image allowance and queues no work", async () => {
+/*
+  B3 review, fourth pass: the Review panel exemption is gone. The request that
+  reserves a group writes every panel's answer in the reservation itself
+  (lib/chatImageTurn.ts), so a later panel refused here leaves nothing paid
+  out of sight, and it follows the image allowance like any request.
+*/
+test("a later Review panel is counted like any image turn, and a refusal starts nothing", async () => {
   reset();
-  groupReserved = true;
-  pendingIds = ["gen-1", "gen-2"];
-  const { status } = await post(reviewPanel);
-  assert.equal(status, 202);
-  assert.equal(rateLimitCalls, 0, "binding to a reserved group buys nothing, so it is not counted");
-  assert.deepEqual(groupChecks, [{ userId: "user-1", conversationId: "conv-1",
-    assistantMessageId: reviewPanel.assistantMessageId, panelCount: 2 }]);
-  assert.deepEqual(bindTries, [`user-1:${reviewPanel.assistantMessageId}`]);
+  assert.equal((await post(reviewPanel)).status, 202);
+  assert.equal(rateLimitCalls, 1);
   assert.deepEqual(turns[0].imageGroupPanelModelIds, reviewPanel.imageGroupPanelModelIds);
-  // The panel that reserved the group queued its work; an uncounted bind
-  // must not be a way to queue it again.
-  assert.equal(afterCalls, 0);
-
-  // Even with the allowance spent, a first bind still binds: its image is paid for.
-  reset();
-  groupReserved = true;
-  rateLimitRefused = true;
-  assert.equal((await post(reviewPanel)).status, 202);
-});
-
-/*
-  Review finding (B3, 2026-11-28, second pass): anyone who knew a reserved
-  group's panel ids could repeat a request, valid or not, outside the image
-  allowance -- each a database round and, for a valid one, the group's pending
-  work queued again.
-*/
-test("a repeat of a panel that has bound already is counted, and only a counted request queues work", async () => {
-  reset();
-  groupReserved = true;
-  pendingIds = ["gen-1"];
-  assert.equal((await post(reviewPanel)).status, 202);
-  assert.equal(rateLimitCalls, 0);
-  for (let repeat = 1; repeat <= 3; repeat += 1) {
-    assert.equal((await post(reviewPanel)).status, 202);
-    assert.equal(rateLimitCalls, repeat, "every repeat draws on the image allowance");
-  }
-  // A counted retry may still start work that never ran.
-  assert.equal(afterCalls, 3);
-  rateLimitRefused = true;
-  assert.equal((await post(reviewPanel)).status, 429, "so the allowance ends the repeats");
-});
-
-/*
-  Review finding (B3, 2026-11-28, third pass): the panel's one uncounted bind
-  was spent when the request was classified, so a bind the turn then refused
-  (ASSISTANT_MESSAGE_CONFLICT and the like) left the legitimate retry to be
-  charged against the image allowance.
-*/
-test("a bind the turn refuses gives its uncounted bind back, and the retry is still uncounted", async () => {
-  reset();
-  groupReserved = true;
-  refusal = { status: 409, code: "ASSISTANT_MESSAGE_CONFLICT" };
-  const refused = await post(reviewPanel);
-  assert.equal(refused.status, 409);
-  assert.equal(refused.payload.code, "ASSISTANT_MESSAGE_CONFLICT", "the caller sees the turn's own refusal");
-  const subject = `user-1:${reviewPanel.assistantMessageId}`;
-  assert.deepEqual([...releases].sort(), [`image-turn-panel-bind:day:${subject}`, `image-turn-panel-bind:minute:${subject}`]);
-  // The refused request is counted instead, so failing repeats stay bounded.
-  assert.equal(rateLimitCalls, 1);
-
-  refusal = null;
-  assert.equal((await post(reviewPanel)).status, 202);
-  assert.equal(rateLimitCalls, 1, "the retry binds uncounted");
-  assert.equal(bindTries.length, 2);
-
-  // Even with the allowance spent at that moment, the refusal is still the one returned.
-  reset();
-  groupReserved = true;
-  rateLimitRefused = true;
-  refusal = { status: 409, code: "ASSISTANT_MESSAGE_CONFLICT" };
-  const stillRefused = await post(reviewPanel);
-  assert.equal(stillRefused.status, 409);
-  assert.equal(stillRefused.payload.code, "ASSISTANT_MESSAGE_CONFLICT");
-});
-
-test("a malformed panel id is never a bind: it is counted before the group is even looked up", async () => {
-  for (const assistantMessageId of [
-    "6f1c1d3e-2222-4a2b-9c3d-000000000002_2", // past the last of two panels
-    "6f1c1d3e-2222-4a2b-9c3d-000000000002_01", // another spelling of panel 1
-    "not-a-uuid-group-at-all_1",
-    "6f1c1d3e-2222-4a2b-9c3d-000000000002", // no panel index
-  ]) {
-    reset();
-    groupReserved = true;
-    await post({ ...reviewPanel, assistantMessageId });
-    assert.equal(groupChecks.length, 0, assistantMessageId);
-    assert.equal(bindTries.length, 0, assistantMessageId);
-    assert.equal(rateLimitCalls, 1, assistantMessageId);
-  }
-});
-
-test("the panel that reserves a group, and every plain turn, still spend the image allowance", async () => {
-  reset();
-  pendingIds = ["gen-1", "gen-2"];
-  assert.equal((await post(reviewPanel)).status, 202);
-  assert.equal(rateLimitCalls, 1);
-  assert.equal(bindTries.length, 0, "no group yet, so no bind is spent");
-  assert.equal(afterCalls, 1, "the reserving request queues the group's work");
-  reset();
-  assert.equal((await post(body)).status, 202);
-  assert.equal(rateLimitCalls, 1);
-  assert.equal(groupChecks.length, 0, "a plain Chat image turn is never a later panel");
   reset();
   rateLimitRefused = true;
   const refused = await post(reviewPanel);
   assert.equal(refused.status, 429);
-  assert.equal(turns.length, 0, "nothing was reserved");
+  assert.equal(turns.length, 0, "refused before the turn: nothing reserved or written");
+  assert.equal(afterCalls, 0);
+});
+
+test("a replay that finds work still pending queues it again", async () => {
+  // The first request's process may have died before after() ran; the retry
+  // is what starts it, and the executor's claim lets only one runner take it.
+  reset();
+  pendingIds = ["gen-1", "gen-2"];
+  assert.equal((await post(reviewPanel)).status, 202);
+  assert.equal(afterCalls, 1);
+  reset();
+  assert.equal((await post(body)).status, 202);
+  assert.equal(afterCalls, 0, "nothing pending, nothing queued");
 });
 
 test("no session is rejected before anything else", async () => {

@@ -2,7 +2,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
-import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey, reviewPanelIndex } from "@/lib/chatImageTurnCore";
+import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { isChatConversationKind } from "@/lib/conversationKindGuard";
 import { isUniqueConstraintDatabaseError } from "@/lib/databaseError";
@@ -66,49 +66,33 @@ export type ChatImageTurnResult = {
     content: string;
     /**
      * Generations still waiting to start; the route drives them after
-     * responding. A counted replay included: if the first request's executor
-     * never ran (the response was lost before after()), the retry is what
-     * starts them. A Review panel's uncounted first bind to a group another
-     * panel reserved does not (the image-turn route). The claim in
-     * processImageGeneration lets only one runner take each.
+     * responding. A replay included: if the first request's executor never
+     * ran (the response was lost before after()), the retry is what starts
+     * them. The claim in processImageGeneration lets only one runner take each.
      */
     pendingGenerationIds: string[];
 };
-
-/**
- * Whether a Review panel's image group is already reserved in this
- * conversation, read before the image-turn route's rate limit: a panel that
- * only binds its answer to a group another panel reserved buys nothing. Only a
- * well-formed panel id of a group with exactly `panelCount` targets qualifies
- * (`reviewPanelIndex`); a plain answer id, an index past the last panel or
- * another conversation's group does not.
- */
-export async function chatImageTurnGroupReserved(input: {
-    userId: string;
-    conversationId: string;
-    assistantMessageId: string;
-    panelCount: number;
-}): Promise<boolean> {
-    if (reviewPanelIndex(input.assistantMessageId, input.panelCount) === null) return false;
-    const group = await prisma.imageGenerationGroup.findUnique({
-        where: {
-            userId_groupIdempotencyKey: {
-                userId: input.userId,
-                groupIdempotencyKey: chatImageTurnGroupKey(input.assistantMessageId),
-            },
-        },
-        select: { conversationId: true, _count: { select: { targets: true } } },
-    });
-    return (
-        group?.conversationId === input.conversationId &&
-        group._count.targets === input.panelCount
-    );
-}
 
 type PanelAnswer = { id: string; modelId: string };
 
 const panelAnswerConflict = () =>
     new ChatAccessError(409, "ASSISTANT_MESSAGE_CONFLICT", "That answer id is taken.");
+
+const isPanelAnswerConflict = (error: unknown) =>
+    error instanceof ChatAccessError && error.code === "ASSISTANT_MESSAGE_CONFLICT";
+
+/** Whether every panel id is already this conversation's image answer. */
+const panelAnswersInPlace = async (conversationId: string, answers: readonly PanelAnswer[]) => {
+    const rows = await prisma.message.findMany({
+        where: { id: { in: answers.map((answer) => answer.id) } },
+        select: { id: true, conversationId: true, role: true, content: true },
+    });
+    return answers.every((answer) => rows.some((row) =>
+        row.id === answer.id &&
+        row.conversationId === conversationId &&
+        row.role === "assistant" &&
+        row.content.startsWith(CHAT_IMAGE_TURN_CONTENT_PREFIX)));
+};
 
 /**
  * Writes every Review panel's answer that is not there yet, in the caller's
@@ -342,9 +326,21 @@ export async function startChatImageTurn(
         // nothing, and writes only answers an older client's group never got,
         // all or none.
         if (result.reused) {
-            panelAnswersWritten = await prisma.$transaction((tx) =>
-                writePanelAnswers(tx, input.conversationId, panelAnswers, chatImageTurnContent(prompt))
-            );
+            try {
+                panelAnswersWritten = await prisma.$transaction((tx) =>
+                    writePanelAnswers(tx, input.conversationId, panelAnswers, chatImageTurnContent(prompt))
+                );
+            } catch (error) {
+                // Two replays of an older client's group, both writing the
+                // answers it lacked: the second one's insert meets the
+                // first one's rows. Read again, outside the aborted
+                // transaction; if every panel now has this conversation's
+                // image answer, the replay has what it came for.
+                if (!(isPanelAnswerConflict(error) &&
+                    await panelAnswersInPlace(input.conversationId, panelAnswers))) {
+                    throw error;
+                }
+            }
         }
         if (panelAnswersWritten > 0) {
             await prisma.conversation.update({

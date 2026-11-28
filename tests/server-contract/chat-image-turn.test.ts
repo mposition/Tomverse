@@ -28,8 +28,6 @@ const createdMany: Array<Record<string, unknown>> = [];
 const storedIds = new Set<string>();
 /** Rows that already hold an id, as `message.findMany` reads them. */
 let heldRows: Array<{ id: string; conversationId: string; role: string; content: string }> = [];
-/** `${userId}:${groupKey}` -> the reserved group's conversation and target count. */
-const reservedGroups = new Map<string, { conversationId: string; targets: number }>();
 let groupQueries = 0;
 let reused = false;
 let replayStatus = "pending";
@@ -94,11 +92,6 @@ const prismaMock = {
       groupQueries += 1;
       return groups;
     },
-    findUnique: async ({ where }: { where: { userId_groupIdempotencyKey: { userId: string; groupIdempotencyKey: string } } }) => {
-      const key = where.userId_groupIdempotencyKey;
-      const group = reservedGroups.get(`${key.userId}:${key.groupIdempotencyKey}`);
-      return group ? { conversationId: group.conversationId, _count: { targets: group.targets } } : null;
-    },
   },
 };
 
@@ -159,7 +152,6 @@ const reset = () => {
   createdMany.length = 0;
   storedIds.clear();
   heldRows = [];
-  reservedGroups.clear();
   committedReservations.length = 0;
   takenLater = null;
   takenAtInsert = null;
@@ -466,22 +458,56 @@ test("an older client that sends no panel list keeps one answer per request", as
   assert.deepEqual(created.map((row) => [row.id, row.modelId]), [[`${REVIEW_GROUP}_1`, "openai-chat"]]);
 });
 
-test("a group counts as reserved only for a well-formed panel of it, in its own conversation", async () => {
+/*
+  Why a later panel needs no rate-limit exemption (B3 review, fourth pass):
+  the other panel's own request is refused by the image allowance (429) and
+  never reaches startChatImageTurn -- and its image is still in the
+  conversation, because the reserving request wrote its answer.
+*/
+test("a later panel refused by the rate limit still has its image answer, written by the reserving request", async () => {
+  const { turn, read } = await load();
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  await turn.startChatImageTurn(reviewPanel(0));
+  // Panel 1's request: refused at the route, so nothing more happens here.
+  assert.equal(requests.length, 1);
+  groups = [{ id: "group-1", groupIdempotencyKey: REVIEW_GROUP,
+    targets: [{ modelId: "fal-ai/nano-banana-2" }, { modelId: "gpt-image-2" }] }];
+  const [panelOne] = (await read.attachChatImageTurns("user-1", "conv-1", [{
+    id: `${REVIEW_GROUP}_1`,
+    role: "assistant",
+    content: String(createdMany.find((row) => row.id === `${REVIEW_GROUP}_1`)?.content),
+  }])) as Array<{ id: string; imageTurn?: { modelIds: string[] } }>;
+  assert.equal(createdMany.find((row) => row.id === `${REVIEW_GROUP}_1`)?.modelId, "openai-chat");
+  assert.deepEqual(panelOne.imageTurn?.modelIds, ["gpt-image-2"]);
+});
+
+test("two replays of an older client's group that race to write the same answers both succeed", async () => {
   const { turn } = await load();
   reset();
-  reservedGroups.set(`user-1:${REVIEW_GROUP}`, { conversationId: "conv-1", targets: 2 });
-  const reserved = (assistantMessageId: string, conversationId = "conv-1", panelCount = 2) =>
-    turn.chatImageTurnGroupReserved({ userId: "user-1", conversationId, assistantMessageId, panelCount });
-  assert.equal(await reserved(`${REVIEW_GROUP}_1`), true);
-  assert.equal(await reserved(`${REVIEW_GROUP}_1`, "conv-other"), false);
-  // A plain Chat answer id is never a later panel of anything.
-  assert.equal(await reserved(REVIEW_GROUP), false);
-  assert.equal(await reserved("6f1c1d3e-3333-4a2b-9c3d-000000000003_0"), false);
-  // Past the last panel, another spelling of one, or a panel count the group
-  // does not have: not a panel of this group.
-  assert.equal(await reserved(`${REVIEW_GROUP}_2`), false);
-  assert.equal(await reserved(`${REVIEW_GROUP}_01`), false);
-  assert.equal(await reserved(`${REVIEW_GROUP}_1`, "conv-1", 3), false);
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  reused = true;
+  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
+  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
+  storedIds.add(`${REVIEW_GROUP}_1`);
+  // The other replay inserts panel 0's answer between this one's read and its
+  // insert: the insert fails, and the read after it finds this
+  // conversation's image answer there.
+  takenAtInsert = `${REVIEW_GROUP}_0`;
+  takenLater = { row: { id: `${REVIEW_GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }, fromRead: 3 };
+  await turn.startChatImageTurn(reviewPanel(1));
+  assert.equal(createdMany.length, 0, "this replay wrote nothing; the other one did");
+
+  // A foreign row in the same place is still a refusal.
+  reset();
+  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
+  reused = true;
+  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
+  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
+  storedIds.add(`${REVIEW_GROUP}_1`);
+  takenAtInsert = `${REVIEW_GROUP}_0`;
+  takenLater = { row: { id: `${REVIEW_GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "a text answer" }, fromRead: 3 };
+  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
 });
 
 /*
