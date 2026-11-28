@@ -110,7 +110,7 @@ test("the example config validates, with Antigravity off and Codex credits off u
   assert.equal(byId["antigravity-argon"].enabled, false);
   assert.equal(byId["antigravity-argon"].vendor, "google");
   assert.equal(byId.codex.useCredits, false);
-  assert.deepEqual(byId["antigravity-argon"].quotaGroups, ["Gemini 4 Argon"]);
+  assert.deepEqual(byId["antigravity-argon"].quotaGroups, ["Gemini Models"]);
   assert.equal(byId["antigravity-argon"].model.startsWith("gemini-4-argon"), true);
   // The deny rules are real JSON agy can read, and they shut every tool but reads.
   const settings = JSON.parse(byId["antigravity-argon"].args[byId["antigravity-argon"].args.indexOf("--settings") + 1]);
@@ -121,10 +121,10 @@ test("the example config validates, with Antigravity off and Codex credits off u
 test("each agy model lane is bounded by its own usage group and vendored by its model, all on the same read-only args", () => {
   const example = validateConfig(JSON.parse(readFileSync(resolve("tools/review-orchestrator/config.example.json"), "utf8")));
   const lanes = example.providers.filter((provider) => provider.quotaProbe === "antigravity");
-  // agy 1.5.4 /usage on the box (2026-11-19): Hydrogen is in "Gemini Models",
-  // Claude Opus 5.5 in "Claude and GPT models", Argon apart in its own group.
+  // agy 1.5.4 /usage on the box (2026-11-28): Argon and Hydrogen are in
+  // "Gemini Models" (Argon's own group is gone), Claude Opus 5.5 in "Claude and GPT models".
   assert.deepEqual(lanes.map((p) => [p.id, p.vendor, p.model, p.quotaGroups]), [
-    ["antigravity-argon", "google", "gemini-4-argon-medium", ["Gemini 4 Argon"]],
+    ["antigravity-argon", "google", "gemini-4-argon-medium", ["Gemini Models"]],
     ["antigravity-hydrogen", "google", "gemini-4-hydrogen-high", ["Gemini Models"]],
     ["antigravity-opus", "anthropic", "claude-opus-5-5-high", ["Claude and GPT models"]],
   ]);
@@ -406,6 +406,23 @@ test("the quota is read from the groups that bound the model, not always Gemini 
     { state: "available", remainingPercent: 97 });
   // A named group the panel does not list is unknown, never a guess.
   assert.deepEqual(antigravityQuotaFromUsage(BOX_PANEL, at, ["Gemini 5"]), { state: "unknown" });
+});
+
+test("a window nobody has used yet (full, reset 1970-01-01, box 2026-11-28) is full, not unknown", () => {
+  const at = Date.parse("2026-11-28T03:59:00Z");
+  const panel = (fraction, reset) => ({ status: "SUCCESS", command: { name: "usage", data: { groups: [
+    { name: "Claude and GPT models", buckets: [
+      { id: "3p-weekly", window: "weekly", remaining_fraction: fraction, reset_time: reset },
+      { id: "3p-5h", window: "5h", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" }] }] } } });
+  assert.deepEqual(antigravityQuotaFromUsage(panel(1, "1970-01-01T00:00:00Z"), at, ["Claude and GPT models"]),
+    { state: "available", remainingPercent: 100 });
+  assert.deepEqual(antigravityQuotaFromUsage(panel(0.4, "2026-12-01T00:00:00Z"), at, ["Claude and GPT models"]),
+    { state: "available", remainingPercent: 40 });
+  // Only a full bucket at the epoch is unused; anything else past its reset is old.
+  assert.deepEqual(antigravityQuotaFromUsage(panel(0.4, "1970-01-01T00:00:00Z"), at, ["Claude and GPT models"]),
+    { state: "unknown" });
+  assert.deepEqual(antigravityQuotaFromUsage(panel(1, "2026-11-01T00:00:00Z"), at, ["Claude and GPT models"]),
+    { state: "unknown" });
 });
 
 test("the probe passes the provider's quotaGroups; config takes them only for the antigravity probe", async () => {
