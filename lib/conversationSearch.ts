@@ -14,6 +14,8 @@ import {
     SEARCH_CANDIDATE_ROW_LIMIT,
     SEARCH_CANDIDATES_PER_GROUP,
     escapeLikePattern,
+    snippetNeedle,
+    splitSearchWords,
     isStatementTimeout,
     rankSearchHits,
     type RankedSearchHit,
@@ -198,7 +200,10 @@ export async function searchConversationMessages(input: {
     const modelReference = Boolean(input.modelReference);
     const memoryDefaultOff = input.modelReference?.accountMemoryDefaultOff ?? false;
     const sourceTimeoutMs = input.sourceTimeoutMs ?? SOURCE_SEARCH_TIMEOUT_MS;
-    const pattern = escapeLikePattern(query);
+    // The user's search box matches the query as one phrase. The model's search matches its words
+    // anywhere in a message (AND), because a model writes keywords, not the exact sentence.
+    const words = modelReference ? splitSearchWords(query) : [query];
+    const patterns = words.map((word) => `%${escapeLikePattern(word)}%`);
 
     const read = await readOnlySnapshotTransaction(
         async (tx) => {
@@ -346,7 +351,8 @@ export async function searchConversationMessages(input: {
                       -- authorised hit needed.
                       AND (b.id IS NULL OR (b."userId" = ${userId}
                            AND (b."externalConversationId" IS NULL OR e."userId" = ${userId})))
-                      AND m.content ILIKE ${`%${pattern}%`}
+                      AND m.content ILIKE ${patterns[0]}
+                      AND m.content ILIKE ALL(${patterns}::text[])
                 ) ranked
                 WHERE ranked.rn <= ${SEARCH_CANDIDATES_PER_GROUP}
                 ORDER BY ranked."conversationUpdatedAt" DESC, ranked."conversationId" COLLATE "C" ASC, ranked.rn ASC
@@ -400,7 +406,8 @@ export async function searchConversationMessages(input: {
                             FROM "ExternalMessage" m
                             WHERE m."userId" = ${userId}
                               AND m."externalConversationId" = ANY(${authorizedSnapshotIds}::text[])
-                              AND m.content ILIKE ${`%${pattern}%`}
+                              AND m.content ILIKE ${patterns[0]}
+                      AND m.content ILIKE ALL(${patterns}::text[])
                         ) ranked
                         WHERE ranked.rn <= ${SEARCH_CANDIDATES_PER_GROUP}
                         ORDER BY array_position(${authorizedSnapshotIds}::text[], ranked."externalConversationId"),
@@ -543,7 +550,7 @@ export async function searchConversationMessages(input: {
         results: results.map((pending) => {
             const conversationId =
                 pending.kind === "native" ? pending.message.conversationId : pending.conversationId;
-            return toResult(pending, targets.get(conversationId) as Target, query, displayTimeZone);
+            return toResult(pending, targets.get(conversationId) as Target, query, words, displayTimeZone);
         }),
         truncated,
         sourceSearch: read.imported.status,
@@ -554,9 +561,10 @@ function toResult(
     pending: Pending,
     target: Target,
     query: string,
+    words: readonly string[],
     displayTimeZone: string
 ): ConversationSearchResult {
-    const snippet = searchSnippet(pending.message.content, query);
+    const snippet = searchSnippet(pending.message.content, snippetNeedle(pending.message.content, query, words));
     const base = {
         conversationTitle: target.title,
         ...continuationRowNaming(target.continuationBridge, displayTimeZone),

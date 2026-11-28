@@ -1141,6 +1141,7 @@ domains:
       - providerResponseId
       - reservationPayload
       - providerUsageSnapshot
+      - assistantMessageId
     anonymisationReplacements:
       subjectKey: "deleted-account"
       traceId: "deleted-account"
@@ -1149,6 +1150,12 @@ domains:
       reviewedBy: security-privacy
       reviewedAt: "2026-08-06"
       joinRisksConsidered:
+        - >-
+          Closed (2026-11-28). assistantMessageId names the saved Chat answer
+          the charge was for. The message cascades away with the account; the
+          id is a per-turn identifier the person's own client minted, so like
+          traceId it is cleared (to NULL), and the credits, model and timings
+          remain as the transaction record without it.
         - >-
           Closed. subjectKey and traceId join this row to the chat logs and
           providerRequestId and providerResponseId join it to the provider's own

@@ -8,13 +8,33 @@ export function createServerLatency(id: string, now = () => performance.now()) {
   const dimensions: ResponseLatencyDimensions = { product: "unknown", mode: "unknown", modelId: null, provider: null };
   let finished = false;
   let routingEnded: number | undefined;
+  // Moments before the response stream exists, for a turn that never reaches one. Not part of the
+  // stored sample: they exist so a request that dies early (a client that gave up waiting for
+  // headers) can still say how far it got and what it was waiting on.
+  const checkpoints: Array<{ name: string; ms: number }> = [];
+  let openStage: { key: string; since: number } | null = null;
   const duration = (since: number) => Math.max(0, Math.min(3_600_000, Math.round(now() - since)));
   return {
     dimensions,
+    /** Names a point on the way to the stream. Bounded; never carries content. */
+    checkpoint(name: string) {
+      if (checkpoints.length < 32) checkpoints.push({ name, ms: duration(started) });
+    },
+    /** How far the turn got, whether or not it finished. */
+    prestream() {
+      return {
+        elapsedMs: duration(started),
+        timings: { ...timings },
+        checkpoints: [...checkpoints],
+        ...(openStage ? { openStage: openStage.key, openStageMs: duration(openStage.since) } : {}),
+      };
+    },
     stage(key: "routingMs" | "contextMs" | "presearchMs") {
       const since = now();
+      openStage = { key, since };
       if (key === "routingMs") timings.beforeRoutingMs = duration(started);
       return () => {
+        if (openStage?.key === key) openStage = null;
         timings[key] = duration(since);
         if (key === "routingMs") routingEnded = now();
       };

@@ -3,6 +3,7 @@ import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 
 import { NextResponse } from "next/server";
 import { deleteOwnedConversations } from "@/lib/conversationDeletion";
+import { deleteConversationsInBatches } from "@/lib/conversationDeletionBatches";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { readableContinuationSourceTitle } from "@/lib/continuationDisplayTitle";
 import {
@@ -302,15 +303,37 @@ export async function DELETE(req: Request) {
 
     // The single-conversation delete's path and order (lib/conversationDeletion.ts):
     // object keys are queued before the rows disappear, never deleted ahead
-    // of the database.
-    const result = await prisma.$transaction((tx) =>
-      deleteOwnedConversations(tx, {
-        userId,
-        conversationIds: conversations.map((conversation) => conversation.id),
-      })
+    // of the database. One transaction per batch of fifty (not one for the
+    // whole account, which outgrew Prisma's five-second default): a batch is
+    // committed with its own cleanup tombstones or not at all.
+    const outcome = await deleteConversationsInBatches(
+      conversations.map((conversation) => conversation.id),
+      (batch) =>
+        prisma.$transaction(
+          (tx) => deleteOwnedConversations(tx, { userId, conversationIds: batch }),
+          { maxWait: 5_000, timeout: 20_000 }
+        )
     );
+    if (outcome.failure !== null) {
+      console.error("Failed to delete all conversations:", outcome.failure);
+      // Nothing committed: the same answer as before this was batched. Some
+      // batches committed: say how far it got, so the screen can refresh the
+      // list instead of showing rows that are already gone.
+      if (outcome.deleted === 0 && outcome.processed === 0) {
+        return NextResponse.json({ error: "Failed to delete conversations." }, { status: 500 });
+      }
+      return NextResponse.json(
+        {
+          error: "Some conversations could not be deleted.",
+          code: "CONVERSATION_DELETE_PARTIAL",
+          deleted: outcome.deleted,
+          remaining: outcome.remaining,
+        },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json({ success: true, deleted: result.count });
+    return NextResponse.json({ success: true, deleted: outcome.deleted });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

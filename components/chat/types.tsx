@@ -179,6 +179,15 @@ export type Message = {
   routedModelId?: string;
   routedReason?: string | null;
   /**
+   * Credits this saved Chat answer was actually charged, once settlement is
+   * final and only when at least one (lib/chatAnswerCreditsCore.ts). From the
+   * owner's conversation read or the answer-credits read after a stream ends;
+   * never computed here. Runtime-only, like `memoryUsedCount`: the allowlists
+   * in lib/chatMessageSerialization.ts leave it out of transcripts, guest
+   * storage and exports, where another reader would see what was paid.
+   */
+  settledCredits?: number;
+  /**
    * The router's restatement of the user's message, when Auto rewriting was on
    * and the answering model read it (docs/ui-contracts/prompt-refiner-suggestion.md,
    * "Auto router rewrite"). From the same response's headers as routedModelId,

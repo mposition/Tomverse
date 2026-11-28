@@ -79,6 +79,8 @@ export type MemoryEvidenceView = {
     sourceType: string;
     manualContent: string | null;
     externalConversationId: string | null;
+    /** The Tomverse conversation a memory was learned from (null when it is locked or gone). */
+    conversationId?: string | null;
     sourceTitle?: string | null;
 };
 
@@ -217,6 +219,21 @@ function EvidenceList({ evidence, fromImport }: { evidence: MemoryEvidenceView[]
                             >
                                 {item.sourceTitle || t("memoryReview.evidenceViewSource")}
                             </Link>
+                        </span>
+                    ) : item.sourceType === "tomverse_message" ? (
+                        <span className="flex flex-wrap items-center gap-x-2">
+                            <span className="font-semibold">
+                                {t("memoryReview.evidenceChat")}
+                            </span>
+                            {item.conversationId && (
+                                <Link
+                                    href={`/chat?conversation=${encodeURIComponent(item.conversationId)}`}
+                                    className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
+                                    data-testid="memory-evidence-chat-link"
+                                >
+                                    {item.sourceTitle || t("memoryReview.evidenceViewSource")}
+                                </Link>
+                            )}
                         </span>
                     ) : (
                         <span className="font-semibold">

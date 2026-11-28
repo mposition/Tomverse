@@ -2300,12 +2300,25 @@ model ChatCreditReservation {
   researchFundingSegment ResearchFundingSegment?
   externalApiRequest     ExternalApiRequest?
 
+  /// The saved Chat answer this reservation paid for, so the answer can show
+  /// what it actually cost. Written once, when the Chat route inserts the row
+  /// for a turn of a saved conversation; NULL on every other source, on guest
+  /// and unsaved turns, and on every row from before the column existed.
+  ///
+  /// A plain value rather than a relation, like RoutingRun.assistantMessageId:
+  /// deleting a conversation removes its messages and must leave the financial
+  /// record exactly as it was. Account deletion clears it with the other
+  /// identifiers (lib/accountDataAnonymisation.ts). Nothing in reservation,
+  /// settlement or refund reads it.
+  assistantMessageId     String?
+
   @@index([status, expiresAt])
   @@index([userId, createdAt])
   @@index([traceId])
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+  @@index([assistantMessageId])
 }
 
 /// A key the account holder issued for the external inference API (/api/v1).
