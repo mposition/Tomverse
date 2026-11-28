@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { IMAGE_MAX_BYTES, isSecretPath, type Workspace } from "../../../tomverse-cli/src/runtime.js";
 
@@ -33,9 +33,12 @@ async function attachmentFolder(root: string) {
   await mkdir(folder, { recursive: true });
   // A link could point the copies anywhere; only a real folder is written to.
   if (!(await lstat(folder)).isDirectory()) throw new CodeAttachmentRefused("The attachment folder is not a folder.");
-  await writeFile(join(folder, ".gitignore"), "*\n", { flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+  const ignore = join(folder, ".gitignore");
+  await writeFile(ignore, "*\n", { flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "EEXIST") throw error;
   });
+  // A folder that would not keep the copies out of Git is not used: an existing .gitignore must be this app's own.
+  if (!(await lstat(ignore)).isFile() || (await readFile(ignore, "utf8")) !== "*\n") throw new CodeAttachmentRefused("The attachment folder is not ignored by Git.");
   return folder;
 }
 
@@ -57,11 +60,31 @@ async function writeAttachment(root: string, name: string, bytes: Uint8Array) {
 
 /** Copies a file the person chose outside the project; a credential file by name, an empty or too large file is refused. */
 export async function copyOutsideFile(root: string, source: string, now = new Date()) {
-  if (isSecretPath(source)) throw new CodeAttachmentRefused("The file can hold credentials.");
-  const info = await stat(source);
-  const limit = imageExtensions.has(extname(source).toLowerCase()) ? CODE_ATTACHMENT_IMAGE_MAX_BYTES : CODE_ATTACHMENT_MAX_BYTES;
-  if (!info.isFile() || !info.size || info.size > limit) throw new CodeAttachmentRefused("The file cannot be attached.");
-  return writeAttachment(root, attachmentFileName(basename(source), now), await readFile(source));
+  // The name the person chose and the file it really is are both checked: a link cannot bring a credential file in.
+  const real = await realpath(source);
+  if (isSecretPath(source) || isSecretPath(real)) throw new CodeAttachmentRefused("The file can hold credentials.");
+  const limit = imageExtensions.has(extname(real).toLowerCase()) || imageExtensions.has(extname(source).toLowerCase())
+    ? CODE_ATTACHMENT_IMAGE_MAX_BYTES : CODE_ATTACHMENT_MAX_BYTES;
+  // Read from the one open file, at most one byte past the limit, so a file that grows meanwhile is refused, not copied whole.
+  const handle = await open(real, "r");
+  let bytes: Uint8Array;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || !info.size || info.size > limit) throw new CodeAttachmentRefused("The file cannot be attached.");
+    const buffer = new Uint8Array(limit + 1);
+    let length = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (!bytesRead) break;
+      length += bytesRead;
+      if (length > limit) throw new CodeAttachmentRefused("The file cannot be attached.");
+    }
+    bytes = buffer.subarray(0, length);
+  } finally {
+    await handle.close();
+  }
+  if (!bytes.byteLength) throw new CodeAttachmentRefused("The file cannot be attached.");
+  return writeAttachment(root, attachmentFileName(basename(source), now), bytes);
 }
 
 /** Saves an image pasted into the Code composer. */
@@ -85,6 +108,11 @@ export async function discardAttachmentCopy(workspace: Workspace, path: string) 
   if (!isCopyPath(path)) return;
   const resolved = workspace.resolve(path, "write");
   if (resolved.exists) await rm(resolved.absolute);
+}
+
+/** Takes carried copies back out of a worktree that did not start, so it can be discarded as unchanged. */
+export async function removeCarriedCopies(targetRoot: string) {
+  await rm(join(targetRoot, CODE_ATTACHMENT_FOLDER), { recursive: true, force: true });
 }
 
 /** Puts the copies a task names into a new worktree of the project, at the same paths: Git does not carry them. */

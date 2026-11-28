@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -66,6 +66,30 @@ test("A file from outside the project and a pasted image land in the self-ignori
     assert.equal(await readFile(join(root, "own.txt"), "utf8"), "mine");
     assert.deepEqual((await readdir(join(root, CODE_ATTACHMENT_FOLDER))).sort(),
       [".gitignore", "20261128-123456-big.log", "20261128-123456-image.png", "20261128-123456-shot-2.png"]);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("A link to a credential file and a folder Git would not ignore are refused", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "code-attach-refuse-"));
+  try {
+    const root = join(tmp, "project");
+    await mkdir(join(root, CODE_ATTACHMENT_FOLDER), { recursive: true });
+    const outside = join(tmp, "notes.txt");
+    await writeFile(outside, "notes");
+    // An attachment folder whose .gitignore is not this app's own would let the copies reach a commit.
+    await writeFile(join(root, CODE_ATTACHMENT_FOLDER, ".gitignore"), "");
+    await assert.rejects(copyOutsideFile(root, outside, now));
+    await writeFile(join(root, CODE_ATTACHMENT_FOLDER, ".gitignore"), "*\n");
+    await copyOutsideFile(root, outside, now);
+
+    const key = join(tmp, ".ssh", "id_ed25519");
+    await mkdir(join(tmp, ".ssh"));
+    await writeFile(key, "private");
+    const link = join(tmp, "harmless.txt");
+    const linked = await symlink(key, link, "file").then(() => true, () => false);
+    if (linked) await assert.rejects(copyOutsideFile(root, link, now), "the file a link points to is checked too");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

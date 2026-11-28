@@ -53,7 +53,7 @@ import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, ty
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
-import { carryAttachmentCopies, copyOutsideFile, discardAttachmentCopy, savePastedImage } from "./code-attachments";
+import { carryAttachmentCopies, copyOutsideFile, discardAttachmentCopy, removeCarriedCopies, savePastedImage } from "./code-attachments";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { z } from "zod";
@@ -1258,6 +1258,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   runId = randomUUID();
   state.busy = true;
   codeReferences.clear();
+  ownedCopies.clear();
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
       ...(chosen?.providerModelId ? { model: chosen.providerModelId } : {}),
@@ -1280,6 +1281,7 @@ function startCliFixtureTask(task: Task, command: Extract<WorkerCommand, { type:
   runId = command.runId;
   state.busy = true;
   codeReferences.clear();
+  ownedCopies.clear();
   try {
     send(command);
   } catch {
@@ -1627,6 +1629,7 @@ async function chooseRemote(project: ProjectRoot) {
     assertProjectRoot(project);
     if (state.root !== project.path || projectRoot?.identity !== project.identity) {
       codeReferences.clear();
+      ownedCopies.clear();
       workspaceHandoff = null;
       // Allow all never follows the person to another project, a remote one included.
       if (permissionHost.current === "allow_all" && permissionHost.run({ action: "set-mode", mode: "ask" }).ok) {
@@ -1779,6 +1782,7 @@ function adoptCodeSession(owner: StoredDesktopSession) {
   linkAttempt = null;
   pendingInspection?.settle(null);
   codeReferences.clear();
+  ownedCopies.clear();
   workspaceHandoff = null;
   const linked = { accountId: owner.accountId, connection: codeSessionConnection(owner.accountId, accountOrigin ?? DESKTOP_LIVE_ORIGIN) };
   linkedCode = linked;
@@ -1803,6 +1807,7 @@ function dropCodeSession() {
   if (!linkedCode?.connection.session || state.busy || pendingMutation || parallel.lanes.busy()) return;
   pendingInspection?.settle(null);
   codeReferences.clear();
+  ownedCopies.clear();
   workspaceHandoff = null;
   linkedCode = null;
   codeToken = null;
@@ -1937,6 +1942,7 @@ async function chooseRoot(target: string) {
     const projectChanged = state.root !== root || projectRoot?.identity !== project.identity;
     if (projectChanged) {
       codeReferences.clear();
+      ownedCopies.clear();
       workspaceHandoff = null;
     }
     projectRoot = project;
@@ -2763,6 +2769,7 @@ function clearAccountWorkspace() {
   attachmentTransfer?.controller.abort();
   attachmentReceipts.clear();
   codeReferences.clear();
+  ownedCopies.clear();
   void voice.end();
   chatSession.abort();
   workspaceHandoff = null;
@@ -2825,6 +2832,7 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
     pendingInspection?.settle(null);
     if (codeConnection()?.key !== key) {
       codeReferences.clear();
+      ownedCopies.clear();
       workspaceHandoff = null;
     }
     linkedCode = { accountId: owner.accountId, connection: { key,
@@ -4642,8 +4650,12 @@ function registerIpc() {
               if (checkout.reference(reference.path).kind !== reference.kind) throw new Error("A selected reference is unavailable in this branch.");
             }
           },
+          // The copies come from the project before the worktree is recorded; a failed copy leaves no worktree behind.
+          ...(copiedPaths.size ? {
+            prepare: (project: ProjectRoot) => carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), project.path, [...copiedPaths]),
+            unprepare: (project: ProjectRoot) => removeCarriedCopies(project.path),
+          } : {}),
         });
-        if (copiedPaths.size) await carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), worktree.project.path, [...copiedPaths]);
       } catch {
         codeWorktreeDraft = undefined;
         if (projectRoot === sourceProject && !session.aborted && !closing) codeGitProject = await readGitProject(sourceProject);
@@ -4661,6 +4673,7 @@ function registerIpc() {
         start: { type: "start", runId: id, project, scope: taskScope, protectedRoot: app.getPath("userData"), connection, input, references, preference, ...picturesOf(input.prompt) } });
       if (handoffId) removeWorkspaceHandoff(handoffId);
       codeReferences.clear();
+      ownedCopies.clear();
       codeWorktreeDraft = undefined;
       broadcast();
       return;
@@ -4686,6 +4699,7 @@ function registerIpc() {
       ...picturesOf(input.prompt), ...codeRunTools() });
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
+    ownedCopies.clear();
     codeWorktreeDraft = undefined;
     broadcast();
   };
