@@ -1028,3 +1028,20 @@ test("A request that describes another action than the agent announced for the s
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("A request whose kind differs from the announced call, or whose command fields disagree, is refused even when an earlier command could stand in", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "acp-kind-"));
+  try {
+    const options = [{ optionId: "allow_once", kind: "allow_once" }, { optionId: "reject_once", kind: "reject_once" }];
+    const earlierEdit = { toolCallId: "e", kind: "edit", title: "Write", rawInput: { path: "a.txt", content: "hi" } } as unknown as TrackedCall;
+    const read = classifyAcpPermission({ toolCall: { toolCallId: "e", kind: "read", title: "Read", locations: [{ path: join(cwd, "a.txt") }] }, options },
+      { cwd, plan: cliPermissionPlan("moonshot", "read_only"), tracked: earlierEdit });
+    assert.notEqual(read.verdict, "allow", "an announced edit is not allowed as a read");
+    const earlierEcho = { toolCallId: "c", kind: "execute", title: "Bash", rawInput: { command: "echo hi" } } as unknown as TrackedCall;
+    const mixed = classifyAcpPermission({ toolCall: { toolCallId: "c", kind: "execute", title: "Bash", rawInput: { command: "echo hi", CommandLine: "git push" } }, options },
+      { cwd, plan: cliPermissionPlan("moonshot", "ask"), tracked: earlierEcho });
+    assert.equal(mixed.verdict, "refuse");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

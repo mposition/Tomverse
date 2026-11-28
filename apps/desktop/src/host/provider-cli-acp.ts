@@ -327,6 +327,8 @@ function factsOf(call: Json, tracked?: TrackedCall): Facts {
   const title = text(call.title, 300);
   const command = commandOf(raw);
   if (command !== undefined && commandWords(command).length > MAX_WORDS) limited = true;
+  // Command fields that disagree (command and CommandLine) are refused here, so nothing announced earlier can stand in for them.
+  if (command === undefined && allFields(raw, commandNames).length > 0) limited = true;
   return { kind, title, raw, paths, diffs, command, named: kind !== undefined || title !== undefined || raw !== undefined || paths.length > 0, limited };
 }
 
@@ -438,7 +440,8 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   // The request and what the agent said of the same call before must describe one action: a command, diff or file the request
   // shows that differs from the earlier one (an earlier `git push`, a request for `echo hi`) would let the card approve what it
   // does not show, so the two are compared where both speak, and a difference refuses the request.
-  const sameAction = (own.command === undefined || earlier?.command === undefined || own.command === earlier.command) &&
+  const sameAction = (own.kind === undefined || earlier?.kind === undefined || own.kind === earlier.kind) &&
+    (own.command === undefined || earlier?.command === undefined || own.command === earlier.command) &&
     (own.diffs.length === 0 || (earlier?.diffs.length ?? 0) === 0 || sameDiffs(own.diffs, earlier!.diffs, context.cwd)) &&
     (own.raw === undefined || earlier?.raw === undefined || diffMatchesRawPaths(own.raw, earlier.raw, context.cwd));
   const limited = own.limited || earlier?.limited === true || !sameAction || !diffMatchesRaw(diffs, raw, context.cwd);
