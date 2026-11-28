@@ -23,3 +23,23 @@
 .desktop-plugins-lane .desktop-plugin-logo img, .desktop-plugins-lane .desktop-plugin-logo svg { width: 16px; height: 16px; }
 .desktop-plugins-mine p { margin: 0; padding: 4px 10px; font-size: 12px; color: var(--muted); }
 .desktop-plugins-slot { width: 100%; }
+
+/* Detail drawer (this width is also the room the list gives up, see below): the connect form, a connection's management and a platform's details slide in over the right of the screen,
+   so the list keeps its place and scroll. Colours come from the shell's theme tokens, so light and dark both follow. */
+.desktop-drawer { position: fixed; inset-block: var(--header-height, 0px) 0; inset-inline-end: 0; z-index: 20; display: flex; flex-direction: column; width: min(var(--plugin-drawer-width), calc(100vw - var(--rail-width, 0px))); border-inline-start: 1px solid var(--line); background: var(--surface); color: var(--text); box-shadow: -14px 0 32px rgb(0 0 0 / 0.18); }
+.desktop-drawer:focus { outline: 0; }
+.desktop-drawer-close { position: absolute; inset-block-start: 12px; inset-inline-end: 12px; z-index: 1; }
+.desktop-drawer-body { display: grid; align-content: start; gap: 12px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 20px 28px; }
+.desktop-drawer-body > .desktop-connector-form h3:first-child, .desktop-drawer-body > .desktop-connector-detail h3:first-child { padding-inline-end: 40px; overflow-wrap: anywhere; }
+.desktop-drawer .desktop-connector-form, .desktop-drawer .desktop-connector-detail { margin: 0; padding: 0; border: 0; background: transparent; }
+.desktop-drawer .notice { margin: 0; }
+@keyframes desktop-drawer-in { from { opacity: 0; transform: translateX(28px); } }
+@media (prefers-reduced-motion: no-preference) {
+  .desktop-drawer { animation: desktop-drawer-in 180ms ease-out; }
+}
+:root { --plugin-drawer-width: 460px; }
+/* While the drawer is open the list shrinks to the left of it, so no card or button sits underneath. Windows too narrow for that
+   (below 1200px) keep the drawer as an overlay instead. */
+@media (min-width: 1200px) {
+  .content:has(.desktop-plugins[data-drawer]) { margin-inline: 0; padding-inline-end: calc(var(--plugin-drawer-width) + 24px); }
+}

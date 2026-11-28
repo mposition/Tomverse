@@ -13,6 +13,7 @@ const en = {
   chatSelected: "Plugin in use: {name}",
   approvalWaiting: "A plugin action is waiting for your approval. Nothing is sent until you approve it.",
   reviewApprovals: "Review pending actions",
+  closeDetails: "Close details",
 };
 type Copy = typeof en;
 
@@ -29,6 +30,7 @@ export const desktopConnectorCopy = {
     chatSelected: "사용 중인 플러그인: {name}",
     approvalWaiting: "플러그인 실행이 승인을 기다리고 있습니다. 승인하기 전에는 아무것도 전송되지 않습니다.",
     reviewApprovals: "대기 중인 실행 확인",
+    closeDetails: "상세 정보 닫기",
   },
   zh: {
     windowTitle: "{host} · Tomverse 连接",
@@ -41,6 +43,7 @@ export const desktopConnectorCopy = {
     chatSelected: "正在使用的插件：{name}",
     approvalWaiting: "有插件操作正在等待你的批准。批准之前不会发送任何内容。",
     reviewApprovals: "查看待处理操作",
+    closeDetails: "关闭详情",
   },
   "zh-Hant": {
     windowTitle: "{host} · Tomverse 連線",
@@ -53,6 +56,7 @@ export const desktopConnectorCopy = {
     chatSelected: "使用中的外掛：{name}",
     approvalWaiting: "有外掛操作正在等待你的核准。核准之前不會傳送任何內容。",
     reviewApprovals: "檢視待處理操作",
+    closeDetails: "關閉詳情",
   },
   fr: {
     windowTitle: "{host} · Connexion Tomverse",
@@ -65,6 +69,7 @@ export const desktopConnectorCopy = {
     chatSelected: "Plugin utilisé : {name}",
     approvalWaiting: "Une action de plugin attend votre approbation. Rien n’est envoyé tant que vous ne l’avez pas approuvée.",
     reviewApprovals: "Examiner les actions en attente",
+    closeDetails: "Fermer les détails",
   },
   de: {
     windowTitle: "{host} · Tomverse-Verbindung",
@@ -77,6 +82,7 @@ export const desktopConnectorCopy = {
     chatSelected: "Verwendetes Plugin: {name}",
     approvalWaiting: "Eine Plugin-Aktion wartet auf Ihre Genehmigung. Ohne Genehmigung wird nichts gesendet.",
     reviewApprovals: "Ausstehende Aktionen prüfen",
+    closeDetails: "Details schließen",
   },
   es: {
     windowTitle: "{host} · Conexión de Tomverse",
@@ -89,6 +95,7 @@ export const desktopConnectorCopy = {
     chatSelected: "Plugin en uso: {name}",
     approvalWaiting: "Una acción del plugin espera tu aprobación. No se envía nada hasta que la apruebes.",
     reviewApprovals: "Revisar acciones pendientes",
+    closeDetails: "Cerrar detalles",
   },
   pt: {
     windowTitle: "{host} · Ligação Tomverse",
@@ -101,5 +108,6 @@ export const desktopConnectorCopy = {
     chatSelected: "Plugin em uso: {name}",
     approvalWaiting: "Uma ação do plugin aguarda a sua aprovação. Nada é enviado até a aprovar.",
     reviewApprovals: "Rever ações pendentes",
+    closeDetails: "Fechar detalhes",
   },
 } satisfies Record<Language, Copy>;

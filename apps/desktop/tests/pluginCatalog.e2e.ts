@@ -142,13 +142,70 @@ test("Plugins lists the web's catalogue from the server, keeps it per its cache 
       await plugins.getByRole("combobox", { name: "Directory" }).selectOption({ label: "All directories" });
       await expect.poll(names).toHaveLength(4);
 
-      // A platform with no server here shows what it is and its documentation, which opens in the app's link view.
-      await github.getByRole("button", { name: "Details", exact: true }).click();
-      const detail = plugins.getByTestId("desktop-provider-detail");
+      // A platform with no server here shows what it is and its documentation in a drawer on the right, which opens the link view.
+      // The list shrinks beside the drawer only in a window wide enough for both (see connector-workspace.css).
+      await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1400, 900));
+      await expect.poll(() => page.evaluate(() => window.innerWidth)).toBeGreaterThanOrEqual(1200);
+      const detailsOf = (card: typeof github) => card.getByRole("button", { name: "Details", exact: true });
+      await detailsOf(github).click();
+      const drawer = page.getByRole("dialog", { name: "GitHub", exact: true });
+      await expect(drawer).toBeVisible();
+      await expect(drawer).toHaveAttribute("aria-modal", "true");
+      // The drawer sits at the right edge of the window.
+      const viewportWidth = await page.evaluate(() => window.innerWidth);
+      // The slide-in takes a moment; the box settles at the right edge.
+      await expect.poll(async () => { const box = await drawer.boundingBox(); return box ? Math.round(box.x + box.width) : 0; }).toBe(viewportWidth);
+      const drawerWidth = (await drawer.boundingBox())!.width;
+      assert.ok(drawerWidth >= 420 && drawerWidth <= 480, `drawer width ${drawerWidth}`);
+      // The list gives way to it: every card ends to the left of the drawer, so each card's own buttons stay reachable.
+      const rightEdges = () => plugins.locator(".desktop-plugin-list > li").evaluateAll((items) => items.map((item) => item.getBoundingClientRect().right));
+      await expect.poll(async () => Math.max(...await rightEdges())).toBeLessThanOrEqual((await drawer.boundingBox())!.x);
+      // Focus starts inside the drawer, on its first control.
+      await expect(drawer.getByTestId("desktop-plugin-drawer-close")).toBeFocused();
+      const detail = drawer.getByTestId("desktop-provider-detail");
       await expect(detail).toContainText("GitHub");
       await expect(detail).toContainText("https://mcp.example.org/github");
+      // Tab and Shift+Tab cycle inside the drawer.
+      const controls = await drawer.locator("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled])").count();
+      const insideDrawer = () => drawer.evaluate((element) => element.contains(document.activeElement));
+      for (let step = 0; step < controls; step += 1) {
+        await page.keyboard.press("Tab");
+        assert.equal(await insideDrawer(), true, `Tab ${step + 1} stays in the drawer`);
+      }
+      await expect(drawer.getByTestId("desktop-plugin-drawer-close")).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(drawer.getByTestId("desktop-provider-docs")).toBeFocused();
       await detail.getByTestId("desktop-provider-docs").click();
       await expect.poll(webViewCommands).toEqual([{ type: "open-link", url: "https://docs.example.org/github" }]);
+      // Esc closes it and puts focus back on the card's Details button.
+      await drawer.getByTestId("desktop-plugin-drawer-close").focus();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(detailsOf(github)).toBeFocused();
+      // The close button does the same, and a card's Details pressed while the drawer is open swaps its content.
+      await detailsOf(github).click();
+      await drawer.getByRole("button", { name: "Close details", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(detailsOf(github)).toBeFocused();
+      const airtable = plugins.locator("[data-testid=desktop-connector-provider][data-provider=airtable]");
+      await detailsOf(airtable).click();
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await expect(page.getByRole("dialog", { name: "Airtable", exact: true })).toBeVisible();
+      await detailsOf(github).click();
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByTestId("desktop-plugin-drawer-close")).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(detailsOf(github)).toBeFocused();
+      // The custom connection form uses the same drawer.
+      const add = plugins.getByTestId("desktop-connector-add");
+      await add.click();
+      const form = page.getByRole("dialog", { name: "Custom MCP server", exact: true });
+      await expect(form.getByTestId("desktop-connector-url")).toBeFocused();
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(add).toBeFocused();
 
       // Leaving and coming back within the lifetime the server named asks for nothing.
       await rail.getByRole("button", { name: "Chat", exact: true }).click();
