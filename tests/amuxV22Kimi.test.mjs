@@ -543,6 +543,11 @@ test("kimi's config.toml models become the CLI's model list, the Kimi Code platf
     '[providers."managed:kimi-code"]',
     'type = "kimi"',
     'model = "not-a-model-table"',
+    '[models."kimi-code/kimi-hooks-after"]',
+    'provider = "managed:kimi-code"',
+    "[[hooks]]",
+    // An array-of-tables header ends the model table above it.
+    'model = "hook-model"',
   ].join("\n");
   assert.deepEqual(readKimiConfigModels(toml), [
     { cliModel: "kimi-for-coding", displayName: "Kimi for Coding" },
