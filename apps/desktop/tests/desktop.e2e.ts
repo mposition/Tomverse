@@ -410,6 +410,18 @@ setTimeout(() => process.exit(0), 35000).unref();
     await expect(draftReferences).toContainText(/\.tomverse-attachments\/\d{8}-\d{6}-image\.png/);
     await draftReferences.getByRole("button", { name: /^Remove \.tomverse-attachments\// }).click();
     await expect.poll(() => readdir(join(root, ".tomverse-attachments"))).toEqual([".gitignore"]);
+    // A file the person keeps in that folder and attaches from the project is theirs: taking it off the draft leaves it.
+    const kept = join(root, ".tomverse-attachments", "kept.txt");
+    await writeFile(kept, "Kept by the person.");
+    await application.evaluate(({ dialog }, { kept, folder }) => {
+      dialog.showOpenDialog = async (_window: unknown, options?: Electron.OpenDialogOptions) =>
+        ({ canceled: false, filePaths: options?.properties?.includes("openDirectory") ? [folder] : [kept] });
+    }, { kept, folder: join(root, "fixtures") });
+    await attach.click();
+    await page.getByRole("button", { name: "Attach files", exact: true }).click();
+    await draftReferences.getByRole("button", { name: "Remove .tomverse-attachments/kept.txt" }).click();
+    await expect(draftReferences.getByRole("listitem")).toHaveCount(2);
+    assert.equal(await readFile(kept, "utf8"), "Kept by the person.");
     await draftReferences.getByRole("button", { name: "Remove check.mjs" }).click();
     await expect(draftReferences.getByRole("listitem")).toHaveCount(1);
     await attach.click();

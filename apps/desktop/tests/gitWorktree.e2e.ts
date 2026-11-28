@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { openCodeProject } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -104,6 +104,13 @@ test("Agent edits are isolated by task and a stopped saved task resumes in its o
 
     await page.getByRole("button", { name: "New task", exact: true }).click();
     await expect.poll(task).toBeNull();
+    // A pasted image is a copy Git ignores: the new worktree gets it from the project, not from the commit.
+    await editor().evaluate((textarea, encoded) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0))], "image.png", { type: "image/png" }));
+      textarea.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }));
+    }, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+    await expect(page.getByRole("list", { name: "Project references", exact: true }).getByRole("listitem")).toHaveCount(1);
     await editor().fill(secondPrompt);
     await approve(send);
     await expect(page.getByText("Workspace edit complete.", { exact: true })).toBeVisible();
@@ -113,6 +120,11 @@ test("Agent edits are isolated by task and a stopped saved task resumes in its o
     assert.notEqual(second.worktree.branch, first.worktree.branch);
     assert.equal(await readFile(join(second.root, "tracked.txt"), "utf8"), "original");
     assert.match(await readFile(join(second.root, "created.txt"), "utf8"), /Second isolated edit/);
+    const carried = (await readdir(join(second.root, ".tomverse-attachments"))).sort();
+    assert.equal(carried.length, 2);
+    assert.equal(carried[0], ".gitignore");
+    assert.match(carried[1]!, /^\d{8}-\d{6}-image\.png$/);
+    assert.deepEqual(await readFile(join(second.root, ".tomverse-attachments", carried[1]!)), await readFile(join(root, ".tomverse-attachments", carried[1]!)));
 
     await application!.close();
     page = await openProject();

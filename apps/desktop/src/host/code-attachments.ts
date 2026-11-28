@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { isSecretPath, type Workspace } from "../../../tomverse-cli/src/runtime.js";
+import { IMAGE_MAX_BYTES, isSecretPath, type Workspace } from "../../../tomverse-cli/src/runtime.js";
 
 /**
  * Files the person attaches to a Code request from outside the project (a screenshot, a pasted image, a log from
@@ -9,8 +9,11 @@ import { isSecretPath, type Workspace } from "../../../tomverse-cli/src/runtime.
  * copies never show up as changes to commit.
  */
 export const CODE_ATTACHMENT_FOLDER = ".tomverse-attachments";
-/** One copied file at most; view_image itself takes images up to 3 MB. */
+/** One copied file at most. */
 export const CODE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+/** One image at most: what view_image reads, so an attached image is one the agent can see. */
+export const CODE_ATTACHMENT_IMAGE_MAX_BYTES = IMAGE_MAX_BYTES;
+const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 /** What a pasted clipboard image may be: the types the agents' image tools read. */
 export const CODE_PASTE_IMAGE_TYPES = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif" } as const;
 
@@ -56,22 +59,40 @@ async function writeAttachment(root: string, name: string, bytes: Uint8Array) {
 export async function copyOutsideFile(root: string, source: string, now = new Date()) {
   if (isSecretPath(source)) throw new CodeAttachmentRefused("The file can hold credentials.");
   const info = await stat(source);
-  if (!info.isFile() || !info.size || info.size > CODE_ATTACHMENT_MAX_BYTES) throw new CodeAttachmentRefused("The file cannot be attached.");
+  const limit = imageExtensions.has(extname(source).toLowerCase()) ? CODE_ATTACHMENT_IMAGE_MAX_BYTES : CODE_ATTACHMENT_MAX_BYTES;
+  if (!info.isFile() || !info.size || info.size > limit) throw new CodeAttachmentRefused("The file cannot be attached.");
   return writeAttachment(root, attachmentFileName(basename(source), now), await readFile(source));
 }
 
 /** Saves an image pasted into the Code composer. */
 export async function savePastedImage(root: string, input: { name: string; mediaType: string; bytes: Uint8Array }, now = new Date()) {
   const extension = CODE_PASTE_IMAGE_TYPES[input.mediaType as keyof typeof CODE_PASTE_IMAGE_TYPES];
-  if (!extension || !input.bytes.byteLength || input.bytes.byteLength > CODE_ATTACHMENT_MAX_BYTES) throw new CodeAttachmentRefused("The image cannot be attached.");
+  if (!extension || !input.bytes.byteLength || input.bytes.byteLength > CODE_ATTACHMENT_IMAGE_MAX_BYTES) throw new CodeAttachmentRefused("The image cannot be attached.");
   const stem = basename(input.name || "pasted-image", extname(input.name || ""));
   return writeAttachment(root, attachmentFileName(stem + extension, now), input.bytes);
 }
 
-/** Deletes a copy this app made, when the person takes it off the draft; any other path is left alone. */
-export async function discardAttachmentCopy(workspace: Workspace, path: string) {
+const isCopyPath = (path: string) => {
   const parts = path.split("/");
-  if (parts.length !== 2 || parts[0] !== CODE_ATTACHMENT_FOLDER || parts[1] === ".gitignore") return;
+  return parts.length === 2 && parts[0] === CODE_ATTACHMENT_FOLDER && parts[1] !== ".gitignore";
+};
+
+/**
+ * Deletes a copy this app made, when the person takes it off the draft. The caller passes only references it copied
+ * itself (main.ts keeps them); a path outside the attachment folder is left alone as well.
+ */
+export async function discardAttachmentCopy(workspace: Workspace, path: string) {
+  if (!isCopyPath(path)) return;
   const resolved = workspace.resolve(path, "write");
   if (resolved.exists) await rm(resolved.absolute);
+}
+
+/** Puts the copies a task names into a new worktree of the project, at the same paths: Git does not carry them. */
+export async function carryAttachmentCopies(source: Workspace, targetRoot: string, paths: readonly string[]) {
+  const folder = paths.length ? await attachmentFolder(targetRoot) : "";
+  for (const path of paths) {
+    if (!isCopyPath(path)) throw new CodeAttachmentRefused("Only attachment copies are carried.");
+    const bytes = await readFile(source.resolve(path, "read").absolute);
+    await writeFile(join(folder, path.split("/")[1]!), bytes, { flag: "wx" });
+  }
 }

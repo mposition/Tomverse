@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Workspace } from "../../tomverse-cli/src/runtime.js";
-import { attachmentFileName, CODE_ATTACHMENT_FOLDER, CODE_ATTACHMENT_MAX_BYTES, copyOutsideFile, discardAttachmentCopy, savePastedImage } from "../src/host/code-attachments";
+import { attachmentFileName, carryAttachmentCopies, CODE_ATTACHMENT_FOLDER, CODE_ATTACHMENT_IMAGE_MAX_BYTES, CODE_ATTACHMENT_MAX_BYTES, copyOutsideFile,
+  discardAttachmentCopy, savePastedImage } from "../src/host/code-attachments";
 
 const now = new Date("2026-11-28T12:34:56.000Z");
 
@@ -40,6 +41,22 @@ test("A file from outside the project and a pasted image land in the self-ignori
     const large = join(tmp, "large.bin");
     await writeFile(large, new Uint8Array(CODE_ATTACHMENT_MAX_BYTES + 1));
     await assert.rejects(copyOutsideFile(root, large));
+    // An image is held to what view_image reads, so an attached image is one the agent can see.
+    const bigImage = join(tmp, "big.png");
+    await writeFile(bigImage, new Uint8Array(CODE_ATTACHMENT_IMAGE_MAX_BYTES + 1));
+    await assert.rejects(copyOutsideFile(root, bigImage));
+    await assert.rejects(savePastedImage(root, { name: "big.png", mediaType: "image/png", bytes: new Uint8Array(CODE_ATTACHMENT_IMAGE_MAX_BYTES + 1) }));
+    const bigText = join(tmp, "big.log");
+    await writeFile(bigText, new Uint8Array(CODE_ATTACHMENT_IMAGE_MAX_BYTES + 1));
+    await copyOutsideFile(root, bigText, now);
+
+    // A new worktree gets the copies at the same paths; anything outside the attachment folder is refused.
+    const checkout = join(tmp, "checkout");
+    await mkdir(checkout);
+    await carryAttachmentCopies(workspace, checkout, [workspace.reference(pasted).path]);
+    assert.deepEqual(await readFile(join(checkout, CODE_ATTACHMENT_FOLDER, "20261128-123456-image.png")), Buffer.from([1, 2, 3]));
+    assert.equal(await readFile(join(checkout, CODE_ATTACHMENT_FOLDER, ".gitignore"), "utf8"), "*\n");
+    await assert.rejects(carryAttachmentCopies(workspace, checkout, ["own.txt"]));
 
     // Taking a copy off the draft deletes it; a project file of the person's own and the .gitignore are never touched.
     await writeFile(join(root, "own.txt"), "mine");
@@ -48,7 +65,7 @@ test("A file from outside the project and a pasted image land in the self-ignori
     await discardAttachmentCopy(workspace, `${CODE_ATTACHMENT_FOLDER}/.gitignore`);
     assert.equal(await readFile(join(root, "own.txt"), "utf8"), "mine");
     assert.deepEqual((await readdir(join(root, CODE_ATTACHMENT_FOLDER))).sort(),
-      [".gitignore", "20261128-123456-image.png", "20261128-123456-shot-2.png"]);
+      [".gitignore", "20261128-123456-big.log", "20261128-123456-image.png", "20261128-123456-shot-2.png"]);
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

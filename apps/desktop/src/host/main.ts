@@ -53,7 +53,7 @@ import { desktopIdentityProvider, desktopLoginEmail, type DesktopEmailResult, ty
 import { link, open, readFile, realpath, unlink } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
-import { copyOutsideFile, discardAttachmentCopy, savePastedImage } from "./code-attachments";
+import { carryAttachmentCopies, copyOutsideFile, discardAttachmentCopy, savePastedImage } from "./code-attachments";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { z } from "zod";
@@ -304,6 +304,8 @@ let projectRoot: ProjectRoot | null = null;
 let codeGitProject: GitProject | "unavailable" | null = null;
 let codeWorktreeDraft: { home: string; id: string } | undefined;
 const codeReferences = new Map<string, CodeReference>();
+/** The references whose file this app copied into the attachment folder (code-attachments.ts): only these are ever deleted. */
+const ownedCopies = new Set<string>();
 let historyCursor: string | null = null;
 const historyStorage = new Map<string, string>();
 const historyWorktreePaths = new Map<string, string>();
@@ -1964,10 +1966,13 @@ async function pasteCodeImage(input: z.infer<typeof codePastedImage>) {
   assertProjectRoot(project);
   let rejected = 0;
   try {
-    const reference = new Workspace(root, [app.getPath("userData")]).reference(await savePastedImage(root, input));
-    if (projectRoot !== project || state.root !== root) throw new Error("The Code project changed.");
-    if (connection && cleanText(reference.path, connection.key) !== reference.path) rejected++;
-    else { const id = randomUUID(); codeReferences.set(id, { id, ...reference }); }
+    const workspace = new Workspace(root, [app.getPath("userData")]);
+    const reference = workspace.reference(await savePastedImage(root, input));
+    if (projectRoot !== project || state.root !== root || (connection && cleanText(reference.path, connection.key) !== reference.path)) {
+      await discardAttachmentCopy(workspace, reference.path).catch(() => {});
+      if (projectRoot !== project || state.root !== root) throw new Error("The Code project changed.");
+      rejected++;
+    } else { const id = randomUUID(); codeReferences.set(id, { id, ...reference }); ownedCopies.add(id); }
   } catch (error) {
     if (projectRoot !== project) throw error;
     rejected++;
@@ -2010,16 +2015,19 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
         try {
           // A file from outside the project is copied into the project's attachment folder (code-attachments.ts) and attached there.
           const outside = relative(root, path);
-          const source = kind === "file" && (outside.startsWith("..") || isAbsolute(outside)) ? await copyOutsideFile(root, path) : path;
-          const reference = workspace.reference(source);
+          const copied = kind === "file" && (outside.startsWith("..") || isAbsolute(outside)) ? await copyOutsideFile(root, path) : undefined;
+          const reference = workspace.reference(copied ?? path);
           if (reference.kind !== kind || !codeReferencePath.safeParse(reference.path).success ||
               cleanText(reference.path, connection.key) !== reference.path) {
+            // A copy that cannot be attached is not left behind.
+            if (copied) await discardAttachmentCopy(workspace, reference.path).catch(() => {});
             rejected++;
             continue;
           }
           if ([...codeReferences.values()].some((item) => item.path === reference.path)) continue;
           const id = randomUUID();
           codeReferences.set(id, { id, ...reference });
+          if (copied) ownedCopies.add(id);
         } catch {
           rejected++;
         }
@@ -4520,8 +4528,9 @@ function registerIpc() {
     const id = z.uuid().parse(value);
     const reference = codeReferences.get(id);
     codeReferences.delete(id);
-    // A copy this app made for the draft goes with it; the person's own project files are never touched.
-    if (reference && state.root) await discardAttachmentCopy(new Workspace(state.root, [app.getPath("userData")]), reference.path).catch(() => {});
+    // A copy this app made for the draft goes with it; any other file, the attachment folder's included, is never touched.
+    const owned = ownedCopies.delete(id);
+    if (owned && reference && state.root) await discardAttachmentCopy(new Workspace(state.root, [app.getPath("userData")]), reference.path).catch(() => {});
   });
   main("desktop:paste-code-image", (value) => pasteCodeImage(codePastedImage.parse(value)));
   main("desktop:new-task", async () => {
@@ -4560,6 +4569,9 @@ function registerIpc() {
       if (!reference) throw new Error("Select the project references again.");
       return { path: reference.path, kind: reference.kind };
     });
+    // The copies this app made sit in a folder Git ignores, so a worktree gets them after it is made rather than from the commit.
+    const copiedPaths = new Set((draft.referenceIds ?? []).flatMap((referenceId) => ownedCopies.has(referenceId) ? [codeReferences.get(referenceId)!.path] : []));
+    const committed = references.filter(({ path }) => !copiedPaths.has(path));
     if (draft.permissionProfile === "accept_edits" && (readProjectPermissionProfile() !== "accept_edits" || draft.mode !== "agent" || preference !== "tomverse_api")) {
       throw new Error("Accept Edits is unavailable for this execution route.");
     }
@@ -4619,18 +4631,19 @@ function registerIpc() {
       choosing = true;
       try {
         worktree = await createManagedWorktree(sourceProject, git, reservation.home, reservation.id, workspace?.base ?? git.bases[0]!, {
-          references,
+          references: committed,
           checkReady(project) {
             if (projectRoot !== sourceProject || codeConnection() !== connection || !worker || session.aborted || signingOut ||
                 suspended || closing || installingUpdate() || state.codeExecutionPreference !== preference) {
               throw new Error("The Code connection changed.");
             }
             const checkout = new Workspace(project.path, [app.getPath("userData"), codeProjectLocks()]);
-            for (const reference of references) {
+            for (const reference of committed) {
               if (checkout.reference(reference.path).kind !== reference.kind) throw new Error("A selected reference is unavailable in this branch.");
             }
           },
         });
+        if (copiedPaths.size) await carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), worktree.project.path, [...copiedPaths]);
       } catch {
         codeWorktreeDraft = undefined;
         if (projectRoot === sourceProject && !session.aborted && !closing) codeGitProject = await readGitProject(sourceProject);

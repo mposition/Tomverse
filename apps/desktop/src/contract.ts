@@ -54,11 +54,11 @@ export const MAX_CODE_PROMPT_CHARACTERS = 24_000;
 export const MAX_HANDOFF_EXCERPT_CHARACTERS = 2_400;
 export const codeReferenceKind = z.enum(["file", "folder"]);
 export const codeReferencePath = z.string().min(1).max(2048);
-/** A clipboard image for Code: the types the agents' image tools read, at most 10 MB (code-attachments.ts). */
+/** A clipboard image for Code: the types the agents' image tools read, at most 3 MB, what view_image reads (code-attachments.ts). */
 export const codePastedImage = z.object({
   name: z.string().max(200),
   mediaType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
-  bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= 10 * 1024 * 1024),
+  bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= 3 * 1024 * 1024),
 }).strict();
 export const codePermissionProfile = z.enum(["manual", "accept_edits"]);
 export type CodePermissionProfile = z.infer<typeof codePermissionProfile>;
