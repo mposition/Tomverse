@@ -51,7 +51,6 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   const [catalog, setCatalog] = useState<PluginCatalogView | null>();
   const [bundled, setBundled] = useState<Bundled>();
   const [logos, setLogos] = useState<BundledLogos>();
-  useEffect(() => { void import("./bundledLogos").then((module) => { if (alive.current) setLogos(module); }); }, []);
   const [providerId, setProviderId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ConnectorMessage>();
@@ -89,6 +88,8 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
       () => { if (alive.current) { setCatalog(null); setMessage({ tone: "error", text: c.error }); } });
     return () => { alive.current = false; };
   }, [c.error]);
+  // The logos the app carries, loaded with the screen (bundledLogos.ts).
+  useEffect(() => { void import("./bundledLogos").then((module) => { if (alive.current) setLogos(module); }); }, []);
   useEffect(() => {
     if (catalog !== null || bundled) return;
     void import("./bundledCatalog").then((module) => { if (alive.current) setBundled(module); });
