@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
+import { codeRunVendorRequestRefused, createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import { isArtifactSharePagePath } from "@/lib/artifactSharePageHeaders";
 import {
   EXPERIMENT_COOKIE_NAME,
@@ -209,6 +209,13 @@ export function proxy(request: NextRequest) {
 
   if (!requestHostAllowed || !originSecretAllowed) {
     return blockedOriginResponse();
+  }
+
+  // The Python runner's files (lib/chatCodeRunFrame.ts) are plain static GETs. A query string or a body on a request to
+  // them can only be text someone chose to put there, and the runner's policy cannot tell (it matches paths), so the
+  // server refuses both.
+  if (codeRunVendorRequestRefused(request.nextUrl.pathname, request.method, request.nextUrl.search)) {
+    return new NextResponse(null, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 
   // Section 5.4, step 3 of the order. Unconditional, and before anything is

@@ -7,8 +7,10 @@ import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPane
 import { ArtifactPreviewWorkspace } from "@/components/chat/ArtifactPreviewWorkspace";
 import { ArtifactShareControl } from "@/components/chat/ArtifactShareControl";
 import { useChatArtifactWorkspace, useCodeBlockStreaming } from "@/components/chat/ChatArtifactWorkspaceContext";
+import { CodeBlockRun } from "@/components/chat/CodeBlockRun";
 import { useLanguage } from "@/components/LanguageProvider";
 import { previewableBlockIndex } from "@/lib/artifactPreviewEditing";
+import { isPythonCodeLanguage } from "@/lib/chatCodeRun";
 import {
   codeLanguageFromClassName,
   codePreviewKindForLanguage,
@@ -26,6 +28,9 @@ import {
  * It renders nothing unless the workspace switch is on, the fence's language
  * is one that can be previewed, and the answer has finished -- a block still
  * arriving is unfinished code.
+ *
+ * A Python block is not previewed; it is run, in the user's browser, by
+ * `CodeBlockRun` behind its own switch (lib/chatCodeRun.ts).
  */
 
 const languageOfCode = (children: ReactNode): string | null => {
@@ -71,6 +76,7 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
     [opened, fillComposer, t]
   );
 
+  if (isPythonCodeLanguage(language)) return <CodeBlockRun preRef={preRef} />;
   if (!workspace.enabled || streaming || !kind || !language) return null;
 
   const open = () => {

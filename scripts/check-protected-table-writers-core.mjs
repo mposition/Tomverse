@@ -613,6 +613,11 @@ export const EXCLUDED_PREFIXES = [
       "React and Babel exactly as published, served to the sandboxed chat preview frame and pinned by sha384 (lib/chatArtifactPreview.ts). They run only in the browser, with no database to reach, and nothing of ours can be added without breaking the pin.",
   },
   {
+    prefix: "public/vendor/pyodide/",
+    reason:
+      "Pyodide's loader, its wasm build and the numpy, pandas and matplotlib wheels exactly as published, served to the sandboxed Python runner frame and pinned by sha256 (lib/chatCodeRunFrame.ts). They run only in the user's browser, with no database to reach, and nothing of ours can be added without breaking the pin.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
