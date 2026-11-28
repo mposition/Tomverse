@@ -127,6 +127,29 @@ refreshes inside the run home, and the operator's own login stays as it was
 rotated by a refresh. The refresh token stays with the CLI process: the
 implement shell runs in the sidecar's jail, which has no run home.
 
+Kimi (`kimi:<worker>`, from `~/.kimi/credentials/kimi-code.json` to
+`<worker>/cli/kimi/kimi-code.json`, owner request 2026-11-28) keeps only
+the access token: a Kimi refresh rotates the refresh token, so the copy's
+refresh token is emptied and the CLI never refreshes it. The copy is refused
+once `expires_at` has passed, so how long a Kimi Code access token lasts on
+the box decides how often the stage timer must run.
+
+The Kimi sidecar is off unless its unit sets `TOMVERSE_AMUX_V22_KIMI=enabled`.
+It takes read roles only (design, investigate, review): `--print` approves
+every tool call, ReadFile/Glob/Grep read any absolute path, and Shell runs
+without a sandbox. Each run home holds an agent file (`extend: default`,
+`tools` = ReadFile, Glob, Grep) and an empty `--skills-dir`; the whole
+configuration (Kimi Code platform, OAuth key `oauth/kimi-code`, the route's
+model) comes from `--config`, so no user `config.toml` or hook is read. The
+parser refuses any other tool, any undocumented argument and any path or path
+pattern that is absolute outside the checkout, has `..`, `~` or a
+backslash. A checkout with `.kimi/` is refused. Kimi's stream-json carries no
+usage, so the sidecar reads the session's `wire.jsonl` in the run home
+(StatusUpdate `token_usage`, one step each) before the home is removed; a
+run without exactly one readable session has unknown usage and does not
+settle. No quota reading exists for Kimi yet (`/usage` is interactive only),
+so the office card shows its row without a number.
+
 The Antigravity sidecar runs agy (a single Go binary) from a root-owned copy
 under `/opt/tomverse-amux-v22/`, with `AGY_CLI_DISABLE_AUTO_UPDATE=true` (agy
 ignores `1`). Each run home holds a custom agent (`amux-v22-read` or

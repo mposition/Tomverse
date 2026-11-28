@@ -24,8 +24,12 @@ for (const name of ["DATABASE_URL", "DIRECT_URL", "TOMVERSE_AMUX_SYNC_SECRET",
 // The CLI this sidecar runs (a v19 channel name); Claude when unset. Another
 // provider reuses the binary and config-directory variables for its own CLI.
 const provider = process.env.TOMVERSE_AMUX_V22_PROVIDER ?? "anthropic";
-if (!["anthropic", "openai", "github-copilot", "cursor", "antigravity"].includes(provider))
+if (!["anthropic", "openai", "github-copilot", "cursor", "antigravity", "kimi"].includes(provider))
   throw new Error("invalid sidecar provider");
+// Kimi Code CLI (owner request 2026-11-28) stays off until the operator sets
+// this on the worker's sidecar unit, after the box procedure in its PR.
+if (provider === "kimi" && process.env.TOMVERSE_AMUX_V22_KIMI !== "enabled")
+  throw new Error("kimi sidecar is off (TOMVERSE_AMUX_V22_KIMI)");
 const config = { ...amuxV22SidecarLaunchConfigFromEnvironment(process.env), provider };
 // The agy /usage group that bounds the worker's model (default "Gemini 4
 // Argon"; Hydrogen is "Gemini Models", Claude Opus "Claude and GPT

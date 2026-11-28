@@ -1490,8 +1490,9 @@ v27의 여섯 세션은 이 일곱 곳이 모두 걸려 아직 제품 배정에 
 | `cursor` | Cursor CLI | 미검증 | `implementation`(v27 절 1과 같음) |
 | `copilot` | GitHub Copilot CLI | 미검증 | `implementation`(v27 절 1과 같음) |
 | `antigravity` | Antigravity CLI (Google) | 미검증 | `implementation`(운영자 결정 2026-11-10) |
+| `kimi` | Kimi Code CLI (Moonshot) | 미검증 | `implementation`(운영자 요청 2026-11-28) |
 
-`cursor`, `copilot`, `antigravity`는 v27 절 1처럼 `contract`와 `review`, 계약 경로를 바꾸는 작업을 맡지 않는다. `antigravity`는 운영자 결정(2026-11-10)으로 추가했다. v22 구현을 맡고, 구현 셸은 Copilot과 같은 sidecar jail에서 돈다(migration `20261110200000_amux_antigravity_worker_class`).
+`cursor`, `copilot`, `antigravity`, `kimi`는 v27 절 1처럼 `contract`와 `review`, 계약 경로를 바꾸는 작업을 맡지 않는다. `antigravity`는 운영자 결정(2026-11-10)으로 추가했다. v22 구현을 맡고, 구현 셸은 Copilot과 같은 sidecar jail에서 돈다(migration `20261110200000_amux_antigravity_worker_class`). `kimi`는 운영자 요청(2026-11-28)으로 추가했다. `--print`가 모든 도구 호출을 승인하고 파일 도구가 작업 폴더 밖 절대 경로를 읽으며 Shell 도구에 샌드박스가 없으므로, Cursor처럼 v22 읽기 역할만 맡는다(migration `20261128120000_amux_kimi_worker_class`).
 
 ### 3. worker 등록부 — 사람이 정하는 원하는 상태
 

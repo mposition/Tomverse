@@ -472,6 +472,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // complete; one state CHECK on AmuxDmOwnerSettlement, no commit-deadline
   // marker, classifier or trigger changes.
   "20261123210000_amux_dm_settlement_t2_complete",
+  // Owner request 2026-11-28: the kimi worker class widens the same five
+  // CHECK constraints as the antigravity one; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261128120000_amux_kimi_worker_class",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

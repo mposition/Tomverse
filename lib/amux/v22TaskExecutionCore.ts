@@ -53,21 +53,21 @@ export function amuxV22DeliveryBudgetMicrousd(reservedMicrousd: number,
  * of receipts cannot turn an unobserved second call into a successful run. */
 /** The usage source each one-shot executor writes, by assignment provider. */
 export type V22ExecutionSource = "claude_result" | "anthropic_messages_api" |
-  "codex_jsonl" | "copilot_json" | "cursor_stream" | "antigravity_stream";
+  "codex_jsonl" | "copilot_json" | "cursor_stream" | "antigravity_stream" | "kimi_wire";
 const V22_EXECUTOR_BY_SOURCE: Record<V22ExecutionSource, string> = {
   claude_result: "claude", anthropic_messages_api: "anthropic_api",
   codex_jsonl: "codex", copilot_json: "copilot", cursor_stream: "cursor",
-  antigravity_stream: "antigravity",
+  antigravity_stream: "antigravity", kimi_wire: "kimi",
 };
-// Antigravity's `init` only echoes the requested model; nothing names the
-// model that answered.
+// Antigravity's `init` only echoes the requested model, and Kimi's stream and
+// wire name no model; nothing names the model that answered.
 const V22_UNATTESTED_SOURCES = new Set<V22ExecutionSource>(["codex_jsonl", "cursor_stream",
-  "antigravity_stream"]);
+  "antigravity_stream", "kimi_wire"]);
 export const v22ExecutionSourceForProvider = (provider: string): V22ExecutionSource | null =>
   ({ anthropic: "claude_result", openai: "codex_jsonl",
     "github-copilot": "copilot_json", cursor: "cursor_stream",
-    antigravity: "antigravity_stream" } as const)[
-    provider as "anthropic" | "openai" | "github-copilot" | "cursor" | "antigravity"] ?? null;
+    antigravity: "antigravity_stream", kimi: "kimi_wire" } as const)[
+    provider as "anthropic" | "openai" | "github-copilot" | "cursor" | "antigravity" | "kimi"] ?? null;
 
 export function v22ExecutionReceiptVerified(input: {
   attemptId: string;

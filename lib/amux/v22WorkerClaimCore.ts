@@ -66,6 +66,12 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
   // PATH (agy 1.5.4, measured on the box), so the sidecar's jail holds it.
   antigravity: Object.freeze({ providerClass: "antigravity", cli: "antigravity",
     model: ANY_MODEL, implement: true }),
+  // Owner request 2026-11-28: Kimi Code CLI takes the read roles only. Its
+  // print mode approves every tool call, its file tools read any absolute
+  // path, and its Shell tool runs without a sandbox, so no jail holds it once
+  // it may write (v22ChannelRun.mjs).
+  kimi: Object.freeze({ providerClass: "kimi", cli: "kimi",
+    model: ANY_MODEL, implement: false }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
 export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {

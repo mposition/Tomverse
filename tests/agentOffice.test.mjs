@@ -790,7 +790,10 @@ test("the AMUX room sits under the teams, with an island for each CLI channel th
     ["anthropic", "cursor", "antigravity", "devin"].map(agentOfficeQuotaChannel),
     ["claude", "cursor", "antigravity", null]
   );
-  assert.deepEqual(AGENT_OFFICE_QUOTA_CHANNELS, ["claude", "codex", "copilot", "cursor", "antigravity"]);
+  assert.deepEqual(AGENT_OFFICE_QUOTA_CHANNELS, ["claude", "codex", "copilot", "cursor", "antigravity", "kimi"]);
+  // Kimi (owner request 2026-11-28) has no island either, and its own row.
+  assert.equal(agentOfficeChannel("kimi"), null);
+  assert.equal(agentOfficeQuotaChannel("kimi"), "kimi");
 });
 
 test("a worker's record decides where it is drawn, and nobody disappears from the floor", () => {

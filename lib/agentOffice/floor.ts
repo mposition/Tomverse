@@ -27,15 +27,17 @@ export type AgentOfficeChannel = (typeof AGENT_OFFICE_CHANNELS)[number];
 
 /**
  * The quota card's rows: every island channel, then the channels that have
- * no island on the floor yet (Antigravity since 2026-11-11). Its workers
+ * no island on the floor yet (Antigravity since 2026-11-11, Kimi since
+ * 2026-11-28). Their workers
  * still sit in the roster and the shared zones; only the card reads them.
  */
-export const AGENT_OFFICE_QUOTA_CHANNELS = [...AGENT_OFFICE_CHANNELS, "antigravity"] as const;
+export const AGENT_OFFICE_QUOTA_CHANNELS = [...AGENT_OFFICE_CHANNELS, "antigravity", "kimi"] as const;
 export type AgentOfficeQuotaChannel = (typeof AGENT_OFFICE_QUOTA_CHANNELS)[number];
 
 /** A worker's quota-card row from its provider label, or null. */
 export function agentOfficeQuotaChannel(provider: string): AgentOfficeQuotaChannel | null {
-  return agentOfficeChannel(provider) ?? (provider === "antigravity" ? "antigravity" : null);
+  return agentOfficeChannel(provider) ??
+    (provider === "antigravity" || provider === "kimi" ? provider : null);
 }
 
 /**

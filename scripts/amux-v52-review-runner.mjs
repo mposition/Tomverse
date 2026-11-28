@@ -27,7 +27,7 @@ function validInput(input) {
   return input && UUID.test(input.attemptId) && SHA.test(input.baseSha) &&
     SHA.test(input.commitSha) && input.baseSha !== input.commitSha &&
     input.reviewRef === `refs/amux-v52-review/${input.attemptId}` &&
-    ["claude", "codex", "cursor", "copilot", "antigravity"].includes(input.author) &&
+    ["claude", "codex", "cursor", "copilot", "antigravity", "kimi"].includes(input.author) &&
     VENDOR.test(input.authorVendor) && typeof input.scope === "string" &&
     input.scope.length > 0 &&
     typeof input.touchesContract === "boolean" && validAvoid(input);
