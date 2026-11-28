@@ -32,6 +32,7 @@ import {
   preflightChatDraftForMessage,
 } from "@/lib/chatDraftMessageConsume";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
+import { restoreArchivedConversationOnMessage } from "@/lib/conversationArchive";
 import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import {
   PUBLIC_MESSAGE_ATTACHMENT_SELECT,
@@ -299,6 +300,9 @@ export async function POST(
               }
             : {}),
           beforeCreate: (tx) => assertMessageCapacity(tx, userId, conversationId, messages.length, contentBytes),
+          // A new message brings an archived conversation back, in the same
+          // transaction that creates it (lib/conversationArchive.ts).
+          afterCreate: (tx) => restoreArchivedConversationOnMessage(tx, conversationId),
         })
       : await prisma.$transaction(async (tx) => {
       if (draftConsume) {
@@ -353,6 +357,9 @@ export async function POST(
           uploadIds: message.attachmentUploadIds,
         });
       }
+      // A new message brings an archived conversation back, in this same
+      // transaction (lib/conversationArchive.ts). A replay wrote nothing and moves nothing.
+      if (count > 0) await restoreArchivedConversationOnMessage(tx, conversationId);
       return { count };
     });
 

@@ -84,6 +84,7 @@ export async function startChatImageTurn(
             productKey: true,
             password: true, passwordVersion: true,
             continuationBridge: { select: { id: true } },
+            archivedAt: true,
         },
     });
     if (!conversation) {
@@ -230,7 +231,9 @@ export async function startChatImageTurn(
         }
         await prisma.conversation.update({
             where: { id: input.conversationId },
-            data: { updatedAt: new Date() },
+            // A new turn brings an archived conversation back
+            // (lib/conversationArchive.ts); an unarchived one is not written.
+            data: { updatedAt: new Date(), ...(conversation.archivedAt ? { archivedAt: null } : {}) },
         });
     }
 

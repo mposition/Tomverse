@@ -333,7 +333,7 @@ type MobileChatShellProps = {
   onUnlock: (id: string) => void;
   onShare: (id: string, title: string) => void;
   onRevokeShare: (id: string) => void;
-  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" }) => void;
+  onDownload: (id: string, title: string, options?: { includeSource?: boolean; format?: "markdown" | "pdf" }) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
   /** Threaded to the composer; see `ChatInput`'s own prop docs. */
@@ -701,7 +701,7 @@ export function MobileChatShell({
         // keeping the recent-chats row on screen for someone with no history.
         .filter(
           (conversation) =>
-            !conversation.isLocked && conversation.id !== currentChatId
+            !conversation.isLocked && !conversation.archived && conversation.id !== currentChatId
         )
         .slice(0, 3)
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
