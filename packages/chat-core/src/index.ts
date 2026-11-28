@@ -22,7 +22,11 @@ export {
   type ChatCompletionStatus,
   type ChatIncompleteReason,
 } from "./completionStatus";
-export { chatStreamDisplayText } from "./streamText";
+export {
+  chatStreamDisplayText,
+  createChatStreamDisplayProjector,
+  type ChatStreamDisplayProjector,
+} from "./streamText";
 export * from "./voiceConversation";
 
 export * from "./location";
