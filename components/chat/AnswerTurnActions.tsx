@@ -91,9 +91,10 @@ export function AnswerTurnActions({
       toggleReadout({
         messageId,
         content,
-        // The server could not read it: the browser voice does, as before.
-        onUnavailable: () => {
-          if (canSpeak) toggleSpeaking(messageId, content, lang);
+        // The server could not read (the rest of) it: the browser voice reads
+        // from where the server voice stopped, the whole answer if nothing played.
+        onUnavailable: (text) => {
+          if (canSpeak) toggleSpeaking(messageId, text, lang);
         },
       });
       return;

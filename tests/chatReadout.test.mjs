@@ -21,7 +21,12 @@ import {
 } from "../lib/chatReadoutPricing.ts";
 import { readoutSpeechEndpoint, synthesizeReadoutSpeech } from "../lib/chatReadoutSpeechCore.ts";
 import { readoutPieces } from "../lib/chatReadoutText.ts";
-import { createReadoutAudioCache, readoutCacheKey } from "../lib/chatServerReadout.ts";
+import {
+  createReadoutAudioCache,
+  createReadoutPieceRequester,
+  readoutCacheKey,
+  readoutFailureIsUnknown,
+} from "../lib/chatServerReadout.ts";
 
 /* ------------------------------------------------------------- text ---- */
 
@@ -315,4 +320,84 @@ test("fetched audio is kept per answer so a second press does not buy it again",
   assert.deepEqual(cache.keys(), ["m1", "m3"]);
   assert.notEqual(readoutCacheKey("m1", "Hello"), readoutCacheKey("m1", "Hello!"));
   assert.equal(readoutCacheKey("m1", "Hello"), readoutCacheKey("m1", "Hello"));
+});
+
+/* ------------------------------------------------- one request per piece -- */
+
+const audioResponse = () =>
+  new Response(new Uint8Array([1, 2]), { status: 200, headers: { "X-Readout-Chunks": "3", "content-type": "audio/mpeg" } });
+const failure = (status, code) => new Response(JSON.stringify({ code }), { status, headers: { "content-type": "application/json" } });
+
+const countingFetch = (respond) => {
+  const calls = [];
+  return {
+    calls,
+    fetchImpl: async (url, init) => {
+      calls.push(JSON.parse(init.body));
+      return respond(calls.length);
+    },
+  };
+};
+
+test("a piece already being fetched is waited for, not requested again", async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { calls, fetchImpl } = countingFetch(async () => {
+    await gate;
+    return audioResponse();
+  });
+  const request = createReadoutPieceRequester({ fetchImpl, cache: createReadoutAudioCache() });
+  // The prefetch, then playback reaching the same piece before it arrived.
+  const prefetch = request("m1", "key", 1);
+  const playback = request("m1", "key", 1);
+  release();
+  const [first, second] = await Promise.all([prefetch, playback]);
+  assert.equal(calls.length, 1);
+  assert.equal(first.ok && second.ok, true);
+  // And from the cache afterwards.
+  assert.equal((await request("m1", "key", 1)).ok, true);
+  assert.equal(calls.length, 1);
+});
+
+test("a piece with an unknown outcome is never requested again; a refused one may be", async () => {
+  for (const respond of [
+    () => failure(502, "READOUT_OUTCOME_UNKNOWN"),
+    () => failure(500, "READOUT_FAILED"),
+    () => {
+      throw new TypeError("network down");
+    },
+    // Answered (so billed) but unreadable: asking again would buy it again.
+    () => new Response(new Uint8Array([1]), { status: 200 }),
+  ]) {
+    const { calls, fetchImpl } = countingFetch(respond);
+    const request = createReadoutPieceRequester({ fetchImpl, cache: createReadoutAudioCache() });
+    assert.deepEqual(await request("m1", "key", 2), { ok: false, unknown: true });
+    assert.deepEqual(await request("m1", "key", 2), { ok: false, unknown: true });
+    assert.equal(calls.length, 1, "no second paid call for the same piece");
+  }
+
+  for (const [status, code] of [
+    [502, "READOUT_PROVIDER_REFUSED"],
+    [503, "READOUT_UNAVAILABLE"],
+    [429, "READOUT_LIMIT_REACHED"],
+    [409, "READOUT_IN_PROGRESS"],
+  ]) {
+    const { calls, fetchImpl } = countingFetch(() => failure(status, code));
+    const request = createReadoutPieceRequester({ fetchImpl, cache: createReadoutAudioCache() });
+    assert.deepEqual(await request("m1", "key", 0), { ok: false, unknown: false }, code);
+    await request("m1", "key", 0);
+    assert.equal(calls.length, 2, `${code} cost nothing and is not remembered`);
+  }
+});
+
+test("only failures that cost nothing are told apart from unknown outcomes", () => {
+  assert.equal(readoutFailureIsUnknown(502, "READOUT_OUTCOME_UNKNOWN"), true);
+  assert.equal(readoutFailureIsUnknown(500, "READOUT_FAILED"), true);
+  assert.equal(readoutFailureIsUnknown(502, undefined), true);
+  assert.equal(readoutFailureIsUnknown(502, "READOUT_PROVIDER_REFUSED"), false);
+  assert.equal(readoutFailureIsUnknown(503, "READOUT_UNAVAILABLE"), false);
+  assert.equal(readoutFailureIsUnknown(404, "READOUT_NOTHING_TO_READ"), false);
+  assert.equal(readoutFailureIsUnknown(400, undefined), false);
 });

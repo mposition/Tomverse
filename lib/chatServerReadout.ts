@@ -4,17 +4,20 @@
  *
  * Contract: docs/policy/voice-input.md §6.4. One answer at a time across both
  * engines: starting here stops the browser voice (lib/chatSpeech.ts) and any
- * other server read-aloud. When the server cannot read an answer before any of
- * it has played -- switched off, over its limit, provider failure -- the
- * caller's `onUnavailable` runs and the browser voice reads it instead.
+ * other server read-aloud. When the server cannot read a piece -- switched
+ * off, over its limit, provider failure -- the browser voice reads the answer
+ * from that piece on (the whole answer when nothing had played yet).
  *
- * Nothing is retried. A failed request is not sent again; a piece that fails
- * after others have played ends the read-aloud.
+ * Nothing is retried. Each piece has one request at a time, shared by the
+ * prefetch and the playback; a piece whose outcome is unknown is never asked
+ * for again on this page (createReadoutPieceRequester). The server holds the
+ * same line on its side with a per-piece lease.
  *
  * Audio already fetched is kept in memory per answer, so pressing "Read
  * aloud" again on the same answer replays it without buying it again.
  */
 
+import { readoutPieces } from "@/lib/chatReadoutText";
 import { stopSpeaking } from "@/lib/chatSpeech";
 
 export type ReadoutPhase = "loading" | "playing" | "paused";
@@ -115,35 +118,104 @@ export function resumeReadout() {
   setState({ ...state, phase: "playing" });
 }
 
-type Piece = { blob: Blob; chunks: number };
+export type PieceResult =
+  | { ok: true; blob: Blob; chunks: number }
+  /** `unknown`: the paid call may have been made and billed; never asked for again. */
+  | { ok: false; unknown: boolean };
 
-async function fetchPiece(messageId: string, cacheKey: string, index: number): Promise<Piece | null> {
-  const cached = cache.get(cacheKey, index);
-  if (cached && cached.chunks !== null) return { blob: cached.blob, chunks: cached.chunks };
-  let response: Response;
-  try {
-    response = await fetch("/api/chat/readout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messageId, chunk: index }),
-      cache: "no-store",
+/**
+ * Failures that cost nothing: the server refused before the provider, or the
+ * provider refused. Everything else -- an unknown provider outcome, a server
+ * error, an unreadable answer -- may have been billed.
+ */
+const NOT_BILLED_CODES = new Set([
+  "READOUT_UNAVAILABLE",
+  "READOUT_AUTH_REQUIRED",
+  "READOUT_NOT_AN_ANSWER",
+  "READOUT_NOTHING_TO_READ",
+  "READOUT_LIMIT_REACHED",
+  "READOUT_IN_PROGRESS",
+  "READOUT_PROVIDER_REFUSED",
+  "CONVERSATION_LOCKED",
+  "API_RATE_LIMITED",
+]);
+
+export const readoutFailureIsUnknown = (status: number, code: unknown) =>
+  !(typeof code === "string" && NOT_BILLED_CODES.has(code)) && (status >= 500 || status === 0);
+
+/**
+ * One request per piece, shared. Asking for a piece that is already being
+ * fetched -- the prefetch during the previous piece, then playback reaching
+ * it -- waits for that request instead of starting another. A piece whose
+ * outcome is unknown is remembered for the rest of the page's life and is not
+ * requested again: re-asking could buy it a second time. A refusal is not
+ * remembered; it cost nothing. Exported as a factory so a test can drive it
+ * with its own `fetch`.
+ */
+export function createReadoutPieceRequester(input: {
+  fetchImpl: typeof fetch;
+  cache: ReturnType<typeof createReadoutAudioCache>;
+}) {
+  const inflight = new Map<string, Promise<PieceResult>>();
+  const unknown = new Set<string>();
+
+  const fetchOnce = async (messageId: string, cacheKey: string, index: number): Promise<PieceResult> => {
+    let response: Response;
+    try {
+      response = await input.fetchImpl("/api/chat/readout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, chunk: index }),
+        cache: "no-store",
+      });
+    } catch {
+      // The request may have reached the server and the provider.
+      return { ok: false, unknown: true };
+    }
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
+      return { ok: false, unknown: readoutFailureIsUnknown(response.status, body?.code) };
+    }
+    const chunks = Number(response.headers.get("X-Readout-Chunks"));
+    const blob = await response.blob().catch(() => null);
+    // Answered, so billed -- but lost on the way. Asking again would buy it again.
+    if (!blob || !Number.isInteger(chunks) || chunks < 1) return { ok: false, unknown: true };
+    input.cache.set(cacheKey, index, blob, chunks);
+    return { ok: true, blob, chunks };
+  };
+
+  return (messageId: string, cacheKey: string, index: number): Promise<PieceResult> => {
+    const cached = input.cache.get(cacheKey, index);
+    if (cached && cached.chunks !== null) return Promise.resolve({ ok: true, blob: cached.blob, chunks: cached.chunks });
+    const id = `${cacheKey}#${index}`;
+    if (unknown.has(id)) return Promise.resolve({ ok: false, unknown: true });
+    const pending = inflight.get(id);
+    if (pending) return pending;
+    const request = fetchOnce(messageId, cacheKey, index).then((result) => {
+      if (!result.ok && result.unknown) unknown.add(id);
+      inflight.delete(id);
+      return result;
     });
-  } catch {
-    return null;
-  }
-  if (!response.ok) return null;
-  const chunks = Number(response.headers.get("X-Readout-Chunks"));
-  const blob = await response.blob().catch(() => null);
-  if (!blob || !Number.isInteger(chunks) || chunks < 1) return null;
-  cache.set(cacheKey, index, blob, chunks);
-  return { blob, chunks };
+    inflight.set(id, request);
+    return request;
+  };
 }
+
+const requestPiece = createReadoutPieceRequester({
+  fetchImpl: (...args) => fetch(...args),
+  cache,
+});
 
 /**
  * Starts reading one answer with the server voice. A second call for the
  * answer being read stops it instead.
+ *
+ * When a piece cannot be had from the server, the server voice stops and
+ * `onUnavailable` receives the text from that piece on, so the browser voice
+ * continues where the server voice ended -- the whole answer when nothing had
+ * played yet. The unavailable piece is not requested again.
  */
-export function toggleReadout(input: { messageId: string; content: string; onUnavailable: () => void }) {
+export function toggleReadout(input: { messageId: string; content: string; onUnavailable: (text: string) => void }) {
   if (state?.messageId === input.messageId) {
     stopReadout();
     return;
@@ -157,19 +229,25 @@ export function toggleReadout(input: { messageId: string; content: string; onUna
   setState({ messageId: input.messageId, phase: "loading" });
   const cacheKey = readoutCacheKey(input.messageId, input.content);
 
+  // The same pieces the server cuts (lib/chatReadoutText.ts), so the browser
+  // voice can pick up exactly where the server voice stopped.
+  const continueInBrowser = (index: number) => {
+    stopReadout();
+    const text = index === 0 ? input.content : readoutPieces(input.content).chunks.slice(index).join("\n");
+    if (text.trim()) input.onUnavailable(text);
+  };
+
   const playFrom = async (index: number, total: number | null): Promise<void> => {
-    const piece = await fetchPiece(input.messageId, cacheKey, index);
+    const piece = await requestPiece(input.messageId, cacheKey, index);
     if (generation !== mine) return;
-    if (!piece) {
-      stopReadout();
-      // Only before anything was heard: a browser voice starting from the
-      // top halfway through would repeat what was already read.
-      if (index === 0) input.onUnavailable();
+    if (!piece.ok) {
+      continueInBrowser(index);
       return;
     }
     const count = total ?? piece.chunks;
-    // Fetch the next piece while this one plays.
-    if (index + 1 < count) void fetchPiece(input.messageId, cacheKey, index + 1);
+    // Fetch the next piece while this one plays; playback reaching it waits
+    // for this same request.
+    if (index + 1 < count) void requestPiece(input.messageId, cacheKey, index + 1);
     releaseUrl();
     objectUrl = URL.createObjectURL(piece.blob);
     element.onended = () => {
@@ -187,10 +265,7 @@ export function toggleReadout(input: { messageId: string; content: string; onUna
         setState({ messageId: input.messageId, phase: "playing" });
       }
     } catch {
-      if (generation === mine) {
-        stopReadout();
-        if (index === 0) input.onUnavailable();
-      }
+      if (generation === mine) continueInBrowser(index);
     }
   };
   void playFrom(0, null);

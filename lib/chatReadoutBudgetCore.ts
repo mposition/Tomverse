@@ -73,6 +73,28 @@ export type ReadoutDisposition = "billed" | "indeterminate" | "refused" | "not_s
 export const readoutKeepsReservation = (disposition: ReadoutDisposition) =>
   disposition === "billed" || disposition === "indeterminate";
 
+/**
+ * One request per piece at a time, decided by the server and not by the
+ * browser: an account's piece `n` of an answer is leased before it is
+ * reserved, and a second request while the lease is held is refused
+ * (`READOUT_IN_PROGRESS`) without reaching the budget or the provider.
+ *
+ * The lease is released when the outcome is known (billed, refused, not sent)
+ * and **kept** when it is not: a piece whose paid call may have been billed is
+ * not bought a second time until the lease lapses. The lapse is what clears a
+ * lease a crashed process never released; it is far longer than the provider
+ * timeout, so a live request is never overtaken.
+ */
+export const READOUT_PIECE_LEASE_SECONDS = 300;
+
+export const readoutKeepsLease = (disposition: ReadoutDisposition) => disposition === "indeterminate";
+
+export type ReadoutLeaseStore = {
+  /** True when this request now holds the lease. */
+  acquire(key: string): Promise<boolean>;
+  release(key: string): Promise<void>;
+};
+
 export const readoutDayStart = (now: Date) =>
   new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 export const readoutMonthStart = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));

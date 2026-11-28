@@ -7,10 +7,17 @@ import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { CHAT_ANSWER_RATING_REFUSAL_STATUS, chatAnswerRatingRefusal } from "@/lib/chatAnswerRatingCore";
 import { READOUT_MAX_CHUNKS, readoutRefusal, resolveReadoutLimits } from "@/lib/chatReadoutAccess";
-import { readoutAccountKey, readoutBudgetStore, readoutProviderKey } from "@/lib/chatReadoutBudget";
+import {
+  readoutAccountKey,
+  readoutBudgetStore,
+  readoutLeaseStore,
+  readoutPieceLeaseKey,
+  readoutProviderKey,
+} from "@/lib/chatReadoutBudget";
 import { readoutApiKey } from "@/lib/chatReadoutServer";
 import {
   ReadoutBudgetError,
+  readoutKeepsLease,
   reserveReadoutCharacters,
   settleReadoutReservation,
   type ReadoutDisposition,
@@ -27,7 +34,9 @@ import { prisma } from "@/lib/prisma";
  * Every refusal is answered with a code the browser reads as "use the
  * browser's own voice instead"; none of them reach the provider or the budget.
  * The order is: switch and prerequisites, signed-in owner, rate limit, the
- * answer itself, then reserve -> call -> settle on every exit. The text is
+ * answer itself, the piece's lease (one request per account, answer and piece
+ * at a time; kept after an unknown outcome so the piece is not bought twice),
+ * then reserve -> call -> settle on every exit. The text is
  * always the stored answer, re-cleaned here; the request names an answer and a
  * piece number, never the words that are paid for.
  *
@@ -98,6 +107,15 @@ export async function POST(req: Request) {
     const text = pieces.chunks[body.chunk];
     if (!text) return refuse(404, "READOUT_NOTHING_TO_READ");
 
+    // The same piece is already being read for this account -- another tab, a
+    // retried click -- or its last paid call ended with an unknown outcome.
+    // Either way a second call could buy it twice, so this one does not start.
+    const leaseKey = readoutPieceLeaseKey(userId, message.id, body.chunk);
+    if (!(await readoutLeaseStore.acquire(leaseKey))) {
+      log({ outcome: "in_progress", chunk: body.chunk });
+      return refuse(409, "READOUT_IN_PROGRESS");
+    }
+
     let reservation;
     try {
       reservation = await reserveReadoutCharacters({
@@ -108,6 +126,8 @@ export async function POST(req: Request) {
         limits,
       });
     } catch (error) {
+      // Nothing was sent, so the piece is free again.
+      await readoutLeaseStore.release(leaseKey).catch(() => undefined);
       if (error instanceof ReadoutBudgetError) {
         log({ outcome: "limit_reached", bucket: error.bucket });
         return refuse(429, "READOUT_LIMIT_REACHED", { "Retry-After": String(error.retryAfterSeconds) });
@@ -126,7 +146,11 @@ export async function POST(req: Request) {
         chunk: body.chunk,
         chunks: pieces.chunks.length,
       });
-      if (!result.ok) return refuse(502, "READOUT_PROVIDER_FAILED");
+      // The browser must tell these apart: a refusal cost nothing, while an
+      // unknown outcome may have been billed and is never asked for again.
+      if (!result.ok) {
+        return refuse(502, result.disposition === "indeterminate" ? "READOUT_OUTCOME_UNKNOWN" : "READOUT_PROVIDER_REFUSED");
+      }
       return new Response(result.audio, {
         status: 200,
         headers: {
@@ -144,6 +168,9 @@ export async function POST(req: Request) {
           errorName: error instanceof Error ? error.name : "UnknownError",
         })
       );
+      // Released only once the outcome is known; an unknown one keeps the
+      // piece leased until the lease lapses (READOUT_PIECE_LEASE_SECONDS).
+      if (!readoutKeepsLease(disposition)) await readoutLeaseStore.release(leaseKey).catch(() => undefined);
     }
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

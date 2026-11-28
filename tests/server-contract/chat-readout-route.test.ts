@@ -46,7 +46,9 @@ type World = {
   rateLimitScopes: string[];
   rows: Map<string, number>;
   providerCalls: Array<{ url: string; body: Record<string, unknown> }>;
-  provider: () => Response;
+  provider: () => Response | Promise<Response>;
+  /** Held piece leases, by key. */
+  leases: Set<string>;
 };
 
 const ANSWER = "Here is the answer you asked for.\n\n```js\nconst hidden = 1;\n```\n\nThat is all.";
@@ -68,6 +70,7 @@ const freshWorld = (): World => ({
   rows: new Map(),
   providerCalls: [],
   provider: () => new Response(new Uint8Array([7, 7, 7]), { status: 200, headers: { "content-type": "audio/mpeg" } }),
+  leases: new Set(),
 });
 
 let world = freshWorld();
@@ -122,6 +125,17 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
       namedExports: {
         readoutAccountKey: (userId: string) => `account:${userId}`,
         readoutProviderKey: () => "provider",
+        readoutPieceLeaseKey: (userId: string, messageId: string, chunk: number) => `lease:${userId}:${messageId}:${chunk}`,
+        readoutLeaseStore: {
+          async acquire(key: string) {
+            if (world.leases.has(key)) return false;
+            world.leases.add(key);
+            return true;
+          },
+          async release(key: string) {
+            world.leases.delete(key);
+          },
+        },
         readoutBudgetStore: {
           async book(booking: { key: string; period: string; periodStart: Date; characters: number; limit: number }) {
             const current = world.rows.get(id(booking));
@@ -247,16 +261,17 @@ scenario("an exhausted account day is a 429 with no provider call", { ...ON_ENV,
   assert.equal(booked(), before);
 });
 
-scenario("a provider refusal gives the booking back", ON_ENV, async (POST) => {
+scenario("a provider refusal gives the booking and the piece back", ON_ENV, async (POST) => {
   world.provider = () => new Response("rate limited", { status: 429 });
   const response = await POST(request({ messageId: "msg_1", chunk: 0 }));
   assert.equal(response.status, 502);
-  assert.equal((await response.json()).code, "READOUT_PROVIDER_FAILED");
+  assert.equal((await response.json()).code, "READOUT_PROVIDER_REFUSED");
   assert.equal(world.providerCalls.length, 1);
   assert.equal(booked(), 0);
+  assert.equal(world.leases.size, 0, "a refusal cost nothing, so the piece may be asked for again");
 });
 
-scenario("an unknown provider outcome keeps the booking and is not retried", ON_ENV, async (POST) => {
+scenario("an unknown provider outcome keeps the booking and the piece's lease, and is not bought again", ON_ENV, async (POST) => {
   for (const provider of [
     () => new Response("upstream", { status: 503 }),
     () => {
@@ -264,11 +279,52 @@ scenario("an unknown provider outcome keeps the booking and is not retried", ON_
     },
   ]) {
     world.rows.clear();
+    world.leases.clear();
     world.providerCalls = [];
     world.provider = provider;
     const response = await POST(request({ messageId: "msg_1", chunk: 0 }));
     assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, "READOUT_OUTCOME_UNKNOWN");
     assert.equal(world.providerCalls.length, 1);
     assert.ok(booked() > 0);
+    // The same piece again -- a retried click, another tab -- is refused
+    // before the budget and the provider while the lease is held.
+    const before = booked();
+    world.provider = () => new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+    const again = await POST(request({ messageId: "msg_1", chunk: 0 }));
+    assert.equal(again.status, 409);
+    assert.equal((await again.json()).code, "READOUT_IN_PROGRESS");
+    assert.equal(world.providerCalls.length, 1);
+    assert.equal(booked(), before);
   }
+});
+
+scenario("two concurrent requests for one piece make one provider call", ON_ENV, async (POST) => {
+  let finish!: () => void;
+  const held = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  world.provider = async () => {
+    await held;
+    return new Response(new Uint8Array([9]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+  };
+  const first = POST(request({ messageId: "msg_1", chunk: 0 }));
+  // Let the first request reach the provider before the second arrives.
+  while (world.providerCalls.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  const second = await POST(request({ messageId: "msg_1", chunk: 0 }));
+  assert.equal(second.status, 409);
+  assert.equal((await second.json()).code, "READOUT_IN_PROGRESS");
+  finish();
+  assert.equal((await first).status, 200);
+  assert.equal(world.providerCalls.length, 1);
+  // Known outcome: the lease is gone, and a later request may read it again.
+  assert.equal(world.leases.size, 0);
+  assert.equal((await POST(request({ messageId: "msg_1", chunk: 0 }))).status, 200);
+  assert.equal(world.providerCalls.length, 2);
+});
+
+scenario("a refused budget gives the piece's lease back", { ...ON_ENV, CHAT_READOUT_CHARACTERS_PER_ACCOUNT_DAY: "10" }, async (POST) => {
+  assert.equal((await POST(request({ messageId: "msg_1", chunk: 0 }))).status, 429);
+  assert.equal(world.leases.size, 0);
+  assert.equal(world.providerCalls.length, 0);
 });
