@@ -23,43 +23,12 @@ let existing: Row = null;
 let groups: Array<{ id: string; groupIdempotencyKey: string; targets: Array<{ modelId: string }> }> = [];
 const requests: Array<Record<string, unknown>> = [];
 const created: Array<Record<string, unknown>> = [];
-/** Rows written by the all-panels insert, and every id already stored. */
-const createdMany: Array<Record<string, unknown>> = [];
-const storedIds = new Set<string>();
-/** Rows that already hold an id, as `message.findMany` reads them. */
-let heldRows: Array<{ id: string; conversationId: string; role: string; content: string }> = [];
 let groupQueries = 0;
 let reused = false;
 let replayStatus = "pending";
 let mocksInstalled = false;
-/** Reservations whose transaction committed (the hook inside it did not throw). */
-const committedReservations: Array<Record<string, unknown>> = [];
-/**
- * Another writer takes an id while this request runs: visible from the Nth
- * `message.findMany` on, or only when the insert hits it.
- */
-let takenLater: { row: { id: string; conversationId: string; role: string; content: string }; fromRead: number } | null = null;
-let takenAtInsert: string | null = null;
-let messageReads = 0;
-const uniqueViolation = () =>
-  Object.assign(new Error("duplicate key"), { name: "PrismaClientKnownRequestError", code: "P2002" });
-
-/** Runs `fn` as one transaction: a throw rolls back the rows it wrote. */
-const asTransaction = async <T>(fn: () => Promise<T>): Promise<T> => {
-  const rows = createdMany.length;
-  const ids = new Set(storedIds);
-  try {
-    return await fn();
-  } catch (error) {
-    createdMany.length = rows;
-    storedIds.clear();
-    for (const id of ids) storedIds.add(id);
-    throw error;
-  }
-};
 
 const prismaMock = {
-  $transaction: async (fn: (tx: unknown) => Promise<unknown>) => asTransaction(() => fn(prismaMock)),
   conversation: {
     findFirst: async () => conversation,
     update: async () => ({}),
@@ -67,24 +36,9 @@ const prismaMock = {
   message: {
     findFirst: async () => source,
     findUnique: async () => existing,
-    // What already holds those ids: rows a test placed, and rows a sibling
-    // panel's request wrote.
-    findMany: async ({ where }: { where: { id: { in: string[] } } }) => {
-      messageReads += 1;
-      const late = takenLater && messageReads >= takenLater.fromRead ? [takenLater.row] : [];
-      return [...heldRows, ...createdMany as typeof heldRows, ...late].filter((row) => where.id.in.includes(row.id));
-    },
     create: async ({ data }: { data: Record<string, unknown> }) => {
       created.push(data);
       return data;
-    },
-    createMany: async ({ data, skipDuplicates }: { data: Array<Record<string, unknown>>; skipDuplicates?: boolean }) => {
-      // Nothing is skipped: a taken id fails the insert, and its transaction.
-      assert.equal(skipDuplicates, undefined);
-      if (data.some((row) => storedIds.has(String(row.id)) || row.id === takenAtInsert)) throw uniqueViolation();
-      for (const row of data) storedIds.add(String(row.id));
-      createdMany.push(...data);
-      return { count: data.length };
     },
   },
   imageGenerationGroup: {
@@ -112,13 +66,6 @@ async function load() {
       namedExports: {
         requestImageGeneration: async (input: Record<string, unknown>) => {
           requests.push(input);
-          // A new group runs the caller's hook inside its reservation
-          // transaction; a throw there rolls the reservation back with it.
-          if (!reused) {
-            const onReserved = input.onReserved as ((tx: unknown, conversationId: unknown) => Promise<unknown>) | undefined;
-            await asTransaction(async () => onReserved?.(prismaMock, input.conversationId));
-          }
-          committedReservations.push(input);
           return {
             generationId: "gen-1",
             groupId: "group-1",
@@ -126,10 +73,9 @@ async function load() {
             status: "pending",
             reservedCredits: 15,
             reused,
-            // One target per requested model, as the real group has.
-            targets: ((input.modelIds as string[] | undefined) ?? ["gpt-image-2"]).map((modelId, index) => (
-              { targetId: `t${index + 1}`, modelId, provider: "openai", generationId: `gen-${index + 1}`, status: reused ? replayStatus : "pending", reservedCredits: 15 }
-            )),
+            targets: [
+              { targetId: "t1", modelId: "gpt-image-2", provider: "openai", generationId: "gen-1", status: reused ? replayStatus : "pending", reservedCredits: 15 },
+            ],
           };
         },
       },
@@ -149,13 +95,6 @@ const reset = () => {
   groups = [];
   requests.length = 0;
   created.length = 0;
-  createdMany.length = 0;
-  storedIds.clear();
-  heldRows = [];
-  committedReservations.length = 0;
-  takenLater = null;
-  takenAtInsert = null;
-  messageReads = 0;
   groupQueries = 0;
   reused = false;
   replayStatus = "pending";
@@ -375,238 +314,4 @@ test("an edit keeps the photo's shape only where every model sells that size", a
     edit: true,
   });
   assert.equal(requests[0].size, "1024x1024");
-});
-
-/*
-  A Review image turn: the first panel request reserves the whole group, so
-  it writes every panel's answer too. Before, each panel wrote only its own,
-  and a panel whose request was refused (the image rate limit) or never sent
-  left its image charged and absent from the conversation.
-*/
-const REVIEW_GROUP = "6f1c1d3e-2222-4a2b-9c3d-000000000002";
-const reviewPanel = (index: number, overrides: Record<string, unknown> = {}) => ({
-  ...input,
-  assistantMessageId: `${REVIEW_GROUP}_${index}`,
-  modelId: index === 0 ? "google-chat" : "openai-chat",
-  imageModelIds: [index === 0 ? "fal-ai/nano-banana-2" : "gpt-image-2"],
-  imageGroupModelIds: ["fal-ai/nano-banana-2", "gpt-image-2"],
-  imageGroupPanelModelIds: ["google-chat", "openai-chat"],
-  ...overrides,
-});
-
-test("the panel request that reserves a Review group writes every panel's answer, so every paid image is shown", async () => {
-  const { turn, read } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  const result = await turn.startChatImageTurn(reviewPanel(1));
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].idempotencyKey, REVIEW_GROUP);
-  assert.deepEqual(requests[0].modelIds, ["fal-ai/nano-banana-2", "gpt-image-2"]);
-  assert.deepEqual(
-    createdMany.map((row) => [row.id, row.modelId, row.role]),
-    [[`${REVIEW_GROUP}_0`, "google-chat", "assistant"], [`${REVIEW_GROUP}_1`, "openai-chat", "assistant"]]
-  );
-  assert.equal(created.length, 0, "one statement writes them all");
-  assert.equal(result.content, createdMany[1]!.content);
-  assert.deepEqual(result.pendingGenerationIds, ["gen-1", "gen-2"]);
-
-  // The other panel's request never arrives. Both images are still in the
-  // transcript, each beside its own panel's answer.
-  groups = [{ id: "group-1", groupIdempotencyKey: REVIEW_GROUP,
-    targets: [{ modelId: "fal-ai/nano-banana-2" }, { modelId: "gpt-image-2" }] }];
-  const transcript = await read.attachChatImageTurns("user-1", "conv-1",
-    createdMany.map((row) => ({ id: String(row.id), role: "assistant", content: String(row.content) })));
-  assert.deepEqual(
-    transcript.map((message: { id: string; imageTurn?: { groupId: string; modelIds: string[] } }) =>
-      [message.id, message.imageTurn?.groupId, message.imageTurn?.modelIds]),
-    [[`${REVIEW_GROUP}_0`, "group-1", ["fal-ai/nano-banana-2"]], [`${REVIEW_GROUP}_1`, "group-1", ["gpt-image-2"]]]
-  );
-
-  // The late panel request finds its row and writes nothing new.
-  existing = { conversationId: "conv-1", role: "assistant", content: String(createdMany[0]!.content) };
-  const before = createdMany.length;
-  await turn.startChatImageTurn(reviewPanel(0));
-  assert.equal(createdMany.length, before);
-  assert.equal(created.length, 0);
-});
-
-test("a panel list that disagrees with the request is refused before anything is reserved", async () => {
-  const { turn } = await load();
-  for (const overrides of [
-    // This request's own panel is somebody else's.
-    { imageGroupPanelModelIds: ["openai-chat", "google-chat"] },
-    { imageGroupPanelModelIds: ["openai-chat", "openai-chat"] },
-    { imageGroupPanelModelIds: ["openai-chat"] },
-    { imageGroupModelIds: ["gpt-image-2", "gpt-image-2"] },
-    // A panel list with no group to belong to.
-    { imageGroupModelIds: undefined },
-  ]) {
-    reset();
-    conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-    await rejects(() => turn.startChatImageTurn(reviewPanel(1, overrides)), "IMAGE_MODEL_SELECTION_INVALID");
-    assert.equal(requests.length, 0, JSON.stringify(overrides));
-    assert.equal(createdMany.length, 0);
-  }
-});
-
-test("an older client that sends no panel list keeps one answer per request", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  await turn.startChatImageTurn(reviewPanel(1, { imageGroupPanelModelIds: undefined }));
-  assert.equal(createdMany.length, 0);
-  assert.deepEqual(created.map((row) => [row.id, row.modelId]), [[`${REVIEW_GROUP}_1`, "openai-chat"]]);
-});
-
-/*
-  Why a later panel needs no rate-limit exemption (B3 review, fourth pass):
-  the other panel's own request is refused by the image allowance (429) and
-  never reaches startChatImageTurn -- and its image is still in the
-  conversation, because the reserving request wrote its answer.
-*/
-test("a later panel refused by the rate limit still has its image answer, written by the reserving request", async () => {
-  const { turn, read } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  await turn.startChatImageTurn(reviewPanel(0));
-  // Panel 1's request: refused at the route, so nothing more happens here.
-  assert.equal(requests.length, 1);
-  groups = [{ id: "group-1", groupIdempotencyKey: REVIEW_GROUP,
-    targets: [{ modelId: "fal-ai/nano-banana-2" }, { modelId: "gpt-image-2" }] }];
-  const [panelOne] = (await read.attachChatImageTurns("user-1", "conv-1", [{
-    id: `${REVIEW_GROUP}_1`,
-    role: "assistant",
-    content: String(createdMany.find((row) => row.id === `${REVIEW_GROUP}_1`)?.content),
-  }])) as Array<{ id: string; imageTurn?: { modelIds: string[] } }>;
-  assert.equal(createdMany.find((row) => row.id === `${REVIEW_GROUP}_1`)?.modelId, "openai-chat");
-  assert.deepEqual(panelOne.imageTurn?.modelIds, ["gpt-image-2"]);
-});
-
-test("two replays of an older client's group that race to write the same answers both succeed", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  reused = true;
-  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
-  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
-  storedIds.add(`${REVIEW_GROUP}_1`);
-  // The other replay inserts panel 0's answer between this one's read and its
-  // insert: the insert fails, and the read after it finds this
-  // conversation's image answer there.
-  takenAtInsert = `${REVIEW_GROUP}_0`;
-  takenLater = { row: { id: `${REVIEW_GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }, fromRead: 3 };
-  await turn.startChatImageTurn(reviewPanel(1));
-  assert.equal(createdMany.length, 0, "this replay wrote nothing; the other one did");
-
-  // A foreign row in the same place is still a refusal.
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  reused = true;
-  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
-  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
-  storedIds.add(`${REVIEW_GROUP}_1`);
-  takenAtInsert = `${REVIEW_GROUP}_0`;
-  takenLater = { row: { id: `${REVIEW_GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "a text answer" }, fromRead: 3 };
-  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
-});
-
-/*
-  Review finding (B3, 2026-11-28): only this request's own panel id was
-  checked for a collision, and the all-panels write skips a row that exists.
-  A sibling panel id already held by a text answer, a user message or another
-  conversation's row meant the group was reserved and that panel's image never
-  got an answer. Every panel id is now checked before anything is reserved.
-*/
-test("a sibling panel id held by anything but this conversation's image answer is refused before reserving", async () => {
-  const { turn } = await load();
-  const sibling = `${REVIEW_GROUP}_0`;
-  for (const [label, row] of [
-    ["a text answer here", { id: sibling, conversationId: "conv-1", role: "assistant", content: "a text answer" }],
-    ["a user message here", { id: sibling, conversationId: "conv-1", role: "user", content: "[Image generated] spoof" }],
-    ["another conversation's image answer", { id: sibling, conversationId: "conv-other", role: "assistant", content: "[Image generated] elsewhere" }],
-  ] as const) {
-    reset();
-    conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-    heldRows = [{ ...row }];
-    await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
-    assert.equal(requests.length, 0, `${label}: nothing reserved`);
-    assert.equal(createdMany.length, 0, `${label}: nothing written`);
-  }
-});
-
-test("a sibling panel id that is already this conversation's image answer is a replay, not a conflict", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  const sibling = `${REVIEW_GROUP}_0`;
-  heldRows = [{ id: sibling, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
-  storedIds.add(sibling);
-  await turn.startChatImageTurn(reviewPanel(1));
-  assert.equal(requests.length, 1);
-  // Only the free id is written; the sibling's row stays as it was.
-  assert.deepEqual(createdMany.map((row) => row.id), [`${REVIEW_GROUP}_1`]);
-});
-
-/*
-  Review finding (B3, 2026-11-28, second pass): the panel ids were checked,
-  the group reserved, and the answers inserted with `skipDuplicates`, as three
-  steps. An id another writer took after the check was skipped silently, and
-  the group was reserved with no answer for that panel. The answers are now
-  written inside the reservation's own transaction, without skipping, so a
-  taken id rolls the reservation back with them.
-*/
-test("the panel answers are written inside the reservation, and a group never commits without them", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  await turn.startChatImageTurn(reviewPanel(1));
-  const request = requests[0] as { onReserved?: unknown };
-  assert.equal(typeof request.onReserved, "function", "the answers ride on the reservation transaction");
-  assert.equal(committedReservations.length, 1);
-  assert.deepEqual(createdMany.map((row) => row.id).sort(), [`${REVIEW_GROUP}_0`, `${REVIEW_GROUP}_1`]);
-});
-
-test("an id taken after the early check is found inside the reservation and rolls it back", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  // Free at the early check (read 1), held by a text answer by the time the
-  // reservation transaction reads (read 2).
-  takenLater = { row: { id: `${REVIEW_GROUP}_0`, conversationId: "conv-1", role: "assistant", content: "a text answer" }, fromRead: 2 };
-  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
-  assert.equal(committedReservations.length, 0, "nothing was reserved");
-  assert.equal(createdMany.length, 0, "no answer row survives");
-});
-
-test("an id taken between the reservation's read and its insert fails the insert and rolls it all back", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  takenAtInsert = `${REVIEW_GROUP}_0`;
-  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
-  assert.equal(committedReservations.length, 0);
-  assert.equal(createdMany.length, 0);
-});
-
-test("a replay of an existing group writes the answers it lacks, all or none, and reserves nothing", async () => {
-  const { turn } = await load();
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  reused = true;
-  // An older client's group: only its own panel's answer was ever written.
-  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
-  storedIds.add(`${REVIEW_GROUP}_1`);
-  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
-  await turn.startChatImageTurn(reviewPanel(1));
-  assert.deepEqual(createdMany.map((row) => row.id), [`${REVIEW_GROUP}_0`]);
-
-  reset();
-  conversation = { kind: "chat", productKey: "review", continuationBridge: null };
-  reused = true;
-  existing = { conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" };
-  heldRows = [{ id: `${REVIEW_GROUP}_1`, conversationId: "conv-1", role: "assistant", content: "[Image generated] earlier" }];
-  storedIds.add(`${REVIEW_GROUP}_1`);
-  takenAtInsert = `${REVIEW_GROUP}_0`;
-  await rejects(() => turn.startChatImageTurn(reviewPanel(1)), "ASSISTANT_MESSAGE_CONFLICT");
-  assert.equal(createdMany.length, 0);
 });

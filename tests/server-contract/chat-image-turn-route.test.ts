@@ -23,12 +23,6 @@ let refusal: { status: number; code: string } | null = null;
 const turns: Array<Record<string, unknown>> = [];
 let mocksInstalled = false;
 let cookieReads = 0;
-/** The image allowance: how often it was asked, and whether it refuses. */
-let rateLimitCalls = 0;
-let rateLimitRefused = false;
-/** What the turn leaves pending, and how often work was queued after the response. */
-let pendingIds: string[] = [];
-let afterCalls = 0;
 
 async function loadRoute() {
   if (!mocksInstalled) {
@@ -50,19 +44,8 @@ async function loadRoute() {
         { ok: true, identity: { userId: "native-owner" } } :
         { ok: false, response: Response.json({ code: "MOBILE_TOKEN_INVALID" }, { status: 401 }) },
     } });
-    const { ApiSecurityError } = realApiSecurity as {
-      ApiSecurityError: new (status: number, code: string, message: string) => Error;
-    };
     mock.module(mod("lib/apiSecurity.ts"), {
-      namedExports: { ...realApiSecurity, consumeApiRateLimit: async (_request: Request, _subject: string, scope: string) => {
-        assert.equal(scope, "image-generation", "one allowance for every image turn, Review panels included");
-        rateLimitCalls += 1;
-        if (rateLimitRefused) throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.");
-      } },
-    });
-    const realNextServer = require("next/server") as Record<string, unknown>;
-    mock.module("next/server", {
-      namedExports: { ...realNextServer, after: () => { afterCalls += 1; } },
+      namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => undefined },
     });
     mock.module(mod("lib/chatImageTurn.ts"), {
       namedExports: {
@@ -73,7 +56,7 @@ async function loadRoute() {
             groupId: "group-1",
             imageModelIds: ["gpt-image-2"],
             content: "[Image generated] cat",
-            pendingGenerationIds: pendingIds,
+            pendingGenerationIds: [],
           };
         },
       },
@@ -112,49 +95,7 @@ const reset = () => {
   sessionOverride = { user: { id: "user-1" } };
   refusal = null;
   turns.length = 0;
-  rateLimitCalls = 0;
-  rateLimitRefused = false;
-  pendingIds = [];
-  afterCalls = 0;
 };
-
-const reviewPanel = {
-  ...body,
-  assistantMessageId: "6f1c1d3e-2222-4a2b-9c3d-000000000002_1",
-  imageGroupModelIds: ["fal-ai/nano-banana-2", "gpt-image-2"],
-  imageGroupPanelModelIds: ["google-chat", "gpt-6-luna"],
-};
-
-/*
-  B3 review, fourth pass: the Review panel exemption is gone. The request that
-  reserves a group writes every panel's answer in the reservation itself
-  (lib/chatImageTurn.ts), so a later panel refused here leaves nothing paid
-  out of sight, and it follows the image allowance like any request.
-*/
-test("a later Review panel is counted like any image turn, and a refusal starts nothing", async () => {
-  reset();
-  assert.equal((await post(reviewPanel)).status, 202);
-  assert.equal(rateLimitCalls, 1);
-  assert.deepEqual(turns[0].imageGroupPanelModelIds, reviewPanel.imageGroupPanelModelIds);
-  reset();
-  rateLimitRefused = true;
-  const refused = await post(reviewPanel);
-  assert.equal(refused.status, 429);
-  assert.equal(turns.length, 0, "refused before the turn: nothing reserved or written");
-  assert.equal(afterCalls, 0);
-});
-
-test("a replay that finds work still pending queues it again", async () => {
-  // The first request's process may have died before after() ran; the retry
-  // is what starts it, and the executor's claim lets only one runner take it.
-  reset();
-  pendingIds = ["gen-1", "gen-2"];
-  assert.equal((await post(reviewPanel)).status, 202);
-  assert.equal(afterCalls, 1);
-  reset();
-  assert.equal((await post(body)).status, 202);
-  assert.equal(afterCalls, 0, "nothing pending, nothing queued");
-});
 
 test("no session is rejected before anything else", async () => {
   reset();

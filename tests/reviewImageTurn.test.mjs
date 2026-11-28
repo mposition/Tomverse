@@ -42,22 +42,11 @@ test("provider answers share one group and persist a catalogue-independent targe
       { provider: "anthropic", modelId: null },
       { provider: "google", modelId: "fal-ai/nano-banana-2" },
     ] });
-  // Every panel's chat model rides along in image-model order, so whichever
-  // panel's request reserves the shared group also writes every panel's
-  // answer: a paid image is never left without one (lib/chatImageTurn.ts).
-  const panelModelIds = ["google-chat", "openai-chat"];
   assert.deepEqual(plan.turns["openai-chat"].comparison,
-    { id: "shared-turn", index: 1, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"], panelModelIds });
+    { id: "shared-turn", index: 1, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"] });
   assert.deepEqual(plan.turns["google-chat"].comparison,
-    { id: "shared-turn", index: 0, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"], panelModelIds });
+    { id: "shared-turn", index: 0, modelIds: ["fal-ai/nano-banana-2", "gpt-image-2"] });
   assert.equal(plan.turns["claude-chat"], null);
-});
-
-test("a plan without a comparison id carries no panel list", () => {
-  const plan = reviewImageTurnPlan({ models, panels: models.map(m => m.id), preset: "standard", choices: [
-    { provider: "openai", modelId: "gpt-image-2" },
-  ] });
-  assert.equal(plan.turns["openai-chat"].comparison, undefined);
 });
 
 // --- active image catalogue ------------------------------------------------

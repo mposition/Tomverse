@@ -2164,11 +2164,6 @@ function ChatAppComponent({
                 modelId,
                 imageModelIds: request.modelIds,
                 ...(request.comparison ? { imageGroupModelIds: request.comparison.modelIds } : {}),
-                // Every panel's chat model, so the first request to reserve
-                // the group also writes every panel's answer.
-                ...(request.comparison?.panelModelIds
-                  ? { imageGroupPanelModelIds: request.comparison.panelModelIds }
-                  : {}),
                 preset: request.preset,
                 ...(request.prompt ? { prompt: request.prompt } : {}),
                 // The photo is the one saved with the question; this only

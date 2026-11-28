@@ -33,19 +33,6 @@ export function reviewImageTurnPlan(input: {
       ...(input.comparisonId ? { comparison: { id: input.comparisonId, index: imageModels.indexOf(choice.modelId), modelIds: imageModels } } : {}),
     } : null;
   }
-  // Every panel's chat model, in the group's image-model order. Whichever
-  // panel's request reaches the server first reserves the whole group and,
-  // with this, writes every panel's answer too: an image that was paid for is
-  // in the conversation even if another panel's own request never lands.
-  if (input.comparisonId) {
-    const panelModelIds = imageModels.map(imageModelId =>
-      Object.keys(turns).find(panelId => turns[panelId]?.modelIds[0] === imageModelId) ?? "");
-    if (panelModelIds.every(Boolean)) {
-      for (const turn of Object.values(turns)) {
-        if (turn?.comparison) turn.comparison = { ...turn.comparison, panelModelIds };
-      }
-    }
-  }
   return { panelIds: Object.keys(turns), turns };
 }
 
