@@ -118,15 +118,22 @@ pre, code { font-family: var(--font-code); }
 .projects li button:hover, .projects li button[aria-current] { background: var(--raised); }
 .projects li button[aria-current] { border-left-color: var(--action); }
 
-.desktop-plugins { width: 100%; max-width: 780px; margin: 32px auto; }
+.desktop-plugins { width: 100%; max-width: 1160px; margin: 32px auto; }
 .desktop-plugins-heading { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .desktop-plugins-heading { justify-content: space-between; }
 .desktop-plugins-heading h2, .desktop-plugin-list p { margin: 0; }
 .desktop-plugins-heading p, .desktop-plugin-list p { color: var(--muted); }
-.desktop-plugin-list { margin: 0; padding: 0; list-style: none; }
-.desktop-plugin-list li { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.desktop-plugin-logo { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 9px; background: var(--raised); }
-.desktop-plugin-logo img { object-fit: contain; }
+/* Cards in as many columns as the window fits, so a wide window shows several platforms a row. */
+.desktop-plugin-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; margin: 10px 0 0; padding: 0; list-style: none; }
+.desktop-plugin-list li { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
+.desktop-plugin-list li > button { flex: none; }
+.desktop-plugin-list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A description or address shows two lines; the whole text stays in the card for search and the reader. */
+.desktop-plugin-list .desktop-connector-help { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.desktop-plugin-logo { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--raised); }
+/* Brand logos are drawn for a light ground; a dark one (GitHub) would vanish on the dark tile. */
+.desktop-plugin-logo:has(img) { background: #fff; }
+.desktop-plugin-logo img { width: 24px; height: 24px; object-fit: contain; }
 .desktop-connector-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .desktop-connector-summary { flex: 1 1 auto; min-width: 0; }
 .desktop-connector-summary p { margin: 2px 0 0; }
