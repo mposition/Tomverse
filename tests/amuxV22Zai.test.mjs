@@ -5,15 +5,18 @@
 // Nothing here calls a model.
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { constants } from "node:fs";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { amuxCliPricedModelId, amuxCliUsageReceiptSchema, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
 import { inspectClaudeCliResultUsage } from "../lib/amux/cliUsageObservationCore.ts";
 import { amuxV22ChannelPreflight } from "../lib/amux/v22ChannelRun.mjs";
-import { AMUX_V22_ZAI_BASE_URL, amuxV22CliEnv, amuxV22ZaiEnv, parseAmuxV22OneShotRequest,
-  readAmuxV22ZaiCodingPlanKey } from "../lib/amux/v22OneShotSidecar.mjs";
+import { AMUX_V22_ZAI_BASE_URL, amuxV22ClaudeArgs, amuxV22CliEnv, amuxV22ZaiDisallowedTools,
+  amuxV22ZaiEnv, parseAmuxV22OneShotRequest, readAmuxV22ZaiCodingPlanKey, runAmuxV22OneShot } from
+  "../lib/amux/v22OneShotSidecar.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
   "../lib/amux/v22TaskExecutionCore.ts";
 import { AMUX_V22_PROVIDERS, amuxV22OneShotRouteSupported, amuxV22ProviderForClass,
@@ -126,4 +129,74 @@ test("a Z.ai receipt is Claude Code's counts under Z.ai's name, settled as the s
     { inputTokensIncludeCacheRead: true }, { cliFailure: "turn_limit", status: "failed" }])
     assert.equal(amuxCliUsageReceiptSchema.safeParse({ ...receipt, ...change }).success, false,
       JSON.stringify(change));
+});
+
+test("a Z.ai run's file tools may not read the key, the profile, the run home or /proc", () => {
+  assert.deepEqual(amuxV22ZaiDisallowedTools(config), ["--disallowedTools", [
+    `Read(/${config.claudeConfigDir}/**)`, `Edit(/${config.claudeConfigDir}/**)`,
+    "Read(//proc/**)", "Edit(//proc/**)",
+    `Read(/${config.homePath}/**)`, `Edit(/${config.homePath}/**)`].join(",")]);
+  // A checkout inside the run home keeps its own reads; the home is then not denied.
+  const inside = { ...config, worktreePath: `${config.homePath}/checkout` };
+  assert.ok(!amuxV22ZaiDisallowedTools(inside)[1].includes(`Read(/${config.homePath}/**)`));
+  // A checkout inside the profile, or an unsafe path, cannot be run at all.
+  for (const bad of [{ worktreePath: `${config.claudeConfigDir}/w` }, { homePath: "/a b" },
+    { claudeConfigDir: "relative" }, { worktreePath: "/proc/1" }])
+    assert.throws(() => amuxV22ZaiDisallowedTools({ ...config, ...bad }));
+});
+
+function fakeSpawn(output) {
+  const calls = [];
+  const spawnChild = (binary, args, spawnOptions) => {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    calls.push({ binary, args, spawnOptions });
+    child.kill = () => {};
+    queueMicrotask(() => { child.emit("spawn"); child.stdout.end(output); child.emit("close", 0, null); });
+    return child;
+  };
+  return { spawnChild, calls };
+}
+
+test("a Z.ai run is Claude Code with its deny rules, its jail and Z.ai's environment", async () => {
+  const request = { version: 1, attemptId: ATTEMPT, worker: "zai-impl", role: "investigate",
+    modelId: MODEL, budgetMicrousd: 1_000_000, prompt: "Look at the parser." };
+  const result = { type: "result", subtype: "success", is_error: false, result: "It drops a line.",
+    num_turns: 1, usage: { input_tokens: 50, output_tokens: 10, cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0 },
+    modelUsage: { [MODEL]: { inputTokens: 50, outputTokens: 10, cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0 } } };
+  const fake = fakeSpawn(`${JSON.stringify(result)}
+`);
+  const keys = [];
+  const options = { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+    ensureDependencies: async () => ({ ok: true, installed: false }),
+    createShellJail: async () => ({ binPath: "/jail/bin", prefixPath: "/jail/prefix",
+      cleanup: async () => {} }),
+    readZaiKey: async (value) => { keys.push(value.claudeConfigDir); return KEY; } };
+  const outcome = await runAmuxV22OneShot(request, { ...config, binaryPath: "/opt/claude/bin/claude" },
+    options);
+  assert.deepEqual(keys, [config.claudeConfigDir]);
+  const { binary, args, spawnOptions } = fake.calls[0];
+  assert.equal(binary, "/opt/claude/bin/claude");
+  assert.deepEqual(args, [...amuxV22ClaudeArgs(request, { flow: true }),
+    ...amuxV22ZaiDisallowedTools(config)]);
+  assert.ok(!args.includes(KEY));
+  assert.equal(spawnOptions.env.ANTHROPIC_AUTH_TOKEN, KEY);
+  assert.equal(spawnOptions.env.ANTHROPIC_BASE_URL, AMUX_V22_ZAI_BASE_URL);
+  assert.equal(spawnOptions.env.CLAUDE_CODE_SHELL_PREFIX, "/jail/prefix");
+  assert.equal(outcome.kind, "succeeded");
+  assert.equal(outcome.usageReceipt.cli, "zai");
+  assert.equal(outcome.usageReceipt.actualModelId, null);
+  // No key, no run.
+  const none = fakeSpawn("");
+  const refused = await runAmuxV22OneShot(request, { ...config, binaryPath: "/opt/claude/bin/claude" },
+    { ...options, spawnChild: none.spawnChild, readZaiKey: async () => null });
+  assert.deepEqual([refused.kind, refused.cliStarted, refused.failure],
+    ["failed", false, "channel_auth_refused"]);
+  assert.equal(none.calls.length, 0);
+  // A Claude worker's arguments carry no Z.ai rule.
+  assert.ok(!amuxV22ClaudeArgs({ ...request, modelId: "claude-opus-5-5" }, { flow: true })
+    .includes("--disallowedTools"));
 });

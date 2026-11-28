@@ -199,8 +199,11 @@ so it implements as a Claude worker does. Its environment adds:
 The key is not staged from the operator's home. The operator puts it in
 `<worker>/cli/zai/coding-plan-key`, owned by root and group-readable by the
 worker. The sidecar refuses a link, any other owner or mode, and a malformed
-key. As with a Claude worker's OAuth token, the CLI itself can read that file,
-but the jailed shell never gets the key.
+key. The run passes Claude Code deny rules (`--disallowedTools`) for `Read` and
+`Edit` on the worker's CLI directory (the key's), its home (unless the
+checkout is inside it) and `/proc` (the CLI's environment holds the key);
+Claude Code applies them before a file tool runs, and the jailed shell never
+gets the key.
 
 A checkout that contains `.claude/settings.json` or
 `.claude/settings.local.json` is refused, because either file could point the
