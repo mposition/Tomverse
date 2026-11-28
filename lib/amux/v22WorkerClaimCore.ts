@@ -72,6 +72,11 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
   // it may write (v22ChannelRun.mjs).
   kimi: Object.freeze({ providerClass: "kimi", cli: "kimi",
     model: ANY_MODEL, implement: false }),
+  // The same request: Qwen Code CLI takes the read roles only. Its write
+  // tools' workspace boundary is not documented, and once a shell or a write
+  // is allowed in headless mode no permission check is left (v22ChannelRun.mjs).
+  qwen: Object.freeze({ providerClass: "qwen", cli: "qwen",
+    model: ANY_MODEL, implement: false }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
 export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {

@@ -150,6 +150,25 @@ run without exactly one readable session has unknown usage and does not
 settle. No quota reading exists for Kimi yet (`/usage` is interactive only),
 so the office card shows its row without a number.
 
+Qwen (`qwen:<worker>`, from `~/.qwen/settings.json` to
+`<worker>/cli/qwen/coding-plan-key`, owner request 2026-11-28) copies only
+`env.BAILIAN_CODING_PLAN_API_KEY`, the Alibaba Cloud Coding Plan key that
+`/auth` stores there (Qwen OAuth's free tier ended 2026-04-15). The key has
+no expiry and reaches the CLI only as `OPENAI_API_KEY` in its environment,
+with `OPENAI_BASE_URL` the plan's international endpoint
+(`https://coding-intl.dashscope.aliyuncs.com/v1`; the China endpoint is out
+of scope) and `--auth-type openai`. The Qwen sidecar is off unless its unit
+sets `TOMVERSE_AMUX_V22_QWEN=enabled`, and takes read roles only: a read role
+runs `--approval-mode plan --safe-mode --extensions none --core-tools
+read_file glob grep_search` with the prompt on stdin, `QWEN_HOME` in the run
+home and `general.enableAutoUpdate: false`. Qwen's read tools resolve paths
+with realpath and ask for one outside the workspace, and a headless run
+refuses every ask. The parser refuses an `init` not in plan mode, any other
+tool, a subagent's message and any path outside the checkout. A checkout with
+`.qwen/` is refused. Usage is the stream's `result.usage`; its input
+includes cache reads, so cache reads are priced as input (Copilot's rule).
+Qwen has no headless quota or model-list command yet.
+
 The Antigravity sidecar runs agy (a single Go binary) from a root-owned copy
 under `/opt/tomverse-amux-v22/`, with `AGY_CLI_DISABLE_AUTO_UPDATE=true` (agy
 ignores `1`). Each run home holds a custom agent (`amux-v22-read` or

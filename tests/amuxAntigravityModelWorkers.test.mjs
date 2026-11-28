@@ -70,8 +70,9 @@ test("the quota card shows Antigravity per model, so a spent Argon week is not t
     ["antigravity", "Argon", { kind: "fresh", percent: 0 }],
     ["antigravity", "Hydrogen", { kind: "fresh", percent: 100 }],
     ["antigravity", "Opus", { kind: "fresh", percent: 99 }],
-    // Kimi (owner request 2026-11-28) reports no quota yet: one empty row.
+    // Kimi and Qwen (owner request 2026-11-28) report no quota yet: one empty row each.
     ["kimi", null, { kind: "none" }],
+    ["qwen", null, { kind: "none" }],
   ]);
   // A worker with no model is a row of its own, not folded into a model.
   const unnamed = agentOfficeChannelQuotaRows(["antigravity"], [

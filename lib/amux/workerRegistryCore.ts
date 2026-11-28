@@ -25,9 +25,12 @@
  * Pro sign-in), unverified with an implementation ceiling like Copilot.
  * Owner request 2026-11-28 added `kimi` (Moonshot's Kimi Code CLI on the
  * owner's Kimi Code sign-in), unverified at implementation like Cursor; its
- * v22 runs take the read roles only (AMUX_V22_PROVIDERS).
+ * v22 runs take the read roles only (AMUX_V22_PROVIDERS). The same request
+ * added `qwen` (Alibaba's Qwen Code CLI on the owner's Coding Plan), read
+ * roles only as well.
  */
-export const AMUX_WORKER_PROVIDER_CLASSES = ["claude", "codex", "cursor", "copilot", "antigravity", "kimi"] as const;
+export const AMUX_WORKER_PROVIDER_CLASSES = ["claude", "codex", "cursor", "copilot", "antigravity", "kimi",
+  "qwen"] as const;
 export type AmuxWorkerProviderClass = (typeof AMUX_WORKER_PROVIDER_CLASSES)[number];
 
 /** Version 16's routing roles, lowest first: `chore < implementation < contract`. */
@@ -60,6 +63,7 @@ export const AMUX_WORKER_PROVIDER_CLASS_TABLE: Readonly<
   copilot: Object.freeze({ cli: "GitHub Copilot CLI", verified: false, maxRole: "implementation" }),
   antigravity: Object.freeze({ cli: "Antigravity CLI", verified: false, maxRole: "implementation" }),
   kimi: Object.freeze({ cli: "Kimi Code CLI", verified: false, maxRole: "implementation" }),
+  qwen: Object.freeze({ cli: "Qwen Code CLI", verified: false, maxRole: "implementation" }),
 });
 
 /**

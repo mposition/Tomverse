@@ -7,7 +7,8 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -18,8 +19,11 @@ import { amuxCliPricedModelId, amuxCliUsageReceiptSchema, makeAmuxCliUsageReceip
 import { readKimiConfigModels } from "../lib/amux/cliModelListReader.mjs";
 import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
   amuxV22ChannelPreflight, amuxV22ChannelStdin, amuxV22KimiAgent, amuxV22KimiConfig,
-  amuxV22KimiToolCallRefusal, amuxV22OutputShape, createAmuxV22ChannelRunHome,
-  parseAmuxV22ChannelOutput, readAmuxV22KimiSessionUsage } from "../lib/amux/v22ChannelRun.mjs";
+  amuxV22KimiHookCommand, amuxV22KimiToolCallRefusal, amuxV22OutputShape,
+  createAmuxV22ChannelRunHome, parseAmuxV22ChannelOutput, readAmuxV22KimiGuardDecisions,
+  readAmuxV22KimiSessionUsage } from "../lib/amux/v22ChannelRun.mjs";
+import { amuxV22KimiToolCallGuard, runAmuxV22KimiToolGuardHook } from
+  "../lib/amux/v22KimiToolGuard.mjs";
 import { parseAmuxV22OneShotRequest, runAmuxV22OneShot } from "../lib/amux/v22OneShotSidecar.mjs";
 import { v22ExecutionReceiptVerified, v22ExecutionSourceForProvider } from
   "../lib/amux/v22TaskExecutionCore.ts";
@@ -53,6 +57,8 @@ const assistant = (text, calls) => ({ role: "assistant",
 const toolResult = (id = "tc_1") => ({ role: "tool", tool_call_id: id, content: "file text" });
 const USAGE = { inputTokens: 1200, outputTokens: 300, cacheReadTokens: 800, cacheWriteTokens: 0,
   steps: 2 };
+const GUARD = { nodePath: "/usr/bin/node", guardPath: "/opt/tomverse/lib/amux/v22KimiToolGuard.mjs" };
+const HOOK = `'/usr/bin/node' '/opt/tomverse/lib/amux/v22KimiToolGuard.mjs' '${WORKTREE}' '${RUN_HOME}/.amux-v22/kimi-guard.log'`;
 
 test("Kimi is a sixth worker class that takes read roles only", () => {
   assert.ok(AMUX_WORKER_PROVIDER_CLASSES.includes("kimi"));
@@ -81,30 +87,38 @@ test("Kimi is a sixth worker class that takes read roles only", () => {
 test("a read role runs --print with its agent file, an empty skills directory and its own config", () => {
   for (const role of ["investigate", "design", "review"]) {
     const args = amuxV22ChannelArgs("kimi", { role, modelId: MODEL }, WORKTREE,
-      { runHomePath: RUN_HOME });
+      { runHomePath: RUN_HOME, kimiGuard: GUARD });
     assert.deepEqual(args.slice(0, 11), ["--print", "--input-format", "text",
       "--output-format", "stream-json", "--work-dir", WORKTREE,
       "--agent-file", `${RUN_HOME}/.amux-v22/kimi-read.yaml`,
       "--skills-dir", `${RUN_HOME}/.amux-v22/skills`]);
     assert.equal(args[11], "--config");
-    assert.deepEqual(JSON.parse(args[12]), amuxV22KimiConfig(MODEL));
+    assert.deepEqual(JSON.parse(args[12]), amuxV22KimiConfig(MODEL, { hookCommand: HOOK }));
     assert.equal(args.length, 13);
   }
   // The prompt travels on stdin as it is, never on the command line.
   assert.equal(amuxV22ChannelStdin("kimi", "Look at the parser."), "Look at the parser.");
   assert.throws(() => amuxV22ChannelArgs("kimi", { role: "implement", modelId: MODEL }, WORKTREE,
-    { runHomePath: RUN_HOME }), /read roles only/);
+    { runHomePath: RUN_HOME, kimiGuard: GUARD }), /read roles only/);
   for (const runHomePath of [null, "relative/home", "/var/lib/../etc", "/home/a b"])
     assert.throws(() => amuxV22ChannelArgs("kimi", { role: "review", modelId: MODEL }, WORKTREE,
-      { runHomePath }), /unsafe path/);
-  assert.throws(() => amuxV22KimiConfig("kimi:for-coding"), /unsafe model/);
-  assert.deepEqual(amuxV22KimiConfig(MODEL), {
+      { runHomePath, kimiGuard: GUARD }), /unsafe path/);
+  // A hook part that a shell would read as more than one word is refused.
+  for (const guardPath of ["/opt/a b.mjs", "/opt/x';rm -rf /;'.mjs", "relative.mjs"])
+    assert.throws(() => amuxV22ChannelArgs("kimi", { role: "review", modelId: MODEL }, WORKTREE,
+      { runHomePath: RUN_HOME, kimiGuard: { ...GUARD, guardPath } }), /unsafe path/);
+  assert.equal(amuxV22KimiHookCommand({ ...GUARD, worktreePath: WORKTREE,
+    logPath: `${RUN_HOME}/.amux-v22/kimi-guard.log` }), HOOK);
+  assert.throws(() => amuxV22KimiConfig("kimi:for-coding", { hookCommand: HOOK }), /unsafe model/);
+  // No configuration without the guard.
+  assert.throws(() => amuxV22KimiConfig(MODEL), /tool guard/);
+  assert.deepEqual(amuxV22KimiConfig(MODEL, { hookCommand: HOOK }), {
     default_model: "kimi-code/kimi-for-coding",
     providers: { "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1",
       api_key: "", oauth: { storage: "file", key: "oauth/kimi-code" } } },
     models: { "kimi-code/kimi-for-coding": { provider: "managed:kimi-code",
       model: "kimi-for-coding", max_context_size: 262_144 } },
-    hooks: [] });
+    hooks: [{ event: "PreToolUse", command: HOOK, timeout: 15 }] });
   // `tools` replaces the default agent's list: no Shell, no writer, no web, no subagent.
   assert.equal(amuxV22KimiAgent().text, [
     "version: 1", "agent:", "  extend: default", "  tools:",
@@ -136,8 +150,11 @@ test("the run home holds the access token without its refresh token, the agent f
     }
   };
   await walk(run.config.homePath);
-  assert.deepEqual(entries.sort(), [".amux-v22/", ".amux-v22/kimi-read.yaml", ".amux-v22/skills/",
+  assert.deepEqual(entries.sort(), [".amux-v22/", ".amux-v22/kimi-guard.log",
+    ".amux-v22/kimi-read.yaml", ".amux-v22/skills/",
     ".kimi/", ".kimi/credentials/", ".kimi/credentials/kimi-code.json"].sort());
+  // The guard log starts empty, so zero decisions is a reading, not a missing file.
+  assert.equal(await readAmuxV22KimiGuardDecisions(run.config.homePath), 0);
   const copy = JSON.parse(await readFile(join(run.config.homePath, ".kimi", "credentials",
     "kimi-code.json"), "utf8"));
   const source = JSON.parse(login());
@@ -156,7 +173,8 @@ test("the run home holds the access token without its refresh token, the agent f
   // An expired access token, or any other shape, makes no run home.
   for (const body of ["not json", login({ expires_at: NOW / 1000 - 1 }),
     login({ access_token: "short" }), login({ expires_at: "soon" }),
-    login({ token_type: "Bearer\nX" }), JSON.stringify({ token: JSON.parse(login()) })]) {
+    login({ token_type: "Bearer\nX" }), login({ expires_at: NOW / 1000 + 400 * 86_400 }),
+    JSON.stringify({ token: JSON.parse(login()) })]) {
     await writeFile(join(cli, "kimi", "kimi-code.json"), body);
     await assert.rejects(createAmuxV22ChannelRunHome("kimi", config, { now: NOW, role: "review" }),
       (error) => error instanceof AmuxV22ChannelAuthRefused);
@@ -194,7 +212,7 @@ test("the stream settles on its last assistant message, with the wire's tokens",
     toolResult("tc_2"), toolResult("tc_3"),
     assistant("The parser drops the last line."));
   const parsed = parseAmuxV22ChannelOutput("kimi", output, { exitCode: 0, role: "review",
-    worktreePath: WORKTREE, sessionUsage: USAGE });
+    worktreePath: WORKTREE, sessionUsage: USAGE, guardDecisions: 3 });
   assert.equal(parsed.valid, true);
   assert.equal(parsed.success, true);
   assert.equal(parsed.resultText, "The parser drops the last line.");
@@ -220,13 +238,18 @@ test("the stream settles on its last assistant message, with the wire's tokens",
     resultStored: true, expectedExecutionSource: "kimi_wire", budgetBound: false }), true);
   // Without the wire's tokens the run is a result, but its usage is unknown.
   const unread = parseAmuxV22ChannelOutput("kimi", output, { exitCode: 0, role: "review",
-    worktreePath: WORKTREE });
+    worktreePath: WORKTREE, guardDecisions: 3 });
   assert.equal(unread.success, true);
   assert.equal(unread.observation.observed, null);
   assert.equal(unread.observation.completeness, "unknown");
   // A nonzero exit is a failed result, not a success.
   assert.equal(parseAmuxV22ChannelOutput("kimi", output, { exitCode: 1, role: "review",
-    worktreePath: WORKTREE, sessionUsage: USAGE }).success, false);
+    worktreePath: WORKTREE, sessionUsage: USAGE, guardDecisions: 3 }).success, false);
+  // Kimi's hooks fail open: a call the guard did not decide makes no result.
+  for (const guardDecisions of [null, 0, 2, 4])
+    assert.deepEqual(parseAmuxV22ChannelOutput("kimi", output, { exitCode: 0, role: "review",
+      worktreePath: WORKTREE, sessionUsage: USAGE, guardDecisions }),
+    { valid: false, reason: "tool_guard_unconfirmed" }, String(guardDecisions));
   // A string content (--final-message-only's shape) is read as the answer.
   assert.equal(parseAmuxV22ChannelOutput("kimi", jsonl({ role: "assistant", content: "Done." }),
     { exitCode: 0, role: "investigate", worktreePath: WORKTREE }).resultText, "Done.");
@@ -237,7 +260,8 @@ test("the stream settles on its last assistant message, with the wire's tokens",
 test("a tool outside the read list, or a path that leaves the checkout, is never trusted", () => {
   const run = (...calls) => parseAmuxV22ChannelOutput("kimi",
     jsonl(assistant("Working.", calls), toolResult(), assistant("Done.")),
-    { exitCode: 0, role: "review", worktreePath: WORKTREE, sessionUsage: USAGE });
+    { exitCode: 0, role: "review", worktreePath: WORKTREE, sessionUsage: USAGE,
+      guardDecisions: calls.length });
   const reason = (...calls) => { const parsed = run(...calls); return parsed.valid ? null : parsed.reason; };
   for (const name of ["Shell", "WriteFile", "StrReplaceFile", "FetchURL", "SearchWeb", "Agent",
     "ReadMediaFile", "EnterPlanMode", "AskUserQuestion", "SetTodoList"])
@@ -266,7 +290,8 @@ test("a tool outside the read list, or a path that leaves the checkout, is never
 });
 
 test("a stream without its answer, a non-JSON line, a write role or an unseen role is not a result", () => {
-  const options = { exitCode: 0, role: "review", worktreePath: WORKTREE, sessionUsage: USAGE };
+  const options = { exitCode: 0, role: "review", worktreePath: WORKTREE, sessionUsage: USAGE,
+    guardDecisions: 1 };
   const reason = (output, extra = {}) => {
     const parsed = parseAmuxV22ChannelOutput("kimi", output, { ...options, ...extra });
     return parsed.valid ? null : parsed.reason;
@@ -291,6 +316,71 @@ test("a stream without its answer, a non-JSON line, a write role or an unseen ro
   assert.equal(reason(jsonl({ type: "notice", tool_call: {} }, assistant("Done."))), "event:notice");
 });
 
+test("the guard blocks before a tool runs: any other tool, an undocumented argument, a path that resolves outside", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "amux-v22-kimi-guard-")));
+  const checkout = join(root, "checkout");
+  const outside = join(root, "outside");
+  await mkdir(join(checkout, "lib"), { recursive: true });
+  await mkdir(outside);
+  await writeFile(join(checkout, "lib", "a.ts"), "x");
+  await writeFile(join(outside, "secret.json"), "{}");
+  let linked = true;
+  try {
+    await symlink(outside, join(checkout, "escape"), "junction");
+    await symlink(join(outside, "secret.json"), join(checkout, "secret-link"), "file");
+  } catch { linked = false; }
+  const guard = (name, args) => amuxV22KimiToolCallGuard(name, args, checkout);
+  assert.equal(guard("ReadFile", { path: "lib/a.ts" }), null);
+  // An absolute path is POSIX on the box; a Windows temp path is not one.
+  if (checkout.startsWith("/"))
+    assert.equal(guard("ReadFile", { path: join(checkout, "lib", "a.ts") }), null);
+  assert.equal(guard("Glob", { pattern: "**/*.ts" }), null);
+  assert.equal(guard("Grep", { pattern: "x", path: "lib", glob: "*.ts" }), null);
+  // A file that does not exist yet resolves through its existing parent.
+  assert.equal(guard("ReadFile", { path: "lib/new/missing.ts" }), null);
+  assert.equal(guard("Shell", { command: "cat /etc/passwd" }), "tool");
+  assert.equal(guard("ReadFile", { path: "lib/a.ts", follow: true }), "tool_arguments");
+  assert.equal(guard("ReadFile", undefined), "tool_arguments");
+  assert.equal(guard("Glob", { pattern: "../*" }), "tool_path");
+  if (linked) {
+    // Inside by its text, outside on disk: blocked before it runs.
+    assert.equal(guard("ReadFile", { path: "escape/secret.json" }), "tool_path");
+    assert.equal(guard("ReadFile", { path: "secret-link" }), "tool_path");
+    assert.equal(guard("Grep", { pattern: "x", path: "escape" }), "tool_path");
+    assert.equal(guard("Glob", { pattern: "*", directory: "escape" }), "tool_path");
+  }
+  // The hook: one decision line per call, exit 2 to block, and anything it
+  // cannot read is blocked too.
+  const log = join(root, "kimi-guard.log");
+  await writeFile(log, "");
+  const hook = (input) => runAmuxV22KimiToolGuardHook({ argv: [checkout, log],
+    stdin: () => typeof input === "string" ? input : JSON.stringify(input) });
+  assert.equal(hook({ hook_event_name: "PreToolUse", tool_name: "ReadFile",
+    tool_input: { path: "lib/a.ts" }, cwd: checkout }), 0);
+  assert.equal(hook({ hook_event_name: "PreToolUse", tool_name: "Shell",
+    tool_input: { command: "ls" } }), 2);
+  assert.equal(hook("{not json"), 2);
+  assert.equal(hook({ hook_event_name: "PostToolUse", tool_name: "ReadFile",
+    tool_input: { path: "lib/a.ts" } }), 2);
+  assert.equal(await readFile(log, "utf8"), "allow\nblock tool\nblock unreadable\nblock event\n");
+  assert.equal(await readAmuxV22KimiGuardDecisions(root), null);
+  // A log the hook cannot write blocks the call as well.
+  assert.equal(runAmuxV22KimiToolGuardHook({ argv: [checkout, join(root, "missing", "log")],
+    stdin: () => JSON.stringify({ tool_name: "ReadFile", tool_input: { path: "lib/a.ts" } }) }), 2);
+  assert.equal(realpathSync(checkout), checkout);
+});
+
+test("the guard log counts only the lines the guard writes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "amux-v22-kimi-log-"));
+  await mkdir(join(root, ".amux-v22"));
+  const write = (text) => writeFile(join(root, ".amux-v22", "kimi-guard.log"), text);
+  await write("allow\nblock tool_path\nallow\n");
+  assert.equal(await readAmuxV22KimiGuardDecisions(root), 3);
+  await write("allow\nsomething else\n");
+  assert.equal(await readAmuxV22KimiGuardDecisions(root), null);
+  assert.equal(await readAmuxV22KimiGuardDecisions(join(root, "missing")), null);
+});
+
 test("the wire's StatusUpdate token usage sums by step, and anything unclear is unknown", async () => {
   const root = await mkdtemp(join(tmpdir(), "amux-v22-kimi-wire-"));
   const session = join(root, ".kimi", "sessions", "0123abcd", "session-1");
@@ -300,22 +390,38 @@ test("the wire's StatusUpdate token usage sums by step, and anything unclear is 
     token_usage: { input_other: input, output, input_cache_read: cache, input_cache_creation: 0 },
     ...(id ? { message_id: id } : {}) });
   const write = (...lines) => writeFile(join(session, "wire.jsonl"), jsonl(...lines));
-  await write({ type: "metadata", protocol_version: "1.10" }, record("TurnBegin", { user_input: "x" }),
+  const head = [{ type: "metadata", protocol_version: "1.10" }, record("TurnBegin", { user_input: "x" })];
+  await write(...head,
     record("StepBegin", { n: 1 }), usage(500, 100, 300, "m1"), record("StatusUpdate", { context_usage: 0.2 }),
+    record("ContentPart", { type: "text", text: "a" }),
     record("StepBegin", { n: 2 }), usage(1, 1, 1, "m2"), usage(700, 200, 500, "m2"),
-    usage(10, 5, 0), record("TurnEnd", {}));
-  assert.deepEqual(await readAmuxV22KimiSessionUsage(root), { inputTokens: 1210, outputTokens: 305,
-    cacheReadTokens: 800, cacheWriteTokens: 0, steps: 3 });
-  // No usage at all, a malformed count, a broken line: unknown.
-  await write({ type: "metadata", protocol_version: "1.10" }, record("TurnEnd", {}));
-  assert.equal(await readAmuxV22KimiSessionUsage(root), null);
-  await write(record("StatusUpdate", { token_usage: { input_other: -1, output: 1,
-    input_cache_read: 0, input_cache_creation: 0 } }));
-  assert.equal(await readAmuxV22KimiSessionUsage(root), null);
+    record("TurnEnd", {}));
+  // A step's last report counts once.
+  assert.deepEqual(await readAmuxV22KimiSessionUsage(root), { inputTokens: 1200, outputTokens: 300,
+    cacheReadTokens: 800, cacheWriteTokens: 0, steps: 2 });
+  // A step without its usage, a turn that did not end, a retried, interrupted
+  // or compacting step, a second turn, usage before any step: unknown.
+  for (const lines of [
+    [...head, record("StepBegin", { n: 1 }), usage(5, 5, 0), record("StepBegin", { n: 2 }), record("TurnEnd", {})],
+    [...head, record("StepBegin", { n: 1 }), usage(5, 5, 0)],
+    [...head, record("StepBegin", { n: 1 }), record("StepRetry", {}), usage(5, 5, 0), record("TurnEnd", {})],
+    [...head, record("StepBegin", { n: 1 }), usage(5, 5, 0), record("StepInterrupted", {}), record("TurnEnd", {})],
+    [...head, record("CompactionBegin", {}), record("StepBegin", { n: 1 }), usage(5, 5, 0), record("TurnEnd", {})],
+    [...head, record("StepBegin", { n: 1 }), usage(5, 5, 0), record("TurnEnd", {}),
+      record("TurnBegin", { user_input: "y" }), record("StepBegin", { n: 1 }), usage(5, 5, 0), record("TurnEnd", {})],
+    [...head, usage(5, 5, 0), record("StepBegin", { n: 1 }), usage(5, 5, 0), record("TurnEnd", {})],
+    [...head, record("TurnEnd", {})],
+    [...head, record("StepBegin", { n: 1 }), record("StatusUpdate", { token_usage: { input_other: -1, output: 1,
+      input_cache_read: 0, input_cache_creation: 0 } }), record("TurnEnd", {})],
+    [...head, { timestamp: 1, message: "StepBegin" }, record("TurnEnd", {})],
+  ]) {
+    await write(...lines);
+    assert.equal(await readAmuxV22KimiSessionUsage(root), null, JSON.stringify(lines.slice(2)));
+  }
   await writeFile(join(session, "wire.jsonl"), "{not json\n");
   assert.equal(await readAmuxV22KimiSessionUsage(root), null);
   // Two sessions in one run home cannot be told apart: unknown.
-  await write(usage(5, 5, 0));
+  await write(...head, record("StepBegin", { n: 1 }), usage(5, 5, 0), record("TurnEnd", {}));
   await mkdir(join(root, ".kimi", "sessions", "0123abcd", "session-2"));
   await writeFile(join(root, ".kimi", "sessions", "0123abcd", "session-2", "wire.jsonl"), jsonl(usage(5, 5, 0)));
   assert.equal(await readAmuxV22KimiSessionUsage(root), null);
@@ -403,12 +509,15 @@ test("a Kimi review run reads its prompt from stdin and its tokens from the run 
   const outcome = await runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
     ensureDependencies: async () => ({ ok: true, installed: false }),
+    kimiGuard: GUARD,
     readKimiSessionUsage: async (home) => { read.push(home); return USAGE; },
+    readKimiGuardDecisions: async (home) => { read.push(home); return 1; },
     createRunHome: async (_provider, value) => ({
       config: { ...value, homePath: RUN_HOME, claudeConfigDir: `${RUN_HOME}/.config` },
       copilotToken: null, cleanup: async () => {} }) });
-  assert.deepEqual(read, [RUN_HOME]);
+  assert.deepEqual(read, [RUN_HOME, RUN_HOME]);
   const { args, spawnOptions } = fake.calls[0];
+  assert.equal(JSON.parse(args[args.indexOf("--config") + 1]).hooks[0].command, HOOK);
   assert.equal(Buffer.concat(fake.calls[0].stdin).toString("utf8"), "Review the change.");
   assert.ok(!args.includes("Review the change."));
   assert.deepEqual(args.slice(0, 2), ["--print", "--input-format"]);

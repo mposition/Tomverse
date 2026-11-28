@@ -15,7 +15,7 @@ export type AmuxCliTokenCounts = {
 
 export type AmuxCliUsageObservation = {
   version: 1;
-  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity" | "kimi";
+  cli: "codex" | "claude" | "copilot" | "cursor" | "antigravity" | "kimi" | "qwen";
   completeness: AmuxCliUsageCompleteness;
   /** Null means no trustworthy numeric report, never zero spend. */
   observed: AmuxCliTokenCounts | null;
@@ -259,19 +259,21 @@ export function inspectClaudeCliResultUsage(raw: unknown, options: {
  * priced as uncached input), Cursor input excludes them. Antigravity's
  * `result` (agy 1.5.4, measured 2026-11-10) excludes them as Cursor's does,
  * and so does Kimi's wire TokenUsage (`input_other` is input without
- * `input_cache_read` and `input_cache_creation`).
+ * `input_cache_read` and `input_cache_creation`). Qwen Code's result
+ * usage includes cache reads in input as Copilot's does (its input_tokens is
+ * the provider's prompt count), so its cache reads are priced as input too.
  * None has a
  * measured cache-write rule, so a nonzero write is an unknown usage; at zero
  * the inclusion question cannot change a price and is recorded as false.
  */
-export function amuxSubscriptionCliUsageObservation(cli: "copilot" | "cursor" | "antigravity" | "kimi", input: {
+export function amuxSubscriptionCliUsageObservation(cli: "copilot" | "cursor" | "antigravity" | "kimi" | "qwen", input: {
   counts: { inputTokens: number; outputTokens: number; cacheReadTokens: number;
     cacheWriteTokens: number } | null;
   servedModelId: string | null;
   completedTurns: number;
   complete: boolean;
 }): AmuxCliUsageObservation {
-  const includeCacheRead = cli === "copilot";
+  const includeCacheRead = cli === "copilot" || cli === "qwen";
   const unknown: AmuxCliUsageObservation = {
     version: 1, cli, completeness: "unknown", observed: null, completedTurns: 0,
     models: [], inputTokensIncludeCacheRead: includeCacheRead,
