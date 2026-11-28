@@ -141,6 +141,16 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
         ],
       },
+      // The Python runner's files (lib/chatCodeRunFrame.ts): Pyodide's loader, wasm, standard library and the
+      // numpy/pandas/matplotlib wheels, in a versioned directory. Same reason as above: the runner frame's origin is
+      // opaque, so its worker reads them in CORS mode. Public files that never change at a given path.
+      {
+        source: "/vendor/pyodide/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
       {
         source: "/:path*",
         headers: securityHeaders,

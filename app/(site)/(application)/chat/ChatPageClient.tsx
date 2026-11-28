@@ -843,6 +843,7 @@ export function ChatPageClient({
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
   chatArtifactWorkspaceEnabled = false,
+  chatCodeRunEnabled = false,
   chatParallelPreparationEnabled = false,
   chatRouterLocationFusion = false,
   existingChatRouterLocationFusion = false,
@@ -876,6 +877,8 @@ export function ChatPageClient({
   generatedArtifactRevisionEnabled?: boolean;
   /** TOMVERSE_CHAT_ARTIFACT_WORKSPACE_ENABLED, resolved server-side: Preview on code blocks, React previews, "change this screen". */
   chatArtifactWorkspaceEnabled?: boolean;
+  /** TOMVERSE_CHAT_CODE_RUN_ENABLED, resolved server-side: the Run button on a Python code block (lib/chatCodeRun.ts). */
+  chatCodeRunEnabled?: boolean;
   /**
    * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
@@ -11075,7 +11078,7 @@ export function ChatPageClient({
       notify={text => showToast(text, "info")} />}
     <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
     <GeneratedArtifactRevisionContext.Provider value={artifactRevisionAction}>
-    <ChatArtifactWorkspaceProvider enabled={chatArtifactWorkspaceEnabled} fillComposer={mountedSurface === "chat" ? fillComposerFromPreview : null}>
+    <ChatArtifactWorkspaceProvider enabled={chatArtifactWorkspaceEnabled} codeRunEnabled={chatCodeRunEnabled} fillComposer={mountedSurface === "chat" ? fillComposerFromPreview : null}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
