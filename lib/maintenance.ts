@@ -96,6 +96,7 @@ import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor"
 import { runMarketingRetention } from "@/lib/marketingRetention";
 import { runMarketingWeeklyKpi } from "@/lib/marketingWeeklyKpi";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
+import { deleteExpiredArtifactShares } from "@/lib/artifactShareService";
 import { purgeDesktopRemoteControl } from "@/lib/desktopRemoteControlStore";
 import { purgeDesktopRemotePasskeyChallenges } from "@/lib/desktopRemotePasskeyStore";
 import {
@@ -643,6 +644,10 @@ export async function cleanupExpiredData() {
     })
   );
 
+  // Public share links past their expiry (docs/policy/generated-artifacts.md
+  // section 19), removed and recorded the way stopping a share is.
+  const expiredArtifactShares = await step("expired_artifact_shares", () => deleteExpiredArtifactShares(now));
+
   const usageBuckets = await step("usage_buckets", () => prisma.$executeRaw`
     DELETE FROM "ChatUsageBucket"
     WHERE
@@ -1141,6 +1146,7 @@ export async function cleanupExpiredData() {
     assistantImportsExpiryRefused: importExpiry?.refused ?? null,
     assistantImportUploadClaimsReclaimed: importUploadClaims?.reclaimed ?? null,
     sessions: sessions?.count ?? null,
+    expiredArtifactShares: expiredArtifactShares?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
     storageCleanupQueues: storageCleanupQueues?.count ?? null,

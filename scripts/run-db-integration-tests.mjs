@@ -1066,6 +1066,10 @@ run(
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
+    // Public pages made from previewed artifacts: the lock re-checked in the
+    // publishing statement, expiry and lock in the public read, and every
+    // cascade that takes a link down with its source.
+    "tests/integration/artifact-share.db.test.ts",
     // N2: what the database refuses about mobile bearer authentication -- the
     // two-step cascade to a rotation row that has no user column of its own,
     // and the constraint stopping an audit row from naming somebody's device

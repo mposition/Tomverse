@@ -186,6 +186,26 @@ export const USER_REQUEST_FETCHERS = [
 ] as const;
 
 /**
+ * Ad landing-page crawlers: Google's AdsBot (desktop and mobile) and Bing's
+ * adidxbot, which check the pages an ad points to.
+ *
+ * They do not read the `*` group -- Google documents that AdsBot ignores it
+ * and obeys only a group that names it -- so without a group of their own the
+ * private paths, the share pages above all, were open to them. That is the
+ * abuse seen on other AI products (2026): ads that send people to a shared
+ * page which then asks them to download or run something. A crawler that may
+ * not read the page lets the ad network refuse an ad that points at it.
+ *
+ * They get the `*` access and nothing else, so the site's own ads still land
+ * on its public pages.
+ */
+export const AD_LANDING_CRAWLERS = [
+  "AdsBot-Google",
+  "AdsBot-Google-Mobile",
+  "adidxbot",
+] as const;
+
+/**
  * The content signals the canonical site declares (https://contentsignals.org/).
  *
  * Same provenance as the list above: this is the value Cloudflare's managed
