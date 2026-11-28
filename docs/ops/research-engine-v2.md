@@ -31,6 +31,7 @@ DB 제약(`ResearchPreviewRun_v2_shape_check`)상 run 단위 checkpoint·예약�
 | `RESEARCH_ENGINE_DEFAULT_ENTRY` | rollout: composer에서 v2를 기본 Research 진입으로 보이고 Perplexity 신규 선택 행을 숨김. 기존 Perplexity run·가격·조회는 그대로 |
 | `RESEARCH_ENGINE_MAX_APPROVED_CREDITS` | 사용자가 한 run에 승인할 수 있는 총액 상한(기본 2,000) |
 | `RESEARCH_ENGINE_MAX_RUNNING_ITEMS{,_PER_ACCOUNT,_PER_RUN,_PER_PROVIDER}` | 동시 실행 한도(기본 32/4/4/16) |
+| `CHAT_TASK_AGENT_ENABLED` | 작업 맡기기(§9). 정확히 `true`이고 `RESEARCH_ENGINE_ENABLED`도 켜져 있을 때만. 끄면 새 작업 run과 작업 run의 유료 작업 시작(계획 요청·승인·재개·예산·마무리·범위·수정)이 `CHAT_TASK_AGENT_DISABLED`로 거절되고, 일시정지·취소·삭제는 그대로 됩니다 |
 
 Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 run의 `executionProfile`에
 고정되고, dispatch 직전 registry의 provider/API ID/reasoning/가격 version이 다르면 보내지
@@ -121,7 +122,10 @@ node --conditions=react-server --import tsx --test --test-concurrency=1 tests/in
 node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/research-engine-boundaries.db.test.ts
 node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/research-engine-chat-finance.db.test.ts
 node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/research-engine-scale.db.test.ts
+node --conditions=react-server --experimental-test-module-mocks --import tsx --test --test-concurrency=1 tests/integration/research-engine-task.db.test.ts
 ```
+
+작업 맡기기(§9)의 unit·화면 검사: `tests/researchEngineTask.test.ts`(react-server 조건), `tests/client/deepResearchTaskRender.test.tsx`.
 
 scale suite는 synthetic 기능·부하 목표입니다(한 run에 generation 20회 이상, source 후보
 500개 이상, 성공 read 100개 이상, 인용 40개 이상, 출력 4,096 tokens 초과 보고서, 20개 동시
@@ -143,3 +147,35 @@ CSV를 만듭니다. run을 새로 시작하거나 provider를 부르지 않습�
 - Project workspace 자료 — develop에 Project 서비스가 없어 adapter 경계
   (`setResearchProjectSourceAdapter`)만 있고 기본은 사용 불가.
 - 스캔 PDF OCR/vision — 유료 provider 권한이 없어 `no_text_layer`로 표시만 함.
+- 작업 맡기기(§9)의 실제 모델 계획·결과 파일 품질 — fake 모델 DB 테스트만, live 미실행.
+
+## 9. 작업 맡기기(delegated task, 기본 꺼짐 `CHAT_TASK_AGENT_ENABLED`)
+
+새 실행 엔진이 아니라 이 엔진의 run 하나입니다. 차이는 brief의 `taskOutput`(`document` | `spreadsheet` |
+`presentation`) 하나이고 manifest JSON에만 들어가므로 migration이 없습니다. 강도는 기존 standard/deep 프로필을
+그대로 쓰고(새 한도 값 없음), 요금제·승인 총액 상한·동시 실행 한도도 Research와 같습니다.
+
+- **맡기기**: composer 도구 메뉴의 Deep Research 시트에 "결과물: 보고서 / 문서 / 표 / 발표 자료"가 보입니다
+  (offer의 `features.taskAgent`). 보고서는 지금의 Research 그대로이고, 나머지를 고르면 작업 run이 됩니다.
+- **계획**: planner가 "해야 할 일의 단계"(plan schema의 `subquestions`)와 결과물 구성(`outline`)을 냅니다.
+  같은 plan schema·편집·승인·`autoStart`를 씁니다. 표는 모든 섹션이 표로 작성되고, 발표 자료는 짧은 요점으로
+  작성됩니다(writer 지시). 결과물 종류는 닫힌 enum이라 공개 context(`PublicResearchContext`)에 들어가도 됩니다.
+- **도구**: 모델 호출은 `RESEARCH_MODEL_TOOL_NAMES`의 구조화 제출 7개(`submit_research_plan`, `_turn`,
+  `_private_analysis`, `_coverage`, `_verification`, `_section`, `_synthesis`) 중 하나만, 호출마다 하나를 강제로
+  받으며 `execute`는 입력을 받아 두기만 합니다. 목록 밖 이름은 `callResearchModel`이 예약 전에 거절합니다. 실행기의
+  동작은 기존 공개 웹 검색(Brave)·공개 페이지 읽기·사용자가 고른 비공개 자료 읽기, 그리고 마지막의 파일 배치뿐입니다.
+  이메일·MCP 쓰기·결제·게시·브라우저 조작 도구는 없고, 계획이나 읽은 페이지가 그렇게 하라고 해도 실행기에 그 동작이 없습니다.
+- **결과물**: 보고서가 끝나면(`finalizeReport`) 같은 보고서 문서를 모델 호출 없이 기존 생성 파일 렌더러로
+  docx·xlsx·pptx로 배치해(`lib/researchEngineTaskOutput.ts`) 답변 메시지의 `MessageArtifact`로 붙입니다
+  (`lib/researchEngineTaskFiles.ts`). 카드·내려받기·버전은 일반 생성 파일과 같습니다. 보고서 revision마다 파일
+  하나(ordinal = revision − 1)이고, 수정 요청의 파일은 앞 파일의 다음 버전입니다. 바이트를 먼저 쓰고 행은 finalize
+  트랜잭션에서 씁니다. 행을 못 쓰면 바로 지우고, 그 사이 crash는 orphan sweep이 회수합니다.
+- **비공개 자료 철회**: 철회(§3) 뒤 `revokePrivateSource`가, finalize 중 철회가 겹치면 finalize가
+  `refreshResearchTaskFiles`를 부릅니다. 각 파일을 정리된 revision에서 다시 배치해 같은 행의 바이트를 바꾸고
+  옛 객체를 같은 트랜잭션에서 삭제 큐(`MessageArtifactCleanup`, `source_revoked`)에 넣습니다. revision이 배치 뒤
+  바뀌었으면(run lock 아래 digest 비교) 다시 배치합니다. 깨끗한 파일을 못 만들면 행을 실패 파일로 바꾸고 옛 바이트는
+  지웁니다. run 삭제는 답변 파일을 `message_deleted`로 삭제 큐에 넣습니다.
+- **진행·멈추기·알림**: 진행 화면, 일시정지·재개·취소·지금 마무리·예산 늘리기는 Research 그대로입니다. workspace가
+  열린 채 run이 끝나면 기존 답변 완료 브라우저 알림(설정에서 켠 경우, 탭이 숨겨졌을 때만)을 띄웁니다. 웹 푸시·이메일은 없습니다.
+- **비용**: 결과 파일 단계는 모델을 부르지 않으므로 크레딧이 없습니다. 같은 fake 응답이면 작업 run과 Research run의
+  정산 총액·모델 호출이 같다는 것을 DB 테스트가 확인합니다.

@@ -27,6 +27,7 @@ import {
 } from "@/lib/researchEngineReport";
 import { researchEvidenceObjectKey, researchEvidenceStore, researchNow } from "@/lib/researchEngineRuntime";
 import { loadResearchPrivateText, revalidateResearchPrivateEntry } from "@/lib/researchEngineSources";
+import { discardResearchTaskFile, persistResearchTaskFile, prepareResearchTaskFile, refreshResearchTaskFiles } from "@/lib/researchEngineTaskFiles";
 import {
   beginResearchDispatch, bumpRunSequence, claimNextResearchWorkItem, completeResearchDispatch, enqueueResearchWorkItems,
   finishResearchWorkItem, heartbeatResearchWorkItem, latestResearchVersions, lockResearchRun, markResearchDispatchStarted,
@@ -64,7 +65,9 @@ export function publicContextOf(manifest: ResearchInputManifest): PublicResearch
     brief: { deliverable: manifest.brief.deliverable, searchLanguages: manifest.brief.searchLanguages,
       regions: manifest.brief.regions, period: manifest.brief.period, freshness: manifest.brief.freshness,
       includeDomains: manifest.brief.includeDomains,
-      excludeDomains: [...manifest.brief.excludeDomains, ...manifest.amendments.flatMap((amendment) => amendment.excludeDomains)] },
+      excludeDomains: [...manifest.brief.excludeDomains, ...manifest.amendments.flatMap((amendment) => amendment.excludeDomains)],
+      // The deliverable kind of a delegated task: a closed enum, never user text.
+      ...(manifest.brief.taskOutput ? { taskOutput: manifest.brief.taskOutput } : {}) },
     privateSourceCount: manifest.entries.filter((entry) => entry.type !== "url").length,
     currentDate: manifest.currentDate, locale: manifest.brief.outputLanguage ?? manifest.locale,
     // Added questions are, by the amendment contract, public research questions (like the question itself).
@@ -582,6 +585,8 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     // source and the queued cleanup deletes the stored object.
     await bumpRunSequence(tx, run.id);
   });
+  // A delegated task's files were made from the report: they are rebuilt from the cleaned revisions.
+  await refreshResearchTaskFiles(run.id);
 }
 
 /**
@@ -596,11 +601,13 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
  * bibliography and the chat answer. Text derived from a source goes too: claim
  * text, what a model wrote after reading such claims, and the stored analysis
  * findings (which hold verbatim quotes). Evidence references stay; they hold no text.
+ * Returns whether any report revision or claim changed, so a caller holding a file made from them rebuilds it.
  */
 export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId: string) {
   const revoked = (await tx.researchSource.findMany({ where: { runId, visibility: "private", status: "revoked" }, select: { sourceKey: true } }))
     .map((row) => row.sourceKey);
-  if (!revoked.length) return;
+  if (!revoked.length) return false;
+  let changed = false;
   const keys = new Set(revoked);
   const runRow = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: runId }, select: { inputManifest: true, assistantMessageId: true, currentReportRevision: true } });
   const manifest = researchInputManifestSchema.parse(runRow.inputManifest);
@@ -627,6 +634,7 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
       { note: labels.redactedNote, privateSource: placeholder, title: manifest.brief.question, headings: planHeadings.get(revision.planRevision) })?.document;
     if (!document || JSON.stringify(document) === JSON.stringify(before)) continue;
     await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json(document) } });
+    changed = true;
     if (revision.revision === runRow.currentReportRevision) currentChanged = true;
   }
   const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
@@ -634,6 +642,7 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
     const key = citedKey(claim) ?? (unattributedPrivateClaim(claim, privateSourceKeys) ? "unattributed" : undefined);
     if (key && (claim.text !== labels.redactedNote || claim.verification !== "unsupported")) {
       await tx.researchClaim.update({ where: { id: claim.id }, data: { text: labels.redactedNote, verification: "unsupported", checks: json({ revoked: key }) } });
+      changed = true;
       if (claim.revisionId === currentRevisionId) currentChanged = true;
     }
   }
@@ -655,6 +664,7 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
       await tx.message.update({ where: { id: message.id }, data: { content: markdown } });
     }
   }
+  return changed;
 }
 
 /**
@@ -802,10 +812,11 @@ async function handleWriteSection(run: RunRow, item: ResearchWorkItem, fence: Re
   const citable = claims.filter((claim) => claim.verification !== "unsupported");
   const privateEntries = manifest.entries.filter((entry) => entry.type !== "url" &&
     citable.some((claim) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === entry.key))) as ResearchPrivateManifestEntry[];
+  const taskOutput = manifest.brief.taskOutput;
   const prompt = writerSectionPrompt({ heading, purpose: outline?.purpose ?? heading, question: manifest.brief.question,
-    locale: manifest.brief.outputLanguage ?? manifest.locale, table: outline?.table ?? false,
+    locale: manifest.brief.outputLanguage ?? manifest.locale, table: (outline?.table ?? false) || taskOutput === "spreadsheet",
     claims: citable.map((claim) => ({ claimKey: claim.claimKey, text: claim.text, verification: claim.verification, kind: claim.kind })),
-    feedback: payload.feedback, instruction: payload.instruction });
+    feedback: payload.feedback, instruction: payload.instruction, ...(taskOutput ? { taskOutput } : {}) });
   const result = await callResearchModel({ run, fence, role: "writer", purpose: "finalization", dispatchKey: dispatchKeyFor(item), ...prompt,
     toolName: "submit_research_section", toolDescription: "Submit this report section.", schema: researchSectionDraftSchema,
     outputTokenCap: RESEARCH_OUTPUT_TOKEN_CAPS.writeSection, signal, ...(privateEntries.length ? { revalidate: async () =>
@@ -958,10 +969,13 @@ async function finalizeReport(runId: string, revisionId: string, synthesis: Retu
   const quality = synthesis ? decideResearchQuality(document, claims) : claims.some((claim) => ["supported", "partial"].includes(claim.verification)) ? "partial" : "insufficient_evidence";
   const parsed = researchReportDocumentSchema.parse(document);
   const markdown = renderReportMarkdown(parsed, reportClaims, quality, labels.report);
-  await prisma.$transaction(async (tx) => {
+  // A delegated task hands the same report back as a file: laid out without a model call, so no credits.
+  const output = manifest.brief.taskOutput;
+  const taskFile = output ? await prepareResearchTaskFile(run, { output, reportRevision: revision.revision, document: parsed, claims: reportClaims, labels, quality }) : null;
+  const committed = await prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, runId);
     const current = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: runId } });
-    if (["completed", "cancelled", "failed"].includes(current.status) && current.currentReportRevision >= revision.revision) return;
+    if (["completed", "cancelled", "failed"].includes(current.status) && current.currentReportRevision >= revision.revision) return null;
     await tx.researchReportRevision.update({ where: { id: revisionId }, data: { document: json(parsed), qualityStatus: quality,
       // Conservative: once any private source was selected, model-written prose may
       // carry it even if no private claim survived. Sharing then needs the
@@ -972,14 +986,22 @@ async function finalizeReport(runId: string, revisionId: string, synthesis: Retu
     if (existing) await tx.message.update({ where: { id: run.assistantMessageId }, data: { content: markdown, searchMetadata: metadata, status: "normal" } });
     else await tx.message.create({ data: { id: run.assistantMessageId, role: "assistant", content: markdown, status: "normal",
       modelId: run.modelId, searchMetadata: metadata, conversationId: run.conversationId, researchRunId: run.id } });
+    const fileWritten = taskFile ? await persistResearchTaskFile(tx, run, taskFile) : false;
     const unknown = await tx.researchPreviewGeneration.count({ where: { runId, status: "outcome_unknown" } });
     await bumpRunSequence(tx, runId, { status: "completed", qualityStatus: quality, currentReportRevision: revision.revision,
       stopReason: quality === "complete" ? "report_submitted" : "partial_report", completedAt: researchNow(),
       lastErrorCode: unknown ? "RESEARCH_SOME_OUTCOMES_UNKNOWN" : null });
     await tx.researchWorkItem.updateMany({ where: { runId, status: { in: ["queued", "blocked"] } }, data: { status: "superseded" } });
     // The document and answer were built from reads made before this lock; a source revoked since is withheld here.
-    await withholdRevokedSources(tx, runId);
+    return { fileWritten, withheld: await withholdRevokedSources(tx, runId) };
+  }).catch(async (error: unknown) => {
+    await discardResearchTaskFile(taskFile);
+    throw error;
   });
+  // Bytes whose row was not committed (another finalize won this revision) are reclaimed now.
+  if (!committed?.fileWritten) await discardResearchTaskFile(taskFile);
+  // The file was laid out from the report before the withholding above: rebuild it from the cleaned revision.
+  else if (committed.withheld) await refreshResearchTaskFiles(runId);
 }
 
 async function reportSources(runId: string) {

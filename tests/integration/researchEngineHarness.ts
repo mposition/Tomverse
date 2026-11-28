@@ -68,7 +68,8 @@ export function createFakeFunding(options: { creditsPerCall?: number; searchSurc
   return { adapter, reservations, balances, refuseOnce: (refusal: typeof refuseNext) => { refuseNext = refusal; } };
 }
 
-type Prompted = { tool: string; text: string; callIndex: number };
+/** `tools` is every tool the request offered, so a test can prove nothing beyond the one submission was given. */
+type Prompted = { tool: string; text: string; callIndex: number; tools?: string[] };
 export type FakeBehaviour = {
   /** Return the structured tool input for this call, or `{ usage: "unknown" }` to drop usage. */
   respond?: (call: Prompted) => unknown;
@@ -167,7 +168,7 @@ export function createFakeModel(behaviour: FakeBehaviour = {}) {
   let maxActive = 0;
   const model = new MockLanguageModelV4({ provider: "google", modelId: modelConfig.apiModel, doGenerate: async (request) => {
     const tool = (request.tools ?? []).find((entry) => entry.type === "function")?.name ?? "none";
-    const call = { tool, text: textOf(request.prompt), callIndex: calls.length };
+    const call = { tool, text: textOf(request.prompt), callIndex: calls.length, tools: (request.tools ?? []).map((entry) => entry.name) };
     calls.push(call);
     active += 1; maxActive = Math.max(maxActive, active);
     try {

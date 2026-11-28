@@ -4282,6 +4282,7 @@ export function ChatInput({
                   )}
                   {deepResearchEngineOffer?.offered && (
                     <DeepResearchEngineRow language={lang} disabled={isDraftMutationDisabled || isSending}
+                      taskAgent={Boolean(deepResearchEngineOffer.features?.taskAgent)}
                       onOpen={() => { closeMenu(false); setDeepResearchEngineOpen(true); }} />
                   )}
                   {review?.mode !== "easy" && !deepResearchEngineDefault && (

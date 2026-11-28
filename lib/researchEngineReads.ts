@@ -3,10 +3,11 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import { ResearchPreviewRunError } from "@/lib/deepResearchSettlementHandoff";
-import { documentSpecSchema, workbookSpecSchema, ARTIFACT_LIMITS } from "@/lib/generatedArtifactCore";
+import { workbookSpecSchema, ARTIFACT_LIMITS } from "@/lib/generatedArtifactCore";
 import { renderDocumentArtifact, renderSpreadsheetArtifact } from "@/lib/generatedArtifactRenderers";
-import { researchInputManifestSchema, researchReportDocumentSchema, type ResearchReportDocument } from "@/lib/researchEngineContract";
+import { researchInputManifestSchema, researchReportDocumentSchema } from "@/lib/researchEngineContract";
 import { renderReportMarkdown, reportTablesCsv, type ReportClaim } from "@/lib/researchEngineReport";
+import { reportDocumentSpec } from "@/lib/researchEngineTaskOutput";
 import { researchEvidenceStore } from "@/lib/researchEngineRuntime";
 import { researchEngineLabels } from "@/locales/researchEngine";
 
@@ -141,44 +142,6 @@ const toClaimMap = (claims: ReadonlyArray<{ claimKey: string; sectionKey: string
     evidence: claim.evidence as ReportClaim["evidence"] }]));
 
 const clip = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
-
-/** The report as the existing document renderer's spec; citations become [n] markers that match the bibliography. */
-export function reportDocumentSpec(document: ResearchReportDocument, claims: ReadonlyMap<string, ReportClaim>, format: "pdf" | "docx" | "md",
-  labels: ReturnType<typeof researchEngineLabels>, quality: "complete" | "partial" | "insufficient_evidence", filename: string) {
-  const numberOf = new Map(document.bibliography.map((entry) => [entry.sourceKey, entry.n]));
-  const cite = (keys: readonly string[]) => {
-    const numbers = [...new Set(keys.flatMap((key) => (claims.get(key)?.evidence ?? []).map((evidence) => numberOf.get(evidence.sourceKey))
-      .filter((value): value is number => value !== undefined)))].sort((a, b) => a - b);
-    return numbers.length ? ` ${numbers.map((n) => `[${n}]`).join("")}` : "";
-  };
-  const max = ARTIFACT_LIMITS.maxTextLength;
-  const blocks: Array<Record<string, unknown>> = [
-    { type: "paragraph", text: labels.report.quality[quality] },
-    { type: "heading", level: 2, text: labels.report.summary }, { type: "paragraph", text: clip(document.summary, max) },
-    { type: "heading", level: 2, text: labels.report.scope }, { type: "paragraph", text: clip(document.scope.note || document.scope.question, max) },
-  ];
-  for (const section of document.sections) {
-    blocks.push({ type: "heading", level: 2, text: clip(section.heading, ARTIFACT_LIMITS.maxTitleLength) });
-    if (section.status === "missing") { blocks.push({ type: "paragraph", text: labels.report.missingSection }); continue; }
-    for (const block of section.blocks) {
-      if (block.type === "paragraph") blocks.push({ type: "paragraph", text: clip(`${block.text}${cite(block.claimKeys)}`, max) });
-      else {
-        blocks.push({ type: "paragraph", text: clip(`${block.caption}${cite(block.claimKeys)}`, max) });
-        blocks.push({ type: "table", columns: block.columns.slice(0, ARTIFACT_LIMITS.maxDocumentTableColumns).map((column) => clip(column, ARTIFACT_LIMITS.maxTitleLength)),
-          rows: block.rows.slice(0, ARTIFACT_LIMITS.maxDocumentTableRows).map((row) => row.slice(0, ARTIFACT_LIMITS.maxDocumentTableColumns)) });
-      }
-    }
-  }
-  if (document.conflicts.length) blocks.push({ type: "heading", level: 2, text: labels.report.conflicts },
-    { type: "bullets", items: document.conflicts.map((conflict) => clip(`${conflict.text}${cite(conflict.claimKeys)}`, max)) });
-  if (document.limitations.length) blocks.push({ type: "heading", level: 2, text: labels.report.limitations },
-    { type: "bullets", items: document.limitations.map((entry) => clip(entry, max)) });
-  if (document.nextQuestions.length) blocks.push({ type: "heading", level: 2, text: labels.report.nextQuestions },
-    { type: "bullets", items: document.nextQuestions.map((entry) => clip(entry, max)) });
-  if (document.bibliography.length) blocks.push({ type: "heading", level: 2, text: labels.report.sources },
-    { type: "numbers", items: document.bibliography.map((entry) => clip(`${entry.title}${entry.url ? ` — ${entry.url}` : entry.private ? ` — ${labels.report.privateSource}` : ""}${entry.readStatus === "snippet_only" ? ` (${labels.report.snippetOnly})` : ""} · ${entry.retrievedAt.slice(0, 10)}`, max)) });
-  return documentSpecSchema.parse({ filename, format, title: clip(document.title, ARTIFACT_LIMITS.maxTitleLength), blocks: blocks.slice(0, ARTIFACT_LIMITS.maxDocumentBlocks) });
-}
 
 export async function exportResearchReport(input: { userId: string; runId: string; revision?: number; format: "md" | "pdf" | "docx" | "csv" | "xlsx"; request?: Request }) {
   const report = await readResearchReport(input);

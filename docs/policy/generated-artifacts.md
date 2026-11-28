@@ -1232,3 +1232,18 @@ revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 
 소유자 계정 JSON export에는 새로 보관한 canonical/source 명세의 내용을 포함한다.
 파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.
 schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 승인과 별개다.
+
+## 19. Deep Research 작업 맡기기의 결과 파일 (2026-11-28, 기본 꺼짐)
+
+`CHAT_TASK_AGENT_ENABLED`로 맡긴 작업(`docs/ops/research-engine-v2.md` §9)은 끝난 보고서를 이 문서의
+생성기로 docx·xlsx·pptx 하나로 만들어 그 답변 메시지의 `MessageArtifact`로 붙인다. 카드, `/api/artifacts/{id}`
+다운로드, 소유권 검사, 버전(앞 revision 파일이 parent), 대화·계정 삭제 정리는 §5·§8 그대로다.
+
+- **모델은 명세도 만들지 않는다.** writer가 검증된 claim으로 이미 쓴 보고서 문서를 서버가 명세로 배치한다
+  (`lib/researchEngineTaskOutput.ts`). 그래서 파일 단계에는 tool 호출·입력 토큰·예약이 없고 §11의 별도 credit
+  없음과 같다. §3의 상한은 같은 `ARTIFACT_LIMITS`와 `bounded()`가 지킨다.
+- **못 만들면 실패 행이다.** 생성 실패는 `generation_failed`/`limit_exceeded`, 저장 실패는 `storage_failed`로
+  남겨 답변이 파일이 없다고 말한다(§1).
+- **비공개 자료 철회는 파일에도 적용된다.** 철회 뒤 같은 행을 정리된 revision에서 다시 만든 바이트로 바꾸고 옛
+  객체를 같은 트랜잭션에서 `MessageArtifactCleanup`(`source_revoked`)에 넣는다. 깨끗한 파일을 못 만들면 행을
+  실패로 바꾸고 옛 바이트를 지운다(`lib/researchEngineTaskFiles.ts`).

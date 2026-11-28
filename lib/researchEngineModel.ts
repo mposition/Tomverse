@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { usedResearchOutputTokens } from "@/lib/researchPreviewExecution";
-import { researchExecutionProfileSchema, type ResearchModelRole } from "@/lib/researchEngineContract";
+import { RESEARCH_MODEL_TOOL_NAMES, researchExecutionProfileSchema, type ResearchModelRole } from "@/lib/researchEngineContract";
 import { RESEARCH_ZERO_SETTLEMENT_USAGE, researchFundingAdapter } from "@/lib/researchEngineFunding";
 import {
   beginResearchDispatch, bindResearchFundingReservation, claimResearchFundingRoom, markResearchDispatchStarted,
@@ -105,6 +105,10 @@ export async function callResearchModel<T>(input: {
   revalidate?: () => Promise<boolean>;
   signal: AbortSignal;
 }): Promise<ResearchModelCallResult<T>> {
+  // Deterministic boundary, before any money moves: a call offers only one of the fixed submission tools.
+  if (!(RESEARCH_MODEL_TOOL_NAMES as readonly string[]).includes(input.toolName)) {
+    throw Object.assign(new Error("RESEARCH_TOOL_NOT_ALLOWED"), { code: "RESEARCH_TOOL_NOT_ALLOWED" });
+  }
   const profile = researchExecutionProfileSchema.safeParse(input.run.executionProfile);
   const pinned = profile.success ? profile.data.roles[input.role] : undefined;
   if (!pinned) return { ok: false, kind: "profile_changed", code: "RESEARCH_PROFILE_MISSING" };

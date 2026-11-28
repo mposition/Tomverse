@@ -11,6 +11,7 @@ import { researchEngineCopy } from "@/locales/researchEngine";
 import type { Language } from "@/lib/language";
 import { conversationHandoffHref } from "@/lib/continuationRoutes";
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+import { currentNotificationPermission, readAnswerNotificationEnabled, shouldNotifyAnswerReady, showAnswerReadyNotification } from "@/lib/answerNotification";
 
 /**
  * Deep Research (engine v2) on the web: the tools-menu entry, the brief sheet
@@ -24,9 +25,13 @@ const webApi = createResearchApi((path, init) => fetch(path, init));
 
 type Offer = {
   offered: boolean; reason?: string;
-  features?: { defaultEntry: boolean; privateSources: boolean; projectSources: boolean; maxApprovedCredits: number };
+  features?: { defaultEntry: boolean; privateSources: boolean; projectSources: boolean; maxApprovedCredits: number; taskAgent?: boolean };
   estimate?: { lowCredits: number; highCredits: number; perCallCredits: number };
 };
+
+/** What the work is handed back as. "report" is Deep Research as before; the others delegate a task that ends in a file. */
+export const RESEARCH_SHEET_OUTPUTS = ["report", "document", "spreadsheet", "presentation"] as const;
+type SheetOutput = (typeof RESEARCH_SHEET_OUTPUTS)[number];
 
 /** One offer read per account scope. Deterministic on the server; never calls a model. */
 export function useDeepResearchEngineOffer(identityKey: string | null, enabled: boolean) {
@@ -45,9 +50,11 @@ export function useDeepResearchEngineOffer(identityKey: string | null, enabled: 
 
 const splitList = (value: string) => value.split(/[\s,]+/u).map((entry) => entry.trim()).filter(Boolean);
 
-export function DeepResearchEngineSheet({ open, onClose, language, conversationId, draft, offer, api = webApi, onStarted }: {
+export function DeepResearchEngineSheet({ open, onClose, language, conversationId, draft, offer, api = webApi, onStarted, initialOutput = "report" }: {
   open: boolean; onClose: () => void; language: Language; conversationId: string | null; draft: string; offer: Offer | null;
   api?: ResearchApi; onStarted?: (conversationId: string) => void;
+  /** An entry that opens the sheet for a specific deliverable; ignored unless delegated tasks are on. */
+  initialOutput?: SheetOutput;
 }) {
   const copy = researchEngineCopy[language];
   const [question, setQuestion] = useState(draft);
@@ -63,17 +70,22 @@ export function DeepResearchEngineSheet({ open, onClose, language, conversationI
   const [profile, setProfile] = useState<"standard" | "deep">("standard");
   const [credits, setCredits] = useState(() => Math.max(50, offer?.estimate?.highCredits ?? 400));
   const [autoStart, setAutoStart] = useState(false);
+  const [output, setOutput] = useState<SheetOutput>(initialOutput);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // One identity per attempt: a lost create response is retried with the same ids and returns the same run.
   const ids = useRef(researchStartIds(() => crypto.randomUUID()));
   if (!open) return null;
   const max = offer?.features?.maxApprovedCredits ?? 2_000;
+  const taskAgent = Boolean(offer?.features?.taskAgent);
+  const task = taskAgent && output !== "report";
+  const outputLabel: Record<SheetOutput, string> = { report: copy.outputReport, document: copy.outputDocument,
+    spreadsheet: copy.outputSpreadsheet, presentation: copy.outputPresentation };
   const submit = async () => {
     setBusy(true); setError(null);
     const payload = {
       ...(conversationId ? { conversationId } : {}), ...ids.current,
-      brief: { question: question.trim(), ...(objective.trim() ? { objective: objective.trim() } : {}), deliverable: "report",
+      brief: { question: question.trim(), ...(objective.trim() ? { objective: objective.trim() } : {}), deliverable: "report", ...(task ? { taskOutput: output } : {}),
         searchLanguages: splitList(languages), regions: splitList(regions).map((entry) => entry.toUpperCase()),
         ...(from || to ? { period: { ...(from ? { from } : {}), ...(to ? { to } : {}) } } : {}),
         includeDomains: splitList(include), excludeDomains: splitList(exclude), constraints: [] },
@@ -96,8 +108,17 @@ export function DeepResearchEngineSheet({ open, onClose, language, conversationI
   return <div role="dialog" aria-modal="true" aria-labelledby="deep-research-engine-title" data-testid="deep-research-engine-sheet"
     className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
     <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-t-2xl bg-white p-4 shadow-xl dark:bg-zinc-950 sm:rounded-2xl">
-      <h2 id="deep-research-engine-title" className="mb-3 text-lg font-semibold">{copy.title}</h2>
-      <label className="mb-1 block text-sm font-medium" htmlFor="dre-question">{copy.briefQuestion}</label>
+      <h2 id="deep-research-engine-title" className="mb-3 text-lg font-semibold">{task ? copy.taskTitle : copy.title}</h2>
+      {taskAgent && <fieldset className="mb-3" data-testid="dre-output">
+        <legend className="mb-1 text-sm font-medium">{copy.outputLabel}</legend>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={copy.outputLabel}>
+          {RESEARCH_SHEET_OUTPUTS.map((value) => <button key={value} type="button" role="radio" aria-checked={output === value} data-testid={`dre-output-${value}`}
+            onClick={() => setOutput(value)} className={`min-h-11 rounded-lg border px-3 text-sm ${output === value ? "border-accent-deep-research-500 font-semibold" : "border-zinc-300 dark:border-zinc-700"}`}>
+            {outputLabel[value]}</button>)}
+        </div>
+        {task && <p className="mt-1 text-xs text-zinc-500" data-testid="dre-output-hint">{copy.taskHint}</p>}
+      </fieldset>}
+      <label className="mb-1 block text-sm font-medium" htmlFor="dre-question">{task ? copy.taskQuestion : copy.briefQuestion}</label>
       <textarea id="dre-question" data-testid="dre-question" className={`${field} min-h-28`} value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={60_000} />
       <p className="mt-1 text-xs text-zinc-500">{copy.briefPublicNote}</p>
       <label className="mb-1 mt-3 block text-sm font-medium" htmlFor="dre-objective">{copy.briefObjective}</label>
@@ -140,7 +161,7 @@ export function DeepResearchEngineSheet({ open, onClose, language, conversationI
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" className="min-h-11 rounded-lg px-4 text-sm" onClick={onClose} disabled={busy}>{copy.cancel}</button>
         <button type="button" data-testid="dre-submit" className="min-h-11 rounded-lg bg-accent-deep-research-500 px-4 text-sm font-semibold text-white disabled:opacity-50"
-          disabled={busy || !question.trim()} onClick={() => void submit()}>{autoStart ? copy.start : copy.makePlan}</button>
+          disabled={busy || !question.trim()} onClick={() => void submit()}>{autoStart ? (task ? copy.taskStart : copy.start) : copy.makePlan}</button>
       </div>
     </div>
   </div>;
@@ -205,12 +226,19 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
   useLayoutEffect(() => { reportChanged.current = onReportChanged; }, [onReportChanged]);
   const settledKey = run ? `${run.currentReportRevision ?? 0}:${researchRunNeedsPolling(run) ? "open" : run.status}` : null;
   const seenSettledKey = useRef<string | null>(null);
+  const isTask = Boolean(run?.task);
   useEffect(() => {
     if (!settledKey) return;
     // The first view is what the chat already shows; later changes refresh it.
-    if (seenSettledKey.current !== null && seenSettledKey.current !== settledKey) reportChanged.current?.();
+    const previous = seenSettledKey.current;
+    if (previous !== null && previous !== settledKey) reportChanged.current?.();
     seenSettledKey.current = settledKey;
-  }, [settledKey]);
+    // Finished while this tab was hidden: the existing answer-ready notification, only if the person turned it on.
+    if (previous?.endsWith(":open") && settledKey.endsWith(":completed") && shouldNotifyAnswerReady({
+      enabled: readAnswerNotificationEnabled(), permission: currentNotificationPermission(), documentHidden: document.visibilityState === "hidden",
+      wasSending: true, isSending: false, lastAnswer: { role: "assistant", status: "normal", content: settledKey },
+    })) showAnswerReadyNotification({ title: isTask ? copy.taskNotifyTitle : copy.notifyTitle, body: copy.notifyBody });
+  }, [settledKey, isTask, copy]);
   const act = async (action: ResearchAction) => {
     if (busy) return;
     setBusy(true); setNotice(null);
@@ -253,7 +281,7 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
   const button = "min-h-11 rounded-lg border border-zinc-300 px-3 text-sm disabled:opacity-50 dark:border-zinc-700";
   return <section className="research-run-card space-y-3" data-testid="research-workspace" data-run-status={run.status} data-event-sequence={run.eventSequence} aria-label={copy.title}>
     <header className="flex flex-wrap items-center gap-2">
-      <strong>{copy.title}</strong>
+      <strong>{isTask ? copy.taskTitle : copy.title}</strong>
       <span role="status" data-testid="research-workspace-status">{copy[researchStatusKey(run.status)]}</span>
       {qualityLabel && <span data-testid="research-workspace-quality" className="rounded bg-zinc-100 px-2 text-xs dark:bg-zinc-800">{qualityLabel}</span>}
     </header>
@@ -282,9 +310,9 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
           <ul className="list-disc pl-5 text-sm">{run.plan.plan.clarifications.map((entry, index) => <li key={index}>{entry.question}</li>)}</ul></>}
         <h4 className="mt-2 text-sm font-semibold">{copy.planAssumptions}</h4>
         <ul className="list-disc pl-5 text-sm">{run.plan.plan.assumptions.map((entry, index) => <li key={index}>{entry}</li>)}</ul>
-        <h4 className="mt-2 text-sm font-semibold">{copy.planSubquestions}</h4>
+        <h4 className="mt-2 text-sm font-semibold">{isTask ? copy.taskSteps : copy.planSubquestions}</h4>
         <ol className="list-decimal pl-5 text-sm">{run.plan.plan.subquestions.map((entry) => <li key={entry.key}>{entry.question}</li>)}</ol>
-        <h4 className="mt-2 text-sm font-semibold">{copy.planOutline}</h4>
+        <h4 className="mt-2 text-sm font-semibold">{isTask ? copy.taskOutline : copy.planOutline}</h4>
         <ol className="list-decimal pl-5 text-sm">{run.plan.plan.outline.map((entry) => <li key={entry.key}>{entry.heading}</li>)}</ol>
         <h4 className="mt-2 text-sm font-semibold">{copy.planCriteria}</h4>
         <ul className="list-disc pl-5 text-sm">{run.plan.plan.completionCriteria.map((entry, index) => <li key={index}>{entry}</li>)}</ul>
@@ -295,7 +323,7 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
           <button type="button" className={button} disabled={busy} data-testid="research-plan-request"
             onClick={() => void act({ kind: "plan", expectedPlanRevision: run.planRevision, ...(instruction.trim() ? { feedback: instruction.trim() } : {}) })}>{run.plan ? copy.planFeedback : copy.makePlan}</button>
           {run.actions.canApprovePlan && run.plan && <button type="button" className={`${button} font-semibold`} disabled={busy} data-testid="research-plan-approve"
-            onClick={() => void act({ kind: "approve", planRevision: run.planRevision })}>{copy.planApprove}</button>}
+            onClick={() => void act({ kind: "approve", planRevision: run.planRevision })}>{isTask ? copy.taskApprove : copy.planApprove}</button>}
         </div>
         <p className="text-xs text-zinc-500">{copy.planCost}</p>
       </div>}
@@ -328,6 +356,7 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
     {tab === "report" && <div data-testid="research-report">
       {!run.currentReportRevision ? <p>{copy.reportNotReady}</p> : <>
         <p className="text-xs text-zinc-500">{formatResearchCopy(copy.reportRevision, { revision: report?.revision ?? run.currentReportRevision })}</p>
+        {isTask && <p className="text-sm" data-testid="research-task-file-note">{copy.taskFileNote}</p>}
         {report?.containsPrivate && <p className="text-sm" data-testid="research-report-private">{copy.shareContainsPrivate}</p>}
         <div className="flex flex-wrap gap-2">{(["md", "pdf", "docx", "csv", "xlsx"] as const).map((format) =>
           <button key={format} type="button" className={button} data-testid={`research-export-${format}`} onClick={() => void download(format)}>{copy.exportLabel} {format.toUpperCase()}</button>)}</div>
@@ -359,13 +388,15 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
   </section>;
 }
 
-export function DeepResearchEngineRow({ language, onOpen, disabled }: { language: Language; onOpen: () => void; disabled?: boolean }) {
+export function DeepResearchEngineRow({ language, onOpen, disabled, taskAgent = false }: { language: Language; onOpen: () => void; disabled?: boolean;
+  /** Delegated tasks are on: the same entry also hands work back as a document, spreadsheet or slides. */
+  taskAgent?: boolean }) {
   const copy = researchEngineCopy[language];
   return <button type="button" data-testid="tools-deep-research-engine-row" disabled={disabled} onClick={onOpen}
     className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-zinc-800">
     <span className="flex min-w-0 flex-col">
       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{copy.title}</span>
-      <span className="text-xs text-zinc-500">{copy.briefSourcesHint}</span>
+      <span className="text-xs text-zinc-500">{taskAgent ? copy.taskRowHint : copy.briefSourcesHint}</span>
     </span>
   </button>;
 }

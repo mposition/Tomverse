@@ -60,6 +60,8 @@ export const ARTIFACT_CLEANUP_REASONS = [
   "account_deleted",
   "message_deleted",
   "storage_rollback",
+  // A Research task file rebuilt without a revoked private source (lib/researchEngineTaskFiles.ts).
+  "source_revoked",
 ] as const;
 
 export type ArtifactCleanupReason = (typeof ARTIFACT_CLEANUP_REASONS)[number];

@@ -43,6 +43,23 @@ export const RESEARCH_DISPATCH_KINDS = ["model", "search", "read"] as const;
 export const RESEARCH_MODEL_ROLES = ["planner", "researcher", "analyst", "coordinator", "verifier", "writer"] as const;
 
 /**
+ * The only tools a Research model call is ever given: one structured submission per call, forced, whose
+ * execute only captures the input. None reaches outside Tomverse. A delegated task (`taskOutput`) uses
+ * exactly this list; model output (a plan or a page asking to "send an email") cannot add to it.
+ */
+export const RESEARCH_MODEL_TOOL_NAMES = [
+  "submit_research_plan", "submit_research_turn", "submit_research_private_analysis", "submit_research_coverage",
+  "submit_research_verification", "submit_research_section", "submit_research_synthesis",
+] as const;
+
+/**
+ * Delegated-task deliverables. A run with `brief.taskOutput` plans steps of work instead of research
+ * questions and ends with the written report rendered, without a model call, into this file kind.
+ */
+export const RESEARCH_TASK_OUTPUTS = ["document", "spreadsheet", "presentation"] as const;
+export type ResearchTaskOutput = (typeof RESEARCH_TASK_OUTPUTS)[number];
+
+/**
  * Output token caps per dispatch. Reasoning models count thinking inside these (Gemini, OpenAI, Anthropic all
  * report it in outputTokens), so each cap leaves room to think before the structured submission. A cap spent
  * thinking ends without the tool call (RESEARCH_OUTPUT_TRUNCATED). Credits are charged per call by the Chat
@@ -126,6 +143,8 @@ export const researchBriefSchema = z.object({
   includeDomains: z.array(domain).max(RESEARCH_RESOURCE_LIMITS.maxDomainFilters).default([]),
   excludeDomains: z.array(domain).max(RESEARCH_RESOURCE_LIMITS.maxDomainFilters).default([]),
   constraints: z.array(trimmed(500)).max(20).default([]),
+  /** Present only for a delegated task (CHAT_TASK_AGENT_ENABLED): the file the finished work is handed back as. */
+  taskOutput: z.enum(RESEARCH_TASK_OUTPUTS).optional(),
 }).strict();
 export type ResearchBrief = z.infer<typeof researchBriefSchema>;
 
@@ -401,6 +420,8 @@ export type ResearchRunV2Dto = {
   currentReportRevision: number;
   pauseRequested: boolean;
   cancelRequested: boolean;
+  /** A delegated task: the plan lists steps and the finished report is also handed back as this file kind. */
+  task?: { output: ResearchTaskOutput };
   plan?: { revision: number; author: string; plan: ResearchPlan };
   progress: {
     /** Counts of real work items by state; no time-based percentage. */

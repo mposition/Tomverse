@@ -24,6 +24,7 @@ import { resolveResearchSelections, researchProjectSourcesAvailable } from "@/li
 import { bumpRunSequence, enqueueResearchWorkItems, lockResearchRun, readResearchRunMoney } from "@/lib/researchEngineStore";
 import { advanceResearchRun, createPublicRedaction, providerFor, researchRunDeadline, startResearchFromPlan } from "@/lib/researchEngineWorker";
 import { researchPreviewLocale } from "@/lib/researchPreviewPrompt";
+import { chatTaskAgentEnabled } from "@/lib/researchEngineTaskOutput";
 
 /**
  * User-facing operations of Research engine v2. Every mutation is owner-scoped,
@@ -45,9 +46,13 @@ export function researchEngineFeatures(env: Record<string, string | undefined> =
     defaultEntry: enabled && env.RESEARCH_ENGINE_DEFAULT_ENTRY === "true",
     privateSources: enabled && env.RESEARCH_ENGINE_PRIVATE_SOURCES_ENABLED === "true",
     projectSources: enabled && researchProjectSourcesAvailable(),
+    /** Delegated tasks (CHAT_TASK_AGENT_ENABLED, default off): the same engine, ending in a generated file. */
+    taskAgent: chatTaskAgentEnabled(env),
     maxApprovedCredits: Math.max(1, Math.min(100_000, Number(env.RESEARCH_ENGINE_MAX_APPROVED_CREDITS) || 2_000)),
   };
 }
+
+const taskDisabled = () => refuse(409, "CHAT_TASK_AGENT_DISABLED", "Task delegation is unavailable.");
 
 /**
  * Engine v2 models beyond the Preview P0 pair. Each entry pins the provider API id. For each, AI SDK v7
@@ -182,6 +187,7 @@ export async function createResearchRun(input: { request: Request; userId: strin
   const { features } = await assertEligible(input.userId);
   const { payload } = input;
   if (payload.approvedCredits > features.maxApprovedCredits) throw refuse(400, "RESEARCH_BUDGET_TOO_HIGH", "That maximum is above the allowed research total.");
+  if (payload.brief.taskOutput && !features.taskAgent) throw taskDisabled();
   const existing = await prisma.researchPreviewRun.findFirst({ where: { assistantMessageId: payload.assistantMessageId } });
   if (existing) {
     if (existing.userId !== input.userId || existing.engineVersion !== 2 || existing.sourceUserMessageId !== payload.userMessageId) {
@@ -263,6 +269,8 @@ async function ownedRunForMutation(tx: Prisma.TransactionClient, userId: string,
   if (startsWork && isTemporaryConversationExpired(run.conversation.temporaryExpiresAt, new Date())) {
     throw refuse(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
   }
+  // A delegated task starts no new paid work once its switch is off; pause, cancel and delete stay allowed.
+  if (startsWork && researchInputManifestSchema.safeParse(run.inputManifest).data?.brief.taskOutput && !researchEngineFeatures().taskAgent) throw taskDisabled();
   return run;
 }
 
@@ -513,6 +521,10 @@ export async function deleteResearchRun(input: { request: Request; userId: strin
     const dispatching = await tx.researchPreviewGeneration.count({ where: { runId: run.id, status: "dispatch_started" } });
     const running = await tx.researchWorkItem.count({ where: { runId: run.id, status: "running" } });
     if (inFlight || dispatching || running) throw refuse(409, "RESEARCH_RUN_ACTIVE", "Cancel the research and wait for in-flight work to finish before deleting.");
+    // A task's file goes with its answer: the tombstone commits with the row deletion (lib/generatedArtifactStorage.ts).
+    const files = await tx.messageArtifact.findMany({ where: { messageId: run.assistantMessageId, conversationId: run.conversationId, objectKey: { not: null },
+      message: { researchRunId: run.id } }, select: { objectKey: true } });
+    if (files.length) await tx.messageArtifactCleanup.createMany({ data: files.map((file) => ({ objectKey: file.objectKey!, reason: "message_deleted" })), skipDuplicates: true });
     await tx.message.deleteMany({ where: { id: run.assistantMessageId, conversationId: run.conversationId, researchRunId: run.id } });
     await tx.researchPreviewRun.delete({ where: { id: run.id } });
   });
@@ -566,12 +578,14 @@ export async function readResearchRunDto(userId: string, runId: string, request?
   const terminal = RESEARCH_RUN_TERMINAL_STATUSES.has(run.status);
   const inFlight = counts.running > 0 || money.reservedCredits > 0;
   const parsedPlan = plan ? researchPlanSchema.safeParse(plan.plan) : null;
+  const taskOutput = researchInputManifestSchema.safeParse(run.inputManifest).data?.brief.taskOutput;
   const dto: ResearchRunV2Dto = {
     id: run.id, engineVersion: 2, conversationId: run.conversationId, assistantMessageId: run.assistantMessageId, status: run.status,
     ...(run.stopReason ? { stopReason: run.stopReason } : {}), eventSequence: run.eventSequence, inputRevision: run.inputRevision,
     planRevision: run.planRevision, approvedPlanRevision: run.approvedPlanRevision,
     qualityStatus: (run.qualityStatus as ResearchRunV2Dto["qualityStatus"]) ?? null, currentReportRevision: run.currentReportRevision,
     pauseRequested: Boolean(run.pauseRequestedAt), cancelRequested: Boolean(run.cancelRequestedAt),
+    ...(taskOutput ? { task: { output: taskOutput } } : {}),
     ...(plan && parsedPlan?.success ? { plan: { revision: plan.revision, author: plan.author, plan: parsedPlan.data } } : {}),
     progress: { items: counts, questions: [...questions.values()], sourcesSeen: (visibility.public ?? 0) + (visibility.private ?? 0),
       sourcesRead: readCount, privateSources: visibility.private ?? 0, openQuestions },

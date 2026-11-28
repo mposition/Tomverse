@@ -1240,6 +1240,11 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
   검색 surcharge는 segment에 기록되어 검색이 제공되지 않은 dispatch에서는 Chat 정산이 환불합니다.
 - **계획·offer는 별도입니다.** offer/추정은 결정적 계산이며 모델을 부르지 않습니다. 계획
   생성은 사용자가 누른 명시적 동작이고 run 총액에서 예약합니다.
+- **작업 맡기기(2026-11-28, 기본 꺼짐 `CHAT_TASK_AGENT_ENABLED`)는 같은 run입니다.** brief의
+  `taskOutput`만 다르고, 모든 유료 호출은 위의 dispatch 하나 = Chat 예약 하나와 run 총액 불변식을 그대로 지납니다.
+  새 가격, 새 credit 계산, 새 상한 값이 없습니다(강도는 기존 standard/deep 프로필, 승인 총액 상한은
+  `RESEARCH_ENGINE_MAX_APPROVED_CREDITS`). 마지막 결과 파일(docx·xlsx·pptx)은 이미 정산된 보고서를 모델 호출 없이
+  배치한 것이라 예약도 정산도 없습니다. 생성 파일 정책의 "토큰 값만, 파일 자체에 별도 credit 없음"(§11)과 같습니다.
 
 ### 예약 작업: 회차 하나 = 일반 Chat turn 하나, 1회 상한은 사용자가 승인한 견적 (2026-11-27)
 
