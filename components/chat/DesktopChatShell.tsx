@@ -454,6 +454,15 @@ export type DesktopChatShellProps = {
   }) => Promise<string | null>;
 };
 
+/** A function with a fixed identity that always runs the latest closure given to it. */
+function useLatestCallback<Args extends unknown[], Result>(callback: (...args: Args) => Result) {
+  const latest = useRef(callback);
+  useEffect(() => {
+    latest.current = callback;
+  });
+  return useCallback((...args: Args) => latest.current(...args), []);
+}
+
 export function DesktopChatShell({
   workspaceNotice,
   continuationNotice,
@@ -636,6 +645,21 @@ export function DesktopChatShell({
     }
     return entries;
   }, [conversationStateKey, selectedModels, singleTranscript, studio, studioPanelOrder]);
+  // A panel's close/choose-model handler is created once per panel, not once
+  // per render: an inline arrow here is a new prop every keystroke (the
+  // composer text is a prop of this shell), which defeats the memo on ChatApp
+  // and re-renders every transcript. The current props are read at click time.
+  const closeModel = useLatestCallback((panelModelId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    if (singleTranscript) openChatModelPicker(event.currentTarget);
+    else onToggleModel(panelModelId);
+  });
+  const closeModelHandlers = useMemo(() => {
+    const handlers = new Map<string, React.MouseEventHandler<HTMLButtonElement>>();
+    for (const { modelId: panelModelId } of panelEntries) {
+      handlers.set(panelModelId, (event) => closeModel(panelModelId, event));
+    }
+    return handlers;
+  }, [panelEntries, closeModel]);
   const [modelContentStates, setModelContentStates] = useState<
     Record<string, ChatContentState>
   >({});
@@ -1503,9 +1527,7 @@ export function DesktopChatShell({
                   useCenteredWelcome
                   onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
-                  onRequestCloseModel={(event) => singleTranscript
-                    ? openChatModelPicker(event.currentTarget)
-                    : onToggleModel(modelId)}
+                  onRequestCloseModel={closeModelHandlers.get(modelId)}
                   hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}
                 />
