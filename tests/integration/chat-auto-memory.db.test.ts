@@ -350,10 +350,10 @@ test("save_memory stores a personal, user-grounded memory through the manual ser
         rateLimit: async () => undefined,
     });
     const call = (statement: string) =>
-        part.tools.save_memory.execute!(
+        (part.tools.save_memory as unknown as { execute: (input: unknown, options: unknown) => Promise<{ status: string }> }).execute(
             { memories: [{ kind: "preference", statement, quote: "remember that I am vegetarian", sensitive: false }] },
             { toolCallId: "t", messages: [] }
-        ) as Promise<{ status: string }>;
+        );
     assert.equal((await call("The user is vegetarian")).status, "saved");
     const memory = await prisma.memoryItem.findFirstOrThrow({ where: { userId: owner.id }, include: { evidences: true } });
     assert.equal(memory.status, "active");
