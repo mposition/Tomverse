@@ -96,6 +96,11 @@ type AutoLlmRouterCallInput = {
     rewriteGuidance?: string;
     /** The live turn's deadline unless given; the optimizer's replay waits longer. */
     timeoutMs?: number;
+    /**
+     * The request this call serves. Its abort stops the call beside the
+     * deadline, so a client that went away does not keep a paid call running.
+     */
+    abortSignal?: AbortSignal;
     traceId?: string;
     cycleId?: string;
     decisionId?: string;
@@ -201,6 +206,9 @@ async function callPreparedAutoLlmRouter(
     const timeoutMs = input.timeoutMs ??
         (rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : AUTO_LLM_ROUTER_TIMEOUT_MS);
     let abortSignal: AbortSignal | undefined;
+    // Kept apart from the combined signal: only the deadline firing is a
+    // timeout. A request abort is the caller leaving, not a slow router.
+    let deadline: AbortSignal | undefined;
     const startedAt = Date.now();
     let usage: AutoLlmRouterCallResult["usage"];
     let finishReason: string | undefined;
@@ -228,7 +236,10 @@ async function callPreparedAutoLlmRouter(
         })
     );
     try {
-        abortSignal = AbortSignal.timeout(timeoutMs);
+        deadline = AbortSignal.timeout(timeoutMs);
+        abortSignal = input.abortSignal
+            ? AbortSignal.any([input.abortSignal, deadline])
+            : deadline;
         let historyRead = false;
         let historyAttempted = false;
         const history = historyTool ? input.historySearch : undefined;
@@ -326,7 +337,7 @@ async function callPreparedAutoLlmRouter(
             finishReason = error.finishReason ?? finishReason;
             stage = "output";
         }
-        const failure = autoLlmRouterFailureDetail(error, abortSignal?.aborted === true);
+        const failure = autoLlmRouterFailureDetail(error, deadline?.aborted === true);
         // A cut-off answer has its own code, so an output ceiling that is too
         // tight shows up in the logs as itself rather than as a malformed answer.
         const failureCode = failure.kind === "timeout" ? "timeout"
@@ -542,6 +553,14 @@ export async function pickAutoModelWithLlm(input: {
     /** The soft-filtered menu, reused by normal selection and fallback. */
     onCandidatesResolved?: (modelIds: readonly string[]) => void;
     /**
+     * The request the pick serves. A request already gone takes no budget
+     * hold and makes no call; one that goes away during the call aborts it.
+     * Not passed where a decision is shared between requests (the external
+     * API's in-flight routing), since one caller leaving must not cancel
+     * another's.
+     */
+    abortSignal?: AbortSignal;
+    /**
      * An external API coding request: the fixed coding guidance
      * (AUTO_LLM_ROUTER_CODING_GUIDANCE) instead of the promoted Chat one, and
      * these signals beside the message.
@@ -624,6 +643,7 @@ export async function pickAutoModelWithLlm(input: {
         coding: input.coding,
         // A rewrite needs its own longer deadline; a tuned one only ever adds to it.
         timeoutMs: Math.max(rewrite ? AUTO_LLM_ROUTER_REWRITE_TIMEOUT_MS : timeoutMs, timeoutMs, imageIntent?.timeoutMs ?? 0),
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     };
     const request = routerRequest(call);
     const worstCase = prices ? routerRequestWorstCase(call, request, prices) : null;
@@ -646,6 +666,8 @@ export async function pickAutoModelWithLlm(input: {
     if (worstCase !== null && input.verifyPreparedContext &&
         !(await (earlyPrecheck ? earlyPrecheck.then(unsettled) : input.verifyPreparedContext()))) return null;
     if (input.importedSource && (!input.verifyImportedSource || !(await input.verifyImportedSource()))) return null;
+    // Nobody is waiting for this pick any more: hold nothing and call nothing.
+    if (input.abortSignal?.aborted) return null;
     const reservedAt = new Date();
     if (worstCase === null || !(await reserveRouterCost(routerModel.provider, worstCase, reservedAt))) {
         console.info(

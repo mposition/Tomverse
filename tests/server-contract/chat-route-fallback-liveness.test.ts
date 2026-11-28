@@ -13,6 +13,11 @@ import {
   validatePromptRefinerChatExecution,
 } from "@/lib/promptRefinerChatExecutionCore";
 import { preflightInputEstimate } from "@/lib/autoDispatchPreflight";
+import {
+  chatResponseAttemptFingerprint,
+  decideAttemptClaim,
+  type ChatResponseAttemptIdentity,
+} from "@/lib/chatResponseAttemptCore";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { DispatchBoundaryError } from "@/lib/routingAttemptStore";
 
@@ -536,6 +541,9 @@ let durableAttemptAdmissionRefused = false;
 let durableAttemptAdmissionCalls = 0;
 let locationIntentLimitCalls = 0;
 let locationIntentLimitRefused = false;
+/** The pre-dispatch storage check: what it was asked, and whether the store is full. */
+let messageStoreFull = false;
+const messageCapacityChecks: Array<{ conversationId: string | null; count: number; bytes: number }> = [];
 class TestApiSecurityError extends Error {
   constructor(
     readonly status: number,
@@ -561,6 +569,12 @@ mock.module(mod("lib/apiSecurity.ts"), {
           )
         : null,
     assertMessageCapacity: async () => undefined,
+    checkMessageCapacity: async (_db: unknown, _userId: string, conversationId: string | null, count: number, bytes: number) => {
+      messageCapacityChecks.push({ conversationId, count, bytes });
+      if (messageStoreFull) {
+        throw new TestApiSecurityError(409, "MESSAGE_STORAGE_QUOTA_EXCEEDED", "Message storage quota exceeded.");
+      }
+    },
     consumeApiRateLimit: async (
       request: Request,
       subject: string,
@@ -690,6 +704,8 @@ type Attempt = {
   toolNames: string[];
   searchDescription?: string;
   preparesStep: boolean;
+  /** The step hook itself, so a test can ask what a given step is given. */
+  prepareStep?: (options: { stepNumber: number; steps: unknown[]; messages: unknown[] }) => unknown;
   /** What reached the provider-facing abort signal. */
   providerAbortedWith: unknown;
   /** The provider signal state at the exact reader-cancel boundary. */
@@ -752,6 +768,7 @@ mock.module("ai", {
         toolNames: Object.keys(options.tools ?? {}),
         searchDescription: typeof searchDescription === "string" ? searchDescription : undefined,
         preparesStep: typeof options.prepareStep === "function",
+        prepareStep: options.prepareStep as Attempt["prepareStep"],
         providerAbortedWith: null,
         providerAbortedBeforeReaderCancel: false,
       };
@@ -1052,9 +1069,39 @@ let durableClaimMode:
   | "conflict" = "claimed";
 let durableClaimCalls = 0;
 let durableTerminalFails = false;
+/** The conversation a pre-Router peek finds an attempt bound in; null is none. */
+let peekedAttemptConversationId: string | null = null;
+let durablePeekCalls = 0;
+let peekFails = false;
+/**
+ * When set, the claim decides as the real one does: the stored identity's
+ * fingerprint from lib/chatResponseAttemptCore.ts, compared by
+ * `decideAttemptClaim`. The peek then reads this store too.
+ */
+let realClaimStore: Map<string, ChatResponseAttemptIdentity> | null = null;
 class DurableConflict extends Error {
   readonly code = "CHAT_ATTEMPT_ID_REUSED";
 }
+const realClaimDisposition = (input: Record<string, unknown>) => {
+  const identity: ChatResponseAttemptIdentity = {
+    assistantMessageId: String(input.assistantMessageId),
+    userId: String(input.userId),
+    conversationId: String(input.conversationId),
+    sourceUserMessageId: String(input.sourceUserMessageId),
+    requestedModelId: String(input.requestedModelId),
+    fingerprint: chatResponseAttemptFingerprint({
+      conversationId: String(input.conversationId),
+      sourceUserMessageId: String(input.sourceUserMessageId),
+      requestedModelId: String(input.requestedModelId),
+      requestPayloadDigest: String(input.requestPayloadDigest),
+    }),
+  };
+  const existing = realClaimStore!.get(identity.assistantMessageId) ?? null;
+  const decision = decideAttemptClaim(existing, identity);
+  if (decision.action === "conflict") throw new DurableConflict();
+  if (decision.action === "create") realClaimStore!.set(identity.assistantMessageId, identity);
+  return decision.action === "reattach" ? "reattach" as const : "claimed" as const;
+};
 mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
   namedExports: {
     ChatAttemptCapacityError: class extends Error {
@@ -1064,14 +1111,23 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptCasError: class extends Error { readonly code = "CHAT_ATTEMPT_REVISION_CONFLICT"; },
     ChatAttemptIdentityConflictError: DurableConflict,
     ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
+    peekChatResponseAttempt: async (_userId: string, assistantMessageId: string) => {
+      durablePeekCalls += 1;
+      if (peekFails) throw new Error("attempt peek unavailable");
+      if (realClaimStore) return realClaimStore.get(assistantMessageId) ?? null;
+      return peekedAttemptConversationId === null
+        ? null
+        : { assistantMessageId, conversationId: peekedAttemptConversationId };
+    },
     claimChatResponseAttempt: async (input: Record<string, unknown>) => {
       durableClaimCalls += 1;
       lastDurableClaimInput = input;
-      if (durableClaimMode === "conflict") throw new DurableConflict();
+      const realDisposition = realClaimStore ? realClaimDisposition(input) : null;
+      if (!realDisposition && durableClaimMode === "conflict") throw new DurableConflict();
       return {
-      disposition: durableClaimMode === "reattach-completed"
+      disposition: realDisposition ?? (durableClaimMode === "reattach-completed"
         ? "reattach"
-        : durableClaimMode,
+        : durableClaimMode),
       attempt: {
         ...input,
         fingerprint: "a".repeat(64),
@@ -2351,6 +2407,141 @@ test("an exact durable replay reattaches without reservation or provider dispatc
   assert.equal("leaseExpiresAt" in payload.attempt, false);
 });
 
+/*
+  A repeat is routed like any turn (B3 review: skipping the Router left it on
+  the rule model, and checks before the claim could then refuse it). The claim
+  here decides with the real fingerprint and `decideAttemptClaim`, over the
+  digest the route computed from the execution view.
+*/
+test("a repeat of a turn is routed again and reattaches through the real identity digest", async () => {
+  realClaimStore = new Map();
+  try {
+    llmRouterInputs.length = 0;
+    await ask("answers", "claimed", 200, false);
+    const digest = lastDurableClaimInput?.requestPayloadDigest;
+    const repeat = await ask("answers", "claimed", 200, false);
+    assert.equal(llmRouterInputs.length, 2, "the repeat asked the Router too");
+    assert.equal(repeat.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(lastDurableClaimInput?.requestPayloadDigest, digest);
+  } finally {
+    realClaimStore = null;
+  }
+});
+
+/** The answer row counts as zero bytes (a file-only answer is stored empty); the turn's own message is already stored. */
+const TURN_MESSAGE_BYTES = 0;
+
+/*
+  Review finding (B3, 2026-11-28, third pass): the storage check ran after the
+  paid Auto Router, so an account with a full message store paid for a Router
+  call on every turn before being told no.
+*/
+test("a full message store is refused before the paid Router, the claim and the reservation", async () => {
+  messageStoreFull = true;
+  messageCapacityChecks.length = 0;
+  try {
+    llmRouterInputs.length = 0;
+    const { body } = await ask("answers", "claimed", 409, false);
+    assert.equal((JSON.parse(body) as { code?: string }).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+    assert.equal(llmRouterInputs.length, 0, "no Router call for an answer that could not be stored");
+    assert.equal(durableClaimCalls, 0, "no attempt row either");
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    // Room for this turn's own message and a one-byte answer; no answer size assumed.
+    assert.deepEqual(messageCapacityChecks, [{ conversationId: CONVERSATION_ID, count: 1, bytes: TURN_MESSAGE_BYTES }]);
+  } finally {
+    messageStoreFull = false;
+  }
+  // With room, the same turn asks the Router as before, after one check.
+  messageCapacityChecks.length = 0;
+  llmRouterInputs.length = 0;
+  await ask("answers", "claimed", 200, false);
+  assert.equal(messageCapacityChecks.length, 1);
+  assert.equal(llmRouterInputs.length, 1);
+});
+
+/*
+  Review finding (B3, 2026-11-28, fourth pass): the storage check ran before
+  the durable claim, so a POST that only reattaches to an answer already saved
+  was refused with 409 by a full message store -- the recovery path refused.
+*/
+test("a full message store refuses a new answer but lets a POST reattach to the one already bound", async () => {
+  messageStoreFull = true;
+  try {
+    peekedAttemptConversationId = CONVERSATION_ID;
+    messageCapacityChecks.length = 0;
+    const reattach = await ask("answers", "reattach", 200, false);
+    assert.equal(reattach.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(messageCapacityChecks.length, 0, "a reattach writes no answer, so it is not checked");
+    assert.equal(durableClaimCalls, 1);
+
+    peekedAttemptConversationId = null;
+    messageCapacityChecks.length = 0;
+    const fresh = await ask("answers", "claimed", 409, false);
+    assert.equal((JSON.parse(fresh.body) as { code?: string }).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+    assert.equal(messageCapacityChecks.length, 1);
+    assert.equal(durableClaimCalls, 0);
+  } finally {
+    messageStoreFull = false;
+    peekedAttemptConversationId = null;
+  }
+});
+
+test("a failed attempt peek skips the early storage check, so a reattach on a full store still reaches the claim", async () => {
+  messageStoreFull = true;
+  peekFails = true;
+  try {
+    messageCapacityChecks.length = 0;
+    const reattach = await ask("answers", "reattach", 200, false);
+    assert.equal(reattach.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(messageCapacityChecks.length, 0, "an unknown attempt state is not read as no attempt");
+    assert.equal(durableClaimCalls, 1);
+  } finally {
+    messageStoreFull = false;
+    peekFails = false;
+  }
+});
+
+test("a conversation the owner-scoped read does not find is checked against the account alone", async () => {
+  // copilot (B3, fourth pass): without a conversation row the check still
+  // applies, on the account's limits only -- never counting a conversation
+  // this account was not shown to own. The ownership refusal follows as before.
+  contextConversationAccess = "missing";
+  messageCapacityChecks.length = 0;
+  try {
+    const { body } = await ask("answers", "claimed", 403, false);
+    assert.equal((JSON.parse(body) as { code?: string }).code, "CONVERSATION_FORBIDDEN");
+    assert.deepEqual(messageCapacityChecks, [{ conversationId: null, count: 1, bytes: TURN_MESSAGE_BYTES }]);
+  } finally {
+    contextConversationAccess = "owned";
+  }
+});
+
+test("a POST whose attempt is already bound is still routed, and the claim reattaches it", async () => {
+  peekedAttemptConversationId = CONVERSATION_ID;
+  try {
+    llmRouterInputs.length = 0;
+    durablePeekCalls = 0;
+    const { response, body } = await ask("answers", "reattach");
+    assert.equal(durablePeekCalls, 1, "read once, for the storage check");
+    assert.equal(llmRouterInputs.length, 1, "routed like any turn");
+    assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(durableClaimCalls, 1, "the claim makes the decision");
+    assert.equal(attempts.length, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal((JSON.parse(body) as { attempt: { assistantMessageId: string } }).attempt.assistantMessageId,
+      ASSISTANT_MESSAGE_ID);
+
+    // A different identity under the same id is still the claim's 409.
+    llmRouterInputs.length = 0;
+    const conflict = await ask("answers", "conflict", 409);
+    assert.equal(llmRouterInputs.length, 1);
+    assert.equal((JSON.parse(conflict.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
+  } finally {
+    peekedAttemptConversationId = null;
+  }
+});
+
 test("a completed durable replay includes its canonical public Message", async () => {
   const { response, body } = await ask("answers", "reattach-completed");
   assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
@@ -2755,6 +2946,15 @@ test("a stall after the swap cancels the fallback's stream, settles and releases
 
   // No answer existed, so no assistant message may be written for one.
   assert.deepEqual(world.messages, []);
+});
+
+test("a turn no provider ever wrote a token for is recorded as unavailable, not as interrupted", async () => {
+  await ask("silent");
+  // The first-token deadline ended it: nothing was interrupted, because
+  // nothing had started. The code is one the attempt row's CHECK allows.
+  const terminal = world.terminals.at(-1) as { status?: string; failureCode?: string } | undefined;
+  assert.equal(terminal?.status, "failed");
+  assert.equal(terminal?.failureCode, "provider_unavailable");
 });
 
 /* ------------------------------------- what the override record may claim */
@@ -4215,7 +4415,18 @@ test("grounded answer guidance and Qwen first-step thinking follow independent g
     assert.equal(lastPart.includes("End of quoted evidence"), withEvidence && scenario !== "answer flag off", scenario);
     assert.equal(lastPart.includes("\nObservation —"), groundedLookupScenarios.includes(scenario), scenario);
     assert.equal(lastPart.includes("requested precision"), groundedFullScenarios.includes(scenario), scenario);
-    assert.equal(attempts[0].preparesStep, ["grounded", "compact", "answer flag off", "fast lookup", "both lookup flags"].includes(scenario), scenario);
+    // Qwen's lookup model is swapped in for the first step only where its gate
+    // is on. Every application-managed search turn now carries a step hook
+    // anyway: its last allowed step may not search again, so a turn whose
+    // budget runs out still ends on an answer rather than on `tool-calls`.
+    const firstStep = await attempts[0].prepareStep?.({ stepNumber: 0, steps: [], messages: [] }) as
+      { model?: unknown } | undefined;
+    assert.equal(Boolean(firstStep?.model),
+      ["grounded", "compact", "answer flag off", "fast lookup", "both lookup flags"].includes(scenario), scenario);
+    const lastStep = await attempts[0].prepareStep?.({ stepNumber: 7,
+      steps: Array.from({ length: 7 }, () => ({ toolCalls: [], toolResults: [] })),
+      messages: [] }) as { toolChoice?: unknown } | undefined;
+    assert.equal(lastStep?.toolChoice, "none", scenario);
     if (scenario === "grounded") ordinarySearchDescription = attempts[0].searchDescription;
     assert.ok(ordinarySearchDescription, "the ordinary web search tool has a provider description");
     if (scenario === "fast lookup" || scenario === "both lookup flags" || scenario === "complex") {

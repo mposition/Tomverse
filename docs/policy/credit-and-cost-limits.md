@@ -904,6 +904,59 @@ provider 스트림이 끝난 뒤 완료 분기가 고르는 정산 outcome입니
   수치로, 없으면 취소 turn과 같은 추정으로. 정액 `completed` 과금을 하지 않습니다.
   routing attempt 기록은 취소가 아니라 post-token provider 실패이고, provider·모델
   실패로 기록합니다. Research Preview는 채택된 보고서가 답이므로 제외합니다.
+- **스트림이 끝났는지는 finish reason 하나로 판정합니다(2026-11-28).** 완료 분기는
+  `response`·`usage`·`finishReason`·`rawFinishReason`·`content`·`providerMetadata`를
+  함께 기다리는데, 예전에는 이 중 하나만 reject돼도 끊긴 스트림으로 보아 `stop`으로 끝난
+  답을 `incomplete`·`cancelled`로 감액 정산했습니다. 이제 `finishReason` 자체가 reject된
+  경우만 끊긴 스트림입니다. `usage`를 읽지 못한 정상 답은 usage가 보고되지 않은 답과 같은
+  추정으로 `completed` 정산하고, `content`를 읽지 못하면 native 검색 횟수를 아무도 세지
+  못한 것으로 보아 승인 상한으로 정산합니다(application-managed 검색은 이 프로세스가
+  세므로 그대로 관측값입니다). `lib/chatTurnCompletion.ts`.
+- **단계 상한에 걸린 turn(2026-11-28).** application-managed 검색만 쓰는 turn은 마지막
+  허용 단계에서 도구 호출을 끕니다(`toolChoice: "none"`, project·MCP·장문 루프와 같은
+  규칙). 그래도 `tool-calls`로 끝나고 저장된 파일이 없는 turn은 쓰려던 답을 쓰지 못한
+  것이므로 이유 없는 `incomplete`로 저장하고(브라우저는 "응답이 끝나지 않았다"만
+  표시) provider 중단과 같은 비례 방식으로 정산합니다. provider 실패로 기록하지 않습니다.
+  저장된 파일이 있는 turn은 파일이 답이므로 그대로 `completed`이고
+  (`docs/policy/generated-artifacts.md` §8), Research Preview도 제외입니다.
+- **저장이 확실히 불가능한 답은 보내기 전에 거절합니다(2026-11-28).** 로그인 turn은
+  Auto Router·이미지 분류·위치 동의 준비·durable claim·예약 같은 유료 또는 기록을 남기는
+  단계보다 먼저 메시지 저장 한도(`STORAGE_LIMITS`)를 잠금 없이 확인하고, 다음 둘 중
+  하나일 때만 `MESSAGE_STORAGE_QUOTA_EXCEEDED`(409)로 거절합니다: 메시지 개수 한도에
+  이미 닿았거나, 계정 바이트가 이미 한도를 넘은 경우. 답변 행은 0바이트로 셉니다(파일만
+  있는 답변은 본문 없이 저장됩니다). 이번 사용자 메시지는 이미 저장되어 합계에 들어 있으므로
+  다시 더하지 않습니다. attempt 조회가 실패하면 사전 검사를 건너뛰고 저장 시점 검사가
+  판정합니다. Deep Research 턴은 거절된 제출을 기존 답변 행을 고쳐 다시 시도하므로 사전
+  검사에서 제외합니다. 답변 크기는 가정하지 않으므로, 긴 답변이 넘치는 경우는 저장 시점의 잠금
+  검사가 판정합니다. 거절할 때는 아무것도 호출·예약하지 않고 attempt 행도 만들지
+  않습니다. 같은 `assistantMessageId`의 attempt가 이 대화에 이미 있는 POST(재연결)는
+  답을 새로 쓰지 않으므로 검사하지 않습니다(재연결도 Router는 다른 turn처럼 거칩니다).
+  소유자 범위 조회에서 대화 행을 찾지 못한 경우에는 계정 한도만 확인합니다. Message
+  저장의 잠금 아래 검사가 여전히 최종 판정이고, 동시 turn이 마지막
+  자리를 가져가 그 검사가 거절하면 위 정산 순서(저장 전 정산, 되돌리지 않음)를 그대로
+  따릅니다. 그 거절은 로컬 저장 거절이라 provider·모델 실패로 기록하지 않습니다.
+
+### 정산 실패와 재시도 (2026-11-28)
+
+- **정산 트랜잭션은 일시적 DB 오류에 다시 시도합니다.** `settleChatUsage`는
+  `isRetryableDatabaseError`인 실패에 `DATABASE_WRITE_RETRY_DELAYS_MS`(150ms, 500ms)
+  간격으로 두 번 더 시도합니다(`retrySelfCheckingDatabaseWork`, 로그
+  `chat_usage_settlement_retry`). 예전에는 한 번의 연결 끊김으로 turn의 정산이 끝났고,
+  route의 memo 때문에 다른 경로도 다시 정산하지 않아 만료 sweep이 비용 0·전액 환불로
+  닫았습니다.
+- **다시 실행해도 이중 정산이 되지 않는 근거.** 트랜잭션은 계정 잠금과 예약 잠금을 잡은
+  뒤 행이 `reserved`일 때만 정산합니다(§9). COMMIT은 됐는데 응답을 못 받은 시도는 행을
+  terminal로 남기므로, 다음 시도는 그것을 읽고 `applied: false`로 끝나며 돈을 움직이지
+  않습니다. `tests/server-contract/chat-usage-settlement-retry.test.ts`가 고정합니다.
+- **만료 reconcile은 Chat 예약도 provider 쪽에 예약 추정치를 남깁니다.** 만료될 때까지
+  아무도 정산하지 않은 Chat 예약(프로세스가 스트림 중에 죽었거나, 위 재시도를 넘겨 정산이
+  실패한 turn)은 `external_api`와 같은 방식으로 정산합니다: outcome `failed`, 토큰 수 없음,
+  `searchQueriesObserved: false`. 사용자 크레딧은 지금처럼 전액 환불이고, provider 예산·
+  비용 ledger와 운영 guardrail(`cost-*`, `op-cost-*`, token bucket)은 예약 추정치를,
+  검색 승인은 상한을 유지합니다. 호출 전에 실패하고 환불까지 실패한 예약도 같은 추정이
+  남으므로 provider 쪽은 상한 방향으로 과대 집계될 수 있습니다(예산이 넘지 않게 하는
+  쪽입니다). Deep Research는 handoff 규칙을, AI Review(`comparison_review`)는 기존
+  환불을 그대로 씁니다. `expiredChatReservationEstimate`.
 
 ## 4. 예약 정확도
 
