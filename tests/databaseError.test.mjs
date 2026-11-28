@@ -10,6 +10,7 @@ import {
   isRetryableDatabaseError,
   isTransactionStartFailure,
   isUniqueConstraintDatabaseError,
+  retrySelfCheckingDatabaseWork,
   runRetryableDatabaseWrite,
 } from "../lib/databaseError.ts";
 
@@ -290,6 +291,94 @@ test("a last try that turns out to have committed is reported as committed", asy
     sleep: noSleep,
   });
   assert.equal(outcome, "already_committed");
+});
+
+/*
+  retrySelfCheckingDatabaseWork: for work that re-reads its own state under a
+  lock, as the Chat settlement does (lib/chatSecurity.ts settleChatUsage). Its
+  shape is what makes a blind re-run safe; these pin the retry itself.
+*/
+const connectionClosed = () =>
+  Object.assign(new Error("connection closed"), {
+    name: "DriverAdapterError",
+    cause: { kind: "ConnectionClosed" },
+  });
+
+test("self-checking work is run again after a retryable failure", async () => {
+  const delays = [];
+  let runs = 0;
+  const value = await retrySelfCheckingDatabaseWork({
+    run: async () => {
+      runs += 1;
+      if (runs === 1) throw connectionClosed();
+      return "settled";
+    },
+    sleep: async (ms) => { delays.push(ms); },
+  });
+  assert.equal(value, "settled");
+  assert.equal(runs, 2);
+  assert.deepEqual(delays, [150]);
+});
+
+test("a commit whose answer was lost is found by the next try and applied once", async () => {
+  // The state the work guards: a reservation that is `reserved` until one
+  // settlement moves it. The first try commits and then loses its answer.
+  const row = { status: "reserved", applications: 0 };
+  const settle = async () => {
+    if (row.status !== "reserved") return { applied: false, status: row.status };
+    row.status = "settled";
+    row.applications += 1;
+    return { applied: true, status: row.status };
+  };
+  let runs = 0;
+  const result = await retrySelfCheckingDatabaseWork({
+    run: async () => {
+      runs += 1;
+      const outcome = await settle();
+      if (runs === 1) throw connectionClosed();
+      return outcome;
+    },
+    sleep: noSleep,
+  });
+  assert.deepEqual(result, { applied: false, status: "settled" });
+  assert.equal(row.applications, 1, "no second charge or refund");
+  assert.equal(runs, 2);
+});
+
+test("a non-retryable failure is thrown at once", async () => {
+  const refusal = new Error("constraint");
+  let runs = 0;
+  await assert.rejects(
+    retrySelfCheckingDatabaseWork({
+      run: async () => {
+        runs += 1;
+        throw refusal;
+      },
+      sleep: noSleep,
+    }),
+    (error) => error === refusal
+  );
+  assert.equal(runs, 1);
+});
+
+test("at most two more tries, then the last failure is thrown", async () => {
+  const delays = [];
+  const retries = [];
+  let runs = 0;
+  await assert.rejects(
+    retrySelfCheckingDatabaseWork({
+      run: async () => {
+        runs += 1;
+        throw writeConflict();
+      },
+      sleep: async (ms) => { delays.push(ms); },
+      onRetry: ({ attempt }) => { retries.push(attempt); },
+    }),
+    (error) => error.code === "P2034"
+  );
+  assert.equal(runs, 3);
+  assert.deepEqual(delays, [150, 500]);
+  assert.deepEqual(retries, [1, 2]);
 });
 
 test("isDatabaseError names Prisma and driver-adapter errors, never a provider error", () => {
