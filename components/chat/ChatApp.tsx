@@ -9,6 +9,7 @@ import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceip
 import { PASSAGE_HEADER } from "@/lib/continuationPassages";
 import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
+import { watchAnswerCredits } from "@/lib/chatAnswerCreditsClient";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
 import { chatLocationSession, readRouterLocationRequest, requireRouterLocationVersion } from "@/lib/chatLocationClient";
@@ -1778,6 +1779,22 @@ function ChatAppComponent({
         }
       );
     };
+    // Once this answer's settlement lands, show what it was charged
+    // (lib/chatAnswerCreditsClient.ts). Chat, signed in: the only turns the
+    // server links to their answer. Read-only; it never touches the charge.
+    const followAnswerCredits = (answerId: string) => {
+      if (transcriptScope !== "conversation" || currentProduct !== "chat" || isGuestMode) return;
+      watchAnswerCredits({
+        conversationId: targetChatId,
+        messageId: answerId,
+        onSettled: (settledCredits) =>
+          writeChatRuntimeMessages(runKey, (current) =>
+            current.map((message) =>
+              message.id === answerId ? { ...message, settledCredits } : message
+            )
+          ),
+      });
+    };
     /*
       What this one request searches with. The override wins where it is given
       and the conversation's own mode is used everywhere else, so an ordinary
@@ -3001,6 +3018,7 @@ function ChatAppComponent({
         );
         // Only an answer the server stored replaces the turn before it.
         replacement.complete(completionStatus, { saved: !trailer?.persistence });
+        if (!trailer?.persistence) followAnswerCredits(assistantMessageId);
         if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
           conversationId: targetChatId, sourceUserMessageId, status: completionStatus,
           nonempty: Boolean(assistantText.trim()) || fileOnlyAnswer });
@@ -3101,6 +3119,8 @@ function ChatAppComponent({
             assistantText.trim() ? assistantText : t("chat.responseCancelled"),
             "cancelled"
           );
+          // A stop after some text is charged for what was written.
+          if (assistantText.trim()) followAnswerCredits(assistantMessageId);
         }
       } else if (isGuestVerificationError(error)) {
         // The challenge itself ended without a token (failed / cancelled /
@@ -3950,6 +3970,7 @@ function ChatAppComponent({
           : undefined}
         compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
         onBranchFromAnswer={transcriptScope === "conversation" && currentProduct === "chat" ? onBranchFromAnswer : undefined}
+        showAnswerCredits={transcriptScope === "conversation" && currentProduct === "chat" && !isGuestMode}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

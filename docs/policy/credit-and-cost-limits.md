@@ -1275,6 +1275,41 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
   (`claimBatch`, `dueScanLimit`). 보지 못한 작업은 그대로 다음 tick(15분 뒤)으로 넘어가고, 3시간
   유예를 넘긴 회차는 늦게 몰아서 실행하지 않고 건너뜁니다.
 
+### 답변별 실제 크레딧: 예약 행이 자기 답변을 가리킵니다 (2026-11-28)
+
+Chat 답변 아래에 그 답변에 실제로 차감된 크레딧을 보여 줍니다(운영자 지시). 새 가격이나
+새 정산은 없고, 예약 행에 열 하나(`ChatCreditReservation.assistantMessageId`, nullable,
+`20261128110000_chat_reservation_assistant_message`)가 늘었을 뿐입니다.
+
+- **쓰는 곳은 한 곳입니다.** Chat route가 저장되는 turn(로그인 사용자, 저장된 대화,
+  `assistantMessageId` 있음)에 `acquireChatAccess`를 부를 때 넘기고, 예약 insert가 그
+  자리에서 씁니다. 이후 갱신하지 않습니다. 예약·정산·환불·만료 reconcile은 이 열을 읽지
+  않으므로 금액과 상태 전이는 그대로입니다. continuation 재계획(첫 예약을 0으로 정산하고
+  다시 예약)이나 같은 답변 id로 다시 보낸 turn은 한 답변을 가리키는 예약이 둘 이상이 되고,
+  읽는 쪽이 합칩니다.
+- **연결하지 않는 것**: 게스트 turn, 저장되지 않는 turn, Chat route 밖의 예약(비교 요약,
+  교차검토 항목 확인, Research Preview·Deep Research engine v2 dispatch, 음성, 외부 API,
+  Code 검색)과 이미지 턴(`ImageCreditReservation`은 다른 테이블). 이 답변들은 숫자를
+  보여 주지 않습니다. 웹 검색 surcharge, 도구 호출, fallback attempt는 같은 예약 행
+  안에서 정산되므로 따로 연결할 것이 없습니다. Chat route를 거치는 Perplexity Deep
+  Research(비동기 job)는 같은 insert로 연결되고, job이 끝나 정산된 뒤에 보입니다.
+- **보여 주는 조건**: 대화 소유자의 예약만(`userId`), 그 답변의 예약이 모두 종료
+  상태(`settled`·`refunded`)일 때, `settledCredits` 합이 1 이상일 때만 보여 줍니다. 아직
+  `reserved`인 예약이 하나라도 있으면 값이 확정되지 않은 것이므로 아무것도 보여 주지
+  않습니다. 합이 0인 답변(실패·환불, 출력 없이 중지)도 보여 주지 않습니다 — `refunded`는
+  "무료였다"와 "돌려받았다"를 구분하지 않기 때문입니다. 이 열이 생기기 전의 답변은
+  연결이 없어 보여 주지 않습니다. Chat 제품 대화(`productKey = "chat"`)에서만 읽고,
+  공유 snapshot·대화 내보내기에는 넣지 않습니다.
+- **구성 내역은 저장돼 있지 않습니다.** `settledCredits`는 합계 하나이고, 웹 검색
+  surcharge가 그 안에서 몇 크레딧인지는 정산 때 계산만 하고 행에 남기지 않습니다. 읽는 쪽이
+  오늘의 registry로 다시 계산하면 소급 가격이 되므로 하지 않습니다. 내역을 보이려면 정산이
+  그 구성을 `pricingSnapshot`에 기록해야 하고, 그것은 정산 쓰기의 변경이라 따로 다룹니다.
+- **삭제**: 메시지에 대한 FK가 없습니다(`RoutingRun.assistantMessageId`와 같은 선택).
+  대화 삭제는 원장 행을 건드리지 않고, 계정 삭제는 이 열을 다른 식별자와 함께 NULL로
+  지웁니다(`lib/accountDataAnonymisation.ts`).
+- 관련 테스트: `tests/integration/chat-answer-credits.db.test.ts`,
+  `tests/chatAnswerCreditsCore.test.ts`.
+
 ## 5. 시간대와 reset
 
 일일 window는 사용자 IANA timezone 기준(`lib/userTimeZone.ts`)입니다. 모든
