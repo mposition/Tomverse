@@ -383,13 +383,13 @@ test("Antigravity names its arguments in its own way and sends options with no k
       rawInput: { CommandLine: "echo hi", WaitMsBeforeAsync: 5000, toolSummary: "Print hi" } } }, { cwd, plan: cliPermissionPlan("google", "ask") });
     assert.deepEqual([bash.verdict, bash.approval.tool, bash.allowOption, bash.rejectOption], ["ask", "Bash", "allow", "deny"]);
     // Every field of the request is on the card.
-    assert.deepEqual(bash.approval.input, { command: "echo hi", WaitMsBeforeAsync: 5000, toolSummary: "Print hi" });
+    assert.deepEqual(bash.approval.input, { command: "echo hi", otherArguments: { WaitMsBeforeAsync: 5000, toolSummary: "Print hi" } });
     const write = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", rawInput: { Content: "hi", Overwrite: true, Path: join(cwd, "hello.txt") } } },
       { cwd, plan: cliPermissionPlan("google", "allow_all") });
     assert.equal(write.verdict, "allow");
     const card = classifyAcpPermission({ sessionId: "s", options: bare, toolCall: { name: "write_file", kind: "edit", rawInput: { Content: "hi", Overwrite: true, Path: join(cwd, "hello.txt") } } },
       { cwd, plan: cliPermissionPlan("google", "ask") });
-    assert.deepEqual([card.approval.tool, card.approval.input], ["Write", { file_path: join(cwd, "hello.txt"), content: "hi", Overwrite: true }]);
+    assert.deepEqual([card.approval.tool, card.approval.input], ["Write", { file_path: join(cwd, "hello.txt"), content: "hi", otherArguments: { Overwrite: true } }]);
     for (const toolCall of [{ kind: "edit", rawInput: { Content: "x", Path: "/home/p/.gemini/antigravity-cli/state" } }, { kind: "execute", rawInput: { CommandLine: "type ~/.gemini/config" } }]) {
       assert.equal(classifyAcpPermission({ sessionId: "s", options: bare, toolCall }, { cwd, plan: cliPermissionPlan("google", "ask") }).verdict, "refuse");
     }
@@ -488,7 +488,7 @@ test("A Read only run advertises no file system or terminal, runs in the project
     assert.equal(seen.initialize.protocolVersion, 1);
     assert.deepEqual(seen.sessionNew.mcpServers, []);
     assert.equal(seen.prompt, "Fix the bug");
-    assert.deepEqual(seen.modeSets, [], "Qwen Code is already in a mode that refuses");
+    assert.deepEqual(seen.modeSets, ["dontAsk"], "Qwen Code starts in default, where it runs what it judges safe: Read only puts it in dontAsk");
     for (const name of ["TOMVERSE_CODE_KEY", "OPENAI_API_KEY", "MISTRAL_API_KEY", "KIMI_CODE_HOME", "NODE_OPTIONS"]) assert.ok(!seen.env.includes(name), name);
     assert.deepEqual(seen.env.filter((name) => /tomverse/i.test(name)), []);
     for (const name of ["run-echo", "edit-project", "edit-outside", "edit-credential", "command-credential", "read-grok-auth"]) assert.ok(rejected(outcomeOf(seen, name)), name);
@@ -943,10 +943,10 @@ test("A diff and the arguments of the same edit must agree: they are shown toget
     // The same file (written two ways) and the same text: the diff is the card, and every other field of the arguments is on it too.
     const same = ask({ content: [diff("hello.txt", "hi")], rawInput: { filePath: join(cwd, "hello.txt"), content: "hi", mode: "0644", createDirs: true } });
     assert.equal(same.verdict, "ask");
-    assert.deepEqual([same.approval.tool, same.approval.input], ["Write", { file_path: "hello.txt", content: "hi", mode: "0644", createDirs: true }]);
+    assert.deepEqual([same.approval.tool, same.approval.input], ["Write", { file_path: "hello.txt", content: "hi", otherArguments: { mode: "0644", createDirs: true } }]);
     const card = approvalRequestFor(same.approval, cwd, clean);
     assert.ok(card);
-    assert.deepEqual(JSON.parse(card.explanation ?? "{}"), { mode: "0644", createDirs: true });
+    assert.deepEqual(JSON.parse(card.explanation ?? "{}"), { otherArguments: { mode: "0644", createDirs: true } });
     assert.deepEqual(card.files?.map((file) => [file.path, file.after]), [["hello.txt", "hi"]]);
     // More than the card can show in full is refused by the card, as for Claude Code.
     const long = ask({ content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", content: "hi", note: "n".repeat(5_000) } });
@@ -954,7 +954,7 @@ test("A diff and the arguments of the same edit must agree: they are shown toget
     assert.equal(approvalRequestFor(long.approval, cwd, clean), null);
     // An edit with an old text: the Edit card, with the extras.
     const edit = ask({ content: [diff("hello.txt", "new", "old")], rawInput: { path: "hello.txt", old_string: "old", new_string: "new", replace_all: true } });
-    assert.deepEqual([edit.verdict, edit.approval.tool, edit.approval.input], ["ask", "Edit", { file_path: "hello.txt", old_string: "old", new_string: "new", replace_all: true }]);
+    assert.deepEqual([edit.verdict, edit.approval.tool, edit.approval.input], ["ask", "Edit", { file_path: "hello.txt", old_string: "old", new_string: "new", otherArguments: { replace_all: true } }]);
     assert.equal(ask({ content: [diff("hello.txt", "hi")], rawInput: { filePath: "hello.txt", content: "hi" } }, "allow_all").verdict, "allow");
 
     // Not the same edit: another file, other text, an old text the diff does not have, or arguments with nothing in the diff.
@@ -977,7 +977,7 @@ test("A diff and the arguments of the same edit must agree: they are shown toget
     }
     // Several diffs that the arguments list the same files for, and arguments that say nothing about the files, are fine.
     const two = ask({ content: [diff("a.txt", "1"), diff("b.txt", "2")], rawInput: { paths: ["b.txt", "a.txt"], dryRun: false } });
-    assert.deepEqual([two.verdict, two.approval.tool, two.approval.input.dryRun], ["ask", "MultiEdit", false]);
+    assert.deepEqual([two.verdict, two.approval.tool, two.approval.input.otherArguments], ["ask", "MultiEdit", { paths: ["b.txt", "a.txt"], dryRun: false }]);
     assert.equal(ask({ content: [diff("hello.txt", "hi")], rawInput: { dryRun: false } }).verdict, "ask");
     // What the agent said before the request counts the same way.
     const calls = new Map<string, TrackedCall>();
@@ -1073,7 +1073,7 @@ test("Arguments the request and the earlier call both carry must be the same arg
     // Only one of them has arguments: those are the card.
     assert.equal(decide({ rawInput: { command: "ls -la", cwd: "/work" } }, undefined).approval.input.command, "ls -la");
     const onlyEarlier = decide({}, { rawInput: { command: "ls -la", cwd: "/work" } });
-    assert.deepEqual([onlyEarlier.verdict, onlyEarlier.approval.input.command, onlyEarlier.approval.input.cwd], ["ask", "ls -la", "/work"]);
+    assert.deepEqual([onlyEarlier.verdict, onlyEarlier.approval.input.command, onlyEarlier.approval.input.otherArguments], ["ask", "ls -la", { cwd: "/work" }]);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -1107,16 +1107,16 @@ test("Names for one thing in a request's arguments must agree, with or without a
     assert.deepEqual([edit.approval.tool, edit.approval.input], ["Edit", { file_path: "a.md", old_string: "a", new_string: "b" }]);
     // Every other field is on the card: here as the card's own explanation.
     const rest = ask({ path: "a.md", content: "x", cwd: "/work", runInBackground: true, Mode: "0600" });
-    assert.deepEqual(rest.approval.input, { file_path: "a.md", content: "x", cwd: "/work", runInBackground: true, Mode: "0600" });
+    assert.deepEqual(rest.approval.input, { file_path: "a.md", content: "x", otherArguments: { cwd: "/work", runInBackground: true, Mode: "0600" } });
     const card = approvalRequestFor(rest.approval, cwd, (value) => value);
-    assert.deepEqual(JSON.parse(card?.explanation ?? "{}"), { cwd: "/work", runInBackground: true, Mode: "0600" });
+    assert.deepEqual(JSON.parse(card?.explanation ?? "{}"), { otherArguments: { cwd: "/work", runInBackground: true, Mode: "0600" } });
     assert.equal(approvalRequestFor(ask({ path: "a.md", content: "x", note: "n".repeat(5_000) }).approval, cwd, (value) => value), null);
     // A list of files alone stays on the card, with the other files; so does a list that is not the one file.
     const many = ask({ paths: ["a.md", "b.md"], content: "x" }, "other");
     assert.deepEqual(many.approval.input.rawInput, { paths: ["a.md", "b.md"], content: "x" });
     // Commands: the same command under two names is one; two commands are none.
     const command = ask({ command: "ls", Cmd: "ls", cwd: "/work" }, "execute");
-    assert.deepEqual([command.verdict, command.approval.input], ["ask", { command: "ls", description: "Work", cwd: "/work" }]);
+    assert.deepEqual([command.verdict, command.approval.input], ["ask", { command: "ls", description: "Work", otherArguments: { cwd: "/work" } }]);
     assert.equal(ask({ command: "ls", CommandLine: "pwd" }, "execute").verdict, "refuse");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
@@ -1128,18 +1128,18 @@ test("The card reads only the groups it shows: every other field of the argument
       classifyAcpPermission(request({ kind, title: "Work", rawInput }), { cwd, plan: cliPermissionPlan("moonshot", mode) });
     // A command card shows the command: the file and the text of the same arguments stay on it as they are.
     const run = decide("execute", { command: "ls", path: "a.md", content: "x", cwd: "/work" });
-    assert.deepEqual([run.verdict, run.approval.tool, run.approval.input], ["ask", "Bash", { command: "ls", description: "Work", path: "a.md", content: "x", cwd: "/work" }]);
+    assert.deepEqual([run.verdict, run.approval.tool, run.approval.input], ["ask", "Bash", { command: "ls", description: "Work", otherArguments: { path: "a.md", content: "x", cwd: "/work" } }]);
     const card = approvalRequestFor(run.approval, cwd, (value) => value);
-    assert.deepEqual(JSON.parse(card?.explanation ?? "{}"), { description: "Work", path: "a.md", content: "x", cwd: "/work" });
+    assert.deepEqual(JSON.parse(card?.explanation ?? "{}"), { description: "Work", otherArguments: { path: "a.md", content: "x", cwd: "/work" } });
     // A group the card does not show is not checked: it is seen as it is, not refused.
     const odd = decide("execute", { command: "ls", path: 7, filePath: "a.md" });
-    assert.deepEqual([odd.verdict, odd.approval.input.path, odd.approval.input.filePath], ["ask", 7, "a.md"]);
+    assert.deepEqual([odd.verdict, odd.approval.input.otherArguments], ["ask", { path: 7, filePath: "a.md" }]);
     // A Write or Edit card shows the file and the texts: the command of the same arguments stays on it.
     const write = decide("edit", { path: "a.md", content: "x", command: "ls", Cmd: "ls" });
-    assert.deepEqual([write.verdict, write.approval.tool, write.approval.input], ["ask", "Write", { file_path: "a.md", content: "x", command: "ls", Cmd: "ls" }]);
+    assert.deepEqual([write.verdict, write.approval.tool, write.approval.input], ["ask", "Write", { file_path: "a.md", content: "x", otherArguments: { command: "ls", Cmd: "ls" } }]);
     // Even two commands that disagree stay on it as they are: all are checked, none stands in for the other.
     const two = decide("edit", { path: "a.md", content: "x", command: "ls", CommandLine: "pwd" });
-    assert.deepEqual([two.verdict, two.approval.input.command, two.approval.input.CommandLine], ["ask", "ls", "pwd"]);
+    assert.deepEqual([two.verdict, two.approval.input.otherArguments], ["ask", { command: "ls", CommandLine: "pwd" }]);
     // An edit that carries a command is never approved without the card, and a command that names a credential store is refused.
     for (const mode of ["allow_all"] as const) assert.equal(decide("edit", { path: "a.md", content: "x", command: "ls" }, mode).verdict, "ask");
     assert.equal(decide("edit", { path: "a.md", content: "x", command: "cat ~/.qwen/settings.json" }).verdict, "refuse");
@@ -1209,4 +1209,66 @@ test("A Node run by a provider CLI is not told where to look for modules", () =>
     }
     assert.equal(result.NODE_EXTRA_CA_CERTS, "/certs/ca.pem");
   }
+});
+
+test("The arguments a card does not show in its own fields cannot stand in for them: they sit under one key of their own", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "tomverse-acp-other-"));
+  try {
+    const diff = (path: string, newText: string, oldText?: string) => ({ type: "diff", path, newText, ...(oldText !== undefined ? { oldText } : {}) });
+    const plan = cliPermissionPlan("mistral", "ask");
+    // `edits` in the arguments does not replace the diffs a MultiEdit card shows, nor `file_path` or the explanation fields.
+    const multi = classifyAcpPermission(request({ kind: "edit", title: "Edit two", content: [diff("a.txt", "1", "0"), diff("b.txt", "2", "0")],
+      rawInput: { paths: ["a.txt", "b.txt"], edits: [{ path: "evil.md", old_string: "x", new_string: "y" }], otherArguments: "mine", explanation: "harmless" } }), { cwd, plan });
+    assert.equal(multi.verdict, "ask");
+    assert.equal(multi.approval.tool, "MultiEdit");
+    assert.deepEqual(multi.approval.input.edits, [{ path: "a.txt", old_string: "0", new_string: "1" }, { path: "b.txt", old_string: "0", new_string: "2" }]);
+    assert.equal(multi.approval.input.file_path, "a.txt");
+    assert.deepEqual(multi.approval.input.otherArguments, { paths: ["a.txt", "b.txt"], edits: [{ path: "evil.md", old_string: "x", new_string: "y" }], otherArguments: "mine", explanation: "harmless" });
+    const shown = approvalRequestFor(multi.approval, cwd, (value) => value);
+    assert.ok(shown);
+    // The card shows both, each under its own name, so the person sees the diffs and the arguments that came with them.
+    const text = shown.files?.[0]?.after ?? "";
+    assert.ok(text.includes('"otherArguments"') && text.includes("evil.md") && text.includes('"old_string": "0"'), text);
+    // The same for a command card and a Write card: no argument takes the place of a card field.
+    const run = classifyAcpPermission(request({ kind: "execute", title: "Run", locations: [{ path: cwd }], rawInput: { command: "ls", description: "harmless", locationPaths: ["x"], timeout: "soon" } }), { cwd, plan });
+    assert.deepEqual([run.approval.input.command, run.approval.input.description, run.approval.input.locationPaths], ["ls", "Run", [cwd]]);
+    assert.deepEqual(run.approval.input.otherArguments, { description: "harmless", locationPaths: ["x"], timeout: "soon" });
+    const write = classifyAcpPermission(request({ kind: "edit", title: "Write", rawInput: { path: "a.md", content: "x", edits: [1], tool: "Bash", kind: "execute" } }), { cwd, plan });
+    assert.deepEqual([write.approval.tool, write.approval.input.file_path, write.approval.input.content], ["Write", "a.md", "x"]);
+    assert.deepEqual(write.approval.input.otherArguments, { edits: [1], tool: "Bash", kind: "execute" });
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("Read only puts Kimi Code in plan and Qwen Code in dontAsk when they start in default, and fails when it cannot", async () => {
+  await withProject(async (directory) => {
+    const attempt = async (provider: LiveAcpProvider, session: Session, mode: "read_only" | "ask") => {
+      const record = join(directory, "..", `acp-record-readonly-${provider}-${mode}-${Math.random()}.json`);
+      const result = await runProviderCli(acpRun(directory, { scenario: "simple", record, session }, { provider, mode, approve: async () => false, limits: { confirm: 400 } }));
+      const seen = await seenIn(record);
+      await rm(record, { force: true });
+      return { result, seen };
+    };
+    for (const [provider, target] of [["moonshot", "plan"], ["qwen", "dontAsk"]] as const) {
+      // Starting in default, where the CLI runs what it judges safe without asking: Read only switches it, and the task is sent after.
+      const read = await attempt(provider, safeSession[provider], "read_only");
+      assert.equal(read.result.status, "completed", `${provider}: ${read.result.error}`);
+      assert.deepEqual(read.seen.modeSets, [target], provider);
+      assert.equal(read.seen.prompt, "Fix the bug");
+      // Already in that mode: nothing to switch. Ask keeps default.
+      const already = await attempt(provider, { ...safeSession[provider], modes: modesOf(provider, target) }, "read_only");
+      assert.deepEqual([already.result.status, already.seen.modeSets], ["completed", []], provider);
+      const ask = await attempt(provider, safeSession[provider], "ask");
+      assert.deepEqual([ask.result.status, ask.seen.modeSets], ["completed", []], provider);
+      // The mode is not on offer, or the CLI does not confirm it: the run does not start, and no task is sent.
+      const missing = await attempt(provider, { ...safeSession[provider], modes: { current: "default", available: ["default"] } }, "read_only");
+      assert.equal(missing.result.status, "failed", provider);
+      assert.match(missing.result.error ?? "", new RegExp(`cannot switch to "${target}"`));
+      assert.equal(missing.seen.prompt, undefined, provider);
+      const silent = await attempt(provider, { ...safeSession[provider], setMode: "error" }, "read_only");
+      assert.equal(silent.result.status, "failed", provider);
+      assert.equal(silent.seen.prompt, undefined, provider);
+    }
+    assert.deepEqual(acpSafety.moonshot.readOnly, ["plan"]);
+    assert.deepEqual(acpSafety.qwen.readOnly, ["dontAsk"]);
+  });
 });

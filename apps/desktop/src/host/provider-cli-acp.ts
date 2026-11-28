@@ -78,10 +78,11 @@ type Safety = {
 
 /** The known permission modes of each CLI, from the owner's computer (Qwen Code 1.0.0-preview.2, Kimi Code 2.8.1, Mistral Vibe 3.1.5, Antigravity 1.5.19, MiniMax Code 0.8.0, Grok Build 1.0.92). */
 export const acpSafety: Record<LiveAcpProvider, Safety> = {
-  qwen: { known: ["default", "acceptEdits", "auto", "dontAsk", "yolo"], readOnly: ["dontAsk", "default"], interactive: ["default"] },
+  qwen: { known: ["default", "acceptEdits", "auto", "dontAsk", "yolo"], readOnly: ["dontAsk"], interactive: ["default"] },
   // Grok Build reports no modes: the `--permission-mode` argument is what holds, and a mode it does report must be a known one.
   xai: { known: [], readOnly: [], interactive: [] },
-  moonshot: { known: ["default", "plan", "auto", "yolo"], readOnly: ["plan", "default"], interactive: ["default"] },
+  // Read only holds the mode that refuses or plans, never default, where a CLI does what it judges safe without asking.
+  moonshot: { known: ["default", "plan", "auto", "yolo"], readOnly: ["plan"], interactive: ["default"] },
   mistral: { known: ["ask", "accept-edits", "smart-approve", "auto-approve"], readOnly: ["ask"], interactive: ["ask"] },
   // MiniMax Code edits without asking in "default": Read only is held to its plan mode only (whether plan blocks edits is the CLI's own rule).
   minimax: { known: ["default", "plan"], readOnly: ["plan"], interactive: ["default"],
@@ -497,7 +498,10 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const limited = own.limited || earlier?.limited === true || !sameAction || !aliases.ok || strayLocation || !diffMatchesRaw(diffs, raw, context.cwd);
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
-  const extras = Object.fromEntries(Object.entries(raw ?? {}).filter(([key]) => !aliases.consumed.has(key)));
+  // The arguments the card does not show in its own fields go under one key of their own, so none can stand in for a card field
+  // (an `edits` argument replacing the diffs shown, a `file_path` replacing the file).
+  const rest = Object.fromEntries(Object.entries(raw ?? {}).filter(([key]) => !aliases.consumed.has(key)));
+  const extras = Object.keys(rest).length > 0 ? { otherArguments: rest } : {};
   const { path: rawPath, after, before } = aliases;
   let approval: CliApproval;
   if (kind === "execute" && command) {
