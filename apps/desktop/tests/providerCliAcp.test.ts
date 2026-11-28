@@ -1010,3 +1010,21 @@ test("Two names for one argument are all checked: a second path, text or command
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("A request that describes another action than the agent announced for the same call is refused", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "acp-same-"));
+  try {
+    const plan = cliPermissionPlan("moonshot", "ask");
+    const options = [{ optionId: "allow_once", kind: "allow_once" }, { optionId: "reject_once", kind: "reject_once" }];
+    const tracked = (rawInput: Record<string, unknown>, extra: Partial<TrackedCall> = {}) => ({ toolCallId: "t", kind: "execute", title: "Bash", rawInput, ...extra }) as unknown as TrackedCall;
+    const ask = (rawInput: Record<string, unknown>, earlier?: TrackedCall) => classifyAcpPermission({ toolCall: { toolCallId: "t", kind: "execute", title: "Bash", rawInput }, options }, { cwd, plan, tracked: earlier });
+    assert.equal(ask({ command: "echo hi" }, tracked({ command: "echo hi" })).verdict, "ask");
+    assert.equal(ask({ command: "echo hi" }, tracked({ command: "git push" })).verdict, "refuse", "the card would show echo hi for a git push");
+    const edit = (rawInput: Record<string, unknown>, earlier?: TrackedCall) => classifyAcpPermission({ toolCall: { toolCallId: "e", kind: "edit", title: "Write", rawInput }, options }, { cwd, plan, tracked: earlier });
+    assert.equal(edit({ path: "a.txt", content: "hi" }, tracked({ path: "a.txt", content: "hi" }, { kind: "edit" })).verdict, "ask");
+    assert.equal(edit({ path: "a.txt", content: "hi" }, tracked({ path: "b.txt", content: "hi" }, { kind: "edit" })).verdict, "refuse");
+    assert.equal(edit({ path: "a.txt", content: "hi" }, tracked({ path: "a.txt", content: "bye" }, { kind: "edit" })).verdict, "refuse");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

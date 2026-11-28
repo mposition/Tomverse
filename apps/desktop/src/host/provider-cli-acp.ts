@@ -363,6 +363,29 @@ function diffMatchesRaw(diffs: readonly Diff[], raw: Json | undefined, cwd: stri
   return true;
 }
 
+/** Whether two lists of diffs are the same edits: the same files (where they really are) with the same old and new text. */
+function sameDiffs(a: readonly Diff[], b: readonly Diff[], cwd: string): boolean {
+  const key = (diff: Diff) => JSON.stringify([fold(realPathOf(diff.path, cwd) ?? resolve(cwd, diff.path)), diff.oldText, diff.newText]);
+  const left = new Set(a.map(key));
+  const right = new Set(b.map(key));
+  return left.size === right.size && [...left].every((entry) => right.has(entry));
+}
+
+/** Whether two argument objects name the same files and the same new and old text, where both name them. */
+function diffMatchesRawPaths(a: Json, b: Json, cwd: string): boolean {
+  const where = (paths: string[] | null) => paths === null ? null : new Set(paths.map((path) => fold(realPathOf(path, cwd) ?? resolve(cwd, path))));
+  const left = where(primaryPaths(a));
+  const right = where(primaryPaths(b));
+  if (left === null || right === null) return false;
+  if (left.size > 0 && right.size > 0 && (left.size !== right.size || [...left].some((path) => !right.has(path)))) return false;
+  for (const names of [afterNames, beforeNames]) {
+    const one = allFields(a, names);
+    const other = allFields(b, names);
+    if (one.length > 0 && other.length > 0 && [...one, ...other].some((value) => value !== one[0])) return false;
+  }
+  return true;
+}
+
 export type AcpPermission = {
   /** "allow": answered yes with no card. "deny": answered no with no card. "ask": the person's card. "refuse": no card, and the person is told. */
   verdict: "allow" | "deny" | "ask" | "refuse";
@@ -412,7 +435,13 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
   const commandMissing = kind === "execute" && command === undefined;
   const blank = !own.named && !earlier?.named;
   // More than is looked at in part is not judged in part, and a diff that is not the edit the arguments describe is not shown as if it were: both are refused.
-  const limited = own.limited || earlier?.limited === true || !diffMatchesRaw(diffs, raw, context.cwd);
+  // The request and what the agent said of the same call before must describe one action: a command, diff or file the request
+  // shows that differs from the earlier one (an earlier `git push`, a request for `echo hi`) would let the card approve what it
+  // does not show, so the two are compared where both speak, and a difference refuses the request.
+  const sameAction = (own.command === undefined || earlier?.command === undefined || own.command === earlier.command) &&
+    (own.diffs.length === 0 || (earlier?.diffs.length ?? 0) === 0 || sameDiffs(own.diffs, earlier!.diffs, context.cwd)) &&
+    (own.raw === undefined || earlier?.raw === undefined || diffMatchesRawPaths(own.raw, earlier.raw, context.cwd));
+  const limited = own.limited || earlier?.limited === true || !sameAction || !diffMatchesRaw(diffs, raw, context.cwd);
 
   // The card, from the arguments the CLI will run with; the title is a description and is never taken for them.
   const known = new Set([...commandNames, ...afterNames, ...beforeNames, ...pathNames]);

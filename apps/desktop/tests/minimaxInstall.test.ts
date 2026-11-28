@@ -152,3 +152,18 @@ test("A trusted MiniMax Code install with no Node to run it does not start", { t
     assert.equal(await host.resolveSaved("minimax", { path: root, status: "userTrusted" }), null);
   } finally { await rm(w.base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
+
+test("A Node installed as a link (Homebrew) is found through the link and run as its real file", async (t) => {
+  const base = await mkdtemp(join(tmpdir(), "mm-node-link-"));
+  try {
+    const name = process.platform === "win32" ? "node.exe" : "node";
+    await mkdir(join(base, "cellar"), { recursive: true });
+    await mkdir(join(base, "bin"), { recursive: true });
+    const real = join(base, "cellar", name);
+    await writeFile(real, Buffer.from(process.platform === "win32" ? "MZ\0\0" : "\x7fELF"));
+    try { await symlink(real, join(base, "bin", name), "file"); } catch { t.skip("this system cannot create a file link"); return; }
+    assert.equal(await nodeExecutable([join(base, "bin")], join(base, "missing-root")), await realpath(real));
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});

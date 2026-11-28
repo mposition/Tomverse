@@ -74,7 +74,7 @@ export async function nodeExecutable(directories: readonly string[], root: strin
   for (const directory of [root, ...directories]) {
     const candidate = path.join(directory, name);
     try {
-      if (!(await regularFile(candidate))) continue;
+      // A link is resolved first (Homebrew installs node as a link); the real file is what is checked and run.
       const real = await realpath(candidate);
       if (!isLocalPath(real) || !(await regularFile(real))) continue;
       const file = await open(real, localReadFlags);
