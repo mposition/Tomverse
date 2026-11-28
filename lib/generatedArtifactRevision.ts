@@ -75,6 +75,8 @@ const asUpload = (row: { id: string; userId: string; objectKey: string; name: st
 export async function copyGeneratedArtifactForRevision(input: Input): Promise<RegisteredUpload> {
   if (!generatedArtifactRevisionEnabled()) throw new GeneratedArtifactRevisionError("GENERATED_ARTIFACT_REVISION_DISABLED", 404);
   generatedArtifactCopySchema.parse({ action: input.action, artifactId: input.artifactId, conversationId: input.conversationId, operationId: input.operationId });
+  // A Research task file left withheld by a failed rebuild is rebuilt on request before it is read.
+  await (await import("@/lib/researchEngineTaskFiles")).retryWithheldResearchTaskFile(input.artifactId, input.userId);
   const source = await readSource(prisma, input);
   const format = generatedArtifactRevisionFormat({ format: source.format, filename: source.filename, mediaType: source.mediaType });
   if (!format) throw new GeneratedArtifactRevisionError("UNSUPPORTED_ATTACHMENT_TYPE", 400);

@@ -94,6 +94,8 @@ async function readSource(request: Request, userId: string, source: MaterialCopy
             };
         }
         case "generated_artifact": {
+            // A Research task file left withheld by a failed rebuild is rebuilt on request before it is read.
+            await (await import("@/lib/researchEngineTaskFiles")).retryWithheldResearchTaskFile(source.artifactId, userId);
             // The exact revision row the user chose -- never "the latest".
             const row = await prisma.messageArtifact.findFirst({
                 where: { id: source.artifactId, userId, status: "ready", objectKey: { not: null } },

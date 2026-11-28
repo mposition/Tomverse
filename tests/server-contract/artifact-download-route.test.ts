@@ -66,6 +66,8 @@ const world = {
   /** What the Research private-source re-check answers for this file. */
   researchServable: true,
   researchChecks: [] as string[],
+  researchRetries: [] as string[],
+  rebuildOnRetry: false,
 };
 
 const resetWorld = () => {
@@ -76,6 +78,8 @@ const resetWorld = () => {
   world.readKeys = [];
   world.researchServable = true;
   world.researchChecks = [];
+  world.researchRetries = [];
+  world.rebuildOnRetry = false;
 };
 
 let mocksInstalled = false;
@@ -126,6 +130,13 @@ const loadRoute = async () => {
     });
     mock.module(mod("lib/researchEngineTaskFiles.ts"), {
       namedExports: {
+        RESEARCH_TASK_FILE_WITHHELD: "source_revoked",
+        retryWithheldResearchTaskFile: async (artifactId: string) => {
+          world.researchRetries.push(artifactId);
+          const row = world.rows.find((entry) => entry.id === artifactId);
+          if (row && world.rebuildOnRetry) Object.assign(row, { status: "ready", failureCode: null, objectKey: "message-artifacts/user_1/conv_1/rebuilt.xlsx" });
+          return true;
+        },
         researchTaskFileServable: async (artifact: { id: string; objectKey: string }) => {
           world.researchChecks.push(`${artifact.id}:${artifact.objectKey}`);
           return world.researchServable;
@@ -196,6 +207,23 @@ test("a Research task file whose private sources no longer grant it is a 404, an
   assert.equal(response.status, 404);
   assert.deepEqual(world.researchChecks, [`${READY.id}:${READY.objectKey}`], "the re-check sees the row's current object");
   assert.deepEqual(world.readKeys, []);
+});
+
+test("a withheld Research task file is rebuilt on request: served once rebuilt, a 404 while it is not", async () => {
+  resetWorld();
+  world.rows = [{ ...READY, userId: "user_1", status: "failed", objectKey: null, failureCode: "source_revoked" } as never];
+  const { GET } = await loadRoute();
+  assert.equal((await GET(request(), context())).status, 404, "still withheld: not found");
+  assert.deepEqual(world.researchRetries, [READY.id]);
+  world.rebuildOnRetry = true;
+  const response = await GET(request(), context());
+  assert.equal(response.status, 200);
+  assert.deepEqual(world.readKeys, ["message-artifacts/user_1/conv_1/rebuilt.xlsx"], "the rebuilt object is the one read");
+  // Any other failure is not retried.
+  resetWorld();
+  world.rows = [{ ...READY, userId: "user_1", status: "failed", objectKey: null, failureCode: "generation_failed" } as never];
+  assert.equal((await GET(request(), context())).status, 404);
+  assert.deepEqual(world.researchRetries, []);
 });
 
 test("the storage key never reaches the response", async () => {

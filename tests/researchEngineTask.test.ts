@@ -8,7 +8,7 @@ import {
 import { buildBibliography, type ReportClaim, type ReportSource } from "@/lib/researchEngineReport";
 import { plannerPrompt, researcherPrompt, writerSectionPrompt, type PublicResearchContext } from "@/lib/researchEnginePrompts";
 import {
-  RESEARCH_TASK_FILE_FORMATS, ResearchTaskFileOverflowError, chatTaskAgentEnabled, renderResearchTaskFile, reportDocumentSpec, reportPresentationSpec,
+  RESEARCH_REPORT_FILE_PLACEMENT, RESEARCH_TASK_FILE_FORMATS, ResearchTaskFileOverflowError, chatTaskAgentEnabled, renderResearchTaskFile, reportDocumentSpec, reportPresentationSpec,
   reportTaskWorkbookSpec,
 } from "@/lib/researchEngineTaskOutput";
 import { researchEngineCopy } from "@/locales/researchEngine";
@@ -113,7 +113,7 @@ test("each deliverable is laid out from the finished report without a model call
   const workbook = reportTaskWorkbookSpec(document, claims, labels, "partial", "x.xlsx");
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["Summary", "s1-1", "Sources"]);
   assert.deepEqual(workbook.worksheets[1]!.rows, [["A", "07:00"], ["B", "08:00"]]);
-  assert.deepEqual(workbook.worksheets[2]!.rows, [["1", "Public page", "https://example.com/a", "2026-11-23"]]);
+  assert.deepEqual(workbook.worksheets[2]!.rows, [["1", "Public page", "https://example.com/a", "", "2026-11-23", ""]]);
   assert.ok(workbook.worksheets[0]!.rows.some((row) => row[0] === "Opening hours" && row[1] === "Most open at seven. [1]"));
 
   const deck = reportPresentationSpec(document, claims, labels, "partial", "x.pptx");
@@ -198,4 +198,100 @@ test("a document task refuses a report with more blocks than a document holds; l
   assert.ok(items[0]!.startsWith("[1] Source 1") && items[449]!.startsWith("[450] Source 450"));
   // A list that fits stays the numbered list the export always wrote.
   assert.ok(reportDocumentSpec(big([[paragraph("a")]], 3), claims, "docx", labels, "partial", "x.docx").blocks.some((block) => block.type === "numbers"));
+});
+
+/** Every field path of a zod schema, objects and arrays flattened, union members merged. */
+const schemaPaths = (schema: unknown, prefix = ""): string[] => {
+  const node = schema as { def?: { type?: string; innerType?: unknown; element?: unknown; options?: unknown[]; shape?: Record<string, unknown> }; shape?: Record<string, unknown> };
+  const type = node.def?.type;
+  if (type === "optional" || type === "default" || type === "nullable") return schemaPaths(node.def!.innerType, prefix);
+  if (type === "array") return schemaPaths(node.def!.element, prefix);
+  if (type === "union") return [...new Set((node.def!.options ?? []).flatMap((option) => schemaPaths(option, prefix)))];
+  if (type === "object") return Object.entries(node.shape ?? node.def!.shape ?? {}).flatMap(([key, value]) => {
+    const nested = schemaPaths(value, `${prefix}${key}.`);
+    return nested.length ? nested : [`${prefix}${key}`];
+  });
+  return [];
+};
+
+test("the placement table names every field of the report, so a new report field fails here until it is laid out", () => {
+  const paths = schemaPaths(researchReportDocumentSchema).sort();
+  assert.ok(paths.includes("conflicts.text") && paths.includes("scope.note") && paths.includes("bibliography.duplicateOf"), paths.join(","));
+  assert.deepEqual(Object.keys(RESEARCH_REPORT_FILE_PLACEMENT).sort(), paths);
+});
+
+test("every field of the report reaches the document, the spreadsheet and the slide deck", () => {
+  const claimMap = new Map<string, ReportClaim>([
+    ["C1", { claimKey: "C1", sectionKey: "s1", text: "a", kind: "fact", verification: "supported", privateDerived: false, evidence: [{ sourceKey: "W1", level: "text" }] }],
+    ["C2", { claimKey: "C2", sectionKey: "s1", text: "b", kind: "fact", verification: "conflicting", privateDerived: false, evidence: [{ sourceKey: "W2", level: "text" }] }],
+  ]);
+  const document = researchReportDocumentSchema.parse({ version: 1, title: "TITLE-SENTINEL", summary: "SUMMARY-SENTINEL",
+    scope: { question: "QUESTION-SENTINEL", assumptions: ["ASSUMPTION-SENTINEL"], note: "NOTE-SENTINEL", currentDate: "2031-02-03" },
+    sections: [
+      { key: "s1", heading: "HEADING-SENTINEL", status: "written", blocks: [
+        { type: "paragraph", text: "PARAGRAPH-SENTINEL", claimKeys: ["C2"] },
+        { type: "table", caption: "CAPTION-SENTINEL", columns: ["COLUMN-SENTINEL"], rows: [["CELL-SENTINEL"]], claimKeys: ["C1"] }] },
+      { key: "s2", heading: "MISSING-HEADING-SENTINEL", status: "missing", blocks: [] },
+    ],
+    conflicts: [{ text: "CONFLICT-SENTINEL", claimKeys: ["C2"] }], limitations: ["LIMITATION-SENTINEL"], nextQuestions: ["NEXT-SENTINEL"],
+    criteria: [{ criterion: "MET-CRITERION-SENTINEL", met: true }, { criterion: "UNMET-CRITERION-SENTINEL", met: false }],
+    bibliography: [
+      { n: 1, sourceKey: "W1", versionId: "v1", title: "SOURCE-ONE-SENTINEL", url: "https://example.com/one-sentinel", private: false, readStatus: "read",
+        retrievedAt: "2031-01-05T00:00:00.000Z", publishedAt: "2030-12-24T00:00:00.000Z" },
+      { n: 2, sourceKey: "W2", versionId: "v2", title: "SOURCE-TWO-SENTINEL", private: true, readStatus: "snippet_only",
+        retrievedAt: "2031-01-06T00:00:00.000Z", duplicateOf: "W1" },
+    ] });
+  const r = labels.report;
+  // One expected text per placed field; `satisfies` keeps the list in step with the placement table.
+  const expected = {
+    "title": ["TITLE-SENTINEL"], "summary": ["SUMMARY-SENTINEL"], "scope.question": ["QUESTION-SENTINEL"], "scope.note": ["NOTE-SENTINEL"],
+    "scope.assumptions": ["ASSUMPTION-SENTINEL"], "scope.currentDate": ["2031-02-03"], "sections.heading": ["HEADING-SENTINEL", "MISSING-HEADING-SENTINEL"],
+    "sections.status": [r.missingSection], "sections.blocks.text": ["PARAGRAPH-SENTINEL"], "sections.blocks.claimKeys": ["PARAGRAPH-SENTINEL [2] (conflicting)"],
+    "sections.blocks.caption": ["CAPTION-SENTINEL"], "sections.blocks.columns": ["COLUMN-SENTINEL"], "sections.blocks.rows": ["CELL-SENTINEL"],
+    "conflicts.text": ["CONFLICT-SENTINEL"], "conflicts.claimKeys": ["CONFLICT-SENTINEL [2] (conflicting)"], "limitations": ["LIMITATION-SENTINEL"],
+    "nextQuestions": ["NEXT-SENTINEL"], "criteria.criterion": ["MET-CRITERION-SENTINEL", "UNMET-CRITERION-SENTINEL"],
+    "criteria.met": [`${r.met}: MET-CRITERION-SENTINEL`, `${r.notMet}: UNMET-CRITERION-SENTINEL`],
+    "bibliography.n": ["SOURCE-TWO-SENTINEL"], "bibliography.title": ["SOURCE-ONE-SENTINEL", "SOURCE-TWO-SENTINEL"],
+    "bibliography.url": ["https://example.com/one-sentinel"], "bibliography.private": [r.privateSource], "bibliography.readStatus": [r.snippetOnly],
+    "bibliography.retrievedAt": ["2031-01-05", "2031-01-06"], "bibliography.publishedAt": ["2030-12-24"], "bibliography.duplicateOf": [`${r.republishes} [1]`],
+  } satisfies Partial<Record<keyof typeof RESEARCH_REPORT_FILE_PLACEMENT, string[]>>;
+  const placed = Object.entries(RESEARCH_REPORT_FILE_PLACEMENT).filter(([, place]) => place !== "internal").map(([path]) => path).sort();
+  assert.deepEqual(Object.keys(expected).sort(), placed, "every placed field has an expected text");
+  const xmlText = (bytes: Uint8Array) => Object.entries(unzip(bytes)).filter(([name]) => name.endsWith(".xml")).map(([, part]) => strFromU8(part)).join("\n")
+    .replace(/<[^>]+>/gu, "\n").replaceAll("&amp;", "&").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", "\"").replaceAll("&apos;", "'");
+  for (const output of RESEARCH_TASK_OUTPUTS) {
+    const text = xmlText(renderResearchTaskFile({ output, document, claims: claimMap, labels, quality: "partial" }).bytes);
+    assert.ok(text.includes(r.quality.partial), `${output}: quality`);
+    for (const [path, needles] of Object.entries(expected)) for (const needle of needles) assert.ok(text.includes(needle), `${output} is missing ${path}: ${needle}`);
+  }
+  // Source numbers: the [n] of each source, in the form each file kind shows it.
+  const sheet = reportTaskWorkbookSpec(document, claimMap, labels, "partial", "x.xlsx").worksheets.find((entry) => entry.name === r.sources)!;
+  assert.deepEqual(sheet.rows.map((row) => [row[0], row[1]]), [["1", "SOURCE-ONE-SENTINEL"], ["2", "SOURCE-TWO-SENTINEL"]]);
+  assert.ok(reportPresentationSpec(document, claimMap, labels, "partial", "x.pptx").slides.some((slide) => (slide.bullets ?? []).some((bullet) => bullet.startsWith("[2] SOURCE-TWO-SENTINEL"))));
+  const numbered = reportDocumentSpec(document, claimMap, "docx", labels, "partial", "x.docx", { strict: true }).blocks.find((block) => block.type === "numbers");
+  assert.ok(numbered?.type === "numbers" && numbered.items[1]!.startsWith("SOURCE-TWO-SENTINEL"), "the docx list is numbered in [n] order");
+});
+
+test("text longer than one value holds is split across paragraphs, rows or bullets, never cut, and anything still over a limit is content_too_large", () => {
+  const document = report();
+  const long = `${"A long summary sentence that keeps going. ".repeat(1_200)}END-OF-SUMMARY`;
+  document.summary = long;
+  for (const output of RESEARCH_TASK_OUTPUTS) {
+    const file = renderResearchTaskFile({ output, document, claims, labels, quality: "partial" });
+    const text = Object.entries(unzip(file.bytes)).filter(([name]) => name.endsWith(".xml")).map(([, part]) => strFromU8(part)).join("");
+    assert.ok(text.includes("END-OF-SUMMARY"), `${output} keeps the end of a ${long.length}-character summary`);
+  }
+  const spec = reportDocumentSpec(document, claims, "docx", labels, "partial", "x.docx", { strict: true });
+  const start = spec.blocks.findIndex((block) => block.type === "heading" && block.text === labels.report.summary);
+  const end = spec.blocks.findIndex((block, index) => index > start && block.type === "heading");
+  const summaryBlocks = spec.blocks.slice(start + 1, end);
+  assert.ok(summaryBlocks.length >= 3, "split into several paragraphs");
+  assert.equal(summaryBlocks.map((block) => block.type === "paragraph" ? block.text : "").join(""), long, "the pieces are the whole text");
+  // A table wider than a document table holds is refused, not narrowed.
+  const wide = report();
+  const table = wide.sections[0]!.blocks[1]!;
+  if (table.type !== "table") throw new Error("fixture");
+  table.columns = Array.from({ length: ARTIFACT_LIMITS.maxDocumentTableColumns + 1 }, (_, index) => `C${index}`);
+  table.rows = [table.columns.map((column) => `${column}-value`)];
+  assert.throws(() => renderResearchTaskFile({ output: "document", document: wide, claims, labels, quality: "partial" }), ResearchTaskFileOverflowError);
 });

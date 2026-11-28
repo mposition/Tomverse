@@ -121,6 +121,10 @@ const en = {
   taskColumnRetrieved: "Retrieved",
   taskColumnTable: "Table",
   taskSheetMoreTables: "More tables",
+  taskLabelQuestion: "Question",
+  taskLabelDate: "As of",
+  taskColumnPublished: "Published",
+  taskColumnNotes: "Notes",
 };
 
 type Copy = typeof en;
@@ -245,6 +249,10 @@ const ko: Copy = {
   taskColumnRetrieved: "확인일",
   taskColumnTable: "표",
   taskSheetMoreTables: "나머지 표",
+  taskLabelQuestion: "질문",
+  taskLabelDate: "기준일",
+  taskColumnPublished: "게시일",
+  taskColumnNotes: "비고",
 };
 
 const translated = (base: Copy, overrides: Partial<Omit<Copy, "report">> & { report: Copy["report"] }): Copy => ({ ...base, ...overrides });
@@ -304,6 +312,10 @@ const zh = translated(en, {
   taskColumnRetrieved: "获取日期",
   taskColumnTable: "表格",
   taskSheetMoreTables: "其余表格",
+  taskLabelQuestion: "问题",
+  taskLabelDate: "截至日期",
+  taskColumnPublished: "发布日期",
+  taskColumnNotes: "备注",
 });
 
 const zhHant = translated(zh, {
@@ -358,6 +370,10 @@ const zhHant = translated(zh, {
   taskColumnRetrieved: "取得日期",
   taskColumnTable: "表格",
   taskSheetMoreTables: "其餘表格",
+  taskLabelQuestion: "問題",
+  taskLabelDate: "截至日期",
+  taskColumnPublished: "發布日期",
+  taskColumnNotes: "備註",
 });
 
 const fr = translated(en, {
@@ -424,6 +440,10 @@ const fr = translated(en, {
   taskColumnRetrieved: "Consulté le",
   taskColumnTable: "Tableau",
   taskSheetMoreTables: "Autres tableaux",
+  taskLabelQuestion: "Question",
+  taskLabelDate: "Date de référence",
+  taskColumnPublished: "Publié le",
+  taskColumnNotes: "Remarques",
 });
 
 const de = translated(en, {
@@ -490,6 +510,10 @@ const de = translated(en, {
   taskColumnRetrieved: "Abgerufen",
   taskColumnTable: "Tabelle",
   taskSheetMoreTables: "Weitere Tabellen",
+  taskLabelQuestion: "Frage",
+  taskLabelDate: "Stand",
+  taskColumnPublished: "Veröffentlicht",
+  taskColumnNotes: "Hinweise",
 });
 
 const es = translated(en, {
@@ -556,6 +580,10 @@ const es = translated(en, {
   taskColumnRetrieved: "Consultado",
   taskColumnTable: "Tabla",
   taskSheetMoreTables: "Más tablas",
+  taskLabelQuestion: "Pregunta",
+  taskLabelDate: "Fecha de referencia",
+  taskColumnPublished: "Publicado",
+  taskColumnNotes: "Notas",
 });
 
 const pt = translated(en, {
@@ -622,6 +650,10 @@ const pt = translated(en, {
   taskColumnRetrieved: "Consultado em",
   taskColumnTable: "Tabela",
   taskSheetMoreTables: "Demais tabelas",
+  taskLabelQuestion: "Pergunta",
+  taskLabelDate: "Data de referência",
+  taskColumnPublished: "Publicado em",
+  taskColumnNotes: "Observações",
 });
 
 export const researchEngineCopy: Record<Language, Copy> = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireArtifactFormat, sanitizeArtifactFilename, type ArtifactFailureCode } from "@/lib/generatedArtifactCore";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import { discardStoredArtifacts, persistArtifactRows, putArtifactObject, type StoredArtifact } from "@/lib/generatedArtifactStorage";
 import { researchInputManifestSchema, researchReportDocumentSchema, type ResearchReportDocument, type ResearchTaskOutput } from "@/lib/researchEngineContract";
 import type { ReportClaim } from "@/lib/researchEngineReport";
@@ -41,7 +42,7 @@ const failureCodeOf = (error: unknown): ArtifactFailureCode =>
 
 /** Renders and stores one file; a failure becomes a failed row so the answer says no file was made. */
 async function renderAndStore(owner: RunFileOwner, input: { output: ResearchTaskOutput; ordinal: number; document: ResearchReportDocument;
-  claims: ReadonlyMap<string, ReportClaim>; labels: ResearchEngineCopy; quality: Quality; lineage?: { parentArtifactId: string; lineageId: string } }): Promise<PreparedResearchTaskFile> {
+  claims: ReadonlyMap<string, ReportClaim>; labels: ResearchEngineCopy; quality: Quality }): Promise<PreparedResearchTaskFile> {
   const format = RESEARCH_TASK_FILE_FORMATS[input.output];
   const failed = (failureCode: ArtifactFailureCode): PreparedResearchTaskFile => ({ failed: { ordinal: input.ordinal, format,
     filename: sanitizeArtifactFilename(input.document.title, format), mediaType: requireArtifactFormat(format).mediaType, failureCode, modelId: owner.modelId } });
@@ -49,26 +50,36 @@ async function renderAndStore(owner: RunFileOwner, input: { output: ResearchTask
   try { file = renderResearchTaskFile(input); } catch (error) { return failed(failureCodeOf(error)); }
   try {
     return { stored: await putArtifactObject({ userId: owner.userId, conversationId: owner.conversationId, ordinal: input.ordinal, format, filename: file.filename,
-      mediaType: file.mediaType, bytes: file.bytes, modelId: owner.modelId, ...(input.lineage ?? {}) }) };
+      mediaType: file.mediaType, bytes: file.bytes, modelId: owner.modelId }) };
   } catch {
     return failed("storage_failed");
   }
 }
 
-/** Before the finalize transaction: the file for one finished revision, as the next version of the previous one. */
+/** Before the finalize transaction: the file for one finished revision. */
 export async function prepareResearchTaskFile(owner: RunFileOwner, input: { output: ResearchTaskOutput; reportRevision: number;
   document: ResearchReportDocument; claims: ReadonlyMap<string, ReportClaim>; labels: ResearchEngineCopy; quality: Quality }) {
-  const ordinal = researchTaskFileOrdinal(input.reportRevision);
-  const parent = await prisma.messageArtifact.findFirst({ where: { messageId: owner.assistantMessageId, conversationId: owner.conversationId,
-    userId: owner.userId, status: "ready", ordinal: { lt: ordinal } }, orderBy: { ordinal: "desc" }, select: { id: true, lineageId: true } });
-  return renderAndStore(owner, { ...input, ordinal, ...(parent ? { lineage: { parentArtifactId: parent.id, lineageId: parent.lineageId ?? parent.id } } : {}) });
+  return renderAndStore(owner, { ...input, ordinal: researchTaskFileOrdinal(input.reportRevision) });
 }
 
-/** Inside the finalize transaction, after the answer message exists. Returns whether this call wrote the row. */
+/**
+ * Inside the finalize transaction, after the answer message exists. Returns whether this call wrote the row.
+ * The file is the next version of the run's previous file whatever that file's state (ready, withheld, too
+ * large): every file of a run sits on its own answer message, which only the engine writes, so the edge is
+ * known rather than inferred and the version chain never breaks at a file that could not be served.
+ */
 export async function persistResearchTaskFile(tx: Prisma.TransactionClient, owner: RunFileOwner, prepared: PreparedResearchTaskFile) {
   const written = await persistArtifactRows(tx, { messageId: owner.assistantMessageId, conversationId: owner.conversationId, userId: owner.userId,
     stored: "stored" in prepared ? [prepared.stored] : [], failed: "failed" in prepared ? [prepared.failed] : [] });
-  return written > 0;
+  if (!written || !generatedArtifactRevisionEnabled()) return written > 0;
+  const ordinal = "stored" in prepared ? prepared.stored.ordinal : prepared.failed.ordinal;
+  const scope = { messageId: owner.assistantMessageId, conversationId: owner.conversationId, userId: owner.userId };
+  const file = await tx.messageArtifact.findUniqueOrThrow({ where: { messageId_ordinal: { messageId: owner.assistantMessageId, ordinal } }, select: { id: true } });
+  const parent = await tx.messageArtifact.findFirst({ where: { ...scope, ordinal: { lt: ordinal } }, orderBy: { ordinal: "desc" }, select: { id: true, lineageId: true } });
+  if (parent && !parent.lineageId) await tx.messageArtifact.update({ where: { id: parent.id }, data: { lineageId: parent.id } });
+  await tx.messageArtifact.update({ where: { id: file.id }, data: parent
+    ? { parentArtifactId: parent.id, lineageId: parent.lineageId ?? parent.id } : { parentArtifactId: null, lineageId: file.id } });
+  return true;
 }
 
 export async function discardResearchTaskFile(prepared: PreparedResearchTaskFile | null) {
@@ -147,6 +158,23 @@ export async function rebuildWithheldResearchTaskFiles(runId: string) {
     }
   }
   return rebuilt;
+}
+
+/**
+ * A file left withheld by a rebuild that failed or was interrupted is retried when someone asks for it
+ * (download, revision input, project material), with no new revocation needed: the run's private sources
+ * are re-checked first and the rebuild runs under the usual run lock and revision digest. Callers read the
+ * row again afterwards. Any other file costs one indexed read.
+ */
+export async function retryWithheldResearchTaskFile(artifactId: string, userId: string) {
+  const row = await prisma.messageArtifact.findFirst({ where: { id: artifactId, userId }, select: { status: true, failureCode: true, message: { select: { researchRunId: true } } } });
+  const runId = row?.message.researchRunId;
+  if (!runId || row.status !== "failed" || row.failureCode !== RESEARCH_TASK_FILE_WITHHELD) return false;
+  const run = await prisma.researchPreviewRun.findUnique({ where: { id: runId }, select: { id: true, userId: true, inputManifest: true } });
+  if (!run) return false;
+  const { revalidateRunPrivateSources } = await import("@/lib/researchEngineReads");
+  await revalidateRunPrivateSources(run);
+  return true;
 }
 
 /**

@@ -40,6 +40,7 @@ let readResearchPreviewRunDto: typeof import("@/lib/researchPreviewRunStore").re
 let drainArtifactCleanupQueue: typeof import("@/lib/generatedArtifactStorage").drainArtifactCleanupQueue;
 let recoverResearchEngine: typeof import("@/lib/researchEngineRecovery").recoverResearchEngine;
 let researchTaskFileServable: typeof import("@/lib/researchEngineTaskFiles").researchTaskFileServable;
+let retryWithheldResearchTaskFile: typeof import("@/lib/researchEngineTaskFiles").retryWithheldResearchTaskFile;
 let readResearchReport: typeof import("@/lib/researchEngineReads").readResearchReport;
 let harness: typeof import("./researchEngineHarness");
 const createFakeFunding = (...args: Parameters<typeof harness.createFakeFunding>) => harness.createFakeFunding(...args);
@@ -58,7 +59,7 @@ before(async () => {
   ({ drainResearchWork, processOneResearchWorkItem } = await import("@/lib/researchEngineWorker"));
   ({ readResearchRunMoney } = await import("@/lib/researchEngineStore"));
   ({ revalidateRunPrivateSources, readResearchReport } = await import("@/lib/researchEngineReads"));
-  ({ researchTaskFileServable } = await import("@/lib/researchEngineTaskFiles"));
+  ({ researchTaskFileServable, retryWithheldResearchTaskFile } = await import("@/lib/researchEngineTaskFiles"));
   ({ readResearchPreviewRunDto } = await import("@/lib/researchPreviewRunStore"));
   ({ drainArtifactCleanupQueue } = await import("@/lib/generatedArtifactStorage"));
   ({ recoverResearchEngine } = await import("@/lib/researchEngineRecovery"));
@@ -482,4 +483,60 @@ test("a large report keeps every table and every point: ten tables in the spread
   assert.ok(atSix > 100, `six points a slide would need ${atSix} slides`);
   assert.ok(deck.parts.filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name)).length <= 100);
   for (const text of paragraphs) assert.ok(deck.xml.includes(text), text);
+});
+
+test("a file left withheld by a failed rebuild recovers on the next read or file request, with no new revocation", async () => {
+  const { user, run, memories, row } = await memoryTask("task-withheld-no-revoke", ["Lingering memory one with a private note", "Lingering memory two with a private note"]);
+  const [original] = await answerFiles(run.id);
+  const state = async () => { const [file] = await answerFiles(run.id); return [file!.id, file!.status, file!.failureCode] as const; };
+  try {
+    storage.failWrites = true;
+    await prisma.memoryItem.delete({ where: { id: memories[0]!.id } });
+    await revalidateRunPrivateSources(row);
+    assert.deepEqual(await state(), [original!.id, "failed", "source_revoked"]);
+    storage.failWrites = false;
+    // Nothing else is revoked now: the remaining source still grants, so this read finds no new revocation.
+    const revokedBefore = await prisma.researchSource.count({ where: { runId: run.id, status: "revoked" } });
+    await readResearchReport({ userId: user.id, runId: run.id });
+    assert.equal(await prisma.researchSource.count({ where: { runId: run.id, status: "revoked" } }), revokedBefore);
+    assert.deepEqual(await state(), [original!.id, "ready", null], "the read rebuilt it");
+
+    // Again withheld by a failed rebuild; this time asking for the file itself (download, revision input, project save) rebuilds it.
+    storage.failWrites = true;
+    await prisma.memoryItem.delete({ where: { id: memories[1]!.id } });
+    await revalidateRunPrivateSources(row);
+    assert.deepEqual(await state(), [original!.id, "failed", "source_revoked"]);
+    storage.failWrites = false;
+    assert.equal(await retryWithheldResearchTaskFile(original!.id, "someone-else"), false, "only the owner's request rebuilds");
+    assert.deepEqual(await state(), [original!.id, "failed", "source_revoked"]);
+    assert.equal(await retryWithheldResearchTaskFile(original!.id, user.id), true);
+    assert.deepEqual(await state(), [original!.id, "ready", null]);
+    const [file] = await answerFiles(run.id);
+    assert.ok(!docxText(file!.objectKey).includes("Lingering memory"));
+  } finally { storage.failWrites = false; }
+});
+
+test("the version chain runs through files that could not be served: a revision's file is the next version of a failed one", async () => {
+  enable();
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("task-chain");
+  let run: Awaited<ReturnType<typeof create>>;
+  storage.failWrites = true;
+  try {
+    run = await create(user.id);
+    await drainResearchWork("task-chain", 4);
+  } finally { storage.failWrites = false; }
+  const first = { run, dto: await service.readResearchRunDto(user.id, run.id) };
+  assert.equal(first.dto.status, "completed");
+  const [failed] = await answerFiles(first.run.id);
+  assert.deepEqual([failed!.status, failed!.failureCode, failed!.lineageId], ["failed", "storage_failed", failed!.id], "a failed first file still roots the chain");
+  await service.requestResearchRevision({ request: fakeRequest(), userId: user.id, runId: first.run.id,
+    revision: { expectedReportRevision: first.dto.currentReportRevision, kind: "format", sectionKeys: [], instruction: "Tighter, please." } });
+  await drainResearchWork("task-chain", 4);
+  const files = await answerFiles(first.run.id);
+  assert.equal(files.length, 2);
+  assert.equal(files[1]!.status, "ready");
+  assert.equal(files[1]!.parentArtifactId, failed!.id, "the next version of the failed file");
+  assert.equal(files[1]!.lineageId, failed!.id);
 });

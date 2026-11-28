@@ -170,7 +170,10 @@ CSV를 만듭니다. run을 새로 시작하거나 provider를 부르지 않습�
   (`lib/researchEngineTaskFiles.ts`). 카드·내려받기·버전은 일반 생성 파일과 같습니다. 보고서 revision마다 파일
   하나(ordinal = revision − 1)이고, 수정 요청의 파일은 앞 파일의 다음 버전입니다. 바이트를 먼저 쓰고 행은 finalize
   트랜잭션에서 씁니다. 행을 못 쓰면 바로 지우고, 그 사이 crash는 orphan sweep이 회수합니다.
-  배치는 내용을 버리지 않습니다. 표가 시트보다 많으면 남는 표를 마지막 표 시트에 이름·머리행과 함께 이어 붙이고,
+  보고서 document의 모든 필드(제목, 품질, 요약, scope의 질문·note·가정·기준일, 섹션 본문·표·인용 [n]과 검증 표시, 상충, 완료
+  조건, 한계, 다음 질문, 출처의 번호·제목·URL·비공개·snippet·게시일·확인일·재게재)를 세 결과물 모두에 담습니다. 필드별 위치는
+  `RESEARCH_REPORT_FILE_PLACEMENT`이고, 테스트가 이 표를 보고서 schema와 대조하므로 필드가 늘면 배치할 때까지 테스트가 깨집니다.
+  배치는 내용을 버리지 않습니다. 한 값에 들어가지 않는 긴 글은 문단·행·요점으로 나눠 담습니다. 표가 시트보다 많으면 남는 표를 마지막 표 시트에 이름·머리행과 함께 이어 붙이고,
   슬라이드가 100장을 넘으면 더 촘촘히(슬라이드당 요점 20개, 그다음 구분 슬라이드 없이) 배치합니다. 슬라이드의 요점이
   잘려도 전문은 그 슬라이드의 발표자 노트에 있습니다. 그래도 한도를 넘으면 파일을 실패(`content_too_large`)로 남기고
   카드가 답변의 보고서나 보고서 탭 내보내기를 안내합니다.
@@ -178,8 +181,9 @@ CSV를 만듭니다. run을 새로 시작하거나 provider를 부르지 않습�
   없음, 옛 객체는 같은 트랜잭션에서 삭제 큐 `MessageArtifactCleanup`의 `source_revoked`). finalize나 다른 commit의
   보류가 revision을 바꾸면 그 revision의 파일도 같은 트랜잭션에서 보류됩니다. 그 commit 뒤 정리된 revision에서 다시
   배치해 같은 행을 ready로 되돌립니다(run lock 아래 revision digest가 같고 아직 보류 중일 때만). 재생성이 저장에 실패하거나
-  중간에 끊기면 행은 `source_revoked`로 남고, 다음 Research 읽기(`revalidateRunPrivateSources`)나 maintenance
-  (`rebuildWithheldResearchFiles`)가 다시 만듭니다. 파일 바이트를 내주거나 복사하는 곳(다운로드, 생성 파일 수정 입력,
+  중간에 끊기면 행은 `source_revoked`로 남고, 새 철회가 없어도 다음 Research 읽기(`revalidateRunPrivateSources`), 그 파일의
+  다운로드·수정 입력 복사·프로젝트 저장 요청(`retryWithheldResearchTaskFile`), maintenance(`rebuildWithheldResearchFiles`)가
+  다시 만듭니다. 버전은 앞 파일의 상태(ready, 보류, 실패)와 상관없이 같은 답변의 앞 파일을 parent로 잇습니다. 파일 바이트를 내주거나 복사하는 곳(다운로드, 생성 파일 수정 입력,
   프로젝트 저장)은 비공개 자료를 고른 run의 파일이면 먼저 그 run의 비공개 자료를 다시 확인하고, 철회가 발견되면 내주지
   않습니다. run 삭제는 답변 파일을 `message_deleted`로 삭제 큐에 넣습니다.
 - **진행·멈추기·알림**: 진행 화면, 일시정지·재개·취소·지금 마무리·예산 늘리기는 Research 그대로입니다. workspace가

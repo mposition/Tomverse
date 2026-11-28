@@ -16,7 +16,7 @@ import {
 } from "@/lib/generatedArtifactCore";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
-import { researchTaskFileServable } from "@/lib/researchEngineTaskFiles";
+import { RESEARCH_TASK_FILE_WITHHELD, researchTaskFileServable, retryWithheldResearchTaskFile } from "@/lib/researchEngineTaskFiles";
 
 /**
  * Downloading a file an assistant answer produced.
@@ -67,7 +67,7 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const artifact = await prisma.messageArtifact.findFirst({
+    const lookup = () => prisma.messageArtifact.findFirst({
       // Ownership is part of the lookup, not a check after it.
       where: { id: artifactId, userId },
       select: {
@@ -78,10 +78,18 @@ export async function GET(
         mediaType: true,
         byteSize: true,
         status: true,
+        failureCode: true,
         objectKey: true,
         conversation: { select: { password: true, passwordVersion: true, userId: true } },
       },
     });
+    let artifact = await lookup();
+    // A Research task file still withheld by a rebuild that failed or was interrupted is rebuilt on
+    // request (docs/policy/generated-artifacts.md section 19), then read again.
+    if (artifact?.status === "failed" && artifact.failureCode === RESEARCH_TASK_FILE_WITHHELD && artifact.conversation?.userId === userId) {
+      await retryWithheldResearchTaskFile(artifact.id, userId);
+      artifact = await lookup();
+    }
 
     if (
       !artifact ||
