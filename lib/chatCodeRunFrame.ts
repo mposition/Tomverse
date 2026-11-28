@@ -108,6 +108,49 @@ export const codeRunCsp = (assetOrigin: string): string => {
 };
 
 /**
+ * What the worker takes away before the person's code runs: every way it has to
+ * send a request. The policy cannot do this by itself: `connect-src` admits a
+ * directory on this application's origin, and a policy matches paths and never
+ * query strings or bodies, so a script that could call `fetch` could still put
+ * a file's text into the query of a request to that directory. With these gone
+ * there is no call to make.
+ *
+ *   * `fetch`, `Request`, `XMLHttpRequest`, `WebSocket`, `WebSocketStream`,
+ *     `EventSource`, `WebTransport`, `fetchLater`: the request makers.
+ *   * `importScripts`, `Worker`, `SharedWorker`: a new worker would start with a
+ *     clean `fetch`.
+ *   * `caches`, `CacheStorage`, `Cache`: `Cache.add` sends a request.
+ *   * `BroadcastChannel`, `FontFace`: a channel out of the worker, and a font by URL.
+ *   * `sendBeacon` and `serviceWorker` on `navigator`.
+ *
+ * A dynamic `import(url)` cannot be removed, but it is syntax: Python can reach
+ * it only by running JavaScript from a string, which the policy refuses (no
+ * `'unsafe-eval'`). The worker's own variables are not globals (the script is a
+ * function), so nothing of ours that calls `import()` is in reach either.
+ */
+export const CODE_RUN_BLOCKED_GLOBALS = [
+    "fetch",
+    "Request",
+    "XMLHttpRequest",
+    "WebSocket",
+    "WebSocketStream",
+    "EventSource",
+    "WebTransport",
+    "fetchLater",
+    "importScripts",
+    "Worker",
+    "SharedWorker",
+    "caches",
+    "CacheStorage",
+    "Cache",
+    "BroadcastChannel",
+    "FontFace",
+] as const;
+
+/** Names removed from `navigator` as well (the worker's `WorkerNavigator`). */
+export const CODE_RUN_BLOCKED_NAVIGATOR = ["sendBeacon", "serviceWorker"] as const;
+
+/**
  * The Python the worker loads once, after the runtime. Written without a
  * backslash so it is the same text in source and at run time.
  *
@@ -205,16 +248,22 @@ async def tv_run(source, namespace, use_matplotlib, max_images, max_pixels, max_
 `;
 
 /**
- * The worker's script. It starts the runtime on the first run, writes the
- * person's files into the current directory, loads only the packages the code
- * imports, runs it, and posts what happened. It never touches the DOM (there is
- * none) and can reach nothing the policy above does not admit.
+ * The worker's script. It starts the runtime, writes the person's files into the
+ * current directory, loads only the packages the code imports, then removes its
+ * network (`CODE_RUN_BLOCKED_GLOBALS`) and only then runs the code, and posts
+ * what happened. It never touches the DOM (there is none) and can reach nothing
+ * the policy above does not admit.
+ *
+ * A worker runs once. The network is gone for good after the first run starts,
+ * so a second run -- which may need a package -- gets a fresh worker; the frame
+ * starts it as soon as the last one finishes, so the runtime is already up.
  *
  * Its messages are `{ kind, runId, ... }` to the frame, which checks and
  * forwards them; Python can post to the frame too (`js.self.postMessage`), which
  * is why the frame trusts none of it. No backslashes.
  */
 export const CODE_RUN_WORKER_SOURCE = `"use strict";
+var used = false;
 var pyodide = null;
 var booting = null;
 var written = [];
@@ -271,6 +320,39 @@ function replaceFiles(files) {
   }
 }
 
+// Takes away every request maker, from the global object and from every prototype above it (the members of
+// WorkerGlobalScope live there), then checks that nothing callable is left under any of the names.
+function removeNetwork() {
+  var names = CONFIG.blocked;
+  var scopes = [];
+  for (var scope = self; scope; scope = Object.getPrototypeOf(scope)) scopes.push(scope);
+  if (self.navigator) { for (var nav = self.navigator; nav; nav = Object.getPrototypeOf(nav)) scopes.push(nav); }
+  var all = names.concat(CONFIG.blockedNavigator);
+  for (var s = 0; s < scopes.length; s++) {
+    for (var n = 0; n < all.length; n++) {
+      var name = all[n];
+      if (!Object.prototype.hasOwnProperty.call(scopes[s], name)) continue;
+      try { delete scopes[s][name]; } catch (error) { noop(); }
+      if (Object.prototype.hasOwnProperty.call(scopes[s], name)) {
+        try { Object.defineProperty(scopes[s], name, { value: undefined, writable: false, configurable: false }); } catch (error) { noop(); }
+      }
+    }
+  }
+  // Under each name on the global object, an undefined value nobody can replace.
+  for (var g = 0; g < names.length; g++) {
+    try { Object.defineProperty(self, names[g], { value: undefined, writable: false, configurable: false, enumerable: false }); } catch (error) { noop(); }
+  }
+  var left = [];
+  for (var t = 0; t < scopes.length; t++) {
+    for (var m = 0; m < all.length; m++) {
+      var found = false;
+      try { found = Object.prototype.hasOwnProperty.call(scopes[t], all[m]) && typeof scopes[t][all[m]] !== "undefined"; } catch (error) { found = true; }
+      if (found) left.push(all[m]);
+    }
+  }
+  if (left.length) throw new Error("the sandbox could not remove: " + left.join(", "));
+}
+
 async function run(message) {
   var runId = message.runId;
   current = runId;
@@ -280,6 +362,8 @@ async function run(message) {
     send({ kind: "phase", runId: runId, phase: "packages" });
     replaceFiles(message.files);
     await pyodide.loadPackagesFromImports(message.code, { messageCallback: noop, errorCallback: noop });
+    // Everything the code may import is in. From here on this worker can send nothing anywhere.
+    removeNetwork();
     send({ kind: "phase", runId: runId, phase: "running" });
     var useMatplotlib = Boolean(pyodide.loadedPackages && pyodide.loadedPackages.matplotlib);
     var namespace = pyodide.globals.get("tv_namespace")();
@@ -298,7 +382,9 @@ async function run(message) {
 
 self.onmessage = function (event) {
   var message = event.data;
-  if (message && message.type === "run") run(message);
+  if (!message) return;
+  if (message.type === "boot") { boot().catch(noop); return; }
+  if (message.type === "run" && !used) { used = true; run(message); }
 };
 `;
 
@@ -326,7 +412,10 @@ function finish(status, details) {
   var run = current;
   current = null;
   clearTimeout(run.loadTimer); clearTimeout(run.runTimer);
-  if (status !== "ok" && status !== "error") endWorker();
+  // A worker is used once (its network is removed for the code), so it always ends here; after a run that finished
+  // on its own, the next one is started at once so the runtime is up before the person presses Run again.
+  endWorker();
+  if (status === "ok" || status === "error") { try { spawn(); worker.postMessage({ type: "boot" }); } catch (error) { endWorker(); } }
   details = details || {};
   toParent({
     type: "done", runId: run.runId, status: status,
@@ -459,7 +548,7 @@ export function buildCodeRunDocument(options: { assetOrigin: string; token: stri
         parentOrigin: origin,
         base,
         limits: frameLimits,
-        workerSource: `var CONFIG = ${scriptSafeJson({ base, helper: CODE_RUN_PYTHON_HELPER, limits: frameLimits })};\n${CODE_RUN_WORKER_SOURCE}`,
+        workerSource: `(function(){var CONFIG=${scriptSafeJson({ base, helper: CODE_RUN_PYTHON_HELPER, limits: frameLimits, blocked: CODE_RUN_BLOCKED_GLOBALS, blockedNavigator: CODE_RUN_BLOCKED_NAVIGATOR })};\n${CODE_RUN_WORKER_SOURCE}\n})();`,
     };
     const nonce = options.nonce && NONCE.test(options.nonce) ? ` nonce="${options.nonce}"` : "";
     return (

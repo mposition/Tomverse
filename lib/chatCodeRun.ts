@@ -28,6 +28,15 @@ export const chatCodeRunPagePath = (pathname: string | null | undefined): boolea
     /^\/(?:chat(?:\/workspace)?|review|continuations\/[^/]+|settings\/imports\/conversations\/[^/]+)\/?$/.test(pathname);
 
 /**
+ * A request the server refuses for the runtime directory: one with a query string, or any method but GET and HEAD.
+ * The runner's policy admits that directory for `connect-src` and a policy cannot see a query or a body, so this is the
+ * server's half of keeping text out of requests to it. The runner's code has no way to make one (the worker removes its
+ * network first, see `CODE_RUN_BLOCKED_GLOBALS`); this is the second lock. The runtime loads with plain GETs.
+ */
+export const codeRunVendorRequestRefused = (pathname: string, method: string, search: string): boolean =>
+    pathname.startsWith("/vendor/pyodide/") && (search !== "" || (method !== "GET" && method !== "HEAD"));
+
+/**
  * What the model is told when the switch is on. Our own text, so it is a system
  * block, and it is priced with the others (lib/chatTurnSystemBlocks.ts).
  *

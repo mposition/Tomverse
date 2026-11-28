@@ -553,6 +553,16 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
       불투명 origin의 frame은 blob에서 module worker를 못 만듭니다)에서 Pyodide(WebAssembly Python)가 돕니다. worker에는 window·DOM·탐색이 없고 정책을
       그대로 물려받으며, 시간 제한(코드 실행 30초; 런타임·패키지 내려받기는 별도 120초)·출력 제한(100,000자)·그림 제한(6장, 한 장 약 2MB, 16,000,000픽셀)
       또는 "중지"에서 frame이 `terminate()`합니다. 중지는 frame 자체를 제거해 worker가 함께 끝납니다. 그래서 중첩 frame(탐색 차단용)은 두지 않았습니다.
+    - **사용자 코드가 돌기 전에 worker의 네트워크를 없앱니다**(`CODE_RUN_BLOCKED_GLOBALS`). CSP의 `connect-src`는 런타임 디렉터리를 열어 두는데, 정책은 경로만 맞추고
+      쿼리 문자열과 본문은 보지 못하므로, `fetch`를 부를 수 있다면 사용자가 넣은 파일 내용을 그 경로의 쿼리에 실어 이 서버로 보낼 수 있습니다("실행과 파일은 브라우저 안에만
+      머문다"는 계약 위반). 그래서 worker는 코드가 쓸 패키지를 모두 불러온 **뒤, 코드를 실행하기 전에** `fetch`·`Request`·`XMLHttpRequest`·`WebSocket`·`WebSocketStream`·
+      `EventSource`·`WebTransport`·`fetchLater`·`importScripts`·`Worker`·`SharedWorker`·`caches`·`CacheStorage`·`Cache`·`BroadcastChannel`·`FontFace`와 `navigator`의
+      `sendBeacon`·`serviceWorker`를 전역 객체와 그 위 모든 prototype에서 지우고(지워지지 않으면 `configurable:false`인 undefined로 막고), 하나라도 호출 가능하게 남으면
+      코드를 실행하지 않고 실패합니다. `Worker`를 남기면 새 worker가 깨끗한 `fetch`를 얻으므로 반드시 지웁니다. worker 스크립트는 함수로 감싸 `pyodide`·`CONFIG` 같은 내부
+      변수가 전역에 남지 않게 합니다. 동적 `import()`는 지울 수 없는 문법이지만, Python이 쓰려면 JS를 문자열로 실행해야 하고(`Function`·`eval`·`setTimeout(문자열)`·Pyodide
+      `run_js`) CSP에 `'unsafe-eval'`이 없어 브라우저가 거절합니다(Chromium에서 측정). 그 결과 **worker는 한 번만 씁니다**: 첫 실행이 시작되면 네트워크가 영구히 없으므로
+      다음 실행은 새 worker를 쓰고, frame은 실행이 끝나는 즉시 다음 worker의 런타임을 미리 띄워(`boot`) 다시 누르는 시간을 줄입니다. 이전 실행이 남긴 전역 변경도 함께 사라집니다.
+      새 패키지를 import하는 코드는 그 worker에서 ModuleNotFoundError입니다.
     - **frame과 부모 문서는 `postMessage`로만** 말합니다. 부모는 `event.source`가 자기 frame의 window이고 `event.origin`이 `"null"`이며 이름공간·버전·frame마다
       다른 token이 맞는 메시지만 받고(`parseCodeRunFrameMessage`), 필드마다 종류와 크기를 검사합니다. 메시지는 부모→frame `run` 하나, frame→부모
       `ready`·`phase`·`output`·`image`·`done` 다섯 가지입니다. frame도 worker의 메시지를 믿지 않고(Python이 `js.self.postMessage`로 흉내 낼 수 있음) 검사해
@@ -563,7 +573,7 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
       다음 실행 때 지웁니다. 서버로 가지 않습니다. XLSX는 Pyodide 배포에 `openpyxl`이 없어 뺐습니다.
     - **런타임은 이 앱이 직접 제공합니다**: `public/vendor/pyodide/314.0.8/`(Pyodide 314.0.8, Python 3.14; 약 30MB). 파일마다 sha256을 `CODE_RUN_FILES`에 고정하고
       테스트가 디렉터리 전체를 해시합니다. wheel은 lock의 sha256과도 맞춥니다. frame의 origin이 `null`이라 `/vendor/pyodide/:path*`에만 `Access-Control-Allow-Origin: *`와
-      immutable 캐시를 둡니다(`next.config.ts`). `.gitattributes`(`-text`)·`eslint.config.mjs`·`scripts/check-push-scope.mjs`·`scripts/check-protected-table-writers-core.mjs`가
+      immutable 캐시를 둡니다(`next.config.ts`). **서버도 그 디렉터리의 쿼리 문자열이 있거나 GET·HEAD가 아닌 요청을 400으로 거절합니다**(`proxy.ts`, `codeRunVendorRequestRefused`; 런타임은 평범한 GET으로만 받습니다). 위 worker의 네트워크 제거가 본 대책이고 이것은 두 번째 잠금입니다. `.gitattributes`(`-text`)·`eslint.config.mjs`·`scripts/check-push-scope.mjs`·`scripts/check-protected-table-writers-core.mjs`가
       React·Babel과 같은 방식으로 이 디렉터리를 제외합니다. 런타임에 제3자 CDN은 없습니다.
     - **앱 자신의 CSP 한 군데가 바뀝니다.** `srcdoc` frame은 부모 문서의 정책을 물려받으므로, 부모의 `script-src`에 WebAssembly 허용이 없으면 frame이 wasm을 컴파일하지
       못합니다(측정함). `createStrictCsp`는 **스위치가 켜져 있고 답변을 보여 주는 페이지**(`/chat`, `/chat/workspace`, `/review`, `/continuations/<id>`,

@@ -13,6 +13,7 @@ import {
   chatCodeRunEnabled,
   chatCodeRunPagePath,
   checkCodeRunFileAdd,
+  codeRunVendorRequestRefused,
   codeRunPlainText,
   isPythonCodeLanguage,
   parseCodeRunFrameMessage,
@@ -23,6 +24,8 @@ import {
   type CodeRunFrameMessage,
 } from "../lib/chatCodeRun.ts";
 import {
+  CODE_RUN_BLOCKED_GLOBALS,
+  CODE_RUN_BLOCKED_NAVIGATOR,
   CODE_RUN_FILES,
   CODE_RUN_FRAME_SOURCE,
   CODE_RUN_PYODIDE_VERSION,
@@ -426,4 +429,79 @@ test("file names are reduced to a safe bounded name and file additions are bound
   assert.equal(checkCodeRunFileAdd([], { size: CODE_RUN_LIMITS.maxFileBytes + 1 }), "size");
   assert.equal(checkCodeRunFileAdd(Array.from({ length: CODE_RUN_LIMITS.maxFiles }, () => ({ size: 1 })), { size: 1 }), "count");
   assert.equal(checkCodeRunFileAdd([{ size: CODE_RUN_LIMITS.maxFileBytes }, { size: CODE_RUN_LIMITS.maxFileBytes }], { size: 1 }), "total");
+});
+
+// ------------------------------------------- the worker has no network left
+
+/** The worker source is a JSON string inside the page, so its quotes arrive escaped. */
+const BACKSLASH = String.fromCharCode(92);
+const MUST_BE_REMOVED = [
+  "fetch", "Request", "XMLHttpRequest", "WebSocket", "EventSource", "WebTransport",
+  "importScripts", "Worker", "SharedWorker", "caches",
+];
+
+test("the worker removes every request maker, and the list cannot lose one unnoticed", () => {
+  for (const name of MUST_BE_REMOVED) assert.ok((CODE_RUN_BLOCKED_GLOBALS as readonly string[]).includes(name), name);
+  for (const name of ["sendBeacon", "serviceWorker"]) assert.ok((CODE_RUN_BLOCKED_NAVIGATOR as readonly string[]).includes(name), name);
+  assert.equal(new Set(CODE_RUN_BLOCKED_GLOBALS).size, CODE_RUN_BLOCKED_GLOBALS.length, "no duplicates");
+  // The built worker script carries exactly these lists.
+  const html = buildCodeRunDocument({ assetOrigin: ORIGIN, token: TOKEN });
+  for (const name of [...CODE_RUN_BLOCKED_GLOBALS, ...CODE_RUN_BLOCKED_NAVIGATOR]) assert.ok(html.includes(BACKSLASH + '"' + name + BACKSLASH + '"'), name);
+  assert.ok(html.includes(BACKSLASH + '"blocked' + BACKSLASH + '":'));
+  assert.ok(html.includes(BACKSLASH + '"blockedNavigator' + BACKSLASH + '":'));
+});
+
+test("the network is removed after the packages are in and before the code runs, from the global and every prototype", () => {
+  const source = CODE_RUN_WORKER_SOURCE;
+  const packages = source.indexOf("loadPackagesFromImports(message.code");
+  const removal = source.indexOf("    removeNetwork();");
+  const running = source.indexOf('phase: "running"');
+  const runner = source.indexOf("await runner(message.code");
+  assert.ok(packages > 0 && removal > packages && running > removal && runner > running, "order: packages, removal, running, code");
+  assert.match(source, /Object\.getPrototypeOf\(scope\)/);
+  assert.match(source, /delete scopes\[s\]\[name\]/);
+  assert.match(source, /configurable: false/);
+  // It fails closed: a name still callable afterwards ends the run before the code starts.
+  assert.match(source, /the sandbox could not remove/);
+  // One run per worker.
+  assert.match(source, /message\.type === "run" && !used/);
+});
+
+test("the worker script is a function, so none of its own helpers are globals the code can reach", () => {
+  const html = buildCodeRunDocument({ assetOrigin: ORIGIN, token: TOKEN });
+  assert.ok(html.includes("(function(){var CONFIG="), "the worker source is wrapped in a function");
+  assert.ok(html.includes('})();"'), "the function is called with the configuration");
+});
+
+test("a finished worker is ended and the next one started warm; a stop, limit or crash only ends it", () => {
+  const finish = CODE_RUN_FRAME_SOURCE.slice(CODE_RUN_FRAME_SOURCE.indexOf("function finish("), CODE_RUN_FRAME_SOURCE.indexOf("function forwardOutput("));
+  assert.match(finish, /endWorker\(\);\n  if \(status === "ok" \|\| status === "error"\)/);
+  assert.match(finish, /spawn\(\); worker\.postMessage\(\{ type: "boot" \}\)/);
+});
+
+test("Python cannot run JavaScript from a string: the frame policy and the page policy carry no 'unsafe-eval'", () => {
+  // `Function`, `eval`, `setTimeout("...")` and Pyodide's `run_js` all evaluate a string; with no 'unsafe-eval' the
+  // browser refuses each (measured in Chromium), so a dynamic import() -- which cannot be removed -- is out of reach.
+  assert.doesNotMatch(codeRunCsp(ORIGIN), /unsafe-eval(?!')/);
+  assert.doesNotMatch(codeRunCsp(ORIGIN), /'unsafe-eval'/);
+  const nonce = "bm9uY2U=";
+  assert.doesNotMatch(withEnv("true", () => createStrictCsp(nonce, "/chat")), /'unsafe-eval'/);
+  assert.match(codeRunCsp(ORIGIN), /'wasm-unsafe-eval'/);
+});
+
+test("the server refuses a query string or a body on the runtime directory, before anything else of the proxy", () => {
+  const dir = "/vendor/pyodide/314.0.8/";
+  assert.equal(codeRunVendorRequestRefused(`${dir}pyodide.asm.wasm`, "GET", ""), false);
+  assert.equal(codeRunVendorRequestRefused(`${dir}pyodide.asm.wasm`, "HEAD", ""), false);
+  assert.equal(codeRunVendorRequestRefused(`${dir}pyodide-lock.json`, "GET", "?leak=1"), true);
+  assert.equal(codeRunVendorRequestRefused(`${dir}x`, "POST", ""), true);
+  assert.equal(codeRunVendorRequestRefused(`${dir}x`, "PUT", ""), true);
+  assert.equal(codeRunVendorRequestRefused("/vendor/pyodide/", "DELETE", ""), true);
+  // Other paths are not this check's business.
+  assert.equal(codeRunVendorRequestRefused("/vendor/artifact-preview/react.js", "GET", "?v=1"), false);
+  assert.equal(codeRunVendorRequestRefused("/api/chat", "POST", "?x=1"), false);
+  const proxy = readFileSync(join(process.cwd(), "proxy.ts"), "utf8");
+  const call = proxy.indexOf("codeRunVendorRequestRefused(request.nextUrl.pathname");
+  assert.ok(call > proxy.indexOf("blockedOriginResponse();"), "after the host and origin checks");
+  assert.ok(call < proxy.indexOf("stripInternalAuthHeaders(requestHeaders)"), "before the rest of the proxy");
 });
