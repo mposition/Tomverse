@@ -60,7 +60,7 @@ import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationSta
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand, type PermissionModeId } from "../permission-contract";
-import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, liveCliRunnable, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
@@ -639,8 +639,7 @@ function broadcast() {
   state.draftNamespace = workspaceNamespace();
   state.providerCliExec = state.capabilities?.providerCliExec && !signingOut
     ? liveCliProviders.filter((provider) => {
-      const status = state.cliPaths[liveCliFile[provider]]?.status;
-      return (status === "pathVerified" || status === "userTrusted") && (provider !== "zai" || zaiKey !== null);
+      return liveCliRunnable(provider, state.cliPaths[liveCliFile[provider]]) && (provider !== "zai" || zaiKey !== null);
     }) : [];
   state.handoff = currentHandoff();
   state.projectPermissionProfile = readProjectPermissionProfile();

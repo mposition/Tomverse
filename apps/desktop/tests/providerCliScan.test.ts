@@ -104,6 +104,14 @@ test("The scan looks in fixed places only, for each platform and environment", (
   assert.ok(many.filter(({ directory }) => directory.startsWith("/p")).length <= SCAN_LIMITS.pathEntries);
 });
 
+test("The scan also looks where the standalone installers of Qwen Code, Grok Build, Kimi Code and Antigravity put their executable", () => {
+  const win = cliScanDirectories("win32", { LOCALAPPDATA: String.raw`C:\Users\Bo\AppData\Local` }, String.raw`C:\Users\Bo`).map(({ directory }) => directory.toLowerCase());
+  for (const folder of [String.raw`c:\users\bo\.qwen\bin\qwen`, String.raw`c:\users\bo\.qwen\bin`, String.raw`c:\users\bo\.grok\bin`,
+    String.raw`c:\users\bo\.kimi-code\bin`, String.raw`c:\users\bo\.local\bin`, String.raw`c:\users\bo\appdata\local\agy\bin`]) assert.ok(win.includes(folder), folder);
+  const linux = cliScanDirectories("linux", {}, "/home/ada").map(({ directory }) => directory);
+  for (const folder of ["/home/ada/.qwen/bin/qwen", "/home/ada/.grok/bin", "/home/ada/.kimi-code/bin"]) assert.ok(linux.includes(folder), folder);
+});
+
 test("Subfolders are expanded within their limits and duplicates are dropped", async () => {
   const folders: Record<string, string[]> = {
     "C:\\nvm": ["v18.0.0", "v22.22.2", "notes", "settings.txt", ...Array.from({ length: 40 }, (_, index) => "v20.0." + index)],
@@ -367,7 +375,7 @@ test("The scan keeps one entry for each executable, counts wrappers it cannot re
   assert.equal(byProvider.xai.unresolvedShims, 1);
   assert.equal(byProvider.moonshot.unresolvedShims, 1);
   assert.equal(byProvider.openai.unresolvedShims, 0);
-  assert.deepEqual(result.map(({ provider }) => provider).sort(), ["anthropic", "google", "moonshot", "openai", "xai"]);
+  assert.deepEqual(result.map(({ provider }) => provider).sort(), ["anthropic", "google", "minimax", "mistral", "moonshot", "openai", "qwen", "xai"]);
 
   const crowded: Record<string, string[]> = {};
   const crowdedEntries: Record<string, Entry> = {};

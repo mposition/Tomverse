@@ -6,11 +6,13 @@ import { StringDecoder } from "node:string_decoder";
 import { killTree, killTreeSync } from "../../../tomverse-cli/src/commands.js";
 import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
-import { cliPermissionPlan, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { cliPermissionPlan, isLiveAcpProvider, LIVE_CLI_LIMITS, ZAI_ANTHROPIC_BASE_URL, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { codeProcessLaunch } from "./code-process-launch";
+import { ACP_EXIT_GRACE_MS, acpArguments, createAcpClient } from "./provider-cli-acp";
 
 /**
- * Runs the person's own provider CLI (Codex `exec`, Claude Code's stream protocol) for one task and turns what it prints
+ * Runs the person's own provider CLI (Codex `exec`, Claude Code's stream protocol, or an ACP agent: Qwen Code, Grok Build, Kimi Code,
+ * Mistral Vibe, MiniMax Code; see provider-cli-acp.ts) for one task and turns what it prints
  * into the events the Code screen already shows. The file is the one the person saved and trusted (providerCli.resolveSaved);
  * this module never searches PATH and never takes a path from model output. It calls no Tomverse API and spends no credits.
  */
@@ -26,7 +28,9 @@ export type ExecEvent =
   | { type: "notice"; text: string }
   | { type: "turn"; state: "completed" | "failed"; error?: string };
 
-export type CliApproval = { id: string; tool: string; input: Record<string, unknown> };
+export type CliApproval = { id: string; tool: string; input: Record<string, unknown>;
+  /** The request names a credential file or a provider settings folder: the card is never shown, and the answer is no. */
+  refused?: boolean };
 
 type Json = Record<string, unknown>;
 const isRecord = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -158,10 +162,12 @@ export function cliExecEnvironment(env: NodeJS.ProcessEnv, provider: LiveCliProv
     if (value) result[platform === "win32" && name.toLowerCase() === "path" ? "PATH" : name] = value;
   }
   result.NO_COLOR = "1";
-  if (provider !== "openai") {
+  if (provider === "anthropic" || provider === "zai") {
     result.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
     result.DISABLE_AUTOUPDATER = "1";
   }
+  // Antigravity: its own update switch (the fixture sets it too), so a run never replaces the person's file.
+  if (provider === "google") result.AGY_CLI_DISABLE_AUTO_UPDATE = "true";
   if (provider === "zai" && zai) {
     result.CLAUDE_CONFIG_DIR = zai.configDir;
     result.ANTHROPIC_BASE_URL = ZAI_ANTHROPIC_BASE_URL;
@@ -323,11 +329,11 @@ export type ExecRun = {
   env: NodeJS.ProcessEnv;
   signal: AbortSignal;
   onEvent: (event: ExecEvent) => void;
-  /** Claude Code only: asks the person; false denies. Called one request at a time. */
+  /** Claude Code and the ACP CLIs: asks the person; false denies. Called one request at a time. */
   approve?: (request: CliApproval, signal: AbortSignal) => Promise<boolean>;
   platform?: NodeJS.Platform;
   /** Lower limits for a test. */
-  limits?: Partial<{ stream: number; line: number }>;
+  limits?: Partial<{ stream: number; line: number; handshake: number }>;
 };
 export type ExecResult = {
   status: "completed" | "stopped" | "failed" | "unknown";
@@ -384,8 +390,10 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   if (codexWriteProfile(readOnlyPaths).join(" ").length > PROFILE_CHARACTERS) {
     return result("failed", null, { error: "The project has too many credential files to protect. Use Read only, or another route." });
   }
+  const acp = isLiveAcpProvider(run.provider);
   const args = [...(run.argsPrefix ?? []),
-    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
+    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths })
+      : isLiveAcpProvider(run.provider) ? acpArguments(run.provider) : claudeArguments({ plan, sessionId, platform: run.platform }))];
   if (run.provider === "zai" && !run.zai?.key) return result("failed", null, { error: "Add the Z.ai Coding Plan key in Settings > Development CLIs." });
   if (run.signal.aborted) return result("stopped", null);
 
@@ -406,6 +414,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   const stdin = child.stdin!;
   stdin.on("error", () => undefined);
   const parse = run.provider === "openai" ? codexParser() : claudeParser();
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
   let turn: "completed" | "failed" | undefined;
   let error: string | undefined;
   let bytes = 0;
@@ -415,9 +424,15 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   const pendingApprovals = new Map<string, AbortController>();
   const send = (frame: Json) => { try { stdin.write(`${JSON.stringify(frame)}\n`); } catch { /* The CLI already ended. */ } };
   const emit = (event: ExecEvent) => {
-    if (event.type === "turn") { turn = event.state; error = event.error ?? error; }
+    if (event.type === "turn") {
+      turn = event.state; error = event.error ?? error;
+      // An ACP agent does not always leave when its input ends: after the turn it is given a moment, then ended with its tree.
+      if (acp) { stdin.end(); exitTimer ??= setTimeout(() => { void kill(); }, ACP_EXIT_GRACE_MS); }
+    }
     run.onEvent(event);
   };
+  const client = acp ? createAcpClient({ cwd: run.cwd, prompt: run.prompt, mode: run.mode, plan, send, emit, approve: run.approve, signal: run.signal,
+    handshakeMs: run.limits?.handshake }) : undefined;
 
   const answer = (requestId: string, request: Json) => {
     const input = isRecord(request.input) ? request.input : {};
@@ -441,6 +456,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     let frame: unknown;
     try { frame = JSON.parse(line); } catch { skipped += 1; return; }
     if (!isRecord(frame)) { skipped += 1; return; }
+    if (client) { client.handle(frame); return; }
     if (run.provider !== "openai") {
       if (frame.type === "control_request" && isRecord(frame.request) && frame.request.subtype === "can_use_tool" && typeof frame.request_id === "string") {
         answer(frame.request_id, frame.request);
@@ -489,17 +505,20 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
       // killTree lists the orphans of the exited process too: on Windows by the parent id they still record, on POSIX by the
       // process group (a command that started its own session is not found once its parent is gone).
       for (const controller of pendingApprovals.values()) controller.abort();
+      client?.cancelPending();
       void kill();
       // A grandchild that kept the pipes open must not hold the run: give the pipes a moment to flush, then let go.
       setTimeout(() => { child.stdout?.destroy(); child.stderr?.destroy(); done(code); }, closeDeadline).unref();
     });
   });
 
-  const onAbort = () => { for (const controller of pendingApprovals.values()) controller.abort(); void kill(); };
+  const onAbort = () => { for (const controller of pendingApprovals.values()) controller.abort(); client?.cancelPending(); void kill(); };
   run.signal.addEventListener("abort", onAbort, { once: true });
   if (run.signal.aborted) onAbort();
 
-  if (run.provider === "openai") {
+  if (client) {
+    client.start();
+  } else if (run.provider === "openai") {
     stdin.end(run.prompt);
   } else {
     send({ type: "user", session_id: sessionId, uuid: randomUUID(), parent_tool_use_id: null,
@@ -510,16 +529,22 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
     const exitCode = await closed;
     stdout.end();
     await approvals.catch(() => undefined);
+    await client?.idle();
     if (spawnFailed) return result("failed", null, { error: "The CLI could not be started." });
     if (run.signal.aborted) return result("stopped", exitCode);
     if (overflow) return result("failed", exitCode, { error: "The CLI printed more than Tomverse Desktop reads." });
-    if (turn === "completed" && exitCode === 0) return result("completed", exitCode);
+    // An ACP agent that finished its turn is ended by this adapter when it does not leave itself, so its exit code says nothing.
+    if (turn === "completed" && (exitCode === 0 || acp)) return result("completed", exitCode);
+    // An ACP agent that ended before it was given the task changed nothing.
+    if (!turn && client && !client.prompted()) return result("failed", exitCode, { error: "The CLI ended before it accepted the task." });
     // A run that ended without saying how it went has an unknown outcome: it may have changed files.
     if (!turn) return result("unknown", exitCode, { error });
     return result("failed", exitCode, { error });
   } finally {
     run.signal.removeEventListener("abort", onAbort);
     process.removeListener("exit", onExit);
+    clearTimeout(exitTimer);
+    client?.dispose();
     await kill();
     stdin.destroy();
   }

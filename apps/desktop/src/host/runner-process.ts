@@ -623,7 +623,7 @@ async function executeProviderCli(command: Extract<WorkerCommand, { type: "start
         signal.throwIfAborted();
         // A request holding the Z.ai key is refused too: the card would show it removed, so the person could not see what they approve.
         const holdsKey = !!zaiKey && holdsText({ tool: approval.tool, input: approval.input }, zaiKey);
-        const request = holdsKey ? null : approvalRequestFor(approval, command.project.path, clean);
+        const request = holdsKey || approval.refused ? null : approvalRequestFor(approval, command.project.path, clean);
         // A request the card cannot show in full, or that names a credential file, is refused without asking.
         if (!request) {
           if (!leading.some((entry) => entry.role === "event" && entry.notice === "cliApprovalRefused")) leading.push(desktopCodeNotice("cliApprovalRefused"));

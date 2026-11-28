@@ -1,22 +1,52 @@
-import { claudeFixtureExecution, codexFixtureExecution, zaiClaudeExecution, type CliProvider } from "./code-execution";
+import { antigravityFixtureExecution, claudeFixtureExecution, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, grokFixtureExecution, kimiFixtureExecution,
+  miniMaxFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, zaiClaudeExecution, type CliProvider, type SavedCliPath } from "./code-execution";
 import type { PermissionModeId } from "./permission-contract";
 
 /**
  * Running a task with the provider's own CLI (the person's saved, trusted file) instead of the Tomverse API. The run
- * costs no Tomverse credits and calls no Tomverse coding API. Codex and Claude Code have an adapter; the other CLIs keep
- * their fixture-only routes. `zai` is Claude Code on the person's Z.ai Coding Plan: the same saved Claude Code file and
- * adapter, with its own settings folder and the Z.ai key, so the person's Claude sign-in is neither used nor changed.
+ * costs no Tomverse credits and calls no Tomverse coding API. Codex and Claude Code have an adapter of their own; Qwen Code,
+ * Grok Build, Kimi Code, Mistral Vibe, MiniMax Code and Antigravity share one "live ACP" adapter (Agent Client Protocol over stdio).
+ * `zai` is Claude Code on the person's Z.ai Coding Plan: the same saved Claude Code
+ * file and adapter, with its own settings folder and the Z.ai key, so the person's Claude sign-in is neither used nor changed.
  */
-export const liveCliProviders = ["openai", "anthropic", "zai"] as const;
+export const liveAcpProviders = ["qwen", "xai", "moonshot", "mistral", "minimax", "google"] as const;
+export type LiveAcpProvider = (typeof liveAcpProviders)[number];
+export const liveCliProviders = ["openai", "anthropic", "zai", ...liveAcpProviders] as const;
 export type LiveCliProvider = (typeof liveCliProviders)[number];
+export const isLiveAcpProvider = (provider: LiveCliProvider): provider is LiveAcpProvider => (liveAcpProviders as readonly string[]).includes(provider);
 
 /** The saved CLI file each route runs. */
-export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic" } as const satisfies Record<LiveCliProvider, CliProvider>;
+export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic", qwen: "qwen", xai: "xai", moonshot: "moonshot",
+  mistral: "mistral", minimax: "minimax", google: "google" } as const satisfies Record<LiveCliProvider, CliProvider>;
 /** The name the composer and the task show. */
-export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Claude Code (Z.ai)" } as const satisfies Record<LiveCliProvider, string>;
+export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Claude Code (Z.ai)", qwen: providerClis.qwen, xai: providerClis.xai,
+  moonshot: providerClis.moonshot, mistral: providerClis.mistral, minimax: providerClis.minimax, google: providerClis.google } as const satisfies Record<LiveCliProvider, string>;
+const liveAcpExecution = { qwen: qwenFixtureExecution, xai: grokFixtureExecution, moonshot: kimiFixtureExecution, mistral: vibeFixtureExecution,
+  minimax: miniMaxFixtureExecution, google: antigravityFixtureExecution } as const satisfies Record<LiveAcpProvider, unknown>;
 /** What a task run on the route says it ran with. */
 export const liveCliExecution = (provider: LiveCliProvider) =>
-  provider === "openai" ? codexFixtureExecution : provider === "zai" ? zaiClaudeExecution : claudeFixtureExecution;
+  isLiveAcpProvider(provider) ? liveAcpExecution[provider] : provider === "openai" ? codexFixtureExecution : provider === "zai" ? zaiClaudeExecution : claudeFixtureExecution;
+
+/**
+ * Whether the saved file of a route is something a task can start. A pinned release that was verified is the file itself for
+ * most CLIs, but for Qwen Code and Mistral Vibe it is the release archive and for MiniMax Code its installation folder: those
+ * run only from an executable the person trusted ("userTrusted").
+ */
+export function liveCliRunnable(provider: LiveCliProvider, saved: Pick<SavedCliPath, "status"> | undefined) {
+  if (!saved) return false;
+  if (saved.status === "userTrusted") return true;
+  const file = liveCliFile[provider];
+  return saved.status === "pathVerified" && !cliUsesReleaseArchive(file) && !cliUsesInstallationFolder(file);
+}
+
+/**
+ * The folders in a person's home where the provider CLIs keep their sign-in and settings. A live ACP run uses the person's
+ * real home, so these are the files a CLI could be asked to read or change on a model's say-so: a request naming anything
+ * under one is refused in every permission mode and never shown on an approval card. Names are matched as whole path
+ * segments, lower case, in any position (so a project's own `.qwen` folder counts too).
+ */
+export const providerConfigFolders = [".qwen", ".vibe", ".grok", ".kimi-code", ".kimi", ".minimax", ".mcode", ".minimax-code", ".mistral", ".codex", ".claude", ".gemini",
+  ".antigravity"] as const;
 /** Z.ai's Anthropic-compatible endpoint for the Coding Plan (docs.z.ai, Claude Code). */
 export const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 
@@ -69,7 +99,19 @@ export const cliPermissionPlans: Record<LiveCliProvider, Record<PermissionModeId
     auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },
     allow_all: { grants: "allow_all", approvals: "card", notice: "cliAllowAllCommandsAsk" },
   },
+  // The ACP CLIs send each approval as `session/request_permission`, so they follow the Claude Code plan: Read only refuses
+  // every write or command request, Ask and Auto review use the card, and Allow all pre-approves only edits inside the project.
+  qwen: acpPlans(), xai: acpPlans(), moonshot: acpPlans(), mistral: acpPlans(), minimax: acpPlans(), google: acpPlans(),
 };
+
+function acpPlans(): Record<PermissionModeId, CliPermissionPlan> {
+  return {
+    read_only: { grants: "read_only", approvals: "none" },
+    ask: { grants: "ask", approvals: "card" },
+    auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },
+    allow_all: { grants: "allow_all", approvals: "card", notice: "cliAllowAllCommandsAsk" },
+  };
+}
 
 export const cliPermissionPlan = (provider: LiveCliProvider, mode: PermissionModeId): CliPermissionPlan => cliPermissionPlans[provider][mode];
 
