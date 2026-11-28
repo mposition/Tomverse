@@ -20,6 +20,7 @@ import "./connector-workspace.css";
 
 // The catalogue this app was built with, loaded only for a server that does not serve its own (see bundledCatalog.ts).
 type Bundled = typeof import("./bundledCatalog");
+type BundledLogos = typeof import("./bundledLogos");
 
 function ServiceLogo({ src }: { src: string | undefined }) {
   const [failed, setFailed] = useState<string>();
@@ -49,6 +50,7 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   // undefined: not asked yet; null: this server serves no catalogue, so only its own servers are listed.
   const [catalog, setCatalog] = useState<PluginCatalogView | null>();
   const [bundled, setBundled] = useState<Bundled>();
+  const [logos, setLogos] = useState<BundledLogos>();
   const [providerId, setProviderId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ConnectorMessage>();
@@ -86,6 +88,8 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
       () => { if (alive.current) { setCatalog(null); setMessage({ tone: "error", text: c.error }); } });
     return () => { alive.current = false; };
   }, [c.error]);
+  // The logos the app carries, loaded with the screen (bundledLogos.ts).
+  useEffect(() => { void import("./bundledLogos").then((module) => { if (alive.current) setLogos(module); }); }, []);
   useEffect(() => {
     if (catalog !== null || bundled) return;
     void import("./bundledCatalog").then((module) => { if (alive.current) setBundled(module); });
@@ -111,7 +115,9 @@ export function ConnectorWorkspace({ language, lane = null }: { language: Langua
   // The web's catalogue from the server; for a server that serves none, the one this app was built with labels that server's own list.
   const providers: readonly McpProvider[] = catalog?.providers ?? bundled?.bundledProviders ?? [];
   const ready = catalog !== undefined && (catalog !== null || bundled !== undefined);
-  const logoOf = (provider: McpProvider | undefined) => !provider?.logo ? undefined : catalog ? pluginLogoUrl(provider.id, catalog.revision) : bundled?.bundledLogo(provider);
+  // The app's own copy of a logo first; the server's file only for a platform the app does not carry (bundledLogos.ts).
+  const logoOf = (provider: McpProvider | undefined) => !provider?.logo || !logos ? undefined
+    : logos.bundledLogoFile(provider.logo) ?? (catalog ? pluginLogoUrl(provider.id, catalog.revision) : undefined);
   // Cards, their order and the filters are the web page's own (lib/mcpProviderBrowse.ts).
   const cards = ready ? pluginCards({ servers: inventory?.servers ?? [], providers, customEnabled: Boolean(inventory?.customEnabled), customName: c.custom, catalog: Boolean(catalog) }) : [];
   const visibleCards = filterPluginCards(cards, { search: query.trim(), category, source,
