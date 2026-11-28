@@ -16,13 +16,13 @@ import { mcpProviderCopy } from "@/lib/mcpProviderCopy";
 import { mcpProviderSummary } from "@/lib/mcpProviderSummary";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { mcpProvider, type McpProvider, type McpProviderCategory } from "@/lib/mcpProviderCatalog";
+import { filterPluginCards, pluginCards } from "@/lib/mcpProviderBrowse";
 import { PLUGIN_PROVIDERS, EMPTY_PLUGIN_INVENTORY, readPluginInventory, type PluginInventory, type PluginServer, type PluginConnection } from "@/lib/mcpConnectorClientContract";
 import "@/components/chat/review-studio.css";
 import styles from "./pluginWorkspace.module.css";
 
 // A custom server's chosen name never selects a catalogued brand logo.
 const logoName = (serverId: string, name: string) => serverId === "custom" || serverId.startsWith("custom-") ? "" : name;
-const featuredProviders = ["github", "railway", "slack", "notion", "linear", "figma", "canva", "atlassian", "sentry", "cloudflare"];
 
 export function PluginWorkspace() {
   const { lang, t } = useLanguage(); const c = mcpConnectorCopy[lang]; const p = mcpProviderCopy[lang]; const n = reviewWorkspaceCopy[lang]; const router = useRouter();
@@ -101,22 +101,9 @@ export function PluginWorkspace() {
   const scopeServer = !customMode && chosenServer?.auth === "oauth" && chosenServer.scopes ? chosenServer : undefined;
   const scopeMissing = Boolean(scopeServer && !scopes.length);
   const pending = inventory.invocations.filter(i => i.state === "pending");
-  const cards: Array<{ id: string; name: string; server?: PluginServer; provider?: McpProvider }> = [
-    // A user-entered server is never presented as a catalogued provider, whatever its name.
-    ...inventory.servers.map(server => ({ id: server.id, name: server.name, server, provider: server.custom ? undefined : mcpProvider(server.id) || mcpProvider(server.name) })),
-    // Connectable now, so it sits with the connectable servers rather than after 140 catalog entries.
-    ...(inventory.customEnabled ? [{ id: "custom", name: c.custom }] : []),
-    ...PLUGIN_PROVIDERS.filter(provider => !inventory.servers.some(s => !s.custom && (mcpProvider(s.id) || mcpProvider(s.name))?.id === provider.id))
-      .sort((a, b) => {
-        const rank = (provider: McpProvider) => featuredProviders.includes(provider.id) ? featuredProviders.indexOf(provider.id) : provider.kind === "remote" ? 100 : 200;
-        return rank(a) - rank(b);
-      })
-      .map(provider => ({ id: provider.id, name: provider.name, provider })),
-    ...(inventory.customEnabled ? [] : [{ id: "custom", name: c.custom }]),
-  ];
-  const visibleCards = cards.filter(card => [card.name, ...(card.provider?.aliases || [])].some(name => name.toLowerCase().includes(search.toLowerCase())) &&
-    (category === "all" || card.provider?.category === category) && (source === "all" || card.provider?.sources.includes(source)) &&
-    (tab !== "connected" || inventory.connections.some(conn => conn.serverId === card.id && conn.status !== "disconnected")));
+  const cards = pluginCards({ servers: inventory.servers, providers: PLUGIN_PROVIDERS, customEnabled: Boolean(inventory.customEnabled), customName: c.custom });
+  const visibleCards = filterPluginCards(cards, { search, category, source,
+    connected: tab === "connected" ? new Set(inventory.connections.filter(conn => conn.status !== "disconnected").map(conn => conn.serverId)) : undefined });
   const selectedProvider = providerId ? mcpProvider(providerId) : undefined;
   return <div className={styles.shell} lang={lang} data-testid="plugin-workspace">
     <ReviewNavigation product="plugins" onNewChat={() => router.push(`/chat?lang=${lang}`)} />

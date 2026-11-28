@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
@@ -129,7 +130,7 @@ test("a task's approved command runs inside the sandbox: it writes the project a
     app = await electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000, env: { ...realHomeEnv, TEMP: base, TMP: base, TMPDIR: base } });
     const page = await app.firstWindow();
     await page.evaluate(() => window.desktop.codeSandbox({ action: "set-mode", mode: "workspace-write" }));
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("textbox", { name: "Code request" }).fill("Run the check");
     const [approval] = await Promise.all([app.waitForEvent("window", { timeout: 10_000 }), page.getByRole("button", { name: "Send Code request" }).click()]);
     await press(approval, "Allow once");
@@ -197,7 +198,7 @@ test("a task in its own worktree runs its commands with the worktree as the fold
     app = await electron.launch({ executablePath, args: [desktop, "--desktop-fixture", descriptor], timeout: 25_000, env: { ...realHomeEnv, TEMP: base, TMP: base, TMPDIR: base } });
     const page = await app.firstWindow();
     await page.evaluate(() => window.desktop.codeSandbox({ action: "set-mode", mode: "workspace-write" }));
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).codeGitWorkspace?.kind).toBe("git");
     const composer = page.getByRole("textbox", { name: "Code request" });
     await composer.fill("Run the check");

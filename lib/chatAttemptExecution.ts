@@ -110,6 +110,12 @@ export type AttemptExecutionRequest = {
      * admitted under.
      */
     reservationOnlyInputTokens?: number;
+    /**
+     * Ask this attempt's provider for a summary of the reasoning it already
+     * does (lib/chatReasoningRelay.ts). The same switch the primary read, so a
+     * fallback's request differs from the primary's only by the model.
+     */
+    reasoningSummary?: boolean;
     webSearchMode: WebSearchMode | null;
     /**
      * Which application-managed search backends this deployment can reach.
@@ -403,6 +409,7 @@ export const planAttemptExecution = (
             // `max_tool_calls` -- or send one to a model that is not searching
             // at all.
             generationSettings: getModelGenerationSettings(modelConfig, {
+                reasoningSummary: request.reasoningSummary,
                 openAiMaxToolCalls: openAiNativeSearchToolCallCeiling({
                     capability,
                     nativeSearchEnabled,

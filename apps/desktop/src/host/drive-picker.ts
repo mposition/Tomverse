@@ -13,10 +13,18 @@ function finish(response: ServerResponse, status: number, message: string) {
   }).end(message);
 }
 
-export async function selectDriveFiles({ origin, language, slots, signal: lifetime, openExternal }: {
-  origin: string; language: string; slots: number; signal: AbortSignal; openExternal(url: string): Promise<void>;
+/** How long the system browser may stay open on the picker before the person is told the selection expired. */
+export const DRIVE_SELECTION_TIMEOUT_MS = 5 * 60_000;
+
+export class DriveSelectionTimeout extends Error {
+  constructor() { super("The Google Drive selection timed out."); this.name = "DriveSelectionTimeout"; }
+}
+
+export async function selectDriveFiles({ origin, language, slots, signal: lifetime, openExternal, timeoutMs = DRIVE_SELECTION_TIMEOUT_MS }: {
+  origin: string; language: string; slots: number; signal: AbortSignal; openExternal(url: string): Promise<void>; timeoutMs?: number;
 }): Promise<DriveSelection | null> {
-  const signal = AbortSignal.any([lifetime, AbortSignal.timeout(5 * 60_000)]);
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = AbortSignal.any([lifetime, timeout]);
   signal.throwIfAborted();
   const state = randomBytes(32).toString("base64url");
   const pair = await driveKeyPair();
@@ -72,6 +80,9 @@ export async function selectDriveFiles({ origin, language, slots, signal: lifeti
     picker.hash = new URLSearchParams({ port: String(address.port), state, key: pair.key, slots: String(slots) }).toString();
     await Promise.race([openExternal(picker.href), promise]);
     return await promise;
+  } catch (error) {
+    if (timeout.aborted && !lifetime.aborted) throw new DriveSelectionTimeout();
+    throw error;
   } finally {
     signal.removeEventListener("abort", onAbort);
     server.close();

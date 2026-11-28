@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { ModelMessage } from "ai";
+import { collapseConsecutiveSameRole } from "@/lib/chatProviderPrompt";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
   parsePerplexityUsageCost,
@@ -62,27 +63,6 @@ const toPlainTextContent = (content: unknown): string => {
   }
   return "";
 };
-
-// Unlike the OpenAI-compatible sync endpoint every other Perplexity model
-// (and every other provider) goes through, the async endpoint strictly
-// rejects two consecutive messages of the same role with a 400 --
-// "user or tool message(s) should alternate with assistant message(s)".
-// This app's stored history isn't guaranteed to already alternate (e.g. a
-// dropped empty assistant turn, or a tool-role message filtered out above
-// leaving two user turns adjacent), so consecutive same-role messages are
-// merged into one instead of sent as-is.
-const collapseConsecutiveSameRole = (
-  messages: PlainChatMessage[]
-): PlainChatMessage[] =>
-  messages.reduce<PlainChatMessage[]>((collapsed, message) => {
-    const previous = collapsed[collapsed.length - 1];
-    if (previous && previous.role === message.role) {
-      previous.content = `${previous.content}\n\n${message.content}`;
-    } else {
-      collapsed.push({ ...message });
-    }
-    return collapsed;
-  }, []);
 
 // Everything a failed submit may be logged with. Roles and counts only: the
 // shape of a request is what decides whether it was well-formed, and message

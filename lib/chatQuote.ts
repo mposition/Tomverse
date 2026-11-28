@@ -41,3 +41,25 @@ export function subscribeChatQuote(listener: (quote: string) => void): () => voi
   window.addEventListener(CHAT_QUOTE_EVENT, handler);
   return () => window.removeEventListener(CHAT_QUOTE_EVENT, handler);
 }
+
+/**
+ * Plain text for the composer, from a control inside an answer (the quiz's
+ * "explain the ones I missed"). Same path as a quote: the text is added to the
+ * draft after whatever is typed, and nothing is sent.
+ */
+export const CHAT_DRAFT_TEXT_EVENT = "tomverse:chat-draft-text";
+
+export function requestChatDraftText(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<{ text: string }>(CHAT_DRAFT_TEXT_EVENT, { detail: { text: trimmed } }));
+}
+
+export function subscribeChatDraftText(listener: (text: string) => void): () => void {
+  const handler = (event: Event) => {
+    const text = (event as CustomEvent<{ text?: unknown }>).detail?.text;
+    if (typeof text === "string" && text) listener(text);
+  };
+  window.addEventListener(CHAT_DRAFT_TEXT_EVENT, handler);
+  return () => window.removeEventListener(CHAT_DRAFT_TEXT_EVENT, handler);
+}

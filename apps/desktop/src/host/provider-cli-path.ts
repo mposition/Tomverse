@@ -3,7 +3,7 @@ import { constants, createWriteStream, watch, type FSWatcher, type Stats } from 
 import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { pipeline } from "node:stream/promises";
-import type { CliPathCheck, CliProvider } from "../code-execution";
+import type { CliProvider } from "../code-execution";
 import { miniMaxRuntimeSupported, miniMaxVersion, verifyMiniMaxRuntime } from "./minimax-runtime";
 import { zCodeRuntimeSupported, zCodeVersion, verifyZCodeRuntime } from "./zcode-runtime";
 
@@ -65,14 +65,20 @@ const appleSiliconReleases: Partial<Record<CliProvider, CliRelease>> = {
 };
 
 type VerifiedCliPathInspection = { status: "pathVerified"; version: string; file: string; fileStamp?: string };
-type CliPathInspection = Exclude<CliPathCheck, { status: "pathVerified" }> | VerifiedCliPathInspection;
+type CliPathInspection = { status: "versionUnverified" | "invalidPath" | "fileMissing" | "wrongFile" | "windowsShim" | "checkFailed" | "unsupportedPlatform" } | VerifiedCliPathInspection;
 
 const windows = process.platform === "win32";
 const windowsShim = /\.(?:cmd|bat|com|ps1|js|vbs|lnk)$/i;
-const localReadFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
-const releases = process.arch === "x64" ? x64Releases[process.platform]
+export const localReadFlags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+let releases: Partial<Record<CliProvider, CliRelease>> | undefined = process.arch === "x64" ? x64Releases[process.platform]
   : process.platform === "darwin" && process.arch === "arm64" ? appleSiliconReleases : undefined;
 export const releaseArchiveName = (provider: CliProvider) => releases?.[provider]?.archive;
+/** File names a provider's executable is installed under: its own name and the release's aliases. */
+export const cliExecutableNames = (provider: CliProvider): string[] => [executableNames[provider], ...(releases?.[provider]?.aliases ?? [])];
+/** Test seam: replaces a provider's pinned release. The Desktop host calls it only where fixtures are allowed. */
+export function applyCliReleaseFixture(fixture: Partial<Record<CliProvider, { version: string; bytes: number; sha256: string }>>) {
+  releases = { ...releases, ...fixture };
+}
 
 export function supportsCliPath(provider: CliProvider): boolean {
   if (provider === "minimax") return miniMaxRuntimeSupported;
@@ -80,12 +86,12 @@ export function supportsCliPath(provider: CliProvider): boolean {
   return Boolean(releases?.[provider]);
 }
 
-function isLocalPath(path: string) {
+export function isLocalPath(path: string) {
   if (!isAbsolute(path) || /[\u0000-\u001f\u007f]/u.test(path)) return false;
   return !windows || (/^[a-z]:[\\/]/i.test(path) && !path.slice(2).includes(":"));
 }
 
-function fileStamp({ dev, ino, size, mode, mtimeMs, ctimeMs }: Stats) {
+export function fileStamp({ dev, ino, size, mode, mtimeMs, ctimeMs }: Stats) {
   return JSON.stringify([dev, ino, size, mode, mtimeMs, ctimeMs]);
 }
 
@@ -177,7 +183,7 @@ export async function inspectCliPath(provider: CliProvider, selectedPath: string
   }
 }
 
-export async function cliPathStillMatches(provider: CliProvider, selected: string, checked: VerifiedCliPathInspection, signal?: AbortSignal) {
+export async function cliPathStillMatches(provider: CliProvider, selected: string, checked: { file: string; fileStamp?: string; version?: string }, signal?: AbortSignal) {
   try {
     if (checked.fileStamp !== undefined) {
       return await realpath(selected) === checked.file && fileStamp(await lstat(checked.file)) === checked.fileStamp;

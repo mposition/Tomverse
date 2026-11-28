@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
 import { DEFAULT_MODELS, FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
 import { launchNativeFixture, removeNativeFixtureDirectory } from "./launch-native-fixture";
@@ -18,8 +19,8 @@ async function launch(gateway: FakeGateway) {
   await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY, computerUse: true }));
   const app = await launchNativeFixture(descriptor);
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "Open local folder" }).click();
-  await page.getByLabel("Code mode").selectOption("agent");
+  await openCodeProject(page);
+  await selectCodeMode(page, "agent");
   return { folder, app, page };
 }
 

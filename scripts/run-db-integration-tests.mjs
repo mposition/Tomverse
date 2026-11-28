@@ -1006,6 +1006,10 @@ run(
     // move/lock/delete lifecycle, explicit scope moves, confirmed project
     // deletion, the knowledge owner container and the turn context identity.
     "tests/integration/project-workspace.db.test.ts",
+    // Automatic memory from ordinary Chat conversations: which conversations are queued
+    // (default-off switch, locks, temporary, memory off, pacing), what the commit refuses
+    // after the fact, and that locking or deleting the source takes the memory with it.
+    "tests/integration/chat-auto-memory.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
@@ -1265,6 +1269,18 @@ run(
     "--test-concurrency=1",
     "tests/integration/code-web-search.db.test.mjs"],
   "Running the coding API web search's surcharge, vendor budget, cap, idempotency, cancellation and expiry scenarios",
+);
+// Desktop Code on the signed-in Desktop session (no API key): the same account
+// caller, reservation, settlement, refund and receipt as a key, its own
+// Idempotency-Key scope, the session and origin refusals, the account's
+// concurrency and cost limits and account deletion. Fakes only the model
+// provider and the search backend; own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api-desktop-session.db.test.mjs"],
+  "Running the coding API's Desktop session caller, billing parity, refusal, limit and deletion scenarios",
 );
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
@@ -1584,6 +1600,21 @@ run(
   ],
   "Running the temporary Chat and answer rating route scenarios"
 );
+// Its own process: it replaces next-auth. "Branch from this answer" -- what is
+// copied, what is left out, the conversations that are refused, and the limits.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-conversation-branch.db.test.ts",
+  ],
+  "Running the answer branch scenarios"
+);
 // Its own process: it replaces next-auth and the provider stream. Who may mark
 // a regenerated or edited turn replaced, that the conversation read carries
 // the mark, and that the chat route leaves marked turns out of the context and
@@ -1600,6 +1631,23 @@ run(
     "tests/integration/conversation-superseded-turns.db.test.ts",
   ],
   "Running the replaced-turn mark scenarios"
+);
+// Its own process: it replaces next-auth and the provider stream. A saved
+// turn's reservation names its answer, the answer shows what settlement wrote
+// (summed, withheld while open, nothing when refunded or unlinked), and only
+// the owner of an unlocked Chat conversation reads it.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-answer-credits.db.test.ts",
+  ],
+  "Running the answer credit link and read scenarios"
 );
 // Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
 // in its own process rather than changing another integration suite's client.

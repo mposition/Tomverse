@@ -355,7 +355,8 @@ const MODEL_CODES = new Set([
 ]);
 /**
  * Refusals that are the platform's state, not the task's: an operational
- * guardrail, a provider budget, Chat paused by an operator. Nothing was spent
+ * guardrail, a provider budget, Chat paused by an operator, a request-rate
+ * ceiling that clears within a minute, a database blip. Nothing was spent
  * and nothing about the task is wrong, so they neither pause it nor count
  * toward its failure streak.
  */
@@ -365,6 +366,12 @@ const PLATFORM_CODES = new Set([
   "AI_CHAT_DISABLED_BY_ADMIN",
   "CHAT_CONCURRENCY_EXCEEDED",
   "API_RATE_LIMITED",
+  // The Chat route's per-minute request rate (lib/chatRateLimitCore.ts): a
+  // run that lands in a busy minute is refused before anything is reserved.
+  "CHAT_RATE_LIMITED",
+  // The route's own answer to a transient database error (lib/databaseError.ts),
+  // sent with a Retry-After, before the turn started.
+  "DATABASE_TEMPORARILY_UNAVAILABLE",
 ]);
 export const SCHEDULED_TASK_CREDIT_CAP_CODE = "SCHEDULED_TASK_CREDIT_CAP_EXCEEDED";
 /** The reservation guard's answer once the person paused, edited or deleted the task mid-run. */

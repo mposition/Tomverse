@@ -1,6 +1,6 @@
 import { basename, isAbsolute, relative } from "node:path";
 import type { ApprovalView } from "./agent.js";
-import { isSecretPath } from "./workspace.js";
+import { commandNamesSecretPath, isSecretPath } from "./workspace.js";
 import { AutoReviewer, type ReviewCall, type ReviewOutcome } from "./approval-review.js";
 import { JournalError } from "./session.js";
 
@@ -467,8 +467,6 @@ const unreadableReason = (subject: Extract<Subject, { kind: "command" }>) => {
     return null;
 };
 
-const pieceIsPath = (piece: string) => /[\\/.~]/.test(piece) || /^id_/i.test(piece);
-
 /**
  * The checks that hold in every mode. A "deny" is refused outright; a "human"
  * is never decided by a mode, a rule or a model, only by a person.
@@ -493,8 +491,7 @@ export const checkBoundaries = (view: ApprovalView, options: { protectedDirs?: r
     if (subject.kind !== "command") return null;
     const egress = egressReason(subject);
     if (egress) return { kind: "human", code: "egress_command", reason: egress };
-    const pieces = subject.text.split(/[\s"'=,;<>|&()]+/).filter(Boolean);
-    if (pieces.some((piece) => pieceIsPath(piece) && isSecretPath(piece))) {
+    if (commandNamesSecretPath(subject.text)) {
         return { kind: "human", code: "credential_in_command", reason: "It names a file that can hold credentials." };
     }
     const flat = subject.text.replaceAll("\\", "/").toLowerCase();

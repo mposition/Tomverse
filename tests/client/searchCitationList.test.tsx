@@ -23,3 +23,18 @@ test("source links render at a readable size with spacing between rows", () => {
 test("no citations renders nothing", () => {
   assert.equal(renderToStaticMarkup(createElement(SearchCitationList, { citations: [], label: "Sources" })), "");
 });
+
+test("a saved-memory entry renders as a note with a link to the memory screen, not as a source", () => {
+  const withSaved = [
+    ...citations,
+    { url: "https://tomverse.app/settings/memory", title: "Saved to memory", sourceProvider: "memory_saved" },
+  ];
+  const memorySaved = { note: "Saved to memory.", manage: "Manage memory" };
+  const html = renderToStaticMarkup(createElement(SearchCitationList, { citations: withSaved, label: "Sources", memorySaved }));
+  assert.match(html, /data-testid="memory-saved-note"/);
+  assert.match(html, /href="\/settings\/memory"/);
+  assert.equal((html.match(/data-testid="search-citation-item"/g) ?? []).length, 2, "the note is not counted as a source");
+  const onlySaved = renderToStaticMarkup(createElement(SearchCitationList, { citations: withSaved.slice(2), label: "Sources", memorySaved }));
+  assert.match(onlySaved, /data-testid="memory-saved-note"/);
+  assert.doesNotMatch(onlySaved, /search-citation-list/);
+});

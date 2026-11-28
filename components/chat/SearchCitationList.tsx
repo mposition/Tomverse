@@ -1,7 +1,46 @@
+import Link from "next/link";
 import type { WebSearchCitation } from "@/lib/webSearchCitations";
 
-export function SearchCitationList({ citations, label }: { citations: WebSearchCitation[]; label: string }) {
-  if (citations.length === 0) return null;
+/** Set by the save_memory tool when this answer saved something to memory (lib/chatMemoryTool.ts). */
+const MEMORY_SAVED_PROVIDER = "memory_saved";
+
+export function SearchCitationList({
+  citations: allCitations,
+  label,
+  memorySaved,
+}: {
+  citations: WebSearchCitation[];
+  label: string;
+  /** The localized note and link text for an answer that saved a memory. */
+  memorySaved?: { note: string; manage: string };
+}) {
+  const saved = memorySaved && allCitations.some((citation) => citation.sourceProvider === MEMORY_SAVED_PROVIDER);
+  // The saved-memory entry is a note with a link to the memory screen, not a source of the answer.
+  const citations = saved ? allCitations.filter((citation) => citation.sourceProvider !== MEMORY_SAVED_PROVIDER) : allCitations;
+  if (citations.length === 0 && !saved) return null;
+  return (
+    <>
+      {saved && memorySaved && (
+        <p
+          data-testid="memory-saved-note"
+          className="mt-3 flex flex-wrap items-baseline gap-x-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+        >
+          <span>{memorySaved.note}</span>
+          <Link
+            href="/settings/memory"
+            data-testid="memory-saved-manage-link"
+            className="font-semibold text-blue-600 underline underline-offset-2 dark:text-blue-400"
+          >
+            {memorySaved.manage}
+          </Link>
+        </p>
+      )}
+      {citations.length > 0 && <SourceList citations={citations} label={label} />}
+    </>
+  );
+}
+
+function SourceList({ citations, label }: { citations: WebSearchCitation[]; label: string }) {
   return (
     <div
       data-testid="search-citation-list"

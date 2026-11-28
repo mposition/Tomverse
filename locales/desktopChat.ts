@@ -62,6 +62,10 @@ const en = {
   modelEffort: "Chat model and reasoning effort",
   stop: "Stop Chat response",
   send: "Send Chat message",
+  voiceInput: "Voice input",
+  voiceDictation: "Dictation",
+  voiceConversation: "Voice conversation",
+  voiceCost: "{credits} credits per minute",
 };
 
 export const desktopChatCopy: Record<Language, typeof en> = {
@@ -128,6 +132,10 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Chat 모델 및 추론 강도",
     stop: "Chat 답변 중지",
     send: "Chat 메시지 보내기",
+    voiceInput: "음성 입력",
+    voiceDictation: "받아쓰기",
+    voiceConversation: "음성 대화",
+    voiceCost: "1분당 {credits}크레딧",
   },
   zh: {
     unlockConversation: "请在对话菜单中选择解锁并输入密码。",
@@ -191,6 +199,10 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Chat 模型和推理强度",
     stop: "停止 Chat 回答",
     send: "发送 Chat 消息",
+    voiceInput: "语音输入",
+    voiceDictation: "听写",
+    voiceConversation: "语音对话",
+    voiceCost: "每分钟 {credits} 积分",
   },
   "zh-Hant": {
     unlockConversation: "請在對話選單中選擇解鎖並輸入密碼。",
@@ -254,6 +266,10 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Chat 模型和推理強度",
     stop: "停止 Chat 回答",
     send: "傳送 Chat 訊息",
+    voiceInput: "語音輸入",
+    voiceDictation: "聽寫",
+    voiceConversation: "語音對話",
+    voiceCost: "每分鐘 {credits} 點數",
   },
   fr: {
     unlockConversation: "Dans le menu de la conversation, choisissez Déverrouiller et saisissez le mot de passe.",
@@ -317,6 +333,10 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Modèle Chat et effort de raisonnement",
     stop: "Arrêter la réponse Chat",
     send: "Envoyer le message Chat",
+    voiceInput: "Saisie vocale",
+    voiceDictation: "Dictée",
+    voiceConversation: "Conversation vocale",
+    voiceCost: "{credits} crédits par minute",
   },
   de: {
     unlockConversation: "Wähle im Gesprächsmenü Entsperren und gib das Passwort ein.",
@@ -380,6 +400,10 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Chat-Modell und Denkaufwand",
     stop: "Chat-Antwort stoppen",
     send: "Chat-Nachricht senden",
+    voiceInput: "Spracheingabe",
+    voiceDictation: "Diktat",
+    voiceConversation: "Sprachunterhaltung",
+    voiceCost: "{credits} Credits pro Minute",
   },
   es: {
     unlockConversation: "Elige Desbloquear en el menú de la conversación e introduce la contraseña.",
@@ -443,6 +467,10 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Modelo de Chat y esfuerzo de razonamiento",
     stop: "Detener respuesta de Chat",
     send: "Enviar mensaje de Chat",
+    voiceInput: "Entrada de voz",
+    voiceDictation: "Dictado",
+    voiceConversation: "Conversación de voz",
+    voiceCost: "{credits} créditos por minuto",
   },
   pt: {
     unlockConversation: "Escolha Desbloquear no menu da conversa e introduza a palavra-passe.",
@@ -506,5 +534,9 @@ export const desktopChatCopy: Record<Language, typeof en> = {
     modelEffort: "Modelo do Chat e esforço de raciocínio",
     stop: "Parar a resposta do Chat",
     send: "Enviar mensagem do Chat",
+    voiceInput: "Entrada de voz",
+    voiceDictation: "Ditado",
+    voiceConversation: "Conversa por voz",
+    voiceCost: "{credits} créditos por minuto",
   },
 };

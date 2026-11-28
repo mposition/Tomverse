@@ -1,4 +1,5 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import { readStoredChatReasoning } from "@/lib/chatReasoningDisplay";
 import { parseChatStreamArtifacts } from "@/lib/generatedArtifactCore";
 import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -486,6 +487,7 @@ export function parseCompletedChatResponseMessage(
   }
   const searchMetadata = parseStoredWebSearchExecution(value.searchMetadata);
   if (!searchMetadata.ok) return null;
+  const storedReasoning = readStoredChatReasoning(value.searchMetadata);
   const positiveCount = (candidate: unknown) =>
     candidate === undefined ||
     (Number.isSafeInteger(candidate) && (candidate as number) > 0);
@@ -510,6 +512,9 @@ export function parseCompletedChatResponseMessage(
     modelId: expectedModelId,
     createdAt: value.createdAt,
     searchMetadata: searchMetadata.value,
+    // A completed answer read back from the server keeps its saved summary,
+    // so a reconnect after "Thought for N seconds" still shows it.
+    ...(storedReasoning ? { reasoning: storedReasoning } : {}),
     ...(typeof value.memoryUsedCount === "number"
       ? { memoryUsedCount: value.memoryUsedCount }
       : {}),
@@ -615,6 +620,72 @@ export function mergeChatResponseAttempts(
     attemptBackedIds.add(attempt.assistantMessageId);
   }
   return { messages: next, attemptBackedIds };
+}
+
+/**
+ * Folds the server's transcript into one a tab already holds, by message id.
+ *
+ * A tab keeps its own transcript while the user is away, and the other tab or
+ * device that continued the conversation meanwhile wrote turns this one never
+ * saw. The next request is built from this transcript, so a turn missing here
+ * is a turn the model is never shown. The server's rows decide every id it has
+ * and fix the order; a message only this tab holds (an answer the server did
+ * not keep, a question not yet echoed back) stays, placed after the message it
+ * followed.
+ *
+ * One exception keeps the answer from stepping backwards: an attempt-backed
+ * answer the tab already shows further along than the server's checkpoint.
+ * The poller replaces it with the final one.
+ */
+export function mergeServerTranscriptIntoLocal(
+  local: readonly Message[],
+  server: readonly Message[],
+  attemptBackedIds: ReadonlySet<string>,
+  ignoredLocalIds: ReadonlySet<string> = new Set()
+): Message[] {
+  const localById = new Map(local.map((message) => [message.id, message]));
+  const serverIds = new Set(server.map((message) => message.id));
+  const result = server.map((message) => {
+    const mine = localById.get(message.id);
+    if (!mine) return message;
+    // The same row as the server's keeps the tab's own object, with the
+    // runtime-only context (error report, routing badge) the server never had.
+    if (
+      mine.role === message.role &&
+      mine.content === message.content &&
+      mine.status === message.status &&
+      (mine.errorCode ?? null) === (message.errorCode ?? null)
+    ) {
+      return mine;
+    }
+    return message.role === "assistant" &&
+      mine.status === "normal" &&
+      attemptBackedIds.has(message.id) &&
+      mine.content.length > message.content.length
+      ? mine
+      : message;
+  });
+  // Local-only messages are inserted after the nearest earlier local message
+  // that the server also has; ones before any such anchor lead the list.
+  const insertionsAfter = new Map<string | null, Message[]>();
+  let anchor: string | null = null;
+  for (const message of local) {
+    if (serverIds.has(message.id)) {
+      anchor = message.id;
+      continue;
+    }
+    if (ignoredLocalIds.has(message.id)) continue;
+    const bucket = insertionsAfter.get(anchor) ?? [];
+    bucket.push(message);
+    insertionsAfter.set(anchor, bucket);
+  }
+  if (insertionsAfter.size === 0) return result;
+  const merged: Message[] = [...(insertionsAfter.get(null) ?? [])];
+  for (const message of result) {
+    merged.push(message);
+    merged.push(...(insertionsAfter.get(message.id) ?? []));
+  }
+  return merged;
 }
 
 export function replaceAttemptBackedMessage(

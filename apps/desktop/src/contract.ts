@@ -21,12 +21,15 @@ import type { WebViewCommand, WebViewState } from "./web-view-contract";
 import type { ChatExtrasAction, ChatExtrasInput, ChatExtrasOutput, ReviewExportInput } from "./chat-extras-contract";
 import type { DesktopPluginInventory } from "./plugin-contract";
 import type { ConnectorInput, ConnectorInventory, ConnectorResult } from "./connector-contract";
+import type { PluginCatalogView } from "./plugin-catalog-contract";
 import type { LocalExtensionsCommand, LocalExtensionsView } from "./local-extensions-contract";
 import type { PluginsCommand, PluginsView } from "./plugins-contract";
 import type { AttachmentBytesInput, AttachmentUpload } from "./attachment-contract";
 import type { BillingAction, BillingResult, BillingState, DesktopBillingInput } from "./billing-contract";
 import type { DesktopManagedCodeInput, ManagedCodeView } from "./managed-code-contract";
 import type { CloudExecutionView, DesktopCloudExecutionInput } from "./cloud-execution-contract";
+import type { CodeProjectInput, CodeProjectReply, CodeProjectsView } from "./code-project-contract";
+import type { LiveCliProvider } from "./provider-cli-exec-contract";
 import type { DesktopProjectAction, DesktopProjectInput, DesktopProjectOutcome } from "./project-contract";
 import type { DesktopResearchAction, DesktopResearchInput, DesktopResearchOutcome } from "./research-contract";
 import type { ReviewAction, ReviewInput, ReviewOutcome } from "./review-contract";
@@ -36,8 +39,8 @@ import type { ApiQuotaReason } from "../../tomverse-cli/src/quota-refusal";
 import type { CodeOrchestration } from "./orchestrate-contract";
 import type { Language } from "../../../lib/language";
 import type { desktopNativeCopy } from "../../../locales/desktopNative";
-import { codeExecutionMode, type CliAccount, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider,
-  type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
+import { codeExecutionMode, type CliAccount, type CliLoginOpen, type CliPathCheck, type CliScan, type CliPaths, type CliProtocolCheck, type CliProvider,
+  type CodeExecutionMode, type claudeFixtureExecution, type codexFixtureExecution, type kimiFixtureExecution, type qwenFixtureExecution, type vibeFixtureExecution, type deepSeekFixtureExecution, type zCodeFixtureExecution, type zaiClaudeExecution, type miniMaxFixtureExecution, type grokFixtureExecution, type antigravityFixtureExecution,
   type tomverseApiExecution } from "./code-execution";
 import type { CodeCliContinuation, CodeContinuation, CodeFallbackCliModels, CodeFallbackSettings, CodeFallbackUpdate } from "./code-fallback";
 import type { PermissionCommand, PermissionResult, PermissionsView } from "./permission-contract";
@@ -78,6 +81,7 @@ export const startInput = z.object({
   pluginConnectionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
   workspace: codeWorktreeChoice.optional(),
   prompt: z.string().trim().max(MAX_CODE_PROMPT_CHARACTERS),
+  /** The window sends `ask` for Read only and `agent` for every other permission mode. `plan` stays for what already uses it (saved conversations, continuations); no screen starts it. */
   mode: z.enum(["ask", "agent", "plan"]),
   model: z.string().min(1).max(240),
   effort: codeEffort,
@@ -308,9 +312,11 @@ export type Task = {
   effort?: StartInput["effort"];
   actual?: StartInput["effort"];
   model?: string;
-  execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof deepSeekFixtureExecution | typeof zCodeFixtureExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
+  execution?: typeof tomverseApiExecution | typeof codexFixtureExecution | typeof claudeFixtureExecution | typeof qwenFixtureExecution | typeof kimiFixtureExecution | typeof vibeFixtureExecution | typeof deepSeekFixtureExecution | typeof zCodeFixtureExecution | typeof zaiClaudeExecution | typeof miniMaxFixtureExecution | typeof grokFixtureExecution | typeof antigravityFixtureExecution;
   nativeSession?: CodeNativeAssignment;
   nativeRuns?: CodeNativeRunEvidence[];
+  /** Run by the person's own provider CLI on this computer (no Tomverse API, no credits). */
+  liveCli?: true;
   pendingNativeApproval?: { callId: string; turnId: string };
   continuation?: CodeContinuation & { source: CodeNativeAssignment; stage: "checking" | "unavailable" | "started" };
   cliContinuation?: CodeCliContinuation & { sourceModel?: string; stage: "checking" | "unavailable" | "started" };
@@ -353,7 +359,11 @@ export type UpdateState = {
 export type TaskSummary = { id: string; title: string; status: string; unreadable?: true };
 export type AccountState = ({ stage: "unavailable" | "idle" | "waiting" | "restoring" | "signing-out" | "failed" | "expired" }
   | { stage: "connected"; label: string; storage: "device" | "session"; draftNamespace: string }) & { detail?: DesktopDetail };
-export type CodeKeyState = ({ stage: "missing" | "checking" } | { stage: "connected"; prefix: string; storage: "device" | "session" }) & { detail?: DesktopDetail };
+/**
+ * How Code reaches the Tomverse API. `account`: the signed-in Desktop session itself (the server reports
+ * `desktopCodeSession`), so there is no key to connect; the other stages are the Code key path an older server needs.
+ */
+export type CodeKeyState = ({ stage: "missing" | "checking" | "account" } | { stage: "connected"; prefix: string; storage: "device" | "session" }) & { detail?: DesktopDetail };
 
 export type Snapshot = {
   codeGitWorkspace?: CodeGitWorkspace;
@@ -374,7 +384,8 @@ export type Snapshot = {
   draftNamespace: string | null;
   handoff: WorkspaceHandoff | null;
   models: Model[];
-  codeCatalog: "unavailable" | "loading" | "ready" | "failed";
+  /** `planRequired`: the server refused the account's plan for Code (Pro and above), with a key or the session alike. */
+  codeCatalog: "unavailable" | "loading" | "ready" | "failed" | "planRequired";
   task: Task | null;
   history: TaskSummary[];
   moreHistory: boolean;
@@ -392,6 +403,10 @@ export type Snapshot = {
   codeFallbackCliModels: CodeFallbackCliModels;
   cliPaths: CliPaths;
   supportedCliPaths: CliProvider[];
+  /** Provider CLIs a Code task can run with now: the server names the route, and the person saved and trusted the file. Empty or absent otherwise. */
+  providerCliExec?: LiveCliProvider[];
+  /** Where the Z.ai Coding Plan key is kept: encrypted on this device, or for this session only. Absent when none is saved. */
+  zaiKey?: "device" | "session";
   cliAuthFixture: boolean;
   cliProtocolCheckAvailable: boolean;
   codexFixtureModel?: string;
@@ -412,11 +427,15 @@ export type Snapshot = {
     googleDrive?: boolean; deepResearch?: boolean;
     reviewAnalysis?: boolean; composerTools?: boolean; searchReadiness?: { brave: boolean };
     review: ReviewCapability | null; images: ImageCapability | null; attachments: boolean; plugins?: boolean; codeMcp?: boolean;
+    /** The server serves the web's platform catalogue (GET /api/mcp/providers) for the Plugins screen to list. */
+    pluginCatalog?: boolean;
     /** Plugins from a zip file, an npm package or a private GitHub repository, and the marketplace Desktop carries. */
     pluginSources?: boolean;
     billing?: boolean; managedCode?: boolean;
     /** The server offers the Code agent's web_search (charged to the account, approved per call). */
     codeWebSearch?: boolean;
+    /** Code runs on the signed-in Desktop session; no Code key is connected or used. */
+    codeSession?: boolean;
     /** Code tasks on a Tomverse runner (cloud-execution-contract.ts): the server names it only when its switch is on. */
     cloudExecution?: boolean;
     /** What the server accepts in a turn: the device position, a chosen plugin in Chat, a Review turn's own context, the "+" menu's choices for a Review. */
@@ -431,6 +450,8 @@ export type Snapshot = {
     socialLink?: ("google" | "azure-ad")[];
     /** Remote control reports a file change's line counts and, if the person chose, a few redacted changed lines. */
     remotePreview?: boolean;
+    /** The server lets this build run a Code task with the person's own Codex or Claude Code (no Tomverse API, no credits). */
+    providerCliExec?: boolean;
   } | null;
   codeKey: CodeKeyState;
   /** Tasks that run next to the open one: the activity list and the full view of the tasks the window observes. */
@@ -441,6 +462,8 @@ export type Snapshot = {
   remote?: RemoteSnapshot | null;
   /** The switch for remote projects is on: the start screen offers them. */
   remoteEnabled?: boolean;
+  /** The register of Code projects of the signed-in account, and the one that is open. */
+  codeProjects?: CodeProjectsView;
 };
 
 export type ApprovalRequest = {
@@ -481,6 +504,10 @@ export type ApprovalRequest = {
 
 export type DesktopApi = {
   armChatLocation: () => Promise<boolean>;
+  /** After a failed position read: whether Windows has location off for this app. Nothing is passed in. */
+  osLocationStatus: () => Promise<"off" | "on" | "unknown">;
+  /** Opens the Windows location settings page (a fixed address, Windows only); false when it was not opened. */
+  openOsLocationSettings: () => Promise<boolean>;
   armDictation: () => Promise<string | null>;
   cancelDictation: (id: string) => Promise<void>;
   transcribeDictation: (input: DictationClip) => Promise<DictationReply>;
@@ -513,12 +540,23 @@ export type DesktopApi = {
   chooseCliPath(provider?: CliProvider): Promise<string | null>;
   saveCliPath(input: { provider: CliProvider; path: string }): Promise<CliPathCheck>;
   removeCliPath(provider: CliProvider): Promise<void>;
+  /** Saves the Z.ai Coding Plan key; says whether it is kept on this device or for this session only. */
+  saveZaiKey(key: string): Promise<"device" | "session">;
+  removeZaiKey(): Promise<void>;
+  /** Looks for installed provider CLIs in fixed places. Starts a program only for a file that matches its pinned release. */
+  scanCliProviders(): Promise<CliScan>;
+  /** Trusts one exact unverified file and saves it. */
+  trustCliPath(input: { provider: CliProvider; path: string }): Promise<CliPathCheck>;
+  dismissCliOffer(): Promise<void>;
+  /** Types the provider's official sign-in command into a task terminal. */
+  openCliLogin(input: { provider: CliProvider; path: string }): Promise<CliLoginOpen>;
   checkCliAccount(provider: CliProvider): Promise<CliAccount>;
   openCliAuthGuide(provider: CliProvider): Promise<void>;
   checkCliProtocol(provider: CliProvider): Promise<CliProtocolCheck>;
   cancelCliCheck(kind: "account" | "protocol"): Promise<void>;
   subscribe(listener: (snapshot: Snapshot) => void): () => void;
-  chooseRoot(): Promise<boolean>;
+  /** Code projects (code-project-contract.ts): the register of this account's folders, and opening one. */
+  codeProjects(input: CodeProjectInput): Promise<CodeProjectReply>;
   retryCodeCatalog(): Promise<void>;
   chooseCodeReferences(kind: WorkspaceReference["kind"]): Promise<{ references: CodeReference[]; rejected: number }>;
   removeCodeReference(id: string): Promise<void>;
@@ -606,8 +644,11 @@ export type DesktopApi = {
   saveArtifact(input: SaveArtifactInput): Promise<boolean>;
   pluginInventory(): Promise<DesktopPluginInventory>;
   connectorInventory(): Promise<ConnectorInventory>;
+  /** The web's platform list, read from the server (null where the server does not offer it). `refresh` asks again instead of reusing a list that is still fresh. */
+  pluginCatalog(refresh?: boolean): Promise<PluginCatalogView | null>;
   connectorAction(input: ConnectorInput): Promise<ConnectorResult>;
-  importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<{ files: AttachmentUpload[]; incomplete: boolean }>;
+  importDriveAttachments(input: import("./attachment-contract").DriveImportInput): Promise<import("./attachment-contract").DriveImportResult>;
+  subscribeAttachmentPhase(listener: (event: import("./attachment-contract").AttachmentPhaseEvent) => void): () => void;
   checkDeepResearch(id: string): Promise<{ status: "submitted" | "in_progress" | "completed" | "failed"; content?: string }>;
   uploadAttachment(input: AttachmentBytesInput): Promise<AttachmentUpload>;
   cancelAttachmentUpload(requestId: string): Promise<void>;

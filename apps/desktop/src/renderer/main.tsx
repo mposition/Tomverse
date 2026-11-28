@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ArrowUp, ChartNoAxesColumnIncreasing, ChevronDown, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
+  ArrowUp, ChartNoAxesColumnIncreasing, CircleHelp, CircleUserRound, Ellipsis, ExternalLink, File, Folder, Globe, MessageCircle, Moon, PanelLeft, Plus, Puzzle,
   Search, ShieldCheck, SlidersHorizontal, Sparkles, Square, SquareTerminal, Sun, X,
 } from "lucide-react";
 import "@tomverse/ui-tokens/tokens.css";
@@ -30,6 +30,7 @@ import { reviewHandoffCopy } from "../../../../locales/reviewHandoff";
 import type { AccountPreferences, AccountTheme } from "../account-settings-contract";
 import { MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES, MAX_HANDOFF_EXCERPT_CHARACTERS, type ApprovalRequest, type CodeReference, type DesktopApi, type Snapshot,
   type CodeWorktreeChoice, type Model, type StartInput, type Task } from "../contract";
+import { liveCliFile, liveCliModelId, liveCliNames } from "../provider-cli-exec-contract";
 import { antigravityFixtureExecution, claudeFixtureExecution, codexFixtureExecution, cliProviders, codeRouteFor, kimiFixtureExecution, providerClis, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, type CliProvider } from "../code-execution";
 import { DraftDictation, useSpokenCommand } from "./DraftDictation";
 import { ChatDraftPlace } from "./ChatDraftLocation";
@@ -67,11 +68,13 @@ import { desktopPlanAnalysisCopy } from "../../../../locales/desktopTaskList";
 import { desktopPrivacyCopy } from "../../../../locales/desktopPrivacy";
 import { ChatConversationActions, ChatHistory, ChatWorkspace, chatTitle, sidebarCopy, useChatHistory } from "./ChatWorkspace";
 import { PermissionProfileSelect } from "./PermissionProfileSelect";
-import { PermissionModeBadge, PermissionSettings } from "./PermissionSettings";
+import { PermissionSettings } from "./PermissionSettings";
+import { CodeProjectPicker, CreateProjectMenu, WorktreeToggle } from "./CodeProjects";
+import { ComposerPermission } from "./ComposerPermission";
 import { CodeModelPicker } from "./CodeModelPicker";
 import { SMART_ADAPTIVE_MODEL_ID } from "../code-model-catalog";
 import { CodePluginPicker } from "./CodePluginPicker";
-import { CodeWorkspaceDetails, CodeWorkspacePicker } from "./CodeWorkspacePicker";
+import { CodeWorkspaceDetails } from "./CodeWorkspacePicker";
 import { ConnectorWorkspace } from "./ConnectorWorkspace";
 import { desktopLocalExtensionsCopy } from "../../../../locales/desktopLocalExtensions";
 import { mcpConnectorCopy } from "../../../../lib/mcpConnectorCopy";
@@ -231,7 +234,7 @@ function TaskConversation({ task, models, language, openSettings, engine, onRewo
     <footer className="task-status" aria-live="polite">
       <span>{copy[statusLabels[task.status]]}</span>
       {task.execution?.executionMode === "tomverse_api" && <span>Tomverse API</span>}
-      {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language].cliFixture.replace("{cli}", task.execution.cli)}</span>}
+      {task.execution?.executionMode === "provider_cli" && <span>{desktopCodeExecutionCopy[language][task.liveCli ? "cliLive" : "cliFixture"].replace("{cli}", task.execution.cli)}</span>}
       {task.savedLocally === false && <span>{copy.sessionOnly}</span>}
       {task.effort && task.effort !== "default" && <span>{copy.requestedEffort.replace("{effort}", effortLabel(language, task.effort))}</span>}
       {task.actual && <span>{copy.appliedEffort.replace("{effort}", effortLabel(language, task.actual))}</span>}
@@ -326,7 +329,6 @@ function Desktop() {
   const [workspaceSelection, setWorkspaceSelection] = useState<{ key: string; choice: CodeWorktreeChoice }>();
   const [saveNativeHistory, setSaveNativeHistory] = useState(false);
   const [codeReferences, setCodeReferences] = useState<CodeReference[]>([]);
-  const [mode, setMode] = useState<StartInput["mode"]>("agent");
   const [effort, setEffort] = useState<StartInput["effort"]>("default");
   const [engine, setEngine] = useState<CodeEnginePreference>(readCodeEnginePreference);
   function changeEngine(value: CodeEnginePreference) {
@@ -499,12 +501,23 @@ function Desktop() {
     snapshot?.claudeFixtureModel ? claudeFixtureExecution : codexFixtureExecution;
   const cliFixtureModel = snapshot?.codeExecutionPreference === "provider_cli"
     ? snapshot.antigravityFixtureModel ?? snapshot.grokFixtureModel ?? snapshot.miniMaxFixtureModel ?? snapshot.zCodeFixtureModel ?? snapshot.deepSeekFixtureModel ?? snapshot.vibeFixtureModel ?? snapshot.kimiFixtureModel ?? snapshot.qwenFixtureModel ?? snapshot.claudeFixtureModel ?? snapshot.codexFixtureModel : undefined;
-  const models: Model[] = cliFixtureModel ? [{ id: cliFixtureModel, name: cliFixtureModel, provider: cliFixture.provider, efforts: [] }] : snapshot?.models ?? [];
+  // The person's own Codex or Claude Code (the server's route is on, and the file is saved and trusted): each runs with its own default model.
+  const liveCliModels: Model[] = !cliFixtureModel && snapshot?.codeExecutionPreference === "provider_cli"
+    ? (snapshot.providerCliExec ?? []).map((provider) => ({ id: liveCliModelId(provider), name: liveCliNames[provider], provider: liveCliFile[provider], efforts: [] })) : [];
+  const liveCli = liveCliModels.length > 0;
+  const cliRoute = Boolean(cliFixtureModel) || liveCli;
+  // The route is on but no Codex or Claude Code file is saved and trusted yet: the API models cannot run here, and the status says what to do.
+  const liveCliOffered = !cliFixtureModel && snapshot?.capabilities?.providerCliExec === true && snapshot.codeExecutionPreference === "provider_cli";
+  const models: Model[] = cliFixtureModel ? [{ id: cliFixtureModel, name: cliFixtureModel, provider: cliFixture.provider, efforts: [] }]
+    : liveCli ? liveCliModels : liveCliOffered ? [] : snapshot?.models ?? [];
   const selectedModel = models.find((item) => item.id === modelId) ?? models.find((item) => item.id === SMART_ADAPTIVE_MODEL_ID) ?? models[0];
   const codeRoute = codeRouteFor(snapshot?.codeExecutionPreference ?? "tomverse_api", selectedModel);
   const waitingForAnswer = task?.status === "clarification";
+  // The permission dropdown replaced the Agent / Ask / Plan select: Read only is the read-and-answer work mode, every other mode is the agent.
+  const permissionMode = snapshot?.permissions?.mode ?? "ask";
+  const workMode: StartInput["mode"] = permissionMode === "read_only" ? "ask" : "agent";
   const codeMode = waitingForAnswer ? task.plan?.proposalOnly ? "plan" : "agent"
-    : cliFixtureModel && mode === "agent" && !snapshot?.nativeFixtureEdits ? "ask" : mode;
+    : cliFixtureModel && workMode === "agent" && !snapshot?.nativeFixtureEdits ? "ask" : workMode;
   const pluginNamespace = codeMode === "ask" && codeRoute.executionMode === "tomverse_api" && snapshot?.capabilities?.codeMcp &&
     snapshot?.account.stage === "connected" ? snapshot.draftNamespace : null;
   const pluginConnectionId = pluginNamespace && codePlugin?.namespace === pluginNamespace ? codePlugin.id : undefined;
@@ -604,8 +617,10 @@ function Desktop() {
   const composerModelId = (taskSelectionLocked && task.model) || selectedModel?.id || "";
   const composerModelName = models.find(({ id }) => id === composerModelId)?.name || composerModelId ||
     (snapshot?.codeCatalog === "loading" ? copy.loadingCodeModels : copy.modelsUnavailable);
-  const composerEffort = taskSelectionLocked ? task.effort ?? "default" : cliFixtureModel ? "default" : effort;
-  const followUpTarget = !pausedByQuota && nativeTask ? { threadId: nativeTask.threadId, turnId: nativeTask.turnId } : task?.id;
+  const composerEffort = taskSelectionLocked ? task.effort ?? "default" : cliRoute ? "default" : effort;
+  // A task run by the person's own CLI takes no instruction while it runs: the CLI reads one prompt.
+  const followUpTarget = !pausedByQuota && nativeTask ? { threadId: nativeTask.threadId, turnId: nativeTask.turnId }
+    : task?.liveCli ? undefined : task?.id;
   const canFollowUp = followUpTarget && (snapshot?.busy ? task?.status === "running" :
     pausedByQuota ? task.canResumeAfterQuota : waitingForAnswer && task.canAnswerClarification) &&
     !task?.pendingFollowUp && !codeHandoff && !codeReferences.length;
@@ -614,15 +629,22 @@ function Desktop() {
   const canQueue = !!queueTarget && online && !requesting && !!prompt.trim();
   const codeGit = codeMode === "agent" && codeRoute.executionMode === "tomverse_api" ? snapshot?.codeGitWorkspace : undefined;
   const workspaceKey = JSON.stringify([snapshot?.draftNamespace, codeGit?.kind === "git" ? codeGit.id : codeGit?.kind]);
+  const openProjectEntry = snapshot?.codeProjects?.items.find(({ id }) => id === snapshot.codeProjects?.selectedId);
+  // The name the person gave the project; a folder not in the list (or a remote project) shows the name the window knows it by.
+  const projectLabel = openProjectEntry?.name ?? snapshot?.project ?? null;
+  // A Git project starts with the Worktree box as the person left it in that project (on the first time); a folder that is not a repository runs in place.
   const workspaceChoice: CodeWorktreeChoice | undefined = !codeGit ? undefined
     : workspaceSelection?.key === workspaceKey ? workspaceSelection.choice
-    : codeGit.kind === "git" ? { kind: "worktree", id: codeGit.id, base: codeGit.bases[0]! } : undefined;
+    : codeGit.kind === "git" ? (openProjectEntry?.worktree === false ? { kind: "local" } : { kind: "worktree", id: codeGit.id, base: codeGit.bases[0]! })
+    : { kind: "local" };
   const canStartCode = cliFixtureModel ? (prompt.trim() || codeHandoff) &&
     (codeMode !== "agent" || (snapshot?.nativeFixtureEdits && saveNativeHistory))
+    : liveCli ? (prompt.trim() || codeHandoff) && codeRoute.executionMode === "provider_cli"
     : (prompt.trim() || codeHandoff) && codeRoute.executionMode === "tomverse_api" &&
       (codeGit?.kind !== "unavailable" || workspaceChoice?.kind === "local");
   const canSendCode = online && snapshot?.root && !requesting && (snapshot.busy || pausedForInput ? canFollowUp && prompt.trim() : canStartCode);
-  const handoffSource = account?.stage === "connected" && !nativeImages && (snapshot?.localFixture || snapshot?.codeKey.stage === "connected")
+  const handoffSource = account?.stage === "connected" && !nativeImages &&
+    (snapshot?.localFixture || snapshot?.codeKey.stage === "connected" || snapshot?.codeKey.stage === "account")
     ? nativeChat && chat.conversation ? "chat" : surface === "code" && snapshot?.capabilities?.chatWrite && task?.id ? "code" : null : null;
   const selectedExcerpt = useHandoffSelection(handoffSource, handoffSource === "chat" ? chat.conversation?.id : task?.id);
   function openReviewReference(reference: string) {
@@ -636,10 +658,15 @@ function Desktop() {
   const visibleCodeHistory = surface === "code" ? snapshot?.history
     .map((entry) => ({ ...entry, title: entry.unreadable ? native.unreadableTask : entry.title || copy.codeTask }))
     .filter(({ title }) => title.toLowerCase().includes(historyFilter)) ?? [] : [];
-  const catalogUnavailable = codeCatalog === "failed" || (codeCatalog === "ready" && !selectedModel);
-  const canReloadCatalog = !busy && online && !cliFixtureModel && catalogUnavailable &&
-    (snapshot?.localFixture || codeKey?.stage === "connected");
-  const needsCodeConnection = snapshot && !snapshot.localFixture && codeKey?.stage === "missing" && !selectedModel;
+  const catalogUnavailable = codeCatalog === "failed" || codeCatalog === "planRequired" || (codeCatalog === "ready" && !selectedModel);
+  const canReloadCatalog = !busy && online && !cliRoute && !liveCliOffered && catalogUnavailable &&
+    (snapshot?.localFixture || codeKey?.stage === "connected" || codeKey?.stage === "account");
+  // A Code key is asked for only on the Tomverse engine route, and only by a server that does not run Code on the
+  // signed-in session (an older one): it answered its capabilities without desktopCodeSession.
+  const tomverseRoute = (snapshot?.codeExecutionPreference ?? "tomverse_api") === "tomverse_api";
+  const capabilitiesPending = account?.stage === "connected" && !snapshot?.capabilities;
+  const needsCodeConnection = snapshot && !snapshot.localFixture && codeKey?.stage === "missing" && !selectedModel &&
+    tomverseRoute && !capabilitiesPending && !snapshot.capabilities?.codeSession;
   const needsCodeProject = !busy && online && selectedModel && !snapshot?.root;
   const canChooseApi = !busy && online && !pausedForInput && !cliFixtureModel && snapshot?.root &&
     selectedModel && codeRoute.executionMode !== "tomverse_api";
@@ -648,8 +675,11 @@ function Desktop() {
     if (pausedByQuota && task.execution) {
       codeStatus = task.execution.executionMode === "provider_cli"
         ? executionCopy.cliFixture.replace("{cli}", task.execution.cli) : "Tomverse API";
+    } else if (liveCliOffered && !liveCli) {
+      codeStatus = executionCopy.cliUnavailable.replace("{cli}", `${providerClis.openai} / ${providerClis.anthropic}`);
     } else if (selectedModel) {
-      if (cliFixtureModel) codeStatus = executionCopy.cliFixture.replace("{cli}", cliFixture.cli);
+      if (liveCli) codeStatus = executionCopy.cliLive.replace("{cli}", providerClis[selectedModel.provider as CliProvider] ?? selectedModel.name);
+      else if (cliFixtureModel) codeStatus = executionCopy.cliFixture.replace("{cli}", cliFixture.cli);
       else if (codeRoute.executionMode === "tomverse_api") codeStatus = "Tomverse API";
       else if (codeRoute.executionMode !== "provider_cli") codeStatus = executionCopy.apiRequired;
       else if (!snapshot.supportedCliPaths.includes(codeRoute.provider)) codeStatus = `${codeRoute.cli} · ${cliCopy.unsupportedPlatform}`;
@@ -661,8 +691,11 @@ function Desktop() {
         : account?.stage === "restoring" ? controls.restoring
         : account?.stage === "waiting" ? controls.continueSignin : copy.signInForCode;
     } else if (codeKey?.stage === "checking") codeStatus = controls.checkingKey;
-    else if (codeCatalog === "loading") codeStatus = copy.loadingCodeModels;
+    else if (codeCatalog === "loading" || (capabilitiesPending && codeKey?.stage === "missing")) codeStatus = copy.loadingCodeModels;
+    else if (codeCatalog === "planRequired") codeStatus = native.codePlanRequired;
     else if (codeCatalog === "failed") codeStatus = native.codeCatalogFailure;
+    // The provider CLI route without models: this build runs no local CLI task, and Tomverse is not asked for a key.
+    else if (!tomverseRoute && !snapshot.localFixture) codeStatus = cliCopy.localExecutionUnavailable;
     else if (codeCatalog === "ready") codeStatus = copy.noConnectedModels;
   }
 
@@ -727,12 +760,8 @@ function Desktop() {
     if (menu?.isConnected) menu.querySelector("summary")?.focus();
   }
 
-  async function openCodeProject(trigger: HTMLButtonElement) {
-    await act(async () => {
-      if (await window.desktop.chooseRoot()) setCodeReferences([]);
-    });
-    if (trigger.isConnected) trigger.focus();
-  }
+  // Choosing the project that is already open keeps its attached references; another project starts without them.
+  const codeProjectOpened = (changed: boolean) => { if (changed) setCodeReferences([]); };
 
   async function attachCodeReferences(kind: CodeReference["kind"], button: HTMLButtonElement) {
     const menu = button.closest("details");
@@ -801,18 +830,18 @@ ${text}` : text;
       return;
     }
     const { executionMode } = codeRoute;
-    if (!selectedModel || (executionMode !== "tomverse_api" && !(cliFixtureModel && executionMode === "provider_cli"))) return;
+    if (!selectedModel || (executionMode !== "tomverse_api" && !(cliRoute && executionMode === "provider_cli"))) return;
     setRequesting(true);
     nearBottom.current = true;
     await act(async () => {
-      await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliFixtureModel ? "default" : effort,
+      await window.desktop.start({ prompt: withPromptAttachments(prompt, promptAttachmentsFor(attachmentScope)), model: selectedModel.id, mode: codeMode, effort: cliRoute ? "default" : effort,
         // A Code task is always saved. The two that are not: a plugin run, which the host refuses to save, and the CLI fixture's own opt-in.
         saveHistory: pluginConnectionId ? false : cliFixtureModel ? !!snapshot?.cliFixtureHistory && saveNativeHistory : true,
         handoffId: codeHandoff?.id, executionMode, pluginConnectionId, workspace: workspaceChoice,
         referenceIds: codeReferences.map(({ id }) => id),
-        ...(!cliFixtureModel && engine.limits !== "standard" ? { limits: engine.limits } : {}),
-        ...(!cliFixtureModel && engine.goal && codeMode === "agent" ? { goal: true } : {}),
-        ...(!cliFixtureModel && engine.orchestrate && executionMode === "tomverse_api" ? { orchestrate: true } : {}),
+        ...(!cliRoute && engine.limits !== "standard" ? { limits: engine.limits } : {}),
+        ...(!cliRoute && engine.goal && codeMode === "agent" ? { goal: true } : {}),
+        ...(!cliRoute && engine.orchestrate && executionMode === "tomverse_api" ? { orchestrate: true } : {}),
         permissionProfile: codeMode === "agent" && executionMode === "tomverse_api" ? snapshot?.projectPermissionProfile : undefined });
       changeDraft("");
       clearPromptAttachments(attachmentScope);
@@ -934,7 +963,7 @@ ${text}` : text;
           }} />}
         <div className="projects">
           {snapshot?.project && <details open>
-            <summary><Folder size={16} /> <span>{snapshot.project}</span></summary>
+            <summary><Folder size={16} /> <span>{projectLabel}</span></summary>
             {visibleCodeHistory.length === 0 && <p className="notice" role="status">
               {historyFilter ? copy.noHistoryMatches : copy.emptyCodeHistory}
             </p>}
@@ -949,7 +978,7 @@ ${text}` : text;
             {snapshot.moreHistory && <button className="soft" type="button" onClick={() => void act(() => window.desktop.moreHistory())}>{copy.moreTasks}</button>}
           </details>}
         </div>
-        <button type="button" className="soft open-folder" disabled={busy} onClick={(event) => void openCodeProject(event.currentTarget)}>{copy.openLocalFolder}</button>
+        <CreateProjectMenu language={language} variant="sidebar" disabled={Boolean(busy)} onOpened={codeProjectOpened} />
       </>}
       <div className="resize" role="separator" tabIndex={0} aria-label={copy.resizeHistory} aria-orientation="vertical"
         onPointerDown={resizeHistory} onKeyDown={(event) => {
@@ -979,7 +1008,7 @@ ${text}` : text;
             onMouseDown={(event) => event.preventDefault()} onClick={() => void handoffSelection()}>
             {handoffSource === "chat" ? filesCopy.useInCode : filesCopy.useInChat}
           </button>}
-          {surface === "code" && snapshot?.project && <span className="project-label" title={snapshot.root ?? undefined}><Folder size={16} />{snapshot.project}</span>}
+          {surface === "code" && snapshot?.project && <span className="project-label" title={snapshot.root ?? undefined}><Folder size={16} />{projectLabel}</span>}
           {surface === "code" && task?.worktree && <CodeWorkspaceDetails language={language} worktree={task.worktree} />}
           {surface === "code" && task?.id && task.savedLocally && snapshot?.history.some((row) => row.id === task.id) &&
             <details className="chat-conversation-actions">
@@ -1042,9 +1071,9 @@ ${text}` : text;
               language={language} openSettings={() => openSettings("execution")} onRewound={surface === "code" ? changeDraft : undefined} insertReview={surface === "code" && !snapshot?.remote ? insertIntoDraft : undefined}
               engine={surface === "code" ? <CodeEngineBar task={task} language={language} idle={!busy && online} /> : null} /> : <section className="welcome">
               <h2>{copy.build}</h2>
-              <div className="project-picker"><button type="button" className="soft" title={snapshot?.root ?? undefined} disabled={busy}
-                onClick={(event) => void openCodeProject(event.currentTarget)}>
-                <Folder size={19} /> {snapshot?.project ?? copy.openFolder} <ChevronDown size={14} /></button>
+              <div className="project-picker">
+                <CreateProjectMenu language={language} variant="welcome" disabled={Boolean(busy)} onOpened={codeProjectOpened} />
+                {snapshot?.project && <span className="project-label" title={snapshot.root ?? undefined}><Folder size={16} />{projectLabel}</span>}
                 {snapshot?.project && !snapshot.remote && <span>{copy.localProject}</span>}
               </div>
               {snapshot?.remoteEnabled && <RemoteProjectPicker language={language} disabled={Boolean(busy)} />}
@@ -1109,6 +1138,14 @@ ${text}` : text;
               <PromptAttachmentChips scope={attachmentScope} language={language} disabled={Boolean(busy)} />
             </div>
             <div className="composer-actions">
+              <CodeProjectPicker language={language} view={snapshot?.codeProjects} label={projectLabel} disabled={Boolean(busy || pausedForInput)}
+                hasTask={Boolean(task)} cloudOffered={snapshot?.capabilities?.cloudExecution === true} remoteOpen={Boolean(snapshot?.remote)}
+                openIsGit={snapshot?.remote || !snapshot?.root ? null : snapshot.codeGitWorkspace ? snapshot.codeGitWorkspace.kind === "git" : null}
+                remoteEnabled={snapshot?.remoteEnabled === true} onOpened={codeProjectOpened} onOpenCloud={() => openSettings("execution")} />
+              {snapshot?.root && !snapshot.remote && <WorktreeToggle language={language} git={snapshot.codeGitWorkspace} choice={workspaceChoice}
+                disabled={Boolean(busy || pausedForInput)} reason={codeMode !== "agent" ? "readOnly" : codeRoute.executionMode !== "tomverse_api" ? "apiOnly" : null}
+                select={(choice) => setWorkspaceSelection({ key: workspaceKey, choice })}
+                onRemember={(on) => { const id = snapshot.codeProjects?.selectedId; if (id) void window.desktop.codeProjects({ action: "set-worktree", id, worktree: on }); }} />}
               {snapshot?.draftNamespace && !snapshot.remote && <details className="model-menu code-attach-menu">
                 <summary className="icon" aria-label={copy.attachReferences}><Plus size={18} /></summary>
                 <div className="model-popover">
@@ -1118,18 +1155,11 @@ ${text}` : text;
                     onClick={(event) => void attachCodeReferences("folder", event.currentTarget)}><Folder size={15} /> {copy.attachFolders}</button>
                 </div>
               </details>}
-              <select aria-label={copy.codeMode} value={codeMode} disabled={busy || pausedForInput}
-                onChange={(event) => setMode(event.currentTarget.value as StartInput["mode"])}>
-                <option value="agent" disabled={!!cliFixtureModel && !snapshot?.nativeFixtureEdits}>{copy.agent}</option>
-                <option value="ask">{copy.ask}</option><option value="plan">{copy.plan}</option>
-              </select>
-              {codeGit && snapshot?.root && !pausedForInput && <CodeWorkspacePicker key={snapshot.root} git={codeGit} root={snapshot.root}
-                choice={workspaceChoice} language={language} disabled={Boolean(busy)}
-                select={(choice) => setWorkspaceSelection({ key: workspaceKey, choice })} />}
-              {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api"
-                ? <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />
-                : <span className="permission"><ShieldCheck size={15} /> {copy.manual}</span>}
-              {codeMode === "agent" && codeRoute.executionMode === "tomverse_api" && <PermissionModeBadge mode={snapshot?.permissions?.mode} language={language} />}
+              {snapshot?.projectPermissionProfile && codeMode === "agent" && codeRoute.executionMode === "tomverse_api" &&
+                <PermissionProfileSelect profile={snapshot.projectPermissionProfile} language={language} disabled={busy || pausedForInput} act={act} />}
+              <ComposerPermission view={snapshot?.permissions} language={language} apiRoute={codeRoute.executionMode === "tomverse_api" || liveCli} cliRoute={liveCli}
+                readOnlyOnly={Boolean(cliFixtureModel && !snapshot?.nativeFixtureEdits)}
+                running={Boolean(snapshot?.busy)} disabled={Boolean(requesting)} />
               {codeHistoryControl}
               {pluginNamespace && <CodePluginPicker key={pluginNamespace} language={language} value={pluginConnectionId ?? ""}
                 disabled={Boolean(busy || pausedForInput || canFollowUp)} select={(id) => setCodePlugin(id ? { id, namespace: pluginNamespace } : undefined)} />}
@@ -1139,11 +1169,11 @@ ${text}` : text;
                 detail={composerEffort !== "default" ? ` · ${effortLabel(language, composerEffort)}` : undefined}
                 disabled={Boolean(busy || pausedForInput)} onSelect={setModelId}
                 effort={<>
-                  <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || !!cliFixtureModel}
+                  <label>{copy.reasoningEffort} <select aria-label={copy.reasoningEffort} value={composerEffort} disabled={busy || pausedForInput || cliRoute}
                     onChange={(event) => setEffort(event.currentTarget.value as StartInput["effort"])}>
                     {effortOptions(selectedModel?.efforts, composerEffort).map((value) => <option value={value} key={value}>{effortLabel(language, value)}</option>)}
                   </select></label>
-                  {!taskSelectionLocked && !cliFixtureModel && effort !== "default" && selectedModel && selectedModel.id !== SMART_ADAPTIVE_MODEL_ID && !selectedModel.efforts.includes(effort) &&
+                  {!taskSelectionLocked && !cliRoute && effort !== "default" && selectedModel && selectedModel.id !== SMART_ADAPTIVE_MODEL_ID && !selectedModel.efforts.includes(effort) &&
                     <small>{copy.effortFallback}</small>}
                 </>} />}
               {snapshot?.dictationAvailable && snapshot.draftNamespace && <DraftDictation language={language} disabled={busy}
@@ -1199,7 +1229,8 @@ ${text}` : text;
         {settingsView ? cliSettingsOpen && cliSettingsEnabled && snapshot
           ? <ProviderCliSettings language={language} paths={snapshot.cliPaths} supportedPaths={snapshot.supportedCliPaths}
             provider={cliSettingsProvider}
-            goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable} />
+            goTo={setSettingsView} authFixture={snapshot.cliAuthFixture} protocolCheckAvailable={snapshot.cliProtocolCheckAvailable}
+            zai={snapshot.capabilities?.providerCliExec ? { key: snapshot.zaiKey } : undefined} />
           : settingsView === "execution" ? <CodeExecutionSettings key={snapshot?.codeFallback?.scope ?? "disconnected"}
             snapshot={snapshot} language={language} actionFailed={notice === "actionFailed"} act={act}
             engine={engine} changeEngine={changeEngine} />
@@ -1259,17 +1290,25 @@ ${text}` : text;
             : <button className="soft" disabled={update?.stage !== "idle" && update?.stage !== "failed"} onClick={() => void act(() => window.desktop.checkUpdate())}>{controls.checkUpdates}</button>}
           {busy && update?.stage === "ready" && <p>{controls.restartWait}</p>}
           </section>}
-          {settingsView === "developer" && account?.stage === "connected" && <section className="desktop-setting-section">
+          {settingsView === "developer" && account?.stage === "connected" && (codeKey?.stage === "account"
+            ? <section className="desktop-setting-section" data-testid="desktop-code-account">
+              <h3 id="desktop-code-key" tabIndex={-1}>Tomverse Code</h3>
+              <p>{controls.codeAccount}</p>
+              {codeCatalog === "planRequired" && <p role="status">{native.codePlanRequired}</p>}
+              {codeCatalog === "failed" && <p role="status">{native.codeCatalogFailure}</p>}
+            </section>
+            : <section className="desktop-setting-section">
             <h3 id="desktop-code-key" tabIndex={-1}>{controls.codeKey}</h3>
             {codeKey?.stage === "connected" && <p>{(codeKey.storage === "session" ? controls.sessionKey : controls.connectedAs)
               .replace("{account}", () => codeKey.prefix)}</p>}
             {codeKey?.detail && <p role="status">{native[codeKey.detail]}</p>}
+            {codeCatalog === "planRequired" && <p role="status">{native.codePlanRequired}</p>}
             {codeCatalog === "failed" && <p role="status">{native.codeCatalogFailure}</p>}
             <button className="soft" type="button" disabled={busy || codeKey?.stage === "checking"}
               onClick={() => void act(() => window.desktop.connectCopiedCodeKey())}>
               {codeKey?.stage === "checking" ? controls.checkingKey : controls.connectCopiedKey}
             </button>
-          </section>}
+          </section>)}
         </section> : surface === "plugins" && account?.stage === "connected" && snapshot?.capabilities?.plugins
           ? <ConnectorWorkspace key={account.label} language={language} lane={historyOpen ? pluginsLane : null} /> : <section className="welcome" data-testid="desktop-surface-unavailable">
           <h2>{names[surface]}</h2>{surface === "plugins" ? account?.stage === "connected" && <p>{mcpConnectorCopy[language].disabled}</p>

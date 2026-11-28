@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +34,7 @@ test("a read-only schedule set a few seconds ahead runs, and its run record keep
     application = await launchNativeFixture(descriptor);
     const page = await application.firstWindow();
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const state = () => page.evaluate(() => window.desktop.state());
     await expect.poll(async () => (await state()).codeCatalog).toBe("ready");
 
@@ -105,7 +106,7 @@ test("a read-only schedule set a few seconds ahead runs, and its run record keep
     application = await launchNativeFixture(descriptor);
     const again = await application.firstWindow();
     await again.getByRole("button", { name: "Code", exact: true }).click();
-    await again.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(again);
     await again.getByTestId("activity-button").click();
     await again.getByTestId("tab-schedules").click();
     await expect(again.getByTestId("run-row")).toHaveCount(1);

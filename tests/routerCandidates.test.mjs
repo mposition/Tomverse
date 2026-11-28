@@ -6,6 +6,7 @@ import {
     ROUTER_CANDIDATE_VERSION,
     filterRouterCandidates,
 } from "../lib/routerCandidates.ts";
+import { CHAT_MIN_OUTPUT_TOKENS } from "../lib/chatContextWindow.ts";
 import { buildTaskProfile } from "../lib/taskProfileCore.ts";
 import { ALL_WEB_SEARCH_BACKENDS_READY } from "../lib/webSearchBackends.ts";
 
@@ -100,16 +101,24 @@ test("output room is trimmed to what the window leaves", () => {
     assert.deepEqual(result.eligible, [{ modelId: "m-1", outputTokens: 2_000 }]);
 });
 
-test("a request that exactly fills the window is refused, one token less is not", () => {
+test("a request that exactly fills the window is refused; the least answer room is the boundary", () => {
     // The boundary is a contract, and it is the easy thing to get wrong by one.
     assert.equal(
         reasonFor(filterRouterCandidates(base({ reservedInputTokens: 100_000 })), "m-1"),
         "context_exceeded"
     );
+    // Room below CHAT_MIN_OUTPUT_TOKENS is refused too, and exactly that much is not.
     assert.equal(
-        filterRouterCandidates(base({ reservedInputTokens: 99_999 })).eligible[0]
+        reasonFor(
+            filterRouterCandidates(base({ reservedInputTokens: 100_000 - CHAT_MIN_OUTPUT_TOKENS + 1 })),
+            "m-1"
+        ),
+        "context_exceeded"
+    );
+    assert.equal(
+        filterRouterCandidates(base({ reservedInputTokens: 100_000 - CHAT_MIN_OUTPUT_TOKENS })).eligible[0]
             .outputTokens,
-        1
+        CHAT_MIN_OUTPUT_TOKENS
     );
 });
 

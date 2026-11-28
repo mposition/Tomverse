@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
 import { launchNativeFixture } from "./launch-native-fixture";
@@ -48,8 +49,8 @@ test("Code reads the live loopback tab only after a task-specific share and lose
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY, browserInspection: true }));
     application = await launchNativeFixture(descriptor);
     const page = await application.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await openCodeProject(page);
+    await selectCodeMode(page, "ask");
     await page.getByRole("textbox", { name: "Code request" }).fill("Read the local page I share.");
     await page.getByRole("button", { name: "Send Code request" }).click();
     await expect.poll(async () => (await page.evaluate(() => window.desktop.state())).task?.status).toBe("running");

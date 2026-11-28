@@ -78,3 +78,77 @@ export const splitProviderInstructions = (
     ? { messages: rest, instructions: blocks.join("\n\n") }
     : { messages: rest };
 };
+
+/**
+ * Providers whose chat endpoint rejects two consecutive messages of the same
+ * role. Perplexity answers 400 ("user or tool message(s) should alternate with
+ * assistant message(s)"); every other provider this app routes to either
+ * merges adjacent turns itself or accepts them.
+ *
+ * Turn assembly can produce adjacent user turns on purpose: the memory
+ * prelude and a continuation's untrusted-data block are separate user
+ * messages in front of the real question (lib/chatTurnSystemBlocks.ts).
+ */
+const STRICT_ALTERNATION_PROVIDERS: ReadonlySet<string> = new Set(["perplexity"]);
+
+export const requiresRoleAlternation = (provider: string | null | undefined) =>
+  provider != null && STRICT_ALTERNATION_PROVIDERS.has(provider);
+
+type RoleMessage = { role: string; content: unknown };
+
+const MERGEABLE_ROLES = new Set(["system", "user", "assistant"]);
+// Parts that carry no tool or reasoning state, so concatenating them cannot
+// change what a turn means. Images and files are kept as parts, never dropped.
+const MERGEABLE_PART_TYPES = new Set(["text", "image", "file"]);
+
+const mergeableParts = (content: unknown): unknown[] | null => {
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (!Array.isArray(content)) return null;
+  return content.every(
+    (part) =>
+      Boolean(part) &&
+      typeof part === "object" &&
+      MERGEABLE_PART_TYPES.has((part as { type?: unknown }).type as string)
+  )
+    ? content
+    : null;
+};
+
+const mergeContent = (previous: unknown, next: unknown): unknown | undefined => {
+  if (typeof previous === "string" && typeof next === "string") {
+    return `${previous}\n\n${next}`;
+  }
+  const left = mergeableParts(previous);
+  const right = mergeableParts(next);
+  if (!left || !right) return undefined;
+  return [...left, { type: "text", text: "\n\n" }, ...right];
+};
+
+/**
+ * Merge adjacent same-role messages into one. Text is joined with a blank
+ * line; when either side holds image or file parts the result is a part array
+ * so no attachment is lost. Turns that carry tool calls, tool results or
+ * reasoning are left alone, and the input is never mutated.
+ */
+export const collapseConsecutiveSameRole = <T extends RoleMessage>(
+  messages: readonly T[]
+): T[] =>
+  messages.reduce<T[]>((collapsed, message) => {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous && previous.role === message.role && MERGEABLE_ROLES.has(message.role)) {
+      const content = mergeContent(previous.content, message.content);
+      if (content !== undefined) {
+        collapsed[collapsed.length - 1] = { ...previous, content };
+        return collapsed;
+      }
+    }
+    collapsed.push(message);
+    return collapsed;
+  }, []);
+
+/** The messages a provider will actually be sent, honouring its role rules. */
+export const prepareProviderMessages = (
+  messages: ModelMessage[],
+  provider: string | null | undefined
+): ModelMessage[] =>
+  requiresRoleAlternation(provider) ? collapseConsecutiveSameRole(messages) : messages;

@@ -143,6 +143,7 @@ model User {
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
   externalApiKeys                      ExternalApiKey[]
+  externalApiDesktopRequests           ExternalApiRequest[]   @relation("ExternalApiDesktopRequests")
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
   quotaScopes                          QuotaScope[]
@@ -2266,12 +2267,25 @@ model ChatCreditReservation {
   researchFundingSegment ResearchFundingSegment?
   externalApiRequest     ExternalApiRequest?
 
+  /// The saved Chat answer this reservation paid for, so the answer can show
+  /// what it actually cost. Written once, when the Chat route inserts the row
+  /// for a turn of a saved conversation; NULL on every other source, on guest
+  /// and unsaved turns, and on every row from before the column existed.
+  ///
+  /// A plain value rather than a relation, like RoutingRun.assistantMessageId:
+  /// deleting a conversation removes its messages and must leave the financial
+  /// record exactly as it was. Account deletion clears it with the other
+  /// identifiers (lib/accountDataAnonymisation.ts). Nothing in reservation,
+  /// settlement or refund reads it.
+  assistantMessageId     String?
+
   @@index([status, expiresAt])
   @@index([userId, createdAt])
   @@index([traceId])
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+  @@index([assistantMessageId])
 }
 
 /// A key the account holder issued for the external inference API (/api/v1).
@@ -2299,15 +2313,24 @@ model ExternalApiKey {
   @@index([userId, createdAt])
 }
 
-/// One external inference request: the content-free link between a key and
-/// the shared ChatCreditReservation that holds and settles its credits. Every
-/// amount lives on the reservation; this row stores no prompt, output, tool
-/// argument, image or key material.
+/// One external inference request: the content-free link between a key (or
+/// Desktop Code's signed-in session) and the shared ChatCreditReservation that
+/// holds and settles its credits. Every amount lives on the reservation; this
+/// row stores no prompt, output, tool argument, image or key material.
 model ExternalApiRequest {
   id                   String                @id
-  keyId                String
-  key                  ExternalApiKey        @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  /// The API key the request came with; NULL exactly when it came with a
+  /// Desktop session instead (desktopUserId).
+  keyId                String?
+  key                  ExternalApiKey?       @relation(fields: [keyId], references: [id], onDelete: Cascade)
   userId               String
+  /// Desktop Code's signed-in session (docs/policy/external-api.md section
+  /// 11.2): the account id, set exactly when the request came with a Desktop
+  /// session rather than a key, and NULL for a key request. Its own relation,
+  /// so account deletion removes the row (a key request goes with its key).
+  /// Idempotency and receipts are scoped by it as a key request's are by keyId.
+  desktopUserId        String?
+  desktopUser          User?                 @relation("ExternalApiDesktopRequests", fields: [desktopUserId], references: [id], onDelete: Cascade)
   reservationId        String                @unique
   reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   /// SHA-256 of the client's Idempotency-Key header, when it sent one.
@@ -2338,8 +2361,10 @@ model ExternalApiRequest {
   completedAt          DateTime?
 
   @@unique([keyId, idempotencyKeyDigest])
+  @@unique([desktopUserId, idempotencyKeyDigest])
   @@index([userId, createdAt])
   @@index([keyId, createdAt])
+  @@index([desktopUserId, createdAt])
   @@index([createdAt])
 }
 

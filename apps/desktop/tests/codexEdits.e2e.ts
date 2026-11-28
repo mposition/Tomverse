@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { pathIdentity } from "../../tomverse-cli/src/patch.js";
 import { claimLock } from "../../tomverse-cli/src/session.js";
@@ -119,7 +120,7 @@ test("Codex honors patch decisions and carries verified edits across quota conti
     app = await launch();
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(async () => {
       const scope = (await window.desktop.state()).codeFallback!.scope;
       await window.desktop.setCodeExecutionPreference("provider_cli");
@@ -132,7 +133,7 @@ test("Codex honors patch decisions and carries verified edits across quota conti
     const start = (prompt: string, saveHistory = true) => page.evaluate(({ prompt, model, saveHistory }) => window.desktop.start({
       model, mode: "agent", effort: "default", executionMode: "provider_cli", prompt, saveHistory,
     }), { prompt, model, saveHistory });
-    assert.ok(!(await page.getByLabel("Code mode").locator('option[value="agent"]').isDisabled()));
+    await expect(page.getByTestId("permission-picker")).toHaveAttribute("data-mode", "ask");
     await assert.rejects(start("File edits need saved history", false));
     const [native] = await Promise.all([app.waitForEvent("window", { timeout: 23_000 }), start(objective)]);
     const original = (await state()).task;
@@ -220,7 +221,7 @@ test("Codex honors patch decisions and carries verified edits across quota conti
     app = await launch();
     assert.equal(await app.evaluate(({ app }) => app.getPath("userData")), profile);
     const pending = await app.firstWindow();
-    await pending.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(pending);
     await expect.poll(() => pending.evaluate(async () => (await window.desktop.state()).models.map(({ id }) => id))).toContain("fake-coder");
     await expect(pending.getByRole("button", { name: "Continue with the summary scope", exact: true })).toHaveCount(0);
     assert.ok(await readFile(join(retired, "session.json")));
@@ -229,7 +230,7 @@ test("Codex honors patch decisions and carries verified edits across quota conti
 
     app = await launch();
     const reopened = await app.firstWindow();
-    await reopened.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(reopened);
     await expect.poll(() => pathIdentity(retired, "directory")).toBeNull();
     assert.equal(await readFile(join(unrelated, "keep.txt"), "utf8"), "Unrelated directory.");
     await reopened.getByRole("button", { name: objective, exact: true }).click();

@@ -252,7 +252,8 @@ export function nativeExtractionSourceKey(conversationId: string, throughMessage
 
 export type NativeExtractionSelection = {
     kind: "native";
-    projectId: string;
+    /** null: an ordinary (non-project) Chat conversation. */
+    projectId: string | null;
     conversationId: string;
     /** Exclusive lower bound: messages after the previous snapshot's last message. */
     afterMessageCreatedAt: string | null;
@@ -266,7 +267,7 @@ export function isNativeExtractionSelection(value: unknown): value is NativeExtr
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const record = value as Record<string, unknown>;
     return record.kind === "native" &&
-        typeof record.projectId === "string" &&
+        (record.projectId === null || typeof record.projectId === "string") &&
         typeof record.conversationId === "string" &&
         typeof record.throughMessageId === "string" &&
         typeof record.throughMessageCreatedAt === "string" &&
@@ -295,6 +296,104 @@ export function nativeExtractionAllowed(input: {
     if (!input.accountMemoryEnabled) return { allowed: false, reason: "memory_off" };
     if (!input.conversationMemoryOn) return { allowed: false, reason: "conversation_memory_off" };
     if (input.conversationLocked) return { allowed: false, reason: "locked" };
+    return { allowed: true };
+}
+
+/**
+ * Which scope a native run reads and stores in, from the run's own record.
+ *
+ * A project run carries its project id. A Chat (non-project) run carries none
+ * and says so in its selection. A run whose project was deleted (the column is
+ * SET NULL, the selection still names the project) is neither: it stores
+ * nothing, so it can never turn into a personal-memory run by accident.
+ */
+export function nativeRunScope(run: { projectId: string | null; sourceSelection: unknown }):
+    | { kind: "project"; projectId: string }
+    | { kind: "chat" }
+    | null {
+    if (run.projectId) return { kind: "project", projectId: run.projectId };
+    if (isNativeExtractionSelection(run.sourceSelection) && run.sourceSelection.projectId === null) {
+        return { kind: "chat" };
+    }
+    return null;
+}
+
+// -------------------------------------------- automatic memory from Chat
+
+/** Operator switch for the new provider spend of Chat auto memory. Off unless exactly "true". */
+export const CHAT_AUTO_MEMORY_ENV = "TOMVERSE_CHAT_AUTO_MEMORY_ENABLED";
+
+export const chatAutoMemoryOperatorEnabled = (environment: Record<string, string | undefined> = process.env) =>
+    environment[CHAT_AUTO_MEMORY_ENV] === "true";
+
+/**
+ * How much Chat extraction one account may cause. A snapshot is a window of
+ * new messages, so these bound how often a window is cut: not after every
+ * answer, not for a lone question, not more than a few times a day.
+ */
+export const CHAT_AUTO_MEMORY_LIMITS = {
+    /** The window must hold at least this many new user messages. */
+    minNewUserMessages: 2,
+    /** At least this long since the previous snapshot of the same conversation. */
+    minIntervalMs: 15 * 60 * 1000,
+    /** Snapshots per account in a rolling 24 hours (all Chat conversations together). */
+    runsPerDay: 10,
+} as const;
+
+/**
+ * Whether an ordinary Chat conversation may be extracted at all. Everything
+ * here is a reason to do nothing: the operator switch (default off), the
+ * account master switch, the conversation's own memory mode, a lock, a
+ * temporary Chat, a project (those have their own path), an Assistant that
+ * turned memory off, a conversation continued from an imported one, and any
+ * conversation that is not a plain Chat one.
+ */
+export function chatExtractionAllowed(input: {
+    operatorEnabled: boolean;
+    accountMemoryEnabled: boolean;
+    conversationMemoryOn: boolean;
+    conversationLocked: boolean;
+    temporary: boolean;
+    inProject: boolean;
+    /** The stored conversation kind; only a Chat conversation qualifies. */
+    kind: string | null;
+    /** The stored product; only Chat qualifies (Review is another product). */
+    productKey: string | null;
+    /** null: no Assistant profile. Otherwise whether the profile's policy uses account memory. */
+    profileUsesAccountMemory: boolean | null;
+    continuedFromImport: boolean;
+}): { allowed: true } | { allowed: false; reason: string } {
+    if (!input.operatorEnabled) return { allowed: false, reason: "operator_off" };
+    if (input.kind !== null && input.kind !== "chat") return { allowed: false, reason: "not_chat" };
+    if (input.productKey !== "chat") return { allowed: false, reason: "not_chat_product" };
+    if (input.inProject) return { allowed: false, reason: "in_project" };
+    if (input.temporary) return { allowed: false, reason: "temporary" };
+    if (!input.accountMemoryEnabled) return { allowed: false, reason: "memory_off" };
+    if (!input.conversationMemoryOn) return { allowed: false, reason: "conversation_memory_off" };
+    if (input.profileUsesAccountMemory === false) return { allowed: false, reason: "assistant_memory_off" };
+    if (input.continuedFromImport) return { allowed: false, reason: "continued_from_import" };
+    if (input.conversationLocked) return { allowed: false, reason: "locked" };
+    return { allowed: true };
+}
+
+/** The pacing decision for one Chat snapshot. Pure: the caller reads the counts. */
+export function chatExtractionPaced(input: {
+    now: Date;
+    newUserMessages: number;
+    /** When this conversation's previous snapshot was created, if any. */
+    lastSnapshotAt: Date | null;
+    /** Snapshots this account started in the last 24 hours. */
+    snapshotsLast24h: number;
+}): { allowed: true } | { allowed: false; reason: string } {
+    if (input.newUserMessages < CHAT_AUTO_MEMORY_LIMITS.minNewUserMessages) {
+        return { allowed: false, reason: "too_little_new" };
+    }
+    if (input.lastSnapshotAt && input.now.getTime() - input.lastSnapshotAt.getTime() < CHAT_AUTO_MEMORY_LIMITS.minIntervalMs) {
+        return { allowed: false, reason: "too_soon" };
+    }
+    if (input.snapshotsLast24h >= CHAT_AUTO_MEMORY_LIMITS.runsPerDay) {
+        return { allowed: false, reason: "daily_cap" };
+    }
     return { allowed: true };
 }
 
