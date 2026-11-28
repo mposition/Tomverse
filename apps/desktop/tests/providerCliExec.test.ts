@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { permissionModes, type PermissionModeId } from "../src/permission-contract";
 import { cliPermissionPlan, cliPermissionPlans, liveCliModelId, liveCliProviderForModel, liveCliProviders, permissionRank } from "../src/provider-cli-exec-contract";
-import { claudeArguments, claudeParser, claudeSecretRules, claudeTools, cliExecEnvironment, codexArguments, codexParser, runProviderCli,
-  type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
+import { claudeArguments, claudeParser, claudeSecretRules, claudeTools, cliExecEnvironment, codexArguments, codexParser, codexWriteProfile,
+  credentialPathsIn, runProviderCli, type CliApproval, type ExecEvent, type ExecRun } from "../src/host/provider-cli-exec";
 
 const fake = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-provider-cli.mjs");
 
@@ -34,10 +34,16 @@ test("The permission table, as the CLI's own options", () => {
   assert.equal(pair(codex("ask"), "--sandbox"), "read-only");
   assert.equal(cliPermissionPlan("openai", "ask").notice, "cliAskReadOnly");
   // Codex's own reviewer could approve a push or an upload that Tomverse leaves to the person, so it is never used.
-  assert.equal(pair(codex("auto_review"), "--sandbox"), "workspace-write");
   assert.equal(cliPermissionPlan("openai", "auto_review").notice, "cliAutoReviewScoped");
-  assert.equal(pair(codex("allow_all"), "--sandbox"), "workspace-write");
   assert.equal(cliPermissionPlan("openai", "allow_all").notice, "cliAllowAllScoped");
+  // The write modes run in a permission profile: the project and the temp folder writable, the credential files found read-only.
+  for (const mode of ["auto_review", "allow_all"] as const) {
+    const args = codexArguments({ cwd: "/work", plan: cliPermissionPlan("openai", mode), readOnlyPaths: ["/work/.env", "/work/.ssh/**"] });
+    assert.ok(!args.includes("--sandbox"), mode);
+    assert.ok(args.includes('default_permissions="tomverse"'), mode);
+    assert.equal(args.find((arg) => arg.startsWith("permissions.tomverse=")),
+      'permissions.tomverse={filesystem={":root"="read", ":tmpdir"="write", ":workspace_roots"={"."="write"}, "/work/.env"="read", "/work/.ssh/**"="read"}}', mode);
+  }
   for (const mode of permissionModes) {
     const args = codex(mode);
     // No mode reaches the unsandboxed or bypass options, the user's config file or rule files; the prompt comes on stdin.
@@ -47,9 +53,12 @@ test("The permission table, as the CLI's own options", () => {
     assert.equal(pair(args, "-C"), "/work");
     // Without the user's config Codex has no Windows sandbox and refuses every command, so the unelevated one is named there.
     const windows = codexArguments({ cwd: "C:\\work", plan: cliPermissionPlan("openai", mode), platform: "win32" });
-    assert.equal(pair(windows, "-c"), 'windows.sandbox="unelevated"', mode);
-    assert.ok(!codexArguments({ cwd: "/work", plan: cliPermissionPlan("openai", mode), platform: "linux" }).includes("-c"), mode);
+    assert.ok(windows.includes('windows.sandbox="unelevated"'), mode);
+    assert.ok(!codexArguments({ cwd: "/work", plan: cliPermissionPlan("openai", mode), platform: "linux" }).some((arg) => arg.startsWith("windows.")), mode);
   }
+
+  // A read-only file is named exactly; Codex takes a glob only to deny reading.
+  assert.ok(codexWriteProfile(['C:/a "b"/.env']).at(-1)!.includes('"C:/a \\"b\\"/.env"="read"'));
 
   // Claude Code: the tool list is the hard limit; approvals come back over the stream except in Read only.
   assert.deepEqual(claudeTools("read_only"), ["Read", "Glob"]);
@@ -218,6 +227,7 @@ test("A Codex run reads the prompt on stdin, runs in the project folder with the
   t.mock.method(globalThis, "fetch", async () => { throw new Error("A provider CLI run must not call a server."); });
   await withFake(async (directory) => {
     const record = join(directory, "record.json");
+    await writeFile(join(directory, ".env"), "A=1");
     const run = baseRun(directory, { scenario: "codex-ok", record }, { mode: "allow_all" });
     const result = await runProviderCli(run);
     assert.equal(result.status, "completed");
@@ -226,7 +236,11 @@ test("A Codex run reads the prompt on stdin, runs in the project folder with the
     assert.equal(run.events.find((event) => event.type === "message")?.type === "message" && (run.events.find((event) => event.type === "message") as { text: string }).text, "done: Fix the bug");
     const seen = JSON.parse(await readFile(record, "utf8")) as { args: string[]; env: string[]; cwd: string; prompt: string };
     assert.equal(seen.prompt, "Fix the bug");
-    assert.equal(seen.args[seen.args.indexOf("--sandbox") + 1], "workspace-write");
+    assert.ok(!seen.args.includes("--sandbox"));
+    assert.ok(seen.args.includes('default_permissions="tomverse"'));
+    // The project's credential files are found before the start and named read-only.
+    const profile = seen.args.find((arg) => arg.startsWith("permissions.tomverse=")) ?? "";
+    assert.ok(profile.includes(`${JSON.stringify(`${directory.replaceAll("\\", "/")}/.env`)}="read"`), profile);
     assert.equal(await realpathOf(seen.cwd), await realpathOf(directory));
     for (const name of ["TOMVERSE_CODE_KEY", "OPENAI_API_KEY", "NODE_OPTIONS"]) assert.ok(!seen.env.includes(name), name);
     assert.deepEqual(seen.env.filter((name) => /tomverse/i.test(name)), []);
@@ -419,4 +433,20 @@ test("The provider CLI route has no path to a Tomverse API or to credits", async
   const messages = await readFile(join(root, "messages.ts"), "utf8");
   const command = withoutComments(messages.slice(messages.indexOf('type: "start-provider-cli"'), messages.indexOf('type: "resume"')));
   assert.doesNotMatch(command, /connection|connectionKey|token|key:/i);
+});
+
+test("Codex's write modes make the project's credential files read-only, a folder as a whole", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tv-cred-"));
+  try {
+    for (const [path, text] of [[".env", "A=1"], ["app/.env.local", "B=2"], ["keys/server.pem", "k"], [".ssh/id_ed25519", "k"], ["secrets/a.txt", "s"],
+      ["node_modules/pkg/.env", "x"], ["src/index.ts", "x"], ["README.md", "x"]] as const) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await writeFile(join(root, path), text);
+    }
+    const base = root.replaceAll("\\", "/");
+    assert.deepEqual(await credentialPathsIn(root), [`${base}/.env`, `${base}/.ssh/**`, `${base}/app/.env.local`, `${base}/keys/server.pem`, `${base}/secrets/**`]);
+    assert.deepEqual(await credentialPathsIn(join(root, "missing")), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

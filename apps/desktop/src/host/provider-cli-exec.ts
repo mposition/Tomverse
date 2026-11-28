@@ -1,7 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { StringDecoder } from "node:string_decoder";
 import { killTree, killTreeSync } from "../../../tomverse-cli/src/commands.js";
+import { isSecretPath } from "../../../tomverse-cli/src/workspace.js";
 import type { PermissionModeId } from "../permission-contract";
 import { cliPermissionPlan, LIVE_CLI_LIMITS, type CliPermissionPlan, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { codeProcessLaunch } from "./code-process-launch";
@@ -52,15 +55,52 @@ export function claudeTools(grants: PermissionModeId, platform: NodeJS.Platform 
 }
 
 /**
+ * The write modes' sandbox as a Codex permission profile instead of `--sandbox workspace-write`: everything readable, the
+ * project and the temp folder writable, no network, and the credential files and folders found in the project (`readOnlyPaths`)
+ * read-only. Codex takes a glob here only to deny reading (which needs the elevated Windows sandbox), so each one is named.
+ * On Windows a read-only file can still be deleted, since deleting is a right on its folder.
+ */
+export function codexWriteProfile(readOnlyPaths: readonly string[]): string[] {
+  const entries = [`":root"="read"`, `":tmpdir"="write"`, `":workspace_roots"={"."="write"}`, ...readOnlyPaths.map((path) => `${JSON.stringify(path)}="read"`)];
+  return ["-c", 'default_permissions="tomverse"', "-c", `permissions.tomverse={filesystem={${entries.join(", ")}}}`];
+}
+
+/** Codex's command line cannot grow without bound (Windows stops at 32 767 characters). */
+const READ_ONLY_PATHS_CHARACTERS = 24_000;
+
+/**
+ * The files and folders under `root` that can hold credentials (isSecretPath), as absolute paths with forward slashes; a
+ * folder is given as `<folder>/**`. Nothing under a protected folder or `node_modules` is listed, and no link is followed.
+ */
+export async function credentialPathsIn(root: string): Promise<string[]> {
+  const found: string[] = [];
+  const base = root.replaceAll("\\", "/").replace(/\/+$/, "");
+  const pending = [""];
+  while (pending.length) {
+    const relative = pending.pop()!;
+    let entries: Dirent[];
+    try { entries = await readdir(relative ? `${base}/${relative}` : base, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const path = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (isSecretPath(entry.name)) found.push(`${base}/${path}/**`);
+        else if (entry.name.toLowerCase() !== "node_modules") pending.push(path);
+      } else if (isSecretPath(entry.name)) found.push(`${base}/${path}`);
+    }
+  }
+  return found.sort();
+}
+
+/**
  * `codex exec` never asks for approval. The user's config file and exec-policy rules are not loaded (they could widen the
  * sandbox or add tools that run outside it); the flags below are the whole permission. The prompt comes on stdin.
  * On Windows the sandbox is named here: without the config file Codex has none there and refuses every command, reads
  * included. The unelevated sandbox needs no administrator setup.
  */
-export function codexArguments(input: { cwd: string; plan: CliPermissionPlan; platform?: NodeJS.Platform }): string[] {
+export function codexArguments(input: { cwd: string; plan: CliPermissionPlan; platform?: NodeJS.Platform; readOnlyPaths?: readonly string[] }): string[] {
   const { grants } = input.plan;
   const permission = grants === "read_only" ? ["--sandbox", "read-only"]
-    : grants === "auto_review" || grants === "allow_all" ? ["--sandbox", "workspace-write"] : null;
+    : grants === "auto_review" || grants === "allow_all" ? codexWriteProfile(input.readOnlyPaths ?? []) : null;
   if (!permission) throw new Error("Codex has no approval route for this permission.");
   const windows = (input.platform ?? process.platform) === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : [];
   return ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", ...windows, "-C", input.cwd, ...permission, "-"];
@@ -306,12 +346,17 @@ function lineReader(limit: number, onLine: (line: string) => void, onSkip: () =>
 export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   const plan = cliPermissionPlan(run.provider, run.mode);
   const sessionId = randomUUID();
-  const args = [...(run.argsPrefix ?? []),
-    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
   const result = (status: ExecResult["status"], exitCode: number | null, extra: Partial<ExecResult> = {}): ExecResult =>
     ({ status, exitCode, plan, skipped, stderr: stderrTail, ...extra });
   let skipped = 0;
   let stderrTail = "";
+  // Codex changes files without asking in the write modes, so the credential files it may read are made read-only first.
+  const readOnlyPaths = run.provider === "openai" && plan.grants !== "read_only" ? await credentialPathsIn(run.cwd) : [];
+  if (readOnlyPaths.join("").length > READ_ONLY_PATHS_CHARACTERS) {
+    return result("failed", null, { error: "The project has too many credential files to protect. Use Read only, or another route." });
+  }
+  const args = [...(run.argsPrefix ?? []),
+    ...(run.provider === "openai" ? codexArguments({ cwd: run.cwd, plan, platform: run.platform, readOnlyPaths }) : claudeArguments({ plan, sessionId, platform: run.platform }))];
   if (run.signal.aborted) return result("stopped", null);
 
   const launch = codeProcessLaunch(run.file, args);
