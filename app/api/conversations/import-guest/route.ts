@@ -25,6 +25,7 @@ import {
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
 import { createConversation } from "@/lib/conversationCreation";
+import { isUniqueConstraintDatabaseError } from "@/lib/databaseError";
 import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
 
 const modelIdSchema = z.string().min(1).max(120);
@@ -120,7 +121,7 @@ export async function POST(req: Request) {
       body.createdAt
     );
 
-    const result = await prisma.$transaction(async (tx) => {
+    const importTransaction = () => prisma.$transaction(async (tx) => {
       const existing = await tx.conversation.findFirst({
         where: { userId, importedGuestKey: body.guestConversationId },
         select: { id: true },
@@ -168,6 +169,23 @@ export async function POST(req: Request) {
 
       return { conversationId: conversation.id, alreadyImported: false };
     });
+
+    let result: { conversationId: string; alreadyImported: boolean };
+    try {
+      result = await importTransaction();
+    } catch (error) {
+      // Two requests for the same guest conversation (a double click, a retry
+      // after a lost response) both pass the read above before either commits;
+      // the loser trips @@unique([userId, importedGuestKey]). That is "already
+      // imported", not a failure: answer with the winner's conversation.
+      if (!isUniqueConstraintDatabaseError(error)) throw error;
+      const winner = await prisma.conversation.findFirst({
+        where: { userId, importedGuestKey: body.guestConversationId },
+        select: { id: true },
+      });
+      if (!winner) throw error;
+      result = { conversationId: winner.id, alreadyImported: true };
+    }
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

@@ -92,6 +92,7 @@ import {
 } from "@/lib/chatTokenQuotaCore";
 import { APP_DEFAULTS, isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import { currentScheduledTaskRun } from "@/lib/scheduledTaskRunContext";
 import {
     NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
     missingAuthorizationIsADefect,
@@ -3693,7 +3694,19 @@ export const acquireChatAccess = async (
         // Same reservation, aggregate scope: a claimed slot already holds one
         // unit of this IP's minute. An unclaimed request still charges it here,
         // which is what keeps the single-model path unchanged.
-        if (!claimedAdmissionSlot && !guestAutoPrehold) {
+        // A scheduled run is not a client at an address: the runner builds the
+        // request in this process, so its IP key is the shared fingerprint of
+        // "no address" and every run of every account would spend one bucket.
+        // The account's own per-minute subject limit above still applies. The
+        // proof is the in-process run scope (lib/scheduledTaskRunContext.ts),
+        // bound to this account and unreachable from a network request, never
+        // a header the caller could send.
+        const scheduledRunScope = currentScheduledTaskRun();
+        const isScheduledRun =
+            access.kind === "user" &&
+            access.userId !== undefined &&
+            scheduledRunScope?.userId === access.userId;
+        if (!claimedAdmissionSlot && !guestAutoPrehold && !isScheduledRun) {
             const ipMinuteStart = periodStart("minute", now);
             const ipScope = ipRateScope(access.ipKey, ipPerMinute);
             const ipAllowed = await incrementUsage(

@@ -202,6 +202,26 @@ export const isUniqueConstraintDatabaseError = (error: unknown) => {
 };
 
 /**
+ * Runs an idempotent write and, if it loses a unique-constraint race, runs it
+ * once more.
+ *
+ * Prisma's `upsert` is a read followed by a create, not an atomic statement:
+ * two requests that both find no row both try to create it, and the second
+ * raises P2002. By the time it does, the winner's row exists, so the same
+ * upsert now takes its update branch. Only for a write whose repeat is
+ * harmless (the same values, last writer wins); never for one that spends,
+ * counts or sends.
+ */
+export async function retryOnceOnUniqueConstraint<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isUniqueConstraintDatabaseError(error)) throw error;
+    return write();
+  }
+}
+
+/**
  * Whether a database error carries this SQLSTATE, wherever Prisma put it.
  *
  * `databaseErrorMetadata` reads `error.cause`, which is not enough: for a code

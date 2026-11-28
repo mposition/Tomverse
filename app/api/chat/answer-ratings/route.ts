@@ -13,6 +13,7 @@ import {
     type PublicChatAnswerRating,
 } from "@/lib/chatAnswerRatingCore";
 import { conversationLockedResponse, hasConversationUnlockGrant } from "@/lib/conversationLock";
+import { retryOnceOnUniqueConstraint } from "@/lib/databaseError";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -100,7 +101,10 @@ export async function PUT(req: Request) {
             return NextResponse.json({ rating: null });
         }
         const reason = body.rating === "down" ? body.reason ?? null : null;
-        const saved = await prisma.chatAnswerRating.upsert({
+        // A double click or two tabs rate the same answer at once: both upserts
+        // see no row, the second create trips the unique key. The retry takes the
+        // update branch against the winner's row.
+        const saved = await retryOnceOnUniqueConstraint(() => prisma.chatAnswerRating.upsert({
             where: { messageId_userId: { messageId: message.id, userId } },
             create: {
                 userId,
@@ -112,7 +116,7 @@ export async function PUT(req: Request) {
             },
             update: { rating: body.rating, reason, modelId: message.modelId },
             select: RATING_SELECT,
-        });
+        }));
         return NextResponse.json({ rating: publicChatAnswerRating(saved) });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);

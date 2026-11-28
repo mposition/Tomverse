@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import { ipBucketLimit } from "@/lib/apiRateLimitIpPolicy";
 import {
   DATABASE_RETRY_AFTER_SECONDS,
   DATABASE_TEMPORARILY_UNAVAILABLE_CODE,
@@ -133,16 +134,21 @@ export async function consumeApiRateLimit(
           1,
           limits[period]
         );
-        const ipAllowed = ipKey
-          ? await incrementBucket(
-              tx,
-              ipKey,
-              `api-${scope}-${period}`,
-              start,
-              1,
-              limits[period] * 3
-            )
-          : true;
+        // The IP leg is an aggregate abuse ceiling, not the accountable limit:
+        // signed-in subjects get a wide per-minute ceiling and no per-day IP
+        // bucket (see lib/apiRateLimitIpPolicy.ts); anonymous subjects keep 3x.
+        const ipLimit = ipKey ? ipBucketLimit(userId, period, limits[period]) : null;
+        const ipAllowed =
+          ipKey && ipLimit !== null
+            ? await incrementBucket(
+                tx,
+                ipKey,
+                `api-${scope}-${period}`,
+                start,
+                1,
+                ipLimit
+              )
+            : true;
         if (!allowed || !ipAllowed) {
           throw new ApiSecurityError(
             429,
