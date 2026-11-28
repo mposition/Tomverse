@@ -2855,9 +2855,12 @@ async function handleChatPost(
           for one the owner-scoped read above found; otherwise the account's
           limits alone. Not for a POST that reattaches to an answer already
           there. Only the storage refusal stops the turn, and if the check
-          itself fails, the write decides as it always has.
+          itself fails, the write decides as it always has. Not for a Deep
+          Research turn either: a refused desktop submission retries by
+          updating its existing answer row, so it may need no new row at all.
         */
-        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound && !attemptPeekFailed) {
+        const deepResearchTurn = modelId === DEEP_RESEARCH_MODEL_ID || Boolean(deepResearchDepth) || isResearchPreview;
+        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound && !attemptPeekFailed && !deepResearchTurn) {
             try {
                 await checkMessageCapacity(
                     prisma,
