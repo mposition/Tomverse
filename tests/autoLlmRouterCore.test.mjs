@@ -328,7 +328,7 @@ test("a rewrite is kept only when asked for, bounded and different", async () =>
   assert.equal(admitRouterRewrite(42, "fix it"), null);
 });
 
-test("the rewrite replaces only the latest plain-text user message", async () => {
+test("the rewrite is added under the latest plain-text user message, which keeps its own words", async () => {
   const { withRouterRewrite } = await import("../lib/autoLlmRouterCore.ts");
   const history = [
     { role: "user", content: "write a parser" },
@@ -336,7 +336,7 @@ test("the rewrite replaces only the latest plain-text user message", async () =>
     { role: "user", content: "fix it" },
   ];
   const out = withRouterRewrite(history, "Fix the parser above so it handles empty input.");
-  assert.equal(out[2].content, "Fix the parser above so it handles empty input.");
+  assert.equal(out[2].content, "fix it\n\nRouter interpretation: Fix the parser above so it handles empty input.");
   assert.equal(out[0], history[0]);
   assert.equal(history[2].content, "fix it"); // input not mutated
   const structured = [{ role: "user", content: [{ type: "text", text: "see image" }] }];
@@ -358,7 +358,23 @@ test("a conversation with attachments anywhere is never rewritten", async () => 
   ];
   assert.equal(withRouterRewrite(earlierFile, "Fix the issues in a.ts."), earlierFile);
   const emptyList = [{ role: "user", content: "fix it", attachments: [] }];
-  assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "Fix the parser.");
+  assert.equal(withRouterRewrite(emptyList, "Fix the parser.")[0].content, "fix it\n\nRouter interpretation: Fix the parser.");
+});
+
+test("a previous answer longer than the router's excerpt is reported as cut, so the turn is not rewritten", async () => {
+  const { previousAnswerWasCut, previousAnswerExcerpt, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS } = await import("../lib/autoLlmRouterCore.ts");
+  const turn = (answer) => [
+    { role: "user", content: "write it" },
+    { role: "assistant", content: answer },
+    { role: "user", content: "fix it" },
+  ];
+  assert.equal(previousAnswerWasCut(turn("short answer")), false);
+  assert.equal(previousAnswerWasCut(turn("x".repeat(AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS))), false);
+  assert.equal(previousAnswerWasCut(turn("x".repeat(AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS + 1))), true);
+  // A first turn has no previous answer to cut.
+  assert.equal(previousAnswerWasCut([{ role: "user", content: "hello" }]), false);
+  // The excerpt the router sees is unchanged by the refactor.
+  assert.equal(previousAnswerExcerpt(turn("  short answer ")), "short answer");
 });
 
 test("the live router deadline is 7 s with at least as much time for rewriting and more for replay", async () => {

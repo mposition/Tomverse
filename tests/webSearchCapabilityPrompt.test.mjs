@@ -216,3 +216,11 @@ test("the paragraph stays small enough to sit on every non-searching turn", () =
   // measurement: what matters is that it cannot quietly grow into a page.
   assert.ok(WEB_SEARCH_UNAVAILABLE_PROMPT.length < 1200);
 });
+
+test("the read_url exception is appended to the limitation, never replaces it", () => {
+  const withUrl = buildWebSearchCapabilitySystemPrompt("unavailable", { urlReadAvailable: true });
+  assert.ok(withUrl.startsWith(WEB_SEARCH_UNAVAILABLE_PROMPT));
+  assert.ok(withUrl.includes("read_url"));
+  assert.equal(buildWebSearchCapabilitySystemPrompt("unavailable"), WEB_SEARCH_UNAVAILABLE_PROMPT);
+  assert.equal(buildWebSearchCapabilitySystemPrompt("searching", { urlReadAvailable: true }), "");
+});

@@ -37,6 +37,39 @@ export function escapeLikePattern(query: string): string {
     return query.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
+/** A model-written query is cut into at most this many words; the rest are ignored. */
+export const SEARCH_WORD_LIMIT = 6;
+
+/**
+ * The words of a query, for the model's AND search: split on whitespace,
+ * de-duplicated ignoring case, in the order written, at most
+ * `SEARCH_WORD_LIMIT`. A query with no word in it yields the trimmed query so
+ * the caller never builds an empty pattern list.
+ */
+export function splitSearchWords(query: string): string[] {
+    const seen = new Set<string>();
+    const words: string[] = [];
+    for (const word of query.split(/\s+/u)) {
+        const key = word.toLowerCase();
+        if (!word || seen.has(key)) continue;
+        seen.add(key);
+        words.push(word);
+        if (words.length >= SEARCH_WORD_LIMIT) break;
+    }
+    return words.length ? words : [query.trim()];
+}
+
+/**
+ * What to highlight in a hit: the whole query when it appears as written,
+ * else the first of its words that does, else the query (which then finds
+ * nothing and the snippet falls back to the start of the message).
+ */
+export function snippetNeedle(content: string, query: string, words: readonly string[]): string {
+    const lower = content.toLowerCase();
+    if (lower.includes(query.trim().toLowerCase())) return query;
+    return words.find((word) => lower.includes(word.toLowerCase())) ?? query;
+}
+
 export type RankedSearchHit<T> = {
     /** The conversation the hit opens. */
     conversationId: string;
