@@ -5,9 +5,12 @@ import {
     SEARCH_RESULT_LIMIT,
     SEARCH_RESULTS_PER_CONVERSATION,
     SEARCH_CANDIDATE_ROW_LIMIT,
+    SEARCH_WORD_LIMIT,
     escapeLikePattern,
     isStatementTimeout,
     rankSearchHits,
+    snippetNeedle,
+    splitSearchWords,
 } from "../lib/conversationSearchResults.ts";
 import { parseAroundMessageId } from "../lib/continuationFocus.ts";
 import {
@@ -171,4 +174,23 @@ test("the focus handoff notifies, advances its nonce and clears", () => {
     clearContinuationFocus();
     assert.equal(notified, 3, "clearing nothing does not notify");
     unsubscribe();
+});
+
+test("the model's query is split into at most six distinct words, in the order written", () => {
+  assert.deepEqual(splitSearchWords("  마감  일정 마감 "), ["마감", "일정"]);
+  assert.deepEqual(splitSearchWords("Deadline deadline Friday"), ["Deadline", "Friday"]);
+  assert.deepEqual(splitSearchWords("a b c d e f g h"), ["a", "b", "c", "d", "e", "f"]);
+  assert.equal(SEARCH_WORD_LIMIT, 6);
+  assert.deepEqual(splitSearchWords("   "), [""], "never an empty list of patterns");
+});
+
+test("each word is escaped on its own, so a LIKE metacharacter inside a word stays literal", () => {
+  assert.deepEqual(splitSearchWords("100% done_now").map(escapeLikePattern), ["100\\%", "done\\_now"]);
+});
+
+test("the snippet highlights the whole query when it is there, else the first word that is", () => {
+  const content = "We agreed the Friday deadline for the launch.";
+  assert.equal(snippetNeedle(content, "friday deadline", ["friday", "deadline"]), "friday deadline");
+  assert.equal(snippetNeedle(content, "launch friday", ["launch", "friday"]), "launch");
+  assert.equal(snippetNeedle(content, "nothing here", ["nothing", "here"]), "nothing here");
 });

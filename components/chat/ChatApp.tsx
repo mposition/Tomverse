@@ -75,6 +75,7 @@ import { researchRunMessage } from "@/lib/researchPreviewRunClient";
 import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
+import { readBrowserTimeZone } from "@/lib/chatCurrentDatePrompt";
 import {
   armSupersede,
   beginReplacement,
@@ -2433,6 +2434,8 @@ function ChatAppComponent({
           guestAutoRequestStarted = true;
         }
         latency.dispatched();
+        let omittedEarlierMessages = 0;
+        const clientTimeZone = readBrowserTimeZone();
         const requestBody = {
           // UI-only turns never go to a provider, and this turn's own user
           // message is appended exactly once -- `messages` is the pre-send
@@ -2455,8 +2458,13 @@ function ChatAppComponent({
               .map((message) => message === userMessage
                 ? { ...message, id: sourceUserMessageId }
                 : message)
-              .map(toChatRequestMessage)
+              .map(toChatRequestMessage),
+            undefined,
+            (omitted) => { omittedEarlierMessages = omitted; }
           ),
+          // So the model is told when its history starts mid-conversation, and the date can be local.
+          ...(omittedEarlierMessages > 0 ? { omittedEarlierMessages } : {}),
+          ...(clientTimeZone ? { clientTimeZone } : {}),
           modelId: modelId,
           ...(turnstileToken ? { turnstileToken } : {}),
           ...(!isGuestMode
