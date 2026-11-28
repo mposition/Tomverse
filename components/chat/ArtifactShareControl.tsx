@@ -2,10 +2,10 @@
 
 import { ApiClientError, createApiClient } from "@tomverse/api-client";
 import { Link2, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
-import { artifactWorkspaceCopy, formatArtifactWorkspaceCopy } from "@/locales/artifactWorkspace";
+import { artifactWorkspaceCopy, formatArtifactShareExpiry, formatArtifactWorkspaceCopy } from "@/locales/artifactWorkspace";
 
 /**
  * The Share button in the preview panel, and the small card it opens: make a
@@ -37,6 +37,20 @@ const sha256Hex = async (text: string) => {
 
 const SHARES_PATH = "/api/artifact-shares";
 
+/** A short, non-cryptographic key for a block's text (cyrb53), so the status read is keyed on it, not on the text. */
+const textKey = (text: string) => {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${text.length}.${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`;
+};
+
 // The query is built with URLSearchParams on both branches (no literal "?name=" in a
 // string, which the repository's encoding check reads as mojibake).
 const statusPath = async (source: ArtifactShareSource) => {
@@ -57,10 +71,12 @@ const button =
 export function ArtifactShareControl({ source, edited }: { source: ArtifactShareSource; edited: boolean }) {
   const { lang } = useLanguage();
   const copy = artifactWorkspaceCopy[lang].share;
+  const code = source.kind === "code_block" ? source.code : null;
+  const codeKey = useMemo(() => (code === null ? "" : textKey(code)), [code]);
   const sourceKey =
     source.kind === "artifact"
       ? `a:${source.artifactId}`
-      : `c:${source.messageId}:${source.blockIndex}:${source.language}:${source.code}`;
+      : `c:${source.messageId}:${source.blockIndex}:${source.language}:${codeKey}`;
   // Keyed by source, so a status read for another source is never shown for this one.
   const [loaded, setLoaded] = useState<{ key: string; status: Status } | null>(null);
   const status = loaded?.key === sourceKey ? loaded.status : null;
@@ -139,7 +155,7 @@ export function ArtifactShareControl({ source, edited }: { source: ArtifactShare
 
   const expires = share
     ? formatArtifactWorkspaceCopy(copy.expires, {
-        date: new Intl.DateTimeFormat(lang, { dateStyle: "medium" }).format(new Date(share.expiresAt)),
+        date: formatArtifactShareExpiry(lang, share.expiresAt),
       })
     : null;
 

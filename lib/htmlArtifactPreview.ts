@@ -165,10 +165,12 @@ export const HTML_PREVIEW_WEBRTC_GLOBALS = [
  *     root, removes its frames and does the same inside it (nested roots, and
  *     the roots the parser makes from the page's markup, whose host it sees
  *     added). `attachShadow` is replaced, non-configurably, by a wrapper that
- *     reads the options once, makes the root open -- a clonable closed root's
- *     copy is made without `attachShadow` and would be out of reach (measured)
- *     -- and follows it at once, since attaching to a host already in place
- *     records no mutation. The page's markup is parsed before any script, so
+ *     reads each option once into an object with no prototype, writes the
+ *     mode last as open -- a clonable closed root's copy is made without
+ *     `attachShadow` and would be out of reach (measured) -- and follows the
+ *     root at once, since attaching to a host already in place records no
+ *     mutation. The observer's options are such an object too, so getters a
+ *     page puts on `Object.prototype` or `Array.prototype` are never read. The page's markup is parsed before any script, so
  *     its closed declarative roots are made open in the text
  *     (openDeclarativeShadowRoots). What stays locked is what makes a root
  *     from a string at run time, which that text pass never sees: the
@@ -182,182 +184,189 @@ export const HTML_PREVIEW_WEBRTC_GLOBALS = [
  *
  * The observer uses only functions captured here, before the page runs, so a
  * page that replaces `Element.prototype.matches`, `NodeList.prototype.length`
- * or `Reflect.apply` afterwards cannot blind it. No backslashes and no closing
+ * or `Reflect.apply` afterwards cannot blind it. A guard that cannot be set up
+ * in full stops the document (`window.stop()`) before the page is parsed. No backslashes and no closing
  * script tag, so it is the same text in source, in `srcdoc` and at runtime.
  */
 export const HTML_PREVIEW_GUARD_SCRIPT = `(function () {
-  var apply = Reflect.apply, define = Object.defineProperty, describe = Object.getOwnPropertyDescriptor;
-  var lock = function (target, name) {
-    if (!target) return;
-    try { define(target, name, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch (error) {}
-  };
-  var capture = ["getUserMedia", "getDisplayMedia", "enumerateDevices", "getSupportedConstraints", "selectAudioOutput", "setCaptureHandleConfig"];
-  for (var c = 0; c < capture.length; c++) lock(window.MediaDevices && window.MediaDevices.prototype, capture[c]);
-  var names = ${JSON.stringify(HTML_PREVIEW_WEBRTC_GLOBALS)};
-  var own = Object.getOwnPropertyNames(window);
-  for (var i = 0; i < own.length; i++) { if (/^(webkit|moz)?RTC/.test(own[i])) names.push(own[i]); }
-  for (var j = 0; j < names.length; j++) lock(window, names[j]);
-  var media = ["mediaDevices", "getUserMedia", "webkitGetUserMedia", "mozGetUserMedia"];
-  for (var k = 0; k < media.length; k++) { lock(Navigator.prototype, media[k]); lock(navigator, media[k]); }
-  var holders = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
-  for (var h = 0; h < holders.length; h++) {
-    var holder = window[holders[h]];
-    if (holder) { lock(holder.prototype, "contentWindow"); lock(holder.prototype, "contentDocument"); }
-  }
-  var parsers = [[Element.prototype, "setHTMLUnsafe"], [Element.prototype, "setHTML"], [window.Document, "parseHTMLUnsafe"],
-    [window.Document, "parseHTML"], [Document.prototype, "write"], [Document.prototype, "writeln"]];
-  if (window.ShadowRoot) parsers.push([ShadowRoot.prototype, "setHTMLUnsafe"], [ShadowRoot.prototype, "setHTML"]);
-  for (var q = 0; q < parsers.length; q++) lock(parsers[q][0], parsers[q][1]);
-  var frames = "iframe,frame,frameset,object,embed,portal,fencedframe";
-  var addedNodes = describe(MutationRecord.prototype, "addedNodes").get;
-  var listLength = describe(NodeList.prototype, "length").get;
-  var listItem = NodeList.prototype.item;
-  var nodeType = describe(Node.prototype, "nodeType").get;
-  var matches = Element.prototype.matches, remove = Element.prototype.remove, select = Element.prototype.querySelectorAll;
-  var selectInRoot = DocumentFragment.prototype.querySelectorAll, observe = MutationObserver.prototype.observe;
-  var attach = Element.prototype.attachShadow, shadowOf = describe(Element.prototype, "shadowRoot").get, assign = Object.assign;
-  var each = function (list, visit) {
-    var count = apply(listLength, list, []);
-    for (var n = 0; n < count; n++) visit(apply(listItem, list, [n]));
-  };
-  var removeNode = function (node) { apply(remove, node, []); };
-  var watch = { childList: true, subtree: true };
-  var observer, follow;
-  var enter = function (element) {
-    var root = apply(shadowOf, element, []);
-    if (root) follow(root);
-  };
-  follow = function (root) {
-    apply(observe, observer, [root, watch]);
-    each(apply(selectInRoot, root, [frames]), removeNode);
-    each(apply(selectInRoot, root, ["*"]), enter);
-  };
-  var drop = function (node) {
-    if (apply(nodeType, node, []) !== 1) return;
-    if (apply(matches, node, [frames])) { removeNode(node); return; }
-    each(apply(select, node, [frames]), removeNode);
-    enter(node);
-    each(apply(select, node, ["*"]), enter);
-  };
-  observer = new MutationObserver(function (records) {
-    for (var r = 0; r < records.length; r++) each(apply(addedNodes, records[r], []), drop);
-  });
-  apply(observe, observer, [document, watch]);
-  if (attach) {
-    define(Element.prototype, "attachShadow", {
-      value: function attachShadow(init) {
-        var options = assign({}, init);
-        options.mode = "open";
-        var root = apply(attach, this, [options]);
-        follow(root);
-        return root;
-      },
-      writable: false, enumerable: false, configurable: false
+  try {
+    var apply = Reflect.apply, define = Object.defineProperty, describe = Object.getOwnPropertyDescriptor;
+    var lock = function (target, name) {
+      if (!target) return;
+      try { define(target, name, { value: undefined, writable: false, enumerable: false, configurable: false }); } catch (error) {}
+    };
+    var capture = ["getUserMedia", "getDisplayMedia", "enumerateDevices", "getSupportedConstraints", "selectAudioOutput", "setCaptureHandleConfig"];
+    for (var c = 0; c < capture.length; c++) lock(window.MediaDevices && window.MediaDevices.prototype, capture[c]);
+    var names = ${JSON.stringify(HTML_PREVIEW_WEBRTC_GLOBALS)};
+    var own = Object.getOwnPropertyNames(window);
+    for (var i = 0; i < own.length; i++) { if (/^(webkit|moz)?RTC/.test(own[i])) names.push(own[i]); }
+    for (var j = 0; j < names.length; j++) lock(window, names[j]);
+    var media = ["mediaDevices", "getUserMedia", "webkitGetUserMedia", "mozGetUserMedia"];
+    for (var k = 0; k < media.length; k++) { lock(Navigator.prototype, media[k]); lock(navigator, media[k]); }
+    var holders = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+    for (var h = 0; h < holders.length; h++) {
+      var holder = window[holders[h]];
+      if (holder) { lock(holder.prototype, "contentWindow"); lock(holder.prototype, "contentDocument"); }
+    }
+    var parsers = [[Element.prototype, "setHTMLUnsafe"], [Element.prototype, "setHTML"], [window.Document, "parseHTMLUnsafe"],
+      [window.Document, "parseHTML"], [Document.prototype, "write"], [Document.prototype, "writeln"]];
+    if (window.ShadowRoot) parsers.push([ShadowRoot.prototype, "setHTMLUnsafe"], [ShadowRoot.prototype, "setHTML"]);
+    for (var q = 0; q < parsers.length; q++) lock(parsers[q][0], parsers[q][1]);
+    var frames = "iframe,frame,frameset,object,embed,portal,fencedframe";
+    var addedNodes = describe(MutationRecord.prototype, "addedNodes").get;
+    var listLength = describe(NodeList.prototype, "length").get;
+    var listItem = NodeList.prototype.item;
+    var nodeType = describe(Node.prototype, "nodeType").get;
+    var matches = Element.prototype.matches, remove = Element.prototype.remove, select = Element.prototype.querySelectorAll;
+    var selectInRoot = DocumentFragment.prototype.querySelectorAll, observe = MutationObserver.prototype.observe;
+    var attach = Element.prototype.attachShadow, shadowOf = describe(Element.prototype, "shadowRoot").get, create = Object.create;
+    // Objects the browser reads members from later, when the page may have put getters or setters on
+    // Object.prototype or Array.prototype: no prototype, and each member an own data property, so only what
+    // is written here is read.
+    var put = function (object, key, value) {
+      var field = create(null);
+      field.value = value; field.writable = true; field.enumerable = true; field.configurable = true;
+      define(object, key, field);
+    };
+    var shadowKeys = ["delegatesFocus", "slotAssignment", "clonable", "serializable", "customElementRegistry", "referenceTarget"];
+    var each = function (list, visit) {
+      var count = apply(listLength, list, []);
+      for (var n = 0; n < count; n++) visit(apply(listItem, list, [n]));
+    };
+    var removeNode = function (node) { apply(remove, node, []); };
+    var watch = create(null);
+    put(watch, "childList", true);
+    put(watch, "subtree", true);
+    var observer, follow;
+    var enter = function (element) {
+      var root = apply(shadowOf, element, []);
+      if (root) follow(root);
+    };
+    follow = function (root) {
+      apply(observe, observer, [root, watch]);
+      each(apply(selectInRoot, root, [frames]), removeNode);
+      each(apply(selectInRoot, root, ["*"]), enter);
+    };
+    var drop = function (node) {
+      if (apply(nodeType, node, []) !== 1) return;
+      if (apply(matches, node, [frames])) { removeNode(node); return; }
+      each(apply(select, node, [frames]), removeNode);
+      enter(node);
+      each(apply(select, node, ["*"]), enter);
+    };
+    observer = new MutationObserver(function (records) {
+      for (var r = 0; r < records.length; r++) each(apply(addedNodes, records[r], []), drop);
     });
+    apply(observe, observer, [document, watch]);
+    if (attach) {
+      define(Element.prototype, "attachShadow", {
+        value: function attachShadow(init) {
+          // Each option the page passed is read once; the mode is written last and is always open.
+          var options = create(null);
+          if (init !== null && init !== undefined) {
+            for (var s = 0; s < shadowKeys.length; s++) {
+              var value = init[shadowKeys[s]];
+              if (value !== undefined) put(options, shadowKeys[s], value);
+            }
+          }
+          put(options, "mode", "open");
+          var root = apply(attach, this, [options]);
+          follow(root);
+          return root;
+        },
+        writable: false, enumerable: false, configurable: false
+      });
+    }
+  } catch (error) {
+    // A guard that could not be set up in full is no guard: stop the document before the page is parsed.
+    window.stop();
+    throw error;
   }
 })();`;
 
-const isTagSpace = (c: string) => c === " " || c === "\n" || c === "\t" || c === "\f" || c === "\r";
+/** An HTML `<template>` start tag as the HTML parser reads it: where its name ends, and its `shadowrootmode` value. */
+export type TemplateStartTag = { nameEnd: number; mode: string | null };
+
+/** Reads the template start tags of a whole document (lib/htmlPreviewTemplateStarts.ts, parse5). */
+export type TemplateStartFinder = (document: string) => readonly TemplateStartTag[];
+
+/** The preview is not drawn: its declarative shadow roots could not be opened. */
+export class HtmlPreviewUnavailableError extends Error {
+    constructor(message: string, options?: { cause?: unknown }) {
+        super(message, options);
+        this.name = "HtmlPreviewUnavailableError";
+    }
+}
 
 /**
- * The raw value of the first `shadowrootmode` attribute of the `<template`
- * start tag whose name ends at `from`, read the way the HTML tokenizer reads
- * a start tag ("" for an attribute without a value); null when the tag has
- * none before it ends or the text ends; undefined when the shared `budget`
- * ran out first.
+ * Whether a page's markup could make a declarative shadow root at all. The
+ * attribute name is matched in ASCII case only, as the tokenizer does, and a
+ * name cannot be spelled with character references, so a page without the
+ * word has none and is not parsed.
  */
-const firstShadowRootMode = (html: string, from: number, budget: { steps: number }): string | null | undefined => {
-    const n = html.length;
-    let i = from;
-    for (;;) {
-        const before = i;
-        // Before attribute name (also after a quoted value, and after a stray `/`).
-        while (i < n && isTagSpace(html[i])) i++;
-        if (i >= n || html[i] === ">") return null;
-        if (html[i] === "/") {
-            i++;
-            continue;
-        }
-        // Attribute name: its first character is part of it even when it is `=`.
-        const nameStart = i++;
-        while (i < n && !isTagSpace(html[i]) && html[i] !== "/" && html[i] !== ">" && html[i] !== "=") i++;
-        const name = html.slice(nameStart, i);
-        while (i < n && isTagSpace(html[i])) i++;
-        let value = "";
-        if (html[i] === "=") {
-            i++;
-            while (i < n && isTagSpace(html[i])) i++;
-            const quote = html[i];
-            if (quote === '"' || quote === "'") {
-                const close = html.indexOf(quote, i + 1);
-                if (close < 0) return null;
-                value = html.slice(i + 1, close);
-                i = close + 1;
-            } else {
-                const start = i;
-                while (i < n && !isTagSpace(html[i]) && html[i] !== ">") i++;
-                value = html.slice(start, i);
-            }
-        }
-        // Names compare in ASCII case only, as the tokenizer lowercases them; a later duplicate is dropped.
-        if (/^shadowrootmode$/i.test(name)) return value;
-        budget.steps -= i - before;
-        if (budget.steps < 0) return undefined;
-    }
-};
+export const mentionsDeclarativeShadowRoot = (page: string) => /shadowrootmode/i.test(page);
 
-/** What is put in front of a closed declarative root's attributes. The first of two same-named attributes wins. */
+/** Longest a template scan may take before the preview is refused instead (a page is at most 1 MB). */
+export const TEMPLATE_SCAN_TIME_LIMIT_MS = 2_000;
+
+/** What is put straight after a closed template's tag name. The first of two same-named attributes wins. */
 const OPEN_SHADOW_ROOT = " shadowrootmode=open ";
 
 /**
  * Makes every declarative shadow root in a page's own markup open, so the
  * guard can follow it (`host.shadowRoot`); a closed one is unreachable from
  * script. The parser attaches a declarative root without calling
- * `attachShadow`, and no policy switches declarative shadow DOM off, so this
- * is done in the text, before the frame parses it.
+ * `attachShadow`, and no policy changes its mode, so this is done in the text,
+ * before the frame parses it.
  *
- * Each `<template` start tag is read on its own, as the tokenizer reads a
- * start tag (quoted values may hold `>`), up to its first `shadowrootmode`
- * attribute. When that value is `closed`, or holds a character reference
- * that could spell it, ` shadowrootmode=open ` is put straight after the tag
- * name: the first of two same-named attributes wins, so the root is open and
- * keeps its content, styles and other options. Nothing is replaced and the
- * insertion has no quote, so it cannot end a string or change a script's
- * syntax; an open root, a template without the attribute, and every
- * `shadowroot`/`shadowrootmode` word that is not such an attribute are left
- * as written.
+ * `head` is what the frame parses before the page (our policy, the prefetch
+ * switch and the guard), so `findTemplates` reads the page in the context it
+ * will be parsed in. It is a spec tokenizer and tree builder
+ * (lib/htmlPreviewTemplateStarts.ts, parse5), so it reports exactly the
+ * `<template>` elements the browser makes -- not text inside a script, a
+ * style, a comment or an attribute that only looks like one. The only change
+ * made to the page is, for each of those whose first `shadowrootmode` is
+ * `closed`, ` shadowrootmode=open ` straight after its tag name: the root is
+ * open and keeps its content, styles and other options. Nothing else of the
+ * page is touched.
  *
- * Every `<template` in the text is read, inside a script, a comment or an
- * attribute value too: a pass that skipped those would have to know where the
- * browser thinks they end, and could be made to skip a tag the browser parses
- * (`<!-->` ends a comment at once). The cost is that a literal closed template
- * tag in a script string gains the same words. A page made so that every read
- * runs to its end cannot make the pass quadratic: after a budget linear in
- * the page, a tag is treated as closed whenever the word comes after it.
- *
- * The old attribute name `shadowroot` is not handled: Chromium 159 does not
- * make a root from it (measured). Applied only when a preview frame is built
- * -- a shared snapshot keeps the page as it was.
+ * A page that names `shadowrootmode` is refused with HtmlPreviewUnavailableError
+ * -- never drawn with its roots left as they are -- when there is no finder,
+ * when the finder throws or takes longer than TEMPLATE_SCAN_TIME_LIMIT_MS, or
+ * when a position it reports is not a `<template` tag name in the page.
+ * Applied only when a preview frame is built: a shared snapshot keeps the page
+ * as it was.
  */
-export const openDeclarativeShadowRoots = (html: string) => {
-    const mentions = /shadowrootmode/gi;
-    let lastMention = -1;
-    for (let found = mentions.exec(html); found; found = mentions.exec(html)) lastMention = found.index;
-    if (lastMention < 0) return html;
-    const budget = { steps: 4 * html.length + 65_536 };
-    const starts = /<template(?=[\t\n\f\r />])/gi;
+export function openDeclarativeShadowRoots(head: string, page: string, findTemplates?: TemplateStartFinder): string {
+    if (!mentionsDeclarativeShadowRoot(page)) return page;
+    if (!findTemplates) throw new HtmlPreviewUnavailableError("No template finder for a page that names shadowrootmode.");
+    const started = Date.now();
+    let templates: readonly TemplateStartTag[];
+    try {
+        templates = findTemplates(head + page);
+    } catch (cause) {
+        throw new HtmlPreviewUnavailableError("The page's template tags could not be read.", { cause });
+    }
+    if (Date.now() - started > TEMPLATE_SCAN_TIME_LIMIT_MS) {
+        throw new HtmlPreviewUnavailableError("Reading the page's template tags took too long.");
+    }
+    const closed: number[] = [];
+    for (const template of templates) {
+        const nameEnd = template.nameEnd - head.length;
+        if (nameEnd < "<template".length || !/^<template$/i.test(page.slice(nameEnd - "<template".length, nameEnd))) {
+            throw new HtmlPreviewUnavailableError("A template position is not a template tag in the page.");
+        }
+        if (template.mode !== null && /^closed$/i.test(template.mode)) closed.push(nameEnd);
+    }
+    closed.sort((a, b) => a - b);
     let out = "";
     let copied = 0;
-    for (let start = starts.exec(html); start; start = starts.exec(html)) {
-        const from = start.index + "<template".length;
-        const mode = firstShadowRootMode(html, from, budget);
-        const closed = mode === undefined ? from < lastMention : mode !== null && (/^closed$/i.test(mode) || mode.includes("&"));
-        if (!closed) continue;
-        out += html.slice(copied, from) + OPEN_SHADOW_ROOT;
-        copied = from;
+    for (const at of closed) {
+        out += page.slice(copied, at) + OPEN_SHADOW_ROOT;
+        copied = at;
     }
-    return out + html.slice(copied);
-};
+    return out + page.slice(copied);
+}
 
 /** A CSP nonce as an embedding document can carry it (base64 characters). */
 export const isEmbedderNonce = (nonce: string | null | undefined): nonce is string =>
@@ -381,26 +390,30 @@ export const isEmbedderNonce = (nonce: string | null | undefined): nonce is stri
  * In the chat the frame inherits the app's nonce policy, so the guard carries
  * the embedding document's nonce (`options.nonce`) or it would not run; the
  * public share page has no nonce and needs none.
+ *
+ * A page that names `shadowrootmode` needs `options.findTemplates`
+ * (lib/htmlPreviewTemplateStarts.ts); without it, or when it fails, this
+ * throws HtmlPreviewUnavailableError and the preview is not drawn.
  */
 export function buildHtmlPreviewSrcdoc(
     html: string,
     assetOrigin?: string | null,
-    options: { nonce?: string | null } = {}
+    options: { nonce?: string | null; findTemplates?: TemplateStartFinder } = {}
 ): string {
-    const page = openDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE, ""));
     const nonce = isEmbedderNonce(options.nonce) ? ` nonce="${options.nonce}"` : "";
     // The second meta switches off the browser's own DNS prefetching for the
     // frame. A CSP does not cover resource hints (`<link rel="preconnect">`
     // and the like); they are a known residual risk. The page is NOT parsed
-    // here to strip them: this parent document never parses or rewrites the
-    // model's HTML, with two exceptions -- withEmbedderNonce, and
-    // openDeclarativeShadowRoots above, which only puts
-    // ` shadowrootmode=open ` in front of a closed declarative root's
-    // attributes, because no other way reaches a closed root.
-    const inner =
+    // here to strip them: this parent document never rewrites the model's
+    // HTML, with two exceptions -- withEmbedderNonce (the browser's parser),
+    // and openDeclarativeShadowRoots, which finds the real template start tags
+    // with a spec tokenizer (parse5) and only puts ` shadowrootmode=open `
+    // into a closed one, because no other way reaches a closed root.
+    const head =
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${htmlPreviewCsp(assetOrigin)}">` +
         `<meta http-equiv="x-dns-prefetch-control" content="off">` +
-        `<script${nonce}>${HTML_PREVIEW_GUARD_SCRIPT}</script>${page}`;
+        `<script${nonce}>${HTML_PREVIEW_GUARD_SCRIPT}</script>`;
+    const inner = head + openDeclarativeShadowRoots(head, html.replace(LEADING_DOCTYPE, ""), options.findTemplates);
     return (
         `<!doctype html><meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_OUTER_CSP}">` +
         `<body style="margin:0;height:100vh;overflow:hidden">` +
