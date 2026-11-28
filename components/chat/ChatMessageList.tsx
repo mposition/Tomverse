@@ -1833,7 +1833,8 @@ export function ChatMessageList({
                           getModel(modelId)?.name ?? modelId
                         }
                         fallbackModelId={msg.modelId ?? null}
-                        onRetry={onRetryLast}
+                        // A Research answer's file is rebuilt by the server; re-sending the last turn would not do it.
+                        onRetry={msg.researchRunId ? undefined : onRetryLast}
                         isGuestMode={isGuestMode}
                         currentProduct={currentProduct}
                       />

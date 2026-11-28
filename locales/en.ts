@@ -804,6 +804,8 @@ export const en = {
         artifactFailedFormat: "That file format is not supported yet.",
         artifactFailedLimit: "The requested file is too large to create.",
         artifactFailedIncomplete: "The answer ended before the file was finished.",
+        artifactFailedSourceRevoked: "Private material this file used is no longer available, so the file is being rebuilt without it. Open this chat again in a moment.",
+        artifactFailedContentTooLarge: "The report is too long for this file type, so no file was made. Use the report in this answer, or export it from the Research report tab.",
         artifactOnlyAnswer: "Here is the file you asked for.",
         artifactRetry: "Create the file again",
         artifactSignInTitle: "Sign in to create files",

@@ -1795,6 +1795,14 @@ run(
   "Running Deep Research engine v2 synthetic scale, concurrency and 60-minute fake-clock fixtures"
 );
 
+// Delegated tasks on engine v2: the same fakes plus an in-memory object store for the generated file.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-task.db.test.ts"],
+  "Running Deep Research engine v2 delegated tasks: approval, file hand-back, budget, cancel, unknown outcome, switch and revocation"
+);
+
 if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {
   fail("a requested DB_INTEGRATION_SUITES path is not registered in this lane.");
 }

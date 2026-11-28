@@ -94,6 +94,8 @@ async function readSource(request: Request, userId: string, source: MaterialCopy
             };
         }
         case "generated_artifact": {
+            // A Research task file left withheld by a failed rebuild is rebuilt on request before it is read.
+            await (await import("@/lib/researchEngineTaskFiles")).retryWithheldResearchTaskFile(source.artifactId, userId);
             // The exact revision row the user chose -- never "the latest".
             const row = await prisma.messageArtifact.findFirst({
                 where: { id: source.artifactId, userId, status: "ready", objectKey: { not: null } },
@@ -104,6 +106,8 @@ async function readSource(request: Request, userId: string, source: MaterialCopy
             if (!supportedMime(row.mediaType)) {
                 throw new ApiSecurityError(422, "ASSISTANT_KNOWLEDGE_UNSUPPORTED_FILE", "This file type cannot be saved as a project material.");
             }
+            // A Research task file made from private sources is copied only while those sources still grant it.
+            if (!(await (await import("@/lib/researchEngineTaskFiles")).researchTaskFileServable({ id: row.id, objectKey: row.objectKey }))) throw lockedOrMissing();
             const revision = row.lineageId
                 ? await prisma.messageArtifact.count({
                       where: { userId, lineageId: row.lineageId, createdAt: { lte: row.createdAt } },
