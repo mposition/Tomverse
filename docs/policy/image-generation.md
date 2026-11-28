@@ -457,6 +457,11 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **저장 경로는 `GET /api/images/generations/{generationId}/download` 하나다.**
   소유권은 조회 자체를 `userId`로 범위 잡아 정하고, 성공하지 않은 generation·
   스윕된 원본·남의 행은 모두 404다 — 구분할 분기가 존재하지 않는다.
+- **잠긴 대화의 이미지는 웹에서도 잠금을 따른다**(2026-11-28). 다운로드와 이미지 그룹·generation
+  읽기(서명 URL을 주는 세 route)는 대화에 비밀번호가 있으면 해당 잠금 해제 grant
+  (`hasConversationUnlockGrant`, 첨부 미리보기·생성 파일 route와 같은 검사)가 있어야 하고 없으면 423
+  `CONVERSATION_LOCKED`다. 데스크톱은 잠긴 대화를 grant와 무관하게 읽지 못한다(그대로).
+  비밀번호가 없는 대화(이미지 workspace, Studio)는 지금처럼 읽는다.
 - **파일 이름은 저장된 `mimeType`에서 만든다.** `imageAssetR2Key()`는 원본을
   언제나 `original.png`로 이름 짓지만 provider가 전부 PNG를 주는 것은 아니다
   (adapter는 `image/jpeg`·`image/webp`도 파싱한다). key는 저장 경로라 고정

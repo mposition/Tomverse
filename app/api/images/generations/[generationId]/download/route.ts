@@ -8,6 +8,10 @@ import {
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import {
+  conversationLockedResponse,
+  hasConversationUnlockGrant,
+} from "@/lib/conversationLock";
 import { DESKTOP_APP_ORIGIN } from "@/lib/desktopReadApiContract";
 import { BoundedBufferError } from "@/lib/boundedBuffer";
 import { detectImageMimeType } from "@/lib/imageDimensions";
@@ -100,6 +104,8 @@ export async function GET(req: Request, { params }: Params) {
         id: true,
         status: true,
         modelId: true,
+        conversationId: true,
+        conversation: { select: { password: true, passwordVersion: true } },
         assets: {
           // The original only. The thumbnail is a display artefact this
           // application derived; nobody asked to download it.
@@ -108,6 +114,22 @@ export async function GET(req: Request, { params }: Params) {
         },
       },
     });
+
+    // A locked conversation's images need its unlock grant on the web too, as
+    // its attachments and generated files do (the desktop is refused above,
+    // in the lookup). An image workspace or Studio conversation has no
+    // password, so it is read as before.
+    if (
+      generation &&
+      !hasConversationUnlockGrant(
+        req,
+        userId,
+        generation.conversationId,
+        generation.conversation.password == null ? null : generation.conversation.passwordVersion
+      )
+    ) {
+      return conversationLockedResponse();
+    }
 
     const asset = preview
       ? generation?.assets.find(({ role }) => role === "thumbnail") ?? generation?.assets.find(({ role }) => role === "original")
