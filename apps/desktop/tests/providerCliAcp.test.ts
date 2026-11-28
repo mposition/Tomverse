@@ -438,7 +438,7 @@ async function withProject<T>(body: (directory: string) => Promise<T>) {
   } finally { await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
 
-type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string; sneakTo?: string };
+type Session = { modes?: { current: string; available: string[] } | null; config?: Record<string, string>; modeOption?: boolean; setMode?: string; setConfig?: string; flipTo?: string; sneakTo?: string; earlyMode?: string };
 const modesOf = (provider: LiveAcpProvider, current: string) => ({ current, available: [...acpSafety[provider].known] });
 /** What each CLI reports when it starts in a mode that asks, and in the mode it really starts in (Vibe: accept-edits; MiniMax Code: permissionMode auto). */
 const safeSession: Record<LiveAcpProvider, Session> = {
@@ -636,6 +636,11 @@ test("A mode that cannot be confirmed as one that asks ends the run before any t
     await fails({ modes: modesOf("minimax", "default"), config: { permissionMode: "turbo" } }, "minimax", /not one Desktop knows/);
     await fails({ ...unsafeSession.minimax, setConfig: "error" }, "minimax", /refused to set its "permissionMode"/);
     await fails({ ...unsafeSession.minimax, setConfig: "silent" }, "minimax", /did not confirm its "permissionMode"/);
+    // A notification printed before the session's answer is older than the mode the answer reports: it does not undo the switch.
+    const ordered = await attempt({ ...unsafeSession.mistral, earlyMode: "auto-approve" }, "mistral");
+    assert.equal(ordered.result.status, "completed", ordered.result.error);
+    assert.deepEqual(ordered.seen.modeSets, ["ask"]);
+    assert.equal(ordered.seen.prompt, "Fix the bug");
     // A switch the CLI answers in its result, or by a notification, is confirmed.
     for (const how of ["result", "notify"]) {
       const mode = await attempt({ ...unsafeSession.mistral, setMode: how }, "mistral");

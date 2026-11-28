@@ -174,6 +174,8 @@ lines.on("line", (line) => {
   } else if (message.method === "session/new") {
     state.sessionNew = message.params;
     if (scenario === "auth") { out({ id: message.id, error: { code: -32000, message: "Authentication required" } }); save(); return; }
+    // A mode notification the CLI prints before its answer, older than the mode the answer reports.
+    if (session.earlyMode) notify("session-1", { sessionUpdate: "current_mode_update", currentModeId: session.earlyMode });
     out({ id: message.id, result: { sessionId: "session-1", ...(modes ? { modes: { currentModeId: state.mode, availableModes: modes.available.map((id) => ({ id, name: id })) } } : {}),
       configOptions: configOptions() } });
   } else if (message.method === "session/set_mode") {

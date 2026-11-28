@@ -563,6 +563,9 @@ export function createAcpClient(options: AcpClientOptions) {
   const calls = new Map<string, TrackedCall>();
   const pendingApprovals = new Set<AbortController>();
   const early: Json[] = [];
+  /** The id of the session/new request, and how many early notifications came before its answer. */
+  let sessionNewId = -1;
+  let earlyBeforeAnswer = 0;
   const watchers = new Set<() => void>();
   let approvals: Promise<void> = Promise.resolve();
   let sessionId = "";
@@ -640,12 +643,13 @@ export function createAcpClient(options: AcpClientOptions) {
    * The session's permission mode must be one that asks (or, in Read only, one that refuses). A mode outside the table of the
    * CLI's known ones, or one that cannot be confirmed after it is set, fails the run before the task is sent.
    */
-  async function enforceMode(session: Json) {
+  async function enforceMode(session: Json, later: Json[]) {
     observed.mode = undefined;
     observed.modeOption = undefined;
     observed.config.clear();
     observed.overflow = false;
     observe(session);
+    for (const update of later) observe(update);
     const modes = isRecord(session.modes) ? session.modes : undefined;
     const available = Array.isArray(modes?.availableModes) ? modes.availableModes.flatMap((mode) => (isRecord(mode) && typeof mode.id === "string" ? [mode.id] : [])) : [];
     const fail = (why: string) => new Error(`${why} Tomverse Desktop does not start a task in a mode it cannot confirm asks first.`);
@@ -766,6 +770,7 @@ export function createAcpClient(options: AcpClientOptions) {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
     const info = isRecord(initialized.result) ? initialized.result : undefined;
     if (!info || initialized.error || info.protocolVersion !== 1) throw new Error(initialized.error ? errorText(initialized) : "The CLI did not answer as an ACP agent (protocol version 1).");
+    sessionNewId = nextId;
     const created = await request("session/new", { cwd: options.cwd, mcpServers: [] });
     const session = isRecord(created.result) ? created.result : undefined;
     if (created.error || !session || typeof session.sessionId !== "string" || !session.sessionId) {
@@ -773,9 +778,13 @@ export function createAcpClient(options: AcpClientOptions) {
       throw new Error(code === -32000 ? "The CLI is not signed in. Sign in with the CLI itself, then try again." : created.error ? errorText(created) : "The CLI did not start a session.");
     }
     sessionId = session.sessionId.slice(0, 200);
-    await enforceMode(session);
-    // Notifications that arrived in the same read as the session's answer count for what they say about the mode.
-    for (const update of early.splice(0)) if (isRecord(update.params) && update.params.sessionId === sessionId) handleUpdate(update);
+    // Notifications from before the session's answer are older than the mode it reports and are dropped; those after it are newer and
+    // count, the mode ones while the mode is set and the others once it is.
+    const later = early.splice(0).slice(earlyBeforeAnswer).flatMap((message) =>
+      isRecord(message.params) && message.params.sessionId === sessionId && isRecord(message.params.update) ? [message.params.update] : []);
+    const isMode = (update: Json) => update.sessionUpdate === "current_mode_update" || update.sessionUpdate === "config_option_update";
+    await enforceMode(session, later.filter(isMode));
+    for (const update of later) if (!isMode(update) && !finished) onUpdate(update);
     if (finished) return;
     options.emit({ type: "session", id: sessionId });
     clearTimeout(timer);
@@ -803,6 +812,7 @@ export function createAcpClient(options: AcpClientOptions) {
       const hasId = typeof message.id === "number" || typeof message.id === "string";
       if (!method) {
         const resolveReply = typeof message.id === "number" ? waiting.get(message.id) : undefined;
+        if (message.id === sessionNewId) earlyBeforeAnswer = early.length;
         if (resolveReply && typeof message.id === "number") { waiting.delete(message.id); resolveReply(message); }
         return;
       }
