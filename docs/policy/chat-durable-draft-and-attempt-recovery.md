@@ -119,9 +119,9 @@ not copied into the row.
 The payload digest is taken over the execution view as the Auto Router
 received it -- the authored messages, or a consumed Prompt Refiner view -- and
 not over the Router's own rewrite of the last message (2026-11-28). The rewrite
-is a model's output: a repeat of the same request, which may skip the Router
-(below) or ask it again and get other words, would otherwise digest different
-messages and be refused as a different request under its own id. A turn the
+is a model's output: a repeat of the same request asks the Router again and may
+get other words (or none) back, and would otherwise digest different messages
+and be refused as a different request under its own id. A turn the
 Router did not rewrite digests exactly what it always did.
 
 For a context bundle, the effective request digest binds the verified semantic
@@ -164,17 +164,14 @@ refused with `409 CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED`. These caps are a hard
 storage bound, not a retention promise or permission to remove audit rows.
 
 The paid Auto Router call runs before the claim (its pick decides the model the
-turn is reserved for). So that a duplicate POST does not pay for it again, the
-route first makes one owner-scoped read of the assistant id: if an attempt is
-already bound to it in this conversation, the Router (and the image
-classification riding on it) is skipped. The claim still decides, under its
-locks, between the reattach and the identity `409` exactly as before, and
-because the digest leaves the rewrite out, skipping the Router cannot change
-its answer; the read only removes a call whose answer could not matter. Two
-POSTs that both arrive before either has claimed still both call the Router. Guest Auto turns
-are de-duplicated earlier, by their `clientTurnId` prehold, before the Guest
-Refiner and the Router. The Router call is also aborted with the request, so a
-client that goes away stops it.
+turn is reserved for and checked against), so a repeated POST -- a reattach
+included -- is routed again like any turn and reaches the claim with the model
+it would have had; because the digest leaves the rewrite out, the claim still
+reattaches whatever the Router answers this time. A duplicate therefore still
+pays for a Router call; removing that would mean claiming before the Router,
+which is not done here. Guest Auto turns are de-duplicated earlier, by their
+`clientTurnId` prehold, before the Guest Refiner and the Router. The Router call
+is aborted with the request, so a client that goes away stops it.
 
 The authenticated stored-Chat send path wires claim, checkpoint and terminal
 transition around the existing provider dispatch. Review, continuation, guest

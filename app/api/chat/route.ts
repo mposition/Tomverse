@@ -96,7 +96,7 @@ import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnable
 import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
-import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { chatImageTriageModelId, chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import { overrideImageRoutingDecisionAsChat, recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 import {
     latestUserTurnHasAttachments,
@@ -2295,55 +2295,6 @@ async function handleChatPost(
         if (isTemporaryConversationExpired(conversationRouting?.temporaryExpiresAt, new Date())) {
             throw new ChatAccessError(410, TEMPORARY_CHAT_EXPIRED, "This temporary chat has ended.");
         }
-        /*
-          Whether a response attempt is already bound to this assistant id in
-          this conversation. One owner-scoped primary-key read, used twice:
-          such a POST ends at the durable claim -- a reattach to that attempt,
-          or the generic 409 for a different request under the same id -- and
-          never writes an answer, so it is neither checked for storage below
-          nor routed (the paid Router call further down is skipped for it).
-          Only a Chat conversation can hold one: Review, continuation and
-          Deep Research turns never claim an attempt.
-        */
-        const attemptAlreadyBound = Boolean(session?.user?.id && conversationId && assistantMessageId) &&
-            conversationRouting?.productKey === "chat" &&
-            (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
-                ?.conversationId === conversationId;
-        /*
-          An answer that could never be stored is refused before anything is
-          paid for -- the Auto Router, the image classification beside it, the
-          credit reservation, the provider. The Message write re-checks under
-          its own lock and stays the authority; this removes the ordinary case,
-          an account already at its storage limit, whose turn used to be routed,
-          charged, streamed and then lost at that write
-          (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
-          The model is not chosen yet, so the room asked for is the most a
-          stored answer can take: its character cap at four bytes each. The
-          conversation's own count only for one the owner-scoped read above
-          found; otherwise the account's limits alone. Not for a POST that
-          reattaches to an answer already there. Only the storage refusal stops
-          the turn, and if the check itself fails, the write decides as it
-          always has.
-        */
-        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound) {
-            try {
-                await checkMessageCapacity(
-                    prisma,
-                    session.user.id,
-                    conversationRouting ? conversationId : null,
-                    1,
-                    MAX_STORED_MESSAGE_CHARACTERS * 4
-                );
-            } catch (error) {
-                if (apiSecurityResponse(error)) throw error;
-                logRequestError(
-                    "chat_message_capacity_precheck_failed",
-                    traceId,
-                    error,
-                    requestedModelId
-                );
-            }
-        }
         if (conversationRouting?.continuationBridge) continuation.receipt = continuationReceipt({
             traceId, assistantMessageId: assistantMessageId ?? "", selected: req.headers.has(PASSAGE_HEADER), outcome: "not_prepared" });
         if (guestAutoCapability) {
@@ -2864,6 +2815,71 @@ async function handleChatPost(
                 earlyContextRefusal = response;
                 return false;
             } : undefined;
+        /*
+          Whether a response attempt is already bound to this assistant id in
+          this conversation. One owner-scoped primary-key read, for the
+          storage check below only: such a POST ends at the durable claim -- a
+          reattach to that attempt, or the generic 409 for a different request
+          under the same id -- and never writes an answer. It is still routed
+          as any turn is, so the turn reaches the claim with the model it would
+          have had; the claim's digest leaves the Router's rewrite out, so a
+          reattach matches whatever the Router answers this time. Only a Chat
+          conversation can hold one: Review, continuation and Deep Research
+          turns never claim an attempt.
+        */
+        const attemptAlreadyBound = Boolean(session?.user?.id && conversationId && assistantMessageId) &&
+            conversationRouting?.productKey === "chat" &&
+            (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
+                ?.conversationId === conversationId;
+        /*
+          An answer that could never be stored is refused before anything is
+          paid for -- the Auto Router, the image classification beside it, the
+          credit reservation, the provider. The Message write re-checks under
+          its own lock and stays the authority; this removes the ordinary case,
+          an account already at its storage limit, whose turn used to be routed,
+          charged, streamed and then lost at that write
+          (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
+          The model is not chosen yet, so the room asked for is the most a
+          stored answer can take: its character cap at four bytes each. The
+          conversation's own count only for one the owner-scoped read above
+          found; otherwise the account's limits alone. Not for a POST that
+          reattaches to an answer already there. Only the storage refusal stops
+          the turn, and if the check itself fails, the write decides as it
+          always has.
+        */
+        /*
+          An Auto Chat turn that may still be answered with an image -- the
+          image classification runs for it (eligible, the plan includes images,
+          image triage is on) -- does not ask for a text answer's worth of room:
+          an image turn stores a one-line answer, and the 400KB this check asks
+          for would refuse it on an account with room for that line. Its text
+          answer, if it turns out to be one, is still checked by the Message
+          write under its lock. A turn that can only be text is checked here.
+          An unreadable triage setting counts as possibly an image, leaving the
+          decision to the write rather than refusing on a guess.
+        */
+        const mayAnswerWithImage = autoImageTurnEligible &&
+            Boolean(accountPlan && planAllowsImageGeneration(accountPlan.tier)) &&
+            (await chatImageTriageModelId().catch(() => "unreadable")) !== null;
+        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound && !mayAnswerWithImage) {
+            try {
+                await checkMessageCapacity(
+                    prisma,
+                    session.user.id,
+                    conversationRouting ? conversationId : null,
+                    1,
+                    MAX_STORED_MESSAGE_CHARACTERS * 4
+                );
+            } catch (error) {
+                if (apiSecurityResponse(error)) throw error;
+                logRequestError(
+                    "chat_message_capacity_precheck_failed",
+                    traceId,
+                    error,
+                    requestedModelId
+                );
+            }
+        }
         let fusion: { key: RouterLocationClaim; userId: string; requestDigest: string; expiresAt: number; searchUtcDate: string; resume: RouterLocationContinuation | null } | null = null;
         if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
             const userId = session.user.id;
@@ -2922,22 +2938,7 @@ async function handleChatPost(
             const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
             fusion = { key, userId, requestDigest, expiresAt, searchUtcDate, resume };
         }
-        /*
-          A response attempt already bound to this assistant id ends this POST
-          at the durable claim below -- a reattach to that attempt, or the
-          generic 409 for a different request under the same id -- and never
-          dispatches. Neither outcome depends on what the Router picks, so the
-          paid Router call (and the image classification riding on it) is not
-          made for a duplicate (`attemptAlreadyBound`, read before the storage
-          check); the claim still makes the decision, under its own locks. A
-          location-consent turn keeps its own replay rule.
-        */
-        const routerSkippedForBoundAttempt =
-            deterministicAutoSelection.routed &&
-            !wantsFusion &&
-            conversationRouting?.productKey === "chat" &&
-            attemptAlreadyBound;
-        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible && !routerSkippedForBoundAttempt
+        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
             ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(messages),
                 plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
             : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled(), fusion?.resume?.image);
@@ -2995,7 +2996,7 @@ async function handleChatPost(
         // classification beside it (off unless CHAT_ROUTER_IMAGE_HEDGE_MS).
         const imageHedgeMs = imageRouting.context ? chatRouterImageHedgeMs() : null;
         const imageHedge = imageHedgeMs ? setTimeout(() => imageRouting.hedge(), imageHedgeMs) : null;
-        let llmPick = deterministicAutoSelection.routed && !routerSkippedForBoundAttempt
+        let llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
                       // A client that goes away stops the paid call with it.
                       abortSignal: req.signal,
@@ -3146,10 +3147,9 @@ async function handleChatPost(
           The view the Router was handed, kept when it rewrites it. The durable
           attempt's identity is digested from this, not from the rewrite: the
           rewrite is a model's output, so a repeat of the same request -- a
-          POST reattachment, which no longer asks the Router at all when its
-          attempt is already bound, or a duplicate that does and gets other
-          words back -- must still name the same attempt rather than be refused
-          as a different request under that id
+          POST reattachment or a duplicate, each asking the Router again and
+          getting other words (or none) back -- must still name the same
+          attempt rather than be refused as a different request under that id
           (docs/policy/chat-durable-draft-and-attempt-recovery.md section 3).
           Only set when a rewrite applied, and a rewrite never applies on top
           of a Refiner view, so nothing reassigns the messages after it.

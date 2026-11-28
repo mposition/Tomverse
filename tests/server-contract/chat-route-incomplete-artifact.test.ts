@@ -506,8 +506,12 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   },
 } });
 const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
+/** Image triage's model as the route reads it; undefined keeps the real read. */
+let forcedImageTriageModel: string | null | undefined;
 mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
   ...realImageIntent,
+  chatImageTriageModelId: async () =>
+    forcedImageTriageModel === undefined ? realImageIntent.chatImageTriageModelId() : forcedImageTriageModel,
   createChatTurnImageRouting: (input: { text?: string } | null) => {
     if (input) imageIntentCalls += 1;
     imageIntentText = input?.text ?? null;
@@ -1227,6 +1231,40 @@ test("a follow-up that carries a held Refiner decision still gets the image clas
   assert.equal(mode, "image-turn");
   assert.equal(lastStreamTextOptions, null, "an image turn calls no chat model");
   assert.deepEqual(refinerEvents, ["preview"], "an image turn ends before the Refiner decision is consumed");
+});
+
+/*
+  B3 review, fifth pass: the storage precheck asks for a text answer's worth
+  of room (400KB) before the image classification, so an Auto turn that would
+  have stored only a one-line image answer was refused on an account with room
+  for that line. A turn that may still be answered with an image is now left
+  to the write's own check; a turn that can only be text is refused up front.
+*/
+test("with room for an image answer but not a text one, the image turn goes on and a text-only turn is refused", async () => {
+  const prior = process.env.API_MAX_MESSAGE_BYTES_PER_USER;
+  // An empty account allowed 100KB: less than the 400KB a text answer asks for.
+  process.env.API_MAX_MESSAGE_BYTES_PER_USER = "100000";
+  try {
+    forcedImageTriageModel = "gpt-6-luna";
+    const image = await ask({}, { autoRoutedTo: MODEL_ID, imageIntent: true, prompt: "Draw a cat." });
+    assert.equal(image.mode, "image-turn", "an image turn is not refused for room it will not use");
+    assert.equal(imageIntentCalls, 1);
+
+    // The same Auto turn with image triage off can only be text.
+    forcedImageTriageModel = null;
+    const autoText = await ask({}, { autoRoutedTo: MODEL_ID, prompt: "Why is snow white?", expectedStatus: 409 });
+    assert.match(autoText.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+    assert.equal(lastStreamTextOptions, null, "refused before any model was called");
+
+    // A manual turn is never an image turn.
+    forcedImageTriageModel = "gpt-6-luna";
+    const manual = await ask({}, { prompt: "Why is snow white?", expectedStatus: 409 });
+    assert.match(manual.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+  } finally {
+    forcedImageTriageModel = undefined;
+    if (prior === undefined) delete process.env.API_MAX_MESSAGE_BYTES_PER_USER;
+    else process.env.API_MAX_MESSAGE_BYTES_PER_USER = prior;
+  }
 });
 
 test("an ordinary follow-up with a held Refiner decision stays a text turn and consumes it once", async () => {

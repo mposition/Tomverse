@@ -2405,13 +2405,15 @@ test("an exact durable replay reattaches without reservation or provider dispatc
 });
 
 /*
-  Review finding (B3, 2026-11-28): the claim's request digest was taken after
-  the Router's rewrite, so a repeat that skipped the Router -- or asked it and
-  got other words -- digested different messages and a legitimate reattach was
-  refused as CHAT_ATTEMPT_ID_REUSED. The claim here decides with the real
+  Review findings (B3, 2026-11-28): the claim's request digest was taken after
+  the Router's rewrite, so a repeat that asked the Router again and got other
+  words digested different messages and a legitimate reattach was refused as
+  CHAT_ATTEMPT_ID_REUSED. And a repeat must be routed like any turn (fifth
+  pass: skipping the Router left it on the rule model, and checks before the
+  claim could then refuse it). The claim here decides with the real
   fingerprint and `decideAttemptClaim`, over the digest the route computed.
 */
-test("a repeat of a turn the Router rewrote reattaches through the real identity digest, Router asked again or not", async () => {
+test("a repeat of a turn the Router rewrote is routed again and reattaches, whatever the Router answers", async () => {
   realClaimStore = new Map();
   llmRouterRewrite = "Rewritten by the Router.";
   try {
@@ -2423,26 +2425,37 @@ test("a repeat of a turn the Router rewrote reattaches through the real identity
     assert.equal(realClaimStore.size, 1);
     const firstDigest = lastDurableClaimInput?.requestPayloadDigest;
     assert.equal(typeof firstDigest, "string");
+    const eligible = llmRouterInputs[0].eligibleModelIds;
+    const ruleModelId = llmRouterInputs[0].ruleModelId;
 
-    // The same POST again: bound, so no Router call, and the same identity.
+    // The same POST again: routed again, same rewrite, same identity.
     llmRouterInputs.length = 0;
     const repeat = await ask("answers", "claimed", 200, false);
-    assert.equal(llmRouterInputs.length, 0);
+    assert.equal(llmRouterInputs.length, 1, "a repeat is routed like any turn");
     assert.equal(repeat.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
     assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
     assert.equal(attempts.length, 0, "a reattach dispatches nothing");
 
-    // A duplicate that raced the claim, asked the Router and got other words.
-    realPeekBlind = true;
+    // The Router answers in other words this time.
     llmRouterRewrite = "Different words from a second Router call.";
     llmRouterInputs.length = 0;
-    const raced = await ask("answers", "claimed", 200, false);
+    const reworded = await ask("answers", "claimed", 200, false);
     assert.equal(llmRouterInputs.length, 1);
-    assert.equal(raced.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(reworded.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
     assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
 
+    // ... or picks another model.
+    const otherModel = eligible.find((id) => id !== ruleModelId);
+    assert.ok(otherModel, "the fixture offers the Router a second candidate");
+    llmSearchModelId = otherModel;
+    llmRouterInputs.length = 0;
+    const rerouted = await ask("answers", "claimed", 200, false);
+    assert.equal(llmRouterInputs.length, 1);
+    assert.equal(rerouted.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
+    llmSearchModelId = undefined;
+
     // A different request under the same id is still the generic 409.
-    realPeekBlind = false;
     const different = await ask("answers", "claimed", 409, false, undefined, true, true, undefined, "always");
     assert.equal((JSON.parse(different.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
     assert.notEqual(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
@@ -2450,6 +2463,7 @@ test("a repeat of a turn the Router rewrote reattaches through the real identity
     realClaimStore = null;
     realPeekBlind = false;
     llmRouterRewrite = null;
+    llmSearchModelId = undefined;
   }
 });
 
@@ -2539,23 +2553,16 @@ test("a conversation the owner-scoped read does not find is checked against the 
   }
 });
 
-test("a POST whose assistant id is already bound skips the paid Router and still reattaches at the claim", async () => {
-  // Control: nothing bound yet, so this routed turn asks the Router.
-  llmRouterInputs.length = 0;
-  durablePeekCalls = 0;
-  await ask("answers", "reattach");
-  assert.equal(durablePeekCalls, 1);
-  assert.equal(llmRouterInputs.length, 1, "an unbound routed turn asks the Router");
-
-  // An attempt bound in this conversation: the claim can only reattach or
-  // refuse, so the Router is not paid for a duplicate.
+test("a POST whose attempt is already bound is still routed, and the claim reattaches it", async () => {
   peekedAttemptConversationId = CONVERSATION_ID;
   try {
     llmRouterInputs.length = 0;
+    durablePeekCalls = 0;
     const { response, body } = await ask("answers", "reattach");
-    assert.equal(llmRouterInputs.length, 0, "no Router call for a bound duplicate");
+    assert.equal(durablePeekCalls, 1, "read once, for the storage check");
+    assert.equal(llmRouterInputs.length, 1, "routed like any turn");
     assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
-    assert.equal(durableClaimCalls, 1, "the claim still makes the decision");
+    assert.equal(durableClaimCalls, 1, "the claim makes the decision");
     assert.equal(attempts.length, 0);
     assert.equal(ledger.accessAcquisitions, 0);
     assert.equal((JSON.parse(body) as { attempt: { assistantMessageId: string } }).attempt.assistantMessageId,
@@ -2564,14 +2571,8 @@ test("a POST whose assistant id is already bound skips the paid Router and still
     // A different identity under the same id is still the claim's 409.
     llmRouterInputs.length = 0;
     const conflict = await ask("answers", "conflict", 409);
-    assert.equal(llmRouterInputs.length, 0);
-    assert.equal((JSON.parse(conflict.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
-
-    // An attempt bound in another conversation is not this turn's.
-    peekedAttemptConversationId = "another-conversation";
-    llmRouterInputs.length = 0;
-    await ask("answers", "reattach");
     assert.equal(llmRouterInputs.length, 1);
+    assert.equal((JSON.parse(conflict.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
   } finally {
     peekedAttemptConversationId = null;
   }
