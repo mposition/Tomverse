@@ -52,7 +52,10 @@ async function writeAttachment(root: string, name: string, bytes: Uint8Array) {
       await writeFile(candidate, bytes, { flag: "wx" });
       return candidate;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      // The file was this call's own (wx creates it or fails with EEXIST): a write that broke off leaves nothing behind.
+      await rm(candidate, { force: true }).catch(() => {});
+      throw error;
     }
   }
   throw new CodeAttachmentRefused("No free attachment name.");
@@ -130,7 +133,13 @@ export async function carryAttachmentCopies(source: Workspace, targetRoot: strin
     await attachmentFolder(targetRoot);
     for (const path of paths) {
       const target = join(folder, path.split("/")[1]!);
-      await writeFile(target, await readFile(source.resolve(path, "read").absolute), { flag: "wx" });
+      const bytes = await readFile(source.resolve(path, "read").absolute);
+      try { await writeFile(target, bytes, { flag: "wx" }); }
+      catch (error) {
+        // A file the branch already has (EEXIST) is not this call's to remove; a write that broke off is.
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") written.push(target);
+        throw error;
+      }
       written.push(target);
     }
   } catch (error) {

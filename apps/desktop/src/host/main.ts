@@ -306,6 +306,8 @@ let codeWorktreeDraft: { home: string; id: string } | undefined;
 const codeReferences = new Map<string, CodeReference>();
 /** The references whose file this app copied into the attachment folder (code-attachments.ts): only these are ever deleted. */
 const ownedCopies = new Set<string>();
+/** Counts the drafts the references belong to: a copy that finishes after its draft was cleared joins no other draft. */
+let referenceDraft = 0;
 let historyCursor: string | null = null;
 const historyStorage = new Map<string, string>();
 const historyWorktreePaths = new Map<string, string>();
@@ -1259,6 +1261,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   state.busy = true;
   codeReferences.clear();
   ownedCopies.clear();
+  referenceDraft++;
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
       ...(chosen?.providerModelId ? { model: chosen.providerModelId } : {}),
@@ -1282,6 +1285,7 @@ function startCliFixtureTask(task: Task, command: Extract<WorkerCommand, { type:
   state.busy = true;
   codeReferences.clear();
   ownedCopies.clear();
+  referenceDraft++;
   try {
     send(command);
   } catch {
@@ -1630,6 +1634,7 @@ async function chooseRemote(project: ProjectRoot) {
     if (state.root !== project.path || projectRoot?.identity !== project.identity) {
       codeReferences.clear();
       ownedCopies.clear();
+      referenceDraft++;
       workspaceHandoff = null;
       // Allow all never follows the person to another project, a remote one included.
       if (permissionHost.current === "allow_all" && permissionHost.run({ action: "set-mode", mode: "ask" }).ok) {
@@ -1783,6 +1788,7 @@ function adoptCodeSession(owner: StoredDesktopSession) {
   pendingInspection?.settle(null);
   codeReferences.clear();
   ownedCopies.clear();
+  referenceDraft++;
   workspaceHandoff = null;
   const linked = { accountId: owner.accountId, connection: codeSessionConnection(owner.accountId, accountOrigin ?? DESKTOP_LIVE_ORIGIN) };
   linkedCode = linked;
@@ -1808,6 +1814,7 @@ function dropCodeSession() {
   pendingInspection?.settle(null);
   codeReferences.clear();
   ownedCopies.clear();
+  referenceDraft++;
   workspaceHandoff = null;
   linkedCode = null;
   codeToken = null;
@@ -1943,6 +1950,7 @@ async function chooseRoot(target: string) {
     if (projectChanged) {
       codeReferences.clear();
       ownedCopies.clear();
+      referenceDraft++;
       workspaceHandoff = null;
     }
     projectRoot = project;
@@ -1972,9 +1980,11 @@ async function pasteCodeImage(input: z.infer<typeof codePastedImage>) {
   }
   if (codeReferences.size >= MAX_CODE_REFERENCES) return { references: [...codeReferences.values()], rejected: 1 };
   assertProjectRoot(project);
-  // The draft this image was pasted into: a sign-out, another account or another project meanwhile gets nothing of it.
+  // The draft this image was pasted into: a sign-out, another account, project or task meanwhile gets nothing of it.
+  // A task started meanwhile cleared the draft (a new generation) or is running: either way the image is dropped.
+  const draft = referenceDraft;
   const stillDraft = () => projectRoot === project && state.root === root && workspaceNamespace() === namespace && codeConnection() === connection &&
-    !session.aborted && !signingOut && !closing;
+    referenceDraft === draft && !state.busy && !session.aborted && !signingOut && !closing;
   const workspace = new Workspace(root, [app.getPath("userData")]);
   let saved: string | undefined;
   let rejected = 0;
@@ -1982,6 +1992,7 @@ async function pasteCodeImage(input: z.infer<typeof codePastedImage>) {
     saved = relative(root, await savePastedImage(root, input)).split(sep).join("/");
     const reference = workspace.reference(saved);
     if (!stillDraft()) throw new Error("The Code project changed.");
+    // The name is the app's own (date and a sanitized stem); with a Code key it is also kept free of that key.
     if (connection && cleanText(reference.path, connection.key) !== reference.path) throw new Error("The image cannot be attached.");
     const id = randomUUID();
     codeReferences.set(id, { id, ...reference });
@@ -2018,6 +2029,7 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
       throw new Error("The Code project changed.");
     }
     let rejected = 0;
+    const draft = referenceDraft;
     if (!canceled) {
       assertProjectRoot(project);
       const workspace = new Workspace(root, [app.getPath("userData")]);
@@ -2032,6 +2044,12 @@ async function chooseCodeReferences(kind: CodeReference["kind"]) {
           // Outside means a parent step or another drive; a project file named "..notes.txt" is inside.
           const copied = kind === "file" && (/^\.\.(?:[\\/]|$)/.test(outside) || isAbsolute(outside)) ? await copyOutsideFile(root, path) : undefined;
           const copiedPath = copied ? relative(root, copied).split(sep).join("/") : undefined;
+          // The copy took a while: a sign-out, another account, project or draft meanwhile gets nothing of it.
+          if (copiedPath && (window !== mainWindow || session.aborted || connection !== codeConnection() || namespace !== workspaceNamespace() ||
+              projectRoot !== project || referenceDraft !== draft || signingOut || closing)) {
+            await discardAttachmentCopy(workspace, copiedPath).catch(() => {});
+            throw new Error("The Code project changed.");
+          }
           let reference: ReturnType<Workspace["reference"]>;
           try { reference = workspace.reference(copied ?? path); }
           catch (error) {
@@ -2788,6 +2806,7 @@ function clearAccountWorkspace() {
   attachmentReceipts.clear();
   codeReferences.clear();
   ownedCopies.clear();
+  referenceDraft++;
   void voice.end();
   chatSession.abort();
   workspaceHandoff = null;
@@ -2851,6 +2870,7 @@ async function linkCodeKey(key: string, owner: StoredDesktopSession, persist: bo
     if (codeConnection()?.key !== key) {
       codeReferences.clear();
       ownedCopies.clear();
+      referenceDraft++;
       workspaceHandoff = null;
     }
     linkedCode = { accountId: owner.accountId, connection: { key,
@@ -4691,6 +4711,7 @@ function registerIpc() {
       if (handoffId) removeWorkspaceHandoff(handoffId);
       codeReferences.clear();
       ownedCopies.clear();
+      referenceDraft++;
       codeWorktreeDraft = undefined;
       broadcast();
       return;
@@ -4717,6 +4738,7 @@ function registerIpc() {
     if (handoffId) removeWorkspaceHandoff(handoffId);
     codeReferences.clear();
     ownedCopies.clear();
+    referenceDraft++;
     codeWorktreeDraft = undefined;
     broadcast();
   };
