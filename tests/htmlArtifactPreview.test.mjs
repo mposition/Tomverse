@@ -287,7 +287,7 @@ test("the parent document never parses or rewrites the model's HTML for resource
   }
   // No pattern over the page's markup for resource hints in the build step either.
   assert.doesNotMatch(lib, /\.replace\([^)]*<link/i);
-  // The one text substitution over the page is the declarative-shadow-root rename (no parse), made where the
+  // The one text substitution over the page is the declarative-shadow-root rename, with no parse, made where the
   // frame is built.
   assert.equal(code(lib).split("neutralizeDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE").length - 1, 1);
 });
