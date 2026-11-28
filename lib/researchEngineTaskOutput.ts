@@ -134,6 +134,19 @@ function reportFrame(document: ResearchReportDocument, labels: ResearchEngineCop
   };
 }
 
+/**
+ * A report table at its full width: every column header, and every row padded with empty cells to the widest of
+ * the header and the rows (the report schema lets a row be shorter or longer than its header). A cell past the
+ * last header keeps its place under `header(index)` rather than being dropped.
+ */
+function fullTable(block: { columns: readonly string[]; rows: ReadonlyArray<readonly string[]> }, header: (index: number) => string = () => "") {
+  const width = block.rows.reduce((widest, row) => Math.max(widest, row.length), block.columns.length);
+  return {
+    columns: Array.from({ length: width }, (_, index) => block.columns[index] ?? header(index)),
+    rows: block.rows.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? "")),
+  };
+}
+
 /** Lists of at most `maxListItems` items; a longer list continues in the next one. */
 const lists = (type: "bullets" | "numbers", items: string[]) => {
   const blocks: Array<Record<string, unknown>> = [];
@@ -165,10 +178,12 @@ export function reportDocumentSpec(document: ResearchReportDocument, claims: Rea
       if (block.type === "paragraph") blocks.push(...paragraphs(`${block.text}${cite(block.claimKeys)}`));
       else {
         blocks.push(...paragraphs(`${block.caption}${cite(block.claimKeys)}`));
+        // The document writer draws as many cells as there are headers, so the table goes in at its full width.
         // A task file keeps every row and column; one over a document table's limits is refused by the schema below.
-        blocks.push(options.strict ? { type: "table", columns: block.columns, rows: block.rows }
-          : { type: "table", columns: block.columns.slice(0, ARTIFACT_LIMITS.maxDocumentTableColumns).map((column) => clip(column, TITLE)),
-            rows: block.rows.slice(0, ARTIFACT_LIMITS.maxDocumentTableRows).map((row) => row.slice(0, ARTIFACT_LIMITS.maxDocumentTableColumns)) });
+        const table = fullTable(block);
+        blocks.push(options.strict ? { type: "table", ...table }
+          : { type: "table", columns: table.columns.slice(0, ARTIFACT_LIMITS.maxDocumentTableColumns).map((column) => clip(column, TITLE)),
+            rows: table.rows.slice(0, ARTIFACT_LIMITS.maxDocumentTableRows).map((row) => row.slice(0, ARTIFACT_LIMITS.maxDocumentTableColumns)) });
       }
     }
   }
@@ -190,8 +205,9 @@ export function reportDocumentSpec(document: ResearchReportDocument, claims: Rea
 /** Every table of the report, in report order, named as the XLSX export names them. */
 function reportTables(document: ResearchReportDocument, cite: (keys: readonly string[]) => string) {
   return document.sections.flatMap((section) => section.blocks.flatMap((block) => block.type === "table" ? [block] : [])
+    // A spreadsheet header cell cannot be empty: a column past the report's headers is named by its position.
     .map((block, index) => ({ name: clip(`${section.key}-${index + 1}`, 31), caption: block.caption, label: `${section.heading} · ${block.caption}${cite(block.claimKeys)}`,
-      columns: block.columns, rows: block.rows })));
+      ...fullTable(block, (column) => String(column + 1)) })));
 }
 
 /**
@@ -289,7 +305,11 @@ export function reportPresentationSpec(document: ResearchReportDocument, claims:
       pointSlides(section.heading, section.blocks.flatMap((block) => block.type === "paragraph" ? [`${block.text}${cite(block.claimKeys)}`] : []));
       for (const block of section.blocks) {
         if (block.type !== "table") continue;
-        pointSlides(`${block.caption}${cite(block.claimKeys)}`, block.rows.map((row) => row.map((cell, column) => `${block.columns[column] ?? ""}: ${cell}`).join(" · ")));
+        // The header is its own first point, so every column title is on the slide and in the notes however short
+        // the rows are; each row then names every column, an empty cell left empty.
+        const table = fullTable(block);
+        pointSlides(`${block.caption}${cite(block.claimKeys)}`, [table.columns.join(" · "),
+          ...table.rows.map((row) => row.map((cell, column) => table.columns[column] ? `${table.columns[column]}: ${cell}` : cell).join(" · "))]);
       }
     }
     for (const group of frame.closing) pointSlides(group.heading, group.points);

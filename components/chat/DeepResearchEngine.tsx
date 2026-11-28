@@ -32,6 +32,16 @@ type Offer = {
 /** What the work is handed back as. "report" is Deep Research as before; the others delegate a task that ends in a file. */
 export const RESEARCH_SHEET_OUTPUTS = ["report", "document", "spreadsheet", "presentation"] as const;
 type SheetOutput = (typeof RESEARCH_SHEET_OUTPUTS)[number];
+type SheetOutputState = { output: SheetOutput; requested: SheetOutput };
+
+/**
+ * The deliverable the open sheet shows. An entry that asks for a different one (a new `initialOutput`) resets it;
+ * otherwise the person's own choice in the sheet stays. The same adjust-on-prop-change rule as the desktop shell's
+ * active tab: the requested value is kept beside the state and compared while rendering.
+ */
+export function sheetOutputFor(current: SheetOutputState, requested: SheetOutput): SheetOutputState {
+  return current.requested === requested ? current : { output: requested, requested };
+}
 
 /** One offer read per account scope. Deterministic on the server; never calls a model. */
 export function useDeepResearchEngineOffer(identityKey: string | null, enabled: boolean) {
@@ -70,7 +80,11 @@ export function DeepResearchEngineSheet({ open, onClose, language, conversationI
   const [profile, setProfile] = useState<"standard" | "deep">("standard");
   const [credits, setCredits] = useState(() => Math.max(50, offer?.estimate?.highCredits ?? 400));
   const [autoStart, setAutoStart] = useState(false);
-  const [output, setOutput] = useState<SheetOutput>(initialOutput);
+  const [outputState, setOutputState] = useState<SheetOutputState>({ output: initialOutput, requested: initialOutput });
+  const adjustedOutput = sheetOutputFor(outputState, initialOutput);
+  if (adjustedOutput !== outputState) setOutputState(adjustedOutput);
+  const output = adjustedOutput.output;
+  const setOutput = (value: SheetOutput) => setOutputState({ output: value, requested: initialOutput });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // One identity per attempt: a lost create response is retried with the same ids and returns the same run.

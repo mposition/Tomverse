@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { DeepResearchEngineRow, DeepResearchEngineSheet, RESEARCH_SHEET_OUTPUTS } from "@/components/chat/DeepResearchEngine";
+import { DeepResearchEngineRow, DeepResearchEngineSheet, RESEARCH_SHEET_OUTPUTS, sheetOutputFor } from "@/components/chat/DeepResearchEngine";
 import { researchEngineCopy } from "@/locales/researchEngine";
 
 const offer = (taskAgent: boolean) => ({ offered: true, features: { defaultEntry: false, privateSources: false, projectSources: false,
@@ -53,4 +53,14 @@ test("every language has the task copy", () => {
     for (const key of keys) assert.ok(typeof copy[key] === "string" && copy[key].trim(), `${language}.${key}`);
     if (language !== "en") assert.notEqual(copy.taskHint, researchEngineCopy.en.taskHint, `${language} is translated`);
   }
+});
+
+test("reopening the sheet for another deliverable resets the choice; the person's own choice stays while the request is unchanged", () => {
+  const opened = { output: "report", requested: "report" } as const;
+  // The person picks slides inside the sheet: the request is still "report", so a re-render keeps slides.
+  const picked = { output: "presentation", requested: "report" } as const;
+  assert.equal(sheetOutputFor(picked, "report"), picked);
+  // An entry now opens it for a spreadsheet: the new request wins.
+  assert.deepEqual(sheetOutputFor(picked, "spreadsheet"), { output: "spreadsheet", requested: "spreadsheet" });
+  assert.equal(sheetOutputFor(opened, "report"), opened, "no change, same state object, no re-render");
 });

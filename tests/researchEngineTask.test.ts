@@ -230,7 +230,9 @@ test("every field of the report reaches the document, the spreadsheet and the sl
     sections: [
       { key: "s1", heading: "HEADING-SENTINEL", status: "written", blocks: [
         { type: "paragraph", text: "PARAGRAPH-SENTINEL", claimKeys: ["C2"] },
-        { type: "table", caption: "CAPTION-SENTINEL", columns: ["COLUMN-SENTINEL"], rows: [["CELL-SENTINEL"]], claimKeys: ["C1"] }] },
+        // Rows shorter than the header (every row has one cell of two) and a row longer than its header.
+        { type: "table", caption: "CAPTION-SENTINEL", columns: ["COLUMN-SENTINEL", "SECOND-COLUMN-SENTINEL"], rows: [["CELL-SENTINEL"], ["CELL-TWO-SENTINEL"]], claimKeys: ["C1"] },
+        { type: "table", caption: "WIDE-CAPTION-SENTINEL", columns: ["WIDE-COLUMN-SENTINEL"], rows: [["WIDE-CELL-SENTINEL", "EXTRA-CELL-SENTINEL"]], claimKeys: ["C1"] }] },
       { key: "s2", heading: "MISSING-HEADING-SENTINEL", status: "missing", blocks: [] },
     ],
     conflicts: [{ text: "CONFLICT-SENTINEL", claimKeys: ["C2"] }], limitations: ["LIMITATION-SENTINEL"], nextQuestions: ["NEXT-SENTINEL"],
@@ -247,7 +249,9 @@ test("every field of the report reaches the document, the spreadsheet and the sl
     "title": ["TITLE-SENTINEL"], "summary": ["SUMMARY-SENTINEL"], "scope.question": ["QUESTION-SENTINEL"], "scope.note": ["NOTE-SENTINEL"],
     "scope.assumptions": ["ASSUMPTION-SENTINEL"], "scope.currentDate": ["2031-02-03"], "sections.heading": ["HEADING-SENTINEL", "MISSING-HEADING-SENTINEL"],
     "sections.status": [r.missingSection], "sections.blocks.text": ["PARAGRAPH-SENTINEL"], "sections.blocks.claimKeys": ["PARAGRAPH-SENTINEL [2] (conflicting)"],
-    "sections.blocks.caption": ["CAPTION-SENTINEL"], "sections.blocks.columns": ["COLUMN-SENTINEL"], "sections.blocks.rows": ["CELL-SENTINEL"],
+    "sections.blocks.caption": ["CAPTION-SENTINEL", "WIDE-CAPTION-SENTINEL"],
+    "sections.blocks.columns": ["COLUMN-SENTINEL", "SECOND-COLUMN-SENTINEL", "WIDE-COLUMN-SENTINEL"],
+    "sections.blocks.rows": ["CELL-SENTINEL", "CELL-TWO-SENTINEL", "WIDE-CELL-SENTINEL", "EXTRA-CELL-SENTINEL"],
     "conflicts.text": ["CONFLICT-SENTINEL"], "conflicts.claimKeys": ["CONFLICT-SENTINEL [2] (conflicting)"], "limitations": ["LIMITATION-SENTINEL"],
     "nextQuestions": ["NEXT-SENTINEL"], "criteria.criterion": ["MET-CRITERION-SENTINEL", "UNMET-CRITERION-SENTINEL"],
     "criteria.met": [`${r.met}: MET-CRITERION-SENTINEL`, `${r.notMet}: UNMET-CRITERION-SENTINEL`],
@@ -264,6 +268,19 @@ test("every field of the report reaches the document, the spreadsheet and the sl
     assert.ok(text.includes(r.quality.partial), `${output}: quality`);
     for (const [path, needles] of Object.entries(expected)) for (const needle of needles) assert.ok(text.includes(needle), `${output} is missing ${path}: ${needle}`);
   }
+  // Every column title is on the slide and in its notes even when no row reaches that column; empty cells stay empty.
+  const deck = reportPresentationSpec(document, claimMap, labels, "partial", "x.pptx");
+  const tableSlide = deck.slides.find((slide) => slide.title.startsWith("CAPTION-SENTINEL"))!;
+  assert.equal(tableSlide.bullets![0], "COLUMN-SENTINEL · SECOND-COLUMN-SENTINEL");
+  assert.ok(tableSlide.notes!.includes("COLUMN-SENTINEL: CELL-SENTINEL · SECOND-COLUMN-SENTINEL: "));
+  // The document and the sheet get the table at its full width.
+  const docTables = reportDocumentSpec(document, claimMap, "docx", labels, "partial", "x.docx", { strict: true }).blocks.flatMap((block) => block.type === "table" ? [block] : []);
+  assert.deepEqual(docTables.map((block) => [block.columns, block.rows]), [
+    [["COLUMN-SENTINEL", "SECOND-COLUMN-SENTINEL"], [["CELL-SENTINEL", ""], ["CELL-TWO-SENTINEL", ""]]],
+    [["WIDE-COLUMN-SENTINEL", ""], [["WIDE-CELL-SENTINEL", "EXTRA-CELL-SENTINEL"]]],
+  ]);
+  const wideSheet = reportTaskWorkbookSpec(document, claimMap, labels, "partial", "x.xlsx").worksheets.find((entry) => entry.title === "WIDE-CAPTION-SENTINEL")!;
+  assert.deepEqual([wideSheet.columns.map((column) => column.header), wideSheet.rows], [["WIDE-COLUMN-SENTINEL", "2"], [["WIDE-CELL-SENTINEL", "EXTRA-CELL-SENTINEL"]]]);
   // Source numbers: the [n] of each source, in the form each file kind shows it.
   const sheet = reportTaskWorkbookSpec(document, claimMap, labels, "partial", "x.xlsx").worksheets.find((entry) => entry.name === r.sources)!;
   assert.deepEqual(sheet.rows.map((row) => [row[0], row[1]]), [["1", "SOURCE-ONE-SENTINEL"], ["2", "SOURCE-TWO-SENTINEL"]]);
