@@ -141,28 +141,30 @@ if (-not $BuildOnly) {
     }
 
     # App Installer's launch check never blocks a packaged desktop app: Windows starts the installed
-    # build first and can only apply the release on the launch after that. Update this PC's Local Dev
-    # install now instead: at once when the app is closed, or at its next launch while it is running.
+    # build first and can only apply the release on the launch after that. Apply it on this PC now:
+    # install from the feed when the app is closed. While the app runs, a feed install fails with
+    # 0x80073D02 and removes what it staged, so stage the MSIX and register it by full name: that
+    # registration fails while the app runs but stays pending and is applied at the next launch.
+    # The MSIX-staged build is no longer tied to the feed, which is harmless here because this
+    # script updates this PC on every release, and the next closed-app install ties it again.
     # The Appx module loads only in Windows PowerShell.
     $localInstall = & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command {
         param($Identity, $Feed, $Asset, $Version)
         $ErrorActionPreference = 'Stop'
+        function Test-InUse($record) { $record.Exception.HResult -eq 0x80073D02 -or $record.Exception.Message -match '0x80073D02' }
         try {
             $installed = Get-AppxPackage -Name $Identity
             if (-not $installed) { return 'not installed on this PC' }
             if ([version]$installed.Version -ge [version]$Version) { return "already $($installed.Version)" }
-            $root = $installed.InstallLocation.TrimEnd('\') + '\'
-            $running = @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) })
-            if ($running.Count -eq 0) {
-                try {
-                    Add-AppxPackage -Path $Feed -AppInstallerFile
-                    return 'installed now'
-                } catch {
-                    # The app was started after the check above; fall back to the next launch.
-                    if ($_.Exception.HResult -ne 0x80073D02 -and $_.Exception.Message -notmatch '0x80073D02') { throw }
-                }
-            }
-            Add-AppxPackage -Path $Asset -DeferRegistrationWhenPackagesAreInUse
+            try {
+                Add-AppxPackage -Path $Feed -AppInstallerFile
+                return 'installed now'
+            } catch { if (-not (Test-InUse $_)) { throw } }
+            Add-AppxPackage -Path $Asset -Stage
+            try {
+                Add-AppxPackage -MainPackage "$($Identity)_$($Version)_x64__$($installed.PublisherId)"
+                return 'installed now'
+            } catch { if (-not (Test-InUse $_)) { throw } }
             return 'applies at the next launch'
         } catch {
             return "failed: $($_.Exception.Message.Trim())"
