@@ -1,7 +1,10 @@
 export const dynamic = "force-dynamic";
 
 import { AssistantProfileEditor } from "@/components/assistants/AssistantProfileEditor";
-import { isAssistantKnowledgeEnabled } from "@/lib/appSettings";
+import {
+    isAssistantKnowledgeEnabled,
+    isAssistantPackageImportEnabled,
+} from "@/lib/appSettings";
 import {
     ASSISTANT_KNOWLEDGE_GUIDE_PARAM,
     isAssistantKnowledgeGuideValue,
@@ -20,13 +23,18 @@ export default async function AssistantProfilePage({
     // which meant every visit with the flag off logged a failed request to the
     // console -- an error the reader did not cause and cannot act on. The
     // server already knows, so it says.
-    const knowledgeEnabled = await isAssistantKnowledgeEnabled();
+    const [knowledgeEnabled, skillExportEnabled] = await Promise.all([
+        isAssistantKnowledgeEnabled(),
+        // The `SKILL.md` download answers to the package import flag.
+        isAssistantPackageImportEnabled(),
+    ]);
     return (
         <main>
             <AssistantProfileEditor
                 key={profileId}
                 profileId={profileId}
                 knowledgeEnabled={knowledgeEnabled}
+                skillExportEnabled={skillExportEnabled}
                 assistantKnowledgeGuideActive={isAssistantKnowledgeGuideValue(
                     query[ASSISTANT_KNOWLEDGE_GUIDE_PARAM]
                 )}
