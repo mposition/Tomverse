@@ -30,6 +30,18 @@
  * (docs/ops/tomverse-chat-context-window-rollout.md).
  */
 
+/**
+ * The least answer room a request may be left with.
+ *
+ * A window with 30 tokens left is not "fitted", it is a request whose answer
+ * stops mid-sentence after the user has been charged for it. Below this the
+ * request takes the same refusal as one that fills the window, so the person
+ * is told to start a new conversation instead of getting a truncated reply.
+ * A request that itself asks for less than this (a short structured call) is
+ * held to what it asked for.
+ */
+export const CHAT_MIN_OUTPUT_TOKENS = 1_024;
+
 export type ChatOutputBudget =
     /** No declared window, so nothing was checked. See below. */
     | { kind: "unbounded"; outputTokens: number }
@@ -76,7 +88,7 @@ export function fitChatOutputToContextWindow(input: {
     // answer can occupy, so a request is refused only when there is none —
     // not merely because the model's own maximum would not have fitted.
     const remaining = limitTokens - input.reservedInputTokens;
-    if (remaining <= 0) {
+    if (remaining < Math.max(1, Math.min(requested, CHAT_MIN_OUTPUT_TOKENS))) {
         return {
             kind: "exceeded",
             limitTokens,

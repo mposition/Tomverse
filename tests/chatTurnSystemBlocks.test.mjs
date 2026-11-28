@@ -249,3 +249,78 @@ test("a turn just under a threshold can cross it once the blocks are priced", ()
     assert.ok(getInputCreditMultiplier(withBlocks) > getInputCreditMultiplier(justUnder));
   }
 });
+
+test("the chart instruction is carried and priced only when CHAT_INLINE_CHART is on", () => {
+  const previous = process.env.CHAT_INLINE_CHART;
+  const now = new Date("2026-11-15T00:00:00Z");
+  try {
+    delete process.env.CHAT_INLINE_CHART;
+    const off = build({ now });
+    process.env.CHAT_INLINE_CHART = "on";
+    const on = build({ now });
+    assert.equal(on.systemMessages.length, off.systemMessages.length + 1);
+    assert.ok(on.systemMessages.some((message) => message.content.startsWith("# Charts")));
+    assert.ok(!off.systemMessages.some((message) => message.content.startsWith("# Charts")));
+    assert.ok(on.promptTokens > off.promptTokens);
+    // Deep research carries no application-authored system blocks.
+    assert.equal(build({ now, isDeepResearchTurn: true }).systemMessages.length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.CHAT_INLINE_CHART;
+    else process.env.CHAT_INLINE_CHART = previous;
+  }
+});
+
+test("the study instruction is carried and priced only on a turn with study mode on", () => {
+  const now = new Date("2026-11-15T00:00:00Z");
+  const off = build({ now });
+  const on = build({ now, studyMode: true });
+  assert.equal(on.systemMessages.length, off.systemMessages.length + 1);
+  assert.ok(on.systemMessages.some((message) => message.content.startsWith("# Study mode")));
+  assert.ok(!off.systemMessages.some((message) => message.content.startsWith("# Study mode")));
+  assert.ok(on.promptTokens > off.promptTokens);
+  assert.equal(build({ now, studyMode: false }).promptTokens, off.promptTokens);
+  // What is priced is the block that is sent: the delta is its own token count.
+  const studyBlock = on.systemMessages.find((message) => message.content.startsWith("# Study mode"));
+  assert.equal(on.promptTokens - off.promptTokens, estimateTextTokens(studyBlock.content));
+  // Deep research carries no application-authored system blocks.
+  assert.equal(build({ now, isDeepResearchTurn: true, studyMode: true }).systemMessages.length, 0);
+});
+
+test("a turn that cannot search but can read a pasted link carries the read_url exception", () => {
+  const plain = build();
+  const withUrl = build({ urlReadAvailable: true });
+  const text = withUrl.webSearchCapabilityPrompt;
+  assert.ok(text.includes("# Current information"), "the limitation block is still there");
+  assert.ok(text.includes("read_url"), "and names the tool the turn really has");
+  // The exception is where the 're-send' ban is reconciled with a refused link.
+  assert.ok(/ask the user to paste the link/.test(text));
+  assert.equal(plain.webSearchCapabilityPrompt.includes("read_url"), false);
+  assert.ok(withUrl.promptTokens > plain.promptTokens, "the extra text is priced");
+});
+
+test("a searching turn gets no limitation block, with or without read_url", () => {
+  const blocks = build({ nativeSearchEnabled: true, urlReadAvailable: true });
+  assert.equal(blocks.webSearchCapabilityPrompt, "");
+});
+
+test("a cut transcript is announced to the model, priced, and absent when nothing was cut", () => {
+  const whole = build();
+  const cut = build({ omittedEarlierMessages: 12 });
+  const note = cut.systemMessages.find((message) => message.content.includes("# Conversation history"));
+  assert.ok(note, "a system line says the history starts mid-conversation");
+  assert.ok(note.content.includes("12 earlier messages were left out"));
+  assert.ok(cut.promptTokens > whole.promptTokens);
+  assert.equal(whole.systemMessages.some((message) => message.content.includes("# Conversation history")), false);
+  assert.ok(build({ omittedEarlierMessages: 1 }).systemMessages.some((message) => message.content.includes("1 earlier message was left out")));
+});
+
+test("the date block states the local date when the client reported a valid time zone", () => {
+  // 2026-11-28 20:00 UTC is already the 29th in Brisbane (UTC+10) and still the 28th in Los Angeles.
+  const now = new Date("2026-11-28T20:00:00Z");
+  const brisbane = build({ now, clientTimeZone: "Australia/Brisbane" }).systemMessages.find((m) => m.content.includes("# Current date"));
+  assert.ok(brisbane.content.includes("Sunday, 2026-11-29 in the user's time zone (Australia/Brisbane)"));
+  assert.ok(brisbane.content.includes("the UTC date is 2026-11-28"));
+  const utc = build({ now }).systemMessages.find((m) => m.content.includes("# Current date"));
+  assert.ok(utc.content.includes("2026-11-28 (UTC)"));
+  assert.equal(buildChatCurrentDatePrompt(now, "Not/AZone"), buildChatCurrentDatePrompt(now));
+});

@@ -185,6 +185,8 @@ type MobileChatShellProps = {
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
+  /** Chat: new conversation from an answer; the page leaves on success. */
+  onBranchFromAnswer?: (messageId: string) => Promise<void>;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -363,6 +365,9 @@ type MobileChatShellProps = {
   accountMemoryMasterEnabled?: boolean | null;
   onMemorySettingsRefresh?: () => void;
   researchPreview?: ResearchPreviewControls;
+  /** Study mode for this conversation (Chat only), and its switch. */
+  studyMode?: boolean;
+  onStudyModeChange?: (on: boolean) => void;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -502,6 +507,7 @@ export function MobileChatShell({
   onRetryPrompt,
   onCompareInReview,
   onCompareContinuationInReview,
+  onBranchFromAnswer,
   conversations,
   currentChatId,
   selectedModels,
@@ -583,6 +589,8 @@ export function MobileChatShell({
   accountMemoryMasterEnabled,
   onMemorySettingsRefresh,
   researchPreview,
+  studyMode,
+  onStudyModeChange,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -1790,6 +1798,7 @@ export function MobileChatShell({
                   onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
                   onCompareContinuationInReview={onCompareContinuationInReview}
+                  onBranchFromAnswer={onBranchFromAnswer}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
@@ -2002,6 +2011,8 @@ export function MobileChatShell({
             accountMemoryMasterEnabled={accountMemoryMasterEnabled}
             onMemorySettingsRefresh={onMemorySettingsRefresh}
             researchPreview={researchPreview}
+            studyMode={studyMode}
+            onStudyModeChange={onStudyModeChange}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}

@@ -83,3 +83,18 @@ export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest |
         ...(typeof routingDecisionId === "string" && /^[a-z0-9]{20,40}$/.test(routingDecisionId) ? { routingDecisionId } : {}),
     };
 };
+
+/**
+ * Why a photo cannot be edited, known before anything is reserved. Raised with
+ * these codes so the panel can say which: the photo is larger than an edit
+ * accepts, or it is a file the editor cannot decode. Neither costs credits.
+ */
+export const IMAGE_EDIT_SOURCE_TOO_LARGE = "IMAGE_EDIT_SOURCE_TOO_LARGE";
+export const IMAGE_EDIT_SOURCE_UNSUPPORTED = "IMAGE_EDIT_SOURCE_UNSUPPORTED";
+
+export type ImageEditSourceRefusalCode =
+    | typeof IMAGE_EDIT_SOURCE_TOO_LARGE
+    | typeof IMAGE_EDIT_SOURCE_UNSUPPORTED;
+
+export const imageEditSourceRefusalCode = (value: unknown): ImageEditSourceRefusalCode | null =>
+    value === IMAGE_EDIT_SOURCE_TOO_LARGE || value === IMAGE_EDIT_SOURCE_UNSUPPORTED ? value : null;

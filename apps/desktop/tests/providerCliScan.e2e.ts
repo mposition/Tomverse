@@ -109,6 +109,11 @@ test("The CLI scan finds a wrapper's program, offers it once, trusts an exact fi
     // Release archives and installation folders are chosen by hand, so they are not scanned.
     await expect(page.getByRole("group", { name: /Qwen Code · Found/ })).toHaveCount(0);
     await expect(page.locator(".provider-cli-list li")).toHaveCount(10);
+    // A found box spans its row but does not size the row's columns: a long path would squeeze the name and status
+    // to a letter a line and pull that row's button left. Every row keeps its button in the same column.
+    const buttonsAt = await page.locator(".provider-cli-list li > button").evaluateAll((buttons) =>
+      buttons.map((button) => Math.round(button.getBoundingClientRect().left)));
+    assert.equal(new Set(buttonsAt).size, 1, String(buttonsAt));
 
     // The sign-in command is typed into a task terminal. With the terminal off, the screen says what to do instead.
     await page.getByRole("button", { name: "Codex · Sign in" }).click();

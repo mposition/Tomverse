@@ -2,7 +2,12 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
-import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
+import {
+    CHAT_IMAGE_TURN_CONTENT_PREFIX,
+    IMAGE_EDIT_SOURCE_TOO_LARGE,
+    chatImageTurnGroupKey,
+    imageEditSourceRefusalCode,
+} from "@/lib/chatImageTurnCore";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { isChatConversationKind } from "@/lib/conversationKindGuard";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
@@ -156,6 +161,21 @@ export async function startChatImageTurn(
             userId: input.userId,
             conversationId: input.conversationId,
             sourceUserMessageId: input.sourceUserMessageId,
+        }).catch((error: unknown) => {
+            // A photo too large or not decodable is refused here, by name,
+            // before any credit is reserved -- not as a generic failure once
+            // the edit runs.
+            const code = imageEditSourceRefusalCode((error as { code?: unknown } | null)?.code);
+            if (code) {
+                throw new ChatAccessError(
+                    code === IMAGE_EDIT_SOURCE_TOO_LARGE ? 413 : 400,
+                    code,
+                    code === IMAGE_EDIT_SOURCE_TOO_LARGE
+                        ? "The photo is too large to edit."
+                        : "The photo cannot be edited: its format is not supported."
+                );
+            }
+            throw error;
         });
         if (!source) {
             throw new ChatAccessError(400, "IMAGE_EDIT_SOURCE_MISSING", "Attach the photo to edit.");

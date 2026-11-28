@@ -23,8 +23,17 @@
  * Section 2's provider classes. Owner decision 2026-11-10 added
  * `antigravity` (Google's Antigravity CLI, Gemini 4 on the owner's Google AI
  * Pro sign-in), unverified with an implementation ceiling like Copilot.
+ * Owner request 2026-11-28 added `kimi` (Moonshot's Kimi Code CLI on the
+ * owner's Kimi Code sign-in), unverified at implementation like Cursor, and
+ * `qwen` (Alibaba's Qwen Code CLI on the owner's Coding Plan); both take
+ * every v22 role, implement by editing files inside a bubblewrap view
+ * (AMUX_V22_PROVIDERS). A later decision the same day added `zai`: Claude Code
+ * driven against Z.ai's Anthropic-compatible endpoint on the owner's GLM
+ * Coding Plan, a class of its own so its runs and reviews carry Z.ai's
+ * models, not Anthropic's.
  */
-export const AMUX_WORKER_PROVIDER_CLASSES = ["claude", "codex", "cursor", "copilot", "antigravity"] as const;
+export const AMUX_WORKER_PROVIDER_CLASSES = ["claude", "codex", "cursor", "copilot", "antigravity", "kimi",
+  "qwen", "zai"] as const;
 export type AmuxWorkerProviderClass = (typeof AMUX_WORKER_PROVIDER_CLASSES)[number];
 
 /** Version 16's routing roles, lowest first: `chore < implementation < contract`. */
@@ -56,6 +65,9 @@ export const AMUX_WORKER_PROVIDER_CLASS_TABLE: Readonly<
   cursor: Object.freeze({ cli: "Cursor CLI", verified: false, maxRole: "implementation" }),
   copilot: Object.freeze({ cli: "GitHub Copilot CLI", verified: false, maxRole: "implementation" }),
   antigravity: Object.freeze({ cli: "Antigravity CLI", verified: false, maxRole: "implementation" }),
+  kimi: Object.freeze({ cli: "Kimi Code CLI", verified: false, maxRole: "implementation" }),
+  qwen: Object.freeze({ cli: "Qwen Code CLI", verified: false, maxRole: "implementation" }),
+  zai: Object.freeze({ cli: "Claude Code (Z.ai GLM)", verified: false, maxRole: "implementation" }),
 });
 
 /**

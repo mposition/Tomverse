@@ -122,6 +122,28 @@ test("server stages separate routing from admission and provider/tool waiting", 
       firstContentMs: 100, providerToContentMs: 45, settlementMs: 120, _context: responseLatencyContext(process.env) });
 });
 
+test("a turn that dies before its stream can say how far it got and which step was open", async () => {
+  const { createServerLatency } = await import(url("lib/responseLatencyServer.ts"));
+  let time = 0;
+  const timing = createServerLatency(randomUUID(), () => time);
+  time = 10; timing.checkpoint("refinerConsumed");
+  time = 20; const stopRouting = timing.stage("routingMs");
+  time = 35; stopRouting();
+  time = 40; timing.checkpoint("accessAcquired");
+  time = 50; timing.stage("presearchMs");
+  time = 12_000;
+  const seen = timing.prestream();
+  assert.equal(seen.elapsedMs, 12_000);
+  assert.deepEqual(seen.checkpoints, [{ name: "refinerConsumed", ms: 10 }, { name: "accessAcquired", ms: 40 }]);
+  assert.equal(seen.timings.routingMs, 15);
+  assert.equal(seen.openStage, "presearchMs", "the stage still running when the request ended");
+  assert.equal(seen.openStageMs, 11_950);
+  assert.ok(!("openStage" in { ...createServerLatency(randomUUID(), () => 0).prestream() }), "nothing open, nothing reported");
+  // Bounded, whatever a future caller does.
+  for (let index = 0; index < 100; index += 1) timing.checkpoint(`c${index}`);
+  assert.ok(timing.prestream().checkpoints.length <= 32);
+});
+
 test("the store attributes only server samples and reads legacy and deployment cohorts separately", async () => {
   const store = await import(url("lib/responseLatencyStore.ts"));
   const old = process.env.RAILWAY_GIT_COMMIT_SHA;

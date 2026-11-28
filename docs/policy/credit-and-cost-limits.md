@@ -1263,7 +1263,7 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
 - **결과 불명은 다시 보내지 않습니다.** 회차의 assistant id는 회차 id에서 파생되므로 같은
   회차를 다시 보내도 Chat attempt에 재연결될 뿐입니다. lease가 지난 회차는 attempt 행으로만
   판정하고, 판정할 수 없으면 `unknown`으로 기록합니다.
-- **실행 위치와 시간.** 견적은 실행기가 보내는 turn을 Chat route와 같은 입력(질문, `buildChatTurnSystemBlocks`의 capability block)과 같은 예산 옵션으로 계산하고, `tests/integration/scheduled-task-chat-route.db.test.ts`가 실제 route의 예약액이 견적을 넘지 않는지 확인합니다. tick은 유지보수 요청의 `maxDuration` 안에 돌아오고, 남은 시간이 2분보다 적으면 새 회차를 시작하지 않습니다. 이미 시작한 회차는 요청이 끝난 뒤에도 답을 끝까지 읽고 스스로 정산합니다. 이것은 `next start` 서버(운영은 Railway)에서만 보장되므로(Next self-hosting 안내의 `after`), 서버리스 표지(`VERCEL`, `AWS_LAMBDA_FUNCTION_NAME`, `NETLIFY`, `FUNCTIONS_WORKER_RUNTIME`)가 있으면 아무 회차도 시작하지 않습니다(`scheduledTasksHostProblem`). 예약 회차는 계정의 Chat 동시 요청 자리 하나를 항상 사람 몫으로 남기므로(`subjectSlotsKeptFree`), 계정당 한도가 1인 배포(`CHAT_USER_CONCURRENT=1`)에서는 남길 자리가 없어 Chat route가 예약 회차를 거절하고, tick도 같은 검사로 아무 회차도 시작하지 않습니다(`chat_concurrency_too_low`). 기능 스위치(`feature.scheduledTasksEnabled`)와 kill switch(`SCHEDULED_TASKS_KILL_SWITCH`)는 tick 시작 때만이 아니라 새 회차를 시작하기 직전마다, 그리고 크레딧을 잡는 예약 트랜잭션 안에서 다시 읽습니다. 그래서 tick이 도는 중에 끄면 그 뒤로는 아무 회차도 시작하지 않고, 이미 claim된 회차도 크레딧을 잡지 못한 채 `feature_disabled`로 건너뜁니다(작업은 멈춤 처리하지 않습니다). 한 번만 실행하는 작업은 회차가 닫히면 완료되지만, 그 회차가 플랫폼 사정(운영 가드레일, provider 예산, 운영자의 Chat 중지, 동시 요청 한도, rate limit)이나 운영자의 중단(`feature_disabled`)으로 시작되지 못한 경우에는 완료하지 않고 최소 간격(20시간) 뒤에 다시 실행 대상이 됩니다(`onceTaskRetryAt`). 첫 실행 시각에서 72시간이 지나면 더 시도하지 않고 답 없이 완료합니다. 재시도에도 3시간 유예 규칙은 똑같이 적용됩니다. 배포 중 프로세스가 내려가 끊긴 회차는 일반 Chat turn처럼 attempt 행으로 판정합니다.
+- **실행 위치와 시간.** 견적은 실행기가 보내는 turn을 Chat route와 같은 입력(질문, `buildChatTurnSystemBlocks`의 capability block)과 같은 예산 옵션으로 계산하고, `tests/integration/scheduled-task-chat-route.db.test.ts`가 실제 route의 예약액이 견적을 넘지 않는지 확인합니다. tick은 유지보수 요청의 `maxDuration` 안에 돌아오고, 남은 시간이 2분보다 적으면 새 회차를 시작하지 않습니다. 이미 시작한 회차는 요청이 끝난 뒤에도 답을 끝까지 읽고 스스로 정산합니다. 이것은 `next start` 서버(운영은 Railway)에서만 보장되므로(Next self-hosting 안내의 `after`), 서버리스 표지(`VERCEL`, `AWS_LAMBDA_FUNCTION_NAME`, `NETLIFY`, `FUNCTIONS_WORKER_RUNTIME`)가 있으면 아무 회차도 시작하지 않습니다(`scheduledTasksHostProblem`). 예약 회차는 계정의 Chat 동시 요청 자리 하나를 항상 사람 몫으로 남기므로(`subjectSlotsKeptFree`), 계정당 한도가 1인 배포(`CHAT_USER_CONCURRENT=1`)에서는 남길 자리가 없어 Chat route가 예약 회차를 거절하고, tick도 같은 검사로 아무 회차도 시작하지 않습니다(`chat_concurrency_too_low`). 기능 스위치(`feature.scheduledTasksEnabled`)와 kill switch(`SCHEDULED_TASKS_KILL_SWITCH`)는 tick 시작 때만이 아니라 새 회차를 시작하기 직전마다, 그리고 크레딧을 잡는 예약 트랜잭션 안에서 다시 읽습니다. 그래서 tick이 도는 중에 끄면 그 뒤로는 아무 회차도 시작하지 않고, 이미 claim된 회차도 크레딧을 잡지 못한 채 `feature_disabled`로 건너뜁니다(작업은 멈춤 처리하지 않습니다). 한 번만 실행하는 작업은 회차가 닫히면 완료되지만, 그 회차가 플랫폼 사정(운영 가드레일, provider 예산, 운영자의 Chat 중지, 동시 요청 한도, 분당 요청 rate limit, 일시적 DB 불가)이나 운영자의 중단(`feature_disabled`)으로 시작되지 못한 경우에는 완료하지 않고 최소 간격(20시간) 뒤에 다시 실행 대상이 됩니다(`onceTaskRetryAt`). 첫 실행 시각에서 72시간이 지나면 더 시도하지 않고 답 없이 완료합니다. 재시도에도 3시간 유예 규칙은 똑같이 적용됩니다. 배포 중 프로세스가 내려가 끊긴 회차는 일반 Chat turn처럼 attempt 행으로 판정합니다.
 - **빈도와 동시 실행.** 가장 잦은 일정은 매일이고, 실행기는 같은 작업의 두 회차를 20시간보다
   가깝게 두지 않습니다. 간격은 예정 시각 사이와 실제 시작 시각 사이를 모두 재며, lease가
   끊긴 뒤 Chat에 닿지 않았음을 확인하고 다시 시작한 회차는 다시 시작한 시각이 시작 시각입니다
@@ -1274,6 +1274,41 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
   읽지 않습니다. 한 tick은 최대 20회차를 시작하고 최대 200개 작업을 봅니다
   (`claimBatch`, `dueScanLimit`). 보지 못한 작업은 그대로 다음 tick(15분 뒤)으로 넘어가고, 3시간
   유예를 넘긴 회차는 늦게 몰아서 실행하지 않고 건너뜁니다.
+
+### 답변별 실제 크레딧: 예약 행이 자기 답변을 가리킵니다 (2026-11-28)
+
+Chat 답변 아래에 그 답변에 실제로 차감된 크레딧을 보여 줍니다(운영자 지시). 새 가격이나
+새 정산은 없고, 예약 행에 열 하나(`ChatCreditReservation.assistantMessageId`, nullable,
+`20261128130000_chat_reservation_assistant_message`)가 늘었을 뿐입니다.
+
+- **쓰는 곳은 한 곳입니다.** Chat route가 저장되는 turn(로그인 사용자, 저장된 대화,
+  `assistantMessageId` 있음)에 `acquireChatAccess`를 부를 때 넘기고, 예약 insert가 그
+  자리에서 씁니다. 이후 갱신하지 않습니다. 예약·정산·환불·만료 reconcile은 이 열을 읽지
+  않으므로 금액과 상태 전이는 그대로입니다. continuation 재계획(첫 예약을 0으로 정산하고
+  다시 예약)이나 같은 답변 id로 다시 보낸 turn은 한 답변을 가리키는 예약이 둘 이상이 되고,
+  읽는 쪽이 합칩니다.
+- **연결하지 않는 것**: 게스트 turn, 저장되지 않는 turn, Chat route 밖의 예약(비교 요약,
+  교차검토 항목 확인, Research Preview·Deep Research engine v2 dispatch, 음성, 외부 API,
+  Code 검색)과 이미지 턴(`ImageCreditReservation`은 다른 테이블). 이 답변들은 숫자를
+  보여 주지 않습니다. 웹 검색 surcharge, 도구 호출, fallback attempt는 같은 예약 행
+  안에서 정산되므로 따로 연결할 것이 없습니다. Chat route를 거치는 Perplexity Deep
+  Research(비동기 job)는 같은 insert로 연결되고, job이 끝나 정산된 뒤에 보입니다.
+- **보여 주는 조건**: 대화 소유자의 예약만(`userId`), 그 답변의 예약이 모두 종료
+  상태(`settled`·`refunded`)일 때, `settledCredits` 합이 1 이상일 때만 보여 줍니다. 아직
+  `reserved`인 예약이 하나라도 있으면 값이 확정되지 않은 것이므로 아무것도 보여 주지
+  않습니다. 합이 0인 답변(실패·환불, 출력 없이 중지)도 보여 주지 않습니다 — `refunded`는
+  "무료였다"와 "돌려받았다"를 구분하지 않기 때문입니다. 이 열이 생기기 전의 답변은
+  연결이 없어 보여 주지 않습니다. Chat 제품 대화(`productKey = "chat"`)에서만 읽고,
+  공유 snapshot·대화 내보내기에는 넣지 않습니다.
+- **구성 내역은 저장돼 있지 않습니다.** `settledCredits`는 합계 하나이고, 웹 검색
+  surcharge가 그 안에서 몇 크레딧인지는 정산 때 계산만 하고 행에 남기지 않습니다. 읽는 쪽이
+  오늘의 registry로 다시 계산하면 소급 가격이 되므로 하지 않습니다. 내역을 보이려면 정산이
+  그 구성을 `pricingSnapshot`에 기록해야 하고, 그것은 정산 쓰기의 변경이라 따로 다룹니다.
+- **삭제**: 메시지에 대한 FK가 없습니다(`RoutingRun.assistantMessageId`와 같은 선택).
+  대화 삭제는 원장 행을 건드리지 않고, 계정 삭제는 이 열을 다른 식별자와 함께 NULL로
+  지웁니다(`lib/accountDataAnonymisation.ts`).
+- 관련 테스트: `tests/integration/chat-answer-credits.db.test.ts`,
+  `tests/chatAnswerCreditsCore.test.ts`.
 
 ## 5. 시간대와 reset
 

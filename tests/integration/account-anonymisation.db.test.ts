@@ -109,6 +109,7 @@ const seedUser = async () => {
       idempotencyKey: `idem-${randomUUID()}`,
       providerRequestId: sentinel("chatReservation-providerRequestId"),
       providerResponseId: sentinel("chatReservation-providerResponseId"),
+      assistantMessageId: sentinel("chatReservation-assistantMessageId"),
       reservationPayload: { lot: sentinel("chatReservation-reservationPayload") },
       providerUsageSnapshot: { usage: sentinel("chatReservation-providerUsageSnapshot") },
       reservedCredits: 10,
