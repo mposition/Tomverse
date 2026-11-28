@@ -385,6 +385,8 @@ const modelProxy = (model: string) =>
   );
 
 const prismaFake: Record<string, unknown> = {};
+/** What the storage check reads as the account's stored messages; null is none. */
+let accountMessageTotals: { count: bigint; bytes: bigint } | null = null;
 const prismaProxy: unknown = new Proxy(prismaFake, {
   get: (target, property: string) => {
     if (property === "then") return undefined;
@@ -401,7 +403,8 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
       return async () => 0;
     }
     if (property === "$queryRaw" || property === "$queryRawUnsafe") {
-      return async () => [];
+      // The account's stored message totals, when a test sets them.
+      return async () => (accountMessageTotals ? [accountMessageTotals] : []);
     }
     if (!(property in target)) {
       (target as Record<string, unknown>)[property] = modelProxy(property);
@@ -490,6 +493,8 @@ let forcedAutoRoute: string | null = null;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
+/** Calls that reached the (mocked) paid Router. */
+let routerCalls = 0;
 let imageIntentText: string | null = null;
 let routerDecisionKept: boolean | null = null;
 const routerCore = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore");
@@ -497,6 +502,7 @@ const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof i
 mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
+    routerCalls += 1;
     if (!forcedRouterOutput) return null;
     const candidates = routerCore.autoLlmRouterCandidates(input.eligibleModelIds, input.models,
       input.creditsByModelId, input.fileContext);
@@ -506,12 +512,8 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   },
 } });
 const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
-/** Image triage's model as the route reads it; undefined keeps the real read. */
-let forcedImageTriageModel: string | null | undefined;
 mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
   ...realImageIntent,
-  chatImageTriageModelId: async () =>
-    forcedImageTriageModel === undefined ? realImageIntent.chatImageTriageModelId() : forcedImageTriageModel,
   createChatTurnImageRouting: (input: { text?: string } | null) => {
     if (input) imageIntentCalls += 1;
     imageIntentText = input?.text ?? null;
@@ -1234,37 +1236,60 @@ test("a follow-up that carries a held Refiner decision still gets the image clas
 });
 
 /*
-  B3 review, fifth pass: the storage precheck asks for a text answer's worth
-  of room (400KB) before the image classification, so an Auto turn that would
-  have stored only a one-line image answer was refused on an account with room
-  for that line. A turn that may still be answered with an image is now left
-  to the write's own check; a turn that can only be text is refused up front.
+  B3 review, sixth pass: the storage precheck refuses only a turn whose answer
+  certainly cannot be stored -- the message count at its limit, or fewer bytes
+  left than this turn's own message and a one-byte answer. It assumes no answer
+  size: a long answer that overflows is the Message write's locked check to
+  refuse, as before. Runs the real checkMessageCapacity.
 */
-test("with room for an image answer but not a text one, the image turn goes on and a text-only turn is refused", async () => {
-  const prior = process.env.API_MAX_MESSAGE_BYTES_PER_USER;
-  // An empty account allowed 100KB: less than the 400KB a text answer asks for.
-  process.env.API_MAX_MESSAGE_BYTES_PER_USER = "100000";
+const withStorageLimits = async (env: Record<string, string>, run: () => Promise<void>) => {
+  const prior = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
   try {
-    forcedImageTriageModel = "gpt-6-luna";
-    const image = await ask({}, { autoRoutedTo: MODEL_ID, imageIntent: true, prompt: "Draw a cat." });
-    assert.equal(image.mode, "image-turn", "an image turn is not refused for room it will not use");
-    assert.equal(imageIntentCalls, 1);
-
-    // The same Auto turn with image triage off can only be text.
-    forcedImageTriageModel = null;
-    const autoText = await ask({}, { autoRoutedTo: MODEL_ID, prompt: "Why is snow white?", expectedStatus: 409 });
-    assert.match(autoText.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
-    assert.equal(lastStreamTextOptions, null, "refused before any model was called");
-
-    // A manual turn is never an image turn.
-    forcedImageTriageModel = "gpt-6-luna";
-    const manual = await ask({}, { prompt: "Why is snow white?", expectedStatus: 409 });
-    assert.match(manual.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+    await run();
   } finally {
-    forcedImageTriageModel = undefined;
-    if (prior === undefined) delete process.env.API_MAX_MESSAGE_BYTES_PER_USER;
-    else process.env.API_MAX_MESSAGE_BYTES_PER_USER = prior;
+    accountMessageTotals = null;
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
+};
+
+test("an account with less than 400KB left still gets its text turn", async () => {
+  await withStorageLimits({ API_MAX_MESSAGE_BYTES_PER_USER: "100000" }, async () => {
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(50_000) };
+    const { trailer } = await ask({}, { prompt: "Why is snow white?" });
+    assert.equal(trailer?.completion?.status, "normal");
+    assert.ok(lastStreamTextOptions, "the model was called");
+  });
+});
+
+test("an account at its message count limit is refused before the Router", async () => {
+  await withStorageLimits({ API_MAX_MESSAGES_PER_USER: "10" }, async () => {
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(0) };
+    routerCalls = 0;
+    const refused = await ask({}, { autoRoutedTo: MODEL_ID, prompt: "Why is snow white?", expectedStatus: 409 });
+    assert.match(refused.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+    assert.equal(routerCalls, 0, "no Router call for an answer that could not be stored");
+    assert.equal(imageIntentCalls, 0);
+    assert.equal(lastStreamTextOptions, null);
+  });
+});
+
+test("fewer bytes left than the turn's own message is refused; just enough is not", async () => {
+  const prompt = "Why is snow white?";
+  const needed = Buffer.byteLength(prompt, "utf8") + 1;
+  await withStorageLimits({ API_MAX_MESSAGE_BYTES_PER_USER: "100000" }, async () => {
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(100_000 - needed + 1) };
+    const refused = await ask({}, { prompt, expectedStatus: 409 });
+    assert.match(refused.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+    assert.equal(lastStreamTextOptions, null);
+
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(100_000 - needed) };
+    await ask({}, { prompt });
+    assert.ok(lastStreamTextOptions, "exactly enough room goes on to the model");
+  });
 });
 
 test("an ordinary follow-up with a held Refiner decision stays a text turn and consumes it once", async () => {

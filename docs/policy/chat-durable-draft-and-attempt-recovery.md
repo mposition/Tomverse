@@ -116,14 +116,6 @@ conversation id, persisted source user-message id, requested model id, and the
 effective request payload digest. Prompt text and attachment storage facts are
 not copied into the row.
 
-The payload digest is taken over the execution view as the Auto Router
-received it -- the authored messages, or a consumed Prompt Refiner view -- and
-not over the Router's own rewrite of the last message (2026-11-28). The rewrite
-is a model's output: a repeat of the same request asks the Router again and may
-get other words (or none) back, and would otherwise digest different messages
-and be refused as a different request under its own id. A turn the
-Router did not rewrite digests exactly what it always did.
-
 For a context bundle, the effective request digest binds the verified semantic
 context fingerprint and its bounded token fields. It deliberately excludes the
 opaque bearer token or bundle id, so two independently issued bundles with the
@@ -165,13 +157,11 @@ storage bound, not a retention promise or permission to remove audit rows.
 
 The paid Auto Router call runs before the claim (its pick decides the model the
 turn is reserved for and checked against), so a repeated POST -- a reattach
-included -- is routed again like any turn and reaches the claim with the model
-it would have had; because the digest leaves the rewrite out, the claim still
-reattaches whatever the Router answers this time. A duplicate therefore still
-pays for a Router call; removing that would mean claiming before the Router,
-which is not done here. Guest Auto turns are de-duplicated earlier, by their
+included -- is routed again like any turn. A duplicate therefore still pays for
+a Router call; removing that would mean claiming before the Router, which is
+not done here. Guest Auto turns are de-duplicated earlier, by their
 `clientTurnId` prehold, before the Guest Refiner and the Router. The Router call
-is aborted with the request, so a client that goes away stops it.
+is aborted with the request (2026-11-28), so a client that goes away stops it.
 
 The authenticated stored-Chat send path wires claim, checkpoint and terminal
 transition around the existing provider dispatch. Review, continuation, guest
@@ -223,10 +213,12 @@ done -- a refused attempt CAS or a database error in the final checkpoint, the
 settlement or the Message write, and a storage refusal
 (`MESSAGE_STORAGE_QUOTA_EXCEEDED`) at that write -- are this application's: they
 are classified with the stream-failure `completion` phase (never a fallback)
-and are not recorded as provider or model failures. A turn whose account has no
-room for its answer is normally refused before anything is reserved
+and are not recorded as provider or model failures. A turn whose answer
+certainly cannot be stored (the message count at its limit, or fewer bytes left
+than its own message) is refused before anything is reserved
 (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산"); the write's own check
-remains the authority for the concurrent case.
+remains the authority for a long answer that overflows and for the concurrent
+case.
 
 Credit settlement follows the provider outcome and is separate from Message
 and attempt-state persistence. A checkpoint or terminal CAS failure is logged

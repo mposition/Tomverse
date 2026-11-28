@@ -96,7 +96,7 @@ import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnable
 import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
-import { chatImageTriageModelId, chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import { overrideImageRoutingDecisionAsChat, recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 import {
     latestUserTurnHasAttachments,
@@ -2822,53 +2822,38 @@ async function handleChatPost(
           reattach to that attempt, or the generic 409 for a different request
           under the same id -- and never writes an answer. It is still routed
           as any turn is, so the turn reaches the claim with the model it would
-          have had; the claim's digest leaves the Router's rewrite out, so a
-          reattach matches whatever the Router answers this time. Only a Chat
-          conversation can hold one: Review, continuation and Deep Research
-          turns never claim an attempt.
+          have had. Only a Chat conversation can hold one: Review, continuation
+          and Deep Research turns never claim an attempt.
         */
         const attemptAlreadyBound = Boolean(session?.user?.id && conversationId && assistantMessageId) &&
             conversationRouting?.productKey === "chat" &&
             (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
                 ?.conversationId === conversationId;
         /*
-          An answer that could never be stored is refused before anything is
-          paid for -- the Auto Router, the image classification beside it, the
-          credit reservation, the provider. The Message write re-checks under
-          its own lock and stays the authority; this removes the ordinary case,
-          an account already at its storage limit, whose turn used to be routed,
-          charged, streamed and then lost at that write
+          A turn whose answer certainly could not be stored is refused before
+          anything is paid for -- the Auto Router, the image classification
+          beside it, the credit reservation, the provider -- instead of being
+          routed, charged, streamed and then lost at the Message write
           (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
-          The model is not chosen yet, so the room asked for is the most a
-          stored answer can take: its character cap at four bytes each. The
-          conversation's own count only for one the owner-scoped read above
-          found; otherwise the account's limits alone. Not for a POST that
-          reattaches to an answer already there. Only the storage refusal stops
-          the turn, and if the check itself fails, the write decides as it
-          always has.
+          "Certainly" and nothing more: the message count is already at its
+          limit, or the bytes left are fewer than this turn's own message plus
+          the smallest answer row (one byte). No answer size is assumed -- the
+          model is not chosen yet, and an image turn stores one line -- so a
+          long answer that overflows is still the Message write's own locked
+          check to refuse, as it always was. The conversation's own count only
+          for one the owner-scoped read above found; otherwise the account's
+          limits alone. Not for a POST that reattaches to an answer already
+          there. Only the storage refusal stops the turn, and if the check
+          itself fails, the write decides as it always has.
         */
-        /*
-          An Auto Chat turn that may still be answered with an image -- the
-          image classification runs for it (eligible, the plan includes images,
-          image triage is on) -- does not ask for a text answer's worth of room:
-          an image turn stores a one-line answer, and the 400KB this check asks
-          for would refuse it on an account with room for that line. Its text
-          answer, if it turns out to be one, is still checked by the Message
-          write under its lock. A turn that can only be text is checked here.
-          An unreadable triage setting counts as possibly an image, leaving the
-          decision to the write rather than refusing on a guess.
-        */
-        const mayAnswerWithImage = autoImageTurnEligible &&
-            Boolean(accountPlan && planAllowsImageGeneration(accountPlan.tier)) &&
-            (await chatImageTriageModelId().catch(() => "unreadable")) !== null;
-        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound && !mayAnswerWithImage) {
+        if (session?.user?.id && conversationId && assistantMessageId && !attemptAlreadyBound) {
             try {
                 await checkMessageCapacity(
                     prisma,
                     session.user.id,
                     conversationRouting ? conversationId : null,
                     1,
-                    MAX_STORED_MESSAGE_CHARACTERS * 4
+                    Buffer.byteLength(latestUserPromptText(messages), "utf8") + 1
                 );
             } catch (error) {
                 if (apiSecurityResponse(error)) throw error;
@@ -3143,18 +3128,6 @@ async function handleChatPost(
         // never on top of a Refiner suggestion already applied, and only to the
         // execution view -- the stored user message stays as the user wrote it.
         let autoRewrite: string | null = null;
-        /*
-          The view the Router was handed, kept when it rewrites it. The durable
-          attempt's identity is digested from this, not from the rewrite: the
-          rewrite is a model's output, so a repeat of the same request -- a
-          POST reattachment or a duplicate, each asking the Router again and
-          getting other words (or none) back -- must still name the same
-          attempt rather than be refused as a different request under that id
-          (docs/policy/chat-durable-draft-and-attempt-recovery.md section 3).
-          Only set when a rewrite applied, and a rewrite never applies on top
-          of a Refiner view, so nothing reassigns the messages after it.
-        */
-        let messagesBeforeRouterRewrite: typeof executionMessages | null = null;
         if (
             !guestAutoSelection?.routed &&
             autoSelection.routed &&
@@ -3163,7 +3136,6 @@ async function handleChatPost(
         ) {
             const rewritten = withRouterRewrite(executionMessages, llmPick.rewrite);
             if (rewritten !== executionMessages) {
-                messagesBeforeRouterRewrite = executionMessages;
                 executionMessages = [...rewritten];
                 autoRewrite = llmPick.rewrite;
             }
@@ -4074,10 +4046,7 @@ async function handleChatPost(
             });
             const ownerId = randomUUID();
             const requestPayloadDigest = chatResponseAttemptRequestPayloadDigest({
-                // The request as the Router received it; see
-                // `messagesBeforeRouterRewrite`. Without a rewrite this is the
-                // execution view, exactly as before.
-                messages: messagesBeforeRouterRewrite ?? executionMessages,
+                messages: executionMessages,
                 requestedModelId,
                 webSearchMode: webSearchMode ?? "off",
                 researchMode: researchMode ?? null,

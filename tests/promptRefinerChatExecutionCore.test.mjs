@@ -141,10 +141,5 @@ test("Router, shadow and provider formatting use the consumed view; signed conte
   // taken, so the provider loop must not find the current turn by identity.
   assert.doesNotMatch(route, /msg === latestMessage/);
   assert.match(route, /verifyDurableChatSourceMessage\(\{[\s\S]*?messages,\s*\}\)/);
-  // The durable identity binds the Refiner's execution view. Only an Auto
-  // Router rewrite (never applied on top of a Refiner view) is left out of it.
-  assert.match(
-    route,
-    /chatResponseAttemptRequestPayloadDigest\(\{[\s\S]*?messages: messagesBeforeRouterRewrite \?\? executionMessages/
-  );
+  assert.match(route, /chatResponseAttemptRequestPayloadDigest\(\{[\s\S]*?messages: executionMessages/);
 });

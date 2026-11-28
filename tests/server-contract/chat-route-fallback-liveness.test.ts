@@ -1060,11 +1060,9 @@ let durablePeekCalls = 0;
 /**
  * When set, the claim decides as the real one does: the stored identity's
  * fingerprint from lib/chatResponseAttemptCore.ts, compared by
- * `decideAttemptClaim`. The peek then reads this store too, unless
- * `realPeekBlind` makes it miss (two POSTs racing before either claimed).
+ * `decideAttemptClaim`. The peek then reads this store too.
  */
 let realClaimStore: Map<string, ChatResponseAttemptIdentity> | null = null;
-let realPeekBlind = false;
 class DurableConflict extends Error {
   readonly code = "CHAT_ATTEMPT_ID_REUSED";
 }
@@ -1099,7 +1097,7 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
     peekChatResponseAttempt: async (_userId: string, assistantMessageId: string) => {
       durablePeekCalls += 1;
-      if (realClaimStore) return realPeekBlind ? null : realClaimStore.get(assistantMessageId) ?? null;
+      if (realClaimStore) return realClaimStore.get(assistantMessageId) ?? null;
       return peekedAttemptConversationId === null
         ? null
         : { assistantMessageId, conversationId: peekedAttemptConversationId };
@@ -2405,82 +2403,28 @@ test("an exact durable replay reattaches without reservation or provider dispatc
 });
 
 /*
-  Review findings (B3, 2026-11-28): the claim's request digest was taken after
-  the Router's rewrite, so a repeat that asked the Router again and got other
-  words digested different messages and a legitimate reattach was refused as
-  CHAT_ATTEMPT_ID_REUSED. And a repeat must be routed like any turn (fifth
-  pass: skipping the Router left it on the rule model, and checks before the
-  claim could then refuse it). The claim here decides with the real
-  fingerprint and `decideAttemptClaim`, over the digest the route computed.
+  A repeat is routed like any turn (B3 review: skipping the Router left it on
+  the rule model, and checks before the claim could then refuse it). The claim
+  here decides with the real fingerprint and `decideAttemptClaim`, over the
+  digest the route computed from the execution view.
 */
-test("a repeat of a turn the Router rewrote is routed again and reattaches, whatever the Router answers", async () => {
-  realClaimStore = new Map();
-  llmRouterRewrite = "Rewritten by the Router.";
-  try {
-    llmRouterInputs.length = 0;
-    await ask("answers", "claimed", 200, false);
-    assert.equal(llmRouterInputs.length, 1);
-    assert.ok(JSON.stringify(attempts[0].messages).includes("Rewritten by the Router."),
-      "the provider was sent the rewrite");
-    assert.equal(realClaimStore.size, 1);
-    const firstDigest = lastDurableClaimInput?.requestPayloadDigest;
-    assert.equal(typeof firstDigest, "string");
-    const eligible = llmRouterInputs[0].eligibleModelIds;
-    const ruleModelId = llmRouterInputs[0].ruleModelId;
-
-    // The same POST again: routed again, same rewrite, same identity.
-    llmRouterInputs.length = 0;
-    const repeat = await ask("answers", "claimed", 200, false);
-    assert.equal(llmRouterInputs.length, 1, "a repeat is routed like any turn");
-    assert.equal(repeat.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
-    assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
-    assert.equal(attempts.length, 0, "a reattach dispatches nothing");
-
-    // The Router answers in other words this time.
-    llmRouterRewrite = "Different words from a second Router call.";
-    llmRouterInputs.length = 0;
-    const reworded = await ask("answers", "claimed", 200, false);
-    assert.equal(llmRouterInputs.length, 1);
-    assert.equal(reworded.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
-    assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
-
-    // ... or picks another model.
-    const otherModel = eligible.find((id) => id !== ruleModelId);
-    assert.ok(otherModel, "the fixture offers the Router a second candidate");
-    llmSearchModelId = otherModel;
-    llmRouterInputs.length = 0;
-    const rerouted = await ask("answers", "claimed", 200, false);
-    assert.equal(llmRouterInputs.length, 1);
-    assert.equal(rerouted.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
-    assert.equal(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
-    llmSearchModelId = undefined;
-
-    // A different request under the same id is still the generic 409.
-    const different = await ask("answers", "claimed", 409, false, undefined, true, true, undefined, "always");
-    assert.equal((JSON.parse(different.body) as { code?: string }).code, "CHAT_ATTEMPT_ID_REUSED");
-    assert.notEqual(lastDurableClaimInput?.requestPayloadDigest, firstDigest);
-  } finally {
-    realClaimStore = null;
-    realPeekBlind = false;
-    llmRouterRewrite = null;
-    llmSearchModelId = undefined;
-  }
-});
-
-test("a turn the Router did not rewrite keeps the identity digest it always had", async () => {
-  // Without a rewrite the digest is of the execution view, as before: the
-  // durable identity of every existing non-rewritten attempt is unchanged.
+test("a repeat of a turn is routed again and reattaches through the real identity digest", async () => {
   realClaimStore = new Map();
   try {
+    llmRouterInputs.length = 0;
     await ask("answers", "claimed", 200, false);
     const digest = lastDurableClaimInput?.requestPayloadDigest;
     const repeat = await ask("answers", "claimed", 200, false);
+    assert.equal(llmRouterInputs.length, 2, "the repeat asked the Router too");
     assert.equal(repeat.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
     assert.equal(lastDurableClaimInput?.requestPayloadDigest, digest);
   } finally {
     realClaimStore = null;
   }
 });
+
+/** The default turn's own message, plus the one-byte smallest answer. */
+const TURN_MESSAGE_BYTES = Buffer.byteLength("이 질문에 답해 줘", "utf8") + 1;
 
 /*
   Review finding (B3, 2026-11-28, third pass): the storage check ran after the
@@ -2498,8 +2442,8 @@ test("a full message store is refused before the paid Router, the claim and the 
     assert.equal(durableClaimCalls, 0, "no attempt row either");
     assert.equal(ledger.accessAcquisitions, 0);
     assert.equal(attempts.length, 0);
-    // One answer's worth, before any model is chosen: the stored-answer cap.
-    assert.deepEqual(messageCapacityChecks, [{ conversationId: CONVERSATION_ID, count: 1, bytes: 400_000 }]);
+    // Room for this turn's own message and a one-byte answer; no answer size assumed.
+    assert.deepEqual(messageCapacityChecks, [{ conversationId: CONVERSATION_ID, count: 1, bytes: TURN_MESSAGE_BYTES }]);
   } finally {
     messageStoreFull = false;
   }
@@ -2547,7 +2491,7 @@ test("a conversation the owner-scoped read does not find is checked against the 
   try {
     const { body } = await ask("answers", "claimed", 403, false);
     assert.equal((JSON.parse(body) as { code?: string }).code, "CONVERSATION_FORBIDDEN");
-    assert.deepEqual(messageCapacityChecks, [{ conversationId: null, count: 1, bytes: 400_000 }]);
+    assert.deepEqual(messageCapacityChecks, [{ conversationId: null, count: 1, bytes: TURN_MESSAGE_BYTES }]);
   } finally {
     contextConversationAccess = "owned";
   }
