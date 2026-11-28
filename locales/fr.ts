@@ -2348,6 +2348,10 @@ export const fr = {
                 title: "État du service",
                 description: "Pannes et maintenances planifiées.",
             },
+            scheduled_tasks: {
+                title: "Tâches planifiées",
+                description: "Quand une tâche planifiée répond ou se met en pause.",
+            },
             product_updates: {
                 title: "Nouveautés produit",
                 description: "Nouvelles fonctionnalités et améliorations.",

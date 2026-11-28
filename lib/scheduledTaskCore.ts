@@ -496,3 +496,43 @@ export const scheduledTasksHostProblem = (
   const userLimit = resolveChatConcurrencyPlan({ kind: "user", subjectKey: "user:probe", ipKey: "ip:probe" }, env).subject.limit;
   return userLimit < SCHEDULED_TASK_MIN_USER_CONCURRENCY ? "chat_concurrency_too_low" : null;
 };
+
+/* --------------------------------------------------------- result notice -- */
+
+/**
+ * `SCHEDULED_TASK_EMAIL_ENABLED`: exactly "true" queues result emails, anything
+ * else (including unset) queues nothing. Mail leaves Tomverse, so it is off
+ * until an operator turns it on (lib/scheduledTaskNotice.ts).
+ */
+export const scheduledTaskEmailEnabled = (env: Record<string, string | undefined>) =>
+  env.SCHEDULED_TASK_EMAIL_ENABLED === "true";
+
+export type ScheduledRunNoticeKind = "answered" | "paused";
+
+/**
+ * Which result email a finished run owes, if any: an answer, or the pause this
+ * run put the task into. A failure that will be tried again, a skip that did
+ * not pause, and an unknown result owe nothing.
+ */
+export const scheduledRunNoticeKind = (input: {
+  status: RunClassification["status"];
+  pausedTask: boolean;
+}): ScheduledRunNoticeKind | null =>
+  input.status === "succeeded" ? "answered" : input.pausedTask ? "paused" : null;
+
+/** When a run ran, in the account's language and the task's zone, with the zone shown. */
+export const formatScheduledRunTime = (at: Date, timeZone: string, language: string) => {
+  try {
+    return new Intl.DateTimeFormat(language, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone,
+      timeZoneName: "short",
+    }).format(at);
+  } catch {
+    return `${at.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  }
+};

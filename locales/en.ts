@@ -2364,6 +2364,10 @@ export const en = {
                 title: "Service status",
                 description: "Outages and planned maintenance.",
             },
+            scheduled_tasks: {
+                title: "Scheduled tasks",
+                description: "When a scheduled task answers or pauses.",
+            },
             product_updates: {
                 title: "Product updates",
                 description: "New features and improvements.",

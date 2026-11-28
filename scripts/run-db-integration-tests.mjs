@@ -690,6 +690,9 @@ run(
     // lease reconciliation only mean anything against PostgreSQL.
     "tests/integration/scheduled-tasks.db.test.ts",
     "tests/integration/scheduled-task-chat-route.db.test.ts",
+    // A finished run's result email: once per run (the run's own marker,
+    // claimed in the outbox transaction) and never with a switch off.
+    "tests/integration/scheduled-task-notice.db.test.ts",
     "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",

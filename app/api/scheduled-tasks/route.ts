@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
-import { SCHEDULED_TASK_LIMITS } from "@/lib/scheduledTaskCore";
+import { SCHEDULED_TASK_LIMITS, scheduledTaskEmailEnabled } from "@/lib/scheduledTaskCore";
 import { scheduledTaskErrorResponse, scheduledTaskUser } from "@/lib/scheduledTaskRoute";
 import {
   createScheduledTask,
@@ -28,6 +28,9 @@ export async function GET(request: Request) {
     ]);
     return NextResponse.json({
       ...availability,
+      // Whether this deployment sends result emails at all; the per-task switch
+      // is shown only when it does.
+      emailNotices: scheduledTaskEmailEnabled(process.env),
       limits: {
         maxActiveTasks: SCHEDULED_TASK_LIMITS.maxActiveTasks,
         maxTasks: SCHEDULED_TASK_LIMITS.maxTasks,

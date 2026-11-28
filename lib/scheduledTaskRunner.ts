@@ -22,10 +22,12 @@ import {
   onceTaskRetryAt,
   planRunsScheduledTasks,
   SCHEDULED_TASK_LIMITS,
+  scheduledRunNoticeKind,
   scheduledTasksHostProblem,
   type RunClassification,
   type ScheduledTaskSchedule,
 } from "@/lib/scheduledTaskCore";
+import { queueScheduledRunNoticeQuietly } from "@/lib/scheduledTaskNotice";
 import { runAsScheduledTask } from "@/lib/scheduledTaskRunContext";
 import { isScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -128,7 +130,7 @@ async function finalizeRun(
     onlyIfLapsedAt?: Date;
   } = {}
 ) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const closed = await tx.scheduledTaskRun.updateMany({
       where: {
         id: run.id,
@@ -143,7 +145,8 @@ async function finalizeRun(
         ...(extra.chargedCredits !== undefined ? { chargedCredits: extra.chargedCredits } : {}),
       },
     });
-    if (!closed.count) return false;
+    if (!closed.count) return { closed: false, notice: null };
+    let pausedTask = false;
     // Locked, so an edit cannot commit between this read and the write below.
     const rows = await tx.$queryRaw<Array<{ status: string; frequency: string; consecutiveFailures: number; revision: number }>>`
       SELECT "status", "frequency", "consecutiveFailures", "revision" FROM "ScheduledTask"
@@ -151,6 +154,7 @@ async function finalizeRun(
     const task = rows[0];
     if (task && task.status === "active" && task.revision === run.taskRevision) {
       const streak = failureStreakAfter(task.consecutiveFailures, classification);
+      pausedTask = streak.pause !== null;
       // A one-time task whose run was refused by the platform or stopped by
       // the operator is not finished: it is due again (onceTaskRetryAt).
       let retryAt: Date | null = null;
@@ -189,8 +193,14 @@ async function finalizeRun(
         data: { updatedAt: new Date() },
       });
     }
-    return true;
+    return { closed: true, notice: scheduledRunNoticeKind({ status: classification.status, pausedTask }) };
   });
+  // After the close has committed, and never able to undo it: the run is
+  // finished whether or not its email can be queued. Closing happens once per
+  // run (the conditional update above), and the notice claims the run's own
+  // marker, so a second close attempt queues nothing either way.
+  if (result.notice) await queueScheduledRunNoticeQuietly({ runId: run.id, kind: result.notice });
+  return result.closed;
 }
 
 /**

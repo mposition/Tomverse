@@ -1355,6 +1355,7 @@ marketing을 포함하지 않는다는 범위 결정.
 | 2 | 비밀번호/인증수단 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 3 | 영수증, 결제 실패, 환불, 구독 변경 | transactional | 가능 | 가능 | **금지** | P0 | 공격적 | transactional |
 | 4 | 서비스 장애, 예정 점검 | service | 가능 | 가능 | 선택(별도 preference) | P1 | 표준 | transactional |
+| 4a | 예약 작업 결과(답변 완료, 일시정지) | service | 가능 | 가능 | 선택(별도 preference) — 설정 링크 | P2 | 표준 | transactional |
 | 5 | 약관/개인정보처리방침/가격 변경 | service/legal | 가능 | **가능(필수)** | **금지** | P1 | 표준 + 미도달 추적 | transactional |
 | 6 | 기능 업데이트 / 릴리스 노트 | **marketing** | **조건부**(아래) | 불가 | **필수** | P2 | 표준 | marketing |
 | 7 | 신규 기능 소개, 뉴스레터 | marketing | **조건부**(아래) | 불가 | **필수** | P3 | 관대(1회 재시도) | marketing |
@@ -1418,6 +1419,36 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
   끌 수 없습니다**(10번으로 분류).
 - **반드시 포함:** 영향 범위, 시각(사용자 시간대), 현재 상태, 다음 갱신 시점.
 - **국가별 차이:** GDPR 제33/34조의 개인정보 유출 통지는 4번이 아니라 10번입니다.
+
+#### 4a. 예약 작업 결과 (2026-11-28 추가, 기본 꺼짐)
+- **무엇**: 예약 작업 실행이 끝났을 때 한 통 — 답변이 대화에 저장됐거나
+  (`scheduled_task_run_answered`), 그 실행 때문에 작업이 일시정지됐을 때
+  (`scheduled_task_paused`). 다시 시도될 실패, 일시정지하지 않은 건너뜀, 결과 불명은
+  보내지 않습니다(`scheduledRunNoticeKind`, `lib/scheduledTaskCore.ts`).
+- **분류: service, purpose `scheduled_tasks`.** 사용자가 직접 만든 작업에 대한
+  사실이고 판촉이 없으므로 marketing이 아닙니다. 동의가 필요 없고 기본 ON이며,
+  4번처럼 **별도 preference**로 끌 수 있습니다(`/settings/notifications`). "모든
+  마케팅 수신 거부"는 이것을 끄지 않습니다. DB CHECK가 transactional에 purpose를
+  금지하므로, 끌 수 있는 비마케팅 메일은 service입니다.
+- **작업마다 끄기**: `ScheduledTask.emailOnFinish`(기본 true), 예약 작업 설정의
+  "끝나면 이메일로 알림". 발송 스위치가 켜진 배포에서만 보입니다.
+- **내용은 상태와 링크뿐입니다.** 작업 이름, 실행 시각(계정 언어·작업 시간대), 답변이
+  있는 대화 링크(일시정지면 예약 작업 설정 링크), 끄는 곳 링크. **답변도 질문도 넣지
+  않습니다.** 이 절에 요약을 넣는 규칙이 없으므로 넣지 않습니다.
+- **수신 거부**: service는 unsubscribe가 선택입니다(`EmailTemplate_unsubscribe_check`).
+  one-click 링크 대신 본문에 알림 설정 링크를 둡니다(`requiresUnsubscribe: false`).
+- **발송 경계** (`lib/scheduledTaskNotice.ts`): `SCHEDULED_TASK_EMAIL_ENABLED`가
+  정확히 `true`일 때만 큐에 넣습니다. 꺼져 있으면 아무것도 읽거나 쓰지 않습니다.
+  그다음 작업 토글, purpose(`consentGateVerdict`, drain이 발송 때 다시 판정), 그리고
+  **실행 한 번에 한 통**: `ScheduledTaskRun.noticeQueuedAt`을 NULL일 때만 outbox 행과
+  같은 transaction에서 표시합니다. 재시도·재조정·중복 종료는 표시를 보고 아무것도
+  넣지 않고, enqueue가 실패하면 표시도 함께 되돌아갑니다. 실행 종료는 알림 실패와
+  무관하게 먼저 commit됩니다.
+- **발송 경로**: 표준 lane 그대로(Resend, 기존 transactional 도메인, idempotency key,
+  재시도 곡선). 새 공급자·도메인이 없습니다. 발송 결과가 불명확한 메일을 다시 보내지
+  않는 것은 lane의 기존 규칙입니다.
+- **남은 것**: 스위치를 끄기 전에 이미 큐에 들어간 행은 drain이 보냅니다(최대 한 drain
+  주기). 발송 시점에 스위치를 다시 읽지는 않습니다.
 
 #### 5. 약관/개인정보처리방침/가격의 중요 변경
 - **service/legal. marketing 거부자에게도 반드시 보냅니다.**
@@ -4036,6 +4067,10 @@ AT·CH 밖 국가의 국가별 의무 확인). 뒤의 것은 근거와 무관하
     `product_updates`/`newsletter`/`promotions` = **OFF**.
   - `ConsentRecord`: 생성하지 않습니다. **동의한 적이 없으므로 동의 기록을 만들면
     거짓입니다.** 이것을 지키는 것이 중요합니다.
+  - 나중에 생긴 `scheduled_tasks`(2026-11-28)는 backfill하지 않습니다. 동의가 필요
+    없는 purpose라 행이 없으면 기본값(ON)으로 판정되고, 설정을 읽을 때
+    `ensureDefaultPreferences`가 행을 만듭니다. 동의가 필요한 purpose를 나중에
+    더한다면 이 방식은 쓸 수 없습니다(`tests/emailConsentGate.test.mjs`).
 - `UserSettings.country`: NULL로 시작. Stripe 청구 국가가 있는 계정은 배치로
   `countrySource = "billing"`으로 채웁니다. **IP로 채우지 않습니다.**
 - 기존 `NotificationDelivery`: **그대로 둡니다.** 신규 발송만 새 큐를 씁니다.

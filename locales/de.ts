@@ -2352,6 +2352,10 @@ export const de = {
                 title: "Servicestatus",
                 description: "Störungen und geplante Wartungen.",
             },
+            scheduled_tasks: {
+                title: "Geplante Aufgaben",
+                description: "Wenn eine geplante Aufgabe antwortet oder pausiert.",
+            },
             product_updates: {
                 title: "Produkt-Updates",
                 description: "Neue Funktionen und Verbesserungen.",

@@ -60,6 +60,8 @@ export const scheduledTaskInputSchema = z
     prompt: z.string().trim().min(1).max(SCHEDULED_TASK_LIMITS.promptCharacters),
     modelId: z.string().min(1).max(100),
     webSearch: z.boolean(),
+    /** Email the account when a run answers or the task pauses. Omitted means on. */
+    emailOnFinish: z.boolean().default(true),
     frequency: z.enum(SCHEDULED_TASK_FREQUENCIES),
     timeOfDay: z.string().regex(TIME),
     dayOfWeek: z.number().int().min(0).max(6).nullable().default(null),
@@ -89,6 +91,7 @@ export type ScheduledTaskView = {
   prompt: string;
   modelId: string;
   webSearch: boolean;
+  emailOnFinish: boolean;
   frequency: string;
   timeOfDay: string;
   dayOfWeek: number | null;
@@ -117,6 +120,7 @@ const TASK_SELECT = {
   prompt: true,
   modelId: true,
   webSearch: true,
+  emailOnFinish: true,
   frequency: true,
   timeOfDay: true,
   dayOfWeek: true,
@@ -153,6 +157,7 @@ const toView = (row: TaskRow): ScheduledTaskView => {
     prompt: row.prompt,
     modelId: row.modelId,
     webSearch: row.webSearch,
+    emailOnFinish: row.emailOnFinish,
     frequency: row.frequency,
     timeOfDay: row.timeOfDay,
     dayOfWeek: row.dayOfWeek,
@@ -355,6 +360,7 @@ export async function createScheduledTask(userId: string, input: ScheduledTaskIn
         prompt: input.prompt,
         modelId: input.modelId,
         webSearch: input.webSearch,
+        emailOnFinish: input.emailOnFinish,
         ...schedule,
         status: "active",
         creditsPerRun,
@@ -404,6 +410,7 @@ export async function updateScheduledTask(
         prompt: input.prompt,
         modelId: input.modelId,
         webSearch: input.webSearch,
+        emailOnFinish: input.emailOnFinish,
         ...schedule,
         status,
         ...(status === "active" ? { pauseReason: null } : {}),

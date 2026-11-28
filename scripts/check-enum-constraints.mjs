@@ -2036,7 +2036,7 @@ const REGISTRY = {
     module: "lib/emailPreferenceCore.ts",
     list: "EMAIL_PURPOSES",
     reason:
-      "The six things an account can receive (docs/policy/email-notifications.md \u00a711.2). The list is what the preference centre renders and what the standard lane gates on, so a purpose in the constraint the list has never heard of is mail nobody can switch off, and one in the list the constraint refuses is a preference row that cannot be written.",
+      "The seven things an account can receive (scheduled_tasks joined on 2026-11-28; docs/policy/email-notifications.md \u00a711.2). The list is what the preference centre renders and what the standard lane gates on, so a purpose in the constraint the list has never heard of is mail nobody can switch off, and one in the list the constraint refuses is a preference row that cannot be written.",
   },
   EmailPreference_source_check: {
     owner: "database",
@@ -2468,7 +2468,7 @@ const REGISTRY = {
     module: "lib/emailPermissionLedgerCore.ts",
     list: "EMAIL_SEND_APPROVAL_PURPOSE_KEYS",
     reason:
-      "Which purposes a risk_accepted override may cover: the six, or a star for all of them. It sat inside the composite scope constraint until 2026-09-21, where this checker could not see it -- one closed list per constraint is what it reads -- so the code and the database could have drifted apart silently, which is the failure it exists to catch. A waiver has no purpose scope at all and the column is NULL there.",
+      "Which purposes a risk_accepted override may cover: the seven, or a star for all of them. It sat inside the composite scope constraint until 2026-09-21, where this checker could not see it -- one closed list per constraint is what it reads -- so the code and the database could have drifted apart silently, which is the failure it exists to catch. A waiver has no purpose scope at all and the column is NULL there.",
   },
   EmailPermissionDecisionEvidence_authority_check: {
     owner: "list",
@@ -2517,7 +2517,7 @@ const REGISTRY = {
     module: "lib/emailPreferenceCore.ts",
     list: "EMAIL_PURPOSES",
     reason:
-      "The same six purposes EmailPreference is constrained to. A verdict names the purpose it decided, so a purpose this product does not send would be a permanent record about mail that does not exist -- and EmailPermissionDecision_purpose_classification_check beside it pins which classification each one may carry, which is what stops a marketing purpose being recorded as service and the marketing switches being recorded as not applying.",
+      "The same seven purposes EmailPreference is constrained to. A verdict names the purpose it decided, so a purpose this product does not send would be a permanent record about mail that does not exist -- and EmailPermissionDecision_purpose_classification_check beside it pins which classification each one may carry, which is what stops a marketing purpose being recorded as service and the marketing switches being recorded as not applying.",
   },
   EmailPermissionDecision_classification_check: {
     owner: "list",
