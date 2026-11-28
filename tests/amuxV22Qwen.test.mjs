@@ -14,7 +14,7 @@ import test from "node:test";
 
 import { amuxCliPricedModelId, amuxCliUsageReceiptSchema, makeAmuxCliUsageReceipt } from
   "../lib/amux/cliUsageLedgerCore.ts";
-import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv,
+import { AmuxV22ChannelAuthRefused, amuxV22ChannelArgs, amuxV22ChannelEnv, amuxV22CliSandboxArgs,
   amuxV22ChannelPreflight, amuxV22ChannelStdin, createAmuxV22ChannelRunHome,
   parseAmuxV22ChannelOutput } from "../lib/amux/v22ChannelRun.mjs";
 import { parseAmuxV22OneShotRequest, runAmuxV22OneShot } from "../lib/amux/v22OneShotSidecar.mjs";
@@ -48,20 +48,20 @@ const result = (fields = {}) => ({ type: "result", subtype: "success", uuid: "z"
     total_tokens: 4250 }, permission_denials: [], ...fields });
 const read = (role = "review") => ({ exitCode: 0, role, worktreePath: WORKTREE });
 
-test("Qwen is a seventh worker class that takes read roles only", () => {
+test("Qwen is a seventh worker class that implements by editing files, with no shell in any role", () => {
   assert.deepEqual(AMUX_WORKER_PROVIDER_CLASS_TABLE.qwen,
     { cli: "Qwen Code CLI", verified: false, maxRole: "implementation" });
   assert.equal(amuxV22ProviderForClass("qwen"), "qwen");
-  assert.equal(AMUX_V22_PROVIDERS.qwen.implement, false);
-  assert.equal(amuxV22ProviderRoleSupported("qwen", "implement"), false);
-  for (const role of ["investigate", "design", "review"])
+  // Owner request 2026-11-28: implement too.
+  assert.equal(AMUX_V22_PROVIDERS.qwen.implement, true);
+  for (const role of ["implement", "investigate", "design", "review"])
     assert.equal(amuxV22ProviderRoleSupported("qwen", role), true, role);
   const worker = { providerClass: "qwen", roleCeiling: "implementation" };
   assert.deepEqual(amuxWorkerProfilePresetCapability(worker, "impl", MODEL, true).v22,
-    { model: MODEL, roles: ["investigate"], tools: ["repo_read"] });
+    { model: MODEL, roles: ["implement", "investigate"], tools: ["repo_read", "repo_write"] });
   const request = { version: 1, attemptId: ATTEMPT, worker: "qwen-review", role: "implement",
     modelId: MODEL, budgetMicrousd: 1_000_000, prompt: "Change a file." };
-  assert.throws(() => parseAmuxV22OneShotRequest(request, "qwen-review", "qwen"));
+  assert.deepEqual(parseAmuxV22OneShotRequest(request, "qwen-review", "qwen"), request);
 });
 
 test("a read role runs headless in plan mode with the read tools only, the prompt on stdin", () => {
@@ -69,16 +69,29 @@ test("a read role runs headless in plan mode with the read tools only, the promp
   assert.deepEqual(args, ["--output-format", "stream-json", "--input-format", "text",
     "--approval-mode", "plan", "--auth-type", "openai", "--safe-mode", "--model", MODEL,
     "--extensions", "none", "--core-tools", "read_file", "glob", "grep_search",
-    "--exclude-tools", "run_shell_command", "edit", "write_file", "web_fetch", "web_search",
+    "--exclude-tools", "run_shell_command", "web_fetch", "web_search",
     "agent", "skill", "save_memory", "todo_write", "notebook_edit", "monitor", "lsp",
-    "list_directory"]);
+    "list_directory", "edit", "write_file"]);
   assert.ok(!args.includes("-p") && !args.includes("--yolo"));
   assert.equal(amuxV22ChannelStdin("qwen", "Look at the parser."), "Look at the parser.");
-  assert.throws(() => amuxV22ChannelArgs("qwen", { role: "implement", modelId: MODEL }, WORKTREE),
-    /read roles only/);
+  // Implement: auto-edit approves the two file writers, and still no shell.
+  const implement = amuxV22ChannelArgs("qwen", { role: "implement", modelId: MODEL }, WORKTREE);
+  assert.deepEqual(implement, ["--output-format", "stream-json", "--input-format", "text",
+    "--approval-mode", "auto-edit", "--auth-type", "openai", "--safe-mode", "--model", MODEL,
+    "--extensions", "none", "--core-tools", "read_file", "glob", "grep_search", "edit", "write_file",
+    "--exclude-tools", "run_shell_command", "web_fetch", "web_search",
+    "agent", "skill", "save_memory", "todo_write", "notebook_edit", "monitor", "lsp",
+    "list_directory"]);
+  assert.throws(() => amuxV22ChannelArgs("qwen", { role: "operate", modelId: MODEL }, WORKTREE),
+    /unknown v22 role/);
   assert.equal(amuxV22ChannelPreflight("qwen", { worktreePath: WORKTREE },
-    { exists: (path) => path.replaceAll("\\", "/").endsWith("/.qwen") }), "project_cli_config_present");
-  assert.equal(amuxV22ChannelPreflight("qwen", { worktreePath: WORKTREE }, { exists: () => false }), null);
+    { exists: (path) => path.replaceAll("\\", "/").endsWith("/.qwen"), symlinkOutside: () => null }),
+  "project_cli_config_present");
+  assert.equal(amuxV22ChannelPreflight("qwen", { worktreePath: WORKTREE },
+    { exists: () => false, symlinkOutside: () => null }), null);
+  // Qwen's view shows the checkout as it is, so a link out of it is refused too.
+  assert.equal(amuxV22ChannelPreflight("qwen", { worktreePath: WORKTREE },
+    { exists: () => false, symlinkOutside: () => "escape" }), "checkout_symlink_outside");
 });
 
 test("the stager copies only the Coding Plan key; the run gets it in its environment", async () => {
@@ -193,7 +206,26 @@ test("another permission mode, tool, subagent, block or path makes the run untru
   assert.equal(reason(jsonl(init(), { type: "control_request", request: { subtype: "can_use_tool",
     tool_name: "run_shell_command" } }, result())), "event:control_request");
   assert.equal(reason(`${jsonl(init())}Error: not JSON\n`), "non_object_line");
-  assert.equal(reason(jsonl(init(), result()), read("implement")), "role");
+  assert.equal(reason(jsonl(init(), result()), read("operate")), "role");
+  // Implement must report auto-edit; a read role that reports it is refused.
+  assert.equal(reason(jsonl(init(), result()), read("implement")), "permission_mode");
+  assert.equal(reason(jsonl(init({ permission_mode: "auto-edit" }), result()), read("implement")), null);
+  assert.equal(reason(jsonl(init({ permission_mode: "auto-edit" }), result())), "permission_mode");
+  // Implement's writers: inside the checkout only, never .git; a read role has none.
+  const implementCall = (...blocks) => jsonl(init({ permission_mode: "auto-edit" }), assistant(blocks),
+    toolResult(), result());
+  assert.equal(reason(implementCall(toolUse("write_file", { file_path: `${WORKTREE}/lib/new.ts`,
+    content: "x" })), read("implement")), null);
+  assert.equal(reason(implementCall(toolUse("edit", { file_path: `${WORKTREE}/lib/a.ts`,
+    old_string: "a", new_string: "b" })), read("implement")), null);
+  for (const input of [{ file_path: "/etc/hosts", content: "x" }, { file_path: `${WORKTREE}/.git/config`,
+    content: "x" }, { file_path: ".git/hooks/pre-commit", content: "x" }])
+    assert.equal(reason(implementCall(toolUse("write_file", input)), read("implement")), "tool_path",
+      JSON.stringify(input));
+  assert.equal(reason(implementCall(toolUse("run_shell_command", { command: "ls" })), read("implement")),
+    "tool:run_shell_command");
+  assert.equal(reason(withCall(toolUse("write_file", { file_path: `${WORKTREE}/a`, content: "x" }))),
+    "tool:write_file");
   // A kind that names no action passes and is counted.
   const noted = parseAmuxV22ChannelOutput("qwen", jsonl(init(), { type: "stream_event",
     event: { kind: "ping" } }, result()), read());
@@ -243,4 +275,35 @@ test("a Qwen review run reads its prompt from stdin and its key from its environ
   assert.equal(spawnOptions.env.QWEN_HOME, join("/run-home", ".qwen"));
   assert.equal(outcome.kind, "succeeded");
   assert.equal(outcome.usageReceipt.source, "qwen_stream");
+});
+
+test("Qwen runs only inside a bubblewrap view, the checkout writable for implement only", async () => {
+  const config = { worker: "qwen-impl", provider: "qwen",
+    binaryPath: "/opt/tomverse-amux-v22/qwen/bin/qwen", worktreePath: WORKTREE,
+    homePath: "/var/lib/tomverse-amux-v22-qwen-impl/home",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-qwen-impl/cli" };
+  for (const role of ["implement", "review"]) {
+    const output = jsonl(init({ permission_mode: role === "implement" ? "auto-edit" : "plan" }),
+      assistant([{ type: "text", text: "Done." }]), result({ result: "Done." }));
+    const fake = fakeSpawn(output);
+    const outcome = await runAmuxV22OneShot({ version: 1, attemptId: ATTEMPT, worker: "qwen-impl", role,
+      modelId: MODEL, budgetMicrousd: 1_000_000, prompt: "Work." }, config, {
+      syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+      ensureDependencies: async () => ({ ok: true, installed: false }),
+      createRunHome: async (_provider, value) => ({ config: { ...value, homePath: "/run-home",
+        claudeConfigDir: "/run-home/.config" }, copilotToken: null, qwenApiKey: KEY, cleanup: async () => {} }) });
+    const { binary, args } = fake.calls[0];
+    assert.equal(binary, "/usr/bin/bwrap", role);
+    const cut = args.indexOf("--");
+    assert.deepEqual(args.slice(0, cut + 1), amuxV22CliSandboxArgs({ worktreePath: WORKTREE,
+      runHomePath: "/run-home", binaryPath: config.binaryPath, writable: role === "implement" }));
+    assert.equal(args[cut + 1], config.binaryPath);
+    const at = args.indexOf(WORKTREE);
+    assert.equal(args[at - 1], role === "implement" ? "--bind" : "--ro-bind", role);
+    assert.ok(!args.includes(KEY) && !args.includes("--unshare-net"));
+    assert.equal(outcome.kind, "succeeded", role);
+  }
+  // Qwen's own install only, never another CLI's or the whole install root.
+  assert.throws(() => amuxV22CliSandboxArgs({ worktreePath: WORKTREE, runHomePath: "/run-home",
+    binaryPath: "/usr/local/bin/qwen" }), /root-owned install/);
 });

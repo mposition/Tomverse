@@ -138,17 +138,20 @@ once `expires_at` has passed, so how long a Kimi Code access token lasts on
 the box decides how often the stage timer must run.
 
 The Kimi sidecar is off unless its unit sets `TOMVERSE_AMUX_V22_KIMI=enabled`.
-It takes read roles only (design, investigate, review): `--print` approves
-every tool call, ReadFile/Glob/Grep read any absolute path, and Shell runs
-without a sandbox. Each run home holds an agent file (`extend: default`,
-`tools` = ReadFile, Glob, Grep) and an empty `--skills-dir`; the whole
+It takes every role, implement by editing files and never with a shell
+(owner request 2026-11-28): `--print` approves every tool call, its file tools
+reach any absolute path, and Shell runs without a sandbox, so the whole CLI
+runs inside the bubblewrap view below. Each run home holds an agent file
+(`extend: default`, `tools` = ReadFile, Glob, Grep, plus WriteFile and
+StrReplaceFile for implement) and an empty `--skills-dir`; the whole
 configuration (Kimi Code platform, OAuth key `oauth/kimi-code`, the route's
 model) comes from `--config`, so no user `config.toml` or hook is read. The
 CLI runs only inside a bubblewrap view (network kept): `/usr`, only the
 `/etc` files TLS and name resolution read (certificates, `resolv.conf`,
 `hosts`, `nsswitch.conf`, `localtime`; the rest of `/etc` is empty), its own
 install directory `/opt/tomverse-amux-v22/<dir>` (the CLI and its Python must
-be installed there), the guard's node and script, the checkout read-only and the run home; nothing else of the
+be installed there), the guard's node and script, the checkout (writable for
+implement with its `.git` read-only, read-only otherwise), the checkout read-only and the run home; nothing else of the
 box is visible, and where bwrap cannot start the CLI does not either. A
 `PreToolUse` hook (`lib/amux/v22KimiToolGuard.mjs`) also blocks, before a tool
 runs, any path that resolves outside the checkout (symlinks and a pattern's
@@ -173,14 +176,20 @@ no expiry and reaches the CLI only as `OPENAI_API_KEY` in its environment,
 with `OPENAI_BASE_URL` the plan's international endpoint
 (`https://coding-intl.dashscope.aliyuncs.com/v1`; the China endpoint is out
 of scope) and `--auth-type openai`. The Qwen sidecar is off unless its unit
-sets `TOMVERSE_AMUX_V22_QWEN=enabled`, and takes read roles only: a read role
-runs `--approval-mode plan --safe-mode --extensions none --core-tools
-read_file glob grep_search` with the prompt on stdin, `QWEN_HOME` in the run
+sets `TOMVERSE_AMUX_V22_QWEN=enabled`. It takes every role, implement by
+editing files and never with a shell (owner request 2026-11-28), and runs
+whole inside the same bubblewrap view as Kimi (its install directory under
+`/opt/tomverse-amux-v22/`, node from `/usr/bin`, the checkout writable for
+implement only). A read role runs `--approval-mode plan --safe-mode
+--extensions none --core-tools read_file glob grep_search`; implement runs
+`--approval-mode auto-edit` with `edit` and `write_file` added; the prompt is
+on stdin, `QWEN_HOME` in the run
 home and `general.enableAutoUpdate: false`. Qwen's read tools resolve paths
 with realpath and ask for one outside the workspace, and a headless run
-refuses every ask. The parser refuses an `init` not in plan mode, any other
-tool, a subagent's message and any path outside the checkout. A checkout with
-`.qwen/` is refused. Usage is the stream's `result.usage`; its input
+refuses every ask. The parser refuses an `init` in another approval mode, any
+other tool, a subagent's message, any path outside the checkout and a write
+into its `.git`. A checkout with `.qwen/` or a symlink out of itself is
+refused. Usage is the stream's `result.usage`; its input
 includes cache reads, so cache reads are priced as input (Copilot's rule).
 Qwen has no headless quota or model-list command yet.
 

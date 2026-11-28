@@ -66,17 +66,18 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
   // PATH (agy 1.5.4, measured on the box), so the sidecar's jail holds it.
   antigravity: Object.freeze({ providerClass: "antigravity", cli: "antigravity",
     model: ANY_MODEL, implement: true }),
-  // Owner request 2026-11-28: Kimi Code CLI takes the read roles only. Its
-  // print mode approves every tool call, its file tools read any absolute
-  // path, and its Shell tool runs without a sandbox, so no jail holds it once
-  // it may write (v22ChannelRun.mjs).
+  // Owner requests 2026-11-28: Kimi Code CLI and Qwen Code CLI implement by
+  // editing files, with no shell tool in any role. Each runs whole inside a
+  // bubblewrap view (v22ChannelRun.mjs amuxV22CliSandboxArgs): the checkout is
+  // the one writable place besides the run's own home, its .git read-only,
+  // and nothing else of the box is visible. Their own checks (Kimi's hook,
+  // which fails open; Qwen's undocumented write boundary) are not the
+  // boundary. A shell would keep the CLI's network inside the view, and bwrap
+  // cannot nest a no-network jail there, so neither gets one.
   kimi: Object.freeze({ providerClass: "kimi", cli: "kimi",
-    model: ANY_MODEL, implement: false }),
-  // The same request: Qwen Code CLI takes the read roles only. Its write
-  // tools' workspace boundary is not documented, and once a shell or a write
-  // is allowed in headless mode no permission check is left (v22ChannelRun.mjs).
+    model: ANY_MODEL, implement: true }),
   qwen: Object.freeze({ providerClass: "qwen", cli: "qwen",
-    model: ANY_MODEL, implement: false }),
+    model: ANY_MODEL, implement: true }),
   // Owner decision 2026-11-28: the GLM Coding Plan through Claude Code (Z.ai
   // documents Claude Code as a supported tool). The CLI, its tool list and
   // its jailed shell are Claude's, so it implements as a Claude worker does;

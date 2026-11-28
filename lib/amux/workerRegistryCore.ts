@@ -24,10 +24,10 @@
  * `antigravity` (Google's Antigravity CLI, Gemini 4 on the owner's Google AI
  * Pro sign-in), unverified with an implementation ceiling like Copilot.
  * Owner request 2026-11-28 added `kimi` (Moonshot's Kimi Code CLI on the
- * owner's Kimi Code sign-in), unverified at implementation like Cursor; its
- * v22 runs take the read roles only (AMUX_V22_PROVIDERS). The same request
- * added `qwen` (Alibaba's Qwen Code CLI on the owner's Coding Plan), read
- * roles only as well. A later decision the same day added `zai`: Claude Code
+ * owner's Kimi Code sign-in), unverified at implementation like Cursor, and
+ * `qwen` (Alibaba's Qwen Code CLI on the owner's Coding Plan); both take
+ * every v22 role, implement by editing files inside a bubblewrap view
+ * (AMUX_V22_PROVIDERS). A later decision the same day added `zai`: Claude Code
  * driven against Z.ai's Anthropic-compatible endpoint on the owner's GLM
  * Coding Plan, a class of its own so its runs and reviews carry Z.ai's
  * models, not Anthropic's.

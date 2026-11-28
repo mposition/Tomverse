@@ -58,30 +58,29 @@ const toolResult = (id = "tc_1") => ({ role: "tool", tool_call_id: id, content: 
 const USAGE = { inputTokens: 1200, outputTokens: 300, cacheReadTokens: 800, cacheWriteTokens: 0,
   steps: 2 };
 const GUARD = { nodePath: "/usr/bin/node", guardPath: "/opt/tomverse/lib/amux/v22KimiToolGuard.mjs" };
-const HOOK = `'/usr/bin/node' '/opt/tomverse/lib/amux/v22KimiToolGuard.mjs' '${WORKTREE}' '${RUN_HOME}/.amux-v22/kimi-guard.log'`;
+const hookFor = (role) => `'/usr/bin/node' '/opt/tomverse/lib/amux/v22KimiToolGuard.mjs' '${WORKTREE}' '${RUN_HOME}/.amux-v22/kimi-guard.log' ${role}`;
+const HOOK = hookFor("read");
 
-test("Kimi is a sixth worker class that takes read roles only", () => {
+test("Kimi is a sixth worker class that implements by editing files, with no shell in any role", () => {
   assert.ok(AMUX_WORKER_PROVIDER_CLASSES.includes("kimi"));
   assert.deepEqual(AMUX_WORKER_PROVIDER_CLASS_TABLE.kimi,
     { cli: "Kimi Code CLI", verified: false, maxRole: "implementation" });
   assert.equal(amuxV22ProviderForClass("kimi"), "kimi");
-  assert.equal(AMUX_V22_PROVIDERS.kimi.implement, false);
-  assert.equal(amuxV22ProviderRoleSupported("kimi", "implement"), false);
-  for (const role of ["investigate", "design", "review"])
+  // Owner request 2026-11-28: implement too.
+  assert.equal(AMUX_V22_PROVIDERS.kimi.implement, true);
+  for (const role of ["implement", "investigate", "design", "review"])
     assert.equal(amuxV22ProviderRoleSupported("kimi", role), true, role);
   // The model's vendor is Kimi's own, so a reviewer of another vendor pairs.
   assert.equal(amuxV22ReviewAuthorVendor("kimi", MODEL), "kimi");
   const worker = { workerName: "kimi-impl", providerClass: "kimi",
     roleCeiling: "implementation", desiredState: "active", revision: 1 };
   const capability = amuxWorkerProfilePresetCapability(worker, "impl", MODEL, true);
-  assert.deepEqual(capability.v22, { model: MODEL, roles: ["investigate"], tools: ["repo_read"] });
+  assert.deepEqual(capability.v22, { model: MODEL, roles: ["implement", "investigate"],
+    tools: ["repo_read", "repo_write"] });
   assert.equal(amuxWorkerCapabilityRefusal(worker, capability), null);
-  // An implement request never parses for a Kimi sidecar.
   const request = { version: 1, attemptId: ATTEMPT, worker: "kimi-impl", role: "implement",
     modelId: MODEL, budgetMicrousd: 1_000_000, prompt: "Change a file." };
-  assert.throws(() => parseAmuxV22OneShotRequest(request, "kimi-impl", "kimi"), /invalid v22 one-shot request/);
-  assert.deepEqual(parseAmuxV22OneShotRequest({ ...request, role: "investigate" },
-    "kimi-impl", "kimi"), { ...request, role: "investigate" });
+  assert.deepEqual(parseAmuxV22OneShotRequest(request, "kimi-impl", "kimi"), request);
 });
 
 test("a read role runs --print with its agent file, an empty skills directory and its own config", () => {
@@ -98,8 +97,19 @@ test("a read role runs --print with its agent file, an empty skills directory an
   }
   // The prompt travels on stdin as it is, never on the command line.
   assert.equal(amuxV22ChannelStdin("kimi", "Look at the parser."), "Look at the parser.");
-  assert.throws(() => amuxV22ChannelArgs("kimi", { role: "implement", modelId: MODEL }, WORKTREE,
-    { runHomePath: RUN_HOME, kimiGuard: GUARD }), /read roles only/);
+  // Implement has its own agent file (the writers added) and tells the hook so.
+  const implement = amuxV22ChannelArgs("kimi", { role: "implement", modelId: MODEL }, WORKTREE,
+    { runHomePath: RUN_HOME, kimiGuard: GUARD });
+  assert.equal(implement[implement.indexOf("--agent-file") + 1], `${RUN_HOME}/.amux-v22/kimi-implement.yaml`);
+  assert.deepEqual(JSON.parse(implement[12]), amuxV22KimiConfig(MODEL, { hookCommand: hookFor("implement") }));
+  assert.equal(amuxV22KimiAgent("implement").text, [
+    "version: 1", "agent:", "  extend: default", "  tools:",
+    '    - "kimi_cli.tools.file:ReadFile"', '    - "kimi_cli.tools.file:Glob"',
+    '    - "kimi_cli.tools.file:Grep"', '    - "kimi_cli.tools.file:WriteFile"',
+    '    - "kimi_cli.tools.file:StrReplaceFile"', ""].join("\n"));
+  assert.ok(!amuxV22KimiAgent("implement").text.includes("Shell"));
+  assert.throws(() => amuxV22ChannelArgs("kimi", { role: "operate", modelId: MODEL }, WORKTREE,
+    { runHomePath: RUN_HOME, kimiGuard: GUARD }), /unknown v22 role/);
   for (const runHomePath of [null, "relative/home", "/var/lib/../etc", "/home/a b"])
     assert.throws(() => amuxV22ChannelArgs("kimi", { role: "review", modelId: MODEL }, WORKTREE,
       { runHomePath, kimiGuard: GUARD }), /unsafe path/);
@@ -306,7 +316,8 @@ test("a stream without its answer, a non-JSON line, a write role or an unseen ro
   assert.equal(reason(`${jsonl(assistant("Reading."))}Max number of steps reached: 100\n`),
     "non_object_line");
   assert.equal(reason(""), "empty");
-  assert.equal(reason(jsonl(assistant("Done.")), { role: "implement" }), "role");
+  assert.equal(reason(jsonl(assistant("Done.")), { role: "implement" }), null);
+  assert.equal(reason(jsonl(assistant("Done.")), { role: "operate" }), "role");
   assert.equal(reason(jsonl({ role: "user", content: "x" }, assistant("Done."))), "role:user");
   assert.equal(reason(jsonl({ role: "assistant", content: 7 })), "message_shape");
   assert.equal(reason(jsonl({ role: "assistant", content: [], tool_calls: {} })), "message_shape");
@@ -361,7 +372,7 @@ test("the guard blocks before a tool runs: any other tool, an undocumented argum
   // cannot read is blocked too.
   const log = join(root, "kimi-guard.log");
   await writeFile(log, "");
-  const hook = (input) => runAmuxV22KimiToolGuardHook({ argv: [checkout, log],
+  const hook = (input, role = "read") => runAmuxV22KimiToolGuardHook({ argv: [checkout, log, role],
     stdin: () => typeof input === "string" ? input : JSON.stringify(input) });
   assert.equal(hook({ hook_event_name: "PreToolUse", tool_name: "ReadFile",
     tool_input: { path: "lib/a.ts" }, cwd: checkout }), 0);
@@ -370,7 +381,18 @@ test("the guard blocks before a tool runs: any other tool, an undocumented argum
   assert.equal(hook("{not json"), 2);
   assert.equal(hook({ hook_event_name: "PostToolUse", tool_name: "ReadFile",
     tool_input: { path: "lib/a.ts" } }), 2);
-  assert.equal(await readFile(log, "utf8"), "allow\nblock tool\nblock unreadable\nblock event\n");
+  // A read role's hook blocks a writer; implement's allows it inside the
+  // checkout only, never into .git; a role the hook does not know blocks all.
+  const write = { hook_event_name: "PreToolUse", tool_name: "WriteFile",
+    tool_input: { path: "lib/new.ts", content: "x" } };
+  assert.equal(hook(write), 2);
+  assert.equal(hook(write, "implement"), 0);
+  assert.equal(hook({ ...write, tool_input: { path: ".git/hooks/pre-commit", content: "x" } }, "implement"), 2);
+  assert.equal(hook({ ...write, tool_input: { path: "../outside.ts", content: "x" } }, "implement"), 2);
+  assert.equal(hook({ ...write, tool_name: "Shell", tool_input: { command: "ls" } }, "implement"), 2);
+  assert.equal(hook(write, "operate"), 2);
+  assert.equal(await readFile(log, "utf8"), ["allow", "block tool", "block unreadable", "block event",
+    "block tool", "allow", "block tool_path", "block tool_path", "block tool", "block role", ""].join("\n"));
   assert.equal(await readAmuxV22KimiGuardDecisions(root), null);
   // A log the hook cannot write blocks the call as well.
   assert.equal(runAmuxV22KimiToolGuardHook({ argv: [checkout, join(root, "missing", "log")],
@@ -618,4 +640,49 @@ test("a Kimi review run reads its prompt from stdin and its tokens from the run 
   assert.equal(outcome.kind, "succeeded");
   assert.equal(outcome.usageReceipt.source, "kimi_wire");
   assert.equal(outcome.usageReceipt.completeness, "reported_complete");
+});
+
+test("a Kimi implement run writes only its checkout: the view binds it writable with .git read-only", async () => {
+  const view = amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: RUN_HOME,
+    binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi", ...GUARD, writable: true });
+  const at = view.indexOf(WORKTREE);
+  assert.deepEqual(view.slice(at - 1, at + 5), ["--bind", WORKTREE, WORKTREE,
+    "--ro-bind-try", `${WORKTREE}/.git`, `${WORKTREE}/.git`]);
+  assert.ok(!view.includes("--unshare-net"));
+  // A read role's view keeps the checkout read-only.
+  const read = amuxV22KimiSandboxArgs({ worktreePath: WORKTREE, runHomePath: RUN_HOME,
+    binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi", ...GUARD });
+  assert.deepEqual(read.slice(read.indexOf(WORKTREE) - 1, read.indexOf(WORKTREE) + 2),
+    ["--ro-bind", WORKTREE, WORKTREE]);
+  // The stream: implement may write inside the checkout, never its .git or outside it.
+  const options = { exitCode: 0, role: "implement", worktreePath: WORKTREE, sessionUsage: USAGE };
+  const run = (...calls) => parseAmuxV22ChannelOutput("kimi",
+    jsonl(assistant("Editing.", calls), toolResult(), assistant("Done.")),
+    { ...options, guardDecisions: calls.length });
+  assert.equal(run(call("WriteFile", { path: "lib/new.ts", content: "x" }),
+    call("StrReplaceFile", { path: `${WORKTREE}/lib/a.ts`, edit: { old: "a", new: "b" } }, "tc_2")).valid, true);
+  for (const args of [{ path: ".git/config", content: "x" }, { path: `${WORKTREE}/.git/hooks/x`, content: "x" },
+    { path: "/etc/hosts", content: "x" }, { path: "../x", content: "x" }])
+    assert.equal(run(call("WriteFile", args)).reason, "tool_path", JSON.stringify(args));
+  assert.equal(run(call("Shell", { command: "ls" })).reason, "tool:Shell");
+  // An implement sidecar run spawns the writable view.
+  const config = { worker: "kimi-impl", provider: "kimi", binaryPath: "/opt/tomverse-amux-v22/kimi/bin/kimi",
+    worktreePath: WORKTREE, homePath: "/var/lib/tomverse-amux-v22-kimi-impl/home",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-kimi-impl/cli" };
+  const fake = fakeSpawn(jsonl(assistant("Editing.", [call("WriteFile", { path: "a.ts", content: "x" })]),
+    toolResult(), assistant("Changed a.ts.")));
+  const outcome = await runAmuxV22OneShot({ version: 1, attemptId: ATTEMPT, worker: "kimi-impl",
+    role: "implement", modelId: MODEL, budgetMicrousd: 1_000_000, prompt: "Change a.ts." }, config, {
+    syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null,
+    ensureDependencies: async () => ({ ok: true, installed: false }), kimiGuard: GUARD,
+    readKimiSessionUsage: async () => USAGE, readKimiGuardDecisions: async () => 1,
+    createRunHome: async (_provider, value) => ({ config: { ...value, homePath: RUN_HOME,
+      claudeConfigDir: `${RUN_HOME}/.config` }, copilotToken: null, kimiAccessToken: "synthetic-kimi-token-0123456789",
+    cleanup: async () => {} }) });
+  const spawned = fake.calls[0].args;
+  assert.equal(fake.calls[0].binary, "/usr/bin/bwrap");
+  assert.deepEqual(spawned.slice(0, spawned.indexOf("--") + 1), amuxV22KimiSandboxArgs({
+    worktreePath: WORKTREE, runHomePath: RUN_HOME, binaryPath: config.binaryPath, ...GUARD, writable: true }));
+  assert.ok(spawned.includes(`${RUN_HOME}/.amux-v22/kimi-implement.yaml`));
+  assert.equal(outcome.kind, "succeeded");
 });

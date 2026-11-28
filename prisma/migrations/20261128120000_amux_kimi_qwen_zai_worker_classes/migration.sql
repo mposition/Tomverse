@@ -1,9 +1,9 @@
 -- Owner request 2026-11-28: Moonshot's Kimi Code CLI (kimi, on the owner's
 -- Kimi Code sign-in) and Alibaba's Qwen Code CLI (qwen, on the owner's
 -- Coding Plan) are the sixth and seventh worker classes. Both are unverified
--- at implementation like Cursor and take v22 read roles only: their headless
--- runs approve tool calls with no jail for a shell or a write (Kimi's file
--- tools also read any absolute path). Owner decision the same day: `zai`,
+-- at implementation like Cursor; they implement by editing files, with no
+-- shell, inside a bubblewrap view whose only writable places are the
+-- checkout and the run's own home. Owner decision the same day: `zai`,
 -- Claude Code against Z.ai's Anthropic-compatible endpoint on the owner's
 -- GLM Coding Plan, is the eighth; it implements as a Claude worker does.
 -- Each change below is the latest definition (20261110200000) with only
@@ -17,8 +17,7 @@
 --   it (as Copilot's), and neither says whether output includes thinking;
 --   `zai_claude_result` is Claude Code's result JSON, read as Claude's.
 -- The capability guard needs no change: only Claude's model and Cursor's
--- implement are held by class there, and the v22 provider table keeps Kimi
--- and Qwen from implement.
+-- implement are held by class there.
 BEGIN;
 
 ALTER TABLE "AmuxWorkerRegistryEvent"
