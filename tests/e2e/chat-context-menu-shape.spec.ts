@@ -25,6 +25,7 @@ import { mockAuthenticatedApi } from "./support/app-fixtures";
 const CANONICAL_ORDER = [
   "tools-location-row",
   "tools-attach-row",
+  "tools-saved-prompts-row",
   "tools-web-search-row",
   "tools-assistant-row",
   "tools-memory-row",

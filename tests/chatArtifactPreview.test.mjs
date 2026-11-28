@@ -114,7 +114,7 @@ test("with this application's origin the frame policy admits the three vendored 
   // Not the directory: a file added under /vendor/artifact-preview/ later is not reachable from a page.
   assert.ok(!scriptSrc.split(" ").includes(`${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}`), "no directory source");
   assert.deepEqual(
-    scriptSrc.split(" ").filter((source) => source.startsWith(ORIGIN)),
+    scriptSrc.split(" ").filter((source) => URL.canParse(source) && new URL(source).origin === ORIGIN),
     HTML_PREVIEW_VENDOR_FILES.map((file) => `${ORIGIN}${HTML_PREVIEW_VENDOR_PATH}${file}`)
   );
   // The frame policy and the React page's own policy name the same files, and every one exists.
