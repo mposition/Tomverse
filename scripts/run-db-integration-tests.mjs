@@ -1638,6 +1638,23 @@ run(
   ],
   "Running the replaced-turn mark scenarios"
 );
+// Its own process: it replaces next-auth and the provider stream. A saved
+// turn's reservation names its answer, the answer shows what settlement wrote
+// (summed, withheld while open, nothing when refunded or unlinked), and only
+// the owner of an unlocked Chat conversation reads it.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-answer-credits.db.test.ts",
+  ],
+  "Running the answer credit link and read scenarios"
+);
 // Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
 // in its own process rather than changing another integration suite's client.
 run(

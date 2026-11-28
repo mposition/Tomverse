@@ -476,6 +476,35 @@ test("completed recovery accepts and allowlists canonical message metadata", () 
   assert.equal(parsed.knowledgeChunkCount, 1);
 });
 
+test("a recovered answer keeps its saved reasoning summary, and one without a summary gains none", () => {
+  const completed = attempt({
+    status: "completed",
+    actualModelId: "gpt-5-6-luna",
+    finishReason: "stop",
+    terminalAt: "2026-09-13T00:01:00.000Z",
+  });
+  const message = (searchMetadata) => ({
+    id: "assistant_1",
+    role: "assistant",
+    content: "answer",
+    status: "normal",
+    modelId: "gpt-5-6-luna",
+    pendingJobId: null,
+    createdAt: "2026-09-13T00:00:00.000Z",
+    searchMetadata,
+  });
+  const search = { requested: false, supported: true, executed: false, provider: "openai", citations: [] };
+  const withSummary = parseCompletedChatResponseMessage(
+    message({ ...search, reasoning: { text: "Saved summary.", durationMs: 9000 } }),
+    completed
+  );
+  assert.deepEqual(withSummary.reasoning, { text: "Saved summary.", done: true, durationMs: 9000, truncated: false });
+  // The recovered metadata itself is rebuilt from known fields only.
+  assert.equal("reasoning" in withSummary.searchMetadata, false);
+  const without = parseCompletedChatResponseMessage(message(search), completed);
+  assert.equal("reasoning" in without, false);
+});
+
 test("completed recovery rejects an unbound or malformed canonical message", () => {
   const completed = attempt({
     status: "completed",

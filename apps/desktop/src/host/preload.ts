@@ -49,6 +49,8 @@ if (trustedWindow) {
     chooseCliPath: (provider?: Parameters<DesktopApi["chooseCliPath"]>[0]) => ipcRenderer.invoke("desktop:choose-cli-path", provider),
     saveCliPath: (input: Parameters<DesktopApi["saveCliPath"]>[0]) => ipcRenderer.invoke("desktop:save-cli-path", input),
     removeCliPath: (provider: Parameters<DesktopApi["removeCliPath"]>[0]) => ipcRenderer.invoke("desktop:remove-cli-path", provider),
+    saveZaiKey: (key: string) => ipcRenderer.invoke("desktop:save-zai-key", key),
+    removeZaiKey: () => ipcRenderer.invoke("desktop:remove-zai-key"),
     scanCliProviders: () => ipcRenderer.invoke("desktop:scan-cli-providers"),
     trustCliPath: (input: Parameters<DesktopApi["trustCliPath"]>[0]) => ipcRenderer.invoke("desktop:trust-cli-path", input),
     dismissCliOffer: () => ipcRenderer.invoke("desktop:dismiss-cli-offer"),

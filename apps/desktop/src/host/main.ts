@@ -60,7 +60,7 @@ import { readOsLocationStatus, WINDOWS_LOCATION_SETTINGS_URI, type OsLocationSta
 import { Journal, deleteSession, listSessions, Workspace, writeFileAtomic } from "../../../tomverse-cli/src/runtime.js";
 import { pathIdentity } from "../../../tomverse-cli/src/patch.js";
 import { permissionCommand, type PermissionModeId } from "../permission-contract";
-import { liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
+import { liveCliExecution, liveCliFile, liveCliProviderForModel, liveCliProviders, type LiveCliProvider } from "../provider-cli-exec-contract";
 import { subagentStopInput } from "../orchestrate-contract";
 import { DesktopPermissions } from "./permission-host";
 import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions, MAX_CODE_PROMPT_CHARACTERS, MAX_CODE_REFERENCES,
@@ -135,7 +135,7 @@ import {
   DesktopSessionRefused, readBrowserAccount, refreshBrowserSession, revokeBrowserSession, signInByDesktopEmail,
   signInThroughBrowser, type BrowserAccount, type BrowserSession,
 } from "./browser-login";
-import { createCodeKeyVault, createSessionVault, type StorageMode, type StoredDesktopSession } from "./session-vault";
+import { createCodeKeyVault, createSessionVault, createZaiKeyVault, zaiCodingPlanKey, type StorageMode, type StoredDesktopSession } from "./session-vault";
 import { readDesktopCapabilities } from "./desktop-capabilities";
 import { prepareRefinedTurn, refinerEligible, type RefinerAttempt } from "./prompt-refiner";
 import { CodeKeyRefused, readCopiedCodeKey, requestCodeToken, verifyCodeKey } from "./code-key";
@@ -398,6 +398,53 @@ const windowBounds = z.object({
 const accountOrigin = DESKTOP_LOCAL_DEV_PACKAGE ? webOrigin
   : !app.isPackaged && DESKTOP_AUTH_FIXTURE_ORIGIN ? DESKTOP_AUTH_FIXTURE_ORIGIN : undefined;
 const sessionVault = () => createSessionVault(join(app.getPath("userData"), "desktop-session.dat"), safeStorage, process.platform);
+const zaiKeyVault = () => createZaiKeyVault(join(app.getPath("userData"), "zai-coding-plan-key.dat"), safeStorage, process.platform);
+/** The Z.ai key, in the main process only. It reaches a run in memory (the start-provider-cli message), never a file the CLI reads. */
+let zaiKey: string | null = null;
+/**
+ * Loading, saving and removing the key run one at a time, in the order asked: a save still encrypting cannot finish after a
+ * later removal and bring the key back, and an earlier save cannot overwrite a later one.
+ */
+let zaiKeyQueue: Promise<unknown> = Promise.resolve();
+function queueZaiKey<T>(action: () => Promise<T>): Promise<T> {
+  const next = zaiKeyQueue.then(action, action);
+  zaiKeyQueue = next.catch(() => undefined);
+  return next;
+}
+/** Claude Code's settings folder for the Z.ai route, apart from the person's own `~/.claude`. */
+const zaiClaudeConfigDir = () => join(app.getPath("userData"), "provider-cli", "zai-claude");
+
+const loadZaiKey = () => queueZaiKey(async () => {
+  const saved = await zaiKeyVault().read();
+  if (!saved || zaiKey) return;
+  zaiKey = saved.key;
+  state.zaiKey = "device";
+  broadcast();
+});
+
+const saveZaiKey = (input: unknown) => {
+  const key = zaiCodingPlanKey.parse(input);
+  return queueZaiKey(() => storeZaiKey(key));
+};
+
+async function storeZaiKey(key: string) {
+  const vault = zaiKeyVault();
+  const mode = await vault.save({ key });
+  // A key kept for this session only replaces a saved one: the old file goes, or a restart would load the key the person replaced.
+  if (mode === "session") await vault.clear();
+  zaiKey = key;
+  state.zaiKey = mode;
+  broadcast();
+  return mode;
+}
+
+const removeZaiKey = () => queueZaiKey(async () => {
+  zaiKey = null;
+  delete state.zaiKey;
+  await zaiKeyVault().clear();
+  broadcast();
+});
+
 const codeKeyVault = (accountId: string) => createCodeKeyVault(join(app.getPath("userData"),
   "code-key-" + createHash("sha256").update(accountId).digest("hex") + ".dat"), safeStorage, process.platform, accountId);
 
@@ -547,7 +594,7 @@ function refreshHistory(more = false) {
   liveHistory.clear();
   if (state.capabilities?.providerCliExec && projectRoot) for (const provider of liveCliProviders) {
     const home = liveHistoryHome(provider);
-    for (const saved of listNativeHistory(home, projectRoot.path, provider)) {
+    for (const saved of listNativeHistory(home, projectRoot.path, liveCliFile[provider])) {
       if (historyStorage.has(saved.id)) continue;
       historyStorage.set(saved.id, home);
       liveHistory.set(saved.id, provider);
@@ -597,7 +644,10 @@ function broadcast() {
   refreshCodeFallbackSettings();
   state.draftNamespace = workspaceNamespace();
   state.providerCliExec = state.capabilities?.providerCliExec && !signingOut
-    ? liveCliProviders.filter((provider) => { const status = state.cliPaths[provider]?.status; return status === "pathVerified" || status === "userTrusted"; }) : [];
+    ? liveCliProviders.filter((provider) => {
+      const status = state.cliPaths[liveCliFile[provider]]?.status;
+      return (status === "pathVerified" || status === "userTrusted") && (provider !== "zai" || zaiKey !== null);
+    }) : [];
   state.handoff = currentHandoff();
   state.projectPermissionProfile = readProjectPermissionProfile();
   state.permissions = permissionHost.view();
@@ -764,7 +814,7 @@ async function trustCliPath({ provider, path }: z.infer<typeof cliPathInput>) {
 /** A saved CLI file is checked again after a restart; with the server's route on, that happens now so the first task can use it. */
 async function revalidateLiveCliPaths() {
   if (!state.capabilities?.providerCliExec) return;
-  for (const provider of liveCliProviders) {
+  for (const provider of new Set(liveCliProviders.map((route) => liveCliFile[route]))) {
     const saved = state.cliPaths[provider];
     if (closing || configuringCli || saved?.status !== "checkRequired") continue;
     try { await saveCliPath({ provider, path: saved.path }); }
@@ -1170,19 +1220,24 @@ function startNativeTask(cliFixture: NonNullable<typeof cliRunFixture>, project:
 async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<typeof startInput>, "prompt" | "model" | "mode" | "saveHistory">,
     executionMode: CodeExecutionMode | undefined, references: Task["references"]) {
   const provider = liveCliProviderForModel(draft.model);
-  const saved = provider ? state.cliPaths[provider] : undefined;
+  const file = provider ? liveCliFile[provider] : undefined;
+  const saved = file ? state.cliPaths[file] : undefined;
+  const zai = provider === "zai" && zaiKey ? { key: zaiKey, configDir: zaiClaudeConfigDir() } : undefined;
   if (!provider || !saved || executionMode !== "provider_cli" || !state.capabilities?.providerCliExec || !worker ||
-      !state.providerCliExec?.includes(provider)) {
+      !state.providerCliExec?.includes(provider) || !file || (provider === "zai" && !zai)) {
     throw new Error("The selected Code execution route is unavailable.");
   }
   const key = codeConnection()?.key;
   if (key && hasCredential(draft.prompt, key)) throw new Error("The Code request contains a Tomverse credential.");
+  // The Z.ai key is refused the same way: the request is saved and shown before the run, so it must not hold the key.
+  if (zaiKey && draft.prompt.includes(zaiKey)) throw new Error("The Code request contains your Z.ai key.");
   assertProjectRoot(project);
   choosing = true;
   let resolved: Awaited<ReturnType<typeof providerCli.resolveSaved>>;
-  try { resolved = await providerCli.resolveSaved(provider, saved); }
+  try { resolved = await providerCli.resolveSaved(file, saved); }
   finally { choosing = false; }
-  if (!resolved || state.cliPaths[provider] !== saved || projectRoot !== project || state.busy || pendingMutation || closing || signingOut ||
+  // The key is checked again after the wait: one removed or replaced meanwhile is not sent.
+  if (!resolved || state.cliPaths[file] !== saved || (provider === "zai" && zaiKey !== zai?.key) || projectRoot !== project || state.busy || pendingMutation || closing || signingOut ||
       suspended || state.update.stage === "installing" || state.codeExecutionPreference !== "provider_cli") {
     throw new Error("Check the CLI in Settings > Development CLIs and try again.");
   }
@@ -1194,7 +1249,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   const id = draft.saveHistory === false ? null : Journal.newId();
   const home = id ? liveHistoryHome(provider) : null;
   const task: Task = { id, root: project.path, title: text.slice(0, 80), status: "starting", entries: [{ role: "user", text }],
-    execution: provider === "openai" ? codexFixtureExecution : claudeFixtureExecution, effort: "default", changes: [], checks: [], transmission: [],
+    execution: liveCliExecution(provider), effort: "default", changes: [], checks: [], transmission: [],
     readOnly: permission === "read_only", savedLocally: !!home, references, liveCli: true };
   if (home) saveNativeHistory(home, task, mode, true);
   pendingLiveHistory = home ? { home, mode, provider } : undefined;
@@ -1206,7 +1261,7 @@ async function startProviderCliTask(project: ProjectRoot, draft: Pick<z.infer<ty
   try {
     send({ type: "start-provider-cli", runId, project, provider, file: resolved.file, prompt: draft.prompt, permission,
       protectedRoot: app.getPath("userData"), references, ...(home && id ? { history: { id, directory: nativeSessionDirectory(home, id) } } : {}),
-      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}) });
+      ...(providerCliExecFixture ? { argsPrefix: providerCliExecFixture.argsPrefix } : {}), ...(zai ? { zai } : {}) });
   } catch {
     runId = null;
     state.busy = false;
@@ -2014,8 +2069,8 @@ function readTaskHistory(id: string, apiOnly = false): Task | null {
   const liveProvider = liveHistory.get(id);
   const liveStorage = historyStorage.get(id);
   if (liveProvider && liveStorage && !apiOnly) {
-    const saved = readNativeHistory(liveStorage, id, projectRoot.path, liveProvider);
-    return saved ? { ...restoredNativeTask(saved), liveCli: true } : null;
+    const saved = readNativeHistory(liveStorage, id, projectRoot.path, liveCliFile[liveProvider]);
+    return saved ? { ...restoredNativeTask(saved), execution: liveCliExecution(liveProvider), liveCli: true } : null;
   }
   if (DESKTOP_FIXTURE_ALLOWED && !apiOnly) {
     const native = nativeHistoryRecord(id);
@@ -2526,7 +2581,7 @@ async function deleteLiveHistory(taskId: string): Promise<DeleteHistoryResult> {
       deleteSession(storage, taskId, (directory) => {
         assertProjectRoot(project);
         verified = directory === nativeSessionDirectory(storage, taskId) && pathIdentity(directory, "directory") === directoryIdentity &&
-          !!readNativeHistory(storage, taskId, project.path, provider);
+          !!readNativeHistory(storage, taskId, project.path, liveCliFile[provider]);
         return verified;
       });
       state.task = null;
@@ -4411,6 +4466,8 @@ function registerIpc() {
   main("desktop:choose-cli-path", (value) => chooseCliPath(cliProvider.optional().parse(value)));
   main("desktop:save-cli-path", (value) => saveCliPath(cliPathInput.parse(value)));
   main("desktop:remove-cli-path", (value) => removeCliPath(cliProvider.parse(value)));
+  main("desktop:save-zai-key", (value) => saveZaiKey(value));
+  main("desktop:remove-zai-key", () => removeZaiKey());
   main("desktop:scan-cli-providers", () => providerCli.scan());
   main("desktop:trust-cli-path", (value) => trustCliPath(cliPathInput.parse(value)));
   main("desktop:dismiss-cli-offer", () => providerCli.dismissOffer());
@@ -5169,6 +5226,7 @@ else {
     loadCodeExecutionPreference();
     permissionHost.load();
     loadCliPaths();
+    void loadZaiKey().catch(() => { /* An unreadable key is as if none was saved. */ });
     loadCodeNotifications();
     loadCodeTerminal();
     powerMonitor.on("suspend", () => {

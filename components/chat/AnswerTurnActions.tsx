@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore, type MouseEventHandler } from "react";
 import { GitBranch, Pause, Play, RotateCcw, Shuffle, Volume2, VolumeX } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { AnswerCreditsLabel } from "@/components/chat/AnswerCreditsLabel";
 import { useChatServerReadoutEnabled } from "@/components/chat/ChatServerReadoutContext";
 import { CHAT_MODEL_PICKER_CLOSED_EVENT } from "@/lib/chatModelPickerEvents";
 import { decideArmedRegenerate, regenerateArmRecheckInMs } from "@/lib/chatRegenerateArm";
@@ -60,6 +61,7 @@ export function AnswerTurnActions({
   regenerate,
   branch,
   allowServerReadout = false,
+  credits,
 }: {
   messageId: string;
   content: string;
@@ -71,6 +73,8 @@ export function AnswerTurnActions({
    * hold, otherwise "Read aloud" is the browser voice.
    */
   allowServerReadout?: boolean;
+  /** What this answer was charged, once settled; absent shows nothing. */
+  credits?: number;
 }) {
   const { t, lang } = useLanguage();
   const copy = chatTurnToolsCopy[lang];
@@ -152,7 +156,7 @@ export function AnswerTurnActions({
     return () => window.clearTimeout(timer);
   }, [armed, currentModelId, onRegenerate]);
 
-  if (!canRead && !regenerate && !branch) return null;
+  if (!canRead && !regenerate && !branch && credits === undefined) return null;
 
   return (
     <div data-testid="chat-answer-turn-actions" className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">
@@ -242,6 +246,7 @@ export function AnswerTurnActions({
           {branch.pending ? surfaceCopy.branchWorking : surfaceCopy.branchHere}
         </button>
       )}
+      {credits !== undefined && <AnswerCreditsLabel credits={credits} />}
       {waitingForModel && (
         <span
           data-testid="chat-regenerate-waiting"
