@@ -85,10 +85,12 @@ export const isSecretPath = (relativePath: string) => {
 /**
  * Whether a shell command names a path that can hold credentials: its words, split at quotes and shell
  * punctuation, that look like a path (a separator, a dot, `~`, or an `id_` key name) and match isSecretPath.
- * Name-based like isSecretPath; a command that builds the name at run time is not caught.
+ * Name-based like isSecretPath; a command that builds the name at run time is not caught. `everyWord` checks
+ * every word, bare file names such as `credentials` included, for callers that refuse rather than ask.
  */
-export const commandNamesSecretPath = (command: string) =>
-    command.split(/[\s"'=,;<>|&()]+/).filter(Boolean).some((piece) => (/[\\/.~]/.test(piece) || /^id_/i.test(piece)) && isSecretPath(piece));
+export const commandNamesSecretPath = (command: string, options: { everyWord?: boolean } = {}) =>
+    command.split(/[\s"'=,;<>|&()`]+/).filter(Boolean)
+        .some((piece) => (options.everyWord || /[\\/.~]/.test(piece) || /^id_/i.test(piece)) && isSecretPath(piece));
 
 /** Generated or vendored folders that listing and search skip. */
 export const SKIPPED_DIRS = new Set([

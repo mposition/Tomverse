@@ -107,7 +107,8 @@ export function approvalRequestFor(approval: CliApproval, root: string, clean: (
     const extras = rest(["command", "timeout", "run_in_background"]);
     // A command naming a credential file is refused, never shown: Claude Code's deny rules cover its file tools, and its own
     // read-only checks cover only the commands it runs without asking, so a command it asks about could read one if approved.
-    if (typeof command !== "string" || commandNamesSecretPath(String(input.command)) || commandNamesSecretPath(command) || !extras ||
+    // Every word is checked, a bare `credentials` or `secret` too: a refused command is one the CLI cannot run, never one run unseen.
+    if (typeof command !== "string" || commandNamesSecretPath(String(input.command), { everyWord: true }) || !extras ||
         (input.timeout !== undefined && typeof input.timeout !== "number") ||
         (input.run_in_background !== undefined && typeof input.run_in_background !== "boolean")) return null;
     return { ...base, ...extras, command: { mode: "shell", file: base.tool, args: [], cwd: clean(root), display: command, env: [],

@@ -4,7 +4,7 @@ import { LIVE_CLI_LIMITS } from "../src/provider-cli-exec-contract";
 import { approvalRequestFor, createTranscript } from "../src/host/provider-cli-transcript";
 import type { ExecEvent } from "../src/host/provider-cli-exec";
 
-const clean = (text: string) => text.replaceAll("SECRET", "[removed]");
+const clean = (text: string) => text.replaceAll("SECRET", "[removed]").replaceAll("HIDDEN", "[removed]");
 const apply = (events: ExecEvent[]) => {
   const transcript = createTranscript(clean);
   for (const event of events) transcript.apply(event);
@@ -82,7 +82,7 @@ test("A long run stays bounded and says how many calls were left out", () => {
 const need = <T>(value: T | null): T => { assert.ok(value, "the request has a card"); return value; };
 
 test("The approval card shows what the CLI asked for and never offers to remember it", () => {
-  const shell = need(approvalRequestFor({ id: "r1", tool: "Bash", input: { command: "rm -rf build SECRET", timeout: 5_000 } }, "/work", clean));
+  const shell = need(approvalRequestFor({ id: "r1", tool: "Bash", input: { command: "rm -rf build HIDDEN", timeout: 5_000 } }, "/work", clean));
   assert.equal(shell.canRemember, false);
   assert.equal(shell.root, "/work");
   assert.equal(shell.command?.display, "rm -rf build [removed]");
@@ -118,11 +118,12 @@ test("A request the card cannot show in full, or that names a credential file, g
   assert.match(replaceAll.explanation ?? "", /replace_all/);
   // A shell command naming a credential file is refused too: approving it would read what the deny rules keep from the file tools.
   for (const command of ["node -e \"console.log(require('fs').readFileSync('.env','utf8'))\"", "Get-Content -LiteralPath C:\\work\\.env.local",
-    "type ~/.ssh/id_ed25519", "python read.py < .git/config", "cp secrets.yaml out/", "cat ./server.pem"]) {
+    "type ~/.ssh/id_ed25519", "python read.py < .git/config", "cp secrets.yaml out/", "cat ./server.pem",
+    "cat credentials", "type secret", "Get-Content id_rsa", "more `credentials`"]) {
     assert.equal(ask("Bash", { command }), null, command);
     assert.equal(ask("PowerShell", { command }), null, command);
   }
-  assert.ok(ask("Bash", { command: "npm test -- --grep secret" }), "a word that is not a path is not a file name");
+  assert.ok(ask("Bash", { command: "npm test -- --grep login" }), "a command that names no credential file gets its card");
   // A credential file is never asked about, in any tool that names a path.
   for (const path of [".env", "config/.npmrc", "keys/server.pem", ".ssh/config", "a/.git/config", "credentials.json"]) {
     assert.equal(ask("Write", { file_path: path, content: "x" }), null, path);
