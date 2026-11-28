@@ -738,10 +738,12 @@ test("an account at its message storage limit is refused before the turn is rese
     );
     assert.equal(response.status, 409);
     assert.equal((await response.json() as { code?: string }).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
-    // Nothing was reserved, so nothing settles; the claimed attempt is closed.
+    // Refused before the claim and the reservation: nothing settles, and no
+    // attempt row is written for a turn that could never answer.
     assert.deepEqual(ledger.settlements, []);
     assert.deepEqual(world.messages, []);
-    assert.deepEqual(terminals.map((t) => t.status), ["failed"]);
+    assert.equal(row, null, "no attempt was claimed");
+    assert.deepEqual(terminals, []);
   } finally {
     if (prior === undefined) delete process.env.API_MAX_MESSAGE_BYTES_PER_USER;
     else process.env.API_MAX_MESSAGE_BYTES_PER_USER = prior;

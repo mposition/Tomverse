@@ -541,6 +541,9 @@ let durableAttemptAdmissionRefused = false;
 let durableAttemptAdmissionCalls = 0;
 let locationIntentLimitCalls = 0;
 let locationIntentLimitRefused = false;
+/** The pre-dispatch storage check: what it was asked, and whether the store is full. */
+let messageStoreFull = false;
+const messageCapacityChecks: Array<{ count: number; bytes: number }> = [];
 class TestApiSecurityError extends Error {
   constructor(
     readonly status: number,
@@ -566,7 +569,12 @@ mock.module(mod("lib/apiSecurity.ts"), {
           )
         : null,
     assertMessageCapacity: async () => undefined,
-    checkMessageCapacity: async () => undefined,
+    checkMessageCapacity: async (_db: unknown, _userId: string, _conversationId: string, count: number, bytes: number) => {
+      messageCapacityChecks.push({ count, bytes });
+      if (messageStoreFull) {
+        throw new TestApiSecurityError(409, "MESSAGE_STORAGE_QUOTA_EXCEEDED", "Message storage quota exceeded.");
+      }
+    },
     consumeApiRateLimit: async (
       request: Request,
       subject: string,
@@ -2458,6 +2466,35 @@ test("a turn the Router did not rewrite keeps the identity digest it always had"
   } finally {
     realClaimStore = null;
   }
+});
+
+/*
+  Review finding (B3, 2026-11-28, third pass): the storage check ran after the
+  paid Auto Router, so an account with a full message store paid for a Router
+  call on every turn before being told no.
+*/
+test("a full message store is refused before the paid Router, the claim and the reservation", async () => {
+  messageStoreFull = true;
+  messageCapacityChecks.length = 0;
+  try {
+    llmRouterInputs.length = 0;
+    const { body } = await ask("answers", "claimed", 409, false);
+    assert.equal((JSON.parse(body) as { code?: string }).code, "MESSAGE_STORAGE_QUOTA_EXCEEDED");
+    assert.equal(llmRouterInputs.length, 0, "no Router call for an answer that could not be stored");
+    assert.equal(durableClaimCalls, 0, "no attempt row either");
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+    // One answer's worth, before any model is chosen: the stored-answer cap.
+    assert.deepEqual(messageCapacityChecks, [{ count: 1, bytes: 400_000 }]);
+  } finally {
+    messageStoreFull = false;
+  }
+  // With room, the same turn asks the Router as before, after one check.
+  messageCapacityChecks.length = 0;
+  llmRouterInputs.length = 0;
+  await ask("answers", "claimed", 200, false);
+  assert.equal(messageCapacityChecks.length, 1);
+  assert.equal(llmRouterInputs.length, 1);
 });
 
 test("a POST whose assistant id is already bound skips the paid Router and still reattaches at the claim", async () => {

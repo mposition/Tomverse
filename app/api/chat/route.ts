@@ -2281,6 +2281,39 @@ async function handleChatPost(
         if (isTemporaryConversationExpired(conversationRouting?.temporaryExpiresAt, new Date())) {
             throw new ChatAccessError(410, TEMPORARY_CHAT_EXPIRED, "This temporary chat has ended.");
         }
+        /*
+          An answer that could never be stored is refused before anything is
+          paid for -- the Auto Router, the image classification beside it, the
+          credit reservation, the provider. The Message write re-checks under
+          its own lock and stays the authority; this removes the ordinary case,
+          an account already at its storage limit, whose turn used to be routed,
+          charged, streamed and then lost at that write
+          (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
+          The model is not chosen yet, so the room asked for is the most a
+          stored answer can take: its character cap at four bytes each. Only
+          for a conversation the owner-scoped read above found; only the
+          storage refusal stops the turn, and if the check itself fails, the
+          write decides as it always has.
+        */
+        if (session?.user?.id && conversationId && assistantMessageId && conversationRouting) {
+            try {
+                await checkMessageCapacity(
+                    prisma,
+                    session.user.id,
+                    conversationId,
+                    1,
+                    MAX_STORED_MESSAGE_CHARACTERS * 4
+                );
+            } catch (error) {
+                if (apiSecurityResponse(error)) throw error;
+                logRequestError(
+                    "chat_message_capacity_precheck_failed",
+                    traceId,
+                    error,
+                    requestedModelId
+                );
+            }
+        }
         if (conversationRouting?.continuationBridge) continuation.receipt = continuationReceipt({
             traceId, assistantMessageId: assistantMessageId ?? "", selected: req.headers.has(PASSAGE_HEADER), outcome: "not_prepared" });
         if (guestAutoCapability) {
@@ -5801,36 +5834,6 @@ async function handleChatPost(
                 signals: routerCandidateInputs.signals,
             };
         });
-        /*
-          An answer that could never be stored is refused before it is paid
-          for. The Message write re-checks under its own lock and stays the
-          authority; this removes the ordinary case -- an account already at its
-          storage limit, whose turn used to be charged, streamed and then lost
-          at that write (docs/policy/credit-and-cost-limits.md, "완료 분기의
-          정산"). One message, sized at this turn's output ceiling in the four
-          bytes per token the settlement estimator uses. Only the storage
-          refusal stops the turn: if the check itself fails, the write decides
-          as it always has.
-        */
-        if (session?.user?.id && conversationId && assistantMessageId) {
-            try {
-                await checkMessageCapacity(
-                    prisma,
-                    session.user.id,
-                    conversationId,
-                    1,
-                    budget.maxOutputTokens * 4
-                );
-            } catch (error) {
-                if (apiSecurityResponse(error)) throw error;
-                logRequestError(
-                    "chat_message_capacity_precheck_failed",
-                    traceId,
-                    error,
-                    modelConfig.id
-                );
-            }
-        }
         const enabledTools =
             nativeSearchEnabled || appManagedSearchEnabled
                 ? ["web_search"]

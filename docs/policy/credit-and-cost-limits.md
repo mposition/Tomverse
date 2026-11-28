@@ -919,11 +919,13 @@ provider 스트림이 끝난 뒤 완료 분기가 고르는 정산 outcome입니
   표시) provider 중단과 같은 비례 방식으로 정산합니다. provider 실패로 기록하지 않습니다.
   저장된 파일이 있는 turn은 파일이 답이므로 그대로 `completed`이고
   (`docs/policy/generated-artifacts.md` §8), Research Preview도 제외입니다.
-- **저장될 수 없는 답은 보내기 전에 거절합니다(2026-11-28).** 로그인 turn은 예약 직전에
-  메시지 저장 한도(`STORAGE_LIMITS`)를 assistant 메시지 한 건 — 건수 1, 이 turn의 출력
-  상한을 정산 추정기와 같은 4바이트/토큰으로 환산한 바이트 — 만큼 잠금 없이 확인하고,
-  모자라면 `MESSAGE_STORAGE_QUOTA_EXCEEDED`(409)로 거절합니다. 아무것도 예약·호출하지
-  않습니다. Message 저장의 잠금 아래 검사가 여전히 최종 판정이고, 동시 turn이 마지막
+- **저장될 수 없는 답은 보내기 전에 거절합니다(2026-11-28).** 로그인 turn은 대화를
+  소유자 범위로 읽은 직후, Auto Router·이미지 분류·durable claim·예약 같은 유료 또는
+  기록을 남기는 단계보다 먼저 메시지 저장 한도(`STORAGE_LIMITS`)를 assistant 메시지
+  한 건 — 건수 1, 저장 답변의 최대 크기(`CHAT_MAX_STORED_ANSWER_CHARACTERS` × 4바이트;
+  모델이 아직 정해지지 않았으므로 보수적인 상한) — 만큼 잠금 없이 확인하고, 모자라면
+  `MESSAGE_STORAGE_QUOTA_EXCEEDED`(409)로 거절합니다. 아무것도 호출·예약하지 않고
+  attempt 행도 만들지 않습니다. Message 저장의 잠금 아래 검사가 여전히 최종 판정이고, 동시 turn이 마지막
   자리를 가져가 그 검사가 거절하면 위 정산 순서(저장 전 정산, 되돌리지 않음)를 그대로
   따릅니다. 그 거절은 로컬 저장 거절이라 provider·모델 실패로 기록하지 않습니다.
 
