@@ -14,6 +14,13 @@ export type ChatTurnToolsCopy = {
   cancel: string;
   speak: string;
   stopSpeaking: string;
+  /** Server voice only: pausing and resuming the answer being read. */
+  pauseSpeaking: string;
+  resumeSpeaking: string;
+  /** Shown while the server prepares the first piece of audio. */
+  preparingVoice: string;
+  /** The provider's usage policy asks that a generated voice be disclosed. */
+  generatedVoiceNotice: string;
   editQuestion: string;
   editQuestionLabel: string;
   editSave: string;
@@ -48,6 +55,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "Cancel",
     speak: "Read aloud",
     stopSpeaking: "Stop reading",
+    pauseSpeaking: "Pause",
+    resumeSpeaking: "Resume",
+    preparingVoice: "Preparing voice…",
+    generatedVoiceNotice: "AI-generated voice",
     editQuestion: "Edit",
     editQuestionLabel: "Edit your last message",
     editSave: "Save and resend",
@@ -80,6 +91,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "취소",
     speak: "소리 내어 읽기",
     stopSpeaking: "읽기 멈춤",
+    pauseSpeaking: "일시정지",
+    resumeSpeaking: "이어서 읽기",
+    preparingVoice: "음성 준비 중…",
+    generatedVoiceNotice: "AI가 만든 음성",
     editQuestion: "수정",
     editQuestionLabel: "마지막 메시지 수정",
     editSave: "저장하고 다시 보내기",
@@ -112,6 +127,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "Abbrechen",
     speak: "Vorlesen",
     stopSpeaking: "Vorlesen beenden",
+    pauseSpeaking: "Pause",
+    resumeSpeaking: "Fortsetzen",
+    preparingVoice: "Stimme wird vorbereitet…",
+    generatedVoiceNotice: "KI-generierte Stimme",
     editQuestion: "Bearbeiten",
     editQuestionLabel: "Letzte Nachricht bearbeiten",
     editSave: "Speichern und erneut senden",
@@ -144,6 +163,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "Cancelar",
     speak: "Leer en voz alta",
     stopSpeaking: "Detener lectura",
+    pauseSpeaking: "Pausar",
+    resumeSpeaking: "Reanudar",
+    preparingVoice: "Preparando la voz…",
+    generatedVoiceNotice: "Voz generada por IA",
     editQuestion: "Editar",
     editQuestionLabel: "Editar tu último mensaje",
     editSave: "Guardar y reenviar",
@@ -176,6 +199,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "Annuler",
     speak: "Lire à voix haute",
     stopSpeaking: "Arrêter la lecture",
+    pauseSpeaking: "Pause",
+    resumeSpeaking: "Reprendre",
+    preparingVoice: "Préparation de la voix…",
+    generatedVoiceNotice: "Voix générée par IA",
     editQuestion: "Modifier",
     editQuestionLabel: "Modifier votre dernier message",
     editSave: "Enregistrer et renvoyer",
@@ -208,6 +235,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "Cancelar",
     speak: "Ler em voz alta",
     stopSpeaking: "Parar leitura",
+    pauseSpeaking: "Pausar",
+    resumeSpeaking: "Continuar",
+    preparingVoice: "Preparando a voz…",
+    generatedVoiceNotice: "Voz gerada por IA",
     editQuestion: "Editar",
     editQuestionLabel: "Editar sua última mensagem",
     editSave: "Salvar e reenviar",
@@ -240,6 +271,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "取消",
     speak: "朗读",
     stopSpeaking: "停止朗读",
+    pauseSpeaking: "暂停",
+    resumeSpeaking: "继续朗读",
+    preparingVoice: "正在准备语音…",
+    generatedVoiceNotice: "AI 生成的语音",
     editQuestion: "编辑",
     editQuestionLabel: "编辑你的上一条消息",
     editSave: "保存并重新发送",
@@ -272,6 +307,10 @@ export const chatTurnToolsCopy: Record<Language, ChatTurnToolsCopy> = {
     cancel: "取消",
     speak: "朗讀",
     stopSpeaking: "停止朗讀",
+    pauseSpeaking: "暫停",
+    resumeSpeaking: "繼續朗讀",
+    preparingVoice: "正在準備語音…",
+    generatedVoiceNotice: "AI 生成的語音",
     editQuestion: "編輯",
     editQuestionLabel: "編輯你的上一則訊息",
     editSave: "儲存並重新傳送",

@@ -73,6 +73,8 @@ import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisio
 import { voiceConversationConfig } from "@tomverse/chat-core";
 import { ChatAudioAttachmentProvider } from "@/components/chat/ChatAudioAttachmentContext";
 import { chatAudioAttachmentEnabled } from "@/lib/chatAudioAttachment";
+import { ChatServerReadoutProvider } from "@/components/chat/ChatServerReadoutContext";
+import { chatServerReadoutOffered } from "@/lib/chatReadoutServer";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -394,6 +396,8 @@ export async function ReviewWorkspaceShell({
       {/* The catalogue crosses as context, not as a module global (see the provider). */}
       <ImageModelCatalogProvider models={imageModels}>
       <ChatAudioAttachmentProvider enabled={chatAudioAttachmentEnabled()}>
+      {/* Server "Read aloud" (docs/policy/voice-input.md §6.4); guests are excluded where the answer is drawn. */}
+      <ChatServerReadoutProvider enabled={chatServerReadoutOffered()}>
       <ChatPageClient
         reviewEasyAvailable={reviewEasyEnabled() || reviewEasyFixtureOffered}
         guestDefaultModelId={guestDefaultModelId}
@@ -428,6 +432,7 @@ export async function ReviewWorkspaceShell({
         mountedSurface={mountedSurface}
         continuationProduct={continuationProduct}
       />
+      </ChatServerReadoutProvider>
       </ChatAudioAttachmentProvider>
       </ImageModelCatalogProvider>
       </HelpGuideAccessProvider>

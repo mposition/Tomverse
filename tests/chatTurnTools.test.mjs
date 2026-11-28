@@ -50,7 +50,13 @@ test("read aloud skips code, formulas and Markdown symbols", () => {
   for (const word of ["Title", "bold", "link", "inline", "first item", "second item", "quoted line"]) {
     assert.ok(spoken.includes(word), `${word} in ${spoken}`);
   }
-  assert.match(spoken, /a, b/);
+  // Tables are shown, not read: neither the header nor a cell is spoken.
+  assert.ok(!spoken.includes("a, b") && !/\b[12]\b/.test(spoken), spoken);
+});
+
+test("a table between paragraphs is skipped and the prose around it is kept", () => {
+  const spoken = plainTextForSpeech("Before the table.\n\nName | Price\n--- | ---\nTea | 3\nCake | 5\n\nAfter the table.");
+  assert.equal(spoken, "Before the table.\nAfter the table.");
 });
 
 test("an unterminated code fence is not read either", () => {

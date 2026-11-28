@@ -1735,6 +1735,7 @@ export function ChatMessageList({
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        allowServerReadout={!isGuestMode}
                         branch={
                           onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
                             ? {

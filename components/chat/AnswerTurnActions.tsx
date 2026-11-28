@@ -1,10 +1,19 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore, type MouseEventHandler } from "react";
-import { GitBranch, RotateCcw, Shuffle, Volume2, VolumeX } from "lucide-react";
+import { GitBranch, Pause, Play, RotateCcw, Shuffle, Volume2, VolumeX } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useChatServerReadoutEnabled } from "@/components/chat/ChatServerReadoutContext";
 import { CHAT_MODEL_PICKER_CLOSED_EVENT } from "@/lib/chatModelPickerEvents";
 import { decideArmedRegenerate, regenerateArmRecheckInMs } from "@/lib/chatRegenerateArm";
+import {
+  getReadoutState,
+  pauseReadout,
+  resumeReadout,
+  stopReadout,
+  subscribeReadout,
+  toggleReadout,
+} from "@/lib/chatServerReadout";
 import {
   getSpeakingId,
   speechSupported,
@@ -50,18 +59,48 @@ export function AnswerTurnActions({
   content,
   regenerate,
   branch,
+  allowServerReadout = false,
 }: {
   messageId: string;
   content: string;
   regenerate?: AnswerRegenerate;
   branch?: AnswerBranch;
+  /**
+   * Whether this caller may use the server voice: a signed-in account on a
+   * saved answer. The deployment's own switch comes from context; both must
+   * hold, otherwise "Read aloud" is the browser voice.
+   */
+  allowServerReadout?: boolean;
 }) {
   const { t, lang } = useLanguage();
   const copy = chatTurnToolsCopy[lang];
   const surfaceCopy = chatAnswerSurfaceCopy[lang];
   const canSpeak = useSyncExternalStore(noopSubscribe, speechSupported, () => false);
   const speakingId = useSyncExternalStore(subscribeSpeaking, getSpeakingId, () => null);
-  const speaking = speakingId === messageId;
+  const serverReadout = useChatServerReadoutEnabled() && allowServerReadout;
+  const readout = useSyncExternalStore(subscribeReadout, getReadoutState, () => null);
+  const readoutPhase = readout?.messageId === messageId ? readout.phase : null;
+  const speaking = speakingId === messageId || readoutPhase !== null;
+  const canRead = canSpeak || serverReadout;
+  const readAloud = () => {
+    if (serverReadout) {
+      if (speakingId === messageId) {
+        stopSpeaking();
+        return;
+      }
+      toggleReadout({
+        messageId,
+        content,
+        // The server could not read it: the browser voice does, as before.
+        onUnavailable: () => {
+          if (canSpeak) toggleSpeaking(messageId, content, lang);
+        },
+      });
+      return;
+    }
+    stopReadout();
+    toggleSpeaking(messageId, content, lang);
+  };
   const [armed, setArmed] = useState<{ modelId: string; at: number; closedAt: number | null } | null>(
     null
   );
@@ -72,6 +111,7 @@ export function AnswerTurnActions({
   useEffect(
     () => () => {
       if (getSpeakingId() === messageId) stopSpeaking();
+      if (getReadoutState()?.messageId === messageId) stopReadout();
     },
     [messageId]
   );
@@ -111,16 +151,16 @@ export function AnswerTurnActions({
     return () => window.clearTimeout(timer);
   }, [armed, currentModelId, onRegenerate]);
 
-  if (!canSpeak && !regenerate && !branch) return null;
+  if (!canRead && !regenerate && !branch) return null;
 
   return (
     <div data-testid="chat-answer-turn-actions" className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">
-      {canSpeak && (
+      {canRead && (
         <button
           type="button"
           data-testid="chat-speak-answer"
           aria-pressed={speaking}
-          onClick={() => toggleSpeaking(messageId, content, lang)}
+          onClick={readAloud}
           className={ACTION_CLASS}
         >
           {speaking ? (
@@ -130,6 +170,31 @@ export function AnswerTurnActions({
           )}
           {speaking ? copy.stopSpeaking : copy.speak}
         </button>
+      )}
+      {(readoutPhase === "playing" || readoutPhase === "paused") && (
+        <button
+          type="button"
+          data-testid="chat-speak-answer-pause"
+          aria-pressed={readoutPhase === "paused"}
+          onClick={readoutPhase === "paused" ? resumeReadout : pauseReadout}
+          className={ACTION_CLASS}
+        >
+          {readoutPhase === "paused" ? (
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Pause className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {readoutPhase === "paused" ? copy.resumeSpeaking : copy.pauseSpeaking}
+        </button>
+      )}
+      {readoutPhase !== null && (
+        <span
+          data-testid="chat-speak-answer-voice-notice"
+          role="status"
+          className="inline-flex min-h-9 items-center px-2 text-[12px] text-zinc-500 dark:text-zinc-400"
+        >
+          {readoutPhase === "loading" ? copy.preparingVoice : copy.generatedVoiceNotice}
+        </span>
       )}
       {regenerate && (
         <>
