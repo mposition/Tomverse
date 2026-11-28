@@ -2,7 +2,7 @@ import {
   studioStickerArt, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, studioStickerRowEdge, type StickerRect,
 } from "@/lib/studioStickerGeometry";
 import { studioMemeCaptionLines } from "@/lib/studioMeme";
-import { studioStickerLayout } from "@/lib/studioTools";
+import { studioObjectUrl, studioStickerLayout } from "@/lib/studioTools";
 import type { Language } from "@/lib/language";
 import { loadStudioStickerFont } from "./studioStickerFonts";
 
@@ -401,7 +401,14 @@ export async function splitStudioSheet(source: string, count: number) {
 }
 
 export function saveStudioFile(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
+  const created = URL.createObjectURL(blob);
+  let url: string;
+  try {
+    url = studioObjectUrl(created);
+  } catch (error) {
+    URL.revokeObjectURL(created);
+    throw error;
+  }
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;

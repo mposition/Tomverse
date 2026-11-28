@@ -26,7 +26,7 @@ function setup(options: { reply?: Reply; pick?: { name: string; bytes: Uint8Arra
   const transport: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === "/api/auth/desktop/settings-session") return Response.json({ token: "a.b.c.d.e", expiresAt: Date.now() + 300_000 });
-    if (url.hostname.endsWith("r2.cloudflarestorage.com")) {
+    if (/(^|\.)r2\.cloudflarestorage\.com$/.test(url.hostname)) {
       puts.push({ url: String(input), length: (init?.body as Uint8Array).byteLength, headers: init?.headers });
       return options.put ?? new Response(null, { status: 200 });
     }

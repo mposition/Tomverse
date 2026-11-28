@@ -1980,3 +1980,10 @@ d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/desktop/tests/pluginSources.test.t
 8c316d74b5efc32c039e14b369c396a8bd0256e0:apps/tomverse-cli/tests/extension-import.test.ts:generic-api-key:8
 5ef9870e6429d59b27f0f1f119f6f6a5297fa238:apps/desktop/tests/codeMemory.test.ts:generic-api-key:55
 5ef9870e6429d59b27f0f1f119f6f6a5297fa238:apps/tomverse-cli/tests/memory.test.ts:aws-access-token:37
+
+# Synthetic GitHub token shapes (`ghp_abc...`, `github_pat_11AAA...`) in the CLI
+# plugin-source masking test (#4312), never credentials. On develop they sit
+# inside a merge the PR scan skips; the release cherry-pick made them a plain
+# commit. The current test assembles them at runtime. Exact findings only.
+d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/tomverse-cli/tests/plugin-sources.test.ts:github-pat:344
+d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/tomverse-cli/tests/plugin-sources.test.ts:github-pat:345

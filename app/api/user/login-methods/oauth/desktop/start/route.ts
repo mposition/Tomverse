@@ -8,7 +8,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { assertRecentAccountAuthentication, isAccountReauthenticationError } from "@/lib/adminReauthentication";
 import { DESKTOP_AUTH_VALUE, isDesktopRedirect } from "@/lib/desktopAuthContract";
 import { DESKTOP_LINK_PROVIDERS, desktopLinkProviders, desktopSocialLoginEnabled } from "@/lib/desktopSocialLoginCore";
-import { buildDesktopOAuthLinkAuthorizeUrl, OAuthLinkError } from "@/lib/oauthLink";
+import { buildDesktopLinkProviderUrl, OAuthLinkError } from "@/lib/oauthLink";
 
 // Desktop adds Google or Microsoft to the signed-in account: step one, from the Desktop settings session. The answer is
 // the provider's authorize URL (opened in the system browser) and the state that comes back to the loopback address.
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     if (!desktopLinkProviders().includes(body.provider)) {
       return NextResponse.json({ ok: false, code: "NOT_CONFIGURED" }, { status: 400, headers: noStore });
     }
-    const { url, linkState } = buildDesktopOAuthLinkAuthorizeUrl(req, session.user.id, body.provider, body);
+    const { url, linkState } = buildDesktopLinkProviderUrl(req, session.user.id, body.provider, body);
     return NextResponse.json({ ok: true, url, linkState }, { headers: noStore });
   } catch (error) {
     if (isAccountReauthenticationError(error)) {
