@@ -39,6 +39,40 @@ test("pricing page copy is complete in every language and keeps its placeholders
   }
 });
 
+test("the corrected pricing claims keep their required conditions in every language", () => {
+  const correctedCopy = (copy) => [
+    copy.plans.checkout,
+    copy.plans.note,
+    copy.compare.files.label,
+    copy.compare.files.free,
+    copy.compare.files.pro,
+    copy.compare.files.max,
+  ];
+  const conditions = {
+    en: [/currency/i, /amount/i, /daily/i, /credit/i, /safeguard|protection/i, /where enabled/i, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    ko: [/통화|화폐/, /금액/, /일일/, /크레딧/, /안전|보호/, /허용 시|활성화/, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    zh: [/币种|幣別/, /金额|金額/, /每日/, /积分|點數/, /安全措施|保护/, /启用/, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    "zh-Hant": [/幣別/, /金額/, /每日/, /點數/, /安全措施|保護/, /啟用/, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    fr: [/devise/i, /montant/i, /quotidien/i, /crédits?/i, /sécurité|protection/i, /activées/i, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    de: [/Währung/i, /Betrag/i, /täglich/i, /Credit/i, /Schutz/i, /aktiviert/i, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    es: [/moneda/i, /importe/i, /diarios?/i, /créditos?/i, /seguridad|protección/i, /habilitados/i, /10/, /50\s?MiB/i, /100\s?MiB/i],
+    pt: [/moeda/i, /valor/i, /diários?/i, /créditos?/i, /proteções?/i, /disponíveis/i, /10/, /50\s?MiB/i, /100\s?MiB/i],
+  };
+
+  for (const locale of SEO_LOCALES) {
+    const [checkout, note, fileLabel, ...fileLimits] = correctedCopy(pricingPageContent[locale]);
+    const patterns = conditions[locale];
+    assert.ok(patterns, `${locale}: add required condition patterns`);
+    for (const pattern of patterns.slice(0, 2)) assert.match(checkout, pattern, `${locale}: checkout condition missing`);
+    for (const pattern of patterns.slice(2, 5)) assert.match(note, pattern, `${locale}: usage condition missing`);
+    assert.match(fileLabel, patterns[5], `${locale}: attachment availability condition missing`);
+    for (const [index, value] of fileLimits.entries()) {
+      for (const pattern of patterns.slice(6)) assert.match(value, pattern, `${locale}: attachment limit missing in row ${index}`);
+    }
+    assert.deepEqual(tokens(correctedCopy(pricingPageContent[locale])), tokens(correctedCopy(pricingPageContent.ko)), `${locale}: corrected keys have different placeholders`);
+  }
+});
+
 test("pricing page copy states no price, credit figure or discount of its own", () => {
   for (const locale of SEO_LOCALES) {
     const copy = pricingPageContent[locale];
