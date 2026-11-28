@@ -5,10 +5,10 @@ import type { Prisma } from "@prisma/client";
 import { CHAT_RESPONSE_ATTEMPT_ACTIVE_STATUSES } from "@/lib/chatResponseAttemptCore";
 import { lockChatRecoveryConversation } from "@/lib/chatResponseAttemptPersistence";
 import { deleteOwnedConversations } from "@/lib/conversationDeletion";
-import { STALE_IMAGE_GENERATION_AFTER_MS } from "@/lib/imageGenerationStateCore";
+import { STALE_IMAGE_GENERATION_AFTER_MS, STALE_IMAGE_SETTLING_AFTER_MS } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 import {
-    TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES,
+    TEMPORARY_SWEEP_LIVE_IMAGE_CALL_STATUSES,
     TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES,
     temporaryConversationSweepWhere,
     temporarySweepCutoff,
@@ -145,11 +145,24 @@ async function hasWorkInFlight(
         select: { id: true },
     });
     if (research) return true;
+    // Each status counts as in flight for as long as its own recovery waits before it calls the row
+    // abandoned (lib/imageGenerationService.ts reconcileStaleImageGenerations): a provider call that
+    // has not started or finished (pending, processing) after the 12-minute window, a settlement
+    // (settling) after its own 15-minute one. A single window would let the sweep delete a
+    // settlement the recovery still treats as running, and lose the paid work's result.
     const image = await tx.imageGeneration.findFirst({
         where: {
             conversationId,
-            status: { in: [...TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES] },
-            updatedAt: { gt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS) },
+            OR: [
+                {
+                    status: { in: [...TEMPORARY_SWEEP_LIVE_IMAGE_CALL_STATUSES] },
+                    updatedAt: { gt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS) },
+                },
+                {
+                    status: "settling",
+                    updatedAt: { gt: new Date(now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS) },
+                },
+            ],
         },
         select: { id: true },
     });

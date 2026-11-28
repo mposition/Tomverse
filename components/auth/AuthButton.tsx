@@ -110,6 +110,9 @@ type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
     | { type: "email"; address: string; enabled: boolean };
 
+/** How long the partial-delete message stays readable before the page reloads. */
+const PARTIAL_DELETE_RELOAD_DELAY_MS = 2_500;
+
 export function AuthButton({
     showAnalyticsCookieButton = false,
     currentProduct = "review",
@@ -1102,6 +1105,13 @@ export function AuthButton({
                         }),
                         "error"
                     );
+                    // The batches that committed are gone: reload as the success path does, so the page and
+                    // the sidebar stop listing them. The toast gets a moment to be read first.
+                    if (Number(data.deleted ?? 0) > 0) {
+                        window.setTimeout(() => {
+                            window.location.href = accountCallbackUrl;
+                        }, PARTIAL_DELETE_RELOAD_DELAY_MS);
+                    }
                     return;
                 }
                 if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {

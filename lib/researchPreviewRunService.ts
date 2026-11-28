@@ -716,7 +716,7 @@ export async function resumeDurableResearchPreviewRun(input: {
   if (!run || run.userId !== input.userId) return null;
   const conversation = await prisma.conversation.findFirst({
     where: { id: run.conversationId, userId: input.userId },
-    select: { id: true, password: true, passwordVersion: true },
+    select: { id: true, password: true, passwordVersion: true, temporaryExpiresAt: true },
   });
   if (
     !conversation ||
@@ -728,6 +728,10 @@ export async function resumeDurableResearchPreviewRun(input: {
     )
   ) {
     throw new Error("RESEARCH_CONVERSATION_LOCKED");
+  }
+  // Resuming starts provider calls again; an expired temporary Chat is about to be deleted with the run.
+  if (isTemporaryConversationExpired(conversation.temporaryExpiresAt, new Date())) {
+    throw new ResearchPreviewRunError(410, "TEMPORARY_CHAT_EXPIRED", "This temporary chat has ended.");
   }
   await currentWorkerPolicy(run);
   if (!run.reservationId) throw new Error("RESEARCH_RESERVATION_MISSING");

@@ -78,8 +78,12 @@ export const TEMPORARY_SWEEP_LIVE_RESEARCH_STATUSES = [
     "finalizing",
 ] as const;
 
-/** Image generation statuses with a provider call or its settlement in flight (lib/imageGenerationStateCore.ts). */
-export const TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES = ["pending", "processing", "settling"] as const;
+/**
+ * Image generation statuses with a provider call in flight (lib/imageGenerationStateCore.ts). `settling`
+ * is separate: its recovery window is longer (STALE_IMAGE_SETTLING_AFTER_MS), so the sweep applies it there.
+ */
+export const TEMPORARY_SWEEP_LIVE_IMAGE_CALL_STATUSES = ["pending", "processing"] as const;
+export const TEMPORARY_SWEEP_LIVE_IMAGE_STATUSES = [...TEMPORARY_SWEEP_LIVE_IMAGE_CALL_STATUSES, "settling"] as const;
 
 export const temporaryConversationExpiresAt = (now: Date): Date =>
     new Date(now.getTime() + TEMPORARY_CHAT_TTL_MS);

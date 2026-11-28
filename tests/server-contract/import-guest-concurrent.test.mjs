@@ -46,7 +46,8 @@ const request = () => new Request("https://tomverse.app/api/conversations/import
     messages: [{ role: "user", content: "hi", createdAt: "2026-11-28T00:00:00.000Z" }],
   }),
 });
-const uniqueViolation = () => Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+const uniqueViolation = (meta = { target: ["userId", "importedGuestKey"] }) =>
+  Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta });
 
 test("the loser of two concurrent imports gets the winner's conversation as alreadyImported, not a 500", async () => {
   finds = [];
@@ -63,6 +64,38 @@ test("a normal import is unchanged", async () => {
   transactionOutcome = async () => ({ conversationId: "new-conversation", alreadyImported: false });
   const response = await POST(request());
   assert.deepEqual(await response.json(), { success: true, conversationId: "new-conversation", alreadyImported: false });
+  assert.deepEqual(finds, []);
+});
+
+test("the conversation's unique key is recognised in each shape Prisma and its driver adapter report it", async () => {
+  winnerRow = { id: "winner-conversation" };
+  for (const meta of [
+    { target: ["userId", "importedGuestKey"] },
+    { target: "Conversation_userId_importedGuestKey_key" },
+    { driverAdapterError: { cause: { kind: "UniqueConstraintViolation", constraint: { fields: ["userId", "importedGuestKey"] } } } },
+  ]) {
+    transactionOutcome = async () => { throw uniqueViolation(meta); };
+    const response = await POST(request());
+    assert.equal(response.status, 200, JSON.stringify(meta));
+    assert.equal((await response.json()).alreadyImported, true);
+  }
+});
+
+test("a different unique violation inside the import is a failure, never 'already imported'", async () => {
+  winnerRow = { id: "some-other-conversation" };
+  finds = [];
+  for (const meta of [
+    { target: ["id"] },
+    { target: ["conversationId", "ordinal"] },
+    { target: "Message_pkey" },
+    { driverAdapterError: { cause: { kind: "UniqueConstraintViolation", constraint: { fields: ["id"] } } } },
+    null,
+    {},
+  ]) {
+    transactionOutcome = async () => { throw uniqueViolation(meta); };
+    assert.equal((await POST(request())).status, 500, JSON.stringify(meta));
+  }
+  // It never even looked for a winner: nothing says the conflict was the guest key.
   assert.deepEqual(finds, []);
 });
 

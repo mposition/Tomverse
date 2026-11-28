@@ -7,7 +7,7 @@ import {
   TEMPORARY_CHAT_SWEEP_MAX_DEFER_MS,
   TEMPORARY_CHAT_TTL_MS,
 } from "../../lib/temporaryChatAccess.ts";
-import { STALE_IMAGE_GENERATION_AFTER_MS } from "../../lib/imageGenerationStateCore.ts";
+import { STALE_IMAGE_GENERATION_AFTER_MS, STALE_IMAGE_SETTLING_AFTER_MS } from "../../lib/imageGenerationStateCore.ts";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 
@@ -18,6 +18,7 @@ let liveAttempt;
 let liveResearch;
 let liveImage;
 let imageWhere;
+let imageRows;
 let researchWhere;
 let deleted;
 
@@ -31,7 +32,15 @@ mock.module(mod("lib/conversationDeletion.ts"), { namedExports: {
 const tx = {
   chatResponseAttempt: { findFirst: async () => liveAttempt },
   researchPreviewRun: { findFirst: async ({ where }) => { researchWhere = where; return liveResearch; } },
-  imageGeneration: { findFirst: async ({ where }) => { imageWhere = where; return liveImage; } },
+  imageGeneration: { findFirst: async ({ where }) => {
+    imageWhere = where;
+    if (!imageRows) return liveImage;
+    // Evaluate the where the sweep sent against stored rows, the way the database would.
+    const inFlight = (row) => where.OR.some((clause) =>
+      (clause.status.in ? clause.status.in.includes(row.status) : clause.status === row.status) &&
+      row.updatedAt.getTime() > clause.updatedAt.gt.getTime());
+    return imageRows.find(inFlight) ?? null;
+  } },
 };
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   conversation: { findMany: async ({ where }) => (where.id?.notIn ? [] : candidates) },
@@ -46,6 +55,7 @@ const reset = () => {
   liveResearch = null;
   liveImage = null;
   imageWhere = null;
+  imageRows = null;
   researchWhere = null;
   deleted = [];
 };
@@ -63,13 +73,35 @@ test("an executing Research run defers the delete and nothing is removed", async
   }
 });
 
-test("an image generation in flight defers the delete, but only while it is within its worst-case run time", async () => {
+test("an image generation in flight defers the delete", async () => {
   reset();
   liveImage = { id: "gen-1" };
   assert.deepEqual(await sweepExpiredTemporaryConversations(afterGrace), { examined: 1, deleted: 0, deferred: 1, failed: 0 });
-  assert.deepEqual(imageWhere.status.in, ["pending", "processing", "settling"]);
-  // A row older than the stale window has lost its worker and is the reconciler's: it does not hold the delete.
-  assert.equal(imageWhere.updatedAt.gt.getTime(), afterGrace.getTime() - STALE_IMAGE_GENERATION_AFTER_MS);
+  assert.equal(imageWhere.conversationId, "temp-1");
+});
+
+const minutesAgo = (minutes) => new Date(afterGrace.getTime() - minutes * 60_000);
+const sweepWithImage = async (status, ageMinutes) => {
+  reset();
+  imageRows = [{ id: "gen-1", status, updatedAt: minutesAgo(ageMinutes) }];
+  return sweepExpiredTemporaryConversations(afterGrace);
+};
+
+test("each image status holds the delete for its own recovery window, not one shared window", async () => {
+  assert.equal(STALE_IMAGE_GENERATION_AFTER_MS, 12 * 60_000);
+  assert.equal(STALE_IMAGE_SETTLING_AFTER_MS, 15 * 60_000);
+  // A settlement 13 minutes in is still in the recovery's hands (it waits 15): the paid result must survive.
+  assert.deepEqual(await sweepWithImage("settling", 13), { examined: 1, deleted: 0, deferred: 1, failed: 0 });
+  assert.deepEqual(await sweepWithImage("settling", 14.9), { examined: 1, deleted: 0, deferred: 1, failed: 0 });
+  // Past its own window it is abandoned, and the conversation goes.
+  assert.deepEqual(await sweepWithImage("settling", 15.1), { examined: 1, deleted: 1, deferred: 0, failed: 0 });
+  // A provider call is abandoned after 12 minutes, so at 13 it no longer holds the delete.
+  assert.deepEqual(await sweepWithImage("processing", 11), { examined: 1, deleted: 0, deferred: 1, failed: 0 });
+  assert.deepEqual(await sweepWithImage("processing", 13), { examined: 1, deleted: 1, deferred: 0, failed: 0 });
+  assert.deepEqual(await sweepWithImage("pending", 11), { examined: 1, deleted: 0, deferred: 1, failed: 0 });
+  assert.deepEqual(await sweepWithImage("pending", 13), { examined: 1, deleted: 1, deferred: 0, failed: 0 });
+  // Finished rows never hold it.
+  assert.deepEqual(await sweepWithImage("succeeded", 1), { examined: 1, deleted: 1, deferred: 0, failed: 0 });
 });
 
 test("once the work has ended the next sweep deletes the conversation", async () => {

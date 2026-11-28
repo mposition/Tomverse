@@ -25,7 +25,7 @@ import {
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
 import { createConversation } from "@/lib/conversationCreation";
-import { isUniqueConstraintDatabaseError } from "@/lib/databaseError";
+import { isUniqueConstraintOn } from "@/lib/databaseError";
 import { REVIEW_PRODUCT_KEY } from "@/lib/conversationProduct";
 
 const modelIdSchema = z.string().min(1).max(120);
@@ -177,8 +177,10 @@ export async function POST(req: Request) {
       // Two requests for the same guest conversation (a double click, a retry
       // after a lost response) both pass the read above before either commits;
       // the loser trips @@unique([userId, importedGuestKey]). That is "already
-      // imported", not a failure: answer with the winner's conversation.
-      if (!isUniqueConstraintDatabaseError(error)) throw error;
+      // imported", not a failure: answer with the winner's conversation. Only
+      // that constraint: another unique violation inside this transaction is a
+      // different failure and must not be reported as a successful import.
+      if (!isUniqueConstraintOn(error, "importedGuestKey")) throw error;
       const winner = await prisma.conversation.findFirst({
         where: { userId, importedGuestKey: body.guestConversationId },
         select: { id: true },
