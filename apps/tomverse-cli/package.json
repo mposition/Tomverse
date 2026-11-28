@@ -41,9 +41,9 @@
     "prepublishOnly": "node scripts/build.mjs && node scripts/pack-verify.mjs"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.121",
+    "@ai-sdk/openai": "4.0.123",
     "@modelcontextprotocol/sdk": "1.32.2",
-    "ai": "7.0.176",
+    "ai": "7.0.181",
     "zod": "4.6.7"
   }
 }
