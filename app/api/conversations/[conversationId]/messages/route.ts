@@ -300,6 +300,9 @@ export async function POST(
               }
             : {}),
           beforeCreate: (tx) => assertMessageCapacity(tx, userId, conversationId, messages.length, contentBytes),
+          // A new message brings an archived conversation back, in the same
+          // transaction that creates it (lib/conversationArchive.ts).
+          afterCreate: (tx) => restoreArchivedConversationOnMessage(tx, conversationId),
         })
       : await prisma.$transaction(async (tx) => {
       if (draftConsume) {
@@ -354,12 +357,11 @@ export async function POST(
           uploadIds: message.attachmentUploadIds,
         });
       }
+      // A new message brings an archived conversation back, in this same
+      // transaction (lib/conversationArchive.ts). A replay wrote nothing and moves nothing.
+      if (count > 0) await restoreArchivedConversationOnMessage(tx, conversationId);
       return { count };
     });
-
-    // A new message brings an archived conversation back to the list
-    // (lib/conversationArchive.ts). A replayed save wrote nothing and moves nothing.
-    if (created.count > 0) await restoreArchivedConversationOnMessage(prisma, conversationId);
 
     /*
       Read back rather than echoed.
