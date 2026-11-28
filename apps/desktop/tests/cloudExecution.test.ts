@@ -9,10 +9,16 @@ import { codeCloudRequestSchema, type CodeCloudJobView } from "../../../lib/code
 import { cloudFailureFor } from "../src/cloud-execution-contract";
 import { createCloudExecutionClient, type CloudSend } from "../src/host/cloud-execution-client";
 import { createCloudExecutionHost, type CloudProject } from "../src/host/cloud-execution-host";
+import { createCloudOriginStore, projectOrigin, type CloudOriginStore } from "../src/host/cloud-origins";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "core.autocrlf=false", ...args], { cwd }).toString();
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
+/** A record of task origins in a folder of its own, as the app keeps one in its data folder. */
+function originStore(file = join(mkdtempSync(join(tmpdir(), "cloud-origins-")), "cloud-task-origins.json")) {
+  return createCloudOriginStore(file);
+}
 
 function project() {
   const root = mkdtempSync(join(tmpdir(), "cloud-host-"));
@@ -82,7 +88,7 @@ test("starting a cloud task uploads the snapshot it described, once, even after 
   const server = fakeServer();
   const signal = new AbortController().signal;
   const host = createCloudExecutionHost({ client: createCloudExecutionClient({ send: server.send, signal }), catalog,
-    project: async (): Promise<CloudProject> => ({ name: "demo", git: { root, executable: "git" } }), signal });
+    project: async (): Promise<CloudProject> => ({ name: "demo", git: { root, executable: "git" } }), origins: originStore(), signal });
   server.failOnce();
   const view = await host.run({ action: "start", instruction: "Add a test", executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 25 });
   assert.equal(view.notice?.kind, "started");
@@ -105,7 +111,7 @@ test("progress lines are merged by sequence, and a stop is sent for the job", as
   const server = fakeServer();
   const signal = new AbortController().signal;
   const host = createCloudExecutionHost({ client: createCloudExecutionClient({ send: server.send, signal }), catalog,
-    project: async () => ({ name: "demo", git: { root, executable: "git" } }), signal });
+    project: async () => ({ name: "demo", git: { root, executable: "git" } }), origins: originStore(), signal });
   await host.run({ action: "start", instruction: "Do it", executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 5 });
   const job = [...server.jobs.values()][0]!;
   job.status = "running";
@@ -125,7 +131,7 @@ test("changes are applied only after a review of that patch, to the folder the t
   const signal = new AbortController().signal;
   let open = root;
   const host = createCloudExecutionHost({ client: createCloudExecutionClient({ send: server.send, signal }), catalog,
-    project: async () => ({ name: "demo", git: { root: open, executable: "git" } }), signal });
+    project: async () => ({ name: "demo", git: { root: open, executable: "git" } }), origins: originStore(), signal });
   await host.run({ action: "start", instruction: "Change a", executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 5 });
   const job = [...server.jobs.values()][0]!;
   const patch = Buffer.from("diff --git a/a.txt b/a.txt\nindex 7898192..2e65efe 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n");
@@ -186,6 +192,82 @@ test("changes are applied only after a review of that patch, to the folder the t
     assert.equal(shown.review?.applies, false, instruction);
     assert.deepEqual((await host.run({ action: "apply", jobId: row.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" }, instruction);
   }
+  rmSync(root, { recursive: true, force: true });
+  rmSync(other, { recursive: true, force: true });
+});
+
+test("after a restart or a new sign-in, a task's changes still go only to the folder it started from", async () => {
+  // Two clones with the same content: `git apply --check` accepts the patch in both, so only the origin tells them apart.
+  const root = project(), other = project();
+  const file = join(mkdtempSync(join(tmpdir(), "cloud-origins-")), "cloud-task-origins.json");
+  const server = fakeServer();
+  const signal = new AbortController().signal;
+  let open = root;
+  const hostWith = (origins: CloudOriginStore) => createCloudExecutionHost({ client: createCloudExecutionClient({ send: server.send, signal }), catalog,
+    project: async () => ({ name: "demo", git: { root: open, executable: "git" } }), origins, signal });
+  await hostWith(createCloudOriginStore(file)).run({ action: "start", instruction: "Change a", executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 5 });
+  const job = [...server.jobs.values()][0]!;
+  const patch = Buffer.from("diff --git a/a.txt b/a.txt\nindex 7898192..2e65efe 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n");
+  Object.assign(job, { status: "completed", patch: { bytes: patch.length, sha256: sha(patch) }, patchBytes: patch });
+
+  // The app restarted (a new host and a new read of the record): the other clone is refused for review and for applying.
+  const restarted = hostWith(createCloudOriginStore(file));
+  await restarted.run({ action: "read" });
+  open = other;
+  assert.deepEqual((await restarted.run({ action: "review", jobId: job.jobId })).notice, { kind: "refused", refusal: "otherProject" });
+  assert.deepEqual((await restarted.run({ action: "apply", jobId: job.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" });
+  // Reviewed in the folder it came from, then the other clone is opened: applying there is refused and changes nothing.
+  open = root;
+  assert.equal((await restarted.run({ action: "review", jobId: job.jobId })).review?.applies, true);
+  open = other;
+  assert.deepEqual((await restarted.run({ action: "apply", jobId: job.jobId })).notice, { kind: "refused", refusal: "otherProject" });
+  assert.equal(readFileSync(join(other, "a.txt"), "utf8"), "a\n");
+  open = root;
+  assert.deepEqual((await restarted.run({ action: "apply", jobId: job.jobId })).notice, { kind: "applied", jobId: job.jobId });
+  assert.equal(readFileSync(join(root, "a.txt"), "utf8"), "b\n");
+  assert.equal(readFileSync(join(other, "a.txt"), "utf8"), "a\n");
+
+  // On a computer with no record of the task (or for a task started before origins were kept) nothing is reviewed or applied.
+  const elsewhere = hostWith(originStore());
+  await elsewhere.run({ action: "read" });
+  assert.deepEqual((await elsewhere.run({ action: "review", jobId: job.jobId })).notice, { kind: "refused", refusal: "originUnknown" });
+  assert.deepEqual((await elsewhere.run({ action: "apply", jobId: job.jobId })).notice, { kind: "refused", refusal: "patchUnavailable" });
+  rmSync(root, { recursive: true, force: true });
+  rmSync(other, { recursive: true, force: true });
+});
+
+test("a task whose folder could not be recorded is not started", async () => {
+  const root = project();
+  const server = fakeServer();
+  const signal = new AbortController().signal;
+  const unwritable: CloudOriginStore = { read: async () => null, record: async () => { throw new Error("disk full"); } };
+  const host = createCloudExecutionHost({ client: createCloudExecutionClient({ send: server.send, signal }), catalog,
+    project: async () => ({ name: "demo", git: { root, executable: "git" } }), origins: unwritable, signal });
+  const view = await host.run({ action: "start", instruction: "Change a", executorModelId: "gpt-6-luna", reviewerModelId: "claude-haiku-4-5", approvedCredits: 5 });
+  assert.deepEqual(view.notice, { kind: "refused", refusal: "unavailable" });
+  assert.equal(server.jobs.size, 0);
+  assert.equal(server.requests.length, 0);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a folder's origin is stable, names that folder only, and is kept by task id across store instances", async () => {
+  const root = project(), other = project();
+  const origin = projectOrigin(root);
+  assert.match(origin ?? "", /^[0-9a-f]{64}$/);
+  assert.equal(projectOrigin(join(root, ".")), origin);
+  if (process.platform === "win32") assert.equal(projectOrigin(root.toUpperCase()), origin);
+  assert.notEqual(projectOrigin(other), origin);
+  assert.equal(projectOrigin(join(root, "missing")), null);
+  const file = join(mkdtempSync(join(tmpdir(), "cloud-origins-")), "cloud-task-origins.json");
+  const taskId = randomUUID();
+  await createCloudOriginStore(file).record(taskId, origin!);
+  assert.equal(await createCloudOriginStore(file).read(taskId), origin);
+  assert.equal(await createCloudOriginStore(file).read(randomUUID()), null);
+  // The record holds no path.
+  assert.ok(!readFileSync(file, "utf8").includes(root.replaceAll("\\", "\\\\")) && !readFileSync(file, "utf8").includes(root));
+  // An unreadable record knows no origin.
+  writeFileSync(file, "{not json");
+  assert.equal(await createCloudOriginStore(file).read(taskId), null);
   rmSync(root, { recursive: true, force: true });
   rmSync(other, { recursive: true, force: true });
 });

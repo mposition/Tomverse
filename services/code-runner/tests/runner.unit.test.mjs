@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildManagedCall, chatCompletion, chatCompletionStream, managedSafeSchema, reportedContextWindow, turnSchema } from "../model-adapter.mjs";
+import { buildManagedCall, chatCompletion, chatCompletionStream, createModelAdapter, managedSafeSchema, reportedContextWindow, turnSchema } from "../model-adapter.mjs";
 import { sandboxCommand } from "../isolation.mjs";
 import { createServerClient } from "../runner.mjs";
 import { codeSchemaAndPrompt } from "../../../lib/codeManagedCore.ts";
@@ -47,6 +47,116 @@ test("the structured turn comes back as Chat Completions, streamed or not, with 
   assert.match(stream, /"finish_reason":"tool_calls"/);
   assert.ok(stream.endsWith("data: [DONE]\n\n"));
   assert.equal(chatCompletion({ content: "done", tool_calls: [] }, null, "m", []).choices[0].finish_reason, "stop");
+});
+
+/** The adapter on a loopback port, with a scripted managed call that counts how often it is made and with which call id. */
+async function adapterWith(answers) {
+  const calls = [];
+  const adapter = createModelAdapter({ model, callModel: async (call) => {
+    calls.push(call);
+    const next = answers[Math.min(calls.length, answers.length) - 1];
+    return typeof next === "function" ? next(call) : next;
+  } });
+  await new Promise((resolve) => adapter.server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${adapter.server.address().port}/api/code/v1`;
+  const post = async (key, body) => {
+    const response = await fetch(`${base}/chat/completions`, { method: "POST", body: JSON.stringify(body),
+      headers: { "content-type": "application/json", ...(key ? { "idempotency-key": key } : {}) } });
+    return { status: response.status, requestId: response.headers.get("x-request-id"), body: await response.json() };
+  };
+  const status = async (key) => (await fetch(`${base}/requests/status`, { headers: { "idempotency-key": key } })).json();
+  return { calls, post, status, close: () => adapter.close() };
+}
+const turn = { model: "m", stream: false, tools: [{ type: "function", function: { name: "read_file", parameters: { type: "object" } } }],
+  messages: [{ role: "user", content: "Fix it" }] };
+const settled = { ok: true, value: { content: "reading", tool_calls: [{ name: "read_file", arguments: { path: "a" } }] }, usage: { inputTokens: 3, outputTokens: 2 }, callCredits: 4 };
+
+test("a request sent again with its Idempotency-Key after it completed gets the stored answer, not a second paid call", async () => {
+  const adapter = await adapterWith([settled]);
+  try {
+    const first = await adapter.post("key-1", turn);
+    assert.equal(first.status, 200);
+    const again = await adapter.post("key-1", turn);
+    assert.equal(again.status, 200);
+    assert.equal(adapter.calls.length, 1);
+    // The same answer: the same completion id, the same tool call ids the CLI sends results back for, the same receipt.
+    assert.deepEqual(again.body, first.body);
+    assert.equal(again.requestId, first.requestId);
+    assert.equal(again.requestId, adapter.calls[0].callId);
+    const receipt = (await adapter.status("key-1")).request;
+    assert.equal(receipt.status, "completed");
+    assert.equal(receipt.chargedCredits, 4);
+    // The same key with another body is refused, and makes no call either.
+    const reused = await adapter.post("key-1", { ...turn, messages: [{ role: "user", content: "Something else" }] });
+    assert.equal(reused.status, 422);
+    assert.equal(reused.body.error.code, "idempotency_key_reused");
+    assert.equal(adapter.calls.length, 1);
+    // Without a key every request is its own call, as on the coding API.
+    await adapter.post(null, turn);
+    await adapter.post(null, turn);
+    assert.equal(adapter.calls.length, 3);
+    assert.notEqual(adapter.calls[1].callId, adapter.calls[2].callId);
+  } finally {
+    await adapter.close();
+  }
+});
+
+test("two requests with one Idempotency-Key at once make one managed call; the second is told it is in progress", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  // Opened anyway after a while, so an adapter that sent both calls fails the assertions below instead of hanging.
+  const timer = setTimeout(() => release(), 5_000);
+  const adapter = await adapterWith([async () => { await gate; return settled; }]);
+  try {
+    const both = [adapter.post("key-2", turn), adapter.post("key-2", turn)];
+    // The call is held open, so the first answer back can only be the refusal of the twin.
+    const first = await Promise.race(both);
+    assert.equal(first.status, 409);
+    assert.equal(first.body.error.code, "idempotent_request_in_progress");
+    assert.equal(first.body.tomverse.status, "held");
+    assert.equal(first.body.tomverse.charged_credits, null);
+    release();
+    const answers = await Promise.all(both);
+    assert.deepEqual(answers.map((answer) => answer.status).sort(), [200, 409]);
+    assert.equal(adapter.calls.length, 1);
+    assert.equal(first.requestId, adapter.calls[0].callId);
+  } finally {
+    clearTimeout(timer);
+    release();
+    await adapter.close();
+  }
+});
+
+test("a call whose outcome is unknown is never sent again under its key; one refused before dispatch is, with the same call id", async () => {
+  const unknown = { ok: false, status: 503, code: "CODE_CLOUD_MODEL_OUTCOME_UNKNOWN", dispatchState: "dispatched" };
+  const adapter = await adapterWith([unknown, settled]);
+  try {
+    assert.equal((await adapter.post("key-3", turn)).status, 503);
+    const retry = await adapter.post("key-3", turn);
+    assert.equal(retry.status, 409);
+    assert.equal(retry.body.error.code, "idempotent_request_in_progress");
+    assert.equal(adapter.calls.length, 1);
+    assert.equal((await adapter.status("key-3")).request.status, "held");
+  } finally {
+    await adapter.close();
+  }
+  const refused = { ok: false, status: 429, code: "CODE_CALL_CONCURRENCY_EXCEEDED", dispatchState: "not_dispatched" };
+  const second = await adapterWith([refused, settled]);
+  try {
+    assert.equal((await second.post("key-4", turn)).status, 429);
+    const receipt = (await second.status("key-4")).request;
+    assert.equal(receipt.status, "failed");
+    assert.equal(receipt.chargedCredits, 0);
+    const retry = await second.post("key-4", turn);
+    assert.equal(retry.status, 200);
+    assert.equal(second.calls.length, 2);
+    // The retry is the same managed call: if the server had recorded it after all, it refuses it as already dispatched.
+    assert.equal(second.calls[1].callId, second.calls[0].callId);
+    assert.equal((await second.post("key-4", turn)).status, 200);
+    assert.equal(second.calls.length, 2);
+  } finally {
+    await second.close();
+  }
 });
 
 test("under bubblewrap the worker gets an empty environment, no network and only its own folders", () => {
