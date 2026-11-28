@@ -56,26 +56,26 @@ export function claudeTools(grants: PermissionModeId, platform: NodeJS.Platform 
 
 /**
  * The write modes' sandbox as a Codex permission profile instead of `--sandbox workspace-write`: everything readable, the
- * project and the temp folder writable, no network, and the credential files and folders found in the project (`readOnlyPaths`)
+ * project and the temp folder writable, no network, and the credential files and folders found in the project (`readOnlyPaths`, relative to it)
  * read-only. Codex takes a glob here only to deny reading (which needs the elevated Windows sandbox), so each one is named.
  * On Windows a read-only file can still be deleted, since deleting is a right on its folder.
  */
 export function codexWriteProfile(readOnlyPaths: readonly string[]): string[] {
-  const entries = [`":root"="read"`, `":tmpdir"="write"`, `":workspace_roots"={"."="write"}`, ...readOnlyPaths.map((path) => `${JSON.stringify(path)}="read"`)];
+  const project = [`"."="write"`, ...readOnlyPaths.map((path) => `${JSON.stringify(path)}="read"`)];
+  const entries = [`":root"="read"`, `":tmpdir"="write"`, `":workspace_roots"={${project.join(", ")}}`];
   return ["-c", 'default_permissions="tomverse"', "-c", `permissions.tomverse={filesystem={${entries.join(", ")}}}`];
 }
 
 /** Codex's command line cannot grow without bound (Windows stops at 32 767 characters). */
-const READ_ONLY_PATHS_CHARACTERS = 24_000;
+const PROFILE_CHARACTERS = 28_000;
 
 /**
- * The files and folders under `root` that can hold credentials (isSecretPath), as absolute paths with forward slashes; a
- * folder is given as `<folder>/**`. Nothing under a protected folder is listed, and no link is followed (a project holding
- * 116k files is listed in about 3.5 s on Windows).
+ * The files and folders under `root` that can hold credentials (isSecretPath), relative to it with forward slashes; a
+ * folder is given as `<folder>/**`. Nothing under a protected folder is listed, and no link is followed.
  *
- * `node_modules` is not searched, deliberately: it holds installed packages, not the person's credentials, and `npm install`
- * deletes and rewrites it. Packages ship files with these names (an `.npmrc`, test keys such as `*.pem`); made read-only,
- * they would stop an install on macOS and Linux, where a read-only file cannot be removed or replaced.
+ * `node_modules` is searched too (owner decision 2026-11-28): a credential can sit there (a cache, a linked local package).
+ * The cost is that packages with such names (an `.npmrc`, test keys such as `*.pem`, `credential-provider-*`) are read-only
+ * for the run, so installing or updating one of them from Codex fails on macOS and Linux.
  */
 export async function credentialPathsIn(root: string): Promise<string[]> {
   const found: string[] = [];
@@ -88,9 +88,9 @@ export async function credentialPathsIn(root: string): Promise<string[]> {
     for (const entry of entries) {
       const path = relative ? `${relative}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        if (isSecretPath(entry.name)) found.push(`${base}/${path}/**`);
-        else if (entry.name.toLowerCase() !== "node_modules") pending.push(path);
-      } else if (isSecretPath(entry.name)) found.push(`${base}/${path}`);
+        if (isSecretPath(entry.name)) found.push(`${path}/**`);
+        else pending.push(path);
+      } else if (isSecretPath(entry.name)) found.push(path);
     }
   }
   return found.sort();
@@ -357,7 +357,7 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   let stderrTail = "";
   // Codex changes files without asking in the write modes, so the credential files it may read are made read-only first.
   const readOnlyPaths = run.provider === "openai" && plan.grants !== "read_only" ? await credentialPathsIn(run.cwd) : [];
-  if (readOnlyPaths.join("").length > READ_ONLY_PATHS_CHARACTERS) {
+  if (codexWriteProfile(readOnlyPaths).join(" ").length > PROFILE_CHARACTERS) {
     return result("failed", null, { error: "The project has too many credential files to protect. Use Read only, or another route." });
   }
   const args = [...(run.argsPrefix ?? []),
