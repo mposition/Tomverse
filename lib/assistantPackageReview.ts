@@ -180,6 +180,58 @@ export async function buildPackageReview(input: {
     };
 }
 
+/**
+ * Whether a file chosen on its own is a bare skill document rather than a
+ * container. Judged by name; the content is judged by the review itself.
+ */
+export const isBareSkillDocumentName = (name: string): boolean =>
+    /\.(md|markdown)$/iu.test(name);
+
+/**
+ * A `SKILL.md` chosen on its own, without a container around it.
+ *
+ * It goes through the same review as the one inside a package, with a plan of
+ * one entry: there is nothing else to inflate, nothing to skip and nothing to
+ * bring across as knowledge. The loss report is the same report, so the owner
+ * is shown `allowed-tools` and relative links exactly as they would be for a
+ * zip.
+ */
+export async function buildBareSkillReview(input: {
+    bytes: Uint8Array;
+    sha256Hex: Sha256Hex;
+}): Promise<ReviewResult> {
+    if (input.bytes.byteLength > ASSISTANT_PACKAGE_LIMITS.maxEntryBytes) {
+        return {
+            outcome: "refused",
+            code: "ASSISTANT_PACKAGE_TOO_LARGE",
+            cause: "skill_document_too_large",
+        };
+    }
+    const entry: PackageZipEntry = {
+        path: "SKILL.md",
+        uncompressedBytes: input.bytes.byteLength,
+        compressedBytes: input.bytes.byteLength,
+        compressionMethod: 0,
+        encrypted: false,
+        symlink: false,
+        directory: false,
+        localHeaderOffset: 0,
+    };
+    const plan: PackagePlan = {
+        reads: [{ entry, role: "skill_document" }],
+        skips: [],
+        refusals: [],
+        plannedInflatedBytes: entry.uncompressedBytes,
+        packageRefusal: null,
+    };
+    return buildSkillReview({
+        plan,
+        entries: new Map([[entry.path, input.bytes]]),
+        sha256Hex: input.sha256Hex,
+        skillEntry: entry,
+    });
+}
+
 /* ------------------------------------------------------------ Agent Skill */
 
 async function buildSkillReview(input: {
