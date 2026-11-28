@@ -1718,6 +1718,9 @@ model ScheduledTask {
   /// is replaced on the next.
   conversationId        String?
   revision              Int       @default(1)
+  /// Email the account when a run answers or the task pauses
+  /// (lib/scheduledTaskNotice.ts). Off by the email purpose too.
+  emailOnFinish         Boolean   @default(true)
   createdAt             DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
 
@@ -1765,6 +1768,12 @@ model ScheduledTaskRun {
   /// from it.
   startedAt          DateTime  @default(now()) @db.Timestamptz(3)
   finishedAt         DateTime? @db.Timestamptz(3)
+  /// When this run's result notice was settled: queued, or decided against
+  /// (none owed, email switch off, task or account switched it off). Set once,
+  /// only while NULL; NULL means one may still be owed (lib/scheduledTaskNotice.ts).
+  /// Defaults to the insert time: only the runner's claim writes NULL, so a row
+  /// made any other way starts settled.
+  noticeQueuedAt     DateTime? @default(now()) @db.Timestamptz(3)
 
   task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user User          @relation(fields: [userId], references: [id], onDelete: Cascade)

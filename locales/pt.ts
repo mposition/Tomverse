@@ -2381,6 +2381,10 @@ export const pt = {
                 title: "Status do serviço",
                 description: "Falhas e manutenções programadas.",
             },
+            scheduled_tasks: {
+                title: "Tarefas agendadas",
+                description: "Quando uma tarefa agendada responde ou é pausada.",
+            },
             product_updates: {
                 title: "Novidades do produto",
                 description: "Novos recursos e melhorias.",

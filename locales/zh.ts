@@ -2364,6 +2364,10 @@ export const zh = {
                 title: "服务状态",
                 description: "故障与计划维护。",
             },
+            scheduled_tasks: {
+                title: "定时任务",
+                description: "定时任务完成回答或暂停时。",
+            },
             product_updates: {
                 title: "产品更新",
                 description: "新功能与改进。",

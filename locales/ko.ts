@@ -2381,6 +2381,10 @@ export const ko = {
                 title: "서비스 상태",
                 description: "장애와 예정된 점검.",
             },
+            scheduled_tasks: {
+                title: "예약 작업",
+                description: "예약 작업이 답변하거나 일시정지됐을 때.",
+            },
             product_updates: {
                 title: "제품 업데이트",
                 description: "새 기능과 개선 사항.",

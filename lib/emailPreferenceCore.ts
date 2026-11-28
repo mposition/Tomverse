@@ -15,6 +15,9 @@ export const EMAIL_PURPOSES = [
   "security",
   "billing",
   "service_status",
+  // A run of a scheduled task the account set up has finished (2026-11-28).
+  // Service mail like service_status: switchable, on by default, no consent.
+  "scheduled_tasks",
   "product_updates",
   "newsletter",
   "promotions",
@@ -319,6 +322,17 @@ export const EMAIL_PURPOSE_CLASSIFICATION: readonly EmailPurposeEntry[] = [
   },
   {
     purpose: "service_status",
+    classification: "service",
+    locked: false,
+    consentRequired: false,
+    withdrawnByBulkUnsubscribe: false,
+    solicitsResubscription: false,
+  },
+  {
+    // The result notice of a task the account itself scheduled: about a
+    // service they use, never a promotion, so not marketing. Switchable per
+    // task and here as a whole; "unsubscribe from all marketing" leaves it on.
+    purpose: "scheduled_tasks",
     classification: "service",
     locked: false,
     consentRequired: false,
