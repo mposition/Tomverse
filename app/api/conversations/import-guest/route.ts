@@ -130,7 +130,24 @@ export async function POST(req: Request) {
         return { conversationId: existing.id, alreadyImported: true };
       }
 
-      await assertConversationCapacity(tx, userId);
+      // The capacity check takes the account's conversation lock, so what it
+      // reads and what is read after it are serialized with a concurrent import
+      // of the same guest conversation. If that import committed while this one
+      // waited, it may also have taken the last free place: read again under the
+      // lock, so the loser answers "already imported" with the winner's
+      // conversation instead of "quota exceeded" for a conversation that exists.
+      let capacityFailure: unknown = null;
+      try {
+        await assertConversationCapacity(tx, userId);
+      } catch (error) {
+        capacityFailure = error;
+      }
+      const winner = await tx.conversation.findFirst({
+        where: { userId, importedGuestKey: body.guestConversationId },
+        select: { id: true },
+      });
+      if (winner) return { conversationId: winner.id, alreadyImported: true };
+      if (capacityFailure) throw capacityFailure;
 
       const conversation = await createConversation(tx, {
         userId,

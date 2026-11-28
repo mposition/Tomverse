@@ -9,6 +9,7 @@ let rows = [];
 let transactions = [];
 let deletes = [];
 let failOnBatch = null;
+let emptyBatches = [];
 let rateScopes = [];
 
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => ({ user: { id: "owner" } }) } });
@@ -34,7 +35,9 @@ mock.module(mod("lib/conversationDeletion.ts"), { namedExports: {
     assert.equal(input.userId, "owner");
     deletes.push([...input.conversationIds]);
     if (failOnBatch === deletes.length) throw new Error("deadlock detected");
-    return { count: input.conversationIds.length, conversationIds: input.conversationIds };
+    // A batch whose rows another tab had already deleted commits with a count of zero.
+    const count = emptyBatches.includes(deletes.length) ? 0 : input.conversationIds.length;
+    return { count, conversationIds: input.conversationIds };
   },
 } });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
@@ -57,6 +60,7 @@ const setRows = (count) => {
   transactions = [];
   deletes = [];
   failOnBatch = null;
+  emptyBatches = [];
   rateScopes = [];
 };
 
@@ -100,4 +104,19 @@ test("a failure of the first batch keeps the plain error: nothing was deleted", 
   const response = await call();
   assert.equal(response.status, 500);
   assert.deepEqual(await response.json(), { error: "Failed to delete conversations." });
+});
+
+test("a committed batch that deleted nothing still makes a later failure a partial one", async () => {
+  setRows(120);
+  emptyBatches = [1];
+  failOnBatch = 2;
+  const response = await call();
+  assert.equal(response.status, 500);
+  // deleted is 0 but one batch of 50 was handled: the list may have changed, so it is reported as partial.
+  assert.deepEqual(await response.json(), {
+    error: "Some conversations could not be deleted.",
+    code: "CONVERSATION_DELETE_PARTIAL",
+    deleted: 0,
+    remaining: 70,
+  });
 });

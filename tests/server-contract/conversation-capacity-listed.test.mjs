@@ -57,8 +57,19 @@ test("every path that makes a listed conversation takes the same quota before it
     assert.ok(capacity > 0, `${path} checks the conversation quota`);
     assert.ok(create > capacity, `${path} checks the quota before it creates`);
   }
-  // A Studio image run is a hidden one-off row, not a conversation the person made: it is outside the quota.
-  assert.doesNotMatch(readFileSync("lib/imageGenerationService.ts", "utf8"), /assertConversationCapacity/);
+  // An image-workspace conversation is listed, so image generation takes the quota before it creates one ...
+  const image = readFileSync("lib/imageGenerationService.ts", "utf8");
+  const imageCapacity = image.indexOf("assertConversationCapacity(tx, input.userId)");
+  assert.ok(imageCapacity > 0);
+  assert.ok(image.indexOf("createConversation(", imageCapacity) > imageCapacity);
+  // ... except a Studio run, which records its request in the same transaction and so is hidden from the list.
+  assert.ok(image.includes('input.onReserved !== undefined ||'));
+  assert.ok(image.includes('(input.editSource !== undefined && "bindAttachment" in input.editSource)'));
+  assert.ok(image.includes("if (!hiddenStudioRun) await assertConversationCapacity(tx, input.userId);"));
+  // Studio's route always supplies one of the two, so none of its runs is counted.
+  const studio = readFileSync("app/api/studio/images/route.ts", "utf8");
+  assert.ok(studio.includes("bindAttachment: (tx, conversationId) =>"));
+  assert.ok(studio.includes("onReserved: (tx, conversationId) => recordStudioRequest"));
 });
 
 test("a research run and a scheduled turn take the message quota before their first message", () => {

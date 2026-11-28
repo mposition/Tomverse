@@ -58,6 +58,7 @@ test("a partly deleted account reloads like a complete delete, so deleted rows l
   const partial = source.indexOf('data?.code === "CONVERSATION_DELETE_PARTIAL"');
   assert.ok(partial > 0);
   const block = source.slice(partial, source.indexOf("return;", partial));
-  assert.match(block, /Number\(data\.deleted \?\? 0\) > 0/);
+  // Whatever the count says: a committed batch whose rows were already gone (deleted 0) still changed the list.
+  assert.doesNotMatch(block, /if \(/);
   assert.match(block, /window\.location\.href = accountCallbackUrl/);
 });

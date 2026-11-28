@@ -1105,13 +1105,12 @@ export function AuthButton({
                         }),
                         "error"
                     );
-                    // The batches that committed are gone: reload as the success path does, so the page and
-                    // the sidebar stop listing them. The toast gets a moment to be read first.
-                    if (Number(data.deleted ?? 0) > 0) {
-                        window.setTimeout(() => {
-                            window.location.href = accountCallbackUrl;
-                        }, PARTIAL_DELETE_RELOAD_DELAY_MS);
-                    }
+                    // The server answers PARTIAL only once a batch has committed, even one whose rows were
+                    // already gone (deleted 0), so the list may have changed whatever the count says: reload
+                    // as the success path does. The toast gets a moment to be read first.
+                    window.setTimeout(() => {
+                        window.location.href = accountCallbackUrl;
+                    }, PARTIAL_DELETE_RELOAD_DELAY_MS);
                     return;
                 }
                 if (response.status === 428 && data?.code === "ACCOUNT_REAUTHENTICATION_REQUIRED") {
