@@ -25,6 +25,7 @@ import {
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
 import { REVIEW_PRODUCT_KEY, STUDIO_RUN_CONVERSATION } from "@/lib/conversationProduct";
+import { archivedListWhere } from "@/lib/conversationArchive";
 
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -80,11 +81,12 @@ export async function GET(req: Request) {
     const conversations = await prisma.conversation.findMany({
       // A Studio tool run is a one-off shown in the tool, not a conversation to
       // come back to. A temporary Chat is never listed (lib/temporaryChatAccess.ts).
-      where: { userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null },
+      where: { userId, NOT: STUDIO_RUN_CONVERSATION, temporaryExpiresAt: null, ...archivedListWhere(req) },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
         title: true,
+        archivedAt: true,
         // Returned because the sidebar groups by it. The list was already
         // ordered by this column and withheld it, so the client could order
         // rows it could not date -- and a date header cannot be derived from a
@@ -186,6 +188,7 @@ export async function GET(req: Request) {
         updatedAt: conv.updatedAt.toISOString(),
         pinned: conv.pinnedAt !== null,
         pinSeq: conv.pinSeq,
+        archived: conv.archivedAt !== null,
         kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
         productKey: conv.productKey,
         projectId: conv.projectId || null,

@@ -603,7 +603,10 @@ test("the response lifecycle is announced without streaming into a live region",
 
 test("the conversation list is reachable and operable by keyboard", () => {
   const source = readRepoFile("components/chat/ChatSidebar.tsx");
-  assert.match(source, /role="button"\s*\n\s*tabIndex=\{0\}/);
+  // A button that opens, or in selection mode a checkbox that toggles; a tab
+  // stop either way.
+  assert.match(source, /role=\{selectionMode \? "checkbox" : "button"\}/);
+  assert.match(source, /aria-checked=\{selectionMode \? isSelected : undefined\}[\s\S]{0,120}tabIndex=\{0\}/);
   assert.match(source, /event\.key === "Enter" \|\| event\.key === " "/);
 });
 

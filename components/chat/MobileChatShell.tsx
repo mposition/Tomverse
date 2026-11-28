@@ -693,7 +693,7 @@ export function MobileChatShell({
         // keeping the recent-chats row on screen for someone with no history.
         .filter(
           (conversation) =>
-            !conversation.isLocked && conversation.id !== currentChatId
+            !conversation.isLocked && !conversation.archived && conversation.id !== currentChatId
         )
         .slice(0, 3)
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),

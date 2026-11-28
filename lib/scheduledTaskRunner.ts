@@ -27,6 +27,7 @@ import {
   type ScheduledTaskSchedule,
 } from "@/lib/scheduledTaskCore";
 import { runAsScheduledTask } from "@/lib/scheduledTaskRunContext";
+import { restoreArchivedConversationOnMessage } from "@/lib/conversationArchive";
 import { isScheduledTasksEnabled } from "@/lib/scheduledTaskSettings";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { quoteScheduledRunCredits, ScheduledTaskError } from "@/lib/scheduledTaskService";
@@ -500,6 +501,9 @@ async function prepareConversation(
         data: [{ id: userMessageId, conversationId, role: "user", content: task.prompt, status: "normal" }],
         skipDuplicates: true,
       });
+      // The run's answer is how the account is told; an archived conversation
+      // would hide it, so a new question brings it back (lib/conversationArchive.ts).
+      await restoreArchivedConversationOnMessage(tx, conversationId);
       await tx.scheduledTaskRun.updateMany({
         where: { id: run.id, status: "running" },
         // The lease restarts as the dispatch begins, so it covers the dispatch.

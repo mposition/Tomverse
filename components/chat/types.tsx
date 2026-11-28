@@ -341,6 +341,12 @@ export type Conversation = {
      */
     pinSeq?: number;
     /**
+     * Archived by the owner (`Conversation.archivedAt`): kept out of the
+     * sidebar's default list and shown under its "Archived" filter. Absent on a
+     * guest row, which cannot be archived.
+     */
+    archived?: boolean;
+    /**
      * Last activity, which is what the sidebar's date headers group by and
      * what the server already orders the list by.
      *

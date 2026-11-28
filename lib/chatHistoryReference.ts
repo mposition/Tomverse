@@ -37,6 +37,7 @@ import { sanitizeWebSearchCitations, type WebSearchCitation } from "@/lib/webSea
  *     the user said "do not use this one";
  *   * conversations inside a project stay inside it (project_search is the
  *     tool there), and imported transcripts are never searched;
+ *   * an archived conversation is not referenced (lib/conversationArchive.ts);
  *   * counts and excerpt length are capped; the cap is the reserved allowance.
  *
  * Everything the tool returns is quoted history, framed as untrusted data
@@ -86,6 +87,8 @@ export const referenceableConversationWhere = (input: {
     kind: { not: "image" },
     // A project's conversations are reached through project_search.
     projectId: null,
+    // Archiving puts a conversation away; the model does not go looking in it.
+    archivedAt: null,
 });
 
 /** The tool is offered only while this conversation's memory is on. */

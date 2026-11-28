@@ -32,6 +32,7 @@ import {
   preflightChatDraftForMessage,
 } from "@/lib/chatDraftMessageConsume";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
+import { restoreArchivedConversationOnMessage } from "@/lib/conversationArchive";
 import { isTemporaryConversationExpired, TEMPORARY_CHAT_EXPIRED } from "@/lib/temporaryChatAccess";
 import {
   PUBLIC_MESSAGE_ATTACHMENT_SELECT,
@@ -355,6 +356,10 @@ export async function POST(
       }
       return { count };
     });
+
+    // A new message brings an archived conversation back to the list
+    // (lib/conversationArchive.ts). A replayed save wrote nothing and moves nothing.
+    if (created.count > 0) await restoreArchivedConversationOnMessage(prisma, conversationId);
 
     /*
       Read back rather than echoed.

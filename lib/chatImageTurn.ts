@@ -210,7 +210,8 @@ export async function startChatImageTurn(
         }
         await prisma.conversation.update({
             where: { id: input.conversationId },
-            data: { updatedAt: new Date() },
+            // A new turn brings an archived conversation back (lib/conversationArchive.ts).
+            data: { updatedAt: new Date(), archivedAt: null },
         });
     }
 
