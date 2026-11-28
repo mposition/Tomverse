@@ -1987,3 +1987,8 @@ d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/desktop/tests/pluginSources.test.t
 # commit. The current test assembles them at runtime. Exact findings only.
 d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/tomverse-cli/tests/plugin-sources.test.ts:github-pat:344
 d33f5c70bac3fe92af7e5e1f0749fb7592908b91:apps/tomverse-cli/tests/plugin-sources.test.ts:github-pat:345
+
+# Import line of the Z.ai worker test (#4331): the "secret" gitleaks matched is the
+# exported function name `readAmuxV22ZaiCodingPlanKey`, not a credential.
+# Suppress only the exact finding in the commit that added the line.
+3e69e3cf90feb041f290b8569cb2c4aa44dc31fd:tests/amuxV22Zai.test.mjs:generic-api-key:18

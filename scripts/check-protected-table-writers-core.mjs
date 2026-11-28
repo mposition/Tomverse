@@ -1455,6 +1455,15 @@ export const RAW_SQL_ALLOWLIST = [
       `The one mention is the ALTER TABLE that replaces ${table}'s CHECKs to admit the antigravity worker class (owner decision 2026-11-10).` +
       " The migration only replaces five CHECK constraints (registry class, the two CLI model tables' CLI, and the usage ledger's source and shape); its write verbs are the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
   })),
+  ...["AmuxWorkerRegistryEvent", "AmuxCliUsageEvent"].map((table) => ({
+    path: "prisma/migrations/20261128120000_amux_kimi_qwen_zai_worker_classes/migration.sql",
+    table,
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      `The one mention is the ALTER TABLE that replaces ${table}'s CHECKs to admit the kimi, qwen and zai worker classes (owner request and decision 2026-11-28).` +
+      " The migration only replaces the same five CHECK constraints as the antigravity one (registry class, the two CLI model tables' CLI, and the usage ledger's source and shape); its write verbs are the DROP/ADD CONSTRAINT clauses and words of comments. It writes no row.",
+  })),
   {
     path: "prisma/migrations/20261106200000_amux_cli_usage_failure_kind/migration.sql",
     table: "AmuxCliUsageEvent",
