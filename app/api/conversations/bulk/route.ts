@@ -7,6 +7,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { setConversationsArchived } from "@/lib/conversationArchive";
 import {
+    BULK_CONVERSATION_DELETE_RATE_LIMIT,
     CONVERSATION_SELECTION_ACTIONS,
     CONVERSATION_SELECTION_LIMIT,
     uniqueConversationIds,
@@ -41,9 +42,11 @@ import { logSecurityAuditEvent } from "@/lib/securityAudit";
  *
  * ## Limits
  *
- * At most CONVERSATION_SELECTION_LIMIT ids per request, under a rate limit of
- * its own. Delete-all keeps its own limit: this path cannot delete more than
- * one selection per request, and its request budget is separate and small.
+ * At most CONVERSATION_SELECTION_LIMIT ids per request. A delete spends the
+ * same rate-limit bucket as delete-all (BULK_CONVERSATION_DELETE_RATE_LIMIT):
+ * the two together get delete-all's budget, so once delete-all has spent it a
+ * selection delete is refused too, and the other way round. Archiving and
+ * restoring delete nothing and keep a limit of their own.
  *
  * Web only: the native and desktop bearer gates do not enrol this path.
  */
@@ -65,12 +68,16 @@ export async function POST(req: Request) {
         }
 
         const body = await readLimitedJson(req, 16 * 1024, bodySchema);
-        await consumeApiRateLimit(
-            req,
-            userId,
-            body.action === "delete" ? "conversation-delete-bulk" : "conversation-archive",
-            body.action === "delete" ? { minute: 3, day: 30 } : { minute: 30, day: 500 }
-        );
+        if (body.action === "delete") {
+            await consumeApiRateLimit(
+                req,
+                userId,
+                BULK_CONVERSATION_DELETE_RATE_LIMIT.scope,
+                BULK_CONVERSATION_DELETE_RATE_LIMIT.limits
+            );
+        } else {
+            await consumeApiRateLimit(req, userId, "conversation-archive", { minute: 30, day: 500 });
+        }
         const ids = uniqueConversationIds(body.conversationIds);
 
         const rows = await prisma.conversation.findMany({

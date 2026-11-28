@@ -44,7 +44,7 @@ let deleteScheduledAccounts: (typeof import("@/lib/maintenance"))["deleteSchedul
 let SAVED_PROMPT_LIMITS: (typeof import("@/lib/savedPromptsCore"))["SAVED_PROMPT_LIMITS"];
 let bulkRoute: { POST: Handler };
 let singleRoute: { DELETE: Handler };
-let listRoute: { GET: Handler };
+let listRoute: { GET: Handler; DELETE: Handler };
 let messagesRoute: { POST: Handler };
 let promptsRoute: { GET: Handler; POST: Handler };
 let promptRoute: { PATCH: Handler; DELETE: Handler };
@@ -356,6 +356,52 @@ test("a selection is bounded, needs a signed-in account, and a vanished id is re
   const gone = randomUUID();
   const response = await bulk({ action: "delete", conversationIds: [gone] });
   assert.deepEqual(await response.json(), { done: [], skipped: [{ id: gone, reason: "not_found" }] });
+});
+
+/*
+  Deleting in bulk is one budget: delete-all (DELETE /api/conversations) and a
+  selection delete spend the same rate-limit bucket. Without that, an account
+  with fifty conversations or fewer could go on deleting all of them through
+  the selection after delete-all's limit was spent.
+*/
+const deleteAll = () => listRoute.DELETE(new Request(`${ORIGIN}/api/conversations`, { method: "DELETE" }));
+const DELETE_BUCKET = "api-conversation-delete-all";
+
+test("a selection delete is refused once delete-all has spent the day's budget, and nothing is deleted", async () => {
+  const owner = await user();
+  signIn(owner);
+  assert.equal((await deleteAll()).status, 200);
+  // The rest of today's delete-all budget spent in earlier minutes: the day
+  // bucket at its limit, this minute's bucket empty.
+  await prisma.$executeRaw`UPDATE "ChatUsageBucket" SET "count" = 5 WHERE "period" = ${`${DELETE_BUCKET}-day`}`;
+  await prisma.$executeRaw`DELETE FROM "ChatUsageBucket" WHERE "period" = ${`${DELETE_BUCKET}-minute`}`;
+
+  const kept = [await conversation(owner.id), await conversation(owner.id)];
+  const refused = await bulk({ action: "delete", conversationIds: kept.map((row) => row.id) });
+  assert.equal(refused.status, 429);
+  assert.equal(await prisma.conversation.count({ where: { userId: owner.id } }), 2);
+  // Archiving deletes nothing and is not held by the delete budget.
+  assert.equal((await bulk({ action: "archive", conversationIds: [kept[0]!.id] })).status, 200);
+});
+
+test("delete-all and a selection delete share one bucket in either order", async () => {
+  const owner = await user();
+  signIn(owner);
+  const rows = [await conversation(owner.id), await conversation(owner.id), await conversation(owner.id)];
+  // Two selection deletes spend this minute's budget, and delete-all is refused.
+  assert.equal((await bulk({ action: "delete", conversationIds: [rows[0]!.id] })).status, 200);
+  assert.equal((await bulk({ action: "delete", conversationIds: [rows[1]!.id] })).status, 200);
+  assert.equal((await deleteAll()).status, 429);
+  assert.equal(await prisma.conversation.count({ where: { userId: owner.id } }), 1, "delete-all deleted nothing");
+  // And the other way: two delete-alls in a minute, and a selection delete is refused.
+  await prisma.$executeRaw`DELETE FROM "ChatUsageBucket"`;
+  assert.equal((await deleteAll()).status, 200);
+  const again = await conversation(owner.id);
+  assert.equal((await deleteAll()).status, 200);
+  const last = await conversation(owner.id);
+  assert.equal((await bulk({ action: "delete", conversationIds: [last.id] })).status, 429);
+  assert.equal(await prisma.conversation.count({ where: { id: last.id } }), 1);
+  assert.equal(await prisma.conversation.count({ where: { id: again.id } }), 0);
 });
 
 /* -------------------------------------------------------------------------- */

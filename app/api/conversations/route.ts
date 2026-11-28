@@ -26,6 +26,7 @@ import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
 import { REVIEW_PRODUCT_KEY, STUDIO_RUN_CONVERSATION } from "@/lib/conversationProduct";
 import { archivedListWhere } from "@/lib/conversationArchive";
+import { BULK_CONVERSATION_DELETE_RATE_LIMIT } from "@/lib/conversationBulkActions";
 
 
 const safeParse = (data: unknown, fallback: string[]) => {
@@ -270,10 +271,13 @@ export async function DELETE(req: Request) {
     }
 
     const userId = session.user.id;
-    await consumeApiRateLimit(req, userId, "conversation-delete-all", {
-      minute: 2,
-      day: 5,
-    });
+    // Shared with deleting a selection (lib/conversationBulkActions.ts).
+    await consumeApiRateLimit(
+      req,
+      userId,
+      BULK_CONVERSATION_DELETE_RATE_LIMIT.scope,
+      BULK_CONVERSATION_DELETE_RATE_LIMIT.limits
+    );
 
     const conversations = await prisma.conversation.findMany({
       where: { userId },

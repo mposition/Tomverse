@@ -1291,7 +1291,9 @@ export function ChatSidebar({
         const answer = await requestConversationSelection("delete", ids);
         setBulkBusy(false);
         if (!answer.ok) {
-            dispatchAppToast(toolsCopy.bulkFailed, "error");
+            // A 429 is the bulk-delete budget it shares with delete-all, not a
+            // failure a retry right now would fix.
+            dispatchAppToast(answer.status === 429 ? toolsCopy.deleteLimitReached : toolsCopy.bulkFailed, "error");
             return;
         }
         const deleted = answer.result.done;

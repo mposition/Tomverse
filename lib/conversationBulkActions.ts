@@ -17,6 +17,19 @@ export type ConversationSelectionAction = (typeof CONVERSATION_SELECTION_ACTIONS
  */
 export const CONVERSATION_SELECTION_LIMIT = 50;
 
+/**
+ * The one rate limit for deleting conversations in bulk: delete-all
+ * (DELETE /api/conversations) and deleting a selection consume the same
+ * bucket, same key and same limits. Two routes, one budget, so a selection
+ * delete cannot go on deleting after delete-all's limit is spent, nor the
+ * other way round. Archiving deletes nothing and keeps its own limit; the
+ * single delete keeps its own too.
+ */
+export const BULK_CONVERSATION_DELETE_RATE_LIMIT = {
+    scope: "conversation-delete-all",
+    limits: { minute: 2, day: 5 },
+} as const;
+
 /** Why a named conversation was left as it was. */
 export type ConversationSelectionSkipReason =
     /** Locked, and this browser holds no unlock for it: never deleted unseen. */
