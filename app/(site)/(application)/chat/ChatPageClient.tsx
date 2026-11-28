@@ -18,6 +18,8 @@ import {
   withProjectAttribution,
   type ConversationProjectChangedDetail,
 } from "@/lib/projectWorkspaceUi";
+import { CONVERSATIONS_CHANGED_EVENT, type ConversationsChangedDetail } from "@/lib/conversationBulkActions";
+import { conversationToolsCopy } from "@/locales/conversationTools";
 import { parseProjectWorkspaceRoute, projectWorkspaceSearch, type ProjectWorkspaceRoute } from "@/lib/projectWorkspaceRoute";
 import { ProjectChatScopeProvider, useProjectChatScopeState } from "@/components/projects/ProjectChatScope";
 import { ProjectComposerBar } from "@/components/projects/ProjectComposerBar";
@@ -4464,12 +4466,28 @@ export function ChatPageClient({
     if (!sessionUserId) return;
 
     try {
-	  const res = await fetch(`/api/conversations`, {
+	  // The archived rows are asked for beside the default list rather than in
+	  // it: the sidebar files them under its "Archived" filter, and a link to
+	  // one still has to find it here. A failed archived read keeps the rows
+	  // already held instead of making them look deleted.
+	  const [res, archivedRows] = await Promise.all([
+	    fetch(`/api/conversations`, {
         cache: "no-store",
         // The fallback name's date is computed on the server, in this zone
         // (lib/continuationTitleContext.ts).
         headers: displayTimeZoneHeaders(),
-      });
+      }),
+	    fetch(`/api/conversations?archived=only`, { cache: "no-store", headers: displayTimeZoneHeaders() })
+	      .then(async (response) => {
+	        if (!response.ok) {
+	          await discardResponseBody(response);
+	          return null;
+	        }
+	        const body: unknown = await response.json();
+	        return Array.isArray(body) ? (body as (Conversation & ContinuationRowNaming)[]) : null;
+	      })
+	      .catch(() => null),
+	  ]);
       if (res.ok) {
         /*
           Resolve each continuation's displayed name once, here, rather than
@@ -4490,9 +4508,9 @@ export function ChatPageClient({
           knowing about continuations. Message search fetches separately and
           resolves its hits through the same `continuationRowTitle()`.
         */
-        const rows = (await res.json()) as (Conversation & ContinuationRowNaming)[];
+        const activeRows = (await res.json()) as (Conversation & ContinuationRowNaming)[];
         const titleCopy = continuationTitleCopy(t);
-        setConversations(
+        const nameRows = (rows: (Conversation & ContinuationRowNaming)[]) =>
           rows.map(({ sourceTitle, fallbackTitleDate, ...conversation }) => {
             const isContinuation = surfaceHasContinuationBridge(conversation.surface);
             return {
@@ -4512,8 +4530,16 @@ export function ChatPageClient({
                 isContinuation,
               }),
             };
-          })
-        );
+          });
+        const active = nameRows(activeRows);
+        const activeIds = new Set(active.map((conversation) => conversation.id));
+        setConversations((previous) => [
+          ...active,
+          ...(archivedRows
+            ? nameRows(archivedRows).map((conversation) => ({ ...conversation, archived: true }))
+            : previous.filter((conversation) => conversation.archived === true))
+            .filter((conversation) => !activeIds.has(conversation.id)),
+        ]);
       } else await discardResponseBody(res);
     } catch (error) {
       console.error("Failed to load conversations:", error);
@@ -5689,6 +5715,34 @@ export function ChatPageClient({
     setPendingDeleteId(id);
   };
 
+  /*
+    The sidebar archives, restores and deletes a selection through its own
+    request (lib/conversationBulkActions.ts) and says so here. A deleted id
+    gets what a single delete gives it -- its draft and model-sync state
+    dropped, and a new chat if it was open -- and the list is read again.
+  */
+  const conversationsChangedRef = useRef<(detail: ConversationsChangedDetail) => void>(() => {});
+  useEffect(() => {
+    conversationsChangedRef.current = (detail) => {
+      const deleted = new Set(detail.deletedIds ?? []);
+      if (deleted.size > 0) {
+        for (const id of deleted) {
+          discardDraft(id);
+          modelSettingsSyncQueueRef.current.reset(id);
+        }
+        setConversations((prev) => prev.filter((conversation) => !deleted.has(conversation.id)));
+        if (currentChatIdRef.current && deleted.has(currentChatIdRef.current)) handleNewChat();
+      }
+      void fetchConversations();
+    };
+  });
+  useEffect(() => {
+    const onChanged = (event: Event) =>
+      conversationsChangedRef.current((event as CustomEvent<ConversationsChangedDetail>).detail ?? {});
+    window.addEventListener(CONVERSATIONS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CONVERSATIONS_CHANGED_EVENT, onChanged);
+  }, []);
+
   // ---- Project workspace handlers ----------------------------------------
   /** "New chat in project": the create request will carry the project id. */
   const startProjectChat = (projectId: string) => {
@@ -5739,7 +5793,9 @@ export function ChatPageClient({
         onOpenConversation={openProjectConversation}
         onNewChat={startProjectChat}
         onDeleted={handleProjectWorkspaceDeleted}
-        conversations={conversations.map((conversation) => ({
+        // An archived conversation is put away here too; the sidebar's
+        // "Archived" filter is where it is found.
+        conversations={conversations.filter((conversation) => !conversation.archived).map((conversation) => ({
           id: conversation.id,
           title: conversation.title,
           projectId: conversation.projectId ?? null,
@@ -7429,6 +7485,16 @@ export function ChatPageClient({
           );
           const saveRecord = saveBody && typeof saveBody === "object" &&
             !Array.isArray(saveBody) ? saveBody as Record<string, unknown> : null;
+          if (saveResponse.ok) {
+            // The server brought an archived conversation back with this
+            // message (lib/conversationArchive.ts); the list says so now.
+            const savedChatId = activeChatId;
+            setConversations((rows) =>
+              rows.some((row) => row.id === savedChatId && row.archived)
+                ? rows.map((row) => (row.id === savedChatId ? { ...row, archived: false } : row))
+                : rows
+            );
+          }
           if (saveResponse.ok && preparedDraft) {
             const parsed = bodyValid
               ? parseChatMessageSaveResponse(saveBody, {
@@ -9563,7 +9629,7 @@ export function ChatPageClient({
         // The sidebar passes the row title it already has; the file is named by
         // the server from the same row, so it is accepted and ignored here.
         _title?: string,
-        options: { includeSource?: boolean; format?: "markdown" } = {}
+        options: { includeSource?: boolean; format?: "markdown" | "pdf" } = {}
     ) => {
         if (isGuestMode) return;
         // Fetched and saved from here rather than navigated to. Assigning
@@ -9572,7 +9638,7 @@ export function ChatPageClient({
         // navigated to, with the chat gone. See lib/browserDownload.ts.
         try {
             const response = await fetch(
-                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : options.format === "markdown" ? "?format=md" : ""}`,
+                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : options.format === "markdown" ? "?format=md" : options.format === "pdf" ? "?format=pdf" : ""}`,
                 {
                     cache: "no-store",
                     // The file is named with the date and words the list shows
@@ -9588,6 +9654,16 @@ export function ChatPageClient({
                     .json()
                     .then((body: { code?: unknown }) => body?.code)
                     .catch(() => undefined);
+                if (options.format === "pdf" && (code === "EXPORT_TOO_LARGE" || code === "UNSUPPORTED_CHARACTERS")) {
+                    // Both say what to do instead: the Markdown file has neither limit.
+                    showToast(
+                        code === "EXPORT_TOO_LARGE"
+                            ? conversationToolsCopy[lang].pdfTooLarge
+                            : conversationToolsCopy[lang].pdfUnsupportedCharacters,
+                        "error"
+                    );
+                    return;
+                }
                 showToast(
                     t(
                         code === "EXPORT_SOURCE_LOCKED"
@@ -9611,7 +9687,14 @@ export function ChatPageClient({
                 }
                 return;
             }
-            await saveResponseAsFile(response, options.format === "markdown" ? "conversation.md" : "conversation.txt");
+            const charactersReplaced =
+                options.format === "pdf" && response.headers.get("X-Export-Characters-Replaced") === "1";
+            await saveResponseAsFile(
+                response,
+                options.format === "markdown" ? "conversation.md" : options.format === "pdf" ? "conversation.pdf" : "conversation.txt"
+            );
+            // The file is made, but not exactly as written: said, not left to be found.
+            if (charactersReplaced) showToast(conversationToolsCopy[lang].pdfCharactersReplaced, "info");
         } catch {
             showToast(t("sidebar.downloadFailed"), "error");
         }

@@ -85,13 +85,14 @@ test("the switch is default-off and only the exact string true turns it on", () 
   assert.equal(history.chatHistoryReferenceEnabled({ CHAT_HISTORY_REFERENCE_ENABLED: "true" }), true);
 });
 
-test("which conversations the model may see is one condition: own, not locked, not current, not image, not in a project", () => {
+test("which conversations the model may see is one condition: own, not locked, not current, not image, not in a project, not archived", () => {
   assert.deepEqual(history.referenceableConversationWhere({ userId: "u1", currentConversationId: "current" }), {
     userId: "u1",
     id: { not: "current" },
     password: null,
     kind: { not: "image" },
     projectId: null,
+    archivedAt: null,
   });
 });
 

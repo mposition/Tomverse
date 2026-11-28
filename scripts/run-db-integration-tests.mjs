@@ -1610,6 +1610,23 @@ run(
   ],
   "Running the replaced-turn mark scenarios"
 );
+// Its own process: it replaces next-auth. Archiving moves archivedAt and
+// nothing else, the list and both searches read it as documented, deleting a
+// selection cleans up what the single delete does and skips locked rows, and
+// saved prompts stay with their owner and go with the account.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/conversation-tools.db.test.ts",
+  ],
+  "Running the conversation archive, selection delete and saved prompt scenarios"
+);
 // Its own process: it replaces next-auth and the provider stream. A saved
 // turn's reservation names its answer, the answer shows what settlement wrote
 // (summed, withheld while open, nothing when refunded or unlinked), and only

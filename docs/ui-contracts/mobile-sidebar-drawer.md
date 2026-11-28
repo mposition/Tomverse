@@ -164,6 +164,11 @@ its own rules. They exist to buy rows, never to buy them from the reader.
   write after telling the client it failed.
 - **The conversation menu keeps its own 44px target** inside a row that is
   itself the click target.
+- **Selection mode keeps the drawer's targets and keys.** While selecting
+  (components/chat/SidebarSelectionBar.tsx) each row is a `role="checkbox"` with
+  `aria-checked`, the row menu is not drawn, the bar's controls keep 44px in the
+  drawer, and Escape ends selection without closing the drawer. The delete
+  confirmation is a modal above the drawer that names the count.
 
 ## Regression coverage
 
