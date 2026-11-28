@@ -725,6 +725,8 @@ export const de = {
         artifactDownloadFailed: "Die Datei konnte nicht heruntergeladen werden. Bitte versuchen Sie es erneut.",
         artifactDownloadLocked: "Entsperren Sie diese Unterhaltung, um die Datei herunterzuladen.",
         searchCitationsLabel: "Quellen",
+        memorySavedNote: "Im Gedächtnis gespeichert.",
+        memorySavedManage: "Gedächtnis verwalten",
         answerContextKnowledge: "{count} Profilwissen-Auszüge",
         modelsSelectedOne: "KI",
         modelsSelectedOther: "KIs",

@@ -736,6 +736,8 @@ export const fr = {
         artifactDownloadFailed: "Le fichier n'a pas pu être téléchargé. Veuillez réessayer.",
         artifactDownloadLocked: "Déverrouillez cette conversation pour télécharger le fichier.",
         searchCitationsLabel: "Sources",
+        memorySavedNote: "Enregistré dans la mémoire.",
+        memorySavedManage: "Gérer la mémoire",
         answerContextKnowledge: "{count} extraits de connaissances du profil",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IA",

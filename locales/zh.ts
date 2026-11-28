@@ -787,6 +787,8 @@ export const zh = {
         artifactDownloadFailed: "文件下载失败，请重试。",
         artifactDownloadLocked: "请先解锁此对话再下载文件。",
         searchCitationsLabel: "来源",
+        memorySavedNote: "已保存到记忆。",
+        memorySavedManage: "管理记忆",
         answerContextKnowledge: "档案知识摘录 {count} 条",
         modelsSelectedOne: "个模型",
         modelsSelectedOther: "个模型",

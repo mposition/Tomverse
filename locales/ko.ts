@@ -779,6 +779,8 @@ export const ko = {
         artifactDownloadFailed: "파일을 다운로드하지 못했습니다. 다시 시도해 주세요.",
         artifactDownloadLocked: "파일을 다운로드하려면 대화 잠금을 해제하세요.",
         searchCitationsLabel: "출처",
+        memorySavedNote: "기억에 저장했습니다.",
+        memorySavedManage: "기억 관리",
         answerContextKnowledge: "프로필 지식 발췌 {count}개",
         modelsSelectedOne: "개 모델",
         modelsSelectedOther: "개 모델",

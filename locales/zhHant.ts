@@ -782,6 +782,8 @@ export const zhHant = {
         artifactDownloadFailed: "檔案下載失敗，請重試。",
         artifactDownloadLocked: "請先解鎖此對話再下載檔案。",
         searchCitationsLabel: "來源",
+        memorySavedNote: "已儲存到記憶。",
+        memorySavedManage: "管理記憶",
         answerContextKnowledge: "檔案知識摘錄 {count} 則",
         modelsSelectedOne: "個模型",
         modelsSelectedOther: "個模型",

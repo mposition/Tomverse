@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
+import { buildChatMemoryToolPart, memoryToolAllowed } from "@/lib/chatMemoryTool";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
@@ -332,4 +333,51 @@ test("locking or deleting the source conversation takes a memory learned from it
         update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { password: null } }),
     });
     assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } })).status, "active");
+});
+
+test("save_memory stores a personal, user-grounded memory through the manual service and is offered only where Chat memory may run", async () => {
+    await setFeatureFlag(true);
+    const owner = await user();
+    const chat = await conversation(owner.id);
+    assert.equal(await memoryToolAllowed({ userId: owner.id, conversationId: chat.id }), true);
+
+    const part = buildChatMemoryToolPart({
+        userId: owner.id,
+        conversationId: chat.id,
+        userMessages: ["Please remember that I am vegetarian"],
+        request: new Request("https://tomverse.app/api/chat"),
+        signal: new AbortController().signal,
+        rateLimit: async () => undefined,
+    });
+    const call = (statement: string) =>
+        part.tools.save_memory.execute!(
+            { memories: [{ kind: "preference", statement, quote: "remember that I am vegetarian", sensitive: false }] },
+            { toolCallId: "t", messages: [] }
+        ) as Promise<{ status: string }>;
+    assert.equal((await call("The user is vegetarian")).status, "saved");
+    const memory = await prisma.memoryItem.findFirstOrThrow({ where: { userId: owner.id }, include: { evidences: true } });
+    assert.equal(memory.status, "active");
+    assert.equal(memory.projectId, null);
+    assert.equal(memory.userEdited, true, "a memory the user asked for is theirs: extraction never replaces it");
+    assert.equal(memory.evidences[0].sourceType, "manual");
+    assert.equal(memory.evidences[0].manualContent, "remember that I am vegetarian");
+    // Saving the same sentence again replaces itself rather than failing or duplicating.
+    assert.equal((await call("The user is vegetarian")).status, "saved");
+    assert.equal(await prisma.memoryItem.count({ where: { userId: owner.id, status: "active" } }), 1);
+
+    const closed = async (data: Record<string, unknown>) => {
+        const other = await conversation(owner.id, data);
+        return memoryToolAllowed({ userId: owner.id, conversationId: other.id });
+    };
+    assert.equal(await closed({ password: "hash" }), false);
+    assert.equal(await closed({ memoryMode: "off" }), false);
+    assert.equal(await closed({ memoryMode: "off", temporaryExpiresAt: new Date(Date.now() + 3_600_000) }), false);
+    assert.equal(await closed({ productKey: "review" }), false);
+    const folder = await createProject(owner.id, { name: "Folder" });
+    assert.equal(await closed({ projectId: folder.id }), false);
+    await prisma.userMemorySettings.create({ data: { userId: owner.id, masterEnabled: false } });
+    assert.equal(await memoryToolAllowed({ userId: owner.id, conversationId: chat.id }), false);
+    await prisma.userMemorySettings.update({ where: { userId: owner.id }, data: { masterEnabled: true } });
+    await setFeatureFlag(false);
+    assert.equal(await memoryToolAllowed({ userId: owner.id, conversationId: chat.id }), false);
 });
