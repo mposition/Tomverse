@@ -14,27 +14,10 @@
  * Pure and client-safe: strings and numbers only.
  */
 
-/** Exactly `true` turns it on. Read on the server (a Client Component's `process.env` is fixed at build time). */
-export const chatCodeRunEnabled = (env: Record<string, string | undefined> = process.env) =>
-    env.TOMVERSE_CHAT_CODE_RUN_ENABLED === "true";
-
-/**
- * The pages that show an answer and so may offer Run: Chat, Review, a continued
- * conversation and an imported one. Only these get `'wasm-unsafe-eval'` in
- * their policy (lib/csp.ts); nothing else on the site can run WebAssembly.
- */
-export const chatCodeRunPagePath = (pathname: string | null | undefined): boolean =>
-    typeof pathname === "string" &&
-    /^\/(?:chat(?:\/workspace)?|review|continuations\/[^/]+|settings\/imports\/conversations\/[^/]+)\/?$/.test(pathname);
-
-/**
- * A request the server refuses for the runtime directory: one with a query string, or any method but GET and HEAD.
- * The runner's policy admits that directory for `connect-src` and a policy cannot see a query or a body, so this is the
- * server's half of keeping text out of requests to it. The runner's code has no way to make one (the worker removes its
- * network first, see `CODE_RUN_BLOCKED_GLOBALS`); this is the second lock. The runtime loads with plain GETs.
- */
-export const codeRunVendorRequestRefused = (pathname: string, method: string, search: string): boolean =>
-    pathname.startsWith("/vendor/pyodide/") && (search !== "" || (method !== "GET" && method !== "HEAD"));
+// The switch, the pages that may run code and the runtime directory's request rule live in
+// lib/csp.ts, which the page policy and proxy.ts already import: a new import from those files
+// would add a file to the Prompt Refiner's pinned runtime source closure.
+export { chatCodeRunEnabled, chatCodeRunPagePath, codeRunVendorRequestRefused } from "./csp";
 
 /**
  * What the model is told when the switch is on. Our own text, so it is a system

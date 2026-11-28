@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
-import { codeRunVendorRequestRefused } from "@/lib/chatCodeRun";
+import { codeRunVendorRequestRefused, createStaticMarketingCsp, createStrictCsp, createOfflineChatCsp } from "@/lib/csp";
 import {
   EXPERIMENT_COOKIE_NAME,
   EXPERIMENT_HOLD_COOKIE_NAME,
