@@ -1574,6 +1574,21 @@ run(
   ],
   "Running the temporary Chat and answer rating route scenarios"
 );
+// Its own process: it replaces next-auth. "Branch from this answer" -- what is
+// copied, what is left out, the conversations that are refused, and the limits.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-conversation-branch.db.test.ts",
+  ],
+  "Running the answer branch scenarios"
+);
 // Its own process: it replaces next-auth and the provider stream. Who may mark
 // a regenerated or edited turn replaced, that the conversation read carries
 // the mark, and that the chat route leaves marked turns out of the context and

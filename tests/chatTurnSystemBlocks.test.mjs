@@ -250,6 +250,26 @@ test("a turn just under a threshold can cross it once the blocks are priced", ()
   }
 });
 
+test("the chart instruction is carried and priced only when CHAT_INLINE_CHART is on", () => {
+  const previous = process.env.CHAT_INLINE_CHART;
+  const now = new Date("2026-11-15T00:00:00Z");
+  try {
+    delete process.env.CHAT_INLINE_CHART;
+    const off = build({ now });
+    process.env.CHAT_INLINE_CHART = "on";
+    const on = build({ now });
+    assert.equal(on.systemMessages.length, off.systemMessages.length + 1);
+    assert.ok(on.systemMessages.some((message) => message.content.startsWith("# Charts")));
+    assert.ok(!off.systemMessages.some((message) => message.content.startsWith("# Charts")));
+    assert.ok(on.promptTokens > off.promptTokens);
+    // Deep research carries no application-authored system blocks.
+    assert.equal(build({ now, isDeepResearchTurn: true }).systemMessages.length, 0);
+  } finally {
+    if (previous === undefined) delete process.env.CHAT_INLINE_CHART;
+    else process.env.CHAT_INLINE_CHART = previous;
+  }
+});
+
 test("a turn that cannot search but can read a pasted link carries the read_url exception", () => {
   const plain = build();
   const withUrl = build({ urlReadAvailable: true });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore, type MouseEventHandler } from "react";
-import { RotateCcw, Shuffle, Volume2, VolumeX } from "lucide-react";
+import { GitBranch, RotateCcw, Shuffle, Volume2, VolumeX } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { CHAT_MODEL_PICKER_CLOSED_EVENT } from "@/lib/chatModelPickerEvents";
 import { decideArmedRegenerate, regenerateArmRecheckInMs } from "@/lib/chatRegenerateArm";
@@ -12,6 +12,7 @@ import {
   subscribeSpeaking,
   toggleSpeaking,
 } from "@/lib/chatSpeech";
+import { chatAnswerSurfaceCopy } from "@/locales/chatAnswerSurface";
 import { chatTurnToolsCopy } from "@/locales/chatTurnTools";
 
 const ACTION_CLASS =
@@ -29,6 +30,13 @@ export type AnswerRegenerate = {
   disabled?: boolean;
 };
 
+/** Start a new Chat conversation holding the turns up to this answer. */
+export type AnswerBranch = {
+  onBranch: () => void;
+  pending: boolean;
+  disabled?: boolean;
+};
+
 /**
  * The tools under a finished answer: read it aloud (any answer) and, on the
  * newest answer of a Chat conversation, ask for it again.
@@ -41,13 +49,16 @@ export function AnswerTurnActions({
   messageId,
   content,
   regenerate,
+  branch,
 }: {
   messageId: string;
   content: string;
   regenerate?: AnswerRegenerate;
+  branch?: AnswerBranch;
 }) {
   const { t, lang } = useLanguage();
   const copy = chatTurnToolsCopy[lang];
+  const surfaceCopy = chatAnswerSurfaceCopy[lang];
   const canSpeak = useSyncExternalStore(noopSubscribe, speechSupported, () => false);
   const speakingId = useSyncExternalStore(subscribeSpeaking, getSpeakingId, () => null);
   const speaking = speakingId === messageId;
@@ -100,7 +111,7 @@ export function AnswerTurnActions({
     return () => window.clearTimeout(timer);
   }, [armed, currentModelId, onRegenerate]);
 
-  if (!canSpeak && !regenerate) return null;
+  if (!canSpeak && !regenerate && !branch) return null;
 
   return (
     <div data-testid="chat-answer-turn-actions" className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">
@@ -151,6 +162,19 @@ export function AnswerTurnActions({
             </button>
           )}
         </>
+      )}
+      {branch && (
+        <button
+          type="button"
+          data-testid="chat-branch-answer"
+          onClick={branch.onBranch}
+          disabled={branch.disabled || branch.pending}
+          aria-busy={branch.pending}
+          className={ACTION_CLASS}
+        >
+          <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />
+          {branch.pending ? surfaceCopy.branchWorking : surfaceCopy.branchHere}
+        </button>
       )}
       {waitingForModel && (
         <span
