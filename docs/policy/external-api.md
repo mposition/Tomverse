@@ -1110,7 +1110,7 @@ must be exactly `true`, with `TOMVERSE_DESKTOP_AUTH_ENABLED`. Code:
   `Idempotency-Key` and its receipts as `keyId` scopes a key's: the session's
   `GET /usage` answers `key: null` with its own requests, `GET /requests/status`
   finds only its own, and receipts say `source: "desktop_session"` (a key's say
-  `"api_key"`). Migration `20261128090000_external_api_desktop_session`: `keyId`
+  `"api_key"`). Migration `20261128110000_external_api_desktop_session`: `keyId`
   nullable, the new column with its foreign key to the account (so account
   deletion removes the row; a key request goes with its key), a unique index on
   (`desktopUserId`, `idempotencyKeyDigest`), and CHECK constraints that a row has
