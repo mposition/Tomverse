@@ -231,12 +231,12 @@ test("the shared page's code is never part of our document: it is only inside th
     assert.ok(inner.endsWith(hostile));
 });
 
-test("a shared page's declarative shadow root is made inert where the page is drawn, not in the stored snapshot", () => {
+test("a shared page's closed declarative root is opened where the page is drawn, not in the stored snapshot", () => {
     const content = '<div><template shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div>';
     const share = { previewKind: "html", language: "html", title: null, content };
     const html = buildArtifactSharePage({ share, copy: COPY, labels: LABELS, assetOrigin: ORIGIN, reportUrl: `${ORIGIN}/support` });
     const inner = srcdocOf(srcdocOf(html));
-    assert.ok(inner.endsWith('<div><template data-tomverse-shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div>'));
+    assert.ok(inner.endsWith('<div><template shadowrootmode=open  shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div>'));
     assert.equal(share.content, content);
 });
 

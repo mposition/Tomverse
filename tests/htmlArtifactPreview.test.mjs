@@ -13,7 +13,7 @@ import {
   buildHtmlPreviewSrcdoc,
   isHtmlPreviewSmallEnough,
   isHtmlPreviewable,
-  neutralizeDeclarativeShadowRoots,
+  openDeclarativeShadowRoots,
   withEmbedderNonce,
 } from "../lib/htmlArtifactPreview.ts";
 
@@ -161,12 +161,20 @@ test("the guard locks every WebRTC name, media capture and nested frames, with f
   assert.doesNotThrow(() => new Function(HTML_PREVIEW_GUARD_SCRIPT));
 });
 
-test("the guard sees into every shadow root: attachShadow is wrapped for good, and markup parsers that make roots are gone", () => {
-  // The wrapper has the observer watch the new root and sweeps it, and cannot itself be replaced.
-  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('define(Element.prototype, "attachShadow", {'));
+test("the guard follows every shadow root: all are open, and markup parsers that make roots from strings are gone", () => {
+  // Each added element and its descendants are entered through the shadowRoot getter captured before the page ran;
+  // an open root is watched, swept of frames and entered in turn.
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('shadowOf = describe(Element.prototype, "shadowRoot").get'));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("var root = apply(shadowOf, element, []);"));
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("apply(observe, observer, [root, watch]);"));
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("each(apply(selectInRoot, root, [frames]), removeNode);"));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('each(apply(selectInRoot, root, ["*"]), enter);'));
+  assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes('enter(node);\n    each(apply(select, node, ["*"]), enter);'));
+  // attachShadow reads the options once, makes the root open (a clonable closed root's copy would be out of reach)
+  // and follows it; the wrapper itself cannot be replaced.
   const wrapper = HTML_PREVIEW_GUARD_SCRIPT.slice(HTML_PREVIEW_GUARD_SCRIPT.indexOf('"attachShadow", {'));
+  assert.ok(wrapper.includes('var options = assign({}, init);\n        options.mode = "open";'));
+  assert.ok(wrapper.includes("var root = apply(attach, this, [options]);\n        follow(root);"));
   assert.match(wrapper, /writable: false, enumerable: false, configurable: false/);
   // Every way to parse markup into a declarative shadow root without attachShadow, document.write included.
   for (const [holder, name] of [
@@ -184,38 +192,60 @@ test("the guard sees into every shadow root: attachShadow is wrapped for good, a
   assert.ok(HTML_PREVIEW_GUARD_SCRIPT.includes("lock(window.MediaDevices && window.MediaDevices.prototype, capture[c]);"));
 });
 
-test("a page's declarative shadow roots parse as inert templates: the attribute is renamed wherever the tokenizer reads a name", () => {
-  const renamed = [
-    ['<template shadowrootmode="open">', '<template data-tomverse-shadowrootmode="open">'],
-    ["<template\n\tshadowrootmode=closed>", "<template\n\tdata-tomverse-shadowrootmode=closed>"],
-    // Straight after a quoted value, with no space: still an attribute name to the tokenizer.
-    ['<template title="a>b"shadowrootmode="closed">', '<template title="a>b"data-tomverse-shadowrootmode="closed">'],
-    ["<template title='x'shadowrootmode='open'>", "<template title='x'data-tomverse-shadowrootmode='open'>"],
-    // After a slash and in any case.
-    ["<TEMPLATE/SHADOWROOTMODE=closed>", "<TEMPLATE/data-tomverse-SHADOWROOTMODE=closed>"],
-    ["<template ShadowRootMode>", "<template data-tomverse-ShadowRootMode>"],
-    ['<template shadowroot="open">', '<template data-tomverse-shadowroot="open">'],
-    ["<template shadowrootmode/>", "<template data-tomverse-shadowrootmode/>"],
+test("a closed declarative root in the page's markup is made open, read the way the tokenizer reads a template start tag", () => {
+  const OPEN = " shadowrootmode=open ";
+  const opened = [
+    ['<template shadowrootmode="closed"><p>x</p></template>', `<template${OPEN} shadowrootmode="closed"><p>x</p></template>`],
+    // Any case, after a slash, unquoted, single-quoted, other whitespace.
+    ["<TEMPLATE/SHADOWROOTMODE=CLOSED>", `<TEMPLATE${OPEN}/SHADOWROOTMODE=CLOSED>`],
+    ["<template\n\tShadowRootMode='Closed'>", `<template${OPEN}\n\tShadowRootMode='Closed'>`],
+    // A `>` inside a quoted value does not end the tag; nor does a value straight after a quote.
+    ['<template title="a>b"shadowrootmode=\'closed\'>', `<template${OPEN} title="a>b"shadowrootmode='closed'>`],
+    // A character reference could spell "closed", so it is opened too.
+    ['<template shadowrootmode="&#99;losed">', `<template${OPEN} shadowrootmode="&#99;losed">`],
+    // The first of two same-named attributes is the one the browser keeps.
+    ["<template shadowrootmode=closed shadowrootmode=open>", `<template${OPEN} shadowrootmode=closed shadowrootmode=open>`],
+    // A tag the browser parses after a script or an empty comment is read even though its text follows them.
+    [`<script>var s="<template title='";</script><template shadowrootmode=closed>x'`, `<script>var s="<template title='";</script><template${OPEN} shadowrootmode=closed>x'`],
+    ["<!--><template shadowrootmode=closed>", `<!--><template${OPEN} shadowrootmode=closed>`],
   ];
-  for (const [page, expected] of renamed) assert.equal(neutralizeDeclarativeShadowRoots(page), expected, page);
-  // Not an attribute name: a property in a script, a longer name, the companion attributes alone.
+  for (const [page, expected] of opened) assert.equal(openDeclarativeShadowRoots(page), expected, page);
+  // Left exactly as written: open roots, other values, templates without the attribute, other tags, words.
   for (const page of [
-    "<script>host.shadowRoot.innerHTML = 1; this.shadowRoot;</script>",
-    '<div data-shadowrootmode="open" xshadowrootmode="open"></div>',
-    "<template shadowrootmodes shadowrootclonable shadowrootdelegatesfocus shadowrootserializable>",
-    "<p>attachShadow({ mode: 'open' })</p>",
+    '<template shadowrootmode="open"><style>p{color:red}</style><p>x</p></template>',
+    "<template shadowrootmode=open shadowrootmode=closed>",
+    '<template shadowrootmode=" closed">',
+    "<template><p>no root</p></template>",
+    "<templatex shadowrootmode=closed>",
+    '<div shadowrootmode="closed"></div>',
+    '<template shadowroot="closed">',
+    '<template title="shadowrootmode=closed">',
+    "<script>const shadowroot = 1; const shadowrootmode = \"shadowrootmode closed\"; host.shadowRoot;</script>",
+    "<style>.shadowrootmode::after { content: 'shadowrootmode closed'; }</style><p class=\"shadowrootmode\">shadowrootmode</p>",
   ]) {
-    assert.equal(neutralizeDeclarativeShadowRoots(page), page, page);
+    assert.equal(openDeclarativeShadowRoots(page), page, page);
   }
+  // The insertion has no quote, so a literal closed tag inside a script string stays a valid string.
+  const literal = "<script>var t = \"<template shadowrootmode=closed>\";</script>";
+  assert.equal(openDeclarativeShadowRoots(literal), `<script>var t = "<template${OPEN} shadowrootmode=closed>";</script>`);
+  assert.doesNotThrow(() => new Function(openDeclarativeShadowRoots("var t = \"<template shadowrootmode=closed>\";")));
 });
 
-test("the rename is made when the frame is built, and nothing else of the page changes", () => {
+test("a page built so that every template read runs to its end is still handled in linear time, erring towards open", () => {
+  const page = "<template a='".repeat(80_000) + "shadowrootmode";
+  const started = Date.now();
+  const out = openDeclarativeShadowRoots(page);
+  assert.ok(Date.now() - started < 2_000, `${Date.now() - started} ms`);
+  assert.ok(out.length > page.length);
+  // Only insertions: taking them out gives the page back.
+  assert.equal(out.split(" shadowrootmode=open ").join(""), page);
+});
+
+test("the root is opened when the frame is built, and the caller's text is left as it was", () => {
   const page = '<div id="host"><template shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>';
   const { inner } = split(buildHtmlPreviewSrcdoc(page));
-  assert.ok(inner.endsWith('<div id="host"><template data-tomverse-shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>'));
-  assert.ok(!/[\s/"']shadowrootmode/i.test(inner));
-  // The caller's text is a value: building the frame leaves it as it was.
-  assert.ok(page.includes(' shadowrootmode="closed"'));
+  assert.ok(inner.endsWith('<div id="host"><template shadowrootmode=open  shadowrootmode="closed"><iframe srcdoc="x"></iframe></template></div><p>after</p>'));
+  assert.ok(page.includes('<template shadowrootmode="closed">'));
 });
 
 test("a policy the page adds cannot widen ours: ours stays first and unmodified", () => {
@@ -287,7 +317,7 @@ test("the parent document never parses or rewrites the model's HTML for resource
   }
   // No pattern over the page's markup for resource hints in the build step either.
   assert.doesNotMatch(lib, /\.replace\([^)]*<link/i);
-  // The one text substitution over the page is the declarative-shadow-root rename (no parse), made where the
+  // The one text change to the page is opening closed declarative roots (an insertion, no parse), made where the
   // frame is built.
-  assert.equal(code(lib).split("neutralizeDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE").length - 1, 1);
+  assert.equal(code(lib).split("openDeclarativeShadowRoots(html.replace(LEADING_DOCTYPE").length - 1, 1);
 });

@@ -599,9 +599,9 @@ test("two shares of different text at one block, made at the same moment, leave 
 });
 
 test("a page with a declarative shadow root is stored and served exactly as the answer has it", async () => {
-  // The rename that makes the root inert belongs to drawing the frame (lib/htmlArtifactPreview.ts), never to the snapshot.
+  // Opening a closed root belongs to drawing the frame (lib/htmlArtifactPreview.ts), never to the snapshot.
   const { user, answer } = await seed();
-  const page = '<div><template shadowrootmode="open"><p>inside</p></template></div>';
+  const page = '<div><template shadowrootmode="closed"><p>inside</p></template></div>';
   await prisma.message.update({ where: { id: answer.id }, data: { content: page } });
   const prepared = await prepareArtifactShare(user.id, codeSource(answer.id, page, { blockIndex: 0 }), OPEN);
   assert.ok(prepared.ok);

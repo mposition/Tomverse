@@ -408,8 +408,9 @@ async function publishOnce(userId: string, prepared: Prepared, now: Date) {
   await removeExpiredForSource(userId, prepared.sourceKey, now);
   const outcome = await prisma.$transaction(async (tx) => {
     // One publish at a time per place: two texts shared at once at one block would each insert before either
-    // could see the other's row to close it, leaving two links. A file has one place, its own source key.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"artifact-share:" + (prepared.blockPrefix ?? prepared.sourceKey)}))`;
+    // could see the other's row to close it, leaving two links. A file has one place, its own source key. The key is
+    // 64-bit, as in lib/messageAttachmentStorage.ts: two places that hash alike only wait for each other.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"artifact-share:" + (prepared.blockPrefix ?? prepared.sourceKey)}, 0))`;
     const existing = await tx.artifactShare.findUnique({
       where: { sourceKey: prepared.sourceKey },
       select: { id: true, token: true, userId: true, createdAt: true, expiresAt: true },
