@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LIVE_CLI_LIMITS } from "../src/provider-cli-exec-contract";
-import { approvalRequestFor, createTranscript } from "../src/host/provider-cli-transcript";
+import { approvalRequestFor, createTranscript, holdsText, withoutKey } from "../src/host/provider-cli-transcript";
 import type { ExecEvent } from "../src/host/provider-cli-exec";
+
+// A made-up Z.ai key, put together at run time so no credential-shaped literal sits in the source.
+const sampleZai = ["zai", "key", "0123456789"].join("-");
+const dottedZai = ["zai.key", "0123456789"].join("-");
 
 const clean = (text: string) => text.replaceAll("SECRET", "[removed]").replaceAll("HIDDEN", "[removed]");
 const apply = (events: ExecEvent[]) => {
@@ -131,4 +135,46 @@ test("A request the card cannot show in full, or that names a credential file, g
     assert.equal(ask("Read", { file_path: path }), null, path);
   }
   assert.ok(ask("Read", { file_path: "src/a.ts" }));
+});
+
+test("A provider key is taken out whole, and so is a piece of it cut by the stream at either end", () => {
+  const key = sampleZai;
+  assert.equal(withoutKey(`token ${key} and ${key}.`, key), "token [removed] and [removed].");
+  // Still being written: the answer so far ends with the start of the key.
+  assert.equal(withoutKey("the key is zai-key-01", key), "the key is [removed]");
+  // Cut by the window kept of a long answer: the text starts with the end of the key.
+  assert.equal(withoutKey("456789 was the key", key), "[removed] was the key");
+  // Three characters say nothing of the key and are left.
+  assert.equal(withoutKey("ends in zai", key), "ends in zai");
+  assert.equal(withoutKey("no key here", undefined), "no key here");
+  // Streamed in pieces, the whole answer is cleaned on every update, so a key split across pieces never shows.
+  const transcript = createTranscript((text) => withoutKey(text, key));
+  for (const piece of ["the key: zai-k", "ey-0123", "456789 done"]) {
+    transcript.apply({ type: "delta", id: "s", text: piece });
+    assert.ok(!withoutKey(transcript.streaming, key).includes("0123"), piece);
+  }
+});
+
+test("A command or tool line is cleaned before it is cut, so a key at the cut leaves no piece", () => {
+  const key = sampleZai;
+  const transcript = createTranscript((text) => withoutKey(text, key));
+  transcript.apply({ type: "command", id: "c", command: `${"x".repeat(190)} ${key} --rest`, state: "done" });
+  transcript.apply({ type: "tool", id: "t", name: "Read", detail: `${"y".repeat(190)}/${key}/file`, state: "done" });
+  const text = JSON.stringify(transcript.entries);
+  assert.ok(!/zai-key|0123/.test(text), text);
+});
+
+test("A changed file's path is cleaned like every other line", () => {
+  const key = sampleZai;
+  const transcript = createTranscript((text) => withoutKey(text, key));
+  transcript.apply({ type: "files", id: "f", files: [{ path: `notes/${key}.md`, kind: "create" }], state: "done" });
+  assert.deepEqual(transcript.changes.map(({ path }) => path), ["notes/[removed].md"]);
+});
+
+test("An approval request is searched for the key in its values as they are, at any depth", () => {
+  const key = dottedZai;
+  assert.ok(holdsText({ tool: "Bash", input: { command: `echo ${key} > notes.txt` } }, key));
+  assert.ok(holdsText({ tool: "Edit", input: { edits: [{ new_string: `k=${key}` }] } }, key));
+  assert.ok(holdsText({ input: { [key]: 1 } }, key));
+  assert.equal(holdsText({ tool: "Bash", input: { command: "npm test", timeout: 5 } }, key), false);
 });

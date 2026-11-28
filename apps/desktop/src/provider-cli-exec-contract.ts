@@ -1,15 +1,24 @@
-import type { CliProvider } from "./code-execution";
+import { claudeFixtureExecution, codexFixtureExecution, zaiClaudeExecution, type CliProvider } from "./code-execution";
 import type { PermissionModeId } from "./permission-contract";
 
 /**
  * Running a task with the provider's own CLI (the person's saved, trusted file) instead of the Tomverse API. The run
- * costs no Tomverse credits and calls no Tomverse coding API. Only these two providers have an adapter; the others
- * keep their fixture-only routes.
+ * costs no Tomverse credits and calls no Tomverse coding API. Codex and Claude Code have an adapter; the other CLIs keep
+ * their fixture-only routes. `zai` is Claude Code on the person's Z.ai Coding Plan: the same saved Claude Code file and
+ * adapter, with its own settings folder and the Z.ai key, so the person's Claude sign-in is neither used nor changed.
  */
-export const liveCliProviders = ["openai", "anthropic"] as const satisfies readonly CliProvider[];
+export const liveCliProviders = ["openai", "anthropic", "zai"] as const;
 export type LiveCliProvider = (typeof liveCliProviders)[number];
-export const isLiveCliProvider = (provider: CliProvider): provider is LiveCliProvider =>
-  (liveCliProviders as readonly CliProvider[]).includes(provider);
+
+/** The saved CLI file each route runs. */
+export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic" } as const satisfies Record<LiveCliProvider, CliProvider>;
+/** The name the composer and the task show. */
+export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Claude Code (Z.ai)" } as const satisfies Record<LiveCliProvider, string>;
+/** What a task run on the route says it ran with. */
+export const liveCliExecution = (provider: LiveCliProvider) =>
+  provider === "openai" ? codexFixtureExecution : provider === "zai" ? zaiClaudeExecution : claudeFixtureExecution;
+/** Z.ai's Anthropic-compatible endpoint for the Coding Plan (docs.z.ai, Claude Code). */
+export const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 
 /** The composer's model id for a provider CLI that runs with its own default model. */
 export const liveCliModelId = (provider: LiveCliProvider) => `provider-cli:${provider}` as const;
@@ -49,6 +58,12 @@ export const cliPermissionPlans: Record<LiveCliProvider, Record<PermissionModeId
     allow_all: { grants: "allow_all", approvals: "none", notice: "cliAllowAllScoped" },
   },
   anthropic: {
+    read_only: { grants: "read_only", approvals: "none" },
+    ask: { grants: "ask", approvals: "card" },
+    auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },
+    allow_all: { grants: "allow_all", approvals: "card", notice: "cliAllowAllCommandsAsk" },
+  },
+  zai: {
     read_only: { grants: "read_only", approvals: "none" },
     ask: { grants: "ask", approvals: "card" },
     auto_review: { grants: "ask", approvals: "card", notice: "cliAutoReviewAsks" },

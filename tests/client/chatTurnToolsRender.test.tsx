@@ -198,3 +198,43 @@ test("the Korean labels are Korean", () => {
   assert.match(html, /다시 생성/);
   assert.match(html, /다른 모델로 다시/);
 });
+
+/* -------------------------------------------------------------- credits */
+
+test("a settled Chat answer shows what it was charged, and Review shows nothing", () => {
+  const messages: Message[] = [question, answerWith("Done", { settledCredits: 3 })];
+  const html = render(messages, { showAnswerCredits: true });
+  assert.equal(count(html, /data-testid="chat-answer-credits"/g), 1);
+  assert.match(html, /3 credits/);
+  assert.match(html, /title="Credits charged for this answer"/);
+  assert.ok(html.indexOf("Done") < html.indexOf("chat-answer-credits"));
+  assert.match(render([question, answerWith("Done", { settledCredits: 1 })], { showAnswerCredits: true }), /1 credit</);
+  assert.match(render(messages, { showAnswerCredits: true }, "ko"), /3크레딧/);
+  // Review and the model panels never turn it on, whatever the message carries.
+  assert.ok(!render(messages).includes("chat-answer-credits"));
+});
+
+test("no figure while streaming, for nothing charged, or without a settled value", () => {
+  const streaming = render([question, answerWith("Partial", { settledCredits: 3 })], {
+    showAnswerCredits: true,
+    isSending: true,
+  });
+  assert.ok(!streaming.includes("chat-answer-credits"));
+  for (const extra of [{ settledCredits: 0 }, {}, { settledCredits: Number.NaN }]) {
+    const html = render([question, answerWith("Done", extra)], { showAnswerCredits: true });
+    assert.ok(!html.includes("chat-answer-credits"), JSON.stringify(extra));
+  }
+  // The user's own question never carries one.
+  const asked = render([{ ...question, settledCredits: 4 } as Message], { showAnswerCredits: true });
+  assert.ok(!asked.includes("chat-answer-credits"));
+});
+
+test("a stopped answer that was charged shows its figure without the tools row", () => {
+  const html = render([question, answerWith("Half an answer", { status: "cancelled", settledCredits: 2 })], {
+    showAnswerCredits: true,
+    onBranchFromAnswer: async () => {},
+  });
+  assert.equal(count(html, /data-testid="chat-answer-credits"/g), 1);
+  assert.match(html, /2 credits/);
+  assert.ok(!html.includes("chat-branch-answer"));
+});

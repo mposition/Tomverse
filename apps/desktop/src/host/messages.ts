@@ -50,7 +50,9 @@ export type WorkerCommand =
   | { type: "start-provider-cli"; runId: string; project: ProjectRoot; provider: LiveCliProvider; file: string; prompt: string;
     permission: PermissionModeId; protectedRoot: string; references?: WorkspaceReference[]; history?: { id: string; directory: string };
     /** A test runs a stand-in script through the Node binary this way; set only where fixtures are allowed. */
-    argsPrefix?: string[] }
+    argsPrefix?: string[];
+    /** The Z.ai route only: its key and Claude Code settings folder, held in memory for this run. */
+    zai?: { key: string; configDir: string } }
   | (Omit<NativeFixtureTask, "afterQuota"> & { type: "start-structured-cli-fixture"; provider: "qwen" | "moonshot" | "mistral" | "deepseek" | "zhipu" | "minimax" | "xai" | "google"; clientVersion: string })
   | (Omit<RecordedSession, "requestId"> & { type: "resume"; runId: string; protectedRoot: string; connection: Connection; previous: Task;
     browserSnapshot?: boolean; browserAgent?: boolean; browserWeb?: boolean; computerUse?: boolean; terminalRead?: boolean; webSearch?: boolean;

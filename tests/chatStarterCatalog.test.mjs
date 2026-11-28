@@ -723,3 +723,14 @@ test("no seed keeps registry order", () => {
     selectVisibleStarterCards(viewer(), chat, CHAT_STARTER_MAX_VISIBLE, null).map((card) => card.entry.id)
   );
 });
+
+test("only the learn-a-concept card turns study mode on, in Chat, and it is free for every viewer", () => {
+  const withStudy = CHAT_STARTER_CATALOG.filter((entry) => entry.seed.studyMode === true);
+  assert.deepEqual(withStudy.map((entry) => entry.id), ["learn-a-concept"]);
+  const card = withStudy[0];
+  assert.deepEqual(card.surfaces, ["chat"]);
+  assert.equal(card.seed.productKey, "chat");
+  // No sign-in, plan, flag or capability behind it: study mode adds no cost or external send.
+  assert.deepEqual(card.requires, {});
+  assert.deepEqual(chatStarterAvailability(card, viewer()), { state: "available" });
+});
