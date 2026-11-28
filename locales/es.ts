@@ -2177,6 +2177,7 @@ export const es = {
         loadMore: "Mostrar más",
         evidenceManual: "Fundamento escrito por ti:",
         evidenceExternal: "Extraído de una conversación importada",
+        evidenceChat: "Extraído de una conversación de chat",
         evidenceViewSource: "Ver conversación de origen",
         createTitle: "Añadir un recuerdo manualmente",
         createDescription:

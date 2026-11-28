@@ -2176,6 +2176,7 @@ export const ko = {
         loadMore: "더 보기",
         evidenceManual: "직접 작성한 근거:",
         evidenceExternal: "가져온 대화에서 추출됨",
+        evidenceChat: "일반 대화에서 추출됨",
         evidenceViewSource: "출처 대화 보기",
         createTitle: "기억 직접 추가",
         createDescription:

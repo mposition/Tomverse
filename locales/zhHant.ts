@@ -2159,6 +2159,7 @@ export const zhHant = {
         loadMore: "顯示更多",
         evidenceManual: "您填寫的依據：",
         evidenceExternal: "從匯入的對話中擷取",
+        evidenceChat: "從聊天對話中擷取",
         evidenceViewSource: "查看來源對話",
         createTitle: "手動新增記憶",
         createDescription:

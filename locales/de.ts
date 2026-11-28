@@ -2180,6 +2180,7 @@ export const de = {
         loadMore: "Mehr anzeigen",
         evidenceManual: "Von Ihnen verfasste Begründung:",
         evidenceExternal: "Aus einer importierten Unterhaltung extrahiert",
+        evidenceChat: "Aus einer Chat-Unterhaltung extrahiert",
         evidenceViewSource: "Quellunterhaltung ansehen",
         createTitle: "Erinnerung selbst hinzufügen",
         createDescription:

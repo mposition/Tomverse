@@ -2193,6 +2193,7 @@ export const en = {
         loadMore: "Show more",
         evidenceManual: "Grounds you wrote:",
         evidenceExternal: "Extracted from an imported conversation",
+        evidenceChat: "Learned from a Chat conversation",
         evidenceViewSource: "View source conversation",
         createTitle: "Add a memory yourself",
         createDescription:

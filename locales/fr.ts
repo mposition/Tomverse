@@ -2176,6 +2176,7 @@ export const fr = {
         loadMore: "Afficher plus",
         evidenceManual: "Justification rédigée par vous :",
         evidenceExternal: "Extrait d'une conversation importée",
+        evidenceChat: "Extrait d'une conversation de chat",
         evidenceViewSource: "Voir la conversation source",
         createTitle: "Ajouter un souvenir vous-même",
         createDescription:

@@ -605,6 +605,7 @@ type FixtureProject = {
 };
 let fixtureProject: FixtureProject | null = null;
 const projectExtractionEnqueues: string[] = [];
+const chatExtractionEnqueues: string[] = [];
 mock.module(mod("lib/projectWorkspaceService.ts"), {
   namedExports: {
     resolveConversationProjectScope: async () => fixtureProject,
@@ -615,6 +616,10 @@ mock.module(mod("lib/projectMemoryExtraction.ts"), {
   namedExports: {
     enqueueNativeProjectExtraction: async (input: { conversationId: string }) => {
       projectExtractionEnqueues.push(input.conversationId);
+      return { outcome: "skipped", reason: "operator_off" };
+    },
+    enqueueNativeChatExtraction: async (input: { conversationId: string }) => {
+      chatExtractionEnqueues.push(input.conversationId);
       return { outcome: "skipped", reason: "operator_off" };
     },
   },
@@ -4838,6 +4843,22 @@ test("a prepared project turn offers project_search/project_read under a step gu
     const contextRead = contextReads.at(-1) as { project?: FixtureProject | null };
     assert.equal(contextRead.project?.projectId, "project-alpha", "the scope comes from the conversation row, not the request");
   } finally { fixtureProject = null; projectExtractionEnqueues.length = 0; }
+});
+
+test("an ordinary Chat turn queues Chat memory extraction after the answer is stored, and a project turn queues only the project one", async () => {
+  fixtureProject = null;
+  chatExtractionEnqueues.length = 0;
+  projectExtractionEnqueues.length = 0;
+  try {
+    await ask("answers", "claimed", 200, false, undefined, true, false);
+    assert.deepEqual(chatExtractionEnqueues, [CONVERSATION_ID]);
+    assert.deepEqual(projectExtractionEnqueues, []);
+    chatExtractionEnqueues.length = 0;
+    fixtureProject = contextProject();
+    await ask("answers", "claimed", 200, true, undefined, true, false);
+    assert.deepEqual(chatExtractionEnqueues, []);
+    assert.deepEqual(projectExtractionEnqueues, [CONVERSATION_ID]);
+  } finally { fixtureProject = null; chatExtractionEnqueues.length = 0; projectExtractionEnqueues.length = 0; }
 });
 
 test("a folder project (context off) sends exactly as before: no bundle required, no project tools, no extraction", async () => {

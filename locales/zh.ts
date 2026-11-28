@@ -2164,6 +2164,7 @@ export const zh = {
         loadMore: "显示更多",
         evidenceManual: "您填写的依据：",
         evidenceExternal: "从导入的对话中提取",
+        evidenceChat: "从聊天对话中提取",
         evidenceViewSource: "查看来源对话",
         createTitle: "手动添加记忆",
         createDescription:
