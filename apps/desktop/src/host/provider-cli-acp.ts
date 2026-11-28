@@ -532,11 +532,14 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
     return result(!blank && !limited && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && commands.length === 0 && allowOption ? "allow" : "deny");
   }
   if (secret || commandMissing || blank || limited) return result("refuse", { ...approval, refused: true });
-  // Allow all approves on its own only an edit the card shows in full: an argument outside the card's fields (a `destination_path`,
-  // an `edits` list) may name another target, so such an edit is shown and asked instead. The exceptions are the arguments that
-  // only say how to write, never where (Antigravity's `Overwrite` on every write, checked against the real CLI 2026-11-28).
-  const fullyShown = Object.keys(rest).every((key) => howToWrite.has(key.toLowerCase()));
-  if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && fullyShown && commands.length === 0 && allowOption) return result("allow");
+  // Allow all is the person's choice to let edits inside the project run without a card, whatever they write: what it checks is
+  // where an edit goes, not what it writes, so the size of a diff and an edit known only by its file (Mistral Vibe's requests carry
+  // only the tool call id) do not matter. Every place the edit can name must be known and inside the project: an argument outside
+  // the card's own fields (a `destination_path`, an `edits` list) may name another one, so such an edit is asked instead. The
+  // exceptions are the arguments that only say how to write, never where (Antigravity's `Overwrite` on every write, checked
+  // against the real CLI 2026-11-28).
+  const targetsKnown = Object.keys(rest).every((key) => howToWrite.has(key.toLowerCase()));
+  if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && targetsKnown && commands.length === 0 && allowOption) return result("allow");
   return result("ask");
 }
 

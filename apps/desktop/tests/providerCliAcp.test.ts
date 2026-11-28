@@ -306,7 +306,8 @@ test("A project that lives under a provider settings folder name is not refused 
     assert.ok(!namesCredential(join(cwd, "src", "a.ts"), cwd));
     assert.ok(namesCredential(join(cwd, ".claude", "settings.json"), cwd));
     assert.equal(classifyAcpPermission(request({ kind: "edit", locations: [{ path: join(cwd, "src", "a.ts") }] }), { cwd, plan: cliPermissionPlan("qwen", "allow_all") }).verdict, "allow");
-    // Allow all approves on its own only an edit the card shows in full: an argument outside its fields may name another target.
+    // Allow all approves on its own an edit whose every target is known and inside the project; what it writes is the person's
+    // choice. An argument outside the card's fields may name another target, so it asks.
     const allowAll = { cwd, plan: cliPermissionPlan("qwen", "allow_all") };
     const write = (rawInput: Record<string, unknown>) => classifyAcpPermission(request({ kind: "edit", title: "Write", locations: [{ path: join(cwd, "src", "a.ts") }], rawInput }), allowAll);
     assert.equal(write({ path: "src/a.ts", content: "x" }).verdict, "allow");
