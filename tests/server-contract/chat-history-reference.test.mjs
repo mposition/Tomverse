@@ -62,7 +62,7 @@ const native = (conversationId, text = "we agreed on the Friday deadline", role 
   ({ kind: "native", id: `m-${conversationId}`, conversationId, conversationTitle: `title ${conversationId}`, role, modelId: null, snippet: text, snippetHighlight: null, surface: "chat" });
 const imported = (conversationId) =>
   ({ kind: "imported", id: `imported:${conversationId}`, conversationId, conversationTitle: "from ChatGPT", role: "user", sourceModelLabel: null, snippet: "imported text", snippetHighlight: null, surface: "continuation" });
-const row = (id, extra = {}) => ({ id, title: `title ${id}`, productKey: "chat", memoryMode: "inherit", ...extra });
+const row = (id, extra = {}) => ({ id, title: `title ${id}`, productKey: "chat", memoryMode: "inherit", updatedAt: new Date("2026-11-20T10:00:00Z"), ...extra });
 const reset = () => {
   settings = { masterEnabled: true, defaultConversationMode: "on" };
   currentConversation = { memoryMode: "inherit", assistantProfileVersionId: null };
@@ -350,4 +350,29 @@ test("chatUrlReadOffered agrees with withChatReadTools on whether read_url is on
     assert.equal(chatUrlReadOffered(ctx), offered, JSON.stringify(extra));
   }
   assert.equal(chatUrlReadOffered(context({ userMessages: [LINK] })), true);
+});
+
+test("each result carries the date its conversation was last updated", async () => {
+  reset();
+  searchResults = [native("a")];
+  eligibleRows = [row("a", { updatedAt: new Date("2026-10-03T23:30:00Z") })];
+  const part = buildPart({ stillAllowed: async () => true });
+  const result = await exec(part, { queries: ["plan"] });
+  const parsed = JSON.parse(result.data.split("\n").slice(1, -1).join("\n"));
+  assert.equal(parsed[0].updated, "2026-10-03");
+});
+
+test("only the past chats the answer names stay in the source list; other sources are untouched", () => {
+  const citations = [
+    { url: "https://tomverse.app/chat?conversation=a", title: "Launch plan", sourceProvider: "past_chat" },
+    { url: "https://tomverse.app/chat?conversation=b", title: "Recipe ideas", sourceProvider: "past_chat" },
+    { url: "https://news.example.org/story", title: "A page", sourceProvider: "web_page" },
+  ];
+  const kept = history.pastChatCitationsUsed(citations, "As we decided in your launch plan chat, ship on Friday.");
+  assert.deepEqual(kept.map((c) => c.title), ["Launch plan", "A page"]);
+  assert.deepEqual(history.pastChatCitationsUsed(citations, "").map((c) => c.title), ["A page"]);
+  assert.deepEqual(history.pastChatCitationsUsed(citations, undefined).map((c) => c.title), ["A page"]);
+  // A title the tool had to cut keeps matching on what is left of it.
+  const cut = [{ url: "u", title: "Quarterly planning for the platform team…", sourceProvider: "past_chat" }];
+  assert.equal(history.pastChatCitationsUsed(cut, "from Quarterly planning for the platform team last month").length, 1);
 });

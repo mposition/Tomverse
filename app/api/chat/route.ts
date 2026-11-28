@@ -409,6 +409,7 @@ import {
     PROJECT_TOOL_MAX_STEPS,
 } from "@/lib/projectChatTools";
 import { chatUrlReadOffered, withChatReadTools } from "@/lib/chatReadTools";
+import { pastChatCitationsUsed } from "@/lib/chatHistoryReference";
 import type { ChatToolSlot } from "@/lib/chatToolLoop";
 import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
@@ -8694,7 +8695,8 @@ async function handleChatPost(
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
                             ]);
                         }
-                        const readCitations = chatReadCitations();
+                        // A past chat the answer never names is not a source of it.
+                        const readCitations = pastChatCitationsUsed(chatReadCitations(), generatedText);
                         if (readCitations.length) {
                             webSearchExecution.citations = sanitizeWebSearchCitations([
                                 ...webSearchExecution.citations, ...readCitations,
