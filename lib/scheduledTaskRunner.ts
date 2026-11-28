@@ -732,7 +732,7 @@ export async function runScheduledTasksTick(input: {
   // Notices owed by runs that already finished but were never queued (a
   // process that died after a close, a failed enqueue). Bounded and never
   // throwing; off while the email switch is off.
-  result.noticesRecovered = (await reconcileScheduledRunNoticesQuietly()).queued;
+  result.noticesRecovered = (await reconcileScheduledRunNoticesQuietly(clock())).queued;
 
   // Due tasks are read oldest first, a page at a time, behind a cursor on
   // (nextRunAt, id) as read. A claimed, late or too-soon task leaves the due

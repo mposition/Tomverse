@@ -1424,7 +1424,10 @@ authority는 그와 별개로 **여전히 필요합니다.** 호주의 `inferred
 - **무엇**: 예약 작업 실행이 끝났을 때 한 통 — 답변이 대화에 저장됐거나
   (`scheduled_task_run_answered`), 그 실행 때문에 작업이 일시정지됐을 때
   (`scheduled_task_paused`). 다시 시도될 실패, 일시정지하지 않은 건너뜀, 결과 불명은
-  보내지 않습니다(`scheduledRunNoticeKind`, `lib/scheduledTaskCore.ts`).
+  보내지 않습니다. 결과 불명으로 끝난 실행은 그것 때문에 작업이 일시정지돼도 보내지
+  않습니다. 실행 종료 때와 복구 때 같은 함수(`scheduledRunNoticeKind`,
+  `lib/scheduledTaskCore.ts`)로 판정하므로, 어느 쪽이 결정했는지에 따라 결과가 달라지지
+  않습니다.
 - **분류: service, purpose `scheduled_tasks`.** 사용자가 직접 만든 작업에 대한
   사실이고 판촉이 없으므로 marketing이 아닙니다. 동의가 필요 없고 기본 ON이며,
   4번처럼 **별도 preference**로 끌 수 있습니다(`/settings/notifications`). "모든

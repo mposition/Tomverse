@@ -401,3 +401,72 @@ test("only failures that cost nothing are told apart from unknown outcomes", () 
   assert.equal(readoutFailureIsUnknown(404, "READOUT_NOTHING_TO_READ"), false);
   assert.equal(readoutFailureIsUnknown(400, undefined), false);
 });
+
+test("a refusal gives back every bucket it can, even when one fails", async () => {
+  const store = memoryStore();
+  const reservation = await reserveReadoutCharacters({ store, accountKey: "a", providerKey: "p", characters: 500, limits, now });
+  const failing = {
+    ...store,
+    unbook: async (booking) => {
+      if (booking.period === READOUT_BUDGET_PERIODS.accountDay) throw new Error("connection reset");
+      await store.unbook(booking);
+    },
+  };
+  await assert.rejects(
+    settleReadoutReservation({ store: failing, reservation, disposition: "refused" }),
+    /connection reset/
+  );
+  assert.equal(store.count("a", READOUT_BUDGET_PERIODS.accountDay, day), 500, "the failed one stays");
+  assert.equal(store.count("p", READOUT_BUDGET_PERIODS.providerDay, day), 0, "the rest came back");
+  assert.equal(store.count("p", READOUT_BUDGET_PERIODS.providerMonth, month), 0);
+});
+
+test("audio that cannot be played hands the rest to the browser voice without buying it again", async () => {
+  const { toggleReadout, stopReadout } = await import("../lib/chatServerReadout.ts");
+  const players = [];
+  const savedAudio = globalThis.Audio;
+  const savedFetch = globalThis.fetch;
+  globalThis.Audio = class {
+    constructor() {
+      this.src = "";
+      this.onended = null;
+      this.onerror = null;
+      players.push(this);
+    }
+    play() {
+      return Promise.resolve();
+    }
+    pause() {}
+  };
+  let requests = 0;
+  globalThis.fetch = async (_url, init) => {
+    requests += 1;
+    const { chunk } = JSON.parse(init.body);
+    return new Response(new Uint8Array([chunk + 1]), {
+      status: 200,
+      headers: { "X-Readout-Chunks": "2", "content-type": "audio/mpeg" },
+    });
+  };
+  try {
+    const first = "First paragraph sentence. ".repeat(50).trim();
+    const second = "Second paragraph sentence. ".repeat(50).trim();
+    const content = `${first}\n\n${second}`;
+    assert.equal(readoutPieces(content).chunks.length, 2);
+    const handed = [];
+    toggleReadout({ messageId: "playback-error", content, onUnavailable: (text) => handed.push(text) });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
+    const [player] = players;
+    // The first piece plays to its end; the second fails to play.
+    player.onended();
+    await settle();
+    player.onerror();
+    await settle();
+    assert.deepEqual(handed, [readoutPieces(content).chunks[1]]);
+    assert.equal(requests, 2, "each piece was bought once and the failed one is not asked for again");
+  } finally {
+    stopReadout();
+    globalThis.Audio = savedAudio;
+    globalThis.fetch = savedFetch;
+  }
+});

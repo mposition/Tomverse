@@ -167,6 +167,17 @@ export async function settleReadoutReservation(input: {
   if (reservation.settled) return { releasedCharacters: 0 };
   reservation.settled = true;
   if (readoutKeepsReservation(input.disposition)) return { releasedCharacters: 0 };
-  for (const booking of reservation.bookings) await input.store.unbook(booking);
+  // Every bucket is given back even when one of them fails, like the rollback
+  // in reserveReadoutCharacters: a failed day must not strand the month. The
+  // first failure is reported once all of them have been tried.
+  let failure: unknown = null;
+  for (const booking of reservation.bookings) {
+    try {
+      await input.store.unbook(booking);
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  if (failure !== null) throw failure;
   return { releasedCharacters: reservation.characters };
 }

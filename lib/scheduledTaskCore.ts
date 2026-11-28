@@ -512,13 +512,21 @@ export type ScheduledRunNoticeKind = "answered" | "paused";
 /**
  * Which result email a finished run owes, if any: an answer, or the pause this
  * run put the task into. A failure that will be tried again, a skip that did
- * not pause, and an unknown result owe nothing.
+ * not pause, and an unknown result owe nothing -- an unknown result owes
+ * nothing even when it is the failure that pauses the task.
+ *
+ * The one rule, asked both when a run closes and when the recovery reads an
+ * unsettled run back (recoveredNoticeKind), so whether a notice is sent never
+ * depends on which of the two decided it.
  */
 export const scheduledRunNoticeKind = (input: {
-  status: RunClassification["status"];
+  status: string;
   pausedTask: boolean;
-}): ScheduledRunNoticeKind | null =>
-  input.status === "succeeded" ? "answered" : input.pausedTask ? "paused" : null;
+}): ScheduledRunNoticeKind | null => {
+  if (input.status === "succeeded") return "answered";
+  if ((input.status === "failed" || input.status === "skipped") && input.pausedTask) return "paused";
+  return null;
+};
 
 /**
  * The notice recovery (lib/scheduledTaskNotice.ts, reconcileScheduledRunNotices):
@@ -548,17 +556,16 @@ export const recoveredNoticeKind = (input: {
   taskRevision: number;
   pauseReason: string | null;
   isLatestRun: boolean;
-}): ScheduledRunNoticeKind | null => {
-  if (input.runStatus === "succeeded") return "answered";
-  if (input.runStatus !== "failed" && input.runStatus !== "skipped") return null;
-  const pausedByThisRun =
-    input.taskStatus === "paused" &&
-    input.pauseReason !== null &&
-    input.pauseReason !== "user" &&
-    input.taskRevision === input.runRevision &&
-    input.isLatestRun;
-  return pausedByThisRun ? "paused" : null;
-};
+}): ScheduledRunNoticeKind | null =>
+  scheduledRunNoticeKind({
+    status: input.runStatus,
+    pausedTask:
+      input.taskStatus === "paused" &&
+      input.pauseReason !== null &&
+      input.pauseReason !== "user" &&
+      input.taskRevision === input.runRevision &&
+      input.isLatestRun,
+  });
 
 /** When a run ran, in the account's language and the task's zone, with the zone shown. */
 export const formatScheduledRunTime = (at: Date, timeZone: string, language: string) => {

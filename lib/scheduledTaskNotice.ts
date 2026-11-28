@@ -160,7 +160,7 @@ export async function queueScheduledRunNotice(input: {
  * missing email, not a reason to leave a finished run open -- and the run's
  * marker stays NULL, so the recovery below queues it on a later tick.
  */
-export async function queueScheduledRunNoticeQuietly(input: { runId: string; kind: ScheduledRunNoticeKind }) {
+export async function queueScheduledRunNoticeQuietly(input: { runId: string; kind: ScheduledRunNoticeKind; now?: Date }) {
   try {
     return await queueScheduledRunNotice(input);
   } catch (error) {
@@ -189,8 +189,11 @@ export type ScheduledRunNoticeRecovery = { examined: number; queued: number; set
 export async function reconcileScheduledRunNotices(input: {
   env?: Record<string, string | undefined>;
   limit?: number;
+  /** The one instant this pass settles and queues at; the tick passes its own clock. */
+  now?: Date;
 } = {}): Promise<ScheduledRunNoticeRecovery> {
   const recovery: ScheduledRunNoticeRecovery = { examined: 0, queued: 0, settled: 0, failed: 0 };
+  const now = input.now ?? new Date();
   const env = input.env ?? process.env;
   if (!scheduledTaskEmailEnabled(env)) return recovery;
   const limit = input.limit ?? SCHEDULED_TASK_NOTICE_RECOVERY_BATCH;
@@ -233,13 +236,13 @@ export async function reconcileScheduledRunNotices(input: {
     if (!kind) {
       await prisma.scheduledTaskRun.updateMany({
         where: { id: row.id, noticeQueuedAt: null },
-        data: { noticeQueuedAt: new Date() },
+        data: { noticeQueuedAt: now },
       });
       recovery.settled += 1;
       continue;
     }
     // One failing row must not stop the rest; it stays NULL for the next tick.
-    const outcome = await queueScheduledRunNoticeQuietly({ runId: row.id, kind });
+    const outcome = await queueScheduledRunNoticeQuietly({ runId: row.id, kind, now });
     if (outcome === "queued") recovery.queued += 1;
     else if (outcome === "failed") recovery.failed += 1;
     else recovery.settled += 1;
@@ -248,9 +251,9 @@ export async function reconcileScheduledRunNotices(input: {
 }
 
 /** The tick's call: never throws, for the reason the runner's call does not. */
-export async function reconcileScheduledRunNoticesQuietly(): Promise<ScheduledRunNoticeRecovery> {
+export async function reconcileScheduledRunNoticesQuietly(now?: Date): Promise<ScheduledRunNoticeRecovery> {
   try {
-    return await reconcileScheduledRunNotices();
+    return await reconcileScheduledRunNotices({ now });
   } catch (error) {
     console.error("Failed to recover scheduled task notices:", {
       errorName: error instanceof Error ? error.name : "UnknownError",

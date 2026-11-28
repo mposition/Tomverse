@@ -101,3 +101,22 @@ test("an unsettled run's notice is read back from the run and its task", async (
   assert.equal(recoveredNoticeKind({ ...paused, taskStatus: "active", pauseReason: null }), null);
   assert.equal(recoveredNoticeKind({ ...paused, runStatus: "unknown" }), null);
 });
+
+test("the close and the recovery decide a notice with one rule, unknown results included", async () => {
+  const { recoveredNoticeKind } = await import("../lib/scheduledTaskCore.ts");
+  // An unknown result owes nothing even when it is the failure that pauses the task.
+  assert.equal(scheduledRunNoticeKind({ status: "unknown", pausedTask: true }), null);
+  for (const runStatus of ["succeeded", "failed", "skipped", "unknown"]) {
+    for (const pausedTask of [true, false]) {
+      const recovered = recoveredNoticeKind({
+        runStatus,
+        runRevision: 1,
+        taskStatus: pausedTask ? "paused" : "active",
+        taskRevision: 1,
+        pauseReason: pausedTask ? "repeated_failures" : null,
+        isLatestRun: true,
+      });
+      assert.equal(recovered, scheduledRunNoticeKind({ status: runStatus, pausedTask }), `${runStatus}/${pausedTask}`);
+    }
+  }
+});

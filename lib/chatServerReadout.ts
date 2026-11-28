@@ -255,8 +255,11 @@ export function toggleReadout(input: { messageId: string; content: string; onUna
       if (index + 1 < count) void playFrom(index + 1, count);
       else stopReadout();
     };
+    // The audio could not be played (a decode error, say). The piece was
+    // already bought, so it is not asked for again: the browser voice reads on
+    // from this piece instead.
     element.onerror = () => {
-      if (generation === mine) stopReadout();
+      if (generation === mine) continueInBrowser(index);
     };
     element.src = objectUrl;
     try {
