@@ -6,11 +6,22 @@
 --                                    service mail about the account's own task,
 --                                    which needs no consent and starts on like
 --                                    service_status (lib/emailPreferenceCore.ts).
---   ScheduledTaskRun.noticeQueuedAt  the once-per-run marker. It is set only
---                                    while NULL, in the same transaction that
---                                    writes the outbox rows, so a retried or
---                                    duplicated finish cannot queue a second
---                                    notice for the same run.
+--   ScheduledTaskRun.noticeQueuedAt  when the run's notice was settled: queued,
+--                                    or decided against. NULL means a notice
+--                                    may still be owed, and only the new
+--                                    runner's claim writes NULL. The column
+--                                    default is the moment the row is written,
+--                                    so a run created any other way -- by a
+--                                    process still running the old code during
+--                                    the deploy, by hand, by a restore -- starts
+--                                    settled and can never be mailed or
+--                                    recovered later.
+--
+-- Runs that already exist are settled too: a finished run at its finish time,
+-- because it ended before this feature existed and must not be mailed when the
+-- email switch is turned on later. A run still in flight is left NULL, so its
+-- close decides it on the normal path (and settles it when no notice is owed
+-- or the switch is off).
 --
 -- The new email purpose `scheduled_tasks` (classification `service`) joins the
 -- five CHECKs that list purposes. Every one is widened and none narrowed, so
@@ -28,7 +39,16 @@ BEGIN;
 
 ALTER TABLE "ScheduledTask" ADD COLUMN "emailOnFinish" BOOLEAN NOT NULL DEFAULT true;
 
-ALTER TABLE "ScheduledTaskRun" ADD COLUMN "noticeQueuedAt" TIMESTAMPTZ(3);
+ALTER TABLE "ScheduledTaskRun" ADD COLUMN "noticeQueuedAt" TIMESTAMPTZ(3) DEFAULT CURRENT_TIMESTAMP;
+
+-- The backfill. `status` is running | succeeded | failed | skipped | unknown
+-- (ScheduledTaskRun_status_check), and a run that is not running always has a
+-- finishedAt (ScheduledTaskRun_running_shape_check); the COALESCE is a guard.
+UPDATE "ScheduledTaskRun"
+SET "noticeQueuedAt" = CASE
+    WHEN "status" = 'running' THEN NULL
+    ELSE COALESCE("finishedAt", CURRENT_TIMESTAMP)
+END;
 
 ALTER TABLE "EmailPreference"
     DROP CONSTRAINT "EmailPreference_purpose_check",

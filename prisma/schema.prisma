@@ -1832,7 +1832,9 @@ model ScheduledTaskRun {
   /// When this run's result notice was settled: queued, or decided against
   /// (none owed, email switch off, task or account switched it off). Set once,
   /// only while NULL; NULL means one may still be owed (lib/scheduledTaskNotice.ts).
-  noticeQueuedAt     DateTime? @db.Timestamptz(3)
+  /// Defaults to the insert time: only the runner's claim writes NULL, so a row
+  /// made any other way starts settled.
+  noticeQueuedAt     DateTime? @default(now()) @db.Timestamptz(3)
 
   task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user User          @relation(fields: [userId], references: [id], onDelete: Cascade)

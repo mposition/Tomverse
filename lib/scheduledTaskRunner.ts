@@ -404,6 +404,9 @@ async function claimTask(taskId: string, now: Date): Promise<ClaimOutcome> {
           // Claimed by the worker that is about to execute it, so the lease
           // covers the run itself and not a wait behind other runs.
           leaseExpiresAt: new Date(now.getTime() + SCHEDULED_TASK_LIMITS.runLeaseMs),
+          // Open: this run's close decides its notice. The column defaults to
+          // "settled", so only a run claimed here can ever be mailed.
+          noticeQueuedAt: null,
         },
         select: { id: true, taskId: true, userId: true, taskRevision: true, assistantMessageId: true },
       });

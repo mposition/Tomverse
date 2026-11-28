@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { after, beforeEach, mock, test } from "node:test";
 
 import {
@@ -101,7 +103,7 @@ async function seedTask(userId: string, overrides: Record<string, unknown> = {})
 }
 
 /** The Chat route's durable path, as in tests/integration/scheduled-tasks.db.test.ts. */
-const completingChat = (): ChatDispatch => async (request) => {
+const completingChat = (until?: Promise<void>): ChatDispatch => async (request) => {
   const session = scheduledTaskRunSession(request);
   const body = (await request.json()) as Record<string, string>;
   const guard = scheduledTaskReservationGuard(session!.user!.id);
@@ -121,7 +123,13 @@ const completingChat = (): ChatDispatch => async (request) => {
       terminalAt: new Date(),
     },
   });
-  return new Response("the private answer text", { status: 200 });
+  if (!until) return new Response("the private answer text", { status: 200 });
+  return new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("the private answer text"));
+      void until.then(() => controller.close());
+    },
+  }), { status: 200 });
 };
 
 const refusingChat = (status: number, code: string): ChatDispatch => async (request) => {
@@ -253,6 +261,8 @@ test("retried and concurrent queueing of one run writes one notice", async () =>
       assistantMessageId: randomUUID(),
       leaseExpiresAt: new Date(),
       finishedAt: new Date(),
+      // A run the runner claimed: its notice is open until decided.
+      noticeQueuedAt: null,
     },
   });
 
@@ -280,6 +290,8 @@ const finishedRun = async (userId: string, taskId: string, revision: number) =>
       assistantMessageId: randomUUID(),
       leaseExpiresAt: new Date(),
       finishedAt: new Date(),
+      // A run the runner claimed: its notice is open until decided.
+      noticeQueuedAt: null,
     },
   });
 
@@ -513,4 +525,82 @@ test("the recovery honours the task's switch and owes a pause only to the run th
     assert.ok((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id } })).noticeQueuedAt, id);
   }
   assert.equal((await reconcileScheduledRunNotices()).examined, 0);
+});
+
+/* -------------------------------------------- old rows and the deploy moment -- */
+
+const MIGRATION_SQL = readFileSync(
+  resolve(import.meta.dirname, "../../prisma/migrations/20261128170000_chat_readout_task_notice/migration.sql"),
+  "utf8"
+);
+/** The migration's own backfill statement, run again here against rows written before it. */
+const BACKFILL = /UPDATE "ScheduledTaskRun"[\s\S]*?;/.exec(MIGRATION_SQL)?.[0];
+
+test("a run row written without the runner's claim -- old code during the deploy -- starts settled", async () => {
+  switchOn();
+  const userId = await seedUser();
+  const task = await seedTask(userId);
+  const id = randomUUID();
+  // What the previous runner writes: no noticeQueuedAt in its INSERT.
+  await prisma.$executeRaw`
+    INSERT INTO "ScheduledTaskRun" ("id", "taskId", "userId", "taskRevision", "scheduledFor", "status", "outcome",
+                                    "assistantMessageId", "leaseExpiresAt", "finishedAt")
+    VALUES (${id}, ${task.id}, ${userId}, ${task.revision}, NOW() - INTERVAL '20 minutes', 'succeeded', 'completed',
+            ${randomUUID()}, NOW(), NOW() - INTERVAL '10 minutes')`;
+  assert.ok((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id } })).noticeQueuedAt);
+  assert.equal((await reconcileScheduledRunNotices()).examined, 0);
+  assert.equal(await queueScheduledRunNotice({ runId: id, kind: "answered" }), "already_settled");
+  assert.equal(await prisma.emailDelivery.count(), 0);
+});
+
+test("the migration settles runs that had finished and leaves one in flight to be decided when it closes", async () => {
+  assert.ok(BACKFILL, "the migration has its backfill");
+  switchOn();
+
+  // A run in flight when the migration runs: the answer is still streaming.
+  const liveUser = await seedUser();
+  await seedTask(liveUser);
+  let release!: () => void;
+  const answering = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await runScheduledTasksTick({
+    dispatch: async () => completingChat(answering),
+    deadline: Date.now() + 300,
+    startReserveMs: 0,
+  });
+  const live = await prisma.scheduledTaskRun.findFirstOrThrow({ where: { userId: liveUser } });
+  assert.equal(live.status, "running");
+
+  // And a run that had finished before the column existed. Written after the
+  // first tick, whose own recovery would otherwise have looked at it.
+  const oldUser = await seedUser();
+  const oldTask = await seedTask(oldUser, { nextRunAt: null });
+  const finishedAt = new Date(Date.now() - 20 * 60_000);
+  const old = await unsettledRun(oldUser, oldTask, { finishedAt });
+
+  // Both rows as the migration finds them, then its backfill.
+  await prisma.scheduledTaskRun.updateMany({ data: { noticeQueuedAt: null } });
+  await prisma.$executeRawUnsafe(BACKFILL!);
+  const settledOld = await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: old.id } });
+  assert.equal(settledOld.noticeQueuedAt?.getTime(), finishedAt.getTime(), "settled at its finish");
+  assert.equal((await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: live.id } })).noticeQueuedAt, null);
+
+  // The recovery finds nothing: the old run is settled and the live one is running.
+  assert.equal((await reconcileScheduledRunNotices()).examined, 0);
+  assert.equal(await prisma.emailDelivery.count(), 0);
+
+  // The live run's worker is gone; the next tick closes it from its Chat
+  // attempt, and that close decides its notice on the normal path.
+  await prisma.scheduledTaskRun.update({ where: { id: live.id }, data: { leaseExpiresAt: new Date(Date.now() - 1_000) } });
+  const next = await runScheduledTasksTick({ dispatch: noDispatch });
+  assert.equal(next.reconciled, 1);
+  const closed = await prisma.scheduledTaskRun.findUniqueOrThrow({ where: { id: live.id } });
+  assert.equal(closed.status, "succeeded");
+  assert.ok(closed.noticeQueuedAt);
+  const queued = await deliveries();
+  assert.equal(queued.length, 1, "only the run that finished after the feature existed");
+  assert.equal(queued[0].event.referenceId, live.id);
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 200));
 });
