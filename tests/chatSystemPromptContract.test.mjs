@@ -52,8 +52,18 @@ test("the chat route hands the injected context block to the SDK as instructions
   // only source of system messages, and nothing makes that stay true.
   assert.match(
     source,
-    /const \{ messages: sdkMessages, instructions: sdkInstructions \} =\s*splitProviderInstructions\(formattedMessages\);/,
+    /const \{ messages: splitSdkMessages, instructions: sdkInstructions \} =\s*splitProviderInstructions\(formattedMessages\);/,
     `${ROUTE} must split system blocks out of the SDK's messages unconditionally`
+  );
+  // The split result then passes through the provider role rules (Perplexity
+  // rejects adjacent same-role turns), for the primary and fallback alike.
+  assert.match(
+    source,
+    /const sdkMessages = prepareProviderMessages\(splitSdkMessages, modelConfig\.provider\);/
+  );
+  assert.match(
+    source,
+    /const fallbackSdkMessages = prepareProviderMessages\(fallbackSdkMessagesBase, plan\.provider\);/
   );
   assert.doesNotMatch(
     source,

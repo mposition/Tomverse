@@ -241,7 +241,7 @@ import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
-import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
+import { prepareProviderMessages, splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
@@ -6433,7 +6433,7 @@ async function handleChatPost(
          */
         // Fallback gets the original execution view and its own admitted tool.
         // Primary presearch must not leak another attempt's sources or budget.
-        const fallbackSdkMessages = splitProviderInstructions(
+        const fallbackSdkMessagesBase = splitProviderInstructions(
             locationCacheBreakpoint ? uncachedLocationMessages : formattedMessages
         ).messages;
         // File-capable models offer artifact tools on ordinary text turns too.
@@ -6489,8 +6489,11 @@ async function handleChatPost(
             } finally { finishPresearch(); }
             await providerBudgetNotice;
         }
-        const { messages: sdkMessages, instructions: sdkInstructions } =
+        const { messages: splitSdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
+        // Perplexity rejects adjacent same-role turns, and the memory prelude and
+        // continuation data blocks are adjacent user messages by construction.
+        const sdkMessages = prepareProviderMessages(splitSdkMessages, modelConfig.provider);
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -8141,6 +8144,7 @@ async function handleChatPost(
                     attempt: dispatched.attemptIndex + 1, status: "unknown" };
                 // What the primary reported is not the fallback's failure.
                 observedStreamError = null;
+                const fallbackSdkMessages = prepareProviderMessages(fallbackSdkMessagesBase, plan.provider);
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: fallbackSdkMessages,
