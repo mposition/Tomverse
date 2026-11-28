@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CHAT_REQUEST_TRANSCRIPT_LIMITS,
   fitChatRequestTranscript,
+  parseOmittedEarlierMessages,
 } from "../lib/chatRequestLimits.ts";
 import { CHAT_REQUEST_LIMITS, validateChatPayload } from "../lib/chatSecurity.ts";
 import { CHAT_BODY_BYTES_PER_CONTEXT_TOKEN } from "../lib/chatInputLimits.ts";
@@ -169,4 +170,21 @@ test("the client sends its transcript through the fit", () => {
   assert.ok(send > 0, "the chat request body is built in ChatApp");
   const body = source.slice(send, source.indexOf("modelId: modelId", send));
   assert.match(body, /messages: [^\n]*fitChatRequestTranscript\(/);
+});
+
+test("fitChatRequestTranscript reports how many leading messages it left out", () => {
+  const messages = Array.from({ length: 130 }, (_, index) => ({ role: index % 2 === 0 ? "user" : "assistant", content: `m${index}` }));
+  let omitted = -1;
+  const fitted = fitChatRequestTranscript(messages, undefined, (count) => { omitted = count; });
+  assert.equal(omitted, messages.length - fitted.length);
+  assert.ok(omitted >= 30);
+  let none = -1;
+  assert.equal(fitChatRequestTranscript(messages.slice(0, 10), undefined, (count) => { none = count; }).length, 10);
+  assert.equal(none, 0);
+});
+
+test("the omitted count a request reports is a positive whole number or zero", () => {
+  assert.equal(parseOmittedEarlierMessages(30), 30);
+  for (const bad of [0, -1, 1.5, "30", null, undefined, NaN, Infinity, {}]) assert.equal(parseOmittedEarlierMessages(bad), 0);
+  assert.equal(parseOmittedEarlierMessages(10 ** 12), 1_000_000, "capped, never trusted at face value");
 });

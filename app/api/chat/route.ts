@@ -242,6 +242,7 @@ import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
 import { prepareProviderMessages, splitProviderInstructions } from "@/lib/chatProviderPrompt";
+import { parseClientTimeZone } from "@/lib/chatCurrentDatePrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
@@ -261,7 +262,7 @@ import {
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
-import { CHAT_MAX_STORED_ANSWER_CHARACTERS } from "@/lib/chatRequestLimits";
+import { CHAT_MAX_STORED_ANSWER_CHARACTERS, parseOmittedEarlierMessages } from "@/lib/chatRequestLimits";
 import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
 import {
     CHAT_ATTACHMENT_PARSE_CHARACTERS,
@@ -1602,6 +1603,10 @@ async function handleChatPost(
         const currentLocation = parseChatLocation(
             (body as { currentLocation?: unknown } | null)?.currentLocation
         );
+        // Hints the client reports about its own request, each validated before it can reach a prompt.
+        const clientTurnHints = body as { omittedEarlierMessages?: unknown; clientTimeZone?: unknown } | null;
+        const omittedEarlierMessages = parseOmittedEarlierMessages(clientTurnHints?.omittedEarlierMessages);
+        const clientTimeZone = parseClientTimeZone(clientTurnHints?.clientTimeZone);
         const {
             messages: requestMessages,
             modelId,
@@ -4180,6 +4185,8 @@ async function handleChatPost(
         });
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
+            omittedEarlierMessages,
+            clientTimeZone,
             urlReadAvailable,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
