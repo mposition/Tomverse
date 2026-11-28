@@ -247,7 +247,8 @@ pre, code { font-family: var(--font-code); }
 .provider-cli-list li { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, .9fr) minmax(max-content, .55fr); align-items: center; gap: 12px; min-height: 62px; border-bottom: 1px solid var(--line); }
 .provider-cli-list small { color: var(--muted); overflow-wrap: anywhere; }
 .provider-cli-list button { justify-self: start; }
-.provider-cli-found { grid-column: 1 / -1; display: grid; gap: 10px; padding: 0 0 14px; }
+/* Spanning every column, it must not size them: a long path would widen the last column and squeeze the name to a letter a line. */
+.provider-cli-found { grid-column: 1 / -1; display: grid; gap: 10px; padding: 0 0 14px; contain: inline-size; }
 .provider-cli-candidate { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--surface); }
 .provider-cli-file { overflow-wrap: anywhere; }
 .provider-cli-offer { display: grid; gap: 6px; margin: 0 0 18px; padding: 14px 16px; border-radius: 8px; background: var(--surface); }
