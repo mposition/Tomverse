@@ -10,6 +10,7 @@ type Copy = {
   apiRequired: string;
   useApi: string;
   cliFixture: string;
+  cliLive: string;
   automatic: string;
   automaticDetail: string;
   awaitingVerification: string;
@@ -38,6 +39,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "공급자 CLI", cliUnavailable: "{cli} 연결이 필요합니다.",
     apiRequired: "이 모델을 사용하려면 Tomverse API를 선택하세요.", useApi: "Tomverse API 사용",
     cliFixture: "{cli} · 로컬 시험",
+    cliLive: "{cli} · 이 컴퓨터에서 내 로그인으로 실행",
     automatic: "한도 소진 시 자동 전환", automaticDetail: "확인된 소진에만 적용합니다.",
     awaitingVerification: "설정을 저장했습니다. 전환하려면 한도와 결제 출처를 확인해야 합니다.",
     destination: "대체 실행 경로", destinationDetail: "현재까지의 작업을 이어갈 실행 방식과 모델",
@@ -52,6 +54,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "Provider CLI", cliUnavailable: "Connect {cli} to use this model.",
     apiRequired: "Choose Tomverse API to use this model.", useApi: "Use Tomverse API",
     cliFixture: "{cli} · Local test",
+    cliLive: "{cli} · Runs on this computer with your own sign-in",
     automatic: "Switch automatically when limits are reached", automaticDetail: "Applies only after confirmed exhaustion.",
     awaitingVerification: "Preference saved. Switching requires verified limits and billing.",
     destination: "Fallback destination", destinationDetail: "Execution mode and model for continuing the task",
@@ -66,6 +69,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "供应商 CLI", cliUnavailable: "请连接 {cli} 以使用此模型。",
     apiRequired: "请选择 Tomverse API 以使用此模型。", useApi: "使用 Tomverse API",
     cliFixture: "{cli} · 本地测试",
+    cliLive: "{cli} · 使用你自己的登录在本机运行",
     automatic: "额度耗尽时自动切换", automaticDetail: "仅在确认额度耗尽后适用。",
     awaitingVerification: "已保存偏好。切换前须验证额度和计费方式。",
     destination: "备用执行方式", destinationDetail: "继续任务所用的执行方式和模型",
@@ -80,6 +84,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "供應商 CLI", cliUnavailable: "請連線至 {cli} 以使用此模型。",
     apiRequired: "請選擇 Tomverse API 以使用此模型。", useApi: "使用 Tomverse API",
     cliFixture: "{cli} · 本機測試",
+    cliLive: "{cli} · 使用你自己的登入在本機執行",
     automatic: "額度耗盡時自動切換", automaticDetail: "僅在確認額度耗盡後適用。",
     awaitingVerification: "已儲存偏好設定。切換前須驗證額度和計費方式。",
     destination: "備用執行方式", destinationDetail: "繼續工作所用的執行方式和模型",
@@ -94,6 +99,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "CLI du fournisseur", cliUnavailable: "Connectez {cli} pour utiliser ce modèle.",
     apiRequired: "Choisissez l’API Tomverse pour utiliser ce modèle.", useApi: "Utiliser l’API Tomverse",
     cliFixture: "{cli} · Test local",
+    cliLive: "{cli} · S’exécute sur cet ordinateur avec votre propre connexion",
     automatic: "Basculer automatiquement lorsque la limite est atteinte", automaticDetail: "S’applique uniquement après confirmation.",
     awaitingVerification: "Préférence enregistrée. Le basculement exige la vérification des limites et de la facturation.",
     destination: "Mode de secours", destinationDetail: "Mode d’exécution et modèle pour poursuivre la tâche",
@@ -109,6 +115,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "Anbieter-CLI", cliUnavailable: "Verbinden Sie {cli}, um dieses Modell zu verwenden.",
     apiRequired: "Wählen Sie Tomverse API, um dieses Modell zu verwenden.", useApi: "Tomverse API verwenden",
     cliFixture: "{cli} · Lokaler Test",
+    cliLive: "{cli} · Läuft auf diesem Computer mit Ihrer eigenen Anmeldung",
     automatic: "Bei erreichtem Limit automatisch wechseln", automaticDetail: "Gilt nur nach bestätigtem Erreichen des Limits.",
     awaitingVerification: "Einstellung gespeichert. Ein Wechsel erfordert bestätigte Limits und Abrechnung.",
     destination: "Ausweichziel", destinationDetail: "Ausführungsart und Modell zum Fortsetzen der Aufgabe",
@@ -124,6 +131,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "CLI del proveedor", cliUnavailable: "Conecta {cli} para usar este modelo.",
     apiRequired: "Selecciona Tomverse API para usar este modelo.", useApi: "Usar Tomverse API",
     cliFixture: "{cli} · Prueba local",
+    cliLive: "{cli} · Se ejecuta en este equipo con tu propio inicio de sesión",
     automatic: "Cambiar automáticamente al alcanzar el límite", automaticDetail: "Solo se aplica cuando se confirma que se agotó el límite.",
     awaitingVerification: "Preferencia guardada. Para cambiar se deben verificar los límites y la facturación.",
     destination: "Destino alternativo", destinationDetail: "Modo de ejecución y modelo para continuar la tarea",
@@ -139,6 +147,7 @@ export const desktopCodeExecutionCopy = {
     providerCli: "CLI do fornecedor", cliUnavailable: "Ligue {cli} para usar este modelo.",
     apiRequired: "Selecione Tomverse API para usar este modelo.", useApi: "Usar Tomverse API",
     cliFixture: "{cli} · Teste local",
+    cliLive: "{cli} · Executa neste computador com o seu próprio início de sessão",
     automatic: "Mudar automaticamente ao atingir o limite", automaticDetail: "Aplica-se apenas após confirmar que o limite se esgotou.",
     awaitingVerification: "Preferência guardada. A mudança exige a verificação dos limites e da faturação.",
     destination: "Destino alternativo", destinationDetail: "Modo de execução e modelo para continuar a tarefa",
