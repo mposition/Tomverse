@@ -1,3 +1,5 @@
+import { chatCodeRunEnabled, chatCodeRunPagePath } from "./chatCodeRun";
+
 const isDevelopment = process.env.NODE_ENV === "development";
 
 /** The public offline document contains no account state or inline script. */
@@ -81,10 +83,19 @@ const directives = (
  */
 export const DESKTOP_DRIVE_PICKER_PATH = "/auth/desktop/drive-picker";
 
+/**
+ * A frame made by `srcdoc` inherits this page's policy, and the Python runner's frame (lib/chatCodeRunFrame.ts)
+ * cannot compile WebAssembly unless the page's `script-src` allows it. `'wasm-unsafe-eval'` allows that and
+ * nothing else (`eval` and `Function` stay blocked). It is on only for the pages that show an answer, and only
+ * while the runner's switch is on, so with the switch off this policy is byte for byte what it was.
+ */
+const wasmSource = (pathname?: string) =>
+  chatCodeRunEnabled() && chatCodeRunPagePath(pathname) ? " 'wasm-unsafe-eval'" : "";
+
 export const createStrictCsp = (nonce: string, pathname?: string) =>
   [
     ...directives(
-      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${wasmSource(pathname)}${
         isDevelopment ? " 'unsafe-eval'" : ""
       } https://accounts.google.com https://apis.google.com https://www.googletagmanager.com https://challenges.cloudflare.com`,
       `style-src 'self' 'nonce-${nonce}'${

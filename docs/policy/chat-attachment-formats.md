@@ -133,6 +133,13 @@ Windows는 `File.type`을 registry의 `HKCR\<확장자>\Content Type`에서 냅�
   요청 전에 최악 비용을 예약한다는 계약(`docs/policy/credit-and-cost-limits.md`)을 지킬 수
   없다. 2026-11-27에 https://ai.google.dev/gemini-api/docs/code-execution (지금은
   https://aistudio.google.com/docs/code-execution) 에서 확인했다.
+  - **같은 날 운영자가 사용자 브라우저에서 실행하는 방식을 정했고(2026-11-28), 이것은 위 결정과 충돌하지 않는다.** 위에서 뺀 것은 *공급자가*
+    실행하고 *공급자가* 과금하는 도구이고, 그래서 "보내기 전 최악의 경우 예약"이 불가능했다. 브라우저 실행은 답변에 든 Python 코드 블록을 사용자가 "실행"을
+    눌렀을 때 **사용자 기기의 WebAssembly(Pyodide)**가 돌리는 것이라 서버 요청도, 공급자 호출도, 과금되는 토큰도 없다. 크레딧 계약이 묶는 것은 서버가 쓰는
+    비용이고, 이 실행에는 서버 비용이 없으므로 예약할 최악이 없다. 모델이 코드를 받았다는 입력 토큰은 켜져 있을 때 시스템 안내 한 문단(`chatCodeRun`의
+    `CHAT_CODE_RUN_PROMPT`)만큼 `promptTokens`에 반영되어 견적과 청구가 같은 수를 쓴다. 결과는 모델에게 가지 않으며(사용자가 입력창에 넣어 보낼 때만 일반
+    메시지로 간다), 모델이 코드를 스스로 실행하고 결과를 이어 쓰는 도구 루프는 서버 왕복이 필요해 이 방식에 없다. 기본 꺼진
+    `TOMVERSE_CHAT_CODE_RUN_ENABLED` 뒤에 있고, 격리·CSP·런타임 호스팅은 `docs/policy/generated-artifacts.md §9`에 있다.
 
 #### 2.4.1 오디오 첨부 (운영자 지시 2026-11-27)
 

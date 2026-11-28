@@ -32,7 +32,11 @@ const SCANNED_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json"]);
  * sha384, so nothing of ours can be added to them). Babel's list of browser
  * globals names PushManager and friends; that is not push infrastructure.
  */
-const VENDORED_DIRECTORIES = new Set([join("public", "vendor", "artifact-preview")]);
+const VENDORED_DIRECTORIES = new Set([
+    join("public", "vendor", "artifact-preview"),
+    // Pyodide (the chat Python runner, lib/chatCodeRunFrame.ts): loader, wasm and wheels as published, pinned by sha256.
+    join("public", "vendor", "pyodide"),
+]);
 
 const walk = (dir, found = []) => {
     let entries;

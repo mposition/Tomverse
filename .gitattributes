@@ -121,3 +121,7 @@ tests/emailConsentCopy.test.mjs text eol=lf
 # (lib/chatArtifactPreview.ts). One changed byte -- an LF rewritten to CRLF at
 # checkout -- and the browser refuses to run the file, so Git never converts them.
 public/vendor/artifact-preview/*.js -text
+
+# The Python runner's files (Pyodide core and wheels) are pinned by sha256
+# (lib/chatCodeRunFrame.ts) and hold binary data. Git never converts them.
+public/vendor/pyodide/** -text
