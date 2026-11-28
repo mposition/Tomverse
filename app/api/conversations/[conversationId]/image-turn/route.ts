@@ -17,6 +17,7 @@ import {
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { startChatImageTurn } from "@/lib/chatImageTurn";
+import { readChatImageTurnAnswer } from "@/lib/chatImageTurnRead";
 import { processImageGenerationGroup } from "@/lib/imageGenerationService";
 import { IMAGE_ROUTING_DECISION_ID_PATTERN, linkImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 
@@ -33,6 +34,9 @@ const imageTurnSchema = z
     modelId: z.string().trim().min(1).max(120),
     imageModelIds: z.array(z.string().trim().min(1).max(120)).max(8),
     imageGroupModelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
+    // Each Review panel's chat model, in imageGroupModelIds order: the
+    // request that reserves the group writes every panel's answer with it.
+    imageGroupPanelModelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
     preset: z.enum(["draft", "standard", "final"]).nullable(),
     // A follow-up's prompt, rewritten by the image-intent call from the
     // previous image ("make it bluer"). The user's own text either way --
@@ -49,6 +53,52 @@ const imageTurnSchema = z
   .strict();
 
 type Params = { params: Promise<{ conversationId: string }> };
+
+const ANSWER_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+/**
+ * GET /api/conversations/[conversationId]/image-turn?assistantMessageId=...
+ * -- the saved image answer, read only. A Review panel whose own POST the
+ * image allowance refused (429) reads here the answer the panel that reserved
+ * the group wrote for it, so its paid image is shown without a second send.
+ * Nothing is reserved, started or exempted: it takes the transcript read's
+ * allowance and the same owner and unlock checks.
+ */
+export async function GET(req: Request, { params }: Params) {
+  try {
+    const authentication = await resolveChatRouteSession(req);
+    if (authentication.response) return authentication.response;
+    const session = authentication.session;
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+    const userId = session.user.id;
+    await consumeApiRateLimit(req, userId, "conversation-detail", {
+      minute: 300,
+      day: 20_000,
+    });
+    const assistantMessageId = new URL(req.url).searchParams.get("assistantMessageId") ?? "";
+    if (!ANSWER_ID_PATTERN.test(assistantMessageId)) {
+      return NextResponse.json({ error: "Invalid answer id.", code: "INVALID_REQUEST" }, { status: 400 });
+    }
+    const { conversationId } = await params;
+    const answer = await readChatImageTurnAnswer({ userId, conversationId, assistantMessageId, request: req });
+    if (answer === "locked") {
+      return NextResponse.json({ error: "Unlock this conversation first.", code: "CONVERSATION_LOCKED" }, { status: 403 });
+    }
+    if (!answer) {
+      return NextResponse.json({ error: "The image answer was not found.", code: "IMAGE_ANSWER_NOT_FOUND" }, { status: 404 });
+    }
+    const response = NextResponse.json(answer);
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  } catch (error) {
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Chat image answer read failed:", error);
+    return NextResponse.json({ error: "Failed to read the image answer." }, { status: 500 });
+  }
+}
 
 export async function POST(req: Request, { params }: Params) {
   try {
@@ -76,6 +126,7 @@ export async function POST(req: Request, { params }: Params) {
       modelId: body.modelId,
       imageModelIds: body.imageModelIds,
       ...(body.imageGroupModelIds ? { imageGroupModelIds: body.imageGroupModelIds } : {}),
+      ...(body.imageGroupPanelModelIds ? { imageGroupPanelModelIds: body.imageGroupPanelModelIds } : {}),
       preset: body.preset,
       prompt: body.prompt,
       ...(body.edit ? { edit: true } : {}),

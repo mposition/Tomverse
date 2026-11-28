@@ -46,8 +46,12 @@ export type ChatImageTurnRequest = {
      * instead of reserving a second one.
      */
     assistantMessageId?: string;
-    /** Review panels share one priced image group, with distinct answer ids. */
-    comparison?: { id: string; index: number; modelIds: string[] };
+    /**
+     * Review panels share one priced image group, with distinct answer ids.
+     * `panelModelIds` is each panel's chat model in `modelIds` order, so the
+     * request that reserves the group writes every panel's answer.
+     */
+    comparison?: { id: string; index: number; modelIds: string[]; panelModelIds?: string[] };
     /** The routing decision this turn answers, linked to its group by the server. */
     routingDecisionId?: string;
 };
@@ -98,3 +102,41 @@ export type ImageEditSourceRefusalCode =
 
 export const imageEditSourceRefusalCode = (value: unknown): ImageEditSourceRefusalCode | null =>
     value === IMAGE_EDIT_SOURCE_TOO_LARGE || value === IMAGE_EDIT_SOURCE_UNSUPPORTED ? value : null;
+
+/** When a refused Review panel looks for its answer again: right away, then backing off (~15 s in all). */
+export const REVIEW_PANEL_ANSWER_READ_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000] as const;
+
+/**
+ * A Review panel whose own image-turn POST the image allowance refused (429)
+ * may still have a paid image: the panel that reserved the group wrote every
+ * panel's answer in the same transaction (lib/chatImageTurn.ts). This reads
+ * that saved answer (GET .../image-turn), waiting a little for the reserving
+ * request to commit. Null when no answer appears -- nothing was reserved, and
+ * the refusal stands. Reads only: it never sends the turn again.
+ */
+export async function readRefusedReviewPanelAnswer(input: {
+    conversationId: string;
+    assistantMessageId: string;
+    signal?: AbortSignal;
+    fetch?: typeof fetch;
+    delaysMs?: readonly number[];
+}): Promise<{ content: string; imageTurn: ChatImageTurnRef } | null> {
+    const request = input.fetch ?? fetch;
+    const url = `/api/conversations/${encodeURIComponent(input.conversationId)}/image-turn?assistantMessageId=${encodeURIComponent(input.assistantMessageId)}`;
+    for (const delay of input.delaysMs ?? REVIEW_PANEL_ANSWER_READ_DELAYS_MS) {
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+        if (input.signal?.aborted) return null;
+        try {
+            const res = await request(url, { method: "GET", signal: input.signal });
+            const body = (await res.json().catch(() => null)) as { content?: unknown; imageTurn?: unknown } | null;
+            const imageTurn = res.ok ? readChatImageTurnRef(body?.imageTurn) : null;
+            if (imageTurn) return { content: typeof body?.content === "string" ? body.content : "", imageTurn };
+            // Not there yet (404) or a transient failure: wait and read again.
+            // Any other refusal (locked, signed out) will not change.
+            if (res.status !== 404 && res.status < 500) return null;
+        } catch {
+            if (input.signal?.aborted) return null;
+        }
+    }
+    return null;
+}
