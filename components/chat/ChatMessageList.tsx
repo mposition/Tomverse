@@ -64,6 +64,7 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { providerLabel } from "@/components/imports/importFormatting";
 import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
+import { ChatReasoningPanel, chatMessageReasoning } from "@/components/chat/ChatReasoningPanel";
 import { AutoRewriteDisclosure } from "@/components/chat/AutoRewriteDisclosure";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CodeBlockPreview } from "@/components/chat/CodeBlockPreview";
@@ -1311,6 +1312,9 @@ export function ChatMessageList({
                 : messages[idx - 1]?.attachments?.length
                   ? t("chat.readingFileStatus")
                   : t("chat.connectingStatus");
+            // The provider's reasoning summary, streamed or saved; null for the
+            // many answers that have none (components/chat/ChatReasoningPanel.tsx).
+            const reasoningView = chatMessageReasoning(msg);
 
               // Technical detail lines (trace IDs, internal cost figures) are
             // appended to msg.content after a newline -- the first line is
@@ -1546,6 +1550,9 @@ export function ChatMessageList({
                 )}
                 {isUser && !imported && <span className="sr-only">{t("chat.you")}</span>}
 
+                {reasoningView && !imported && (
+                  <ChatReasoningPanel reasoning={reasoningView} generating={isActivelyGenerating} />
+                )}
                 <div
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
                   data-imported={imported ? "true" : undefined}
@@ -1664,9 +1671,11 @@ export function ChatMessageList({
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
-                        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                          {connectingStatusText}
-                        </span>
+                        {!reasoningView && (
+                          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                            {connectingStatusText}
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <TypingIndicator label={t("chat.responseGenerating")} />
