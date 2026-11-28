@@ -88,6 +88,9 @@ const eslintConfig = defineConfig([
     // React and Babel as published, served to the chat preview frame and pinned
     // by sha384 (lib/chatArtifactPreview.ts). Third-party minified files.
     "public/vendor/artifact-preview/**",
+    // Pyodide and its wheels as published, served to the Python runner frame and
+    // pinned by sha256 (lib/chatCodeRunFrame.ts). Third-party minified files.
+    "public/vendor/pyodide/**",
     // AMUX has its own ESLint config and CI step.
     "vendor/amux/**",
   ]),

@@ -60,6 +60,7 @@ import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_
 import { buildChatCurrentDatePrompt } from "@/lib/chatCurrentDatePrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { CHAT_CODE_RUN_PROMPT, chatCodeRunEnabled } from "@/lib/chatCodeRun";
 import { CHAT_INLINE_CHART_PROMPT, chatInlineChartPromptEnabled } from "@/lib/chatChartPrompt";
 import { CHAT_STUDY_MODE_PROMPT } from "@/lib/chatStudyPrompt";
 
@@ -279,6 +280,10 @@ export const buildChatTurnSystemBlocks = (
   const omittedHistoryPrompt = buildOmittedHistoryPrompt(input.omittedEarlierMessages ?? 0);
   // Off by default: it is input tokens on every turn (lib/chatChartPrompt.ts).
   const chartPrompt = chatInlineChartPromptEnabled() ? CHAT_INLINE_CHART_PROMPT : "";
+  // Read here, in the one place the chat route, preflight and scheduled tasks share, so what is quoted and what
+  // is sent cannot disagree. Off (the default) adds no message and no tokens. The run itself happens in the
+  // person's browser and costs nothing on the server (docs/policy/chat-attachment-formats.md section 2.4).
+  const codeRunPrompt = chatCodeRunEnabled() ? CHAT_CODE_RUN_PROMPT : "";
   // Only on a turn that asked for it, so it is priced only there.
   const studyPrompt = input.studyMode === true && !input.isDeepResearchTurn ? CHAT_STUDY_MODE_PROMPT : "";
 
@@ -307,6 +312,8 @@ export const buildChatTurnSystemBlocks = (
     ...(input.appManagedSearchEnabled
       ? [{ role: "system" as const, content: APP_MANAGED_WEB_SEARCH_PROMPT }]
       : []),
+    // Before the continuation's rules, which stay the last system block.
+    ...(codeRunPrompt ? [{ role: "system" as const, content: codeRunPrompt }] : []),
     // The continuation's *rules* -- ours, and the last system block, so they
     // are stated immediately before the excerpt they govern. The excerpt
     // itself is not here; it is in `untrustedDataMessages` below.
@@ -336,6 +343,7 @@ export const buildChatTurnSystemBlocks = (
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +
+    estimateTextTokens(codeRunPrompt) +
     (input.appManagedSearchEnabled
       ? estimateTextTokens(APP_MANAGED_WEB_SEARCH_PROMPT) +
         APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS

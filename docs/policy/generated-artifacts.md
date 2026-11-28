@@ -552,6 +552,51 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
       요청문, 그 아래 입력한 내용)로, 답변 코드 블록은 입력창 맨 위에 "위 코드에서 다음을 고쳐 주세요: …"를 채워 넣고 패널을
       닫습니다. 보내지는 않으며 **새 서버 API가 없습니다**. 입력란은 그 경로가 실제로 있는 곳에만 나타납니다(생성 파일은 계정과 수정본 만들기가 켜진 대화, 코드 블록은 채팅 입력창이 있는 화면).
     - 공개 URL 게시, 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
+  - **Python 코드 블록은 사용자 브라우저 안에서 실행합니다**(`TOMVERSE_CHAT_CODE_RUN_ENABLED`, 기본 꺼짐, 정확히 `true`일 때만 켬;
+    `lib/chatCodeRun.ts`·`lib/chatCodeRunFrame.ts`·`components/chat/CodeBlockRun.tsx`). 스위치는 위 작업 공간 스위치와 별개이며 같은 길(`ReviewWorkspaceShell` →
+    `ChatPageClient` → `ChatArtifactWorkspaceProvider`)로 내려갑니다. 꺼져 있으면 버튼도, 모델 안내도, 페이지 정책의 변화도 없습니다.
+    - 답변이 **끝난 뒤** ```` ```python ````·`py`·`python3` 블록에 "실행" 버튼이 붙고, 누르기 전에는 frame도 만들지 않습니다. 결과(표준 출력·오류,
+      마지막 식의 값, matplotlib 그림)는 **블록 바로 아래** 영역에 보이고, "중지"·"다시 실행"·"내 파일 추가"·"결과를 메시지 입력창에 넣기"가 있습니다.
+      입력창에는 요청문과 출력(3,000자까지)만 채우며 보내지 않습니다. **서버를 거치는 것이 없고 새 API도 없습니다.**
+    - **격리는 위와 같은 구조입니다**: `srcdoc` frame, `sandbox="allow-scripts"`**만**(`allow-same-origin` 없음 — 불투명 origin, 쿠키·저장소·DOM 없음),
+      `<head>` 맨 앞의 CSP `<meta>`. 기존 HTML·React 미리보기의 정책은 **한 글자도 넓히지 않았고**, Python 실행용 정책(`codeRunCsp`)을 따로 둡니다:
+      `default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' <앱 origin>/vendor/pyodide/<버전>/; connect-src <같은 경로>; worker-src blob:;
+      form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'; manifest-src 'none'`. 즉 런타임이 내려받는 그 디렉터리 하나만 script와
+      네트워크로 열려 있어 `fetch`·XHR·WebSocket·`micropip`(PyPI)·CDN이 모두 막히고, `'unsafe-eval'`은 없으며 `'wasm-unsafe-eval'`은 WebAssembly
+      컴파일에만 필요한 최소입니다.
+    - **사용자 코드는 frame의 주 스레드가 아니라 Web Worker에서 돕니다.** frame의 script는 우리 고정 문서이고, 그것이 `blob:`으로 만든 worker(classic —
+      불투명 origin의 frame은 blob에서 module worker를 못 만듭니다)에서 Pyodide(WebAssembly Python)가 돕니다. worker에는 window·DOM·탐색이 없고 정책을
+      그대로 물려받으며, 시간 제한(코드 실행 30초; 런타임·패키지 내려받기는 별도 120초)·출력 제한(100,000자)·그림 제한(6장, 한 장 약 2MB, 16,000,000픽셀)
+      또는 "중지"에서 frame이 `terminate()`합니다. 중지는 frame 자체를 제거해 worker가 함께 끝납니다. 그래서 중첩 frame(탐색 차단용)은 두지 않았습니다.
+    - **사용자 코드가 돌기 전에 worker의 네트워크를 없앱니다**(`CODE_RUN_BLOCKED_GLOBALS`). CSP의 `connect-src`는 런타임 디렉터리를 열어 두는데, 정책은 경로만 맞추고
+      쿼리 문자열과 본문은 보지 못하므로, `fetch`를 부를 수 있다면 사용자가 넣은 파일 내용을 그 경로의 쿼리에 실어 이 서버로 보낼 수 있습니다("실행과 파일은 브라우저 안에만
+      머문다"는 계약 위반). 그래서 worker는 코드가 쓸 패키지를 모두 불러온 **뒤, 코드를 실행하기 전에** `fetch`·`Request`·`XMLHttpRequest`·`WebSocket`·`WebSocketStream`·
+      `EventSource`·`WebTransport`·`fetchLater`·`importScripts`·`Worker`·`SharedWorker`·`caches`·`CacheStorage`·`Cache`·`BroadcastChannel`·`FontFace`와 `navigator`의
+      `sendBeacon`·`serviceWorker`를 전역 객체와 그 위 모든 prototype에서 지우고(지워지지 않으면 `configurable:false`인 undefined로 막고), 하나라도 호출 가능하게 남으면
+      코드를 실행하지 않고 실패합니다. `Worker`를 남기면 새 worker가 깨끗한 `fetch`를 얻으므로 반드시 지웁니다. worker 스크립트는 함수로 감싸 `pyodide`·`CONFIG` 같은 내부
+      변수가 전역에 남지 않게 합니다. 동적 `import()`는 지울 수 없는 문법이지만, Python이 쓰려면 JS를 문자열로 실행해야 하고(`Function`·`eval`·`setTimeout(문자열)`·Pyodide
+      `run_js`) CSP에 `'unsafe-eval'`이 없어 브라우저가 거절합니다(Chromium에서 측정). 그 결과 **worker는 한 번만 씁니다**: 첫 실행이 시작되면 네트워크가 영구히 없으므로
+      다음 실행은 새 worker를 쓰고, frame은 실행이 끝나는 즉시 다음 worker의 런타임을 미리 띄워(`boot`) 다시 누르는 시간을 줄입니다. 이전 실행이 남긴 전역 변경도 함께 사라집니다.
+      새 패키지를 import하는 코드는 그 worker에서 ModuleNotFoundError입니다.
+    - **frame과 부모 문서는 `postMessage`로만** 말합니다. 부모는 `event.source`가 자기 frame의 window이고 `event.origin`이 `"null"`이며 이름공간·버전·frame마다
+      다른 token이 맞는 메시지만 받고(`parseCodeRunFrameMessage`), 필드마다 종류와 크기를 검사합니다. 메시지는 부모→frame `run` 하나, frame→부모
+      `ready`·`phase`·`output`·`image`·`done` 다섯 가지입니다. frame도 worker의 메시지를 믿지 않고(Python이 `js.self.postMessage`로 흉내 낼 수 있음) 검사해
+      한도를 건 뒤에야 넘깁니다. **출력은 신뢰하지 않는 데이터**입니다: 텍스트는 텍스트로, 그림은 `data:image/png;base64,`만 `<img>`로(SVG·URL은 거절), DataFrame은
+      `repr`의 텍스트 표로 보이고 HTML로 넣지 않습니다.
+    - 패키지는 numpy·pandas·matplotlib(와 그 의존 13개)이며 코드의 `import`를 보고 Pyodide `loadPackagesFromImports`가 필요한 것만 불러옵니다. 그 밖의 `import`는
+      ModuleNotFoundError입니다. 내 파일(CSV·TSV·JSON·텍스트, 5개·파일당 10MB·합계 20MB)은 브라우저에서 읽어 frame으로만 보내 worker의 현재 폴더에 두고,
+      다음 실행 때 지웁니다. 서버로 가지 않습니다. XLSX는 Pyodide 배포에 `openpyxl`이 없어 뺐습니다.
+    - **런타임은 이 앱이 직접 제공합니다**: `public/vendor/pyodide/314.0.8/`(Pyodide 314.0.8, Python 3.14; 약 30MB). 파일마다 sha256을 `CODE_RUN_FILES`에 고정하고
+      테스트가 디렉터리 전체를 해시합니다. wheel은 lock의 sha256과도 맞춥니다. frame의 origin이 `null`이라 `/vendor/pyodide/:path*`에만 `Access-Control-Allow-Origin: *`와
+      immutable 캐시를 둡니다(`next.config.ts`). **서버도 그 디렉터리의 쿼리 문자열이 있거나 GET·HEAD가 아닌 요청을 400으로 거절합니다**(`proxy.ts`, `codeRunVendorRequestRefused`; 런타임은 평범한 GET으로만 받습니다). 위 worker의 네트워크 제거가 본 대책이고 이것은 두 번째 잠금입니다. `.gitattributes`(`-text`)·`eslint.config.mjs`·`scripts/check-push-scope.mjs`·`scripts/check-protected-table-writers-core.mjs`가
+      React·Babel과 같은 방식으로 이 디렉터리를 제외합니다. 런타임에 제3자 CDN은 없습니다.
+    - **앱 자신의 CSP 한 군데가 바뀝니다.** `srcdoc` frame은 부모 문서의 정책을 물려받으므로, 부모의 `script-src`에 WebAssembly 허용이 없으면 frame이 wasm을 컴파일하지
+      못합니다(측정함). `createStrictCsp`는 **스위치가 켜져 있고 답변을 보여 주는 페이지**(`/chat`, `/chat/workspace`, `/review`, `/continuations/<id>`,
+      `/settings/imports/conversations/<id>`)에서만 `'wasm-unsafe-eval'`을 더하고, 스위치가 꺼져 있으면 정책은 바이트까지 그대로입니다. `'unsafe-eval'`은 더하지 않습니다.
+    - 모델에게는 켜져 있을 때만 짧은 안내가 갑니다(`lib/chatTurnSystemBlocks.ts`, `promptTokens`에 포함): 브라우저에서 실행할 수 있다, numpy·pandas·matplotlib,
+      네트워크·설치 없음, 30초, **모델은 결과를 보지 못하니 지어내지 말 것**. 모델이 스스로 실행하고 결과를 이어 쓰는 도구 루프는 하지 않습니다(§12).
+    - 검증: `tests/chatCodeRun.test.ts`(스위치·sandbox·정책 문자열·기존 미리보기 정책 불변·메시지 검증·한도·vendored sha256),
+      `tests/client/chatCodeRun.test.tsx`(버튼 조건, 8개 언어 문구).
   - 검증: `tests/htmlArtifactPreview.test.mjs`(sandbox·CSP 문자열 고정),
     `tests/chatArtifactPreview.test.mjs`(코드 블록 판정, React 문서의 자체 호스팅 경로·파일 해시·escape, bootstrap에 eval 없음, 모든 문서가 같은
     격리를 거침), `tests/client/htmlArtifactPreviewRender.test.tsx`(frame 속성·버튼 조건),
@@ -682,6 +727,7 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
 - artifact 공유 링크. 공유 대화 스냅샷은 artifact를 포함하지 않는다.
 - 미리보기 페이지의 공개 URL 게시(외부 게시라 별도 승인·도메인·moderation이 먼저다), 서버 저장, 여러 모델의 결과 나란히 미리보기.
 - React 미리보기에서 React 밖의 패키지(차트·아이콘 라이브러리 등)와 Tailwind. 허용 CDN 목록을 넓히지 않고는 불가능하다.
+- 모델이 스스로 코드를 실행하고 그 결과를 이어 쓰는 도구 루프(서버 왕복이 필요하고 비용 문제가 다시 생긴다), 대화에 첨부한 파일을 Python 실행에 자동으로 넣는 것, 실행 결과를 대화에 저장하는 것, XLSX 읽기(`openpyxl` 없음).
 
 ## 13. 첨부된 템플릿에서 여러 문서 만들기
 
