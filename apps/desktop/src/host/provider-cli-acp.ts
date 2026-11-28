@@ -193,6 +193,8 @@ export function commandNamesCredential(command: string, cwd: string): boolean {
 
 // ---------------------------------------------------------------- permissions
 
+/** Edit arguments that say how to write and never where: they do not stop Allow all from approving an edit on its own. */
+const howToWrite = new Set(["overwrite", "replace_all", "replaceall"]);
 const pathKeys = new Set(["path", "file_path", "filepath", "absolute_path", "absolutepath", "file", "filename", "notebook_path", "target", "source",
   "destination", "dest", "old_path", "new_path", "directory", "dir", "cwd"]);
 const listKeys = new Set(["paths", "files", "file_paths"]);
@@ -530,7 +532,11 @@ export function classifyAcpPermission(params: unknown, context: { cwd: string; p
     return result(!blank && !limited && !secret && !commandMissing && inside && readKinds.has(kind) && paths.length > 0 && commands.length === 0 && allowOption ? "allow" : "deny");
   }
   if (secret || commandMissing || blank || limited) return result("refuse", { ...approval, refused: true });
-  if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && commands.length === 0 && allowOption) return result("allow");
+  // Allow all approves on its own only an edit the card shows in full: an argument outside the card's fields (a `destination_path`,
+  // an `edits` list) may name another target, so such an edit is shown and asked instead. The exceptions are the arguments that
+  // only say how to write, never where (Antigravity's `Overwrite` on every write, checked against the real CLI 2026-11-28).
+  const fullyShown = Object.keys(rest).every((key) => howToWrite.has(key.toLowerCase()));
+  if (context.plan.grants === "allow_all" && kind === "edit" && paths.length > 0 && inside && fullyShown && commands.length === 0 && allowOption) return result("allow");
   return result("ask");
 }
 
