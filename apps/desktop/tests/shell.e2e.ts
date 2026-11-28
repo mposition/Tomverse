@@ -855,15 +855,15 @@ test("Account settings preserve the signed-in Chat conversation and draft", { ti
     await plugins.getByRole("listitem").filter({ hasText: "Linear" }).getByRole("button", { name: "Connect", exact: true }).click();
     await plugins.getByTestId("desktop-connector-submit").click();
     const signIn = () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()
-      .filter((window) => window.getTitle().startsWith("provider.org")).length);
+      .filter((window) => /^provider\.org(?![\w.-])/.test(window.getTitle())).length);
     await expect.poll(signIn).toBe(1);
     assert.deepEqual(await application.evaluate(async ({ BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      const window = BrowserWindow.getAllWindows().find((item) => /^provider\.org(?![\w.-])/.test(item.getTitle()))!;
       return { cookies: (await window.webContents.session.cookies.get({})).length, title: window.getTitle(), modal: window.isModal() };
     }), { cookies: 0, title: "provider.org · Tomverse connection", modal: true });
     // Tomverse's callback is answered by the app, not loaded in the window.
     await application.evaluate(async ({ BrowserWindow }, callback) => {
-      const window = BrowserWindow.getAllWindows().find((item) => item.getTitle().startsWith("provider.org"))!;
+      const window = BrowserWindow.getAllWindows().find((item) => /^provider\.org(?![\w.-])/.test(item.getTitle()))!;
       await window.webContents.loadURL(callback).catch(() => {});
     }, authOrigin + "/api/mcp/oauth/callback?state=" + "S".repeat(43) + "&code=provider-code");
     await expect.poll(signIn).toBe(0);

@@ -39,10 +39,13 @@ export const resetClientErrorReporterForTests = () => {
 
 const pageLoadId = () => {
   if (!sessionId) {
+    // Platform CSPRNG only; a page without Web Crypto falls back to the load time alone.
     sessionId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
-        : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+        : typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function"
+          ? Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, "0")).join("")
+          : Date.now().toString(36);
   }
   return sessionId;
 };

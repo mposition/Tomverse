@@ -144,7 +144,7 @@ test("bubblewrap network: no network at all unless the proxy's socket is relayed
 test("settings: anything missing or malformed means off, the small default list, and no localhost", () => {
     assert.deepEqual(normalizeSandboxSettings(undefined), defaultSandboxSettings());
     assert.equal(defaultSandboxSettings().mode, "off");
-    assert.ok(defaultSandboxSettings().allowedDomains.includes("registry.npmjs.org"));
+    assert.ok(defaultSandboxSettings().allowedDomains.some((domain) => domain === "registry.npmjs.org"));
     assert.deepEqual(normalizeSandboxSettings({ mode: "danger", allowedDomains: "x", allowLocalhost: "yes" }), defaultSandboxSettings());
     assert.deepEqual(normalizeSandboxSettings({ mode: "read-only", allowedDomains: [" PyPI.org ", "bad host", "*.x.test"], allowLocalhost: true }),
         { mode: "read-only", allowedDomains: ["pypi.org", "*.x.test"], allowLocalhost: true });

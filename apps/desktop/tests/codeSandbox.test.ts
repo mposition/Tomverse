@@ -25,7 +25,7 @@ test("the sandbox is off with a small default list until the person changes it, 
   const settings = readCodeSandboxSettings(dir);
   assert.equal(settings.mode, "off");
   assert.equal(settings.allowLocalhost, false);
-  assert.ok(settings.allowedDomains.includes("registry.npmjs.org") && settings.allowedDomains.length < 12);
+  assert.ok(settings.allowedDomains.some((domain) => domain === "registry.npmjs.org") && settings.allowedDomains.length < 12);
 });
 
 test("settings are saved, the list is cleaned, and entries that are not host names are counted and dropped", async () => {

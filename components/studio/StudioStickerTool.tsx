@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { zipSync } from "fflate";
 import { Download, Plus, Shuffle, X } from "lucide-react";
 import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
-import { fillStudioStickerCaptions, STUDIO_STICKER_KEYS, STUDIO_STICKER_LIMIT } from "@/lib/studioTools";
+import { fillStudioStickerCaptions, STUDIO_STICKER_KEYS, STUDIO_STICKER_LIMIT, studioObjectUrl } from "@/lib/studioTools";
 import { studioStickerBrief, type StudioStickerFaceStyle as FaceStyle } from "@/lib/studioStickerPrompt";
 import { studioCopy, studioStickerSuggestions } from "@/locales/studio";
 import { photoSampleCaptions } from "@/locales/studio.ko";
@@ -48,7 +48,13 @@ function StudioStickerPreview({ source, caption, composed, language }: Sticker &
     let url: string | undefined;
     void renderStudioSticker(source, caption, language, composed).then(blob => {
       if (cancelled || !blob) return;
-      url = URL.createObjectURL(blob);
+      const created = URL.createObjectURL(blob);
+      try {
+        url = studioObjectUrl(created);
+      } catch (error) {
+        URL.revokeObjectURL(created);
+        throw error;
+      }
       setRendered({ source, caption, language, url });
     }).catch(() => undefined);
     return () => {

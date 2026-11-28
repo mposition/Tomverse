@@ -81,7 +81,7 @@ test("every supported language words each connector result", () => {
     assert.match(copy.toolsAllowed, /\{granted\}.*\{total\}/);
     assert.equal(describeConnectorResult({ kind: "connected" }, language)?.text, mcpConnectorCopy[language].connected);
     assert.equal(describeConnectorResult({ kind: "failed", code: "custom_server_limit" }, language)?.text, mcpConnectorCopy[language].customLimit);
-    assert.equal(describeConnectorResult({ kind: "unsupported", host: "accounts.google.com" }, language)?.text.includes("accounts.google.com"), true);
+    assert.match(describeConnectorResult({ kind: "unsupported", host: "accounts.google.com" }, language)?.text ?? "", /accounts\.google\.com/);
     assert.equal(describeConnectorResult({ kind: "cancelled" }, language)?.tone, "status");
     assert.equal(describeConnectorResult(undefined, language)?.text, mcpConnectorCopy[language].error);
     assert.equal(describeConnectorResult({ kind: "ok" }, language), undefined);

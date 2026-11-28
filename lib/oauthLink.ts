@@ -181,7 +181,7 @@ export function buildOAuthLinkAuthorizeRedirect(
  * kept here and no cookie is set; the returned `linkState` is the provider's `state` (lib/desktopSocialLoginCore.ts).
  * The provider returns to the same registered callback as the web flow.
  */
-export function buildDesktopOAuthLinkAuthorizeUrl(
+export function buildDesktopLinkProviderUrl(
     request: Request,
     userId: string,
     provider: LinkableProvider,
