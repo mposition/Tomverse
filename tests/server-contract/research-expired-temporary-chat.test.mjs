@@ -23,7 +23,22 @@ const tx = {
   researchWorkItem: { count: async () => 0, updateMany: async () => ({ count: 0 }) },
   researchPlanRevision: { findUniqueOrThrow: async () => { throw Object.assign(new Error("past the guard"), { pastGuard: true }); } },
 };
-mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { $transaction: async (run) => run(tx), researchPreviewRun: tx.researchPreviewRun } } });
+// The plan and switch checks import their modules dynamically; where a runner does not
+// apply the module mocks below to that import (seen on CI's Node 22.23), the real readers
+// run against this client. It answers them as a Pro account with nothing stored: any other
+// table reads as empty, so the real readers fall back to their defaults.
+const emptyTable = { findMany: async () => [], findFirst: async () => null, findUnique: async () => null };
+const prismaClient = new Proxy({
+  $transaction: async (run) => run(tx),
+  researchPreviewRun: tx.researchPreviewRun,
+  user: {
+    findUnique: async () => ({
+      plan: "Pro", subscriptionStatus: "active", subscriptionCurrentPeriodEnd: FUTURE,
+      webSubscriptionPlan: null, storeSubscriptionPlan: null, storeSubscriptionExpiresAt: null, storeSubscriptionSnapshot: null,
+    }),
+  },
+}, { get: (target, key) => (key in target ? target[key] : typeof key === "string" && !key.startsWith("$") ? emptyTable : undefined) });
+mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaClient } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { assertConversationCapacity: async () => {}, assertMessageCapacity: async () => {}, ApiSecurityError: class extends Error {} } });
 mock.module(mod("lib/researchEngineStore.ts"), { namedExports: {
   lockResearchRun: async () => {},
