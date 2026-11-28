@@ -367,11 +367,11 @@ const en: PricingPageCopy = {
     cta: ["Start free", "Upgrade to Pro", "Upgrade to Max"],
     annual: "Annual · billed annually",
     save: "Save {percent}%",
-    checkout: "The fixed local price shown is charged once per year at checkout.",
+    checkout: "Check the final currency and amount at checkout.",
     equivalent: "Monthly equivalent: about {amount}, billed annually.",
     billingChoice: "Choose monthly or annual billing in the next step, before payment.",
     billingChoiceSignedOut: "Choose monthly or annual billing in the next step after signing in, before payment.",
-    note: "Prices are shown before tax in the selected fixed billing currency. On Max, Standard models have no daily limit; Premium usage is subject to monthly credits and the Fair Use Policy.",
+    note: "Prices are fixed amounts in the displayed currency, before tax. See the usage guidance for plan daily credit limits and model operational safeguards.",
     starterPrefix: "You came from ",
     sale: { badge: "Launch special", regular: "Regular", duration: "for {period}" },
     promo: {
