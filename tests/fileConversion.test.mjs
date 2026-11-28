@@ -650,7 +650,7 @@ test("a value a number cannot hold exactly stays the text the user wrote", async
   const sheet = new TextDecoder().decode(unzipSync(result.bytes)["xl/worksheets/sheet1.xml"]);
   // Numbers that print back as themselves are numbers...
   for (const value of ["1200.5", "-3", "0.1"]) {
-    assert.match(sheet, new RegExp(`<v>${value.replace(".", "\.")}</v>`), value);
+    assert.match(sheet, new RegExp(`<v>${value.replace(".", "\\.")}</v>`), value);
   }
   // ...and the two that would change are not.
   assert.equal(sheet.includes("<v>1000000000000000</v>"), false);

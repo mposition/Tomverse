@@ -75,7 +75,7 @@ export const fetchNpmPackage = async (
     const checked = checkNpmSource(source);
     const registry = (checked.registry ?? DEFAULT_NPM_REGISTRY).replace(/\/+$/, "");
     const registryUrl = checkDownloadUrl(registry, "npm registry");
-    const encoded = checked.package.startsWith("@") ? checked.package.replace("/", "%2F") : checked.package;
+    const encoded = checked.package.startsWith("@") ? checked.package.replaceAll("/", "%2F") : checked.package;
     const metadata = await downloadBytes(`${registry}/${encoded}/${checked.version ?? "latest"}`, {
         maxBytes: MAX_METADATA_BYTES, accept: "application/json", what: "npm package listing", ...options,
     });

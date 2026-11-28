@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { after, afterEach, beforeEach, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import {
-  buildDesktopOAuthLinkAuthorizeUrl,
+  buildDesktopLinkProviderUrl,
   completeDesktopOAuthLink,
   OAuthLinkError,
   resolveDesktopOAuthLinkCallback,
@@ -64,7 +64,7 @@ const pkce = () => {
   return { verifier, challenge: createHash("sha256").update(verifier).digest("base64url") };
 };
 const start = (userId: string, challenge: string) =>
-  buildDesktopOAuthLinkAuthorizeUrl(startRequest, userId, "google", { redirectUri, codeChallenge: challenge });
+  buildDesktopLinkProviderUrl(startRequest, userId, "google", { redirectUri, codeChallenge: challenge });
 const googleAccounts = (userId: string) => prisma.account.count({ where: { userId, provider: "google" } });
 const notices = () => prisma.emailDelivery.count();
 
