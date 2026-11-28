@@ -39,6 +39,50 @@ test("pricing page copy is complete in every language and keeps its placeholders
   }
 });
 
+test("the revised pricing claims keep their required conditions in every language", () => {
+  const revisedCopy = (copy) => ({
+    checkout: copy.plans.checkout,
+    planNote: copy.plans.note,
+    fileLabel: copy.compare.files.label,
+    fileLimits: [copy.compare.files.free, copy.compare.files.pro, copy.compare.files.max],
+  });
+  const placeholders = (value) => [...value.matchAll(/\{\w+\}/g)].map(([token]) => token).sort();
+  const requirements = {
+    ko: [/통화/, /금액/, /일일|하루/, /크레딧/, /운영/, /첨부.*(?:켜|활성|허용)|(?:켜|활성|허용).*첨부/],
+    en: [/currency/i, /amount/i, /daily/i, /credit/i, /operational/i, /attachment.*enabled|enabled.*attachment/i],
+    zh: [/币种/, /金额/, /每日/, /积分/, /运营/, /附件.*启用|启用.*附件/],
+    "zh-Hant": [/幣別/, /金額/, /每日/, /點數/, /營運/, /附件.*啟用|啟用.*附件/],
+    fr: [/devise/i, /montant/i, /quotidien/i, /crédit/i, /opérationnel/i, /pièces jointes.*activ|activ.*pièces jointes/i],
+    de: [/Währung/i, /Betrag/i, /täglich/i, /Guthaben|Credits?/i, /Betrieb/i, /(?:Anhang|Dateianhänge).*(?:aktiv|aktiviert)|(?:aktiv|aktiviert).*(?:Anhang|Dateianhänge)/i],
+    es: [/moneda/i, /importe/i, /diari/i, /crédit/i, /operativ/i, /adjunt.*habilitad|habilitad.*adjunt/i],
+    pt: [/moeda/i, /valor/i, /diári/i, /crédito/i, /operacion/i, /anexo.*dispon|dispon.*anexo/i],
+  };
+  const baseline = revisedCopy(pricingPageContent.ko);
+  for (const locale of SEO_LOCALES) {
+    const copy = revisedCopy(pricingPageContent[locale]);
+    for (const key of Object.keys(baseline)) {
+      const baselineValues = Array.isArray(baseline[key]) ? baseline[key] : [baseline[key]];
+      const values = Array.isArray(copy[key]) ? copy[key] : [copy[key]];
+      assert.equal(values.length, baselineValues.length, `${locale}.${key}: value count differs`);
+      for (let index = 0; index < values.length; index += 1) {
+        assert.deepEqual(placeholders(values[index]), placeholders(baselineValues[index]), `${locale}.${key}[${index}]: placeholders differ`);
+      }
+    }
+    const [currency, amount, daily, credit, operational, attachmentEnabled] = requirements[locale];
+    assert.match(copy.checkout, currency, `${locale}: checkout must identify the currency`);
+    assert.match(copy.checkout, amount, `${locale}: checkout must identify the amount`);
+    assert.match(copy.planNote, daily, `${locale}: plan note must identify daily limits`);
+    assert.match(copy.planNote, credit, `${locale}: plan note must identify credit limits`);
+    assert.match(copy.planNote, operational, `${locale}: plan note must identify operational safeguards`);
+    assert.match(copy.fileLabel, attachmentEnabled, `${locale}: file comparison must disclose when attachments are enabled`);
+    for (const [index, limits] of copy.fileLimits.entries()) {
+      assert.match(limits, /10/, `${locale}: plan ${index} must state the per-message file limit`);
+      assert.match(limits, /50\s?MiB/, `${locale}: plan ${index} must state the per-file size limit`);
+      assert.match(limits, /100\s?MiB/, `${locale}: plan ${index} must state the total size limit`);
+    }
+  }
+});
+
 test("pricing page copy states no price, credit figure or discount of its own", () => {
   for (const locale of SEO_LOCALES) {
     const copy = pricingPageContent[locale];
