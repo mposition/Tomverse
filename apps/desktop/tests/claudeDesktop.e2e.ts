@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode, startPlanOnly } from "./code-project-fixture";
 import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { inspectClaudeTranscript } from "../src/host/claude-transcript";
@@ -118,11 +119,10 @@ test("Claude Code Agent uses Desktop approval for verified edits and resumes the
     app = await launch();
     const page = await app.firstWindow();
     const task = () => page.evaluate(() => window.desktop.state().then((state) => state.task));
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
-    const mode = page.getByLabel("Code mode");
-    await mode.selectOption("agent");
-    await expect(mode).toHaveValue("agent");
+    await selectCodeMode(page, "agent");
+    await expect(page.getByTestId("permission-picker")).toHaveAttribute("data-mode", "ask");
     await page.getByRole("textbox", { name: "Code request" }).fill(prompt);
     const send = page.getByRole("button", { name: "Send Code request", exact: true });
     await expect(send).toBeDisabled();
@@ -158,7 +158,7 @@ test("Claude Code Agent uses Desktop approval for verified edits and resumes the
     await app.close();
     app = await launch();
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: prompt, exact: true }).click();
     const restoredAnalysis = restored.getByRole("region", { name: "Request analysis" });
     await expect(restoredAnalysis).toContainText("Review the remaining files");
@@ -246,7 +246,7 @@ test("A recorded Claude quota pause can resume the same saved native session", {
     await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: vendor.base, key: TEST_KEY, claude }));
     app = await launch();
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.evaluate(async ({ model, prompt }) => {
       await window.desktop.setCodeExecutionPreference("provider_cli");
       await window.desktop.start({ model, mode: "ask", effort: "default", executionMode: "provider_cli", prompt, saveHistory: true });
@@ -264,7 +264,7 @@ test("A recorded Claude quota pause can resume the same saved native session", {
 
     app = await launch();
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await restored.getByRole("button", { name: title, exact: true }).click();
     await expect(restored.getByRole("region", { name: "Code paused at a usage limit" })).toBeVisible();
     assert.equal(requests.length, 1);
@@ -336,7 +336,7 @@ test("Desktop resumes saved Claude Code work and inspects uncertain reads withou
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
     const state = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await page.getByRole("button", { name: "Desktop settings" }).click();
     await page.getByRole("button", { name: "Execution and limits", exact: true }).click();
     await page.getByLabel("Preferred execution mode").selectOption("provider_cli");
@@ -350,9 +350,11 @@ test("Desktop resumes saved Claude Code work and inspects uncertain reads withou
     assert.equal((await state()).codeFallback?.settings.automaticFrom, "provider_cli");
     await page.getByRole("button", { name: "Code", exact: true }).click();
     await expect(page.getByText("Claude Code · Local test", { exact: true })).toBeVisible();
-    const mode = page.getByLabel("Code mode");
-    await expect(mode).toHaveValue("ask");
-    assert.equal(await mode.locator('option[value="agent"]').isDisabled(), true);
+    // Claude here reads only: Read only is the mode that holds, and the others are listed switched off.
+    await expect(page.getByTestId("permission-picker")).toHaveAttribute("data-mode", "read_only");
+    await page.getByTestId("permission-picker").click();
+    await expect(page.getByTestId("permission-item-ask")).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Escape");
     const saveHistory = page.getByRole("checkbox", { name: "Save to local history" });
     await expect(saveHistory).not.toBeChecked();
     await assert.rejects(page.evaluate((model) => window.desktop.start({
@@ -360,9 +362,7 @@ test("Desktop resumes saved Claude Code work and inspects uncertain reads withou
       executionMode: "provider_cli", saveHistory: false,
     }), model), /read-only request/);
     assert.equal(scenario.requests, 0);
-    await mode.selectOption("plan");
-    await page.getByRole("textbox", { name: "Code request", exact: true }).fill("Analyze search behavior and show the steps");
-    await page.getByRole("button", { name: "Send Code request", exact: true }).click();
+    await startPlanOnly(page, "Analyze search behavior and show the steps");
     await expect(page.getByText(first, { exact: true })).toBeVisible({ timeout: 30_000 });
     const draft = (await state()).task;
     assert.equal(draft?.status, "running");
@@ -479,7 +479,7 @@ test("Desktop resumes saved Claude Code work and inspects uncertain reads withou
     app = await launchNativeFixture(descriptor);
     const restored = await app.firstWindow();
     const restoredState = () => restored.evaluate(() => window.desktop.state());
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await expect(restored.getByRole("checkbox", { name: "Save to local history" })).not.toBeChecked();
     assert.equal(await restored.evaluate((id) => window.desktop.resume(id), saved.id), false);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: scenario.savedPrompt, exact: true }).click();
@@ -551,7 +551,7 @@ test("Desktop resumes saved Claude Code work and inspects uncertain reads withou
     await writeFile(join(nativeSessionDirectory(store, interruptedId), "session.json"), JSON.stringify({ ...unknown, plan: unconfirmed }));
     app = await launchNativeFixture(descriptor);
     const recovered = await app.firstWindow();
-    await recovered.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(recovered);
     await recovered.getByRole("complementary", { name: "History" }).getByRole("button", { name: scenario.crashPrompt, exact: true }).click();
     await recovered.getByRole("button", { name: "Check recovery", exact: true }).click();
     await expect(recovered.getByText("Claude Code · Outcome unconfirmed", { exact: true })).toBeVisible();

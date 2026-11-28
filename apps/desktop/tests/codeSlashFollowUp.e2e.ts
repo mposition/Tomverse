@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, expect } from "@playwright/test";
 import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
@@ -38,8 +39,8 @@ test("a command typed as a follow-up or a queued message is expanded like one th
   const app = await electron.launch({ executablePath: electronPath, args: [desktopDir, "--desktop-fixture", descriptor], timeout: 20_000 });
   try {
     const page = await app.firstWindow();
-    await page.getByRole("button", { name: "Open local folder" }).click();
-    await page.getByLabel("Code mode").selectOption("ask");
+    await openCodeProject(page);
+    await selectCodeMode(page, "ask");
     const composer = page.getByRole("textbox", { name: "Code request" });
     const menu = page.getByTestId("slash-menu");
 

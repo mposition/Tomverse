@@ -34,6 +34,12 @@ mock.module(mod("lib/amux/v52ReviewFindingsStore.ts"), { namedExports: {
   openAmuxV52RejectedReviewEntries: async (rows: unknown[]) => rows.length === 0 ? { entries: [], unread: 0 } : reviewed,
 } });
 
+// A dependency card's title as the content store opens it; null when it cannot.
+let dependencyTitle: string | null = "Audit /pricing copy";
+mock.module(mod("lib/amux/adminExecutionRead.ts"), { namedExports: {
+  readAmuxCardTitle: async () => dependencyTitle,
+} });
+
 const service = import(mod("lib/amux/decisionMakerWorkspaceService.ts"));
 const settlementCore = import(mod("lib/amux/dmOwnerSettlementCore.ts"));
 const findingsCore = import(mod("lib/amux/v52ReviewFindingsCore.ts"));
@@ -170,6 +176,49 @@ test("a card run's settlement and result review carry the run's change on the co
   } finally {
     runPatchText = PATCH;
   }
+});
+
+// 2026-11-28 (AMUX-PUBLIC-004): its criteria named AMUX-PUBLIC-002's list, and
+// the DM handed the review PR to a person because that list was not there.
+test("a settlement's and a result review's workspace hold the cards the Task depends on, with their results, as CONTEXT.md", async () => {
+  const { openDecisionMakerWorkspaceEvidence } = await service;
+  const dependency = (label: string, status: string, attemptId: string | null) => ({
+    id: `id-${label}`, label, status, cardTitle: "AMUX Task", sourceSystem: "admin-idea-v4", sourceSnapshot: null,
+    v4TitleCiphertext: null, v4TitleKeyId: null, v4TitleKeyVersion: null, v4TitleDigest: null, v4TitleDigestKeyId: null,
+    attemptId, resultIdeaId: attemptId ? "idea-1" : null, keyId: "k", keyVersion: 1, digest: "d", digestKeyId: "dk",
+    sourceSha256: "s", bodyPurgedAt: null,
+  });
+  const list = "| key | fix |\n|---|---|\n" + "| pricing.copy.x | say y |\n".repeat(5_000);
+  resultText = list;
+  try {
+    const pr = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "t2_pr",
+      pullPatch: PATCH, reviews: [], ...sealed,
+      dependencies: [dependency("AMUX-PUBLIC-002", "done", "a2"), dependency("AMUX-PUBLIC-009", "backlog", null)] }))!;
+    assert.deepEqual(pr.files.map((file: { name: string }) => file.name),
+      ["CRITERIA.md", "FINDINGS.md", "PATCH.diff", "CONTEXT.md"]);
+    const context = pr.files.find((file: { name: string }) => file.name === "CONTEXT.md")!.text;
+    assert.ok(context.startsWith("# The cards this Task depends on\n"), "it says what it is");
+    assert.ok(context.includes(`## AMUX-PUBLIC-002 (done): Audit /pricing copy\n\n${list}`), "the newest result, whole");
+    assert.ok(context.includes("## AMUX-PUBLIC-009 (backlog): Audit /pricing copy\n\n(This card has no run result that could be read.)"));
+    assert.deepEqual(pr.excluded, {});
+    // A result review gets the same file; a title that cannot be opened leaves the label alone.
+    dependencyTitle = null;
+    const review = (await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed,
+      dependencies: [dependency("AMUX-PUBLIC-002", "done", "a2")] }))!;
+    assert.match(review.files.at(-1)!.text, /^## AMUX-PUBLIC-002 \(done\)\n/m);
+    // A dependency's result that cannot be opened is shown as such and stops nothing.
+    resultText = null;
+    const unread = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "t2_pr",
+      pullPatch: PATCH, reviews: [], ...sealed, resultIdeaId: null, dependencies: [dependency("AMUX-PUBLIC-002", "done", "a2")] }))!;
+    assert.match(unread.files.at(-1)!.text, /no run result that could be read/);
+    assert.deepEqual(unread.excluded, {}, "the card does not point at it, so nothing is missing");
+  } finally {
+    resultText = "The run's whole report.";
+    dependencyTitle = "Audit /pricing copy";
+  }
+  // No dependencies, no file: the files the card names, as before.
+  const none = (await openDecisionMakerWorkspaceEvidence({ kind: "result_review", ...sealed, dependencies: [] }))!;
+  assert.deepEqual(none.files.map((file: { name: string }) => file.name), ["CRITERIA.md", "FINDINGS.md"]);
 });
 
 test("evidence the card points at that cannot be read is left out, by count, so nothing is sent", async () => {

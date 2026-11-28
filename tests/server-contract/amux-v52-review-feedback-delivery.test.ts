@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
+// The conclusion switch is on by default (2026-11-28); this file is not about
+// prior conclusions, and its fake transaction reads no dependencies.
+process.env.TOMVERSE_AMUX_V22_CONCLUSION = "off";
+
 // Owner decision 2026-11-15: a retried v52 implement run reads why the review
 // rejected the Task's earlier runs, the way a local CLI session reads the
 // review and fixes the change. The findings are stored sealed beside the

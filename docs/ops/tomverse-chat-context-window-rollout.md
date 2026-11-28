@@ -66,8 +66,14 @@ min(request cap, provider ceiling, contextWindowTokens - budget.inputTokens)
 ```
 
 computed by `lib/chatContextWindow.ts`. A request is refused only when that
-leaves nothing — when the input alone fills the window — rather than because
-the model's own maximum would not have fitted beside it. The credit and cost
+leaves less than `CHAT_MIN_OUTPUT_TOKENS` (1,024, or the cap itself when the
+request asks for less) — when the input all but fills the window — rather than
+because the model's own maximum would not have fitted beside it. An answer
+squeezed into a few dozen tokens was billed and cut off mid-sentence, so that
+case now takes the same `MODEL_CONTEXT_WINDOW_EXCEEDED` refusal. When the client
+cut the transcript to the request limits it reports `omittedEarlierMessages`, and
+the turn carries one system line saying the history starts partway through
+(`buildOmittedHistoryPrompt`). The credit and cost
 reservation deliberately keeps the unfitted cap: over-reserving is refunded at
 settlement, and reserving less than the answer might cost protects nothing.
 

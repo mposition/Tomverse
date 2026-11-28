@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { once } from "node:events";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
@@ -168,7 +169,7 @@ for (const vendor of cases) test(linux && vendor.key === "zcode"
     app = await launchNativeFixture(descriptor);
     const page = await app.firstWindow();
     const snapshot = () => page.evaluate(() => window.desktop.state());
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     await expect.poll(async () => (await snapshot()).models.some(({ id }) => id === "fake-coder"), { timeout: taskWait }).toBe(true);
     await page.evaluate(async () => {
       await window.desktop.setCodeExecutionPreference("provider_cli");
@@ -180,7 +181,6 @@ for (const vendor of cases) test(linux && vendor.key === "zcode"
     });
     assert.equal((await snapshot()).codeFallback?.settings.automaticFrom, "provider_cli");
 
-    const mode = page.getByLabel("Code mode");
     const composer = page.getByRole("textbox", { name: "Code request" });
     const send = page.getByRole("button", { name: "Send Code request", exact: true });
     const quota = page.getByRole("region", { name: "Code paused at a usage limit" });
@@ -195,7 +195,7 @@ for (const vendor of cases) test(linux && vendor.key === "zcode"
       if ((await snapshot()).task?.status === "blocked") {
         await page.getByRole("button", { name: "New task", exact: true }).click();
       }
-      await mode.selectOption("ask");
+      await selectCodeMode(page, "ask");
       await page.getByRole("checkbox", { name: "Save to local history" }).check();
       await composer.fill(scenario.title);
       await send.click();
@@ -241,7 +241,7 @@ for (const vendor of cases) test(linux && vendor.key === "zcode"
     await app.close();
     app = await launchNativeFixture(descriptor);
     const restored = await app.firstWindow();
-    await restored.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(restored);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: saved.title, exact: true }).click();
     await expect.poll(async () => (await restored.evaluate(() => window.desktop.state())).task?.id).toBe(saved.id);
     const task = (await restored.evaluate(() => window.desktop.state())).task;

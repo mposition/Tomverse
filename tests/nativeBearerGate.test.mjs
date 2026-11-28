@@ -7,6 +7,8 @@ import {
   applyMobileIdentityHeaders,
   desktopBillingEnabled,
   desktopChatTurnField,
+  desktopCodeSessionEnabled,
+  desktopCodeSessionRoute,
   desktopComposerToolsEnabled,
   desktopDeepResearchEnabled,
   desktopDriveEnabled,
@@ -37,6 +39,47 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
  */
 
 const REGISTERED = "/api/conversations";
+
+test("Desktop Code's session enrols exactly the engine's coding API calls, behind Desktop sign-in and its own switch", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CODE_SESSION_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const reads = ["/api/code/v1/models", "/api/code/v1/usage", "/api/code/v1/requests/status"];
+  const writes = ["/api/code/v1/chat/completions", "/api/code/v1/web-search"];
+  // What a Desktop session never reaches: the coding API's other protocols, the general API, key management and Code's managed path.
+  const never = ["/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens",
+    "/api/code/anthropic/v1/models", "/api/v1/chat/completions", "/api/v1/models", "/api/v1/usage", "/api/user/api-keys",
+    "/api/code/managed", "/api/code/v1/chat/completions/x", "/api/code/v1", "/api/code/v1/"];
+  const enrolled = (path, method) => desktopReadApiRoute(path, method) || desktopWriteApiRoute(path, method);
+  try {
+    for (const key of switches) delete process.env[key];
+    for (const path of [...reads, ...writes]) {
+      for (const method of ["GET", "POST"]) assert.equal(enrolled(path, method), false, method + " " + path);
+    }
+    process.env.TOMVERSE_DESKTOP_CODE_SESSION_ENABLED = "true";
+    assert.equal(desktopCodeSessionEnabled(), false, "never without Desktop sign-in");
+    for (const path of [...reads, ...writes]) assert.equal(desktopCodeSessionRoute(path, path.endsWith("completions") || path.endsWith("web-search") ? "POST" : "GET"), false, path);
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    assert.equal(desktopCodeSessionEnabled(), true);
+    for (const path of reads) {
+      assert.equal(desktopReadApiRoute(path, "GET"), true, path);
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) assert.equal(enrolled(path, method), false, method + " " + path);
+    }
+    for (const path of writes) {
+      assert.equal(desktopWriteApiRoute(path, "POST"), true, path);
+      for (const method of ["GET", "PUT", "PATCH", "DELETE"]) assert.equal(enrolled(path, method), false, method + " " + path);
+    }
+    for (const path of never) {
+      for (const method of ["GET", "POST", "DELETE"]) assert.equal(enrolled(path, method), false, method + " " + path);
+    }
+    delete process.env.TOMVERSE_DESKTOP_CODE_SESSION_ENABLED;
+    for (const path of [...reads, ...writes]) assert.equal(enrolled(path, "GET") || enrolled(path, "POST"), false, path);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
 
 test("Desktop remote control enrols only the PC's own sync path, and only for the Desktop bearer", () => {
   const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED"];
@@ -232,11 +275,16 @@ test("Desktop connector screens are off unless their own switch and the account 
     process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED = "true";
     delete process.env.TOMVERSE_DESKTOP_AUTH_ENABLED;
     assert.equal(desktopPluginsEnabled(), false);
-    // A display switch: it enrols no bearer route.
+    // A display switch: it enrols no write route and no connector route (those take the settings session). The one bearer read it
+    // opens is the platform catalogue the Plugins screen lists (tests/desktopPluginCatalogRoute.test.ts).
     process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
     for (const path of ["/api/mcp/connections", "/api/mcp/oauth/start", "/api/mcp/invocations/abc"]) {
       assert.equal(desktopWriteApiRoute(path, "POST"), false, path);
+      assert.equal(desktopReadApiRoute(path, "GET"), false, path);
     }
+    assert.equal(desktopReadApiRoute("/api/mcp/providers", "GET"), true);
+    delete process.env.TOMVERSE_DESKTOP_PLUGINS_ENABLED;
+    assert.equal(desktopReadApiRoute("/api/mcp/providers", "GET"), false);
   } finally {
     switches.forEach((key, index) => {
       if (previous[index] === undefined) delete process.env[key];

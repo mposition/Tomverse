@@ -64,6 +64,19 @@ test("plugins from a zip file, an npm package or a private repository are offere
   assert.deepEqual([(await load())?.plugins, (await load())?.pluginSources], [false, true]);
 });
 
+test("the platform catalogue is offered only where the server names it, together with plugins", async (t) => {
+  let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopPlugins: true };
+  t.mock.method(globalThis, "fetch", async () => Response.json(body));
+  const load = () => readDesktopCapabilities("fixture-access", new AbortController().signal, "http://127.0.0.1");
+  // An older server names nothing: the Plugins screen lists that server's own connectors only.
+  assert.deepEqual([(await load())?.plugins, (await load())?.pluginCatalog], [true, false]);
+  body = { ...body, desktopPluginCatalog: true };
+  assert.deepEqual([(await load())?.plugins, (await load())?.pluginCatalog], [true, true]);
+  // The catalogue belongs to the plugins screen: without it there is nothing to list it in.
+  body = { ...body, desktopPlugins: false };
+  assert.deepEqual([(await load())?.plugins, (await load())?.pluginCatalog], [false, false]);
+});
+
 test("dictation and the voice conversation are offered only where Desktop's switch and the server's own voice switch are both on", async (t) => {
   let body: Record<string, unknown> = { autoSelection: { offered: false }, desktopWrite: true,
     voiceConversation: { enabled: true, maxSeconds: 300, continuous: true, reservationSeconds: 60 } };

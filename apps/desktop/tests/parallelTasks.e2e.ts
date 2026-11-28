@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openCodeProject } from "./code-project-fixture";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,10 +42,10 @@ test("two tasks run at once in their own worktrees, both show in the activity li
     application = await launchNativeFixture(descriptor);
     const page: Page = await application.firstWindow();
     await page.getByRole("button", { name: "Code", exact: true }).click();
-    await page.getByRole("button", { name: "Open local folder" }).click();
+    await openCodeProject(page);
     const state = () => page.evaluate(() => window.desktop.state());
     const editor = page.getByRole("textbox", { name: "Code request", exact: true });
-    await expect(page.locator('summary[aria-label="Code workspace"]')).toHaveText("New worktree · main");
+    await expect(page.getByTestId("worktree-checkbox")).toBeChecked();
 
     // The open task starts in its own worktree and waits for a file approval.
     const firstCard = application.waitForEvent("window", { timeout: 20_000 });

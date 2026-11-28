@@ -1458,7 +1458,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "ExternalApiRequest",
     state: "included_filtered",
     withheldReason:
-      "One row per API request: which key and model, which API it came through (general or coding; empty on requests made before that was recorded), whether it streamed, the client's user agent, how it finished and when. Withheld: the digests of the request body and of the Idempotency-Key header, which are duplicate-detection values, and the internal reservation link. No prompt, output, tool argument or image is stored to export; credits are in the credit usage domains.",
+      "One row per API request: which key (none for a request Desktop Code made with the signed-in Desktop session) and model, which API it came through (general or coding; empty on requests made before that was recorded), whether it streamed, the client's user agent, how it finished and when. Withheld: the digests of the request body and of the Idempotency-Key header, which are duplicate-detection values, and the internal reservation link. No prompt, output, tool argument or image is stored to export; credits are in the credit usage domains.",
   },
   {
     domain: "amuxBoardImportApproval",

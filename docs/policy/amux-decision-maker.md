@@ -69,7 +69,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    `repo/`로, 그 위에 patch를 적용한 상태는 `repo-patched/`로 간다(§0b). 선택지는
    `apply`(사람이 직접 적용)·`reject`이며 **조언일 뿐**이다. Admin 결정 대기 화면에 답과 근거를 보여 줄 뿐 초안을
    승인·거절·적용하지 않고, 확정된 답은 세션에 전달되지 않으며 DM 승인자(§2-1)도 적용하지 않는다.
-3. **investigate 결론(`TOMVERSE_AMUX_V22_CONCLUSION`, 기본 `off`, `prompt`·`auto`).** investigate(verify 포함)
+3. **investigate 결론(`TOMVERSE_AMUX_V22_CONCLUSION`, 기본 `auto`(운영자 결정 2026-11-28), `prompt`·`off`).** investigate(verify 포함)
    실행은 마지막 줄에 `AMUX_CONCLUSION:` JSON(`verdict` `proceed`·`replan`·`stop`·`needs_owner`, `findings`,
    `handoff`, `evidence`)을 낸다. 앱은 결과 저장 때 형식만 검사해 verdict와 digest를 남긴다. `auto`에서
    `proceed`는 사람 검토 없이 done이 되어 의존 Task가 자동 승격 대상이 되고, `stop`·`replan`은 Task를
@@ -140,6 +140,11 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    얕게 받은 `repo/`(최근 100개 commit 이력), patch가 있으면 그것을 적용한 `repo-patched/`, 카드가 가리키는 근거 원문
    전체(`evidence/PATCH.diff`·`FINDINGS.md`·`CRITERIA.md`·`CONTEXT.md`), 안내 `WORKSPACE.md`. 근거는 앱이 보낼 때마다 원래 행에서
    다시 읽어 준다(`POST /api/internal/amux/decision-maker/workspace`). 카드는 요약과 안내만 담고, 근거를 카드에 맞춰 자르지 않는다.
+   운영자 결정 2026-11-28: 판정(settlement)과 결과 검토 카드의 `CONTEXT.md`에는 그 Task가 의존하는 카드마다 최신 실행 결과
+   전문을 싣는다. 완료 기준이 다른 카드의 산출물을 가리키는데 그 산출물이 없어, DM이 AMUX-PUBLIC-004를 두 번 사람에게 넘겼다.
+   같은 결정으로 작업자의 `.amux/context/prior-conclusions.md`는 결론 요약 뒤에 결과 전문을 싣고, 검토 서버의 scope에도 의존
+   카드 결과를 전문으로 붙인다. scope의 20,000자 제한(앱과 박스 검토 실행기)은 없앴고, 남는 한계는 검토 요청 전송(인자 하나에 실리는
+   RPC 토큰)뿐이다. 그 안에 들어가지 않는 카드는 자르지 않고 이름과 크기만 적는다.
 2. **도구(§5a).** codex는 읽기 전용 shell(권한 profile)로, claude는 `Read`·`Grep`·`Glob`으로 작업 공간을 읽는다. 쓰기와
    네트워크는 없다. 테스트 실행은 켜지 않는다(§5a에 이유). — 2026-11-22 §0f-4로 바뀌었다: DM은 작업 공간의 자기 사본에서
    명령을 실행하고 쓰며 테스트와 typecheck를 돌린다. 네트워크는 여전히 없다.

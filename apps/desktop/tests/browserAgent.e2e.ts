@@ -4,6 +4,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openCodeProject, selectCodeMode } from "./code-project-fixture";
 import { expect, type ElectronApplication, type Page } from "@playwright/test";
 import { DEFAULT_MODELS, FakeGateway, fixtureInitialWorkPlan, fixtureNeedsWorkPlan, fixtureOperationResults, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway";
 import { launchNativeFixture, removeNativeFixtureDirectory } from "./launch-native-fixture";
@@ -29,8 +30,8 @@ async function launch(gateway: FakeGateway, options: { browserAgent?: boolean; a
   await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY, ...(options.browserAgent === false ? {} : { browserAgent: true }) }));
   const app = await launchNativeFixture(descriptor);
   const page = await app.firstWindow();
-  await page.getByRole("button", { name: "Open local folder" }).click();
-  if (options.agentMode !== false) await page.getByLabel("Code mode").selectOption("agent");
+  await openCodeProject(page);
+  if (options.agentMode !== false) await selectCodeMode(page, "agent");
   return { folder, app, page };
 }
 
@@ -122,6 +123,14 @@ test("the agent opens a local page, reads it, clicks after approval and reads th
     assert.ok(inspected);
     await expect(inspected.locator("#name")).toHaveValue("Ada");
     await expect(inspected.locator("#secret")).toHaveValue("");
+    // While the agent holds the tab a page in it is refused a site permission without a question (the person is never asked about the agent's tab).
+    await app.evaluate(({ dialog }) => {
+      const state = globalThis as unknown as { __asked?: number };
+      state.__asked = 0;
+      dialog.showMessageBox = (async () => { state.__asked! += 1; return { response: 1, checkboxChecked: true }; }) as never;
+    });
+    assert.equal(await inspected.evaluate(() => Notification.requestPermission()), "denied");
+    assert.equal(await app.evaluate(() => (globalThis as unknown as { __asked?: number }).__asked), 0, "the person was not asked");
 
     // The person points at an element and comments on it; the comment goes into the composer.
     const panel = app.context().pages().find((candidate) => candidate.url() === href);
