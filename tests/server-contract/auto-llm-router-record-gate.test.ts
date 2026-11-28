@@ -985,12 +985,12 @@ test("a request already gone takes no Router budget hold and makes no call; a li
   routerRequests.length = 0; holds.length = 0; created.length = 0;
   const gone = new AbortController();
   gone.abort(new DOMException("client went away", "AbortError"));
-  assert.equal(await pick(undefined, false, { abortSignal: gone.signal }), null);
+  assert.equal(await pick(undefined, { abortSignal: gone.signal }), null);
   assert.equal(holds.length, 0, "nothing held for a request nobody is waiting on");
   assert.equal(routerRequests.length, 0);
 
   const live = new AbortController();
-  assert.ok(await pick(undefined, false, { abortSignal: live.signal }));
+  assert.ok(await pick(undefined, { abortSignal: live.signal }));
   assert.equal(holds.length, 2);
   assert.equal(routerRequests.length, 1);
   // The call listens to the request as well as to its deadline.
