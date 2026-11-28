@@ -27,7 +27,9 @@ import {
 } from "@/lib/researchEngineReport";
 import { researchEvidenceObjectKey, researchEvidenceStore, researchNow } from "@/lib/researchEngineRuntime";
 import { loadResearchPrivateText, revalidateResearchPrivateEntry } from "@/lib/researchEngineSources";
-import { discardResearchTaskFile, persistResearchTaskFile, prepareResearchTaskFile, refreshResearchTaskFiles } from "@/lib/researchEngineTaskFiles";
+import {
+  discardResearchTaskFile, persistResearchTaskFile, prepareResearchTaskFile, rebuildWithheldResearchTaskFiles, withholdResearchTaskFiles,
+} from "@/lib/researchEngineTaskFiles";
 import {
   beginResearchDispatch, bumpRunSequence, claimNextResearchWorkItem, completeResearchDispatch, enqueueResearchWorkItems,
   finishResearchWorkItem, heartbeatResearchWorkItem, latestResearchVersions, lockResearchRun, markResearchDispatchStarted,
@@ -576,6 +578,8 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     await lockResearchRun(tx, run.id);
     await tx.researchSource.update({ where: { id: sourceId }, data: { status: "revoked", title: null, snippet: null } });
     await withholdRevokedSources(tx, run.id);
+    // A delegated task's files are copies of the report: none is served from this commit until rebuilt.
+    await withholdResearchTaskFiles(tx, run.id);
     const versions = await tx.researchSourceVersion.findMany({ where: { sourceId }, select: { objectKey: true } });
     for (const version of versions) if (version.objectKey) {
       await tx.researchEvidenceObjectCleanup.upsert({ where: { objectKey: version.objectKey },
@@ -585,8 +589,15 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     // source and the queued cleanup deletes the stored object.
     await bumpRunSequence(tx, run.id);
   });
-  // A delegated task's files were made from the report: they are rebuilt from the cleaned revisions.
-  await refreshResearchTaskFiles(run.id);
+  // Rebuilt from the cleaned revisions; a failed or interrupted rebuild stays withheld for the next read or maintenance pass.
+  await rebuildResearchTaskFilesQuietly(run.id);
+}
+
+/** A rebuild after a commit that withheld files never fails that commit's caller; the withheld state is the retry record. */
+export async function rebuildResearchTaskFilesQuietly(runId: string) {
+  await rebuildWithheldResearchTaskFiles(runId).catch((error: unknown) => {
+    console.error(JSON.stringify({ event: "research_task_file_rebuild_failed", runId, name: error instanceof Error ? error.name : "unknown" }));
+  });
 }
 
 /**
@@ -601,13 +612,15 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
  * bibliography and the chat answer. Text derived from a source goes too: claim
  * text, what a model wrote after reading such claims, and the stored analysis
  * findings (which hold verbatim quotes). Evidence references stay; they hold no text.
- * Returns whether any report revision or claim changed, so a caller holding a file made from them rebuilds it.
+ * A delegated task's files made from a changed revision are withheld in the same transaction (served again
+ * only once rebuilt). Returns whether any report revision or claim changed, so the caller can start that rebuild.
  */
 export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId: string) {
   const revoked = (await tx.researchSource.findMany({ where: { runId, visibility: "private", status: "revoked" }, select: { sourceKey: true } }))
     .map((row) => row.sourceKey);
   if (!revoked.length) return false;
   let changed = false;
+  const changedRevisions = new Set<number>();
   const keys = new Set(revoked);
   const runRow = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: runId }, select: { inputManifest: true, assistantMessageId: true, currentReportRevision: true } });
   const manifest = researchInputManifestSchema.parse(runRow.inputManifest);
@@ -635,6 +648,7 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
     if (!document || JSON.stringify(document) === JSON.stringify(before)) continue;
     await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json(document) } });
     changed = true;
+    changedRevisions.add(revision.revision);
     if (revision.revision === runRow.currentReportRevision) currentChanged = true;
   }
   const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
@@ -643,6 +657,8 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
     if (key && (claim.text !== labels.redactedNote || claim.verification !== "unsupported")) {
       await tx.researchClaim.update({ where: { id: claim.id }, data: { text: labels.redactedNote, verification: "unsupported", checks: json({ revoked: key }) } });
       changed = true;
+      const claimRevision = revisions.find((row) => row.id === claim.revisionId)?.revision;
+      if (claimRevision) changedRevisions.add(claimRevision);
       if (claim.revisionId === currentRevisionId) currentChanged = true;
     }
   }
@@ -664,6 +680,7 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
       await tx.message.update({ where: { id: message.id }, data: { content: markdown } });
     }
   }
+  if (changedRevisions.size) await withholdResearchTaskFiles(tx, runId, changedRevisions);
   return changed;
 }
 
@@ -1000,8 +1017,8 @@ async function finalizeReport(runId: string, revisionId: string, synthesis: Retu
   });
   // Bytes whose row was not committed (another finalize won this revision) are reclaimed now.
   if (!committed?.fileWritten) await discardResearchTaskFile(taskFile);
-  // The file was laid out from the report before the withholding above: rebuild it from the cleaned revision.
-  else if (committed.withheld) await refreshResearchTaskFiles(runId);
+  // The file was laid out before the withholding above, which withheld it in the same transaction: rebuild it now.
+  else if (committed.withheld) await rebuildResearchTaskFilesQuietly(runId);
 }
 
 async function reportSources(runId: string) {

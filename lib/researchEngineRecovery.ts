@@ -8,6 +8,7 @@ import {
   RESEARCH_EVIDENCE_ABANDONED_SWEEP_MS, RESEARCH_ITEM_MAX_ATTEMPTS, RESEARCH_SEGMENT_RESERVING_STALE_MS, releaseUnboundResearchFundingSegment,
 } from "@/lib/researchEngineStore";
 import { advanceResearchRun, ensureResearchPrivateSourceGranted } from "@/lib/researchEngineWorker";
+import { RESEARCH_TASK_FILE_WITHHELD, rebuildWithheldResearchTaskFiles } from "@/lib/researchEngineTaskFiles";
 
 /**
  * Recovery-only maintenance for Research engine v2. It never claims a work
@@ -223,9 +224,25 @@ export async function revalidatePrivateResearchSources(limit = 100) {
   return revoked;
 }
 
+/**
+ * Delegated-task files withheld after a revocation whose rebuild failed or never ran (a crash between the
+ * withholding commit and the rebuild). Rendering is model-free; nothing here is paid work.
+ */
+export async function rebuildWithheldResearchFiles(limit = 100) {
+  const rows = await prisma.messageArtifact.findMany({ where: { status: "failed", failureCode: RESEARCH_TASK_FILE_WITHHELD, message: { researchRunId: { not: null } } },
+    select: { messageId: true, message: { select: { researchRunId: true } } }, distinct: ["messageId"], orderBy: { messageId: "asc" }, take: limit });
+  let rebuilt = 0;
+  for (const row of rows) {
+    const runId = row.message.researchRunId!;
+    await isolate(runId, async () => { rebuilt += await rebuildWithheldResearchTaskFiles(runId); });
+  }
+  return rebuilt;
+}
+
 export async function recoverResearchEngine(limit = 100) {
   return {
     revokedPrivateSources: await revalidatePrivateResearchSources(limit),
+    rebuiltTaskFiles: await rebuildWithheldResearchFiles(limit),
     staleItems: await recoverStaleResearchWorkItems(limit),
     staleSegments: await recoverStaleReservingSegments(limit),
     orphanedSegments: await releaseOrphanedResearchSegments(limit),

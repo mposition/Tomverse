@@ -16,6 +16,7 @@ import {
 } from "@/lib/generatedArtifactCore";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
+import { researchTaskFileServable } from "@/lib/researchEngineTaskFiles";
 
 /**
  * Downloading a file an assistant answer produced.
@@ -105,6 +106,12 @@ export async function GET(
       )
     ) {
       return conversationLockedResponse();
+    }
+
+    // A Research task file made from private sources is served only while those sources still grant it
+    // (docs/policy/generated-artifacts.md section 19); a file withheld by that check is a 404 like any other.
+    if (!(await researchTaskFileServable({ id: artifact.id, objectKey: artifact.objectKey }))) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     // Read through the non-destructive path. `readR2Object` deletes an object

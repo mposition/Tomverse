@@ -773,6 +773,8 @@ export const ko = {
         artifactFailedFormat: "아직 지원하지 않는 파일 형식입니다.",
         artifactFailedLimit: "요청한 파일이 너무 커서 만들 수 없습니다.",
         artifactFailedIncomplete: "파일이 완성되기 전에 답변이 끝났습니다.",
+        artifactFailedSourceRevoked: "이 파일에 쓰인 비공개 자료를 더 이상 쓸 수 없어 그 내용을 빼고 파일을 다시 만들고 있습니다. 잠시 뒤 이 대화를 다시 열어 주세요.",
+        artifactFailedContentTooLarge: "보고서가 이 파일 형식에 다 담기지 않아 파일을 만들지 않았습니다. 이 답변의 보고서를 쓰거나 Research 보고서 탭에서 내보내 주세요.",
         artifactOnlyAnswer: "요청하신 파일을 만들었습니다.",
         artifactRetry: "파일 다시 만들기",
         artifactSignInTitle: "파일을 만들려면 로그인하세요",

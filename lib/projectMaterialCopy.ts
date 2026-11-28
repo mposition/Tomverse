@@ -104,6 +104,8 @@ async function readSource(request: Request, userId: string, source: MaterialCopy
             if (!supportedMime(row.mediaType)) {
                 throw new ApiSecurityError(422, "ASSISTANT_KNOWLEDGE_UNSUPPORTED_FILE", "This file type cannot be saved as a project material.");
             }
+            // A Research task file made from private sources is copied only while those sources still grant it.
+            if (!(await (await import("@/lib/researchEngineTaskFiles")).researchTaskFileServable({ id: row.id, objectKey: row.objectKey }))) throw lockedOrMissing();
             const revision = row.lineageId
                 ? await prisma.messageArtifact.count({
                       where: { userId, lineageId: row.lineageId, createdAt: { lte: row.createdAt } },

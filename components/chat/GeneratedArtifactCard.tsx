@@ -112,6 +112,8 @@ const FAILURE_COPY_KEYS: Readonly<Record<ArtifactFailureCode, string>> = {
   format_unsupported: "chat.artifactFailedFormat",
   limit_exceeded: "chat.artifactFailedLimit",
   turn_incomplete: "chat.artifactFailedIncomplete",
+  source_revoked: "chat.artifactFailedSourceRevoked",
+  content_too_large: "chat.artifactFailedContentTooLarge",
 };
 
 type GeneratedArtifactCardProps = {

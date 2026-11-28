@@ -8,9 +8,15 @@ import { strFromU8, unzipSync } from "fflate";
 // Generated files go to object storage; here it is a map. Every other edge is the Research harness's fake.
 const mod = (path: string) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
 const objects = new Map<string, Buffer>();
+/** Storage faults a test can switch on: every write fails, or writes wait until released. */
+const storage = { failWrites: false, hold: null as Promise<void> | null };
 const unused = (name: string) => async () => { throw new Error(`${name} is not used by this suite`); };
 mock.module(mod("lib/r2.ts"), { namedExports: {
-  writeR2Object: async (key: string, bytes: Buffer) => { objects.set(key, Buffer.from(bytes)); },
+  writeR2Object: async (key: string, bytes: Buffer) => {
+    if (storage.hold) await storage.hold;
+    if (storage.failWrites) throw new Error("storage unavailable");
+    objects.set(key, Buffer.from(bytes));
+  },
   readOwnR2ObjectBytes: async (key: string, input: { maxBytes: number }) => {
     const bytes = objects.get(key);
     if (!bytes || bytes.length > input.maxBytes) throw new Error("Missing fixture object");
@@ -33,6 +39,8 @@ let revalidateRunPrivateSources: typeof import("@/lib/researchEngineReads").reva
 let readResearchPreviewRunDto: typeof import("@/lib/researchPreviewRunStore").readResearchPreviewRunDto;
 let drainArtifactCleanupQueue: typeof import("@/lib/generatedArtifactStorage").drainArtifactCleanupQueue;
 let recoverResearchEngine: typeof import("@/lib/researchEngineRecovery").recoverResearchEngine;
+let researchTaskFileServable: typeof import("@/lib/researchEngineTaskFiles").researchTaskFileServable;
+let readResearchReport: typeof import("@/lib/researchEngineReads").readResearchReport;
 let harness: typeof import("./researchEngineHarness");
 const createFakeFunding = (...args: Parameters<typeof harness.createFakeFunding>) => harness.createFakeFunding(...args);
 const createFakeModel = (...args: Parameters<typeof harness.createFakeModel>) => harness.createFakeModel(...args);
@@ -49,7 +57,8 @@ before(async () => {
   service = await import("@/lib/researchEngineService");
   ({ drainResearchWork, processOneResearchWorkItem } = await import("@/lib/researchEngineWorker"));
   ({ readResearchRunMoney } = await import("@/lib/researchEngineStore"));
-  ({ revalidateRunPrivateSources } = await import("@/lib/researchEngineReads"));
+  ({ revalidateRunPrivateSources, readResearchReport } = await import("@/lib/researchEngineReads"));
+  ({ researchTaskFileServable } = await import("@/lib/researchEngineTaskFiles"));
   ({ readResearchPreviewRunDto } = await import("@/lib/researchPreviewRunStore"));
   ({ drainArtifactCleanupQueue } = await import("@/lib/generatedArtifactStorage"));
   ({ recoverResearchEngine } = await import("@/lib/researchEngineRecovery"));
@@ -328,4 +337,149 @@ test("deleting a finished task queues its file for deletion with the answer", as
   await service.deleteResearchRun({ request: fakeRequest(), userId: user.id, runId: run.id });
   assert.equal(await prisma.messageArtifact.count({ where: { id: file!.id } }), 0);
   assert.equal((await prisma.messageArtifactCleanup.findUniqueOrThrow({ where: { objectKey: file!.objectKey! } })).reason, "message_deleted");
+});
+
+const waitFor = async (check: () => Promise<boolean>) => {
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition not reached");
+};
+const memoryTask = async (label: string, statements: string[]) => {
+  enable();
+  installFakes();
+  createFakeWeb();
+  const user = await createUser(label);
+  const memories = [];
+  for (const statement of statements) {
+    memories.push(await prisma.memoryItem.create({ data: { userId: user.id, kind: "project", statement, status: "active", confidence: 0.9 } }));
+  }
+  const run = await create(user.id, { sources: memories.map((item) => ({ type: "memory", memoryItemId: item.id })) });
+  await drainResearchWork(label, 4);
+  assert.equal((await service.readResearchRunDto(user.id, run.id)).status, "completed");
+  return { user, run, memories, row: await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } }) };
+};
+
+test("revoking a private source withholds the task file in the revoking commit: nothing is served while the rebuild is still writing", async () => {
+  const { run, memories, row } = await memoryTask("task-revoke-hold", ["Held memory with a private budget detail"]);
+  const [ready] = await answerFiles(run.id);
+  assert.equal(ready!.status, "ready");
+  let release!: () => void;
+  storage.hold = new Promise<void>((resolve) => { release = resolve; });
+  try {
+    await prisma.memoryItem.delete({ where: { id: memories[0]!.id } });
+    const revoking = revalidateRunPrivateSources(row);
+    await waitFor(async () => (await answerFiles(run.id))[0]!.status !== "ready");
+    // The rebuild is now waiting on storage; the revoking commit has already landed.
+    const [withheld] = await answerFiles(run.id);
+    assert.deepEqual([withheld!.id, withheld!.status, withheld!.failureCode, withheld!.objectKey, withheld!.byteSize], [ready!.id, "failed", "source_revoked", null, 0]);
+    assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: run.id, visibility: "private" } })).status, "revoked");
+    assert.equal((await prisma.messageArtifactCleanup.findUniqueOrThrow({ where: { objectKey: ready!.objectKey! } })).reason, "source_revoked");
+    // A download with the old object (the route already 404s a row that is not ready) is refused by the re-check too.
+    const download = researchTaskFileServable({ id: ready!.id, objectKey: ready!.objectKey! });
+    storage.hold = null;
+    release();
+    assert.equal(await download, false);
+    await revoking;
+  } finally { storage.hold = null; release(); }
+  const [rebuilt] = await answerFiles(run.id);
+  assert.equal(rebuilt!.status, "ready");
+  assert.equal(rebuilt!.failureCode, null);
+  assert.notEqual(rebuilt!.objectKey, ready!.objectKey);
+  assert.ok(!docxText(rebuilt!.objectKey).includes("Held memory with a private"));
+});
+
+test("a rebuild that fails stays withheld and is retried: by maintenance once storage is back, and by the next Research read", async () => {
+  const { user, run, memories, row } = await memoryTask("task-revoke-retry", ["Retry memory one with a private note", "Retry memory two with a private note"]);
+  const [original] = await answerFiles(run.id);
+  const withheld = async () => {
+    const [file] = await answerFiles(run.id);
+    assert.deepEqual([file!.id, file!.status, file!.failureCode, file!.objectKey], [original!.id, "failed", "source_revoked", null]);
+  };
+  try {
+    storage.failWrites = true;
+    await prisma.memoryItem.delete({ where: { id: memories[0]!.id } });
+    await revalidateRunPrivateSources(row);
+    await withheld();
+    await recoverResearchEngine();
+    await withheld();
+    storage.failWrites = false;
+    assert.ok((await recoverResearchEngine()).rebuiltTaskFiles >= 1);
+    const [byMaintenance] = await answerFiles(run.id);
+    assert.equal(byMaintenance!.status, "ready");
+    assert.ok(!docxText(byMaintenance!.objectKey).includes("Retry memory one"));
+
+    storage.failWrites = true;
+    await prisma.memoryItem.delete({ where: { id: memories[1]!.id } });
+    await revalidateRunPrivateSources(row);
+    await withheld();
+    storage.failWrites = false;
+    await readResearchReport({ userId: user.id, runId: run.id });
+    const [byRead] = await answerFiles(run.id);
+    assert.equal(byRead!.status, "ready");
+    assert.ok(!docxText(byRead!.objectKey).includes("Retry memory"));
+  } finally { storage.failWrites = false; }
+});
+
+test("a download re-checks the run's private sources first and refuses the old file once one is gone; other files skip the check", async () => {
+  const { user, run, memories } = await memoryTask("task-download-check", ["Download memory with a private figure"]);
+  const [file] = await answerFiles(run.id);
+  assert.equal(await researchTaskFileServable({ id: file!.id, objectKey: file!.objectKey! }), true, "sources still granted: served");
+  await prisma.memoryItem.delete({ where: { id: memories[0]!.id } });
+  // Nothing has noticed yet: the row still points at the old bytes.
+  assert.equal((await answerFiles(run.id))[0]!.objectKey, file!.objectKey);
+  assert.equal(await researchTaskFileServable({ id: file!.id, objectKey: file!.objectKey! }), false, "the re-check finds the deletion and refuses");
+  const [rebuilt] = await answerFiles(run.id);
+  assert.equal(rebuilt!.status, "ready");
+  assert.notEqual(rebuilt!.objectKey, file!.objectKey);
+  assert.ok(!docxText(rebuilt!.objectKey).includes("Download memory"));
+  assert.equal(await researchTaskFileServable({ id: rebuilt!.id, objectKey: rebuilt!.objectKey! }), true, "the rebuilt file is served");
+  // A task without private sources is served with no source check.
+  const publicRun = await create(user.id);
+  await drainResearchWork("task-download-check", 4);
+  const [publicFile] = await answerFiles(publicRun.id);
+  assert.equal(await researchTaskFileServable({ id: publicFile!.id, objectKey: publicFile!.objectKey! }), true);
+});
+
+test("a large report keeps every table and every point: ten tables in the spreadsheet, and a deck past 100 slides laid out denser", async () => {
+  enable();
+  const points = 59;
+  const respond = (call: { tool: string; text: string; callIndex: number }) => {
+    if (call.tool === "submit_research_plan") return defaultResponse(call, { subquestions: 10, sections: 10 });
+    if (call.tool !== "submit_research_section") return defaultResponse(call);
+    const heading = /Section: ([^\n]+)/u.exec(call.text)?.[1] ?? "Section";
+    const keys = [...call.text.matchAll(/^(C\d+) \[(supported|partial|conflicting|unverified)/gmu)].map((match) => match[1]!);
+    if (!keys.length) return defaultResponse(call);
+    return { heading, blocks: [
+      ...Array.from({ length: points }, (_, index) => ({ type: "paragraph", text: `${heading} point ${index + 1}.`, claimKeys: [keys[0]!] })),
+      { type: "table", caption: `${heading} table`, columns: ["Claim", "Section"], rows: keys.slice(0, 4).map((key) => [key, heading]), claimKeys: [keys[0]!] },
+    ] };
+  };
+  const finished = async (label: string, taskOutput: "spreadsheet" | "presentation") => {
+    installFakes({ model: createFakeModel({ respond }) });
+    createFakeWeb();
+    const user = await createUser(label);
+    const run = await create(user.id, { profile: "deep", brief: brief("Compile everything about café hours near the station.", taskOutput) });
+    await drainResearchWork(label, 4);
+    assert.equal((await service.readResearchRunDto(user.id, run.id)).status, "completed");
+    const report = await readResearchReport({ userId: user.id, runId: run.id });
+    const [file] = await answerFiles(run.id);
+    assert.equal(file!.status, "ready", `${taskOutput}: ${file!.failureCode}`);
+    const parts = entries(file!.objectKey);
+    return { report, parts: Object.keys(parts), xml: Object.entries(parts).filter(([name]) => name.endsWith(".xml")).map(([, bytes]) => strFromU8(bytes)).join("\n") };
+  };
+  const sheet = await finished("task-large-sheet", "spreadsheet");
+  const tables = sheet.report.document.sections.flatMap((section) => section.blocks.filter((block) => block.type === "table"));
+  assert.ok(tables.length >= 9, `the report has ${tables.length} tables`);
+  assert.ok(sheet.parts.filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/u.test(name)).length <= 10);
+  for (const block of tables) if (block.type === "table") for (const row of block.rows) for (const cell of row) assert.ok(sheet.xml.includes(`>${cell}<`), `cell ${cell}`);
+
+  const deck = await finished("task-large-deck", "presentation");
+  const paragraphs = deck.report.document.sections.flatMap((section) => section.blocks.flatMap((block) => block.type === "paragraph" ? [block.text] : []));
+  const sections = deck.report.document.sections.filter((section) => section.blocks.length);
+  const atSix = sections.reduce((sum, section) => sum + Math.ceil(section.blocks.filter((block) => block.type === "paragraph").length / 6) + 2, 2);
+  assert.ok(atSix > 100, `six points a slide would need ${atSix} slides`);
+  assert.ok(deck.parts.filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name)).length <= 100);
+  for (const text of paragraphs) assert.ok(deck.xml.includes(text), text);
 });

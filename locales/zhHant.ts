@@ -776,6 +776,8 @@ export const zhHant = {
         artifactFailedFormat: "此檔案格式暫不支援。",
         artifactFailedLimit: "要求的檔案過大，無法建立。",
         artifactFailedIncomplete: "回答在檔案完成前就結束了。",
+        artifactFailedSourceRevoked: "此檔案使用的私人資料已無法使用，正在移除相關內容後重新產生檔案。請稍後重新開啟此對話。",
+        artifactFailedContentTooLarge: "報告內容超出此檔案類型的容量，因此未產生檔案。請使用此回答中的報告，或在 Research 報告分頁中匯出。",
         artifactOnlyAnswer: "已為你產生所需的檔案。",
         artifactRetry: "重新建立檔案",
         artifactSignInTitle: "登入後可建立檔案",

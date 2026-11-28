@@ -730,6 +730,8 @@ export const pt = {
         artifactFailedFormat: "Esse formato de arquivo ainda não é compatível.",
         artifactFailedLimit: "O arquivo solicitado é grande demais para ser criado.",
         artifactFailedIncomplete: "A resposta terminou antes de o arquivo ficar pronto.",
+        artifactFailedSourceRevoked: "O material privado usado por este arquivo não está mais disponível, então o arquivo está sendo refeito sem ele. Abra esta conversa de novo em instantes.",
+        artifactFailedContentTooLarge: "O relatório é longo demais para este tipo de arquivo, então nenhum arquivo foi criado. Use o relatório desta resposta ou exporte-o na aba Relatório do Research.",
         artifactOnlyAnswer: "Aqui está o arquivo que você pediu.",
         artifactRetry: "Criar o arquivo novamente",
         artifactSignInTitle: "Entre para criar arquivos",

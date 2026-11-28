@@ -63,6 +63,9 @@ const world = {
   queries: [] as Array<Record<string, unknown>>,
   unlockGranted: true,
   readKeys: [] as string[],
+  /** What the Research private-source re-check answers for this file. */
+  researchServable: true,
+  researchChecks: [] as string[],
 };
 
 const resetWorld = () => {
@@ -71,6 +74,8 @@ const resetWorld = () => {
   world.queries = [];
   world.unlockGranted = true;
   world.readKeys = [];
+  world.researchServable = true;
+  world.researchChecks = [];
 };
 
 let mocksInstalled = false;
@@ -116,6 +121,14 @@ const loadRoute = async () => {
               );
             },
           },
+        },
+      },
+    });
+    mock.module(mod("lib/researchEngineTaskFiles.ts"), {
+      namedExports: {
+        researchTaskFileServable: async (artifact: { id: string; objectKey: string }) => {
+          world.researchChecks.push(`${artifact.id}:${artifact.objectKey}`);
+          return world.researchServable;
         },
       },
     });
@@ -172,6 +185,17 @@ test("the owner gets the file, with the headers a download needs", async () => {
   const body = Buffer.from(await response.arrayBuffer());
   assert.equal(response.headers.get("content-length"), String(body.byteLength));
   assert.deepEqual(world.readKeys, [READY.objectKey]);
+});
+
+test("a Research task file whose private sources no longer grant it is a 404, and no byte is read", async () => {
+  resetWorld();
+  world.researchServable = false;
+  const { GET } = await loadRoute();
+  const response = await GET(request(), context());
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(world.researchChecks, [`${READY.id}:${READY.objectKey}`], "the re-check sees the row's current object");
+  assert.deepEqual(world.readKeys, []);
 });
 
 test("the storage key never reaches the response", async () => {

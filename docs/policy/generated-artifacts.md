@@ -1242,8 +1242,13 @@ schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 
 - **모델은 명세도 만들지 않는다.** writer가 검증된 claim으로 이미 쓴 보고서 문서를 서버가 명세로 배치한다
   (`lib/researchEngineTaskOutput.ts`). 그래서 파일 단계에는 tool 호출·입력 토큰·예약이 없고 §11의 별도 credit
   없음과 같다. §3의 상한은 같은 `ARTIFACT_LIMITS`와 `bounded()`가 지킨다.
-- **못 만들면 실패 행이다.** 생성 실패는 `generation_failed`/`limit_exceeded`, 저장 실패는 `storage_failed`로
-  남겨 답변이 파일이 없다고 말한다(§1).
-- **비공개 자료 철회는 파일에도 적용된다.** 철회 뒤 같은 행을 정리된 revision에서 다시 만든 바이트로 바꾸고 옛
-  객체를 같은 트랜잭션에서 `MessageArtifactCleanup`(`source_revoked`)에 넣는다. 깨끗한 파일을 못 만들면 행을
-  실패로 바꾸고 옛 바이트를 지운다(`lib/researchEngineTaskFiles.ts`).
+- **못 만들면 실패 행이다.** 생성 실패는 `generation_failed`, 저장 실패는 `storage_failed`로 남겨 답변이 파일이
+  없다고 말한다(§1).
+- **내용을 버리지 않는다.** 표가 시트보다 많으면 남는 표를 마지막 표 시트에 이어 붙이고, 슬라이드가 100장을 넘으면 더
+  촘촘히 배치한다(요점 전문은 발표자 노트). 그래도 §3의 한도를 넘으면 파일을 만들지 않고 `content_too_large`로
+  남긴다. 카드는 답변의 보고서나 보고서 탭 내보내기를 안내한다.
+- **비공개 자료 철회는 파일에도 적용된다.** 철회하는 트랜잭션 안에서 파일을 `source_revoked`(실패, 객체 없음)로
+  보류하고 옛 객체를 `MessageArtifactCleanup`(`source_revoked`)에 넣는다. 정리된 revision에서 다시 만들면 같은 행이
+  ready로 돌아가고, 실패하거나 끊긴 재생성은 다음 Research 읽기나 maintenance가 다시 한다. 다운로드·수정 입력 복사·
+  프로젝트 저장은 비공개 자료를 고른 Research run의 파일이면 그 run의 비공개 자료를 먼저 다시 확인한다
+  (`researchTaskFileServable`, `lib/researchEngineTaskFiles.ts`). 두 실패 코드의 카드에는 재전송 버튼이 없다.

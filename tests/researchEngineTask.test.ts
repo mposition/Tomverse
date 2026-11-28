@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { strFromU8, unzipSync } from "fflate";
-import { requireArtifactFormat } from "@/lib/generatedArtifactCore";
+import { ARTIFACT_LIMITS, requireArtifactFormat } from "@/lib/generatedArtifactCore";
 import {
   RESEARCH_MODEL_TOOL_NAMES, RESEARCH_TASK_OUTPUTS, researchBriefSchema, researchInputManifestSchema, researchReportDocumentSchema,
 } from "@/lib/researchEngineContract";
 import { buildBibliography, type ReportClaim, type ReportSource } from "@/lib/researchEngineReport";
 import { plannerPrompt, researcherPrompt, writerSectionPrompt, type PublicResearchContext } from "@/lib/researchEnginePrompts";
 import {
-  RESEARCH_TASK_FILE_FORMATS, chatTaskAgentEnabled, renderResearchTaskFile, reportPresentationSpec, reportTaskWorkbookSpec,
+  RESEARCH_TASK_FILE_FORMATS, ResearchTaskFileOverflowError, chatTaskAgentEnabled, renderResearchTaskFile, reportDocumentSpec, reportPresentationSpec,
+  reportTaskWorkbookSpec,
 } from "@/lib/researchEngineTaskOutput";
 import { researchEngineCopy } from "@/locales/researchEngine";
 
@@ -135,4 +136,66 @@ test("a long section becomes several slides and the full text stays in the speak
   assert.deepEqual(opening.map((slide) => slide.title), ["Opening hours", "Opening hours (2)"]);
   assert.ok(opening[0]!.bullets!.every((bullet) => bullet.length <= 300));
   assert.ok(opening[0]!.notes!.includes(`${long} [1]`));
+});
+
+const big = (sections: Array<Array<{ type: "paragraph"; text: string } | { type: "table"; caption: string; columns: string[]; rows: string[][] }>>, sourceCount = 1) => {
+  const document = researchReportDocumentSchema.parse({ version: 1, title: "Large report", summary: "Summary line.",
+    scope: { question: "Q", assumptions: [], note: "", currentDate: "2026-11-28" },
+    sections: sections.map((blocks, index) => ({ key: `s${index + 1}`, heading: `Section ${index + 1}`, status: "written",
+      blocks: blocks.map((block) => ({ ...block, claimKeys: ["C1"] })) })),
+    conflicts: [], limitations: [], nextQuestions: [], criteria: [], bibliography: [] });
+  document.bibliography = Array.from({ length: sourceCount }, (_, index) => ({ n: index + 1, sourceKey: index ? `W${index + 1}` : "W1", versionId: `v${index + 1}`,
+    title: `Source ${index + 1}`, url: `https://example.com/${index + 1}`, private: false, readStatus: "read" as const, retrievedAt: "2026-11-23T00:00:00.000Z" }));
+  return document;
+};
+const table = (id: number, rows = 2, columns = 2) => ({ type: "table" as const, caption: `Table ${id}`, columns: Array.from({ length: columns }, (_, c) => `T${id}C${c + 1}`),
+  rows: Array.from({ length: rows }, (_, r) => Array.from({ length: columns }, (_, c) => `t${id}r${r + 1}c${c + 1}`)) });
+const paragraph = (id: string) => ({ type: "paragraph" as const, text: `Point ${id} with its full text kept.` });
+
+test("a spreadsheet keeps every table: past the sheet limit the rest go one under another on the last table sheet", () => {
+  for (const [count, sources] of [[9, 1], [10, 0], [25, 1]] as const) {
+    const document = big([Array.from({ length: count }, (_, index) => table(index + 1))], sources);
+    const workbook = reportTaskWorkbookSpec(document, claims, labels, "complete", "x.xlsx");
+    assert.ok(workbook.worksheets.length <= ARTIFACT_LIMITS.maxWorksheets);
+    const cells = new Set(workbook.worksheets.flatMap((sheet) => sheet.rows.flat().map(String)));
+    for (let id = 1; id <= count; id += 1) for (const cell of [`t${id}r1c1`, `t${id}r2c2`]) assert.ok(cells.has(cell), `${count} tables: ${cell}`);
+    const stacked = workbook.worksheets.find((sheet) => sheet.name === labels.taskSheetMoreTables);
+    assert.ok(stacked, `${count} tables need the stacked sheet`);
+    assert.ok(stacked.rows.some((row) => row[0] === `Section 1 · Table ${count}${sources ? " [1]" : ""}` && row[1] === `T${count}C1`), "each stacked table opens with its own header row");
+  }
+  // Within the limit every table keeps its own sheet, as before.
+  const eight = reportTaskWorkbookSpec(big([Array.from({ length: 8 }, (_, index) => table(index + 1))]), claims, labels, "complete", "x.xlsx");
+  assert.equal(eight.worksheets.filter((sheet) => /^s1-\d+$/u.test(sheet.name)).length, 8);
+  assert.ok(!eight.worksheets.some((sheet) => sheet.name === labels.taskSheetMoreTables));
+});
+
+test("a deck past 100 slides is laid out denser and keeps every point in its notes; one that still cannot fit is refused", () => {
+  const sections = Array.from({ length: 17 }, (_, s) => Array.from({ length: 30 }, (_, p) => paragraph(`${s + 1}.${p + 1}`)));
+  const document = big(sections);
+  const deck = reportPresentationSpec(document, claims, labels, "complete", "x.pptx");
+  assert.ok(deck.slides.length <= ARTIFACT_LIMITS.maxSlides, String(deck.slides.length));
+  const notes = deck.slides.map((slide) => slide.notes ?? "").join("\n");
+  for (let s = 1; s <= 17; s += 1) for (let p = 1; p <= 30; p += 1) assert.ok(notes.includes(`Point ${s}.${p} with its full text kept. [1]`), `${s}.${p}`);
+  assert.ok(deck.slides.every((slide) => (slide.bullets ?? []).length <= ARTIFACT_LIMITS.maxSlideBullets));
+  // Far past what any layout holds: refused, never cut short.
+  const huge = big(Array.from({ length: 30 }, (_, s) => Array.from({ length: 10 }, (_, t) => table(s * 10 + t + 1, 200))));
+  assert.throws(() => reportPresentationSpec(huge, claims, labels, "complete", "x.pptx"), ResearchTaskFileOverflowError);
+  assert.throws(() => renderResearchTaskFile({ output: "presentation", document: huge, claims, labels, quality: "complete" }), ResearchTaskFileOverflowError);
+  assert.throws(() => reportTaskWorkbookSpec(huge, claims, labels, "complete", "x.xlsx"), ResearchTaskFileOverflowError);
+});
+
+test("a document task refuses a report with more blocks than a document holds; long source lists keep their numbers", () => {
+  const huge = big(Array.from({ length: 30 }, (_, s) => Array.from({ length: 60 }, (_, t) => table(s * 60 + t + 1, 1, 1))));
+  assert.throws(() => reportDocumentSpec(huge, claims, "docx", labels, "partial", "x.docx", { strict: true }), ResearchTaskFileOverflowError);
+  assert.throws(() => renderResearchTaskFile({ output: "document", document: huge, claims, labels, quality: "partial" }), ResearchTaskFileOverflowError);
+  // The export keeps its earlier behaviour.
+  assert.equal(reportDocumentSpec(huge, claims, "docx", labels, "partial", "x.docx").blocks.length, ARTIFACT_LIMITS.maxDocumentBlocks);
+  const sourced = big([[paragraph("a")]], 450);
+  const spec = reportDocumentSpec(sourced, claims, "docx", labels, "partial", "x.docx", { strict: true });
+  const lists = spec.blocks.filter((block) => block.type === "bullets");
+  assert.deepEqual(lists.map((block) => block.type === "bullets" ? block.items.length : 0), [200, 200, 50]);
+  const items = lists.flatMap((block) => block.type === "bullets" ? block.items : []);
+  assert.ok(items[0]!.startsWith("[1] Source 1") && items[449]!.startsWith("[450] Source 450"));
+  // A list that fits stays the numbered list the export always wrote.
+  assert.ok(reportDocumentSpec(big([[paragraph("a")]], 3), claims, "docx", labels, "partial", "x.docx").blocks.some((block) => block.type === "numbers"));
 });

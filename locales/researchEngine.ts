@@ -119,6 +119,8 @@ const en = {
   taskColumnSource: "Source",
   taskColumnLink: "Link",
   taskColumnRetrieved: "Retrieved",
+  taskColumnTable: "Table",
+  taskSheetMoreTables: "More tables",
 };
 
 type Copy = typeof en;
@@ -241,6 +243,8 @@ const ko: Copy = {
   taskColumnSource: "출처",
   taskColumnLink: "링크",
   taskColumnRetrieved: "확인일",
+  taskColumnTable: "표",
+  taskSheetMoreTables: "나머지 표",
 };
 
 const translated = (base: Copy, overrides: Partial<Omit<Copy, "report">> & { report: Copy["report"] }): Copy => ({ ...base, ...overrides });
@@ -298,6 +302,8 @@ const zh = translated(en, {
   taskColumnSource: "来源",
   taskColumnLink: "链接",
   taskColumnRetrieved: "获取日期",
+  taskColumnTable: "表格",
+  taskSheetMoreTables: "其余表格",
 });
 
 const zhHant = translated(zh, {
@@ -350,6 +356,8 @@ const zhHant = translated(zh, {
   taskColumnSource: "來源",
   taskColumnLink: "連結",
   taskColumnRetrieved: "取得日期",
+  taskColumnTable: "表格",
+  taskSheetMoreTables: "其餘表格",
 });
 
 const fr = translated(en, {
@@ -414,6 +422,8 @@ const fr = translated(en, {
   taskColumnSource: "Source",
   taskColumnLink: "Lien",
   taskColumnRetrieved: "Consulté le",
+  taskColumnTable: "Tableau",
+  taskSheetMoreTables: "Autres tableaux",
 });
 
 const de = translated(en, {
@@ -478,6 +488,8 @@ const de = translated(en, {
   taskColumnSource: "Quelle",
   taskColumnLink: "Link",
   taskColumnRetrieved: "Abgerufen",
+  taskColumnTable: "Tabelle",
+  taskSheetMoreTables: "Weitere Tabellen",
 });
 
 const es = translated(en, {
@@ -542,6 +554,8 @@ const es = translated(en, {
   taskColumnSource: "Fuente",
   taskColumnLink: "Enlace",
   taskColumnRetrieved: "Consultado",
+  taskColumnTable: "Tabla",
+  taskSheetMoreTables: "Más tablas",
 });
 
 const pt = translated(en, {
@@ -606,6 +620,8 @@ const pt = translated(en, {
   taskColumnSource: "Fonte",
   taskColumnLink: "Link",
   taskColumnRetrieved: "Consultado em",
+  taskColumnTable: "Tabela",
+  taskSheetMoreTables: "Demais tabelas",
 });
 
 export const researchEngineCopy: Record<Language, Copy> = { en, ko, zh, "zh-Hant": zhHant, fr, de, es, pt };

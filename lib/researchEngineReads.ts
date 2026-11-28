@@ -45,6 +45,8 @@ export async function revalidateRunPrivateSources(run: { id: string; userId: str
     const { ensureResearchPrivateSourceGranted } = await import("@/lib/researchEngineWorker");
     for (const source of live) if (!(await ensureResearchPrivateSourceGranted(run as never, source))) revoked.add(source.sourceKey);
   }
+  // A delegated task's file withheld by an earlier revocation and not rebuilt yet (a crash or a failed rebuild) is retried here.
+  if (revoked.size) await (await import("@/lib/researchEngineWorker")).rebuildResearchTaskFilesQuietly(run.id);
   return revoked;
 }
 
