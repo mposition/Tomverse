@@ -2423,8 +2423,8 @@ test("a repeat of a turn is routed again and reattaches through the real identit
   }
 });
 
-/** The default turn's own message, plus the one-byte smallest answer. */
-const TURN_MESSAGE_BYTES = Buffer.byteLength("이 질문에 답해 줘", "utf8") + 1;
+/** The one-byte smallest answer row: the turn's own message is already stored. */
+const TURN_MESSAGE_BYTES = 1;
 
 /*
   Review finding (B3, 2026-11-28, third pass): the storage check ran after the

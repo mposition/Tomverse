@@ -2825,10 +2825,16 @@ async function handleChatPost(
           have had. Only a Chat conversation can hold one: Review, continuation
           and Deep Research turns never claim an attempt.
         */
-        const attemptAlreadyBound = Boolean(session?.user?.id && conversationId && assistantMessageId) &&
-            conversationRouting?.productKey === "chat" &&
-            (await peekChatResponseAttempt(session!.user!.id!, assistantMessageId!))
-                ?.conversationId === conversationId;
+        let attemptAlreadyBound = false;
+        if (session?.user?.id && conversationId && assistantMessageId && conversationRouting?.productKey === "chat") {
+            try {
+                attemptAlreadyBound =
+                    (await peekChatResponseAttempt(session.user.id, assistantMessageId))?.conversationId === conversationId;
+            } catch (error) {
+                // Advisory like the check it serves: the durable claim decides.
+                logRequestError("chat_attempt_peek_failed", traceId, error, requestedModelId);
+            }
+        }
         /*
           A turn whose answer certainly could not be stored is refused before
           anything is paid for -- the Auto Router, the image classification
@@ -2836,8 +2842,9 @@ async function handleChatPost(
           routed, charged, streamed and then lost at the Message write
           (docs/policy/credit-and-cost-limits.md, "완료 분기의 정산").
           "Certainly" and nothing more: the message count is already at its
-          limit, or the bytes left are fewer than this turn's own message plus
-          the smallest answer row (one byte). No answer size is assumed -- the
+          limit, or the bytes left are fewer than the smallest answer row (one
+          byte): this turn's own message is already stored and counted when the
+          answer is written, so it is not added again. No answer size is assumed -- the
           model is not chosen yet, and an image turn stores one line -- so a
           long answer that overflows is still the Message write's own locked
           check to refuse, as it always was. The conversation's own count only
@@ -2853,7 +2860,7 @@ async function handleChatPost(
                     session.user.id,
                     conversationRouting ? conversationId : null,
                     1,
-                    Buffer.byteLength(latestUserPromptText(messages), "utf8") + 1
+                    1
                 );
             } catch (error) {
                 if (apiSecurityResponse(error)) throw error;
