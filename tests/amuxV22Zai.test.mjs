@@ -213,6 +213,16 @@ test("a Z.ai run is Claude Code with its deny rules, its jail and Z.ai's environ
   assert.deepEqual([refused.kind, refused.cliStarted, refused.failure],
     ["failed", false, "channel_auth_refused"]);
   assert.equal(none.calls.length, 0);
+  // The last check runs on the tree the CLI would start in, after a resumed
+  // change is applied: a project configuration that appears only then stops the run.
+  let checks = 0;
+  const late = await runAmuxV22OneShot(request, { ...config, binaryPath: "/opt/claude/bin/claude" },
+    { ...options, spawnChild: none.spawnChild,
+      channelPreflight: () => (++checks >= 3 ? "project_cli_config_present" : null) });
+  assert.equal(checks, 3);
+  assert.deepEqual([late.kind, late.cliStarted, late.failure],
+    ["failed", false, "project_cli_config_present"]);
+  assert.equal(none.calls.length, 0);
   // Claude Code's managed settings on the host: no run either.
   const managed = await runAmuxV22OneShot(request, { ...config, binaryPath: "/opt/claude/bin/claude" },
     { ...options, spawnChild: none.spawnChild, zaiManagedSettingsPresent: () => true });
