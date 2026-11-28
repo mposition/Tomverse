@@ -269,3 +269,19 @@ test("the chart instruction is carried and priced only when CHAT_INLINE_CHART is
     else process.env.CHAT_INLINE_CHART = previous;
   }
 });
+
+test("the study instruction is carried and priced only on a turn with study mode on", () => {
+  const now = new Date("2026-11-15T00:00:00Z");
+  const off = build({ now });
+  const on = build({ now, studyMode: true });
+  assert.equal(on.systemMessages.length, off.systemMessages.length + 1);
+  assert.ok(on.systemMessages.some((message) => message.content.startsWith("# Study mode")));
+  assert.ok(!off.systemMessages.some((message) => message.content.startsWith("# Study mode")));
+  assert.ok(on.promptTokens > off.promptTokens);
+  assert.equal(build({ now, studyMode: false }).promptTokens, off.promptTokens);
+  // What is priced is the block that is sent: the delta is its own token count.
+  const studyBlock = on.systemMessages.find((message) => message.content.startsWith("# Study mode"));
+  assert.equal(on.promptTokens - off.promptTokens, estimateTextTokens(studyBlock.content));
+  // Deep research carries no application-authored system blocks.
+  assert.equal(build({ now, isDeepResearchTurn: true, studyMode: true }).systemMessages.length, 0);
+});

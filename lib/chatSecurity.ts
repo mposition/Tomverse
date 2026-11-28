@@ -6326,6 +6326,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         reasoningEffort?: unknown;
+        studyMode?: unknown;
         webSearchMode?: unknown;
         mcpConnectionId?: unknown;
         admissionToken?: unknown;
@@ -6468,6 +6469,9 @@ export const validateChatPayload = (body: unknown) => {
     }
     if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "medium" && payload.reasoningEffort !== "high") {
         throw new ChatAccessError(400, "INVALID_REASONING_EFFORT", "Invalid reasoning effort.");
+    }
+    if (payload.studyMode !== undefined && payload.studyMode !== true && payload.studyMode !== false) {
+        throw new ChatAccessError(400, "INVALID_STUDY_MODE", "Invalid study mode.");
     }
 
     if (
@@ -6673,6 +6677,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         reasoningEffort?: "low" | "medium" | "high";
+        studyMode?: boolean;
         webSearchMode?: WebSearchMode;
         mcpConnectionId?: string;
         admissionToken?: string;

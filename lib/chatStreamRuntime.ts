@@ -108,6 +108,8 @@ export type ChatRuntimeSnapshot = {
 
 export type ChatRuntimeLastPrompt = {
   reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
+  /** Study mode was on for this send, so its retry keeps it. */
+  studyMode?: boolean;
   text: string;
   targetChatId: string;
   attachments: ChatAttachment[];

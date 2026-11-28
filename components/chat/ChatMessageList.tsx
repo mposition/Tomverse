@@ -39,6 +39,9 @@ import { prepareMathMarkdown } from "@/lib/chatMathDelimiters";
 import { isMathPre, mermaidSourceFromPre } from "@/lib/chatMermaidBlock";
 import { chartSpecFromPre } from "@/lib/chatChart";
 import { ChatChart } from "@/components/chat/ChatChart";
+import { flashcardSpecFromPre, quizSpecFromPre } from "@/lib/chatStudy";
+import { ChatQuiz } from "@/components/chat/ChatQuiz";
+import { ChatFlashcards } from "@/components/chat/ChatFlashcards";
 import {
   ArrowDown,
   Bot,
@@ -523,6 +526,11 @@ function MarkdownCodeBlock({ children, node }: MarkdownPreProps) {
   // A `chart` block whose JSON spec validates; anything else stays code.
   const chartSpec = answerRender ? chartSpecFromPre(node) : null;
   if (chartSpec) return <ChatChart spec={chartSpec} fallback={codeBlock} />;
+  // `quiz` and `flashcards` blocks, the same way: valid and final, or code.
+  const quizSpec = answerRender ? quizSpecFromPre(node) : null;
+  if (quizSpec) return <ChatQuiz spec={quizSpec} fallback={codeBlock} />;
+  const flashcardSpec = answerRender ? flashcardSpecFromPre(node) : null;
+  if (flashcardSpec) return <ChatFlashcards spec={flashcardSpec} fallback={codeBlock} />;
   return codeBlock;
 }
 

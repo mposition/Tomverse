@@ -61,10 +61,16 @@ import { buildChatCurrentDatePrompt } from "@/lib/chatCurrentDatePrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
 import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import { CHAT_INLINE_CHART_PROMPT, chatInlineChartPromptEnabled } from "@/lib/chatChartPrompt";
+import { CHAT_STUDY_MODE_PROMPT } from "@/lib/chatStudyPrompt";
 
 export type ChatTurnSystemBlocksInput = {
   /** The turn's clock, for the date block. Defaults to now; tests pin it. */
   now?: Date;
+  /**
+   * The reader turned study mode on for this turn (lib/chatStudyPrompt.ts).
+   * Ignored on a deep-research turn, which carries no capability blocks.
+   */
+  studyMode?: boolean;
   currentLocation?: ChatLocation | null;
   reserveLocationInput?: boolean;
   modelId: string;
@@ -238,6 +244,8 @@ export const buildChatTurnSystemBlocks = (
   const currentDatePrompt = buildChatCurrentDatePrompt(input.now);
   // Off by default: it is input tokens on every turn (lib/chatChartPrompt.ts).
   const chartPrompt = chatInlineChartPromptEnabled() ? CHAT_INLINE_CHART_PROMPT : "";
+  // Only on a turn that asked for it, so it is priced only there.
+  const studyPrompt = input.studyMode === true && !input.isDeepResearchTurn ? CHAT_STUDY_MODE_PROMPT : "";
 
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: artifactPlan.systemPrompt },
@@ -245,6 +253,7 @@ export const buildChatTurnSystemBlocks = (
     { role: "system", content: locationPrompt },
     { role: "system", content: currentDatePrompt },
     ...(chartPrompt ? [{ role: "system" as const, content: chartPrompt }] : []),
+    ...(studyPrompt ? [{ role: "system" as const, content: studyPrompt }] : []),
     // Only on a turn that cannot search; an empty block would be a system
     // message saying nothing, priced and sent.
     ...(webSearchCapabilityPrompt
@@ -283,6 +292,7 @@ export const buildChatTurnSystemBlocks = (
     locationTokens +
     estimateTextTokens(currentDatePrompt) +
     estimateTextTokens(chartPrompt) +
+    estimateTextTokens(studyPrompt) +
     estimateTextTokens(artifactPlan.systemPrompt) +
     estimateTextTokens(imageCapabilityPrompt) +
     estimateTextTokens(webSearchCapabilityPrompt) +
