@@ -536,11 +536,22 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 어느 쪽 �
     - **"이 화면 고치기"**: 패널 아래 입력란에 바꿀 내용을 적으면, 생성 파일은 기존 "수정본 만들기" 경로(원본 복사본 첨부와 표준
       요청문, 그 아래 입력한 내용)로, 답변 코드 블록은 입력창 맨 위에 "위 코드에서 다음을 고쳐 주세요: …"를 채워 넣고 패널을
       닫습니다. 보내지는 않으며 **새 서버 API가 없습니다**. 입력란은 그 경로가 실제로 있는 곳에만 나타납니다(생성 파일은 계정과 수정본 만들기가 켜진 대화, 코드 블록은 채팅 입력창이 있는 화면).
-    - 공개 URL 게시, 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
+    - **패널 안에서 직접 고치기**(같은 스위치, 2026-11-28): 패널 위에 "미리보기 / 코드" 전환이 있고, 코드 보기는 위에 원문
+      textarea, 아래에 실시간 미리보기입니다(`components/chat/ArtifactPreviewWorkspace.tsx`). HTML 파일·React 파일·코드 블록
+      모두 같습니다. 미리보기는 마지막 입력 뒤 400ms가 지나야 다시 그립니다(`ARTIFACT_EDIT_RENDER_DELAY_MS`). 고친 글은
+      원문과 **같은 경로**(`buildCodePreviewDocument` → `HtmlArtifactPreviewFrame` → `buildHtmlPreviewSrcdoc`)로만 frame에
+      들어가므로 sandbox·CSP·중첩 frame·1,000,000바이트 한도가 그대로입니다. 고친 내용은 이 페이지의 메모리에만 있고
+      (`lib/artifactPreviewEditing.ts`, 저장소·서버·대화에 쓰지 않음, 새로고침하면 원래대로), 패널을 닫았다 열면 남아
+      있습니다. "원래대로", "복사", "내려받기"(파일은 원래 이름, React는 text/plain), 고쳤을 때만 "이 버전으로 계속"이
+      있고, 마지막은 고친 코드를 fenced block으로 감싼 요청문을 입력창에 채울 뿐 보내지 않습니다(50,000자 넘으면 내려받기
+      안내, `ARTIFACT_CONTINUE_MAX_CHARS`). 스위치가 꺼져 있으면 HTML 파일 패널은 예전처럼 frame만 보입니다.
+    - 서버 저장, 여러 모델 나란히 미리보기는 하지 않습니다(§12).
   - 검증: `tests/htmlArtifactPreview.test.mjs`(sandbox·CSP 문자열 고정),
     `tests/chatArtifactPreview.test.mjs`(코드 블록 판정, React 문서의 자체 호스팅 경로·파일 해시·escape, bootstrap에 eval 없음, 모든 문서가 같은
     격리를 거침), `tests/client/htmlArtifactPreviewRender.test.tsx`(frame 속성·버튼 조건),
-    `tests/client/chatArtifactWorkspace.test.tsx`(스위치·스트리밍·언어별 버튼, 8개 언어 문구).
+    `tests/client/chatArtifactWorkspace.test.tsx`(스위치·스트리밍·언어별 버튼, 8개 언어 문구),
+    `tests/artifactPreviewEditing.test.mjs`·`tests/client/artifactPreviewWorkspaceRender.test.tsx`(편집: fence·길이 상한·
+    내려받기 이름, 스위치 꺼짐이면 frame만, 고친 frame도 같은 sandbox).
 - 버튼은 최소 44px 터치 영역과 `focus-visible` 링을 갖는다.
 - 스크린 리더는 하나의 accessible name으로 형식·파일명·크기·상태를 받는다.
 - 시각 role은 `accent-generated-artifact-*`(emerald)뿐이다. AI Review의

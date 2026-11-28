@@ -1,0 +1,89 @@
+/**
+ * Editing a previewed page in the panel, before anything is sent anywhere.
+ *
+ * Policy: docs/policy/generated-artifacts.md section 9, "패널 안에서 직접
+ * 고치기". The edited text is the person's own, held in this browser tab only:
+ * it is never written to the conversation, and it reaches the preview frame
+ * through the same `buildCodePreviewDocument` -> `buildHtmlPreviewSrcdoc`
+ * path as the original (lib/chatArtifactPreview.ts, lib/htmlArtifactPreview.ts),
+ * so an edit cannot loosen the frame's isolation.
+ *
+ * Pure and client-safe: strings only.
+ */
+
+import type { CodePreviewKind } from "@/lib/chatArtifactPreview";
+
+/** The pause after the last keystroke before the live preview is rebuilt. */
+export const ARTIFACT_EDIT_RENDER_DELAY_MS = 400;
+
+/**
+ * The longest edited version "Continue with this version" puts in the
+ * composer. A page can be a megabyte; a message that large crowds out the
+ * answer it asks for, so a longer version is downloaded and attached instead.
+ */
+export const ARTIFACT_CONTINUE_MAX_CHARS = 50_000;
+
+/** The fence tag a kind of code is written back with. */
+const fenceLanguage = (kind: CodePreviewKind, language: string) =>
+    kind === "react" ? (language.toLowerCase() === "tsx" ? "tsx" : "jsx") : kind;
+
+/**
+ * A fence the code cannot close: one backtick longer than the longest run of
+ * backticks inside it, and never shorter than three.
+ */
+export const markdownFenceFor = (code: string) => {
+    let longest = 0;
+    for (const run of code.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+    return "`".repeat(Math.max(3, longest + 1));
+};
+
+/**
+ * The composer text for "Continue with this version": the request sentence
+ * with the edited code in a fenced block, or null when the code is longer than
+ * `ARTIFACT_CONTINUE_MAX_CHARS`. `template` carries `{code}`.
+ */
+export const continueWithVersionText = (
+    template: string,
+    input: { kind: CodePreviewKind; language: string; code: string }
+): string | null => {
+    if (input.code.length > ARTIFACT_CONTINUE_MAX_CHARS) return null;
+    const fence = markdownFenceFor(input.code);
+    const block = `${fence}${fenceLanguage(input.kind, input.language)}\n${input.code}\n${fence}`;
+    return template.split("{code}").join(block);
+};
+
+const MEDIA_TYPES: Record<CodePreviewKind, string> = {
+    html: "text/html;charset=utf-8",
+    svg: "image/svg+xml;charset=utf-8",
+    react: "text/plain;charset=utf-8",
+};
+
+/** What a downloaded edited version is called and typed as. A file keeps its own name. */
+export const editedDownload = (
+    input: { kind: CodePreviewKind; language: string; filename?: string | null }
+): { filename: string; mediaType: string } => {
+    const fallback =
+        input.kind === "html" ? "page.html"
+        : input.kind === "svg" ? "image.svg"
+        : `component.${fenceLanguage(input.kind, input.language)}`;
+    const filename = input.filename?.trim() || fallback;
+    return { filename, mediaType: MEDIA_TYPES[input.kind] };
+};
+
+/**
+ * Edits kept for the life of this page, so closing the panel and opening the
+ * same file or block again shows the edited version. In memory only: nothing
+ * is written to storage, and a reload starts from the original.
+ */
+const editedVersions = new Map<string, string>();
+
+export const editedVersionKey = (source: { artifactId?: string | null; kind: CodePreviewKind; original: string }) =>
+    source.artifactId ? `artifact:${source.artifactId}` : `code:${source.kind}:${source.original}`;
+
+export const readEditedVersion = (key: string) => editedVersions.get(key) ?? null;
+
+/** Keeps `draft` for `key`, or forgets it when it is the original again. */
+export const keepEditedVersion = (key: string, draft: string, original: string) => {
+    if (draft === original) editedVersions.delete(key);
+    else editedVersions.set(key, draft);
+};

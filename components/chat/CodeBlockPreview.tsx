@@ -4,11 +4,10 @@ import { Eye } from "lucide-react";
 import { Children, isValidElement, useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
 
 import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPanelShell";
+import { ArtifactPreviewWorkspace } from "@/components/chat/ArtifactPreviewWorkspace";
 import { useChatArtifactWorkspace, useCodeBlockStreaming } from "@/components/chat/ChatArtifactWorkspaceContext";
-import { HtmlArtifactPreviewFrame, usePreviewDocumentLabels } from "@/components/chat/HtmlArtifactPreviewPanel";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
-  buildCodePreviewDocument,
   codeLanguageFromClassName,
   codePreviewKindForLanguage,
   type CodePreviewKind,
@@ -44,17 +43,11 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
   const { t } = useLanguage();
   const workspace = useChatArtifactWorkspace();
   const streaming = useCodeBlockStreaming();
-  const labels = usePreviewDocumentLabels();
   const [opened, setOpened] = useState<Opened | null>(null);
   const close = useCallback(() => setOpened(null), []);
 
   const language = languageOfCode(children);
   const kind = codePreviewKindForLanguage(language);
-
-  const built = useMemo(
-    () => (opened ? buildCodePreviewDocument(opened.kind, opened.code, { language: opened.language, labels, assetOrigin: window.location.origin }) : null),
-    [opened, labels]
-  );
 
   const { fillComposer } = workspace;
   const revise = useMemo(
@@ -91,15 +84,15 @@ export function CodeBlockPreview({ children, preRef }: { children: ReactNode; pr
         <Eye className="h-3.5 w-3.5" aria-hidden="true" />
         {t("chat.artifactPreviewOpen")}
       </button>
-      {opened && built && (
+      {opened && (
         <ArtifactPreviewPanelShell title={title} heading={title} onClose={close} onRevise={revise}>
-          {built.ok ? (
-            <HtmlArtifactPreviewFrame html={built.html} title={title} />
-          ) : (
-            <p role="alert" data-testid="html-artifact-preview-notice" className="p-4 text-sm text-zinc-600 dark:text-zinc-300">
-              {t(built.reason === "too_large" ? "chat.artifactWorkspaceCodeTooLarge" : "chat.artifactWorkspaceCodeEmpty")}
-            </p>
-          )}
+          <ArtifactPreviewWorkspace
+            source={{ kind: opened.kind, language: opened.language, original: opened.code }}
+            title={title}
+            editable
+            fillComposer={fillComposer}
+            onClose={close}
+          />
         </ArtifactPreviewPanelShell>
       )}
     </>

@@ -2,20 +2,18 @@
 
 import { createApiClient } from "@tomverse/api-client";
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ArtifactPreviewPanelShell } from "@/components/chat/ArtifactPreviewPanelShell";
+import { ArtifactPreviewWorkspace } from "@/components/chat/ArtifactPreviewWorkspace";
+import { useChatArtifactWorkspace } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { useLanguage } from "@/components/LanguageProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { artifactDownloadPath, type ChatStreamArtifact } from "@/lib/generatedArtifactCore";
-import { buildCodePreviewDocument, type PreviewDocumentLabels } from "@/lib/chatArtifactPreview";
-import {
-  HTML_PREVIEW_MAX_BYTES,
-  HTML_PREVIEW_SANDBOX,
-  buildHtmlPreviewSrcdoc,
-  isHtmlPreviewSmallEnough,
-  withEmbedderNonce,
-} from "@/lib/htmlArtifactPreview";
+import { HTML_PREVIEW_MAX_BYTES, isHtmlPreviewSmallEnough } from "@/lib/htmlArtifactPreview";
+
+// The frame and its labels live in their own module; these names stay importable from here.
+export { HtmlArtifactPreviewFrame, usePreviewDocumentLabels } from "@/components/chat/HtmlArtifactPreviewFrame";
 
 /**
  * The side panel (desktop) or full-screen sheet (phone) that runs a generated
@@ -23,55 +21,17 @@ import {
  *
  * Policy: docs/policy/generated-artifacts.md section 9. The isolation itself
  * (sandbox tokens, CSP, srcdoc) is `lib/htmlArtifactPreview.ts`; this file is
- * the frame, the fetch and the panel around it.
+ * the fetch and the panel around it, and `ArtifactPreviewWorkspace` is the
+ * frame and, with the workspace switch on, the code editor.
  *
  * The file is fetched through the same authenticated download route as the
  * download button, so ownership, the conversation lock and the rate limit are
  * that route's, unchanged. Nothing here reads a file by any other path.
  */
 
-/** The frame alone: no network, no portal, so it renders anywhere. */
-export function HtmlArtifactPreviewFrame({ html, title }: { html: string; title: string }) {
-  const srcDoc = useMemo(() => {
-    // The embedding document's CSP nonce, if it has one (see withEmbedderNonce).
-    // Parsing the untrusted page here fetches nothing: a DOMParser document has no browsing context, so
-    // its <img> never becomes "fully active" to load, and <iframe>, <link>, <script>, <video> and srcset
-    // need a browsing context to fetch at all (measured in Chromium: zero requests for each of them).
-    // Scripts in it never run. Only the rewritten text leaves this function, into the sandboxed frame.
-    const nonce = typeof document === "undefined" ? null : document.querySelector<HTMLScriptElement>("script[nonce]")?.nonce;
-    const page = typeof DOMParser === "undefined" ? html : withEmbedderNonce(html, nonce, (text) => new DOMParser().parseFromString(text, "text/html"));
-    return buildHtmlPreviewSrcdoc(page, typeof window === "undefined" ? null : window.location.origin);
-  }, [html]);
-  return (
-    <iframe
-      data-testid="html-artifact-preview-frame"
-      title={title}
-      sandbox={HTML_PREVIEW_SANDBOX}
-      srcDoc={srcDoc}
-      referrerPolicy="no-referrer"
-      allow=""
-      className="h-full w-full flex-1 border-0 bg-white"
-    />
-  );
-}
-
-/** The sentences a React preview shows inside its own frame when it cannot run. */
-export function usePreviewDocumentLabels(): PreviewDocumentLabels {
-  const { t } = useLanguage();
-  return useMemo(
-    () => ({
-      errorTitle: t("chat.artifactWorkspaceErrorTitle"),
-      loadFailed: t("chat.artifactWorkspaceLoadFailed"),
-      noComponent: t("chat.artifactWorkspaceNoComponent"),
-      missingPackage: t("chat.artifactWorkspaceMissingPackage"),
-    }),
-    [t]
-  );
-}
-
 type Loaded =
   | { status: "loading" }
-  | { status: "ready"; html: string }
+  | { status: "ready"; text: string }
   | { status: "failed"; message: string }
   | { status: "too_large" };
 
@@ -79,14 +39,17 @@ export function HtmlArtifactPreviewPanel({
   artifact,
   onClose,
   onRevise,
+  shareControl,
 }: {
   artifact: ChatStreamArtifact;
   onClose: () => void;
   /** Present only when a change can be asked for from here (see GeneratedArtifactCard). */
   onRevise?: (request: string) => Promise<string | null>;
+  /** The share button, when this file may be shared. */
+  shareControl?: ReactNode;
 }) {
   const { t } = useLanguage();
-  const labels = usePreviewDocumentLabels();
+  const workspace = useChatArtifactWorkspace();
   const [loaded, setLoaded] = useState<Loaded>(
     isHtmlPreviewSmallEnough(artifact.byteSize) ? { status: "loading" } : { status: "too_large" }
   );
@@ -114,14 +77,7 @@ export function HtmlArtifactPreviewPanel({
           setLoaded({ status: "too_large" });
           return;
         }
-        const text = new TextDecoder("utf-8").decode(bytes);
-        if (format === "jsx" || format === "tsx") {
-          // React source is a file the model wrote, not a page: it becomes one here, and runs in the same frame.
-          const built = buildCodePreviewDocument("react", text, { language: format, labels, assetOrigin: window.location.origin });
-          setLoaded(built.ok ? { status: "ready", html: built.html } : { status: "too_large" });
-        } else {
-          setLoaded({ status: "ready", html: text });
-        }
+        setLoaded({ status: "ready", text: new TextDecoder("utf-8").decode(bytes) });
       } catch {
         if (!cancelled) setLoaded({ status: "failed", message: t("chat.artifactPreviewFailed") });
       }
@@ -129,7 +85,7 @@ export function HtmlArtifactPreviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [artifact.byteSize, artifact.id, format, labels, t]);
+  }, [artifact.byteSize, artifact.id, t]);
 
   const title = t("chat.artifactPreviewAlt").replaceAll("{filename}", artifact.filename);
   const notice =
@@ -147,7 +103,21 @@ export function HtmlArtifactPreviewPanel({
           {t("chat.artifactPreviewLoading")}
         </p>
       ) : loaded.status === "ready" ? (
-        <HtmlArtifactPreviewFrame html={loaded.html} title={title} />
+        <ArtifactPreviewWorkspace
+          // React source is a file the model wrote, not a page: it becomes one in the frame, as a code block does.
+          source={{
+            kind: format === "jsx" || format === "tsx" ? "react" : "html",
+            language: format,
+            original: loaded.text,
+            artifactId: artifact.id,
+            filename: artifact.filename,
+          }}
+          title={title}
+          editable={workspace.enabled}
+          fillComposer={workspace.fillComposer}
+          onClose={onClose}
+          shareControl={shareControl}
+        />
       ) : null}
     </ArtifactPreviewPanelShell>
   );
