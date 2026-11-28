@@ -118,6 +118,9 @@ test("A failed carry into a worktree takes out only what it wrote, never what th
     const workspace = new Workspace(source, [join(tmp, "app-data")]);
     await assert.rejects(carryAttachmentCopies(workspace, checkout, [`${CODE_ATTACHMENT_FOLDER}/a.png`, `${CODE_ATTACHMENT_FOLDER}/missing.png`]));
     assert.deepEqual(await readdir(join(checkout, CODE_ATTACHMENT_FOLDER)), ["tracked.txt"]);
+    // A check after the copies (the connection changed meanwhile) takes them out the same way.
+    await assert.rejects(carryAttachmentCopies(workspace, checkout, [`${CODE_ATTACHMENT_FOLDER}/a.png`], () => { throw new Error("changed"); }), /changed/);
+    assert.deepEqual(await readdir(join(checkout, CODE_ATTACHMENT_FOLDER)), ["tracked.txt"]);
     // With no folder of its own the branch is left without one.
     const fresh = join(tmp, "fresh");
     await mkdir(fresh);

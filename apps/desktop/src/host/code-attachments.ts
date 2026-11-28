@@ -121,7 +121,8 @@ export async function discardAttachmentCopy(workspace: Workspace, path: string) 
  * Puts the copies a task names into a new worktree of the project, at the same paths: Git does not carry them. If any copy
  * fails, what this call wrote is taken out again (never a file the branch already had), and the error is thrown.
  */
-export async function carryAttachmentCopies(source: Workspace, targetRoot: string, paths: readonly string[]) {
+export async function carryAttachmentCopies(source: Workspace, targetRoot: string, paths: readonly string[],
+  /** Runs once the copies are in; throwing takes them out again, as a failed copy does. */ afterCopy?: () => void) {
   if (!paths.length) return;
   if (paths.some((path) => !isCopyPath(path))) throw new CodeAttachmentRefused("Only attachment copies are carried.");
   const folder = join(targetRoot, CODE_ATTACHMENT_FOLDER);
@@ -142,6 +143,7 @@ export async function carryAttachmentCopies(source: Workspace, targetRoot: strin
       }
       written.push(target);
     }
+    afterCopy?.();
   } catch (error) {
     for (const file of written) await rm(file, { force: true }).catch(() => {});
     if (!hadIgnore) await rm(ignore, { force: true }).catch(() => {});

@@ -4688,9 +4688,14 @@ function registerIpc() {
             }
           },
           // The copies come from the project before the worktree is recorded; a failed copy takes out only what it put in,
-          // so the unchanged checkout is discarded.
+          // so the unchanged checkout is discarded. The copy takes a while, so the connection is checked again after it.
           ...(copiedPaths.size ? {
-            prepare: (project: ProjectRoot) => carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), project.path, [...copiedPaths]),
+            prepare: (project: ProjectRoot) => carryAttachmentCopies(new Workspace(sourceProject.path, [app.getPath("userData")]), project.path, [...copiedPaths], () => {
+              if (projectRoot !== sourceProject || codeConnection() !== connection || !worker || session.aborted || signingOut ||
+                  suspended || closing || installingUpdate() || state.codeExecutionPreference !== preference) {
+                throw new Error("The Code connection changed.");
+              }
+            }),
           } : {}),
         });
       } catch {

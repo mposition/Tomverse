@@ -1152,6 +1152,7 @@ ${text}` : text;
                 onChange={(event) => changeDraft(event.currentTarget.value)} maxLength={MAX_CODE_PROMPT_CHARACTERS}
                 onPaste={(event) => {
                   const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+                  // An attachment always starts a new task (canFollowUp is off while references wait), so none is dropped by a follow-up.
                   if (!images.length || !snapshot?.draftNamespace || !snapshot.root || snapshot.remote) return;
                   // Copied text still pastes as text; only an image-only paste is taken over.
                   if (!event.clipboardData.getData("text/plain")) event.preventDefault();

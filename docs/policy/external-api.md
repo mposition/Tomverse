@@ -211,7 +211,7 @@ offers nothing on the coding API.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /models` | OpenAI model list of what this key's account can run now. Tomverse facts under `tomverse`: capabilities, `context_window_tokens`, `max_output_tokens`, `credits_per_request`. |
+| `GET /models` | OpenAI model list of what this key's account can run now. Tomverse facts under `tomverse`: capabilities, `context_window_tokens`, `max_output_tokens`, `credits_per_request`, and `provider_model_id` (the provider's own id, so Desktop Code can run the model on the person's own provider CLI; owner request 2026-11-28). |
 | `POST /chat/completions` | Chat Completions, streaming or not. |
 | `GET /usage?limit=50` | Tomverse-specific: this key's cap, committed and held credits, and recent request receipts. |
 | `GET /requests/status` | Tomverse-specific, read only: the receipt of **one** request of this key, by `?request_id=req_…` or by the `Idempotency-Key` header it was sent with -- exactly one of the two. For a client that lost a response (before or after its headers) or keeps a session longer than the 100 receipts `/usage` lists. Never dispatches, reserves or changes anything; returns no output (none is stored). Another key's request, another account's and a missing one answer the same `404 request_not_found`, and not found is not evidence that nothing was sent or charged: a request may not have arrived or been admitted yet. `usage_source: server_settlement` because the row does not say whether the token counts came from the provider or the reservation estimate. |
