@@ -192,6 +192,42 @@ export async function runRetryableDatabaseWrite(input: {
   }
 }
 
+/**
+ * Runs work again after a retryable database failure, for work that decides
+ * for itself whether it has already happened.
+ *
+ * `runRetryableDatabaseWrite` asks a separate `committed()` question because
+ * its write cannot tell a re-run from a first run. A transaction that takes its
+ * own lock and re-reads the state it is about to change answers that question
+ * inside itself: a try whose COMMIT landed and whose answer was lost leaves the
+ * state changed, and the next try reads that and changes nothing. Only work of
+ * that shape may be handed here -- anything else would be applied twice.
+ *
+ * A non-retryable failure, or a retryable one after the last delay, is thrown
+ * as it was raised.
+ */
+export async function retrySelfCheckingDatabaseWork<T>(input: {
+  run: () => Promise<T>;
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  onRetry?: (retry: { attempt: number; error: unknown }) => void;
+}): Promise<T> {
+  const pending = [...(input.delaysMs ?? DATABASE_WRITE_RETRY_DELAYS_MS)];
+  const sleep =
+    input.sleep ??
+    ((ms: number) => new Promise<void>((settle) => setTimeout(settle, ms)));
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await input.run();
+    } catch (error) {
+      const delay = isRetryableDatabaseError(error) ? pending.shift() : undefined;
+      if (delay === undefined) throw error;
+      input.onRetry?.({ attempt, error });
+      await sleep(delay);
+    }
+  }
+}
+
 export const isUniqueConstraintDatabaseError = (error: unknown) => {
   const metadata = databaseErrorMetadata(error);
   return (

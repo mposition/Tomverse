@@ -85,6 +85,8 @@ type ModelCatalogueProps = {
   isKeyboardCompact?: boolean;
   /** The list has no Chat use cases to filter by (the coding catalogue). */
   hideTaskFilter?: boolean;
+  /** Models that do not spend the viewer's credits (a provider CLI on their own subscription): no usage meter on their rows. */
+  creditFreeModelIds?: readonly string[];
   modelStatuses: Record<string, ModelCatalogueStatusRecord>;
   hasImageAttachments: boolean;
   favoriteModelIds: string[];
@@ -119,6 +121,7 @@ export function ModelCatalogue({
   isMobileShell,
   isKeyboardCompact = false,
   hideTaskFilter = false,
+  creditFreeModelIds = [],
   modelStatuses,
   hasImageAttachments,
   favoriteModelIds,
@@ -539,13 +542,17 @@ export function ModelCatalogue({
                               ))}
                             </span>
                           )}
-                        <UsageMeterCount credits={usageProfile.credits} kind="chat" className="mt-1 block" />
+                        {!creditFreeModelIds.includes(model.id) && (
+                          <UsageMeterCount credits={usageProfile.credits} kind="chat" className="mt-1 block" />
+                        )}
                       </span>
                       <span className="flex shrink-0 flex-col items-end gap-2">
                         {/* The count sits in the text column: beside the bars, its nowrap line
                             took a third of a 320px row and squeezed the name
                             and description into a column four words wide. */}
-                        <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" showCount={false} />
+                        {!creditFreeModelIds.includes(model.id) && (
+                          <UsageMeter credits={usageProfile.credits} kind="chat" testId="model-credit-badge" showCount={false} />
+                        )}
                         <ModelSelectionBadge
                           isSelected={isSelected}
                           isLocked={isPlanLocked}

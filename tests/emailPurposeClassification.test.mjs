@@ -4,7 +4,7 @@
 // invariants 5 and 7.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -151,13 +151,20 @@ test("the database is pinned to the same pairs", () => {
   // Two places, compared here. The CHECK stops a verdict the application built
   // wrongly; this stops the two drifting apart, which is how a purpose would
   // end up unwritable rather than refused with a message somebody can read.
-  const sql = readFileSync(
-    new URL(
-      "../prisma/migrations/20260921170000_email_permission_ledger/migration.sql",
-      import.meta.url
-    ),
-    "utf8"
-  );
+  // The newest migration that (re)defines the pair constraint: the database
+  // holds whatever was added last, so that is the one the table must match.
+  const migrations = new URL("../prisma/migrations/", import.meta.url);
+  const definer = readdirSync(migrations)
+    .filter((name) => /^\d{14}_/.test(name))
+    .sort()
+    .filter((name) =>
+      readFileSync(new URL(`${name}/migration.sql`, migrations), "utf8").includes(
+        'ADD CONSTRAINT "EmailPermissionDecision_purpose_classification_check"'
+      )
+    )
+    .at(-1);
+  assert.ok(definer, "no migration defines the pair constraint");
+  const sql = readFileSync(new URL(`${definer}/migration.sql`, migrations), "utf8");
   const quoted = (value) => "'" + value + "'";
 
   for (const classification of EMAIL_CLASSIFICATIONS) {

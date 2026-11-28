@@ -1165,6 +1165,10 @@ export const ARTIFACT_FAILURE_CODES = [
   "format_unsupported",
   "limit_exceeded",
   "turn_incomplete",
+  // A Research task file (docs/policy/generated-artifacts.md section 19): withheld while it is rebuilt without
+  // a revoked private source, and a report too large for the file kind (the report itself is the answer).
+  "source_revoked",
+  "content_too_large",
 ] as const;
 
 export type ArtifactFailureCode = (typeof ARTIFACT_FAILURE_CODES)[number];

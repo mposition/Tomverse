@@ -688,6 +688,12 @@ run(
     // lease reconciliation only mean anything against PostgreSQL.
     "tests/integration/scheduled-tasks.db.test.ts",
     "tests/integration/scheduled-task-chat-route.db.test.ts",
+    // A finished run's result email: once per run (the run's own marker,
+    // claimed in the outbox transaction) and never with a switch off.
+    "tests/integration/scheduled-task-notice.db.test.ts",
+    // The server read-aloud's paid call: one request per account, answer and
+    // piece at a time is a conditional upsert, so only PostgreSQL can show it.
+    "tests/integration/chat-readout-lease.db.test.ts",
     "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
@@ -1064,6 +1070,10 @@ run(
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
+    // Public pages made from previewed artifacts: the lock re-checked in the
+    // publishing statement, expiry and lock in the public read, and every
+    // cascade that takes a link down with its source.
+    "tests/integration/artifact-share.db.test.ts",
     // N2: what the database refuses about mobile bearer authentication -- the
     // two-step cascade to a rotation row that has no user column of its own,
     // and the constraint stopping an audit row from naming somebody's device
@@ -1783,6 +1793,14 @@ run(
   ["--conditions=react-server", "--import", "tsx", "--test",
     "--test-concurrency=1", "tests/integration/research-engine-scale.db.test.ts"],
   "Running Deep Research engine v2 synthetic scale, concurrency and 60-minute fake-clock fixtures"
+);
+
+// Delegated tasks on engine v2: the same fakes plus an in-memory object store for the generated file.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-task.db.test.ts"],
+  "Running Deep Research engine v2 delegated tasks: approval, file hand-back, budget, cancel, unknown outcome, switch and revocation"
 );
 
 if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {

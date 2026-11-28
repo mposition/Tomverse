@@ -101,6 +101,8 @@ export type ModelPickerPanelProps = {
    * Escape leave the picker instead of stepping to a recommended screen.
    */
   catalogueOnly?: boolean;
+  /** Models that do not spend the viewer's credits (a provider CLI on their own subscription): no usage meter and no credit estimate. */
+  creditFreeModelIds?: readonly string[];
   models: readonly AiModel[];
   selectedModelIds: string[];
   maxSelectableModels: number;
@@ -179,6 +181,7 @@ export type ModelPickerPanelProps = {
 export function ModelPickerPanel({
   singleModelSelection = false,
   catalogueOnly = false,
+  creditFreeModelIds = [],
   models,
   selectedModelIds,
   maxSelectableModels,
@@ -876,6 +879,7 @@ export function ModelPickerPanel({
           isMobileShell={isMobileShell}
           isKeyboardCompact={isKeyboardCompact}
           hideTaskFilter={catalogueOnly}
+          creditFreeModelIds={creditFreeModelIds}
           modelStatuses={modelStatuses}
           hasImageAttachments={hasImageAttachments}
           favoriteModelIds={favoriteModelIds}
@@ -1009,16 +1013,20 @@ export function ModelPickerPanel({
               {activeSelectedCount === 1
                 ? t("chat.modelsSelectedOne")
                 : t("chat.modelsSelectedOther")}{" "}
-              · {pickerCopy.baseEstimate}{" "}
-              <CreditCostBadge
-                credits={selectedBaseCredits}
-                size="xs"
-                label={
-                  language === "ko"
-                    ? `기본 예상 ${selectedBaseCredits}크레딧`
-                    : `Base estimate ${formatCountedUnit(selectedBaseCredits, englishCreditUnit, "en")}`
-                }
-              />
+              {!(selectedModelIds.length > 0 && selectedModelIds.every((id) => creditFreeModelIds.includes(id))) && (
+                <>
+                  · {pickerCopy.baseEstimate}{" "}
+                  <CreditCostBadge
+                    credits={selectedBaseCredits}
+                    size="xs"
+                    label={
+                      language === "ko"
+                        ? `기본 예상 ${selectedBaseCredits}크레딧`
+                        : `Base estimate ${formatCountedUnit(selectedBaseCredits, englishCreditUnit, "en")}`
+                    }
+                  />
+                </>
+              )}
             </>
           )}
         </p>

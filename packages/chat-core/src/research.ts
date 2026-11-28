@@ -35,6 +35,8 @@ export type ResearchRunView = {
   currentReportRevision: number;
   pauseRequested: boolean;
   cancelRequested: boolean;
+  /** A delegated task: its plan lists steps and the finished report also comes back as this file kind. */
+  task?: { output: "document" | "spreadsheet" | "presentation" };
   plan?: { revision: number; author: string; plan: ResearchPlanView };
   progress: {
     items: ResearchItemCounts;

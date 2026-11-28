@@ -9,7 +9,7 @@ import { FakeGateway, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { openCodeProject } from "./code-project-fixture";
 import { launchNativeFixture } from "./launch-native-fixture";
 import type { Page } from "@playwright/test";
-import { chooseCodeModel, codeModelControl } from "./code-model-picker";
+import { chooseCodeModel, codeModelControl, codeModelPicker } from "./code-model-picker";
 
 // A made-up Z.ai key, put together at run time so no credential-shaped literal sits in the source.
 const sampleZai = ["zai", "e2e", "key", "0123456789"].join("-");
@@ -110,6 +110,12 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
       await expect(picker).toHaveAttribute("data-mode", mode);
     };
     const chooseCli = async (name: "Codex" | "Claude Code") => {
+      // A provider CLI runs on the person's own subscription: its row shows no Tomverse credit usage and no estimate.
+      await codeModelControl(page).click();
+      await expect(codeModelPicker(page).locator('[data-testid="model-option"][data-model-id^="provider-cli:"]').first()).toBeVisible();
+      await expect(codeModelPicker(page).getByTestId("model-credit-badge")).toHaveCount(0);
+      await expect(codeModelPicker(page).getByTestId("model-selection-summary")).not.toContainText(/estimate/i);
+      await page.keyboard.press("Escape");
       await chooseCodeModel(page, { model: name === "Codex" ? "provider-cli:openai" : "provider-cli:anthropic" });
       await expect(codeModelControl(page)).toContainText(name);
     };
@@ -188,12 +194,12 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     // The fake still asks; with no approver and no prompts allowed, the answer is a denial.
     assert.equal(readOnly.response?.response.response.behavior, "deny");
 
-    // Claude Code (Z.ai): offered once the Coding Plan key is saved in Settings. It runs the same Claude Code file with Z.ai's
+    // Z.ai CLI (via Claude Code): offered once the Coding Plan key is saved in Settings. It runs the same Claude Code file with Z.ai's
     // endpoint, the key and a settings folder of its own in its environment; the key is never shown again or on the command line.
     await expect.poll(async () => (await state()).busy, { timeout: 30_000 }).toBe(false);
     await rail.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Development CLIs", exact: true }).click();
-    const zaiSection = page.getByRole("region", { name: "Claude Code (Z.ai)" });
+    const zaiSection = page.getByRole("region", { name: "Z.ai CLI (via Claude Code)" });
     await zaiSection.getByLabel("Z.ai API key").fill(sampleZai);
     await zaiSection.getByRole("button", { name: "Save key" }).click();
     await expect(zaiSection.getByRole("status")).toHaveText(/Key saved on this device, encrypted\.|Key kept for this session only/);
@@ -202,7 +208,7 @@ test("Code runs a task with the person's own CLI: mapped permissions, approvals,
     assert.ok(!JSON.stringify(await state()).includes(sampleZai), "the window never holds the key");
     await rail.getByRole("button", { name: "Code", exact: true }).click();
     await chooseCodeModel(page, { model: "provider-cli:zai" });
-    await expect(codeModelControl(page)).toContainText("Claude Code (Z.ai)");
+    await expect(codeModelControl(page)).toContainText("Z.ai CLI (via Claude Code)");
     await rm(record, { force: true });
     await send("Read the project on Z.ai");
     await expect.poll(async () => { try { return (await seen()).prompt; } catch { return ""; } }, { timeout: 30_000 }).toBe("Read the project on Z.ai");

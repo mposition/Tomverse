@@ -224,6 +224,8 @@ export const routeSmartAdaptive = async (input: {
     requestDigest: string;
     /** The client's User-Agent, for the router and the log. */
     userAgent?: string | null;
+    /** What the decision log names as the protocol; the route-only choice names itself. */
+    logProtocol?: string;
     now?: number;
 }): Promise<SmartAdaptiveDecision | null> => {
     // The models a request may take when the router does not pick: never a
@@ -244,7 +246,7 @@ export const routeSmartAdaptive = async (input: {
         JSON.stringify({
             event: "external_api_smart_adaptive_routed",
             requestId: input.requestId,
-            protocol: "chat_completions",
+            protocol: input.logProtocol ?? "chat_completions",
             routedBy: decision.routedBy,
             modelId: decision.entry.model.id,
             held: decision.held ?? false,

@@ -41,6 +41,7 @@ import { useArtifactRevisionAction } from "@/components/chat/GeneratedArtifactRe
 import { GeneratedArtifactVersions } from "@/components/chat/GeneratedArtifactVersions";
 import { useChatArtifactWorkspace } from "@/components/chat/ChatArtifactWorkspaceContext";
 import { HtmlArtifactPreviewPanel } from "@/components/chat/HtmlArtifactPreviewPanel";
+import { ArtifactShareControl } from "@/components/chat/ArtifactShareControl";
 import { artifactPreviewKind } from "@/lib/chatArtifactPreview";
 import {
   localizedProductHref,
@@ -112,6 +113,8 @@ const FAILURE_COPY_KEYS: Readonly<Record<ArtifactFailureCode, string>> = {
   format_unsupported: "chat.artifactFailedFormat",
   limit_exceeded: "chat.artifactFailedLimit",
   turn_incomplete: "chat.artifactFailedIncomplete",
+  source_revoked: "chat.artifactFailedSourceRevoked",
+  content_too_large: "chat.artifactFailedContentTooLarge",
 };
 
 type GeneratedArtifactCardProps = {
@@ -494,7 +497,15 @@ export function GeneratedArtifactCard({
         <GeneratedArtifactVersions artifact={artifact} />
       )}
       {htmlPreviewOpen && previewKind && (
-        <HtmlArtifactPreviewPanel artifact={artifact} onClose={closeHtmlPreview} onRevise={reviseFromPreview} />
+        <HtmlArtifactPreviewPanel
+          artifact={artifact}
+          onClose={closeHtmlPreview}
+          onRevise={reviseFromPreview}
+          // A public link to this HTML page (generated-artifacts.md section 19); the control asks the server whether it applies.
+          renderShare={!isGuestMode && previewKind === "html"
+            ? ({ edited }) => <ArtifactShareControl source={{ kind: "artifact", artifactId: artifact.id }} edited={edited} />
+            : undefined}
+        />
       )}
       {previewUrl && (
         <div className="w-full @md/artifacts:basis-full">

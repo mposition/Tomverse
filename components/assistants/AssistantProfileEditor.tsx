@@ -26,6 +26,7 @@ import {
     ASSISTANT_PROFILE_LIST_PATH,
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
+import { AssistantSkillExport } from "@/components/assistants/AssistantSkillExport";
 import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
     assistantProfileCreateModelLimit,
@@ -205,6 +206,7 @@ export function AssistantProfileEditor({
     profileId,
     onCreated,
     knowledgeEnabled = false,
+    skillExportEnabled = false,
     creationEntry,
     returnProduct,
     assistantKnowledgeGuideActive = false,
@@ -219,6 +221,13 @@ export function AssistantProfileEditor({
      * show the panel claim the feature is on.
      */
     knowledgeEnabled?: boolean;
+    /**
+     * Whether the `SKILL.md` download is offered, resolved on the server from
+     * the package import flag the route behind it answers to. Off by default
+     * for the same reason as `knowledgeEnabled`: the create screen never has a
+     * published profile to export.
+     */
+    skillExportEnabled?: boolean;
     /** The source that owns create copy, navigation and privacy-safe funnel data. */
     creationEntry?: "settings" | "chat" | "guide";
     /** Set by the route after comparing the guide query to its one known value. */
@@ -1368,6 +1377,14 @@ export function AssistantProfileEditor({
                                         ))}
                                     </ul>
                                 </section>
+                            )}
+
+                            {skillExportEnabled && profileId && profile?.currentVersionId && (
+                                <AssistantSkillExport
+                                    profileId={profileId}
+                                    className={`mt-4 ${sectionClass}`}
+                                    buttonClassName={secondaryButtonClass}
+                                />
                             )}
 
                             <section className={`mt-4 ${sectionClass}`}>

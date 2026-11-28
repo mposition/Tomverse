@@ -1,4 +1,4 @@
-import type { ResearchBrief, ResearchPlan } from "./researchEngineContract";
+import type { ResearchBrief, ResearchPlan, ResearchTaskOutput } from "./researchEngineContract";
 
 /**
  * Role prompts for Research engine v2. Context for roles that can cause public
@@ -29,17 +29,28 @@ export type PublicEvidenceBlock = { sourceKey: string; fromChunk: number; toChun
 export type PublicResearchContext = {
   readonly kind: "public";
   publicBrief: string;
-  brief: Pick<ResearchBrief, "deliverable" | "searchLanguages" | "regions" | "period" | "freshness" | "includeDomains" | "excludeDomains">;
+  brief: Pick<ResearchBrief, "deliverable" | "searchLanguages" | "regions" | "period" | "freshness" | "includeDomains" | "excludeDomains" | "taskOutput">;
   privateSourceCount: number;
   currentDate: string;
   locale: string;
   addedQuestions: string[];
 };
 
+/** What each delegated-task file becomes, so the plan and every section are shaped for it. */
+const TASK_SHAPES: Record<ResearchTaskOutput, { file: string; outline: string; section: string }> = {
+  document: { file: "a written document (Word file)", outline: "the document's sections, in reading order",
+    section: "This section becomes part of a document: write clear, complete paragraphs." },
+  spreadsheet: { file: "a spreadsheet (Excel file)", outline: "the spreadsheet's tables: every outline section becomes one table (set table to true)",
+    section: "This section becomes a table in a spreadsheet: put its content in one table with clear columns, with at most one short paragraph." },
+  presentation: { file: "a slide deck (PowerPoint file)", outline: "the deck's sections, each a few slides of short points",
+    section: "This section becomes slides: write each paragraph as one short point of one or two sentences." },
+};
+
 const briefLines = (context: PublicResearchContext) => [
   `Current date: ${context.currentDate}. Output language: ${context.locale}.`,
-  `Research question (public):\n<question>\n${context.publicBrief}\n</question>`,
-  `Deliverable: ${context.brief.deliverable}.`,
+  context.brief.taskOutput ? `Task the user delegated (public):\n<task>\n${context.publicBrief}\n</task>`
+    : `Research question (public):\n<question>\n${context.publicBrief}\n</question>`,
+  context.brief.taskOutput ? `Deliverable: ${TASK_SHAPES[context.brief.taskOutput].file}.` : `Deliverable: ${context.brief.deliverable}.`,
   context.brief.searchLanguages.length ? `Search languages: ${context.brief.searchLanguages.join(", ")}.` : "",
   context.brief.regions.length ? `Regions: ${context.brief.regions.join(", ")}.` : "",
   context.brief.period ? `Period of interest: ${context.brief.period.from ?? "open"} to ${context.brief.period.to ?? "open"}.` : "",
@@ -50,9 +61,16 @@ const briefLines = (context: PublicResearchContext) => [
   ...context.addedQuestions.map((question) => `Question the user added to the research: ${question}`),
 ].filter(Boolean).join("\n");
 
+/**
+ * A delegated task is planned as steps of work. The steps can only be web searches, reading public pages
+ * and the user's selected private sources, and writing the deliverable: nothing in a plan can send, post,
+ * buy, sign in or change anything, because the executor has no such tool (RESEARCH_MODEL_TOOL_NAMES).
+ */
+const TASK_PLANNER = (output: ResearchTaskOutput) => `You plan a task the user delegated: gather what it needs and hand back ${TASK_SHAPES[output].file}. Break the work into concrete steps; each step is a sub-question whose answer the deliverable needs, with web search queries. The only actions available are web search, reading public pages and the private sources the user selected, and writing the deliverable from what was found. Nothing can be sent, posted, bought, booked, signed in to or changed anywhere; if the task asks for that, list it as an assumption that you only prepare the material. The outline is ${TASK_SHAPES[output].outline}. Make reasonable assumptions explicit. Ask a clarification only when the answer would materially change the work and cannot be assumed; mark it blocking only if work cannot start without it.`;
+
 export const plannerPrompt = (context: PublicResearchContext, feedback?: string) => ({
-  system: `${SHARED}\nYou plan a multi-step research project. Make reasonable assumptions explicit. Ask a clarification only when the answer would materially change the research and cannot be assumed; mark it blocking only if research cannot start without it.`,
-  prompt: `${briefLines(context)}${feedback ? `\n\nUser feedback on the previous plan:\n${feedback}` : ""}\n\nReturn a plan: sub-questions with search queries, completion criteria and a report outline whose sections reference sub-question keys. Use snake_case keys.`,
+  system: `${SHARED}\n${context.brief.taskOutput ? TASK_PLANNER(context.brief.taskOutput) : "You plan a multi-step research project. Make reasonable assumptions explicit. Ask a clarification only when the answer would materially change the research and cannot be assumed; mark it blocking only if research cannot start without it."}`,
+  prompt: `${briefLines(context)}${feedback ? `\n\nUser feedback on the previous plan:\n${feedback}` : ""}\n\nReturn a plan: ${context.brief.taskOutput ? "work steps (as sub-questions) with search queries, completion criteria and a deliverable outline" : "sub-questions with search queries, completion criteria and a report outline"} whose sections reference sub-question keys. Use snake_case keys.`,
 });
 
 export const researcherPrompt = (context: PublicResearchContext, input: {
@@ -88,8 +106,8 @@ export const verifierPrompt = (input: { claims: Array<{ claimKey: string; text: 
 });
 
 export const writerSectionPrompt = (input: { heading: string; purpose: string; question: string; locale: string; table: boolean;
-  claims: Array<{ claimKey: string; text: string; verification: string; kind: string }>; feedback?: string; instruction?: string }) => ({
-  system: `${SHARED}\nYou write one section of a research report in ${input.locale}. Use only the verified claims provided; cite them with claimKeys on every paragraph or table that relies on them. Present conflicting or unverified claims as such. Do not add facts that are not in the claims.${input.table ? " Include a comparison table where it helps." : ""}`,
+  claims: Array<{ claimKey: string; text: string; verification: string; kind: string }>; feedback?: string; instruction?: string; taskOutput?: ResearchTaskOutput }) => ({
+  system: `${SHARED}\nYou write one section of a research report in ${input.locale}. Use only the verified claims provided; cite them with claimKeys on every paragraph or table that relies on them. Present conflicting or unverified claims as such. Do not add facts that are not in the claims.${input.table ? " Include a comparison table where it helps." : ""}${input.taskOutput ? ` ${TASK_SHAPES[input.taskOutput].section}` : ""}`,
   prompt: `Report question:\n${input.question}\n\nSection: ${input.heading}\nPurpose: ${input.purpose}${input.instruction ? `\nUser instruction: ${input.instruction}` : ""}${input.feedback ? `\nYour previous draft was rejected: ${input.feedback}` : ""}\n\nClaims:\n${input.claims.map((claim) => `${claim.claimKey} [${claim.verification}, ${claim.kind}] ${claim.text}`).join("\n") || "(no verified claims for this section)"}`,
 });
 

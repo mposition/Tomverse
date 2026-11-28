@@ -50,10 +50,10 @@ test("the Chat picker still opens on its recommendations", () => {
   assert.ok(chat.includes(en.chat.singleModelRequired));
 });
 
-function catalogue(hideTaskFilter: boolean) {
+function catalogue(hideTaskFilter: boolean, creditFreeModelIds?: string[]) {
   return renderToStaticMarkup(<LanguageProvider initialLang="en" forceInitialLang><ModelCatalogue models={[coder]} lang="en" t={(key) => key} searchQuery="" filters={EMPTY_MODEL_CATALOGUE_FILTERS}
     onFiltersChange={noop} isFilterSheetOpen={false} onFilterSheetOpenChange={noop} selectedModelIds={[coder.id]} currentPlan="Max"
-    isGuestMode={false} isMobileShell={false} hideTaskFilter={hideTaskFilter} modelStatuses={{}} hasImageAttachments={false}
+    isGuestMode={false} isMobileShell={false} hideTaskFilter={hideTaskFilter} creditFreeModelIds={creditFreeModelIds} modelStatuses={{}} hasImageAttachments={false}
     favoriteModelIds={[]} recentModelIds={[]} onToggleFavorite={noop} onSelectModel={noop} /></LanguageProvider>);
 }
 
@@ -62,4 +62,14 @@ test("the coding catalogue is listed without the Chat use-case filter", () => {
   assert.match(catalogue(true), /data-model-id="catalogue-coder"/);
   assert.match(catalogue(true), /data-testid="model-filter-sheet-trigger"/);
   assert.match(catalogue(false), /data-testid="model-task-filter"/);
+});
+
+test("a credit-free model (a provider CLI on the person's subscription) shows no usage meter or credit estimate", () => {
+  assert.match(catalogue(true), /data-testid="model-credit-badge"/);
+  assert.doesNotMatch(catalogue(true, [coder.id]), /data-testid="model-credit-badge"/);
+  assert.match(catalogue(true, [coder.id]), /data-model-id="catalogue-coder"/);
+  assert.match(panel({ catalogueOnly: true }), /Base estimate/);
+  const free = panel({ catalogueOnly: true, creditFreeModelIds: [coder.id] });
+  assert.doesNotMatch(free, /Base estimate/);
+  assert.match(free, /data-testid="model-selection-summary"/);
 });

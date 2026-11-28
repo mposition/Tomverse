@@ -360,12 +360,18 @@ export function desktopCodeSessionEnabled() {
 }
 
 export const DESKTOP_CODE_SESSION_READS: readonly string[] = ["/api/code/v1/models", "/api/code/v1/usage", "/api/code/v1/requests/status"];
-export const DESKTOP_CODE_SESSION_WRITES: readonly string[] = ["/api/code/v1/chat/completions", "/api/code/v1/web-search"];
+/**
+ * The route-only choice (docs/policy/external-api.md section 5.3, lib/externalApiRouteOnlyCore.ts): enrolled for the
+ * Desktop session only while its own switch is on, so with the switch off the route is not even reachable by a session.
+ */
+const DESKTOP_ROUTE_ONLY_PATH = "/api/code/v1/route";
+export const DESKTOP_CODE_SESSION_WRITES: readonly string[] = ["/api/code/v1/chat/completions", "/api/code/v1/web-search", DESKTOP_ROUTE_ONLY_PATH];
 
 /** Whether this exact method and path is a coding API call a Desktop session may make now. */
 export function desktopCodeSessionRoute(path: string, method: string): boolean {
   if (!desktopCodeSessionEnabled()) return false;
   if (DESKTOP_CODE_SESSION_READS.includes(path)) return method === "GET";
+  if (path === DESKTOP_ROUTE_ONLY_PATH && process.env.EXTERNAL_API_ROUTE_ONLY_ENABLED !== "true") return false;
   if (DESKTOP_CODE_SESSION_WRITES.includes(path)) return method === "POST";
   return false;
 }

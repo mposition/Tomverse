@@ -3,7 +3,7 @@ import type { Language } from "../../../../lib/language";
 import { desktopEvidenceCopy } from "../../../../locales/desktopEvidence";
 import { desktopShellCopy } from "../../../../locales/desktopShell";
 import { desktopCodeQuotaCopy } from "../../../../locales/desktopCodeQuota";
-import { zCodeExtraUsageUnavailableCode, type CodeQuotaEvidence, type RecoveryResult, type RunStatus, type Task } from "../contract";
+import type { CodeQuotaEvidence, RecoveryResult, RunStatus, Task } from "../contract";
 
 const guidance: Partial<Record<RunStatus, keyof typeof desktopEvidenceCopy.en>> = {
   blocked: "blockedGuide", failed: "failedGuide", unknown: "unknownGuide",
@@ -15,14 +15,12 @@ export function CodeQuotaPanel({ quota, language, openSettings }: { quota: CodeQ
   const reset = resetAt && Number.isFinite(Date.parse(resetAt))
     ? copy.reset.replace("{time}", new Date(resetAt).toLocaleString(language, { dateStyle: "medium", timeStyle: "short" }))
     : copy.resetUnknown;
-  const overage = quota.source === "zcode" && zCodeExtraUsageUnavailableCode.safeParse(quota.providerCode).success
-    ? copy.overageUnavailable : copy.overageUnknown;
   return <section className="code-quota" aria-label={copy.paused}>
     <div role="status">
       <p><strong>{copy.paused}</strong></p>
       <p>{copy[quota.reason]}</p>
       <p className="code-quota-details"><span>{reset}</span><span>{copy.remainingUnknown}</span>
-        {quota.source !== "tomverse_api" && <span>{overage}</span>}</p>
+        {quota.source !== "tomverse_api" && <span>{copy.overageUnknown}</span>}</p>
     </div>
     <button className="soft" type="button" onClick={openSettings}>{copy.settings}</button>
   </section>;

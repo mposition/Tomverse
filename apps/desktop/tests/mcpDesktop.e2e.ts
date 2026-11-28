@@ -12,15 +12,11 @@ import { expect, type ElectronApplication } from "@playwright/test";
 import { FakeGateway, fixtureWorkAnalysis, TEST_KEY } from "../../tomverse-cli/tests/fakeGateway.js";
 import { antigravityModel, antigravityPatchFunction, antigravityReadFunction, antigravityTaskListFunction } from "../src/host/antigravity-fixture";
 import { grokPatchFunction, grokReadFunction } from "../src/host/grok-fixture";
-import { deepSeekPatchFunction, deepSeekReadFunction, vibePatchFunction, vibeReadFunction } from "../src/host/native-mcp-server";
-import { sendDeepSeekResponse } from "./deepseek-response-fixture";
+import { directMcpPatchFunction, directMcpReadFunction, vibePatchFunction, vibeReadFunction } from "../src/host/native-mcp-server";
 import { decideNativePatch, launchNativeFixture, removeNativeFixtureDirectory } from "./launch-native-fixture";
 
 const vendors = [
   { key: "vibe", provider: "mistral", name: "Vibe", version: "3.1.4", archive: process.env.TOMVERSE_DESKTOP_VIBE_TASK_ARCHIVE },
-  { key: "deepseek", provider: "deepseek", name: "DeepSeek Harness", version: "0.2.2-rc.2",
-    archive: process.env.TOMVERSE_DESKTOP_DEEPSEEK_TASK_ARCHIVE },
-  { key: "zcode", provider: "zhipu", name: "ZCode Agent", version: "0.17.1", archive: process.env.TOMVERSE_DESKTOP_ZCODE_TASK_DIR },
   { key: "minimax", provider: "minimax", name: "MiniMax Code", version: "0.7.9", archive: process.env.TOMVERSE_DESKTOP_MINIMAX_TASK_DIR },
   { key: "grok", provider: "xai", name: "Grok Build", version: "1.0.92", archive: process.env.TOMVERSE_DESKTOP_GROK_TASK_BINARY },
   { key: "antigravity", provider: "google", name: "Antigravity", version: process.platform === "darwin" ? "1.5.15" : "1.5.14",
@@ -88,30 +84,27 @@ function sendVibeResponse(response: ServerResponse, model: string, index: number
     usage: { prompt_tokens: 21, completion_tokens: 4, total_tokens: 25 } }) + "\n\n");
   response.end("data: [DONE]\n\n");
 }
-for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop approval and restores the verified task${vendor.key === "zcode" ? "" : " after a follow-up"}`, {
+for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop approval and restores the verified task after a follow-up`, {
   timeout: 6 * taskWait + 20_000, skip: vendor.archive ? false : `Requires the pinned ${vendor.name} release`,
 }, async () => {
-  const deepSeek = vendor.key === "deepseek";
-  const zcode = vendor.key === "zcode";
   const miniMax = vendor.key === "minimax";
   const grok = vendor.key === "grok";
   const antigravity = vendor.key === "antigravity";
-  const directMcp = deepSeek || zcode || miniMax;
-  const model = antigravity ? antigravityModel : zcode ? "gpt-4o" : vendor.key + "-desktop-fixture";
+  const directMcp = miniMax;
+  const model = antigravity ? antigravityModel : vendor.key + "-desktop-fixture";
   const geminiCall = (name: string, args: object) => ({ name, args: { ...args, toolSummary: "Desktop workspace operation" } });
   const invoke = (name: string, args: object) => grok ? { name: "use_tool", args: { tool_name: name, tool_input: args } } :
     antigravity ? geminiCall(name, args) :
     directMcp ? { name, args } : { name: "run_typescript", args: {
     code: "async function main() { return await tools." + name + "(" + JSON.stringify(args) + "); }",
   } };
-  const readName = antigravity ? antigravityReadFunction : grok ? grokReadFunction : directMcp ? deepSeekReadFunction : vibeReadFunction;
-  const patchName = antigravity ? antigravityPatchFunction : grok ? grokPatchFunction : directMcp ? deepSeekPatchFunction : vibePatchFunction;
-  const todoName = antigravity ? antigravityTaskListFunction : miniMax ? "todowrite" : deepSeek || grok ? "todo_write" : zcode ? "TodoWrite" : "todo";
+  const readName = antigravity ? antigravityReadFunction : grok ? grokReadFunction : directMcp ? directMcpReadFunction : vibeReadFunction;
+  const patchName = antigravity ? antigravityPatchFunction : grok ? grokPatchFunction : directMcp ? directMcpPatchFunction : vibePatchFunction;
+  const todoName = antigravity ? antigravityTaskListFunction : miniMax ? "todowrite" : grok ? "todo_write" : "todo";
   const read = (path: string) => invoke(readName, { path });
   const sendModelResponse = (response: ServerResponse, serial: number, tool?: Tool) => {
     if (antigravity) return sendAntigravityResponse(response, geminiApiModel, tool);
-    if (deepSeek) return sendDeepSeekResponse(response, model, serial, tool);
-    const omitUsage = ((grok || zcode) && phase === "ask") || (zcode && phase === "resume" && count.resume > 1);
+    const omitUsage = grok && phase === "ask";
     return sendVibeResponse(response, model, serial, tool, undefined, !omitUsage);
   };
   const temp = await realpath(await mkdtemp(join(tmpdir(), miniMax ? "tv-" : "tomverse-mcp-desktop-")));
@@ -140,7 +133,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
   let stoppedRequest = false;
   let stoppedGuide = false;
   let crashedRequestClosed = false;
-  const modelPath = antigravity ? `/v1beta/models/${geminiApiModel}:streamGenerateContent` : deepSeek ? "/v1/messages" : "/v1/chat/completions";
+  const modelPath = antigravity ? `/v1beta/models/${geminiApiModel}:streamGenerateContent` : "/v1/chat/completions";
   const endpoint = createServer(async (request, response) => {
     try {
       const path = antigravity ? new URL(request.url ?? "/", "http://127.0.0.1").pathname : request.url;
@@ -159,7 +152,6 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       assert.ok(!raw.includes(fileMarker));
       if (geminiTitle) return sendAntigravityResponse(response, geminiTitleModel);
       const body = JSON.parse(raw);
-      if (deepSeek) assert.equal(Object.hasOwn(body, "dsh_session_log"), false, "The DeepSeek request included a native session log");
       if (antigravity) {
         const readOnly = phase === "ask" || phase === "crashStream";
         const available = body.tools.flatMap((group: { functionDeclarations?: Tool[]; function_declarations?: Tool[] }) =>
@@ -176,8 +168,6 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
         assert.ok(raw.includes(projectRule), "Project instructions must reach the model.");
       }
       const lastResult = antigravity ? JSON.stringify(body.contents.at(-1)?.parts) :
-        deepSeek ? JSON.stringify(body.messages.flatMap(({ content }: { content: unknown }) =>
-        Array.isArray(content) ? content : []).filter(({ type }: { type: string }) => type === "tool_result").at(-1)?.content) :
         body.messages.filter(({ role }: { role: string }) => role === "tool").at(-1)?.content;
       if (grok) {
         const tools = body.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
@@ -223,7 +213,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
           return /"turnId":"([a-f\d-]+)"/.exec(text)?.[1];
         }).find(Boolean);
       const todoItem = (id: string, content: string, status: string) =>
-        deepSeek ? { content, status } : grok || antigravity ? { id, content, status } :
+        grok || antigravity ? { id, content, status } :
           directMcp ? { content, status, priority: "medium" } : { id, content, status, priority: "medium" };
       const todo = (status: "pending" | "in_progress" | "completed") => {
         const guided = phase === "guide";
@@ -238,8 +228,8 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       if (phase === "ask") {
         if (antigravity && index === 1) return sendModelResponse(response, serial,
           { name: "write_file", args: { Path: join(project, "ask-denied.txt"), Content: edited } });
-        if (index === 1) return sendModelResponse(response, serial, { name: zcode ? "Write" : grok || directMcp ? "write" : "write_file",
-          args: { [zcode || grok ? "file_path" : "path"]: join(project, "ask-denied.txt"), content: edited } });
+        if (index === 1) return sendModelResponse(response, serial, { name: grok || directMcp ? "write" : "write_file",
+          args: { [grok ? "file_path" : "path"]: join(project, "ask-denied.txt"), content: edited } });
         if (grok && index === 2) {
           assert.match(lastResult, /Tool not found: write/);
           return sendModelResponse(response, serial, { name: "read_file", args: { target_file: join(temp, "private.txt") } });
@@ -267,7 +257,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       if (phase === "resume") {
         assert.ok(raw.includes(titles.allow));
         assert.ok(raw.includes("attached-file.txt") && raw.includes("attached-folder"));
-        if (!zcode) assert.ok(raw.includes(guideText));
+        assert.ok(raw.includes(guideText));
         if (index === 1) return sendModelResponse(response, serial, read("allow.txt"));
         assert.equal(index, 2);
         assert.match(lastResult, new RegExp(edited));
@@ -373,7 +363,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     assert.equal((await task())?.nativeSession?.provider, vendor.provider);
     assert.equal((await task())?.root, project);
     await assert.rejects(readFile(join(project, "ask-denied.txt")), { code: "ENOENT" });
-    if (grok || zcode || deepSeek) {
+    if (grok) {
       assert.equal((await task())?.nativeRuns?.at(-1)?.usage, undefined);
       const usage = page.getByText(`Provider usage · ${vendor.name}`, { exact: true });
       await usage.click();
@@ -430,34 +420,32 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
       await decideNativePatch(dialog, action === "deny" ? "Deny" : "Allow once");
       if (action === "allow") {
         await expect.poll(() => count.allow, { timeout: 25_000 }).toBe(5);
-        if (!zcode) {
-          const initial = await task();
-          assert.ok(initial?.id && initial.nativeSession);
-          phase = "guide";
-          await composer.fill(guideText);
-          await page.getByRole("button", { name: "Send follow-up instruction", exact: true }).click();
-          await expect.poll(async () => {
-            assert.ifError(fixtureError);
-            const state = await task();
-            if (state?.status === "unknown" || state?.status === "failed") {
-              throw new Error(`${vendor.name} reached ${state.status} after ${count.guide} follow-up requests.`);
-            }
-            return count.guide;
-          }, { timeout: taskWait }).toBe(3);
-          await expect.poll(() => stoppedRequest).toBe(true);
-          await expect(composer).toBeEmpty();
-          await expect(page.getByRole("region", { name: "Request analysis" })).toContainText(guideText);
-          await expect(page.locator(".code-task-list-item").filter({ hasText: guideRow })).toContainText(model);
-          const guided = await task();
-          assert.equal(guided?.id, initial.id);
-          assert.equal(guided?.nativeSession?.threadId, initial.nativeSession.threadId);
-          assert.notEqual(guided?.nativeSession?.turnId, initial.nativeSession.turnId);
-          assert.deepEqual(guided?.changes, initial.changes);
-          assert.equal(guided?.entries.filter((entry) => entry.role === "user" && entry.text === guideText).length, 1);
-        }
+        const initial = await task();
+        assert.ok(initial?.id && initial.nativeSession);
+        phase = "guide";
+        await composer.fill(guideText);
+        await page.getByRole("button", { name: "Send follow-up instruction", exact: true }).click();
+        await expect.poll(async () => {
+          assert.ifError(fixtureError);
+          const state = await task();
+          if (state?.status === "unknown" || state?.status === "failed") {
+            throw new Error(`${vendor.name} reached ${state.status} after ${count.guide} follow-up requests.`);
+          }
+          return count.guide;
+        }, { timeout: taskWait }).toBe(3);
+        await expect.poll(() => stoppedRequest).toBe(true);
+        await expect(composer).toBeEmpty();
+        await expect(page.getByRole("region", { name: "Request analysis" })).toContainText(guideText);
+        await expect(page.locator(".code-task-list-item").filter({ hasText: guideRow })).toContainText(model);
+        const guided = await task();
+        assert.equal(guided?.id, initial.id);
+        assert.equal(guided?.nativeSession?.threadId, initial.nativeSession.threadId);
+        assert.notEqual(guided?.nativeSession?.turnId, initial.nativeSession.turnId);
+        assert.deepEqual(guided?.changes, initial.changes);
+        assert.equal(guided?.entries.filter((entry) => entry.role === "user" && entry.text === guideText).length, 1);
         await page.getByRole("button", { name: "Stop Code task" }).click();
         await awaitTask("stopped");
-        await expect.poll(() => zcode ? stoppedRequest : stoppedGuide).toBe(true);
+        await expect.poll(() => stoppedGuide).toBe(true);
         assert.equal(await readFile(file, "utf8"), edited);
         assert.equal((await task())?.plan?.items.find(({ title }) => title === rowTitle)?.complete, true);
       } else {
@@ -478,7 +466,7 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     await openCodeProject(restored);
     await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: titles.allow, exact: true }).click();
     await expect(restored.locator(".code-task-list-item").filter({ hasText: rowTitle })).toContainText(model);
-    if (!zcode) await expect(restored.locator(".entry--user").filter({ hasText: guideText })).toHaveCount(1);
+    await expect(restored.locator(".entry--user").filter({ hasText: guideText })).toHaveCount(1);
     const savedReferences = restored.getByRole("list", { name: "Attached project references" });
     await expect(savedReferences.getByRole("listitem")).toHaveCount(2);
     phase = "resume";
@@ -498,28 +486,6 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     assert.deepEqual(resumed?.changes, stopped.changes);
     assert.deepEqual(resumed?.references, references);
     assert.equal(gateway.completions.length, 0);
-    if (zcode) {
-      const run = resumed?.nativeRuns?.at(-1);
-      const usage = run?.usage;
-      assert.ok(run && usage?.source === "zcode_turn", "The completed ZCode turn must keep its provider usage.");
-      assert.equal(run.session.turnId, resumed?.nativeSession?.turnId);
-      const { nativeTurnId, eventId, ...counts } = usage;
-      assert.match(nativeTurnId, /^turn_/);
-      assert.match(eventId, /^[a-f0-9-]{36}$/i);
-      assert.deepEqual(counts, { source: "zcode_turn", reportedRequests: 1, inputTokens: 21, outputTokens: 4 });
-      assert.equal(resumed?.apiUsage, undefined);
-      assert.deepEqual(resumed?.transmission, []);
-      await app.close();
-      app = await launchNativeFixture(descriptor);
-      restored = await app.firstWindow();
-      await openCodeProject(restored);
-      await restored.getByRole("complementary", { name: "History" }).getByRole("button", { name: titles.allow, exact: true }).click();
-      const summary = restored.getByText("Provider usage · ZCode Agent", { exact: true });
-      await summary.click();
-      await expect(summary.locator("..")).toContainText("Reported model requests 1 · Input tokens 21 · Output tokens 4");
-      await expect(summary.locator("..")).toContainText("Billing source unconfirmed");
-      assert.deepEqual((await current())?.nativeRuns?.at(-1)?.usage, usage);
-    }
     if (antigravity || vendor.key === "vibe" || miniMax || grok) {
       const vibe = vendor.key === "vibe";
       const grokRequests = count.resume + (grokSearches.get("resume") ?? 0);
@@ -603,173 +569,5 @@ for (const vendor of vendors) test(`${vendor.name} binds Code edits to Desktop a
     if (endpoint.listening) await new Promise<void>((resolve) => endpoint.close(() => resolve()));
     await gateway.stop();
     await removeNativeFixtureDirectory(temp);
-  }
-});
-
-const zCodeArchive = process.env.TOMVERSE_DESKTOP_ZCODE_TASK_DIR;
-test("ZCode Agent applies a guide in the active task and restores the draft when stopped before delivery", {
-  timeout: 4 * taskWait, skip: !zCodeArchive && "Requires the pinned ZCode Agent release",
-}, async () => {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "tomverse-zcode-guide-")));
-  const root = join(directory, "project"), profile = join(directory, "profile"), descriptor = join(directory, "fixture.json");
-  const gateway = new FakeGateway({ script: () => ({ text: "Unexpected Tomverse API execution." }) });
-  const planPrompt = "Plan the workspace inspection";
-  const guide = "Use the folder evidence for the revised plan.";
-  const stopPrompt = "Inspect the workspace and wait";
-  const cancelledGuide = "Include the input that will be stopped.";
-  const revisedAnswer = "The revised workspace plan is ready.";
-  const model = "gpt-4o";
-  let held: ServerResponse | undefined;
-  let heldClosed = false;
-  let phase: "plan" | "stop" | "resume" = "plan";
-  let calls = 0;
-  let revisedTurn: string | undefined;
-  let fixtureError: unknown;
-  const server = createServer(async (request, response) => {
-    try {
-      assert.equal(request.url, "/v1/chat/completions");
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(chunk);
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      assert.equal(body.model, model);
-      assert.ok(!JSON.stringify(body.messages).includes(cancelledGuide));
-      assert.ok(!body.tools.some((tool: { function: { name: string } }) => tool.function.name === deepSeekPatchFunction));
-      const userInputs: string[] = body.messages.filter(({ role }: { role: string }) => role === "user")
-        .map(({ content }: { content: unknown }) => typeof content === "string" ? content : JSON.stringify(content));
-      calls++;
-      if (calls === 1 && phase !== "resume") {
-        assert.ok(userInputs.some((input) => input.includes(phase === "plan" ? planPrompt : stopPrompt)));
-        held = response;
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        response.flushHeaders();
-        response.once("close", () => { heldClosed = true; });
-        return;
-      }
-      if (phase === "resume") {
-        assert.equal(calls, 1);
-        assert.ok(JSON.stringify(body.messages).includes(stopPrompt));
-        return sendVibeResponse(response, model, calls, undefined, "The stopped workspace inspection resumed.");
-      }
-      assert.equal(phase, "plan");
-      const text = userInputs.findLast((input) => input.includes(guide));
-      assert.ok(text, `ZCode request ${calls} did not include the follow-up.`);
-      assert.ok(JSON.stringify(body.messages).includes(planPrompt));
-      revisedTurn = /"turnId":"([a-f\d-]+)"/.exec(text)?.[1];
-      assert.ok(revisedTurn);
-      if (calls === 2) return sendVibeResponse(response, model, calls, { name: "TodoWrite", args: { todos: [{
-        content: JSON.stringify({ title: "Inspect the selected folder", turnId: revisedTurn,
-          analysis: { ...fixtureWorkAnalysis, objective: guide } }), status: "pending", priority: "medium",
-      }] } });
-      assert.equal(calls, 3);
-      return sendVibeResponse(response, model, calls, undefined, revisedAnswer);
-    } catch (error) {
-      fixtureError = error;
-      response.writeHead(400).end();
-    }
-  });
-  let app: ElectronApplication | undefined;
-  try {
-    await Promise.all([mkdir(root), mkdir(profile), gateway.start()]);
-    await writeFile(join(profile, "language.txt"), "en");
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const address = server.address();
-    assert.ok(address && typeof address !== "string");
-    await writeFile(descriptor, JSON.stringify({ root, profile, endpoint: gateway.base, key: TEST_KEY, zcode: {
-      executable: zCodeArchive, version: "0.17.1", model, origin: "http://127.0.0.1:" + address.port, allowSavedHistory: true,
-    } }));
-    app = await launchNativeFixture(descriptor);
-    const page = await app.firstWindow();
-    const task = () => page.evaluate(() => window.desktop.state().then(({ task }) => task));
-    const awaitStatus = (status: string) => expect.poll(async () => {
-      assert.ifError(fixtureError);
-      const current = await task();
-      if (current?.status === "unknown" || current?.status === "failed") throw new Error(`ZCode returned ${current.status} during ${phase}.`);
-      return current?.status;
-    }, { timeout: taskWait }).toBe(status);
-    await openCodeProject(page);
-    await page.evaluate(() => window.desktop.setCodeExecutionPreference("provider_cli"));
-    const composer = page.getByRole("textbox", { name: "Code request" });
-    const send = page.getByRole("button", { name: "Send Code request", exact: true });
-    const steer = page.getByRole("button", { name: "Send follow-up instruction", exact: true });
-    await page.getByRole("checkbox", { name: "Save to local history" }).check();
-    await startPlanOnly(page, planPrompt);
-    await expect.poll(() => Boolean(held), { timeout: taskWait }).toBe(true);
-    const initial = await task();
-    assert.ok(initial?.id && initial.nativeSession);
-    await composer.fill(guide);
-    await steer.click();
-    await expect.poll(async () => (await task())?.pendingFollowUp, { timeout: taskWait }).toBe(guide);
-    assert.equal((await task())?.entries.filter((entry) => entry.role === "user" && entry.text === guide).length, 0);
-    assert.equal(calls, 1);
-    const chunk = { id: "guide-held", object: "chat.completion.chunk", created: 1, model };
-    held!.write("data: " + JSON.stringify({ ...chunk, choices: [{ index: 0, delta: { role: "assistant", content: "Initial inspection." }, finish_reason: null }] }) + "\n\n");
-    held!.write("data: " + JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) + "\n\n");
-    held!.write("data: " + JSON.stringify({ ...chunk, choices: [],
-      usage: { prompt_tokens: 17, completion_tokens: 6, total_tokens: 23 } }) + "\n\n");
-    held!.end("data: [DONE]\n\n");
-    await awaitStatus("completed");
-    await expect(composer).toBeEmpty();
-    const finished = await task();
-    assert.equal(finished?.id, initial.id);
-    assert.equal(finished?.nativeSession?.threadId, initial.nativeSession.threadId);
-    assert.equal(finished?.nativeSession?.turnId, revisedTurn);
-    assert.notEqual(revisedTurn, initial.nativeSession.turnId);
-    const usageRecords = finished?.nativeRuns?.flatMap(({ usage }) => usage?.source === "zcode_turn" ? [usage] : []) ?? [];
-    assert.equal(new Set(usageRecords.map(({ nativeTurnId }) => nativeTurnId)).size, usageRecords.length);
-    assert.deepEqual(usageRecords.reduce(({ requests, input, output }, usage) => ({
-      requests: requests + usage.reportedRequests, input: input + usage.inputTokens, output: output + usage.outputTokens,
-    }), { requests: 0, input: 0, output: 0 }), { requests: 3, input: 59, output: 14 });
-    assert.deepEqual(finished?.entries.flatMap((entry) => entry.role === "user" ? [entry.text] : []), [planPrompt, guide]);
-    assert.ok(finished?.entries.some((entry) => entry.role === "assistant" && entry.text === revisedAnswer));
-    await expect(page.getByRole("region", { name: "Request analysis" })).toContainText(guide);
-    await expect(page.locator('.code-task-list-item[data-status="pending"]')).toContainText("Inspect the selected folder");
-
-    phase = "stop";
-    calls = 0;
-    held = undefined;
-    heldClosed = false;
-    await selectCodeMode(page, "ask");
-    await composer.fill(stopPrompt);
-    await send.click();
-    await expect.poll(() => Boolean(held), { timeout: taskWait }).toBe(true);
-    const stoppedThread = (await task())?.nativeSession?.threadId;
-    assert.ok(stoppedThread);
-    await composer.fill(cancelledGuide);
-    await steer.click();
-    await expect.poll(async () => (await task())?.pendingFollowUp, { timeout: taskWait }).toBe(cancelledGuide);
-    await page.getByRole("button", { name: "Stop Code task" }).click();
-    await awaitStatus("stopped");
-    await expect(composer).toHaveValue(cancelledGuide);
-    assert.ok(heldClosed);
-    assert.equal(calls, 1);
-    assert.equal((await task())?.entries.some((entry) => entry.role === "user" && entry.text === cancelledGuide), false);
-    await app.close();
-    app = undefined;
-
-    phase = "resume";
-    calls = 0;
-    app = await launchNativeFixture(descriptor);
-    const restored = await app.firstWindow();
-    await openCodeProject(restored);
-    const history = restored.getByRole("complementary", { name: "History" });
-    await history.getByRole("button", { name: planPrompt, exact: true }).click();
-    await expect(restored.locator(".entry--user").filter({ hasText: guide })).toHaveCount(1);
-    await history.getByRole("button", { name: stopPrompt, exact: true }).click();
-    await restored.getByRole("button", { name: "Resume task", exact: true }).click();
-    const restoredTask = () => restored.evaluate(() => window.desktop.state().then(({ task }) => task));
-    await expect.poll(async () => {
-      assert.ifError(fixtureError);
-      return (await restoredTask())?.status;
-    }, { timeout: taskWait }).toBe("completed");
-    assert.equal((await restoredTask())?.nativeSession?.threadId, stoppedThread);
-    assert.equal(calls, 1);
-    assert.equal(gateway.completions.length, 0);
-  } finally {
-    await app?.close();
-    server.closeAllConnections();
-    if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
-    await gateway.stop();
-    await removeNativeFixtureDirectory(directory);
   }
 });

@@ -82,6 +82,9 @@ const CONTROL_PLANE_PATTERNS = [
   "lib/reviewOrchestrator*",
   "tests/reviewOrchestrator*",
   "tests/fixtures/review-orchestrator/**",
+  // The Agent Skills specification's example SKILL.md: only its file name
+  // ("agentskills") carries an agent name; it is an assistant-import fixture.
+  "tests/fixtures/assistantPackages/agentskills-*",
   // The app side of the Auto router coding agent on the Ubuntu runner: the
   // bearer-secret check, the claim and result it may write, and its system
   // audit writer. An agent changing them could widen its own permission.

@@ -128,14 +128,6 @@ const fixture = String.raw`
       reply({ type: "control_response", response: { subtype: "success", request_id: frame.request_id,
         response: { current_permission_mode: "plan", models: [{ value: "opus[1m]", displayName: "Opus (1M)", supportedEffortLevels: ["max"] }],
           account: { token: "fixture-token-not-for-renderer" } } } });
-    } else if (provider === "zhipu") {
-      assert.deepEqual(frame, { id: frame.id, method: "session/list", params: { limit: 1 } });
-      received.push(frame.method);
-      if (scenario === "tool") { reply({ id: "action", method: "interaction/requestProviderRuntimeHeaders" }); continue; }
-      if (scenario !== "noStorage") reply({ method: "startup/storageState", params: {
-        schemaVersion: 1, databaseKind: "session", phase: "ready",
-      } });
-      reply({ id: frame.id, result: { sessions: scenario === "nonemptyStorage" ? [{ id: "existing-session" }] : [] } });
     } else {
       assert.deepEqual(frame, {
         jsonrpc: "2.0", id: 1, method: "initialize", params: {
@@ -154,7 +146,6 @@ const fixture = String.raw`
         moonshot: { agent: { name: "Kimi Code CLI", version: "2.7.2" }, auth: "login" },
         mistral: { agent: { name: "@mistralai/mistral-vibe", version: "3.1.4" }, auth: "browser-auth" },
         minimax: { agent: { name: "minimax-code", version: "0.7.9" } },
-        deepseek: { agent: { name: "deepseek-harness-acp", version: scenario === "wrongBridgeVersion" ? "0.2.2-rc.2" : "0.0.1" } },
       };
       const { agent, auth } = providers[provider];
       reply({ jsonrpc: scenario === "wrongEnvelope" ? undefined : "2.0", id: 1, result: {
@@ -172,7 +163,7 @@ const fixture = String.raw`
     }
   }
   if (scenario === "success") assert.deepEqual(received, provider === "openai" ? ["initialize", "initialized", "model/list"]
-    : provider === "zhipu" ? ["session/list"] : ["initialize"]);
+    : ["initialize"]);
 `;
 
 function start(provider: CliProtocolProvider, scenario: string, abort?: AbortSignal) {
@@ -181,17 +172,16 @@ function start(provider: CliProtocolProvider, scenario: string, abort?: AbortSig
     signal, killSignal: "SIGKILL", shell: false, windowsHide: true, stdio: ["pipe", "pipe", "ignore"],
   });
   const versions = { openai: "0.171.0-alpha.13", anthropic: "2.1.278", google: "1.5.14", xai: "1.0.92", qwen: "0.28.4",
-    moonshot: "2.7.2", mistral: "3.1.4", minimax: "0.7.9", deepseek: "0.2.2-rc.2", zhipu: "0.17.1" };
+    moonshot: "2.7.2", mistral: "3.1.4", minimax: "0.7.9" };
   return { child, result: inspectCliProcess(child, provider, profile,
     { client: "0.1.15", executable: scenario === "wrongBinaryVersion" ? "0.0.0" : versions[provider] }, signal) };
 }
 
 test("CLI transport performs each official initialization and returns model metadata only", async () => {
-  const [codex, claude, antigravity, grok, qwen, kimi, vibe, minimax, deepseek, zcode] = await Promise.all([
+  const [codex, claude, antigravity, grok, qwen, kimi, vibe, minimax] = await Promise.all([
     start("openai", "success").result, start("anthropic", "success").result,
     start("google", "success").result, start("xai", "success").result, start("qwen", "success").result, start("moonshot", "success").result,
-    start("mistral", "success").result, start("minimax", "success").result, start("deepseek", "success").result,
-    start("zhipu", "success").result,
+    start("mistral", "success").result, start("minimax", "success").result,
   ]);
   assert.deepEqual(codex, { status: "verified", protocol: "codex_app_server", catalogComplete: true,
     models: [{ id: "demo-codex", name: "Demo Codex", efforts: ["high"] }] });
@@ -203,8 +193,6 @@ test("CLI transport performs each official initialization and returns model meta
   assert.deepEqual(kimi, antigravity);
   assert.deepEqual(vibe, antigravity);
   assert.deepEqual(minimax, antigravity);
-  assert.deepEqual(deepseek, antigravity);
-  assert.deepEqual(zcode, { status: "verified", protocol: "zcode_protocol", protocolVersion: 1, models: null });
 });
 
 test("CLI transport rejects out-of-order, duplicate, unsolicited and invalid replies", async () => {
@@ -229,10 +217,6 @@ test("CLI transport rejects out-of-order, duplicate, unsolicited and invalid rep
     assert.rejects(start("moonshot", "wrongAgent").result, /identity did not match/),
     assert.rejects(start("mistral", "wrongBinaryVersion").result, /identity did not match/),
     assert.rejects(start("minimax", "wrongAgent").result, /identity did not match/),
-    assert.rejects(start("deepseek", "wrongBridgeVersion").result, /identity did not match/),
-    assert.rejects(start("zhipu", "tool").result, /requested an action/),
-    assert.rejects(start("zhipu", "noStorage").result, /did not confirm isolated storage/),
-    assert.rejects(start("zhipu", "nonemptyStorage").result, /sessions/),
     assert.rejects(start("openai", "oversize").result, /output limit/),
     assert.rejects(start("openai", "truncated").result, /incomplete message/),
   ]);

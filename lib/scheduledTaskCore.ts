@@ -496,3 +496,90 @@ export const scheduledTasksHostProblem = (
   const userLimit = resolveChatConcurrencyPlan({ kind: "user", subjectKey: "user:probe", ipKey: "ip:probe" }, env).subject.limit;
   return userLimit < SCHEDULED_TASK_MIN_USER_CONCURRENCY ? "chat_concurrency_too_low" : null;
 };
+
+/* --------------------------------------------------------- result notice -- */
+
+/**
+ * `SCHEDULED_TASK_EMAIL_ENABLED`: exactly "true" queues result emails, anything
+ * else (including unset) queues nothing. Mail leaves Tomverse, so it is off
+ * until an operator turns it on (lib/scheduledTaskNotice.ts).
+ */
+export const scheduledTaskEmailEnabled = (env: Record<string, string | undefined>) =>
+  env.SCHEDULED_TASK_EMAIL_ENABLED === "true";
+
+export type ScheduledRunNoticeKind = "answered" | "paused";
+
+/**
+ * Which result email a finished run owes, if any: an answer, or the pause this
+ * run put the task into. A failure that will be tried again, a skip that did
+ * not pause, and an unknown result owe nothing -- an unknown result owes
+ * nothing even when it is the failure that pauses the task.
+ *
+ * The one rule, asked both when a run closes and when the recovery reads an
+ * unsettled run back (recoveredNoticeKind), so whether a notice is sent never
+ * depends on which of the two decided it.
+ */
+export const scheduledRunNoticeKind = (input: {
+  status: string;
+  pausedTask: boolean;
+}): ScheduledRunNoticeKind | null => {
+  if (input.status === "succeeded") return "answered";
+  if ((input.status === "failed" || input.status === "skipped") && input.pausedTask) return "paused";
+  return null;
+};
+
+/**
+ * The notice recovery (lib/scheduledTaskNotice.ts, reconcileScheduledRunNotices):
+ * a finished run whose notice was owed but never settled -- the process died
+ * between the run's close and the enqueue, or the enqueue hit a passing
+ * database error -- is queued by a later tick. Only within this window after
+ * the run finished, and only while the email switch is on: a notice hours late
+ * is no longer news, and runs that finished while the switch was off were
+ * already settled as "no notice" when they closed.
+ */
+export const SCHEDULED_TASK_NOTICE_RECOVERY_WINDOW_MS = 6 * 60 * 60 * 1_000;
+/** At most this many unsettled runs per tick. */
+export const SCHEDULED_TASK_NOTICE_RECOVERY_BATCH = 50;
+
+/**
+ * Which notice an unsettled finished run owed, read back from what the run and
+ * its task say now -- the same answer `scheduledRunNoticeKind` gave when it
+ * closed. An answer is a `succeeded` run. A pause is the run that put its task
+ * there: the task is paused by the runner (not by its owner), at the revision
+ * this run was claimed for -- an edit, a resume or an owner's pause moves the
+ * revision -- and no later run of the task exists.
+ */
+export const recoveredNoticeKind = (input: {
+  runStatus: string;
+  runRevision: number;
+  taskStatus: string;
+  taskRevision: number;
+  pauseReason: string | null;
+  isLatestRun: boolean;
+}): ScheduledRunNoticeKind | null =>
+  scheduledRunNoticeKind({
+    status: input.runStatus,
+    pausedTask:
+      input.taskStatus === "paused" &&
+      input.pauseReason !== null &&
+      input.pauseReason !== "user" &&
+      input.taskRevision === input.runRevision &&
+      input.isLatestRun,
+  });
+
+/** When a run ran, in the account's language and the task's zone, with the zone shown. */
+export const formatScheduledRunTime = (at: Date, timeZone: string, language: string) => {
+  try {
+    return new Intl.DateTimeFormat(language, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone,
+      timeZoneName: "short",
+    }).format(at);
+  } catch {
+    return `${at.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  }
+};

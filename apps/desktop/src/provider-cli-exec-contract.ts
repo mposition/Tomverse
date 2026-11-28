@@ -13,7 +13,7 @@ export type LiveCliProvider = (typeof liveCliProviders)[number];
 /** The saved CLI file each route runs. */
 export const liveCliFile = { openai: "openai", anthropic: "anthropic", zai: "anthropic" } as const satisfies Record<LiveCliProvider, CliProvider>;
 /** The name the composer and the task show. */
-export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Claude Code (Z.ai)" } as const satisfies Record<LiveCliProvider, string>;
+export const liveCliNames = { openai: "Codex", anthropic: "Claude Code", zai: "Z.ai CLI (via Claude Code)" } as const satisfies Record<LiveCliProvider, string>;
 /** What a task run on the route says it ran with. */
 export const liveCliExecution = (provider: LiveCliProvider) =>
   provider === "openai" ? codexFixtureExecution : provider === "zai" ? zaiClaudeExecution : claudeFixtureExecution;

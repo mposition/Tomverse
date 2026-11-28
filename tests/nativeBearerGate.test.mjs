@@ -82,6 +82,37 @@ test("Desktop Code's session enrols exactly the engine's coding API calls, behin
   }
 });
 
+test("the route-only choice is enrolled for a Desktop session only while its own switch is on", () => {
+  const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_CODE_SESSION_ENABLED", "EXTERNAL_API_ROUTE_ONLY_ENABLED"];
+  const previous = switches.map((key) => process.env[key]);
+  const route = "/api/code/v1/route";
+  const enrolled = (path, method) => desktopReadApiRoute(path, method) || desktopWriteApiRoute(path, method);
+  try {
+    for (const key of switches) delete process.env[key];
+    process.env.TOMVERSE_DESKTOP_AUTH_ENABLED = "true";
+    process.env.TOMVERSE_DESKTOP_CODE_SESSION_ENABLED = "true";
+    // The Code session is on, the route-only switch is not: the other coding calls open, this one does not.
+    assert.equal(desktopWriteApiRoute("/api/code/v1/web-search", "POST"), true);
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) assert.equal(enrolled(route, method), false, method);
+    process.env.EXTERNAL_API_ROUTE_ONLY_ENABLED = "false";
+    assert.equal(enrolled(route, "POST"), false, "only exactly true");
+    process.env.EXTERNAL_API_ROUTE_ONLY_ENABLED = "true";
+    assert.equal(desktopWriteApiRoute(route, "POST"), true);
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) assert.equal(enrolled(route, method), false, method);
+    for (const path of [route + "/x", route + "/", "/api/code/v1"]) {
+      for (const method of ["GET", "POST"]) assert.equal(enrolled(path, method), false, method + " " + path);
+    }
+    // Never without the Code session itself.
+    delete process.env.TOMVERSE_DESKTOP_CODE_SESSION_ENABLED;
+    assert.equal(enrolled(route, "POST"), false);
+  } finally {
+    switches.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
+});
+
 test("Desktop remote control enrols only the PC's own sync path, and only for the Desktop bearer", () => {
   const switches = ["TOMVERSE_DESKTOP_AUTH_ENABLED", "TOMVERSE_DESKTOP_REMOTE_CONTROL_ENABLED"];
   const previous = switches.map((key) => process.env[key]);

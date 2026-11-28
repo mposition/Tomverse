@@ -104,6 +104,15 @@ type StreamScript = {
   failAfterText?: unknown;
   /** What the SDK's `usage` promise resolves to, when not the default counts. */
   usage?: unknown;
+  /** `providerMetadata` rejects with this, beside an otherwise normal finish. */
+  metadataFailure?: unknown;
+};
+
+/** Rejected, but handled at once: the route reads it later with allSettled. */
+const rejectedLater = (reason: unknown) => {
+  const promise = Promise.reject(reason);
+  promise.catch(() => undefined);
+  return promise;
 };
 
 let script: StreamScript = {
@@ -253,7 +262,9 @@ mock.module("ai", {
         finishReason: Promise.resolve(script.finishReason),
         rawFinishReason: Promise.resolve(script.rawFinishReason),
         content: Promise.resolve([]),
-        providerMetadata: Promise.resolve({}),
+        providerMetadata: script.metadataFailure
+          ? rejectedLater(script.metadataFailure)
+          : Promise.resolve({}),
       };
     },
   },
@@ -374,6 +385,8 @@ const modelProxy = (model: string) =>
   );
 
 const prismaFake: Record<string, unknown> = {};
+/** What the storage check reads as the account's stored messages; null is none. */
+let accountMessageTotals: { count: bigint; bytes: bigint } | null = null;
 const prismaProxy: unknown = new Proxy(prismaFake, {
   get: (target, property: string) => {
     if (property === "then") return undefined;
@@ -390,7 +403,8 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
       return async () => 0;
     }
     if (property === "$queryRaw" || property === "$queryRawUnsafe") {
-      return async () => [];
+      // The account's stored message totals, when a test sets them.
+      return async () => (accountMessageTotals ? [accountMessageTotals] : []);
     }
     if (!(property in target)) {
       (target as Record<string, unknown>)[property] = modelProxy(property);
@@ -479,6 +493,8 @@ let forcedAutoRoute: string | null = null;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
+/** Calls that reached the (mocked) paid Router. */
+let routerCalls = 0;
 let imageIntentText: string | null = null;
 let routerDecisionKept: boolean | null = null;
 const routerCore = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore");
@@ -486,6 +502,7 @@ const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof i
 mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
   ...realLlmRouter,
   pickAutoModelWithLlm: async (input: Parameters<typeof realLlmRouter.pickAutoModelWithLlm>[0]) => {
+    routerCalls += 1;
     if (!forcedRouterOutput) return null;
     const candidates = routerCore.autoLlmRouterCandidates(input.eligibleModelIds, input.models,
       input.creditsByModelId, input.fileContext);
@@ -1214,6 +1231,64 @@ test("a follow-up that carries a held Refiner decision still gets the image clas
   assert.equal(mode, "image-turn");
   assert.equal(lastStreamTextOptions, null, "an image turn calls no chat model");
   assert.deepEqual(refinerEvents, ["preview"], "an image turn ends before the Refiner decision is consumed");
+});
+
+/*
+  B3 review, sixth pass: the storage precheck refuses only a turn whose answer
+  certainly cannot be stored -- the message count at its limit, or fewer bytes
+  the account already over its bytes (the answer row counts as zero bytes, since a
+  file-only answer is stored empty, and the turn's own message is already stored). It assumes no answer
+  size: a long answer that overflows is the Message write's locked check to
+  refuse, as before. Runs the real checkMessageCapacity.
+*/
+const withStorageLimits = async (env: Record<string, string>, run: () => Promise<void>) => {
+  const prior = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  try {
+    await run();
+  } finally {
+    accountMessageTotals = null;
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+};
+
+test("an account with less than 400KB left still gets its text turn", async () => {
+  await withStorageLimits({ API_MAX_MESSAGE_BYTES_PER_USER: "100000" }, async () => {
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(50_000) };
+    const { trailer } = await ask({}, { prompt: "Why is snow white?" });
+    assert.equal(trailer?.completion?.status, "normal");
+    assert.ok(lastStreamTextOptions, "the model was called");
+  });
+});
+
+test("an account at its message count limit is refused before the Router", async () => {
+  await withStorageLimits({ API_MAX_MESSAGES_PER_USER: "10" }, async () => {
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(0) };
+    routerCalls = 0;
+    const refused = await ask({}, { autoRoutedTo: MODEL_ID, prompt: "Why is snow white?", expectedStatus: 409 });
+    assert.match(refused.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+    assert.equal(routerCalls, 0, "no Router call for an answer that could not be stored");
+    assert.equal(imageIntentCalls, 0);
+    assert.equal(lastStreamTextOptions, null);
+  });
+});
+
+test("an account already over its bytes is refused; one exactly at them is not", async () => {
+  const prompt = "Why is snow white?";
+  const needed = 0;
+  await withStorageLimits({ API_MAX_MESSAGE_BYTES_PER_USER: "100000" }, async () => {
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(100_000 - needed + 1) };
+    const refused = await ask({}, { prompt, expectedStatus: 409 });
+    assert.match(refused.body, /MESSAGE_STORAGE_QUOTA_EXCEEDED/);
+    assert.equal(lastStreamTextOptions, null);
+
+    accountMessageTotals = { count: BigInt(10), bytes: BigInt(100_000 - needed) };
+    await ask({}, { prompt });
+    assert.ok(lastStreamTextOptions, "exactly enough room goes on to the model");
+  });
 });
 
 test("an ordinary follow-up with a held Refiner decision stays a text turn and consumes it once", async () => {
@@ -2019,6 +2094,38 @@ test("an interrupted stream with no reported usage is settled on the cancelled-t
   // Estimated from the streamed text, as a cancelled turn is.
   assert.equal(world.settledUsage[0]!.outputTokens, Math.ceil(Buffer.byteLength("Half an answer") / 4));
   assert.deepEqual(world.messages.map((message) => message.status), ["incomplete"]);
+});
+
+/*
+  A finished answer whose provider metadata alone could not be read
+  (lib/chatTurnCompletion.ts). Any rejected completion promise used to count
+  as a broken stream, so a `stop` was saved incomplete and charged prorated.
+*/
+test("a stop whose provider metadata could not be read is saved and charged as the finished answer it is", async () => {
+  const { trailer } = await ask({
+    text: ANSWER,
+    finishReason: "stop",
+    rawFinishReason: "end_turn",
+    metadataFailure: new Error("provider metadata unreadable"),
+  });
+  assert.deepEqual(trailer?.completion, { status: "normal" });
+  assert.deepEqual(world.messages.map((message) => message.status), ["normal"]);
+  assert.deepEqual(world.settlements, ["completed"]);
+  // The provider's own usage still settles it.
+  assert.deepEqual(world.settledUsage, [{ inputTokens: 1_000, outputTokens: 500, usageFromProvider: true }]);
+});
+
+/*
+  A turn its step budget stopped while the model was still calling a tool. It
+  used to be saved `normal` and charged the flat completed rate; the answer it
+  was gathering material for was never written.
+*/
+test("a turn that ended on tool-calls with no file is saved unfinished and settled prorated", async () => {
+  const { trailer } = await ask({ text: "Let me look that up.", finishReason: "tool-calls", rawFinishReason: "tool_use" });
+  // No reason: not the output ceiling and not the provider's fault.
+  assert.deepEqual(trailer?.completion, { status: "incomplete" });
+  assert.deepEqual(world.messages.map((message) => message.status), ["incomplete"]);
+  assert.deepEqual(world.settlements, ["cancelled"]);
 });
 
 test("an error finish with no text is still the empty answer it always was", async () => {

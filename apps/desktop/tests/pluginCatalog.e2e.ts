@@ -111,18 +111,19 @@ test("Plugins lists the web's catalogue from the server, keeps it per its cache 
       await expect.poll(names).toEqual(["Custom MCP server", "GitHub", "Airtable", "Aikido"]);
       await expect(plugins.getByTestId("desktop-connector-provider")).toHaveCount(3);
       await expect(plugins.getByTestId("desktop-connector-custom")).toHaveCount(1);
-      // The app carries no catalogue or logos of its own: the list and the pictures came from the server, with the right credentials.
+      // The list came from the server. A logo the app carries is shown from the app (a gated dev server answers its public files
+      // with a sign-in page); only a platform the app does not carry has its logo fetched.
       const github = plugins.locator("[data-testid=desktop-connector-provider][data-provider=github]");
       await expect.poll(() => github.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+      assert.ok(!(await github.locator("img").getAttribute("src"))?.startsWith("tomverse://desktop/plugin-logo/"), "the app's own GitHub logo");
       await expect(plugins.locator("[data-provider=aikido] img")).toHaveCount(0);
       const catalogCalls = () => application!.evaluate(() => (globalThis as Host).catalogCalls);
       const logoCalls = () => application!.evaluate(() => (globalThis as Host).logoCalls);
       // The viewer also asks to sync its state when it mounts; only the request to open a page matters here.
       const webViewCommands = () => application!.evaluate(() => (globalThis as Host).webView.filter((command) => command.type === "open-link"));
       assert.deepEqual(await catalogCalls(), [{ ifNoneMatch: null, status: 200, authorization: "Bearer fixture-access", origin: "tomverse://desktop", cookie: false }]);
-      // A logo is a public read of the account origin: no token and no cookie, and none for a platform without one.
-      await expect.poll(async () => (await logoCalls()).map((call) => call.path).sort()).toEqual(["/plugins/providers/airtable.png", "/plugins/providers/github.png"]);
-      assert.ok((await logoCalls()).every((call) => !call.authorization && !call.cookie));
+      // Every logo here is one the app carries, so none is fetched.
+      assert.deepEqual(await logoCalls(), []);
 
       // Search matches an alias; the category and directory filters use the platform's own fields.
       const search = plugins.getByRole("searchbox", { name: "Search plugins" });
@@ -166,9 +167,9 @@ test("Plugins lists the web's catalogue from the server, keeps it per its cache 
       await expect.poll(names).toEqual(["Custom MCP server", "GitHub", "Airtable", "Zeta Tools", "Aikido"]);
       await expect(plugins.getByTestId("desktop-connector-provider")).toHaveCount(4);
       assert.deepEqual((await catalogCalls()).map((call) => [call.ifNoneMatch, call.status]), [[null, 200], ["\"catalog-v1\"", 200]]);
-      // A new list gives the images new addresses: the pictures are asked for again (the old ones are not trusted), and the new platform's is fetched.
-      await expect.poll(async () => (await logoCalls()).map((call) => call.path).sort()).toEqual(["/plugins/providers/airtable.png", "/plugins/providers/airtable.png",
-        "/plugins/providers/github.png", "/plugins/providers/github.png", "/plugins/providers/zeta-tools.png"]);
+      // A platform the app does not carry has its logo fetched: a public read of the account origin, no token and no cookie.
+      await expect.poll(async () => (await logoCalls()).map((call) => call.path)).toEqual(["/plugins/providers/zeta-tools.png"]);
+      assert.ok((await logoCalls()).every((call) => !call.authorization && !call.cookie));
       await search.fill("zeta");
       await expect.poll(names).toEqual(["Zeta Tools"]);
       await search.fill("");

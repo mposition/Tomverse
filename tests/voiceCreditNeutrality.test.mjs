@@ -24,6 +24,13 @@ const VOICE_SOURCES = [
   "lib/voiceProviderBudget.ts",
   "lib/voiceTranscriptionPort.ts",
   "lib/voiceTranscriptionPortCore.ts",
+  // The server read-aloud follows the same decision (§6.4): no user credits.
+  "app/api/chat/readout/route.ts",
+  "lib/chatReadoutAccess.ts",
+  "lib/chatReadoutBudget.ts",
+  "lib/chatReadoutBudgetCore.ts",
+  "lib/chatReadoutServer.ts",
+  "lib/chatReadoutSpeechCore.ts",
 ];
 
 /**

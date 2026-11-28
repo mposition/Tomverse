@@ -67,7 +67,7 @@ import { codePermissionProfile, codeReferenceKind, codeReferencePath, decisions,
   MAX_HANDOFF_EXCERPT_CHARACTERS, backgroundInput, codeExtensionsInput, codeMemoryInput, followUpInput, historyTurnInput, queueInput, sessionId, startInput, workspaceHandoffInput,
   type ApprovalRequest, type CodeReference, type CompactHistoryResult, type DeleteHistoryResult,
   type Decision, type ForkTurnResult, type RecoveryResult, type RewindTurnResult, type Snapshot, type Task, type UndoChangeResult, type WorkspaceHandoff, type WorkspaceHandoffInput } from "../contract";
-import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, deepSeekFixtureExecution, zCodeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
+import { antigravityFixtureExecution, claudeFixtureExecution, cliFilePath, cliPathInput, cliProvider, cliProviders, cliUsesInstallationFolder, cliUsesReleaseArchive, codexFixtureExecution, codeExecutionMode, codeRouteFor, isCliProtocolProvider, kimiFixtureExecution, qwenFixtureExecution, vibeFixtureExecution, miniMaxFixtureExecution, grokFixtureExecution, supportsIsolatedCliAccount, tomverseApiExecution, unknownCliAccount,
   type NativeFixtureProvider,
   type CliLoginOpen, type CliPathCheck, type CliPaths, type CliProtocolCheck, type CliProvider, type CodeExecutionMode, type SavedCliPath } from "../code-execution";
 import { codeFallbackModelAvailable, codeCliContinuation, codeContinuation, codeFallbackSettings, codeFallbackUpdate, defaultCodeFallbackSettings, updateCodeFallbackSettings,
@@ -86,7 +86,7 @@ import {
 } from "../chat-contract";
 import { canAnswerClarification, canResumeJournal, canRewindJournal, canResumeQuotaJournal, cleanText, hasCredential, journalApiUsage, journalChanges, journalChecks, journalContext, journalEngine, journalEntries, journalPendingFollowUp, journalPlan, journalQuota, journalReferences, journalStatus } from "./journal-view";
 import { codeDiagnostics } from "./code-diagnostics";
-import { cliFixtureInput, qwenFixtureInput, zCodeFixtureInput } from "./cli-fixture-input";
+import { cliFixtureInput, qwenFixtureInput } from "./cli-fixture-input";
 import { apiCliDirectory, nativeHistoryHome, nativeSessionDirectory, listNativeHistory, matchesNativeContinuation, readNativeCheckpoint, readNativeHistory,
   restoredNativeTask, saveApiCliHistory, saveNativeHistory, stagedNativeDirectory } from "./native-history";
 import { codeHistoryScope, matchesHistory, type HistoryScope } from "./history-scope";
@@ -222,15 +222,13 @@ const fixtureSchema = z.object({
   qwen: qwenFixtureInput.optional(),
   kimi: cliFixtureInput.optional(),
   vibe: cliFixtureInput.optional(),
-  deepseek: cliFixtureInput.optional(),
-  zcode: zCodeFixtureInput.optional(),
   minimax: cliFixtureInput.optional(),
   grok: cliFixtureInput.optional(),
   antigravity: cliFixtureInput.optional(),
   /** A stand-in program for ssh (a test runs its own fake machine through it). Read only where fixtures are allowed. */
   sshFixture: z.object({ file: z.string().min(1), args: z.array(z.string()) }).strict().optional(),
-}).strict().refine(({ codex, claude, qwen, kimi, vibe, deepseek, zcode, minimax, grok, antigravity }) =>
-  [codex, claude, qwen, kimi, vibe, deepseek, zcode, minimax, grok, antigravity].filter(Boolean).length <= 1);
+}).strict().refine(({ codex, claude, qwen, kimi, vibe, minimax, grok, antigravity }) =>
+  [codex, claude, qwen, kimi, vibe, minimax, grok, antigravity].filter(Boolean).length <= 1);
 
 protocol.registerSchemesAsPrivileged([{ scheme: "tomverse", privileges: { standard: true, secure: true } }]);
 if (!app.isPackaged) app.setName(desktopName);
@@ -243,14 +241,12 @@ const claudeRunFixture = fixture?.claude;
 const qwenRunFixture = fixture?.qwen;
 const kimiRunFixture = fixture?.kimi;
 const vibeRunFixture = fixture?.vibe;
-const deepSeekRunFixture = fixture?.deepseek;
-const zCodeRunFixture = fixture?.zcode;
 const miniMaxRunFixture = fixture?.minimax;
 const grokRunFixture = fixture?.grok;
 const antigravityRunFixture = fixture?.antigravity;
 const quotaRunFixture = codexRunFixture ?? claudeRunFixture;
-const cliRunFixture = quotaRunFixture ?? qwenRunFixture ?? kimiRunFixture ?? vibeRunFixture ?? deepSeekRunFixture ?? zCodeRunFixture ?? miniMaxRunFixture ?? grokRunFixture ?? antigravityRunFixture;
-const nativeFixtureExecution = antigravityRunFixture ? antigravityFixtureExecution : grokRunFixture ? grokFixtureExecution : miniMaxRunFixture ? miniMaxFixtureExecution : zCodeRunFixture ? zCodeFixtureExecution : deepSeekRunFixture ? deepSeekFixtureExecution : vibeRunFixture ? vibeFixtureExecution : kimiRunFixture ? kimiFixtureExecution : qwenRunFixture ? qwenFixtureExecution :
+const cliRunFixture = quotaRunFixture ?? qwenRunFixture ?? kimiRunFixture ?? vibeRunFixture ?? miniMaxRunFixture ?? grokRunFixture ?? antigravityRunFixture;
+const nativeFixtureExecution = antigravityRunFixture ? antigravityFixtureExecution : grokRunFixture ? grokFixtureExecution : miniMaxRunFixture ? miniMaxFixtureExecution : vibeRunFixture ? vibeFixtureExecution : kimiRunFixture ? kimiFixtureExecution : qwenRunFixture ? qwenFixtureExecution :
   claudeRunFixture ? claudeFixtureExecution : codexFixtureExecution;
 
 function readFixture() {
@@ -366,8 +362,6 @@ const state: Snapshot = {
   claudeFixtureModel: claudeRunFixture?.model,
   qwenFixtureModel: qwenRunFixture?.model,
   vibeFixtureModel: vibeRunFixture?.model,
-  deepSeekFixtureModel: deepSeekRunFixture?.model,
-  zCodeFixtureModel: zCodeRunFixture?.model,
   miniMaxFixtureModel: miniMaxRunFixture?.model,
   grokFixtureModel: grokRunFixture?.model,
   antigravityFixtureModel: antigravityRunFixture?.model,
@@ -742,8 +736,7 @@ async function chooseCliPath(provider?: CliProvider) {
     const archiveFile = provider ? releaseArchiveName(provider) : undefined;
     const result = await dialog.showOpenDialog(window, {
       title: installation ? copy.installationFolder : archive ? copy.releaseArchive : copy.path,
-      properties: [installation ? "openDirectory" : "openFile", "showHiddenFiles", "dontAddToRecent",
-        ...(process.platform === "darwin" && provider === "zhipu" ? ["treatPackageAsDirectory" as const] : [])],
+      properties: [installation ? "openDirectory" : "openFile", "showHiddenFiles", "dontAddToRecent"],
       ...(archiveFile ? { filters: [{ name: copy.releaseArchive, extensions: [extname(archiveFile).slice(1)] }] } : {}),
     });
     return result.canceled || closing ? null : result.filePaths[0] ?? null;
@@ -888,8 +881,6 @@ const cliAuthGuides = {
   moonshot: "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md",
   mistral: "https://docs.mistral.ai/vibe/code/cli/install-setup",
   minimax: "https://code.minimax.io/docs/cli/quick-start",
-  deepseek: "https://github.com/deepseek-ai/deepseek-harness",
-  zhipu: "https://zcode.z.ai/en/docs/install",
 } satisfies Record<CliProvider, string>;
 
 const webViewHost = createWebViewHost({
@@ -1203,7 +1194,7 @@ function startNativeTask(cliFixture: NonNullable<typeof cliRunFixture>, project:
   const command = { runId: randomUUID(), project, fixture: cliFixture, prompt, history, references,
     protectedRoot: app.getPath("userData"), connectionKey: fixture?.key ?? "" };
   const provider = nativeFixtureExecution.provider;
-  if (provider === "qwen" || provider === "moonshot" || provider === "mistral" || provider === "deepseek" || provider === "zhipu" || provider === "minimax" || provider === "xai" || provider === "google") {
+  if (provider === "qwen" || provider === "moonshot" || provider === "mistral" || provider === "minimax" || provider === "xai" || provider === "google") {
     startCliFixtureTask(task, { ...command, mode, type: "start-structured-cli-fixture", provider, clientVersion: app.getVersion() });
   } else if (nativeFixtureExecution.provider === "anthropic") {
     startCliFixtureTask(task, { ...command, mode, type: "start-claude-fixture" });

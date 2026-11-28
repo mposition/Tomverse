@@ -1148,6 +1148,30 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // Public share links made from previewed pages (generated-artifacts.md
+  // section 19): what was published, from which answer or file, and until
+  // when. The token is withheld: it is the link's whole secret, and a copy in
+  // an export file is a copy of the public page's key.
+  artifactShare: (userId) =>
+    prisma.artifactShare.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        messageId: true,
+        artifactId: true,
+        sourceKind: true,
+        previewKind: true,
+        language: true,
+        title: true,
+        content: true,
+        createdAt: true,
+        expiresAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   // The files this account attached to its own messages. Same shape of gap as
   // the generated files above -- the bytes are in object storage, so the
   // export describes what exists rather than pretending it was delivered --

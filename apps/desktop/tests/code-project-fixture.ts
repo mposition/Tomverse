@@ -31,7 +31,7 @@ export async function startPlanOnly(page: Page, prompt: string, executionMode: "
   const save = await page.getByRole("checkbox", { name: "Save to local history" }).isChecked().catch(() => false);
   await page.evaluate(async ({ prompt, executionMode, saveHistory }) => {
     const state = await window.desktop.state();
-    const model = state.antigravityFixtureModel ?? state.grokFixtureModel ?? state.miniMaxFixtureModel ?? state.zCodeFixtureModel ?? state.deepSeekFixtureModel
+    const model = state.antigravityFixtureModel ?? state.grokFixtureModel ?? state.miniMaxFixtureModel
       ?? state.vibeFixtureModel ?? state.kimiFixtureModel ?? state.qwenFixtureModel ?? state.claudeFixtureModel ?? state.codexFixtureModel ?? state.models.find(({ id }) => id === "smart-adaptive")?.id ?? state.models[0]?.id;
     if (!model) throw new Error("No model to start the plan with.");
     await window.desktop.start({ prompt, model, mode: "plan", effort: "default", executionMode, saveHistory });

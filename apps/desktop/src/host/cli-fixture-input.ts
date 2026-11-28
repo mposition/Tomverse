@@ -16,8 +16,3 @@ export const qwenSubscriptionFixtureToken = "tomverse-qwen-loopback-only";
 export const qwenFixtureInput = cliFixtureInput.safeExtend({ subscriptionCa: z.string().min(1).max(4096).optional() })
   .refine(({ subscriptionCa, allowFileEdits }) => !subscriptionCa || !allowFileEdits);
 export type QwenFixtureInput = z.infer<typeof qwenFixtureInput>;
-
-export const zCodePlanFixtureModel = "GLM-5.3";
-export const zCodeFixtureInput = cliFixtureInput.safeExtend({ codingPlan: z.literal(true).optional() })
-  .refine(({ codingPlan, model, allowFileEdits }) => !codingPlan || model === zCodePlanFixtureModel && !allowFileEdits);
-export type ZCodeFixtureInput = z.infer<typeof zCodeFixtureInput>;

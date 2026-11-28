@@ -1770,6 +1770,7 @@ export function ChatMessageList({
                       <AnswerTurnActions
                         messageId={msg.id}
                         content={msg.content}
+                        allowServerReadout={!isGuestMode}
                         credits={answerCredits}
                         branch={
                           onBranchFromAnswer && !importedTranscript && (msg.status === undefined || msg.status === "normal")
@@ -1832,7 +1833,8 @@ export function ChatMessageList({
                           getModel(modelId)?.name ?? modelId
                         }
                         fallbackModelId={msg.modelId ?? null}
-                        onRetry={onRetryLast}
+                        // A Research answer's file is rebuilt by the server; re-sending the last turn would not do it.
+                        onRetry={msg.researchRunId ? undefined : onRetryLast}
                         isGuestMode={isGuestMode}
                         currentProduct={currentProduct}
                       />
