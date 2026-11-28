@@ -71,7 +71,8 @@ const PROFILE_CHARACTERS = 28_000;
 
 /**
  * The files and folders under `root` that can hold credentials (isSecretPath), relative to it with forward slashes; a
- * folder is given as `<folder>/**`. Nothing under a protected folder is listed, and no link is followed.
+ * folder is given as `<folder>/**`, and so is a folder that cannot be listed. Nothing under one is listed, and no link is
+ * followed. A project folder that cannot be listed is an error: the run does not start with write access.
  *
  * `node_modules` is searched too (owner decision 2026-11-28): a credential can sit there (a cache, a linked local package).
  * The cost is that packages with such names (an `.npmrc`, test keys such as `*.pem`, `credential-provider-*`) are read-only
@@ -84,7 +85,12 @@ export async function credentialPathsIn(root: string): Promise<string[]> {
   while (pending.length) {
     const relative = pending.pop()!;
     let entries: Dirent[];
-    try { entries = await readdir(relative ? `${base}/${relative}` : base, { withFileTypes: true }); } catch { continue; }
+    try { entries = await readdir(relative ? `${base}/${relative}` : base, { withFileTypes: true }); } catch (error) {
+      // A folder that cannot be listed could hide one: it is read-only as a whole. The project itself must be listed.
+      if (!relative) throw error;
+      found.push(`${relative}/**`);
+      continue;
+    }
     for (const entry of entries) {
       const path = relative ? `${relative}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
@@ -356,7 +362,10 @@ export async function runProviderCli(run: ExecRun): Promise<ExecResult> {
   let skipped = 0;
   let stderrTail = "";
   // Codex changes files without asking in the write modes, so the credential files it may read are made read-only first.
-  const readOnlyPaths = run.provider === "openai" && plan.grants !== "read_only" ? await credentialPathsIn(run.cwd) : [];
+  let readOnlyPaths: string[] = [];
+  try { if (run.provider === "openai" && plan.grants !== "read_only") readOnlyPaths = await credentialPathsIn(run.cwd); } catch {
+    return result("failed", null, { error: "The project folder could not be read." });
+  }
   if (codexWriteProfile(readOnlyPaths).join(" ").length > PROFILE_CHARACTERS) {
     return result("failed", null, { error: "The project has too many credential files to protect. Use Read only, or another route." });
   }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -444,8 +444,21 @@ test("Codex's write modes make the project's credential files read-only, a folde
       await writeFile(join(root, path), text);
     }
     assert.deepEqual(await credentialPathsIn(root), [".env", ".ssh/**", "app/.env.local", "keys/server.pem", "node_modules/pkg/.env", "secrets/**"]);
-    assert.deepEqual(await credentialPathsIn(join(root, "missing")), []);
+    await assert.rejects(credentialPathsIn(join(root, "missing")), "a project that cannot be listed is not run with write access");
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("A folder the search cannot list is read-only as a whole", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tv-cred-"));
+  try {
+    await mkdir(join(root, "locked"));
+    await writeFile(join(root, "locked", ".env"), "A=1");
+    await chmod(join(root, "locked"), 0o300);
+    assert.deepEqual(await credentialPathsIn(root), ["locked/**"]);
+  } finally {
+    await chmod(join(root, "locked"), 0o700).catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
 });
