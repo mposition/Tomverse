@@ -16,7 +16,7 @@ import {
     routeOnlyAnswer,
     routeOnlySwitchOn,
 } from "@/lib/externalApiRouteOnlyCore";
-import { routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
+import { routeSmartAdaptive, smartAdaptiveCandidates, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 
 /**
  * POST /api/code/v1/route: which model Smart Adaptive would pick for a request,
@@ -31,6 +31,15 @@ import { routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalAp
  * its own request-rate bucket per account, and by the same router gate as every
  * Smart Adaptive request (smartAdaptiveRouterAllowed): a closed gate picks the
  * default model with no router call.
+ *
+ * The choice is made once, for a new task: the last message must be the
+ * person's. A tool round is never routed here, because the CLI that runs the
+ * task keeps its model for the whole task and the server never sees its tool
+ * calls, so a later round routed afresh could move a running task elsewhere.
+ * A model is recommended only if it can take the request (its window, images
+ * and features); otherwise the answer says none fits. Nothing is remembered for
+ * the conversation either: that memory is written only once admission accepted
+ * a request on a model, and a free choice is not an admitted request.
  *
  * The decision is logged as ids, counts and the model, never the request text.
  */
@@ -65,6 +74,9 @@ export async function handleCodeRouteOnly(request: Request, deps: RouteOnlyDeps 
 
         const raw = await readLimitedText(request, ROUTE_ONLY_MAX_BODY_BYTES);
         const { request: completion, localClis } = parseRouteOnlyRequest(raw);
+        if (completion.messages.at(-1)?.role !== "user") {
+            return externalApiErrorResponse(400, "The route-only choice is made for a new task: the last message must be the person's.", "invalid_request", { requestId });
+        }
 
         const runnable = await (deps.runnable ?? externalApiRunnableModels)(account.plan.tier, { surface: "coding", smartAdaptive: true });
         const routerAllowed = deps.routerAllowed ?? smartAdaptiveRouterAllowed;
@@ -83,9 +95,11 @@ export async function handleCodeRouteOnly(request: Request, deps: RouteOnlyDeps 
         if (!routed) {
             return externalApiErrorResponse(404, "No coding model is available to this account.", "model_not_found", { requestId });
         }
-        // The model is the one that will work on this conversation, here or on
-        // the API: later choices for it only move up (nothing is charged).
-        routed.remember();
+        // The completions route lets a model that cannot take the request refuse it after the pick; nothing does here, so a
+        // pick outside the fitting candidates (a window too small, images, a feature) is answered as no fit, not recommended.
+        if (!smartAdaptiveCandidates(completion, runnable).some((entry) => entry.model.id === routed.entry.model.id)) {
+            return externalApiErrorResponse(400, "No coding model available to this account can take this request.", "unsupported_request", { requestId });
+        }
         const answer = routeOnlyAnswer(routed.entry, routed.routedBy, localClis);
         console.info(
             JSON.stringify({

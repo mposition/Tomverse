@@ -515,13 +515,20 @@ Default off (`EXTERNAL_API_ROUTE_ONLY_ENABLED`, section 2). Code:
   CLI first).
 - **The same choice.** The pool is the models the key's or session's plan can
   run on the coding API (the same list Smart Adaptive routes among), and the
-  pick is `routeSmartAdaptive`'s: the same candidates, coding guidance, tool
-  round continuation, conversation only-moves-up rule and default-model
-  fallback. The router call goes through the same gate
+  pick is `routeSmartAdaptive`'s: the same candidates, coding guidance,
+  conversation only-moves-up rule and default-model fallback. The router call goes through the same gate
   (`smartAdaptiveRouterAllowed`: router switch, AI chat pause, key cap, recent
   refusal); a closed gate makes no router call and picks by the default rule.
   With no model Smart Adaptive may default to, the answer is 404
   `model_not_found`.
+- **Once per task.** The last message must be the person's (400
+  `invalid_request` otherwise): a tool round is never routed here, because the
+  CLI running the task keeps its model for the whole task and the server never
+  sees its tool calls. A pick that cannot take the request (its window, images
+  or features) is answered 400 `unsupported_request`, never recommended, since
+  nothing after this route refuses it as the completions route would. The choice
+  writes no conversation memory: that is written only when admission accepts a
+  request on a model.
 - **Nothing is run or charged.** No admission, no credit reservation, no
   settlement, no receipt and no provider call for the task. The router call is
   Smart Adaptive's own, held against the provider operational budget, never

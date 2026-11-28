@@ -366,11 +366,9 @@ test("with no model Smart Adaptive may default to, the choice is a 404, not a gu
   assert.equal((await response.json()).error.code, "model_not_found");
 });
 
-test("a tool round goes to the model that made the calls, as on the completions route", async () => {
+test("a tool round is never routed: the choice is made once, for a new task", async () => {
   reset();
   process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
-  const { rememberSmartAdaptiveToolCalls } = await import(mod("lib/externalApiSmartAdaptive.ts"));
-  rememberSmartAdaptiveToolCalls("desktop-session:user-1", "glm-x", ["call_1"]);
   routerPick = "claude-sonnet-x";
   const response = await handleCodeRouteOnly(
     post({
@@ -383,9 +381,30 @@ test("a tool round goes to the model that made the calls, as on the completions 
     }),
     makeDeps({ routerAllowed: async () => true })
   );
-  const answer = await response.json();
-  assert.equal(answer.routedBy, "continued");
-  assert.equal(answer.model, "glm-x");
-  assert.equal(answer.execution, "cli");
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, "invalid_request");
   assert.equal(routerCalls.length, 0);
+});
+
+test("a pick that cannot take the request is not recommended", async () => {
+  reset();
+  // No model here reads images, so an image task has no fitting model: the answer says so instead of naming the default.
+  const response = await handleCodeRouteOnly(
+    post({ messages: [{ role: "user", content: [{ type: "text", text: "What does this screenshot show?" }, { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }] }] }),
+    makeDeps()
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, "unsupported_request");
+});
+
+test("a choice writes no conversation memory: a later choice for the same task is free to go to a cheaper model", async () => {
+  reset();
+  process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+  routerPick = "claude-sonnet-x";
+  const first = await (await handleCodeRouteOnly(post(), makeDeps({ routerAllowed: async () => true }))).json();
+  assert.equal(first.model, "claude-sonnet-x");
+  routerPick = "gpt-6-luna";
+  const second = await (await handleCodeRouteOnly(post(), makeDeps({ routerAllowed: async () => true }))).json();
+  assert.equal(second.model, "gpt-6-luna");
+  assert.equal(second.routedBy, "router");
 });
