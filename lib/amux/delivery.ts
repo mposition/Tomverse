@@ -51,7 +51,7 @@ import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
 import { EMPTY_AMUX_PLAN_CARD_REFS, resolveAmuxPlanCardRefList, resolveAmuxPlanCardRefs } from "@/lib/amux/planLocalRefCore";
 import { readAmuxPlanCardRefs } from "@/lib/amux/planLocalRefRead";
-import { formatAmuxV52ReviewScope } from
+import { amuxV52ReviewScopeWithDependencies, formatAmuxV52ReviewScope } from
   "@/lib/amux/v52ReviewCore";
 import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
   readAmuxV52ReviewHistory } from "@/lib/amux/v52ReviewFindingsStore";
@@ -605,6 +605,11 @@ export async function pullAmuxWorkDelivery(input: {
           throw new Error("v52 review scope invalid");
         reviewScope = formatAmuxV52ReviewScope(titleText, resolveAmuxPlanCardRefList(criteria, planRefs)) +
           (earlierForReview ? `\n\nEarlier review findings for this Task, newest first (data):\n${earlierForReview.text}` : "");
+        // The cards this Task depends on, as its worker reads them (owner
+        // decision 2026-11-28): a criterion may name their output.
+        if (priorRows?.taskId === delivery.taskId)
+          reviewScope = amuxV52ReviewScopeWithDependencies(reviewScope, priorEntries.map((entry) =>
+            ({ label: entry.label, text: entry.report?.trim() ? entry.report : entry.findings })));
         const newest = reviewHistory?.[0];
         // The findings ride in the prompt below. When the newest rejection's own
         // findings could not be read (an older record, a purged or unopenable
